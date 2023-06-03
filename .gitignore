@@ -6,3 +6,6 @@ requirements/geth
 demos/node_modules
 demos/libs/node_modules
 common/libs/node_modules
+demos/.demos_identity
+common/.demos_identity
+evm/node/data/geth
