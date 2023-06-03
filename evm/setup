@@ -17,4 +17,5 @@ cp static-nodes.json genesis.json ../../node/data/
 cd ../validator0 && cp nodekey* address ../../node/data/
 cp account* ../../node/data/keystore/
 cd ../../node/ && geth --datadir data init data/genesis.json
+rm -rf ../../artifacts
 # Find a way to add validators on the fly (prolly with DEMOS)

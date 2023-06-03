@@ -8,4 +8,4 @@ demos/libs/node_modules
 common/libs/node_modules
 demos/.demos_identity
 common/.demos_identity
-evm/node/data/geth
+evm/node/data
