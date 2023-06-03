@@ -1,0 +1,1 @@
+docker load --input kyntainer.tar

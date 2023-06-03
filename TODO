@@ -1,0 +1,32 @@
+# TODO
+
+	- Complete initial_setup.sh (in node_1 -> common) that will set up evm and demos identities and files after Docker build
+	- Test EVM on local and remote nodes (4 should be enough)
+	- Find an explorer (prolly blockscout) and apply it to the nodes
+	- Test DEMOS with two remote nodes
+	- Build an image prototype and find a way to quickly build updated images
+	
+# NOTES
+
+	- evm/setup (execute with ./setup) creates a fully compatible evm node given the same genesis.json file
+	- resetting the blockchain (evm) is as simple as rm -rf node/data/geth*
+	- node_1 and node_3 are on (vds_1 and vds_2)
+	- screen -ls shows what is running: manager (on node_1) is the experimental all in one manager for both instances
+	- remember to sh attach.sh to work inside kyntainers
+
+# PROJECT RECAP
+
+	- clean.sh -> remove and clean image for kyntainer
+	- deploy.sh -> build the image, create and run the kyntainer give the dockerfile
+	- run.sh -> run the kyntainer (here are defined the volumes too)
+	- stop.sh -> stop the kyntainer
+	- cleanbuild.sh -> remove and clean image for kynainer then build (but not run) the image again
+	- attach.sh -> attach to the kyntainer
+	- name -> contains and defines the kyntainer docker container name
+	- env_setup.sh -> is not working, in run.sh everything is defined there
+	- evm/setup -> see above
+	- evm/clean.sh -> rm -rf node/data/geth* and rebuild the genesis block with the genesis.json file
+	- evm/run.sh -> geth run with options
+	- requirements -> files used and copied in the Dockerfile (such as geth)
+	- demos/ -> all the demos files
+	- common/ -> files used for both evm and demos layers (such as manager.js)
