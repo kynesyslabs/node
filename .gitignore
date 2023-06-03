@@ -1,0 +1,8 @@
+kyntainer.tar
+node_modules
+evm/node_modules
+common/node_modules
+requirements/geth
+demos/node_modules
+demos/libs/node_modules
+common/libs/node_modules
