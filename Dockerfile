@@ -12,7 +12,6 @@ RUN apt install -y net-tools build-essential nodejs npm python3 vim wget curl sc
 RUN npm install -g n
 RUN n 16.18.1
 RUN hash -r
-run systemctl stop ufw && systemctl disable ufw
 # Copying over the required files
 COPY requirements/geth /usr/local/bin/
 RUN chmod +x /usr/local/bin/geth
