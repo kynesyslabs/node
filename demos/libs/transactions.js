@@ -1,4 +1,5 @@
 // INFO This module exposes a set of functions that can be used to work on transactions
+// NOTE It also exposes methods that will be used to process transactions
 
 var ellipticcurve = require("starkbank-ecdsa")
 var Ecdsa = ellipticcurve.Ecdsa
