@@ -10,10 +10,38 @@ let chainDB = new ChainDB()
  * 3. Status Properties Table; contains the data needed to allow smart features (tokens, nfts, custom properties...)
 */
 
+/* This class basically wraps chainDB class by exposing in a convenient way only the methods that are needed for the GLS */
+
 class GLS {
 	constructor() {
-		// TODO
+		// Representation of the GLS
+		this.statusHashTable = []
+		this.statusNativeTable = []
+		this.statusPropertiesTable = []
 	}
+	// INFO Getters
+	StatusHashTable() {
+		this.statusHashTable = chainDB.getGLSStatusHashTable()
+        return this.statusHashTable
+    }
+	StatusNativeTable() {
+		this.statusNativeTable = chainDB.getGLSStatusNativeTable()
+        return this.statusNativeTable
+    }
+	StatusPropertiesTable() {
+		this.statusPropertiesTable = chainDB.getGLSStatusPropertiesTable()
+        return this.statusPropertiesTable
+    }
+	StatusLastHash() {
+		return chainDB.getGLSLastHash()
+	}
+	StatusNativeFor(address) {
+		return chainDB.getGLSNativeFor(address)
+	}
+	StatusPropertiesFor(address) {
+        return chainDB.getGLSPropertiesFor(address)
+    }
+	// INFO Setters
 	// TODO Add methods
 }
 

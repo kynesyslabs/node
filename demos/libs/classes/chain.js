@@ -136,6 +136,25 @@ class ChainDB {
 	getPendingPool() {
 		return this.read("SELECT * FROM transactions WHERE status='pending'")
 	}
+	// INFO GLS Related methods
+	getGLSStatusHashTable() {
+		return this.read("SELECT * FROM status_hashes")
+	}
+	getGLSStatusNativeTable() {
+		return this.read("SELECT * FROM status_native")
+    }
+	getGLSStatusPropertiesTable() {
+		return this.read("SELECT * FROM status_properties")
+    }
+	getGLSLastHash() {
+		return this.read("SELECT hash FROM status_hashes ORDER BY id DESC LIMIT 1")[0]
+	}
+	getGLSNativeFor(address) {
+		return this.read("SELECT * FROM status_native WHERE address='" + address + "'")[0]
+    }
+	getGLSPropertiesFor(address) {
+        return this.read("SELECT * FROM status_properties WHERE address='" + address + "'")
+    }
 	// TODO Implement the rest of the db schema for the chain
 	// ANCHOR Setters
 	// INFO Insert a block into the database
