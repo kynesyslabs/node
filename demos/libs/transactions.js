@@ -8,7 +8,8 @@ var identity = require("./identity.js")
 var methods = {
 	sign: sign,
     verify: verify,
-	sanityCheck: sanityCheck
+	sanityCheck: sanityCheck,
+	isCoherent: isCoherent
 }
 
 // NOTE All the "tx" parameters are Transaction objects as defined in chain.js
@@ -46,7 +47,16 @@ function verify(tx) {
 
 // INFO Checks the integrity of a transaction
 function sanityCheck(tx) {
+	let _result = true
+	// TODO
+	return _result
+}
 
+// INFO Checking if the tx is coherent to the current state of the blockchain (and the txs pending before it)
+function isCoherent(tx) {
+	let _result = true
+	// TODO
+	return _result
 }
 
 module.exports = { methods }

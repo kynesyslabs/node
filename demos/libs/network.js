@@ -136,16 +136,20 @@ var listeners = {
 			// INFO Transactions listener
 			peerSocket.on("transactions", async (request) => {
 				// Refusing the request if there is no muid
-				if (!request.muid) peerSocket.emit("transactions", { status: "error", message: "No muid specified"})
+				if (!request.muid) peerSocket.emit("transactions", { status: "error", message: "No muid specified"}); return
 				// request.tx is the signed tx (or should be)
 				let integrity = await transactions.methods.sanityCheck(request.tx)
 				if (!integrity) {
-                    peerSocket.emit("transactions", { status: "error", message: "Invalid transaction", muid: request.muid })
+                    peerSocket.emit("transactions", { status: "error", message: "Invalid transaction", muid: request.muid }); return
                     return
                 }
 				// If the tx is valid, we verify the signature
 				let verification = await transactions.methods.verify(request.tx)
-				if (!verification[0]) peerSocket.emit("transactions", { status: "error", message: "Failed verification", muid: request.muid })
+				if (!verification[0]) peerSocket.emit("transactions", { status: "error", message: "Failed verification", muid: request.muid }); return
+				// TODO Put the tx into the blockchain as pending
+				// Verify coherence of the tx
+				let coherence = await transactions.methods.isCoherent(request.tx)
+				if (!coherence[0]) peerSocket.emit("transactions", { status: "error", message: "Failed coherence", muid: request.muid }); return
 				// TODO handle the transactions execution
 			})
 			print.log("[SERVER] Listeners set up")
