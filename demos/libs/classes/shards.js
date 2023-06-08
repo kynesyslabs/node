@@ -3,6 +3,7 @@
 
 // INFO Getting the TRNG
 var TRNG = require("./random.js")
+let trng = TRNG.new()
 
 // TODO Expand and implement
 class Shard {
@@ -15,10 +16,10 @@ class Shard {
 		this.partecipants = _partecipants
 	}
 	getCurrentEntropy() {
-		return TRNG.getCurrentEntropy()
+		return trng.getCurrentEntropy()
 	}
 	getDeterminedRandom() {
-		return TRNG.new()
+		return trng.new()
 	}
 }
 

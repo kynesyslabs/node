@@ -1,0 +1,345 @@
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+                <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" 
+                width="622" height="796" shape-rendering="optimizeSpeed">
+                
+                <g>
+                   <rect x="50" y="65"
+            width="287.4" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>var TRNG = require(&apos;./random.js&apos;)</title>
+            <text x="65" y="85"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="65" y="85">var TRNG = require(&apos;./random.js&apos;)</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="50" y="113.5"
+            width="193.79999999999998" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>let trng = TRNG.new()</title>
+            <text x="65" y="133.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="65" y="133.5">let trng = TRNG.new()</tspan>
+            </text>
+                   
+                   
+                </g>
+            <g>
+                <rect x="50" y="177"
+            width="143.6" height="30"
+            style="fill:#80cbc4; stroke:#444; stroke-width:1" />
+                    
+                <line x1="60" y1="177" x2="60" y2="207"
+                style="fill:#80cbc4; stroke:#444; stroke-width:1" />
+                <line x1="183.6" y1="177" x2="183.6" y2="207"
+                style="fill:#80cbc4; stroke:#444; stroke-width:1" />
+             
+                <title>class Shard </title>
+            <text x="75" y="197"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="75" y="197">class Shard </tspan>
+            </text>
+                
+            </g>
+            <g>
+                <rect x="87" y="225.5"
+            width="440" height="30"
+            style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                    
+                <line x1="97" y1="225.5" x2="97" y2="255.5"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                <line x1="517" y1="225.5" x2="517" y2="255.5"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+             
+                <title>constructor(_checksum, _pendingTxs, _partecipants)</title>
+            <text x="112" y="245.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="112" y="245.5">constructor(_checksum, _pendingTxs, _partecipants)</tspan>
+            </text>
+                
+            </g>
+                <g>
+                   <rect x="124" y="274"
+            width="225" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>this.checksum = _checksum</title>
+            <text x="139" y="294"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="139" y="294">this.checksum = _checksum</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="124" y="322.5"
+            width="139.2" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>this.txs = {*}</title>
+            <text x="139" y="342.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="139" y="342.5">this.txs = {*}</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="161" y="371"
+            width="186" height="30"
+            rx="2" ry="2"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>pending: _pendingTxs</title>
+            <text x="176" y="391"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="176" y="391">pending: _pendingTxs</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="161" y="419.5"
+            width="435.59999999999997" height="30"
+            rx="2" ry="2"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>// The list of pending transactions
+confirmed: [] // The list of confirmed transactions</title>
+            <text x="176" y="439.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="176" y="439.5">// The list of pending transactions
+confirmed: [] ...</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="124" y="468"
+            width="287.4" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>this.partecipants = _partecipants</title>
+            <text x="139" y="488"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="139" y="488">this.partecipants = _partecipants</tspan>
+            </text>
+                   
+                   
+                </g>
+            <g>
+                <rect x="87" y="531.5"
+            width="198.2" height="30"
+            style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                    
+                <line x1="97" y1="531.5" x2="97" y2="561.5"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                <line x1="275.2" y1="531.5" x2="275.2" y2="561.5"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+             
+                <title>getCurrentEntropy()</title>
+            <text x="112" y="551.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="112" y="551.5">getCurrentEntropy()</tspan>
+            </text>
+                
+            </g>
+            <g>
+                <rect x="124" y="580"
+            width="271.79999999999995" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                
+                <line x1="395.79999999999995" y1="590" x2="400.79999999999995" y2="590"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                
+                <line x1="395.79999999999995" y1="600" x2="400.79999999999995" y2="600"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+
+                <path d="M400.79999999999995, 584 L416.79999999999995, 595 L400.79999999999995, 606 Z" 
+        fill="#a5d6a7" stroke="#444" stroke-width="1" />
+                             
+                <title>return trng.getCurrentEntropy()</title>
+            <text x="139" y="600"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="139" y="600">return trng.getCurrentEntropy()</tspan>
+            </text>
+                
+            </g>
+            <g>
+                <rect x="87" y="643.5"
+            width="213.79999999999998" height="30"
+            style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                    
+                <line x1="97" y1="643.5" x2="97" y2="673.5"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                <line x1="290.79999999999995" y1="643.5" x2="290.79999999999995" y2="673.5"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+             
+                <title>getDeterminedRandom()</title>
+            <text x="112" y="663.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="112" y="663.5">getDeterminedRandom()</tspan>
+            </text>
+                
+            </g>
+            <g>
+                <rect x="124" y="692"
+            width="162.6" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                
+                <line x1="286.6" y1="702" x2="291.6" y2="702"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                
+                <line x1="286.6" y1="712" x2="291.6" y2="712"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+
+                <path d="M291.6, 696 L307.6, 707 L291.6, 718 Z" 
+        fill="#a5d6a7" stroke="#444" stroke-width="1" />
+                             
+                <title>return trng.new()</title>
+            <text x="139" y="712"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="139" y="712">return trng.new()</tspan>
+            </text>
+                
+            </g>
+                <g>
+                   <rect x="50" y="740.5"
+            width="201.6" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>module.exports = Shard</title>
+            <text x="65" y="760.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="65" y="760.5">module.exports = Shard</tspan>
+            </text>
+                   
+                   
+                </g>
+            <g>
+               <rect x="25" y="13.75"
+            width="216.6" height="24"
+            style="fill:#fff59d; stroke:#444; stroke-width:1" />
+               <circle cx="25" cy="25" r="15"
+        style="fill:#fff59d; stroke:#444; stroke-width:1" />
+               <title>Program: source module</title>
+            <text x="55" y="30"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="55" y="30">Program: source module</tspan>
+            </text>
+            </g>
+            <g>
+               <path d="M25, 40 L25 76 Q25 80
+                29 80
+                L42 80 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 77 L50, 80 L42, 83 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M25, 40 L25 124.5 Q25 128.5
+                29 128.5
+                L42 128.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 125.5 L50, 128.5 L42, 131.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M25, 40 L25 188 Q25 192
+                29 192
+                L42 192 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 189 L50, 192 L42, 195 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M68.5, 207 L68.5 236.5 Q68.5 240.5
+                72.5 240.5
+                L79 240.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M79, 237.5 L87, 240.5 L79, 243.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M105.5, 255.5 L105.5 285 Q105.5 289
+                109.5 289
+                L116 289 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M116, 286 L124, 289 L116, 292 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M105.5, 255.5 L105.5 333.5 Q105.5 337.5
+                109.5 337.5
+                L116 337.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M116, 334.5 L124, 337.5 L116, 340.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M142.5, 352.5 L142.5 382 Q142.5 386
+                146.5 386
+                L161 386 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               false
+            </g>
+            <g>
+               <path d="M142.5, 352.5 L142.5 430.5 Q142.5 434.5
+                146.5 434.5
+                L161 434.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               false
+            </g>
+            <g>
+               <path d="M105.5, 255.5 L105.5 479 Q105.5 483
+                109.5 483
+                L116 483 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M116, 480 L124, 483 L116, 486 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M68.5, 207 L68.5 542.5 Q68.5 546.5
+                72.5 546.5
+                L79 546.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M79, 543.5 L87, 546.5 L79, 549.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M105.5, 561.5 L105.5 591 Q105.5 595
+                109.5 595
+                L116 595 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M116, 592 L124, 595 L116, 598 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M68.5, 207 L68.5 654.5 Q68.5 658.5
+                72.5 658.5
+                L79 658.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M79, 655.5 L87, 658.5 L79, 661.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M105.5, 673.5 L105.5 703 Q105.5 707
+                109.5 707
+                L116 707 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M116, 704 L124, 707 L116, 710 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M25, 40 L25 751.5 Q25 755.5
+                29 755.5
+                L42 755.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 752.5 L50, 755.5 L42, 758.5 Z" 
+        fill="#333" />
+            </g>
+            </svg>

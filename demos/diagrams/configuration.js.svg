@@ -1,0 +1,142 @@
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+                <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" 
+                width="519" height="363" shape-rendering="optimizeSpeed">
+                
+                <g>
+                   <rect x="50" y="65"
+            width="217.2" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>const fs = require(&apos;fs&apos;)</title>
+            <text x="65" y="85"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="65" y="85">const fs = require(&apos;fs&apos;)</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="50" y="113.5"
+            width="248.4" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>const path = require(&apos;path&apos;)</title>
+            <text x="65" y="133.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="65" y="133.5">const path = require(&apos;path&apos;)</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="50" y="162"
+            width="186" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>const dirname = &quot;./&quot;</title>
+            <text x="65" y="182"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="65" y="182">const dirname = &quot;./&quot;</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="50" y="210.5"
+            width="443.4" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>const config = JSON.parse(fs.readFileSync(path.join(dirname, &quot;config.json&quot;), &quot;utf8&quot;))</title>
+            <text x="65" y="230.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="65" y="230.5">const config = JSON.parse(fs.readFileSync(path.joi...</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="50" y="259"
+            width="186" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>module.exports = {*}</title>
+            <text x="65" y="279"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="65" y="279">module.exports = {*}</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="87" y="307.5"
+            width="76.8" height="30"
+            rx="2" ry="2"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>config</title>
+            <text x="102" y="327.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="102" y="327.5">config</tspan>
+            </text>
+                   
+                   
+                </g>
+            <g>
+               <rect x="25" y="13.75"
+            width="216.6" height="24"
+            style="fill:#fff59d; stroke:#444; stroke-width:1" />
+               <circle cx="25" cy="25" r="15"
+        style="fill:#fff59d; stroke:#444; stroke-width:1" />
+               <title>Program: source module</title>
+            <text x="55" y="30"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="55" y="30">Program: source module</tspan>
+            </text>
+            </g>
+            <g>
+               <path d="M25, 40 L25 76 Q25 80
+                29 80
+                L42 80 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 77 L50, 80 L42, 83 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M25, 40 L25 124.5 Q25 128.5
+                29 128.5
+                L42 128.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 125.5 L50, 128.5 L42, 131.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M25, 40 L25 173 Q25 177
+                29 177
+                L42 177 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 174 L50, 177 L42, 180 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M25, 40 L25 221.5 Q25 225.5
+                29 225.5
+                L42 225.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 222.5 L50, 225.5 L42, 228.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M25, 40 L25 270 Q25 274
+                29 274
+                L42 274 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 271 L50, 274 L42, 277 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M68.5, 289 L68.5 318.5 Q68.5 322.5
+                72.5 322.5
+                L87 322.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               false
+            </g>
+            </svg>

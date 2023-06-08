@@ -3,7 +3,7 @@ const fs = require("fs")
 const sqlite3 = require("sqlite3").verbose()
 const term = require("terminal-kit").terminal
 
-// ANCHOR Loading the chain db
+// ANCHOR Loading the chain db library to interact with the blockchain
 const { ChainDB, Block, Transaction } = require("./libs/classes/chain.js")
 let chainDB = new ChainDB()
 
@@ -131,7 +131,7 @@ async function main() {
 	}
 	// INFO We start the server
 	term.yellow("[BOOTSTRAP] Starting the server\n")
-	await network.methods.server.start(config.serverPort)
+	await network.methods.server.start(config.serverPort) // NOTE See network.js for the listeners that are automatically added
 	// Sleep 4 seconds
 	await new Promise((r) => setTimeout(r, 2000))
 	// Loading the peers

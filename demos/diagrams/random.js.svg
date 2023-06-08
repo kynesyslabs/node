@@ -1,0 +1,566 @@
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+                <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" 
+                width="593" height="1312" shape-rendering="optimizeSpeed">
+                
+                <g>
+                   <rect x="50" y="65"
+            width="232.79999999999998" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>var PRNG = require(&apos;prng&apos;)</title>
+            <text x="65" y="85"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="65" y="85">var PRNG = require(&apos;prng&apos;)</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="50" y="113.5"
+            width="287.4" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>var https = require(&apos;node:https&apos;)</title>
+            <text x="65" y="133.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="65" y="133.5">var https = require(&apos;node:https&apos;)</tspan>
+            </text>
+                   
+                   
+                </g>
+            <g>
+                <rect x="50" y="177"
+            width="135.8" height="30"
+            style="fill:#80cbc4; stroke:#444; stroke-width:1" />
+                    
+                <line x1="60" y1="177" x2="60" y2="207"
+                style="fill:#80cbc4; stroke:#444; stroke-width:1" />
+                <line x1="175.8" y1="177" x2="175.8" y2="207"
+                style="fill:#80cbc4; stroke:#444; stroke-width:1" />
+             
+                <title>class TRNG </title>
+            <text x="75" y="197"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="75" y="197">class TRNG </tspan>
+            </text>
+                
+            </g>
+            <g>
+                <rect x="87" y="225.5"
+            width="151.39999999999998" height="30"
+            style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                    
+                <line x1="97" y1="225.5" x2="97" y2="255.5"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                <line x1="228.39999999999998" y1="225.5" x2="228.39999999999998" y2="255.5"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+             
+                <title>constructor()</title>
+            <text x="112" y="245.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="112" y="245.5">constructor()</tspan>
+            </text>
+                
+            </g>
+                <g>
+                   <rect x="124" y="274"
+            width="154.8" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>this.entropy = 0</title>
+            <text x="139" y="294"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="139" y="294">this.entropy = 0</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="124" y="322.5"
+            width="147" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>this.number = 0</title>
+            <text x="139" y="342.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="139" y="342.5">this.number = 0</tspan>
+            </text>
+                   
+                   
+                </g>
+            <g>
+                <rect x="87" y="386"
+            width="89" height="30"
+            style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                    
+                <line x1="97" y1="386" x2="97" y2="416"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                <line x1="166" y1="386" x2="166" y2="416"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+             
+                <title>new()</title>
+            <text x="112" y="406"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="112" y="406">new()</tspan>
+            </text>
+                
+            </g>
+                <g>
+                   <rect x="124" y="434.5"
+            width="443.4" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>this.entropy = https.request(&apos;https://www.random.org/integers/?num=1&amp;min=-1000000000&amp;max=1000000000&amp;col=1&amp;base=10&amp;format=plain&amp;rnd=new&apos;)</title>
+            <text x="139" y="454.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="139" y="454.5">this.entropy = https.request(&apos;https://www.random.o...</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="124" y="483"
+            width="295.2" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>let generator = PRNG(this.entropy)</title>
+            <text x="139" y="503"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="139" y="503">let generator = PRNG(this.entropy)</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="124" y="531.5"
+            width="365.4" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>this.number = generator.rand(1, 1000000000)</title>
+            <text x="139" y="551.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="139" y="551.5">this.number = generator.rand(1, 1000000000)</tspan>
+            </text>
+                   
+                   
+                </g>
+            <g>
+                <rect x="124" y="580"
+            width="170.4" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                
+                <line x1="294.4" y1="590" x2="299.4" y2="590"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                
+                <line x1="294.4" y1="600" x2="299.4" y2="600"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+
+                <path d="M299.4, 584 L315.4, 595 L299.4, 606 Z" 
+        fill="#a5d6a7" stroke="#444" stroke-width="1" />
+                             
+                <title>return this.number</title>
+            <text x="139" y="600"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="139" y="600">return this.number</tspan>
+            </text>
+                
+            </g>
+            <g>
+                <rect x="87" y="643.5"
+            width="174.8" height="30"
+            style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                    
+                <line x1="97" y1="643.5" x2="97" y2="673.5"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                <line x1="251.8" y1="643.5" x2="251.8" y2="673.5"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+             
+                <title>currentEntropy()</title>
+            <text x="112" y="663.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="112" y="663.5">currentEntropy()</tspan>
+            </text>
+                
+            </g>
+                <g>
+                   <rect x="124" y="692"
+            width="443.4" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>this.entropy = https.request(&apos;https://www.random.org/integers/?num=1&amp;min=-1000000000&amp;max=1000000000&amp;col=1&amp;base=10&amp;format=plain&amp;rnd=new&apos;)</title>
+            <text x="139" y="712"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="139" y="712">this.entropy = https.request(&apos;https://www.random.o...</tspan>
+            </text>
+                   
+                   
+                </g>
+            <g>
+                <rect x="124" y="740.5"
+            width="178.2" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                
+                <line x1="302.2" y1="750.5" x2="307.2" y2="750.5"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                
+                <line x1="302.2" y1="760.5" x2="307.2" y2="760.5"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+
+                <path d="M307.2, 744.5 L323.2, 755.5 L307.2, 766.5 Z" 
+        fill="#a5d6a7" stroke="#444" stroke-width="1" />
+                             
+                <title>return this.entropy</title>
+            <text x="139" y="760.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="139" y="760.5">return this.entropy</tspan>
+            </text>
+                
+            </g>
+            <g>
+                <rect x="87" y="804"
+            width="167" height="30"
+            style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                    
+                <line x1="97" y1="804" x2="97" y2="834"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                <line x1="244" y1="804" x2="244" y2="834"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+             
+                <title>randomOf(items)</title>
+            <text x="112" y="824"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="112" y="824">randomOf(items)</tspan>
+            </text>
+                
+            </g>
+                <g>
+                   <rect x="124" y="852.5"
+            width="443.4" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>this.entropy = https.request(&apos;https://www.random.org/integers/?num=1&amp;min=-1000000000&amp;max=1000000000&amp;col=1&amp;base=10&amp;format=plain&amp;rnd=new&apos;)</title>
+            <text x="139" y="872.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="139" y="872.5">this.entropy = https.request(&apos;https://www.random.o...</tspan>
+            </text>
+                   
+                   
+                </g><g>
+
+            <rect x="154" y="936"
+            width="184.8" height="30"
+            rx="3" ry="3"
+            style="fill:#b39ddb; stroke:#444; stroke-width:1" />
+            <polygon points="124,951 154,921 184,951 154,981"
+            style="fill:#b39ddb; stroke:#444; stroke-width:1" />
+                
+            <title>i &lt; this.entropy</title>
+            <text x="199" y="956"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="199" y="956">i &lt; this.entropy</tspan>
+            </text>
+            
+            <text x="142.3" y="956"
+        font-family="monospace" font-size="13" fill="#222">for</text>
+        </g>
+                <g>
+                   <rect x="174" y="991"
+            width="69" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>i = 0</title>
+            <text x="189" y="1011"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="189" y="1011">i = 0</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="174" y="1039.5"
+            width="53.4" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>i++</title>
+            <text x="189" y="1059.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="189" y="1059.5">i++</tspan>
+            </text>
+                   
+                   
+                </g><g>
+            <rect x="204" y="1103"
+            width="200.4" height="30"
+            rx="3" ry="3"
+            style="fill:#ce93d8; stroke:#444; stroke-width:1" />                
+            <polygon points="174,1118 204,1088 234,1118 204,1148"
+            style="fill:#ce93d8; stroke:#444; stroke-width:1" />
+            <title>(i &gt; items.length)</title>
+            <text x="249" y="1123"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="249" y="1123">(i &gt; items.length)</tspan>
+            </text>
+            
+            <text x="196.2" y="1123"
+        font-family="monospace" font-size="13" fill="#222">if</text> <text x="211.8" y="1149.95"
+        font-family="monospace" font-size="13" fill="#222">+</text> 
+        </g>
+                <g>
+                   <rect x="224" y="1158"
+            width="69" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>i = 0</title>
+            <text x="239" y="1178"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="239" y="1178">i = 0</tspan>
+            </text>
+                   
+                   
+                </g>
+            <g>
+                <rect x="124" y="1208"
+            width="147" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                
+                <line x1="271" y1="1218" x2="276" y2="1218"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                
+                <line x1="271" y1="1228" x2="276" y2="1228"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+
+                <path d="M276, 1212 L292, 1223 L276, 1234 Z" 
+        fill="#a5d6a7" stroke="#444" stroke-width="1" />
+                             
+                <title>return items[i]</title>
+            <text x="139" y="1228"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="139" y="1228">return items[i]</tspan>
+            </text>
+                
+            </g>
+                <g>
+                   <rect x="50" y="1256.5"
+            width="193.79999999999998" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>module.exports = TRNG</title>
+            <text x="65" y="1276.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="65" y="1276.5">module.exports = TRNG</tspan>
+            </text>
+                   
+                   
+                </g>
+            <g>
+               <rect x="25" y="13.75"
+            width="216.6" height="24"
+            style="fill:#fff59d; stroke:#444; stroke-width:1" />
+               <circle cx="25" cy="25" r="15"
+        style="fill:#fff59d; stroke:#444; stroke-width:1" />
+               <title>Program: source module</title>
+            <text x="55" y="30"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="55" y="30">Program: source module</tspan>
+            </text>
+            </g>
+            <g>
+               <path d="M25, 40 L25 76 Q25 80
+                29 80
+                L42 80 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 77 L50, 80 L42, 83 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M25, 40 L25 124.5 Q25 128.5
+                29 128.5
+                L42 128.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 125.5 L50, 128.5 L42, 131.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M25, 40 L25 188 Q25 192
+                29 192
+                L42 192 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 189 L50, 192 L42, 195 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M68.5, 207 L68.5 236.5 Q68.5 240.5
+                72.5 240.5
+                L79 240.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M79, 237.5 L87, 240.5 L79, 243.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M105.5, 255.5 L105.5 285 Q105.5 289
+                109.5 289
+                L116 289 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M116, 286 L124, 289 L116, 292 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M105.5, 255.5 L105.5 333.5 Q105.5 337.5
+                109.5 337.5
+                L116 337.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M116, 334.5 L124, 337.5 L116, 340.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M68.5, 207 L68.5 397 Q68.5 401
+                72.5 401
+                L79 401 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M79, 398 L87, 401 L79, 404 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M105.5, 416 L105.5 445.5 Q105.5 449.5
+                109.5 449.5
+                L116 449.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M116, 446.5 L124, 449.5 L116, 452.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M105.5, 416 L105.5 494 Q105.5 498
+                109.5 498
+                L116 498 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M116, 495 L124, 498 L116, 501 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M105.5, 416 L105.5 542.5 Q105.5 546.5
+                109.5 546.5
+                L116 546.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M116, 543.5 L124, 546.5 L116, 549.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M105.5, 416 L105.5 591 Q105.5 595
+                109.5 595
+                L116 595 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M116, 592 L124, 595 L116, 598 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M68.5, 207 L68.5 654.5 Q68.5 658.5
+                72.5 658.5
+                L79 658.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M79, 655.5 L87, 658.5 L79, 661.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M105.5, 673.5 L105.5 703 Q105.5 707
+                109.5 707
+                L116 707 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M116, 704 L124, 707 L116, 710 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M105.5, 673.5 L105.5 751.5 Q105.5 755.5
+                109.5 755.5
+                L116 755.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M116, 752.5 L124, 755.5 L116, 758.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M68.5, 207 L68.5 815 Q68.5 819
+                72.5 819
+                L79 819 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M79, 816 L87, 819 L79, 822 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M105.5, 834 L105.5 863.5 Q105.5 867.5
+                109.5 867.5
+                L116 867.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M116, 864.5 L124, 867.5 L116, 870.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M105.5, 834 L105.5 947 Q105.5 951
+                109.5 951
+                L116 951 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M116, 948 L124, 951 L116, 954 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M154, 981 L154 1002 Q154 1006
+                158 1006
+                L166 1006 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M166, 1003 L174, 1006 L166, 1009 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M154, 981 L154 1050.5 Q154 1054.5
+                158 1054.5
+                L166 1054.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M166, 1051.5 L174, 1054.5 L166, 1057.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M154, 981 L154 1114 Q154 1118
+                158 1118
+                L166 1118 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M166, 1115 L174, 1118 L166, 1121 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M204, 1148 L204 1169 Q204 1173
+                208 1173
+                L216 1173 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M216, 1170 L224, 1173 L216, 1176 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M293, 1173 L420.4 1173  Q424.4 1173
+                424.4 1169
+                L424.4 909 Q424.4 901
+                420.4 901
+                L162 901  Q154 901
+                154 905
+                L154 913"
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M151, 913 L154, 921 L157, 913 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M105.5, 834 L105.5 1219 Q105.5 1223
+                109.5 1223
+                L116 1223 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M116, 1220 L124, 1223 L116, 1226 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M25, 40 L25 1267.5 Q25 1271.5
+                29 1271.5
+                L42 1271.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 1268.5 L50, 1271.5 L42, 1274.5 Z" 
+        fill="#333" />
+            </g>
+            </svg>

@@ -55,6 +55,16 @@ class ChainDB {
 	constructor() {
 		this.connection = null
 	}
+
+	// create connection
+	createConnection() {
+		// ...
+	}
+	
+	// close connection
+	closeConnection() {
+		// ...
+	}
 	read(sql_query) {
 		let result = []
 		this.connection = new sqlite3.Database("./data/chain.db", (err) => {
@@ -172,6 +182,24 @@ class ChainDB {
 		return this.insertBlock(genesis_block)
 	}
 	// ANCHOR Macro
+	// ANCHOR Specific operations
+	// INFO Getting the status of a given address either from the native or the properties table
+	statusOf(address, type) {
+		// Type can be: 0, 1 (native, properties)
+		let field;
+		if (type == 0) {
+			field = "native" // The native table is the one storing the current balance plus the transactions made by the address
+		} else if (type == 1) {
+			field = "properties" // The properties table is the one enabling smart features
+        } 
+		let query = "SELECT * FROM status_" + field + " WHERE address='" + address + "'"
+		return this.read(query)[0]
+	} // TODO Implement specific time-saving operations to get specific data (see the tables in the db)
+	// INFO Getting the hash of the status at a given block
+	statusHashAt(block_number) {
+		let query = "SELECT hash FROM status_hashes WHERE block='" + block_number + "'"
+        return this.read(query)[0]
+	}
 	// TODO And more
 }
 

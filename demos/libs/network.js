@@ -24,6 +24,7 @@ var air = require("./classes/air")
 var imc = new air()
 imc.initialize("network")
 const { Peer } = require("./peers.js")
+var transactions = require("./transactions.js")
 
 app.get("/", (req, res) => {
 	res.send("<h1>Hello world</h1>")
@@ -86,10 +87,11 @@ var listeners = {
 				// And we reply ok
 				peerSocket.emit("auth_ok")
 			})
-			peerSocket.emit("auth_ask")
+			peerSocket.emit("auth_ask") // Once we are able to listen for the reply, we send the auth_ask event
 			// TODO Adding _peerForged.identity
 			// INFO Adding the peer to the list
 			await imc["states"].peers.methods.addPeer(_peerForged)
+			// NOTE From now on, the peer is connected and is able to communicate through advanced methods (as below)
 			// ANCHOR Public methods for clients
 			peerSocket.on("public", async (request) => {
 				if (!request.message) {
@@ -130,6 +132,21 @@ var listeners = {
 					_receiver.emit("public", { block: response, muid: request.muid })
 				}
 				// TODO Continue with the server public methods
+			})
+			// INFO Transactions listener
+			peerSocket.on("transactions", async (request) => {
+				// Refusing the request if there is no muid
+				if (!request.muid) peerSocket.emit("transactions", { status: "error", message: "No muid specified"})
+				// request.tx is the signed tx (or should be)
+				let integrity = await transactions.methods.sanityCheck(request.tx)
+				if (!integrity) {
+                    peerSocket.emit("transactions", { status: "error", message: "Invalid transaction", muid: request.muid })
+                    return
+                }
+				// If the tx is valid, we verify the signature
+				let verification = await transactions.methods.verify(request.tx)
+				if (!verification[0]) peerSocket.emit("transactions", { status: "error", message: "Failed verification", muid: request.muid })
+				// TODO handle the transactions execution
 			})
 			print.log("[SERVER] Listeners set up")
 		})

@@ -1,0 +1,190 @@
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+                <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" 
+                width="480" height="475" shape-rendering="optimizeSpeed">
+                
+                <g>
+                   <rect x="50" y="65"
+            width="404.4" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>const {...} = require(&apos;./libs/classes/chain.js&apos;)</title>
+            <text x="65" y="85"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="65" y="85">const {...} = require(&apos;./libs/classes/chain.js&apos;)</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="87" y="113.5"
+            width="84.6" height="30"
+            rx="2" ry="2"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>ChainDB</title>
+            <text x="102" y="133.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="102" y="133.5">ChainDB</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="87" y="162"
+            width="69" height="30"
+            rx="2" ry="2"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>Block</title>
+            <text x="102" y="182"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="102" y="182">Block</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="87" y="210.5"
+            width="115.8" height="30"
+            rx="2" ry="2"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>Transaction</title>
+            <text x="102" y="230.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="102" y="230.5">Transaction</tspan>
+            </text>
+                   
+                   
+                </g>
+                <g>
+                   <rect x="50" y="259"
+            width="240.6" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>let chainDB = new ChainDB()</title>
+            <text x="65" y="279"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="65" y="279">let chainDB = new ChainDB()</tspan>
+            </text>
+                   
+                   
+                </g>
+            <g>
+                <rect x="50" y="322.5"
+            width="128" height="30"
+            style="fill:#80cbc4; stroke:#444; stroke-width:1" />
+                    
+                <line x1="60" y1="322.5" x2="60" y2="352.5"
+                style="fill:#80cbc4; stroke:#444; stroke-width:1" />
+                <line x1="168" y1="322.5" x2="168" y2="352.5"
+                style="fill:#80cbc4; stroke:#444; stroke-width:1" />
+             
+                <title>class GLS </title>
+            <text x="75" y="342.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="75" y="342.5">class GLS </tspan>
+            </text>
+                
+            </g>
+            <g>
+                <rect x="87" y="371"
+            width="151.39999999999998" height="30"
+            style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                    
+                <line x1="97" y1="371" x2="97" y2="401"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+                <line x1="228.39999999999998" y1="371" x2="228.39999999999998" y2="401"
+                style="fill:#a5d6a7; stroke:#444; stroke-width:1" />
+             
+                <title>constructor()</title>
+            <text x="112" y="391"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="112" y="391">constructor()</tspan>
+            </text>
+                
+            </g>
+                <g>
+                   <rect x="50" y="419.5"
+            width="186" height="30"
+            rx="3" ry="3"
+            style="fill:#90caf9; stroke:#444; stroke-width:1" />
+                   <title>module.exports = GLS</title>
+            <text x="65" y="439.5"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="65" y="439.5">module.exports = GLS</tspan>
+            </text>
+                   
+                   
+                </g>
+            <g>
+               <rect x="25" y="13.75"
+            width="216.6" height="24"
+            style="fill:#fff59d; stroke:#444; stroke-width:1" />
+               <circle cx="25" cy="25" r="15"
+        style="fill:#fff59d; stroke:#444; stroke-width:1" />
+               <title>Program: source module</title>
+            <text x="55" y="30"
+                font-family="monospace" font-size="13" fill="#222">
+                <tspan x="55" y="30">Program: source module</tspan>
+            </text>
+            </g>
+            <g>
+               <path d="M25, 40 L25 76 Q25 80
+                29 80
+                L42 80 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 77 L50, 80 L42, 83 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M68.5, 95 L68.5 124.5 Q68.5 128.5
+                72.5 128.5
+                L87 128.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               false
+            </g>
+            <g>
+               <path d="M68.5, 95 L68.5 173 Q68.5 177
+                72.5 177
+                L87 177 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               false
+            </g>
+            <g>
+               <path d="M68.5, 95 L68.5 221.5 Q68.5 225.5
+                72.5 225.5
+                L87 225.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               false
+            </g>
+            <g>
+               <path d="M25, 40 L25 270 Q25 274
+                29 274
+                L42 274 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 271 L50, 274 L42, 277 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M25, 40 L25 333.5 Q25 337.5
+                29 337.5
+                L42 337.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 334.5 L50, 337.5 L42, 340.5 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M68.5, 352.5 L68.5 382 Q68.5 386
+                72.5 386
+                L79 386 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M79, 383 L87, 386 L79, 389 Z" 
+        fill="#333" />
+            </g>
+            <g>
+               <path d="M25, 40 L25 430.5 Q25 434.5
+                29 434.5
+                L42 434.5 "
+        style="fill:none; stroke:#444; stroke-width:1" />
+               <path d="M42, 431.5 L50, 434.5 L42, 437.5 Z" 
+        fill="#333" />
+            </g>
+            </svg>

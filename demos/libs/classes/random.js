@@ -21,13 +21,15 @@ class TRNG {
 	// INFO Extract a random element form a list
 	randomOf(items) {
 		this.entropy = https.request("https://www.random.org/integers/?num=1&min=-1000000000&max=1000000000&col=1&base=10&format=plain&rnd=new")
+		let gen = this.new()
 		let i
-		for (i=0; i<this.entropy; i++) {
-			if (i > items.length) {
-				i = 0
+		for (i=0; i<this.gen; i++) {
+			let index = i // Copying this so that we can manipulate index without interfering with the for cycle
+			if (index > items.length) {
+				index = 0
 			}
 		}
-		return items[i]
+		return items[index]
 	}
 		
 
