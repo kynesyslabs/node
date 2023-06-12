@@ -17,7 +17,7 @@ RUN npm install
 WORKDIR /root/evm
 RUN npm install
 WORKDIR /root/common
-run npm install
+RUN npm install
 # Copying over the required files
 COPY requirements/geth /usr/local/bin/
 RUN chmod +x /usr/local/bin/geth
