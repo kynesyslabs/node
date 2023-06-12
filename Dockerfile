@@ -8,7 +8,7 @@ RUN mkdir common
 # Installing basic packages
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt update -y
-RUN apt install -y net-tools build-essential nodejs npm python3 vim wget curl screen
+RUN apt install -y net-tools build-essential nodejs npm vim wget curl screen --fix-missing
 RUN npm install -g n
 RUN n 16.18.1
 RUN hash -r

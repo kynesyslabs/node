@@ -1,1 +1,1 @@
-docker build -t kyntainer -f Dockerfile .
+docker build --no-cache -t kyntainer -f Dockerfile .

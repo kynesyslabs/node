@@ -130,7 +130,7 @@ class ChainDB {
 	}
 	// INFO Get the genesis block that initialized the current chain
 	getGenesisBlock() {
-		return this.read("SELECT * FROM blocks WHERE number=0")[0]
+		return this.read("SELECT * FROM blocks WHERE number=0")
 	}
 	// INFO Get the current pending transactions pool
 	getPendingPool() {
