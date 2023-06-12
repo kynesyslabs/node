@@ -58,7 +58,7 @@ const { print } = require("./libs/logging.js")
 
 // NOTE Defining peers object and registering it through the modules
 // NOTE peers contains the methods that work on peerlist and related variables (shared)
-var { peerlist, methods, Peer } = require("./libs/peers.js") // FIXME Use the new class
+var { peerlist, methods, Peer } = require("./libs/classes/peers.js") // FIXME Use the new class
 imc.states["peers"] = {
 	methods: methods,
 	peerlist: peerlist,

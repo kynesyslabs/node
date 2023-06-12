@@ -23,7 +23,7 @@ let chainDB = new ChainDB()
 var air = require("./classes/air")
 var imc = new air()
 imc.initialize("network")
-const { Peer } = require("./peers.js")
+const { Peer } = require("./classes/peers.js")
 var transactions = require("./transactions.js")
 
 app.get("/", (req, res) => {
