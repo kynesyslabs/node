@@ -130,6 +130,10 @@ var listeners = {
 					}
 					response = chainDB.getBlockByHash(request.parameters.blockHash)
 					_receiver.emit("public", { block: response, muid: request.muid })
+				case "getMempool":
+					response = chainDB.getPendingPool()
+                    _receiver.emit("public", { mempool: response, muid: request.muid })
+                    break
 				}
 				// TODO Continue with the server public methods
 			})
