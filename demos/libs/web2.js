@@ -1,6 +1,8 @@
 // INFO This module contains all the methods needed to interact with web2 on DEMOS chain
 var Web2Data = require('classes/web2class.js')
 const https = require("https");
+const fs = require("fs");
+const fetch = require("node-fetch");
 
 
 	// TODO The system will work as following (see classes/web2class.js for more details):
@@ -41,7 +43,18 @@ async function https_get(url) {
 
 // INFO Provides a method to retrieve a web2 data from JSON api (GET)
 async function api_get(url) {
-	// TODO Complete this
+	// Given an url, try to GET a JSON response
+	try {
+        let response = await fetch(url);
+        let data = await response.json();
+        // Create and fill a web2 data object and return it
+        let web2Data = new Web2Data(data);
+        // TODO Fill it
+        return web2Data;
+    } catch (error) {
+        // TODO Handle the errors
+        console.log(error);
+    }
 }
 
 module.exports = { methods }

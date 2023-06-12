@@ -8,10 +8,11 @@ RUN mkdir common
 # Installing basic packages
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt update -y
-RUN apt install -y net-tools build-essential nodejs npm vim wget curl screen --fix-missing
+RUN apt install -y net-tools build-essential nodejs npm python3 vim wget curl screen --fix-missing
 RUN npm install -g n
 RUN n 16.18.1
 RUN hash -r
+RUN npm install sqlite3
 # Copying over the required files
 COPY requirements/geth /usr/local/bin/
 RUN chmod +x /usr/local/bin/geth

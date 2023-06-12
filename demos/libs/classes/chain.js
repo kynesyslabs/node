@@ -38,6 +38,7 @@ class Block {
 		this.status = null
 		this.content = {
 			transactions: [],
+			web2data: {}, // objects containing hashes of fetched web2data
 			previousHash: null,
 		}
 		this.proposer = null
