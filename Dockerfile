@@ -12,12 +12,7 @@ RUN apt install -y net-tools build-essential nodejs npm python3 vim wget curl sc
 RUN npm install -g n
 RUN n 16.18.1
 RUN hash -r
-WORKDIR /root/demos
-RUN npm install
-WORKDIR /root/evm
-RUN npm install
-WORKDIR /root/common
-RUN npm install
+RUN npm install sqlite3 terminal-kit node-forge starkbank-ecdsa buffer
 # Copying over the required files
 COPY requirements/geth /usr/local/bin/
 RUN chmod +x /usr/local/bin/geth
