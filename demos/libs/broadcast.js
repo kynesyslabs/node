@@ -1,1 +1,0 @@
-// INFO This module contains methods and structures that enable an high level user friendly communication between nodes

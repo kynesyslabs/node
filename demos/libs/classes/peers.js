@@ -1,5 +1,4 @@
 // INFO This library contains useful methods that are used to manage peers and handle them easily
-// FIXME REWRITE ALL THIS AS A CLASS
 
 // ANCHOR Variables initialized on import
 // INFO This is the list of peers that the node knows
@@ -42,7 +41,12 @@ var methods = {
 		if (index > -1) {
 			peerlist.splice(index, 1)
 		}
-	}
+	},
+	// INFO Wildcard method to manipulate the peerlist (unsafe and should not be used)
+	setPeerlist: async function (_peerlist) {
+        peerlist = _peerlist
+    }
 }
 
+// FIXME Don't export peerlist, we access it directly with the methods
 module.exports = { methods, peerlist, Peer }

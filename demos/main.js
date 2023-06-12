@@ -95,6 +95,8 @@ async function sync() {
 		// Ask for the last block
 		_currentPeer.socket.emit("public", _blockAsk)
 		// TODO Wait for the response with a listener and a timeout or using MUID (see network.js)
+		// LINK https://stackoverflow.com/questions/23893872/how-to-properly-remove-event-listeners-in-node-js-eventemitter
+		// The above link will be used to remove the listeners once the response is received, will be applied to keep clean the peers connections too
 	}
 	return synced
 }
