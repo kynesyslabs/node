@@ -1,5 +1,6 @@
 kyntainer.tar
 node_modules
+.vscode
 evm/node_modules
 common/node_modules
 requirements/geth
