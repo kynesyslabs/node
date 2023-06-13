@@ -34,27 +34,28 @@ var imc = new air()
 imc.initialize("main")
 
 // For every module we want to communicate with, we need to register its imc interface
-const identity = require("./libs/identity.js")
+const identity = require("./libs/identity.js") // Provides cryptographical methods
 imc.registered_modules.push({
 	name: "identity",
 	registered: true,
 	socket: identity.imc,
 })
-const messages = require("./libs/messages.js")
+const messages = require("./libs/messages.js") // Definition of the structure of messages (see libs/network.js listeners)
 imc.registered_modules.push({
 	name: "messages",
 	registered: true,
 	socket: messages.imc,
 })
-const network = require("./libs/network.js")
+const network = require("./libs/network.js") // Definitions for network activity (server, client, listeners)
 imc.registered_modules.push({
 	name: "network",
 	registered: true,
 	socket: network.imc,
 })
 
-const { config } = require("./libs/configuration.js")
-const { print } = require("./libs/logging.js")
+const communications = require("./libs/communications.js") // Module used to manage all kind of peers communication
+const { config } = require("./libs/configuration.js") // Loads config.json
+const { print } = require("./libs/logging.js") // Helper for debugging
 
 // NOTE Defining peers object and registering it through the modules
 // NOTE peers contains the methods that work on peerlist and related variables (shared)
