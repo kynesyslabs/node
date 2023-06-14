@@ -6,10 +6,8 @@ const sha256 = require('sha256');
  * Let's say main.js want to send a message to all other nodes
  * We want to send a message to all other nodes and listen for replies
  * We first create the message with messages.js
- * Then we use broadcast.broadcastMessage.toAllPeers to send the message to all other nodes
- * We then iterate through the references and call broadcast.listenForReply to listen for replies 
- *	(given references[n][0] is true and using references[n][1] and references[n][2] as parameters)
- * This way we can specify what happens when we got the reply of that specific message (using the muid as reference)
+ * Then we use broadcast.broadcastMessage.toAllPeers to send the message to all other nodes specifying a callback function
+ * The broadcast.broadcastMessage.toPeer that is called by the above method takes care of setting up the listener with the callback provided
 */
 
 /* NOTE References to objects used in this module
@@ -22,16 +20,15 @@ var broadcast = {
 	broadcastMessage: {
 		toAllPeers: broadcastMessageToAllPeers,
 		toPeer: broadcastMessageToPeer
-	},
-	listenForReply: listenForReply
+	}
 }
 
 // INFO Broadcasts a message to all peers
 // type is a string like "public" or "transactions" as defined in network.js
-function broadcastMessageToAllPeers(type, message, peerlist) {
+function broadcastMessageToAllPeers(type, message, peerlist, callback) {
 	let references = [];
 	for (let i = 0; i < peerlist.length; i++) {
-		let _ref = broadcastMessageToPeer(type, message, peerlist[i]);
+		let _ref = broadcastMessageToPeer(type, message, peerlist[i], callback);
 		references.push(_ref);
 	}
 	return references;
@@ -39,30 +36,28 @@ function broadcastMessageToAllPeers(type, message, peerlist) {
 
 // INFO Broadcasts a message to a specific peer
 // peer must be a Peer like object
-function broadcastMessageToPeer(type, message, peer) {
+function broadcastMessageToPeer(type, message, peer, callback) {
 	let _socket = peer.socket;
+	// TODO Sanitize message and type
 	if (_socket) {
+		// Setting up the listener to receive the response
+		// NOTE We do this before sending the message so that we are able to listen for replies immediately
+		// TODO Keep track of the listeners and destroy them at need
+		_socket.on(type, 
+			function(message) {
+				// Catching messages that are sent to this peer for this specific message muid (same type, same muid = reply)
+				if (message.muid === muid) {
+					let reply = await callback(message);
+					return [true, reply];
+				}
+			});
+		// Emititng the message
         _socket.emit(type, message);
-		// Listen back for messages sent to this peer is made using type and muid and the below method
 		return [true, type, message.muid];
     }
 	return [false, type, "Invalid peer"];
 }
 
-// INFO Listen for replies given a muid
-async function listenForReply(type, muid, callback) {
-	let _socket = this.peers[muid].socket;
-    if (_socket) {
-        _socket.on(type, 
-			function(message) {
-				// Catching messages that are sent to this peer for this specific message muid (same type, same muid = reply)
-                if (message.muid === muid) {
-					let reply = await callback(message);
-					return [true, reply];
-				}
-            });
-    }
-}
 // !SECTION Broadcasts
 
 // TODO Rewrite the above methods to be compliant or included in a ComLink class
