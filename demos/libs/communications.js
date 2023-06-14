@@ -66,6 +66,7 @@ function broadcastMessageToPeer(message, peer, callback) {
 // NOTE Each ComLink object contains a message and its request-reply chain so that each communication can be done keeping track of the request-reply chain
 class ComLink {
 	constructor() {
+		this.peer = null // The peer we are communicating with
         this.chain = {
 			current: {
 				currentMessage: null, // must be a emptyMessage like object (see libs/messages.js)
