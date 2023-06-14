@@ -25,10 +25,10 @@ var broadcast = {
 
 // INFO Broadcasts a message to all peers
 // type is a string like "public" or "transactions" as defined in network.js
-function broadcastMessageToAllPeers(type, message, peerlist, callback) {
+function broadcastMessageToAllPeers(message, peerlist, callback) {
 	let references = [];
 	for (let i = 0; i < peerlist.length; i++) {
-		let _ref = broadcastMessageToPeer(type, message, peerlist[i], callback);
+		let _ref = broadcastMessageToPeer(message, peerlist[i], callback);
 		references.push(_ref);
 	}
 	return references;
@@ -36,9 +36,10 @@ function broadcastMessageToAllPeers(type, message, peerlist, callback) {
 
 // INFO Broadcasts a message to a specific peer
 // peer must be a Peer like object
-function broadcastMessageToPeer(type, message, peer, callback) {
+function broadcastMessageToPeer(message, peer, callback) {
 	let _socket = peer.socket;
-	// TODO Sanitize message and type
+	// REVIEW Sanitize message and type
+	if (!message.type || !message.muid) return [false, null, "Invalid message"];
 	if (_socket) {
 		// Setting up the listener to receive the response
 		// NOTE We do this before sending the message so that we are able to listen for replies immediately
@@ -52,7 +53,7 @@ function broadcastMessageToPeer(type, message, peer, callback) {
 				}
 			});
 		// Emititng the message
-        _socket.emit(type, message);
+        _socket.emit(message.type, message);
 		return [true, type, message.muid];
     }
 	return [false, type, "Invalid peer"];
