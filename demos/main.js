@@ -105,7 +105,7 @@ async function sync() {
 }
 
 // INFO Bootstrapping the peers to find at least one valid peer
-async function peerBootstrap(peerlist) {
+async function peerBootstrap(peers_list) {
 	// Validity check
 	for (let i = 0; i < peers_list.length; i++) {
 		let _currentPeerURL = peers_list[i] // The url of the peer
