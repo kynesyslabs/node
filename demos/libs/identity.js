@@ -30,7 +30,7 @@ var generate = {
 				privateKeyHex: stringToHex(privateKey.toPem()),
 				publicKey: publicKey,
 				publicKeyPEM: publicKey.toPem(),
-				publicKeyHex: stringToHex(publicKey.toPem()),
+				publicKeyHex: stringToHex(publicKey.toPem()).replace("2d2d2d2d2d424547494e205055424c4943204b45592d2d2d2d2d", "").replace("2d2d2d2d2d454e44205055424c4943204b45592d2d2d2d2d0a", ""),
 			}
 			return keypair
 		},
@@ -44,7 +44,7 @@ var generate = {
 				privateKeyHex: stringToHex(privateKey.toPem()),
 				publicKey: publicKey,
 				publicKeyPEM: publicKey.toPem(),
-				publicKeyHex: stringToHex(publicKey.toPem()),
+				publicKeyHex: stringToHex(publicKey.toPem()).replace("2d2d2d2d2d424547494e205055424c4943204b45592d2d2d2d2d", "").replace("2d2d2d2d2d454e44205055424c4943204b45592d2d2d2d2d0a", ""),
 			}
 			return keypair
 		},

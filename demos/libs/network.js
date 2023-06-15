@@ -60,6 +60,11 @@ var listeners = {
 			let _sendBack = [data.message, _signature, imc.states["id"].publicKey]
 			peer.socket.emit("auth_reply", _sendBack)
 		})
+		// REVIEW public endpoint is currently for debugging purposes
+		peer.socket.on("public", request => {
+			console.log("[PEER] Received")
+			console.log(request)
+		})
 	},
 	// INFO Listeners for server
 	server_listeners: async function () {
@@ -94,57 +99,56 @@ var listeners = {
 			// TODO Adding _peerForged.identity
 			// INFO Adding the peer to the list
 			await imc["states"].peers.methods.addPeer(_peerForged)
-			// TODO "public" endopoint will be replaced, see on("comlink")
 			// NOTE From now on, the peer is connected and is able to communicate through advanced methods (as below)
-			// ANCHOR Public methods for clients
-			peerSocket.on("public", async (request) => {
-				if (!request.message) {
-					peerSocket.emit("public", { error: "No command specified" })
-				}
-				if (!request.muid) {
-					peerSocket.emit("public", { error: "No muid specified" })
-				}
-				// Define the receiver of the reply (can be different than the sender)
-				let _receiver
-				if (request.receiver === "self") _receiver = peerSocket; else _receiver = request.receiver
+			peerSocket.on("comlink", request => {
+				let _receiver = peerSocket
+				// We need to check if the message request is valid (is a ComLink object)
+				console.log("[SERVER] Received comlink")
+				console.log(request)
+				// Sanitizing the request
+				// TODO Should reply by filling the comlink with the new answer
+				if (!request.muid) peerSocket.emit("comlink", { status: "error", message: "No muid specified" })
+				if (!request.message) peerSocket.emit("comlink", { status: "error", message: "No message specified" })
+				// Listening for commands
 				// INFO This switch handles the public methods that should have this structure:
 				//      { method: "methodName", params: { ... }, muid: [number] }
 				// Where muid is a message unique identifier that is used to identify the response
-				// TODO FInd the best way to have async emit and reply using the MUID without blocking the script and without nested hell
 				var response
-				switch (request.message) {
-				case "getLastBlockNumber":
-					response = chainDB.getLastBlockNumber()
-					_receiver.emit("public", { blockNumber: response, muid: request.muid })
-					break
-				case "getLastBlockHash":
-					response = chainDB.getLastBlockHash()
-					_receiver.emit("public", { blockHash: response, muid: request.muid })
-					break
-				case "getBlockByNumber":
-					if (!request.parameters.blockNumber) {
-						_receiver.emit("public", { error: "No block specified" })
+				if (request.content.type === "nodeCall") { // TODO Separate parsers by type and use a function to retrieve the result (as a comlink anyway)
+					switch (request.content.message) {
+					case "getLastBlockNumber":
+						console.log("[SERVER] Received getLastBlockNumber")
+						response = chainDB.getLastBlockNumber()
+						_receiver.emit("public", { blockNumber: response, muid: request.muid })
+						break
+					case "getLastBlockHash":
+						response = chainDB.getLastBlockHash()
+						_receiver.emit("public", { blockHash: response, muid: request.muid })
+						break
+					case "getBlockByNumber":
+						if (!request.parameters.blockNumber) {
+							_receiver.emit("public", { error: "No block specified" })
+						}
+						response = chainDB.getBlockByNumber(request.parameters.blockNumber)
+						_receiver.emit("public", { block: response, muid: request.muid })
+						break
+					case "getBlockByHash":
+						if (!request.parameters.blockHash) {
+							_receiver.emit("public", { error: "No block specified" })
+						}
+						response = chainDB.getBlockByHash(request.parameters.blockHash)
+						_receiver.emit("public", { block: response, muid: request.muid })
+					case "getMempool":
+						response = chainDB.getPendingPool()
+						_receiver.emit("public", { mempool: response, muid: request.muid })
+						break
 					}
-					response = chainDB.getBlockByNumber(request.parameters.blockNumber)
-					_receiver.emit("public", { block: response, muid: request.muid })
-					break
-				case "getBlockByHash":
-					if (!request.parameters.blockHash) {
-						_receiver.emit("public", { error: "No block specified" })
-					}
-					response = chainDB.getBlockByHash(request.parameters.blockHash)
-					_receiver.emit("public", { block: response, muid: request.muid })
-				case "getMempool":
-					response = chainDB.getPendingPool()
-                    _receiver.emit("public", { mempool: response, muid: request.muid })
-                    break
 				}
-				// TODO Continue with the server public methods
-			})
-			// REVIEW and replace the public methods
-			peerSocket.on("comlink", async (request) => {
-				// We need to check if the message request is valid (is a ComLink object)
 				// TODO See in communications.js and find the best way to validate, check and digest the request
+			})
+			// INFO Debug code
+			peerSocket.on("hello", async (request) => {
+				console.log("[DEBUG] hello there")
 			})
 			// INFO Transactions listener
 			peerSocket.on("transactions", async (request) => {
@@ -245,6 +249,7 @@ var methods = {
 			if (!connection.connected) return false
 			// Setting up the listeners (common and client)
 			let _peerForged = new Peer()
+			_peerForged.identity = "placeholder" // TODO Add identity filling and verification
 			_peerForged.socket = connection
 			_peerForged.connection_string = address + ">" + port
 			listeners.common_listeners(_peerForged)

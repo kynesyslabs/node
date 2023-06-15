@@ -60,7 +60,7 @@ const { print } = require("./libs/logging.js") // Helper for debugging
 
 // NOTE Defining peers object and registering it through the modules
 // NOTE peers contains the methods that work on peerlist and related variables (shared)
-var { peerlist, methods, Peer } = require("./libs/classes/peers.js") // FIXME Use the new class
+var { peerlist, methods, Peer } = require("./libs/classes/peers.js") 
 imc.states["peers"] = {
 	methods: methods,
 	peerlist: peerlist,
@@ -91,16 +91,35 @@ function containsPeer(obj, list) {
 // INFO Ensure that we are at the head of the chain
 async function sync() {
 	let synced = true
+	console.log("[SYNC] Our data: fetched")
 	let _currentLastBlockNumber = chainDB.getLastBlockNumber()
 	let _currentLastBlockHash = chainDB.getLastBlockHash()
+	// FIXME ^ Why above values go to the end? Because we should await somehow even if it is not async (??) (see chain.js, fixme on read)
+	console.log("[SYNC] Fetching data from peers")
 	// Asking to all the peers for the last block
 	for (let i = 0; i < imc.states["peers"].peerlist.length; i++) {
+		// Creating a comlink object
+		let _comlink = new communications.ComLink()
+		_comlink.peer = imc.states["peers"].peerlist[i]
+
 		let _currentPeer = imc.states["peers"].peerlist[i]
 		// Generate the message to ask for the last block
-		let _blockAsk = messages.create.nodeCall("getLastBlockNumber", {}, _currentPeer, "self")
+		let _blockAskMessage = new messages.Message(id.ecdsa.privateKey)
+		_blockAskMessage.initialize(
+			"nodeCall",
+			"getLastBlockNumber",
+			id.ecdsa.publicKeyHex,
+			_currentPeer,
+			null,
+			null,
+			null
+		)
+		// Hash and sign it
+		await _blockAskMessage.finalize()
+		console.log("[SYNC] Asking " + _currentPeer.socket.id + " for the last block")
 		// Ask for the last block
-		_currentPeer.socket.emit("public", _blockAsk)
-		// TODO Wait for the response with a listener and a timeout or using MUID (see network.js)
+		_currentPeer.socket.emit("comlink", _blockAskMessage.bundle)
+		// REVIEW Ensure the above works
 		// LINK https://stackoverflow.com/questions/23893872/how-to-properly-remove-event-listeners-in-node-js-eventemitter
 		// The above link will be used to remove the listeners once the response is received, will be applied to keep clean the peers connections too
 	}
@@ -128,9 +147,9 @@ async function peerBootstrap(peers_list) {
 		let _currentPeerObject = await network.methods.client.connectToPeer(currentPeerAddress, currentPeerPort) // Returns the Peer object
 		if (_currentPeerObject) {
 			term.green("[BOOTSTRAP] OK: Valid peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
-			if (containsPeer(_currentPeerObject, peerlist)) {
+			/*if (containsPeer(_currentPeerObject, peerlist)) { // FIXME Disabled as was not working. Should be fixed
 				term.yellow("[BOOTSTRAP] WARNING: Duplicate peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
-			} else peerlist.push(_currentPeerObject) 
+			} else */ peerlist.push(_currentPeerObject) 
 		} else {
 			term.red("[BOOTSTRAP] ERROR: Invalid peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
 		}
@@ -209,8 +228,8 @@ async function main() {
 	// Loading the peers
 	let peers_list = JSON.parse(fs.readFileSync("./demos_peers", "utf8"))
 	// INFO Setting the common variables and propagating them
-	imc.states.peers.peerlist = await peerBootstrap(peers_list)
-	imc.broadcast("peers", imc.states.peers)
+	imc.states.peers["peerlist"] = await peerBootstrap(peers_list)
+	//imc.broadcast("peers", imc.states.peers)
 	term.green.bold("[BOOTSTRAP] Peers loaded (" + peerlist.length + ")\n")
 	// INFO Now ensuring we have an initialized chain or initializing the genesis block
 	await findGenesisBlock()

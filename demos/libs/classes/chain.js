@@ -75,7 +75,7 @@ class ChainDB {
 			console.log("Connected to the ChainDB database.")
 		})
 		console.log("[CHAIN READ] Executing " + sql_query)
-		this.connection.each(sql_query, [], (err, row) => {
+		this.connection.each(sql_query, [], (err, row) => { // FIXME Maybe we should use another method to execute the query as this act as async (??)
 			if (err) {
 				return []
 			}
@@ -107,11 +107,11 @@ class ChainDB {
 	// ANCHOR Getters
 	// INFO Get the last block number
 	getLastBlockNumber() {
-		return this.read("SELECT number FROM blocks ORDER BY id DESC LIMIT 1")[0]
+		return this.read("SELECT number FROM blocks ORDER BY number DESC LIMIT 1")[0]
 	}
 	// INFO Get the last block hash
 	getLastBlockHash() {
-		return this.read("SELECT hash FROM blocks ORDER BY id DESC LIMIT 1")[0]
+		return this.read("SELECT hash FROM blocks ORDER BY number DESC LIMIT 1")[0]
 	}
 	// INFO Get any block by its number
 	getBlockByNumber(number) {

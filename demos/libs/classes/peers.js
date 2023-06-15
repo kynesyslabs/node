@@ -8,7 +8,7 @@ class Peer {
 	constructor() {
 		this.connection_string = null // The connection string of the peer
 		this.socket = null // A socket object (as the old 'peer' one)
-		this.identity = null // The identity of the peer (public key)
+		this.identity = "placeholder" // The identity of the peer (public key)
 	}
 	// Methods
 	// INFO Set the connection string of the peer
