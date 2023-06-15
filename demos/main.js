@@ -3,6 +3,7 @@ const fs = require("fs")
 const sqlite3 = require("sqlite3").verbose()
 const term = require("terminal-kit").terminal
 
+// SECTION Globals and imports
 // ANCHOR Loading the chain db library to interact with the blockchain
 const { ChainDB, Block, Transaction } = require("./libs/classes/chain.js")
 let chainDB = new ChainDB()
@@ -71,7 +72,9 @@ var id = {
 	ecdsa: null,
 	rsa: null,
 } // An object with { ed25519: keypair + pem + hex, rsa: keypair }
+// !SECTION Globals and imports
 
+// SECTION Methods called by
 // INFO Checking a peer through the id
 function containsPeer(obj, list) {
 	var i
@@ -163,10 +166,8 @@ async function findGenesisBlock() {
 	} else term.green("Genesis block found: "); console.log(genesis_block[0].hash)
 }
 
-// ANCHOR Entry point of the program
-async function main() {
-	// NOTE The whole first part of main ensures the environment is ready to run
-
+// INFO Ensuring the identity to be valid
+async function ensureIdentity() {
 	// INFO First and foremost, we need to either load or create an identity
 	if (fs.existsSync("./.demos_identity")) {
 		// Loading the identity
@@ -178,6 +179,13 @@ async function main() {
 		fs.writeFileSync("./.demos_identity", id.ecdsa.privateKey.toPem(), "utf8")
 		print.log("Generated new identity")
 	}
+}
+// !SECTION Methods called by main
+
+// ANCHOR Entry point of the program
+async function main() {
+	// NOTE The whole first part of main ensures the environment is ready to run
+	await ensureIdentity()
 	// Log identity
 	print.log("WE ARE " + id.ecdsa.publicKeyHex)
 	// Setting the common variables and propagating them
@@ -202,11 +210,12 @@ async function main() {
 	let peers_list = JSON.parse(fs.readFileSync("./demos_peers", "utf8"))
 	// INFO Setting the common variables and propagating them
 	imc.states.peers.peerlist = await peerBootstrap(peers_list)
+	imc.broadcast("peers", imc.states.peers)
 	term.green.bold("[BOOTSTRAP] Peers loaded (" + peerlist.length + ")\n")
 	// INFO Now ensuring we have an initialized chain or initializing the genesis block
 	await findGenesisBlock()
 	// INFO Starting the sync loop
-	let synced = await sync()
+	let synced = sync() // NOTE We don't wait for the sync to finish because it will run indefinitely in the background
 }
 main()
 

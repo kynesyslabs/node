@@ -81,7 +81,7 @@ class ComLink {
 			_previousHashes.push(_currentHash);
 			this.setPreviousHashes(_previousHashes);
 			// Emitting the message
-			_socket.emit("comLink", this) // REVIEW Rewriting this using comlink
+			_socket.emit("comlink", this) // REVIEW Rewriting this using comlink
 			_socket.emit(message.type, message); // TODO Delete this previous version
 			return [true, message.muid];
 		}

@@ -27,8 +27,10 @@ imc.initialize("network")
 const { Peer } = require("./classes/peers.js")
 var transactions = require("./transactions.js")
 
+var communications = require("./communications.js")
+
 app.get("/", (req, res) => {
-	res.send("<h1>Hello world</h1>")
+	res.send("<h1>Hello from your friendly DEMOS layer</h1>")
 })
 
 // Peers library import
@@ -92,6 +94,7 @@ var listeners = {
 			// TODO Adding _peerForged.identity
 			// INFO Adding the peer to the list
 			await imc["states"].peers.methods.addPeer(_peerForged)
+			// TODO "public" endopoint will be replaced, see on("comlink")
 			// NOTE From now on, the peer is connected and is able to communicate through advanced methods (as below)
 			// ANCHOR Public methods for clients
 			peerSocket.on("public", async (request) => {
@@ -137,6 +140,11 @@ var listeners = {
                     break
 				}
 				// TODO Continue with the server public methods
+			})
+			// REVIEW and replace the public methods
+			peerSocket.on("comlink", async (request) => {
+				// We need to check if the message request is valid (is a ComLink object)
+				// TODO See in communications.js and find the best way to validate, check and digest the request
 			})
 			// INFO Transactions listener
 			peerSocket.on("transactions", async (request) => {
