@@ -72,6 +72,7 @@ var id = {
 	rsa: null,
 } // An object with { ed25519: keypair + pem + hex, rsa: keypair }
 
+// INFO Checking a peer through the id
 function containsPeer(obj, list) {
 	var i
 	for (i = 0; i < list.length; i++) {
@@ -84,6 +85,7 @@ function containsPeer(obj, list) {
 	return false
 }
 
+// INFO Ensure that we are at the head of the chain
 async function sync() {
 	let synced = true
 	let _currentLastBlockNumber = chainDB.getLastBlockNumber()
@@ -102,6 +104,66 @@ async function sync() {
 	return synced
 }
 
+// INFO Bootstrapping the peers to find at least one valid peer
+async function peerBootstrap(peerlist) {
+	// Validity check
+	for (let i = 0; i < peers_list.length; i++) {
+		let _currentPeerURL = peers_list[i] // The url of the peer
+		// If there is a : in the url, we assume it's a address + port
+		let currentPeerAddress
+		let currentPeerPort
+		if (_currentPeerURL.includes(">")) {
+			currentPeerAddress = _currentPeerURL.split(">")[0]
+			currentPeerPort = _currentPeerURL.split(">")[1]
+		} else {
+			currentPeerAddress = _currentPeerURL
+			currentPeerPort = 53550
+		}
+		print.log("[BOOTSTRAP] Testing " + currentPeerAddress + ":" + currentPeerPort)
+		// REVIEW Connection test and add to valid_peers
+		// Trying to connect and retrieve the socket for the given peer using Peer class
+		let _currentPeerObject = await network.methods.client.connectToPeer(currentPeerAddress, currentPeerPort) // Returns the Peer object
+		if (_currentPeerObject) {
+			term.green("[BOOTSTRAP] OK: Valid peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
+			if (containsPeer(_currentPeerObject, peerlist)) {
+				term.yellow("[BOOTSTRAP] WARNING: Duplicate peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
+			} else peerlist.push(_currentPeerObject) 
+		} else {
+			term.red("[BOOTSTRAP] ERROR: Invalid peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
+		}
+	}
+	// Dying if there are no valid peers
+	if (peerlist.length == 0) {
+		// Exit if there are no valid peers
+		print.critical("No valid peers found, exiting")
+		// eslint-disable-next-line no-undef
+		process.exit(-3)
+	}
+	return peerlist
+}
+
+// INFO Finding, creating or rejecting the genesis block
+async function findGenesisBlock() {
+	let genesis_block = chainDB.getGenesisBlock()
+	await sleep(1000)
+	if (genesis_block.length == 0) {
+		// We need to initialize the genesis block
+		term.yellow("[BOOTSTRAP] Initializing the genesis block\n")
+		if (!fs.existsSync("data/genesis.json")) {
+			// Exit if there are no genesis block
+			print.critical("No genesis block found, exiting")
+			// eslint-disable-next-line no-undef
+			process.exit(-5)
+		}
+		// Loading the genesis block
+		let genesis_json = JSON.parse(fs.readFileSync("data/genesis.json", "utf8"))
+		// Adding the genesis block to the chain
+		let genesis_hash = chainDB.generateGenesisBlock(genesis_json)
+		term.green("Genesis block created: " + genesis_hash + "\n")
+	} else term.green("Genesis block found: "); console.log(genesis_block[0].hash)
+}
+
+// ANCHOR Entry point of the program
 async function main() {
 	// NOTE The whole first part of main ensures the environment is ready to run
 
@@ -124,7 +186,6 @@ async function main() {
 	// Sharing it with the network
 	imc.states["publicKeyHex"] = id.ecdsa.publicKeyHex
 	imc.broadcast("publicKeyHex", id.ecdsa.publicKeyHex)
-
 	// INFO Loading the known peers
 	if (!fs.existsSync("./demos_peers")) {
 		// Exit if there are no peers
@@ -139,60 +200,11 @@ async function main() {
 	await new Promise((r) => setTimeout(r, 2000))
 	// Loading the peers
 	let peers_list = JSON.parse(fs.readFileSync("./demos_peers", "utf8"))
-	// Validity check
-	for (let i = 0; i < peers_list.length; i++) {
-		let _currentPeerURL = peers_list[i] // The url of the peer
-		// If there is a : in the url, we assume it's a address + port
-		let currentPeerAddress
-		let currentPeerPort
-		if (_currentPeerURL.includes(">")) {
-			currentPeerAddress = _currentPeerURL.split(">")[0]
-			currentPeerPort = _currentPeerURL.split(">")[1]
-		} else {
-			currentPeerAddress = _currentPeerURL
-			currentPeerPort = 53550
-		}
-		print.log("[BOOTSTRAP] Testing " + currentPeerAddress + ":" + currentPeerPort)
-		// REVIEW Connection test and add to valid_peers
-		// Trying to connect and retrieve the socket for the given peer using Peer class
-		let _currentPeerObject = await network.methods.client.connectToPeer(currentPeerAddress, currentPeerPort)
-		if (_currentPeerObject) {
-			term.green("[BOOTSTRAP] OK: Valid peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
-			if (containsPeer(_currentPeerObject, peerlist)) {
-				term.yellow("[BOOTSTRAP] WARNING: Duplicate peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
-			} else peerlist.push(_currentPeerObject) 
-		} else {
-			term.red("[BOOTSTRAP] ERROR: Invalid peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
-		}
-	}
-	// Dying if there are no valid peers
-	if (peerlist.length == 0) {
-		// Exit if there are no valid peers
-		print.critical("No valid peers found, exiting")
-		// eslint-disable-next-line no-undef
-		process.exit(-3)
-	}
 	// INFO Setting the common variables and propagating them
-	imc.states.peers.peerlist = peerlist
+	imc.states.peers.peerlist = await peerBootstrap(peers_list)
 	term.green.bold("[BOOTSTRAP] Peers loaded (" + peerlist.length + ")\n")
 	// INFO Now ensuring we have an initialized chain or initializing the genesis block
-	let genesis_block = chainDB.getGenesisBlock()
-	await sleep(1000)
-	if (genesis_block.length == 0) {
-		// We need to initialize the genesis block
-		term.yellow("[BOOTSTRAP] Initializing the genesis block\n")
-		if (!fs.existsSync("data/genesis.json")) {
-			// Exit if there are no genesis block
-			print.critical("No genesis block found, exiting")
-			// eslint-disable-next-line no-undef
-			process.exit(-5)
-		}
-		// Loading the genesis block
-		let genesis_json = JSON.parse(fs.readFileSync("data/genesis.json", "utf8"))
-		// Adding the genesis block to the chain
-		let genesis_hash = chainDB.generateGenesisBlock(genesis_json)
-		term.green("Genesis block created: " + genesis_hash + "\n")
-	} else term.green("Genesis block found: "); console.log(genesis_block[0].hash)
+	await findGenesisBlock()
 	// INFO Starting the sync loop
 	let synced = await sync()
 }

@@ -1,5 +1,5 @@
 // INFO This module contains methods and structures that enable an high level user friendly communication between nodes
-var identity = require ('libs/identity.js');
+var identity = require ('./identity.js');
 const sha256 = require('sha256');
 
 /* Workflow
@@ -91,7 +91,7 @@ class ComLink {
 	setMessage(message) {
 		this.chain.current.currentMessage = message;
 	}
-	signCurrent(privateKey) {
+	async signCurrent(privateKey) {
 		let stringifiedMessage = JSON.stringify(this.chain.current);
 		let _signature = await identity.generate.ecdsa.sign(stringifiedMessage, privateKey);
 	}
