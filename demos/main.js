@@ -99,9 +99,7 @@ async function sync() {
 	// Asking to all the peers for the last block
 	for (let i = 0; i < imc.states["peers"].peerlist.length; i++) {
 		// Creating a comlink object
-		let _comlink = new communications.ComLink()
-		_comlink.peer = imc.states["peers"].peerlist[i]
-
+		let _comlink = new communications.ComLink()	
 		let _currentPeer = imc.states["peers"].peerlist[i]
 		// Generate the message to ask for the last block
 		let _blockAskMessage = new messages.Message(id.ecdsa.privateKey)
@@ -116,9 +114,10 @@ async function sync() {
 		)
 		// Hash and sign it
 		await _blockAskMessage.finalize()
+		// Putting the message into the comlink
 		console.log("[SYNC] Asking " + _currentPeer.socket.id + " for the last block")
 		// Ask for the last block
-		_currentPeer.socket.emit("comlink", _blockAskMessage.bundle)
+		await _comlink.broadcastMessageToPeer(_currentPeer, _blockAskMessage.bundle, id.ecdsa.privateKey)
 		// REVIEW Ensure the above works
 		// LINK https://stackoverflow.com/questions/23893872/how-to-properly-remove-event-listeners-in-node-js-eventemitter
 		// The above link will be used to remove the listeners once the response is received, will be applied to keep clean the peers connections too

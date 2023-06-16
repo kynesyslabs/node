@@ -44,69 +44,56 @@ function broadcastMessageToAllPeers(message, peerlist, callback) {
 // NOTE Each ComLink object contains a message and its request-reply chain so that each communication can be done keeping track of the request-reply chain
 class ComLink {
 	constructor() {
-		this.peer = null // The peer we are communicating with
         this.chain = {
 			current: {
 				currentMessage: null, // must be a emptyMessage like object (see libs/messages.js)
-				replyToHash: null, // is either null or the hash of the last message in the chain
+				currentMessageHash: null, // is either null or the hash of the last message in the chain
 				previousHashes: [] // Keep track of the previous hashes to have full integrity
 			},
-			currentMessageHash: null, // is the hashed version of .current
+			comlinkCurrentHash: null, // is the hashed version of .current
+			comlinkCurrentHashSignature: null, // is the signature of the hashed version of.current
 		}
     }
-	// INFO Broadcast method
-	async broadcastMessageToPeer(message, callback, privateKey) {
-		let _socket = this.peer.socket;
+	// INFO Method to hash and sign the current iteration of the message
+	async hashAndSignCurrent(privateKey) {
+		let stringifiedMessage = JSON.stringify(this.chain.current);
+        this.chain.comlinkCurrentHash = sha256(stringifiedMessage);
+		let _signature = await identity.generate.ecdsa.sign(this.chain.comlinkCurrentHash, privateKey);
+		this.chain.comlinkCurrentHashSignature = _signature;
+    }
+	// INFO Prepare and send the (usually) first message in the chain
+	async broadcastMessageToPeer(_peer, message, privateKey) {
 		// REVIEW Sanitize message and type
-		if (!message.type || !message.muid) return [false, "Invalid message"];
-		if (_socket) {
-			// Setting up the listener to receive the response
-			// NOTE We do this before sending the message so that we are able to listen for replies immediately
-			// TODO Keep track of the listeners and destroy them at need
-			_socket.on(message.type, 
-				async function(message) {
-					// Catching messages that are sent to this peer for this specific message muid (same type, same muid = reply)
-					if (message.muid === muid) {
-						let reply = callback(message);
-						return [true, reply];
-					}
-				});
-			// Setting the current message as the head of the chain
-			this.setMessage(message);
-			// Hashing the message for integrity
-			this.setReplyToHash(this.hashCurrentMessage());
-			// Updating previous hashesh with the hash of the current object (message + hash)
-			let _previousHashes = this.previousHashes();
-			let _currentHash = this.signCurrent(privateKey)
-			_previousHashes.push(_currentHash);
-			this.setPreviousHashes(_previousHashes);
-			// Emitting the message
-			_socket.emit("comlink", this) // REVIEW Rewriting this using comlink
-			_socket.emit(message.type, message); // TODO Delete this previous version
-			return [true, message.muid];
+		if (!message.content.type || !message.content.muid) {
+			console.log("[COMMUNICATIONS] Invalid message")
+			return [false, "Invalid message"]
 		}
+		if (_peer.socket) {
+			console.log("[COMMUNICATIONS] Sending message to peer " + _peer.socket.id);
+			// NOTE Setting up the listener to receive the response is useless as we use general listeners
+			// Setting the current message as the head of the chain
+			this.chain.current.currentMessage = JSON.stringify(message.content);
+			// Hashing the message for integrity
+			this.chain.current.currentMessageHash = message.hash;
+			await this.hashAndSignCurrent(privateKey);
+			// TODO Manage previous hashesh
+			// Emitting the message
+			let result = await this.broadcastToPeer(_peer)
+			return result;
+		}
+		console.log("[COMMUNICATIONS] Invalid peer"); 
 		return [false, "Invalid peer"];
 	}
-	// TODO Add and complete methods as specified
-	setMessage(message) {
-		this.chain.current.currentMessage = message;
+	// INFO Prepare and send a reply to the last message in the chain
+	async replyToMessage(peer, reply) { // NOTE: Reply must be a valid message like object (see libs/messages.js)
+		// TODO Do the cryptography here, fill the ComLink with the new parameters, save the previous hashesh and this.broadcastToPeer
 	}
-	async signCurrent(privateKey) {
-		let stringifiedMessage = JSON.stringify(this.chain.current);
-		let _signature = await identity.generate.ecdsa.sign(stringifiedMessage, privateKey);
-	}
-	hashCurrentMessage() {
-		let stringifiedMessage = JSON.stringify(this.chain.current.currentMessage);
-        return sha256(stringifiedMessage);
-    }
-	setReplyToHash(replyToHash) {
-		this.chain.current.replyToHash = replyToHash;
-    }
-	previousHashes(){
-		return this.chain.current.previousHashes;
-	}
-	setPreviousHashes(previousHashes) {
-		this.chain.current.previousHashes = previousHashes;
+	// INFO Broadcast a ComLink object to a peer (usually called by the above methods)
+	async broadcastToPeer(peer) {
+		let _socket = peer.socket
+		console.log("[COMMUNICATIONS] Sending message to peer");
+		_socket.emit("comlink", this) // REVIEW Rewriting this using comlink
+		return [true, this.chain.current.currentMessage.muid];
 	}
 }
 // !SECTION Comlink

@@ -105,17 +105,19 @@ var listeners = {
 				// We need to check if the message request is valid (is a ComLink object)
 				console.log("[SERVER] Received comlink")
 				console.log(request)
+				// Taking the message part
+				let content = JSON.parse(request.chain.current.currentMessage)
 				// Sanitizing the request
 				// TODO Should reply by filling the comlink with the new answer
-				if (!request.muid) peerSocket.emit("comlink", { status: "error", message: "No muid specified" })
-				if (!request.message) peerSocket.emit("comlink", { status: "error", message: "No message specified" })
+				if (!content.muid) peerSocket.emit("comlink", { status: "error", message: "No muid specified" })
+				if (!content.message) peerSocket.emit("comlink", { status: "error", message: "No message specified" })
 				// Listening for commands
 				// INFO This switch handles the public methods that should have this structure:
 				//      { method: "methodName", params: { ... }, muid: [number] }
 				// Where muid is a message unique identifier that is used to identify the response
 				var response
-				if (request.content.type === "nodeCall") { // TODO Separate parsers by type and use a function to retrieve the result (as a comlink anyway)
-					switch (request.content.message) {
+				if (content.type === "nodeCall") { // TODO Separate parsers by type and use a function to retrieve the result (as a comlink anyway)
+					switch (content.message) {
 					case "getLastBlockNumber":
 						console.log("[SERVER] Received getLastBlockNumber")
 						response = chainDB.getLastBlockNumber()
