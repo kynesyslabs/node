@@ -1,6 +1,5 @@
 /* eslint-disable no-unused-vars */
 // INFO All the Server and Client stuff is defined here
-// FIXME Rewrite the whole code to use comLink as specified in communications.js (on("comLink")...)
 // NOTE The peers object, as is managed here, is accessed through methods
 // NOTE The variables within the objects must be accessed only from local methods as are
 //      reinitialized every time the module is imported and thus would not be synced.

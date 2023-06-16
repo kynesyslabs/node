@@ -39,7 +39,6 @@ function broadcastMessageToAllPeers(message, peerlist, callback) {
 }
 // !SECTION Broadcasts
 
-// TODO Rewrite the above methods to be compliant or included in a ComLink class
 // SECTION ComLink (communication system)
 // NOTE Each ComLink object contains a message and its request-reply chain so that each communication can be done keeping track of the request-reply chain
 class ComLink {
@@ -76,7 +75,6 @@ class ComLink {
 			// Hashing the message for integrity
 			this.chain.current.currentMessageHash = message.hash;
 			await this.hashAndSignCurrent(privateKey);
-			// TODO Manage previous hashesh
 			// Emitting the message
 			let result = await this.broadcastToPeer(_peer)
 			return result;
