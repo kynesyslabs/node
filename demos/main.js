@@ -55,18 +55,23 @@ imc.registered_modules.push({
 })
 
 const communications = require("./libs/communications.js") // Module used to manage all kind of peers communication
+const Chainteract = require("./libs/classes/chainteract.js")
 const { config } = require("./libs/configuration.js") // Loads config.json
 const { print } = require("./libs/logging.js") // Helper for debugging
 
 // NOTE Defining peers object and registering it through the modules
 // NOTE peers contains the methods that work on peerlist and related variables (shared)
-var { peerlist, methods, Peer } = require("./libs/classes/peers.js") 
+var {methods, Peer } = require("./libs/classes/peers.js") 
 imc.states["peers"] = {
 	methods: methods,
-	peerlist: peerlist,
+	peerlist: [],
 	Peer: Peer
 }
 imc.broadcast("peers", imc.states["peers"])
+
+let responseRegistry = new communications.ResponseRegistry() // NOTE This will be shared through IMC and is a global registry
+imc.broadcast("responseRegistry", responseRegistry)
+
 // Main varables to pass around
 var id = {
 	ecdsa: null,
@@ -84,12 +89,12 @@ function containsPeer(obj, list) {
 			return true
 		}
 	}
-
 	return false
 }
 
 // INFO Ensure that we are at the head of the chain
 async function sync() {
+	// TODO Implement all the ComLink and responseRegistry mechanism in a standalone function
 	let synced = true
 	console.log("[SYNC] Our data: fetched")
 	let _currentLastBlockNumber = chainDB.getLastBlockNumber()
@@ -99,7 +104,7 @@ async function sync() {
 	// Asking to all the peers for the last block
 	for (let i = 0; i < imc.states["peers"].peerlist.length; i++) {
 		// Creating a comlink object
-		let _comlink = new communications.ComLink()	
+		let _comlink = new communications.ComLink()
 		let _currentPeer = imc.states["peers"].peerlist[i]
 		// Generate the message to ask for the last block
 		let _blockAskMessage = new messages.Message(id.ecdsa.privateKey)
@@ -116,8 +121,27 @@ async function sync() {
 		await _blockAskMessage.finalize()
 		// Putting the message into the comlink
 		console.log("[SYNC] Asking " + _currentPeer.socket.id + " for the last block")
+		// Preparing for a response
+		_comlink.properties.require_reply = true
+		_comlink.properties.is_reply = false
+		responseRegistry.requestResponse(_comlink)
 		// Ask for the last block
 		await _comlink.broadcastMessageToPeer(_currentPeer, _blockAskMessage.bundle, id.ecdsa.privateKey)
+		/* REVIEW
+		 * We should use responseRegistry.hasResponse(_comlink) to check periodically if the response is received
+		 * Or look into communications.js ResponseRegistry for a TODO that explains how to do this in a more elegant way
+		 * In any case, here we should wait until the response is received
+		*/
+		let timeout_limit = 2000
+		let timeout_counter = 0
+		while (!responseRegistry.hashResponse(_comlink)) {
+			await sleep(100)
+			timeout_counter += 100
+			if (timeout_counter > timeout_limit) {
+                console.log("[SYNC] Timeout limit reached: no response received")
+				return false // TODO Manage it
+            }
+        }
 		// REVIEW Ensure the above works
 		// LINK https://stackoverflow.com/questions/23893872/how-to-properly-remove-event-listeners-in-node-js-eventemitter
 		// The above link will be used to remove the listeners once the response is received, will be applied to keep clean the peers connections too
@@ -127,6 +151,8 @@ async function sync() {
 
 // INFO Bootstrapping the peers to find at least one valid peer
 async function peerBootstrap(peers_list) {
+
+	let peerlist = imc.states["peers"]["peerlist"]
 	// Validity check
 	for (let i = 0; i < peers_list.length; i++) {
 		let _currentPeerURL = peers_list[i] // The url of the peer
@@ -152,6 +178,7 @@ async function peerBootstrap(peers_list) {
 		} else {
 			term.red("[BOOTSTRAP] ERROR: Invalid peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
 		}
+		console.log(peerlist)
 	}
 	// Dying if there are no valid peers
 	if (peerlist.length == 0) {
@@ -229,7 +256,7 @@ async function main() {
 	// INFO Setting the common variables and propagating them
 	imc.states.peers["peerlist"] = await peerBootstrap(peers_list)
 	//imc.broadcast("peers", imc.states.peers)
-	term.green.bold("[BOOTSTRAP] Peers loaded (" + peerlist.length + ")\n")
+	term.green.bold("[BOOTSTRAP] Peers loaded (" + imc.states["peers"]["peerlist"].length + ")\n")
 	// INFO Now ensuring we have an initialized chain or initializing the genesis block
 	await findGenesisBlock()
 	// INFO Starting the sync loop

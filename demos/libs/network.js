@@ -100,6 +100,7 @@ var listeners = {
 			await imc["states"].peers.methods.addPeer(_peerForged)
 			// NOTE From now on, the peer is connected and is able to communicate through advanced methods (as below)
 			peerSocket.on("comlink", request => {
+				// TODO Add responseRegistry support as per main.js and communications.js
 				let _receiver = peerSocket
 				// We need to check if the message request is valid (is a ComLink object)
 				console.log("[SERVER] Received comlink")
@@ -108,7 +109,7 @@ var listeners = {
 				let content = JSON.parse(request.chain.current.currentMessage)
 				// Sanitizing the request
 				// TODO Should reply by filling the comlink with the new answer
-				if (!content.muid) peerSocket.emit("comlink", { status: "error", message: "No muid specified" })
+				if (!request.muid) peerSocket.emit("comlink", { status: "error", message: "No muid specified" })
 				if (!content.message) peerSocket.emit("comlink", { status: "error", message: "No message specified" })
 				// Listening for commands
 				// INFO This switch handles the public methods that should have this structure:
