@@ -2,9 +2,9 @@
 // random state in the network
 
 class Randomizer {
-	constructor() {
-		// TOOD Add stuff
-	}
+    constructor() {
+        // TOOD Add stuff
+    }
 }
 
 module.exports = Randomizer
