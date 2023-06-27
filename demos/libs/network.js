@@ -27,6 +27,7 @@ const { Peer } = require("./classes/peers.js")
 var transactions = require("./transactions.js")
 
 var communications = require("./communications.js")
+var messages = require("./messages.js")
 
 app.get("/", (req, res) => {
     res.send("<h1>Hello from your friendly DEMOS layer</h1>")
@@ -39,7 +40,7 @@ var { print } = require("./logging")
 var listeners = {
     // INFO Common listeners for both Server and Client
     // NOTE Is automatically called by server_listeners and client_listeners
-    common_listeners: async function (peer) {
+    common_listeners: async function (peer) { // FIXME Check if and why this produces two events instead of one
         // peer is a peer object
         // Managing disconnection
         peer.socket.on("disconnect", async () => {
@@ -67,6 +68,11 @@ var listeners = {
         peer.socket.on("public", request => {
             console.log("[PEER] Received")
             console.log(request)
+        })
+        // INFO Managing replies
+        peer.socket.on("comlink_reply", async request => { // request is a ComLink object with the same structure as the comlink listener below
+            console.log("[PEER] Received reply to " + request.muid)
+            console.log(JSON.stringify(request, null, 2))
         })
     },
     // INFO Listeners for server
@@ -103,12 +109,17 @@ var listeners = {
             // INFO Adding the peer to the list
             await imc["states"].peers.methods.addPeer(_peerForged)
             // NOTE From now on, the peer is connected and is able to communicate through advanced methods (as below)
-            peerSocket.on("comlink", async request => {
+            peerSocket.on("comlink", async request => { // FIXME The below logic needs to be refactored in a separate method as it is used by other listeners too
                 // TODO Add responseRegistry support as per main.js and communications.js
                 let _receiver = peerSocket
                 // We need to check if the message request is valid (is a ComLink object)
                 console.log("[SERVER] Received comlink")
                 console.log(request)
+                // GIving the request the comlink methods
+                let _comlink_request = new communications.ComLink()
+                _comlink_request.chain = request.chain
+                _comlink_request.muid = request.muid
+                _comlink_request.properties = request.properties
                 // Taking the message part
                 let content = JSON.parse(request.chain.current.currentMessage)
                 // Sanitizing the request
@@ -127,23 +138,15 @@ var listeners = {
                 //      { method: "methodName", params: { ... }, muid: [number] }
                 // Where muid is a message unique identifier that is used to identify the response
                 var response
+                var require_reply = false
                 if (content.type === "nodeCall") {
-                    // TODO Leave out all the 'break' and use response to build a message to send back as a comlink (see below)
                     switch (content.message) {
                         case "getLastBlockNumber":
                             console.log("[SERVER] Received getLastBlockNumber")
                             response = chainDB.getLastBlockNumber()
-                            _receiver.emit("public", {
-                                blockNumber: response,
-                                muid: request.muid,
-                            })
                             break
                         case "getLastBlockHash":
                             response = chainDB.getLastBlockHash()
-                            _receiver.emit("public", {
-                                blockHash: response,
-                                muid: request.muid,
-                            })
                             break
                         case "getBlockByNumber":
                             if (!request.parameters.blockNumber) {
@@ -154,10 +157,6 @@ var listeners = {
                             response = chainDB.getBlockByNumber(
                                 request.parameters.blockNumber,
                             )
-                            _receiver.emit("public", {
-                                block: response,
-                                muid: request.muid,
-                            })
                             break
                         case "getBlockByHash":
                             if (!request.parameters.blockHash) {
@@ -168,32 +167,29 @@ var listeners = {
                             response = chainDB.getBlockByHash(
                                 request.parameters.blockHash,
                             )
-                            _receiver.emit("public", {
-                                block: response,
-                                muid: request.muid,
-                            })
                             break
                         case "getMempool":
                             response = chainDB.getPendingPool()
-                            _receiver.emit("public", {
-                                mempool: response,
-                                muid: request.muid,
-                            })
                             break
                     }
-                    // TODO Build a message from response (see messages.js)
-                    var response_message
                     // REVIEW I don't think we need to do this every time
                     const id_ecdsa = await identity.load.fromFile(
                         "./.demos_identity",
                     )
+                    // Building a message to send back in the comlink
+                    var response_message = new messages.Message(id_ecdsa.privateKey)
+                    response_message.initialize("reply", JSON.stringify(response), id_ecdsa.publicKeyHex, "placeholder", null, null)
                     // REVIEW and TODO: unless specified, we now send back the updated comlink as a response
-                    await request.replyToMessage(
-                        response_message,
+                    _comlink_request.properties.is_reply = true // Setting the reply flag as we are replying
+                    _comlink_request.properties.require_reply = require_reply // Setting the require_reply flag as provided above
+                    await _comlink_request.replyToMessage(
+                        response_message.bundle,
                         id_ecdsa.privateKey,
                     )
                     // Sending back the response
-                    await request.broadcastToSocketPeer(_receiver)
+                    console.log("[SERVER] Sending back comlink")
+                    //console.log(JSON.stringify(_comlink_request))
+                    _receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
                 }
                 // TODO See in communications.js and find the best way to validate, check and digest the request
             })

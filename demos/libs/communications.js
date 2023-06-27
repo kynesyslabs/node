@@ -172,7 +172,7 @@ class ComLink {
             this.chain.current.currentMessageHash,
         )
         // Then we apply the current message to the uplink
-        this.chain.current.currentMessage = reply
+        this.chain.current.currentMessage = reply.content
         // Hashing the message for integrity (using the message proper hash)
         // REVIEW Should we use the message proper hash or recalculate it to see if it is the same?
         this.chain.current.currentMessageHash = reply.hash
@@ -189,7 +189,7 @@ class ComLink {
         return [true, this.muid]
     }
     // INFO Support for sending to a socket directly
-    async broadcastToPeerSocket(socket, callback = false) {
+    async broadcastToSocketPeer(socket, callback = false) {
         let compatible_peer = {
             socket: socket,
         }
