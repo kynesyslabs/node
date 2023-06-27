@@ -1,19 +1,24 @@
-# Base settings
-FROM ubuntu:20.04
-WORKDIR /root
+FROM node:16-alpine
+WORKDIR /usr/src/app
+
 # Preparing the directories that will be shared with the host
 RUN mkdir evm
 RUN mkdir demos
 RUN mkdir common
+
+
 # Installing basic packages
-ARG DEBIAN_FRONTEND=noninteractive
-RUN apt update -y
-RUN apt install -y net-tools build-essential nodejs npm python3 vim wget curl screen --fix-missing
-RUN npm install -g n
-RUN n 16.18.1
+RUN apk update
+RUN apk add --no-cache vim wget screen curl bash nodejs npm yarn
 RUN hash -r
-RUN npm install sqlite3 terminal-kit node-forge starkbank-ecdsa buffer events express http https prng sha256 socket.io socket.io-client util
-# Copying over the required files
+RUN npm install -g eslint
+# RUN n 16
+
+COPY demos/package.json demos/yarn.lock ./demos/
+RUN yarn --cwd ./demos install
+COPY . .
+
+
 COPY requirements/geth /usr/local/bin/
 RUN chmod +x /usr/local/bin/geth
 # Notifying about port exposure
