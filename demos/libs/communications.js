@@ -143,9 +143,18 @@ class ComLink {
 		console.log("[COMMUNICATIONS] Invalid peer"); 
 		return [false, "Invalid peer"];
 	}
-	// INFO Prepare and send a reply to the last message in the chain
-	async replyToMessage(peer, reply) { // NOTE: Reply must be a valid message like object (see libs/messages.js)
-		// TODO Do the cryptography here, fill the ComLink with the new parameters, save the previous hashesh and this.broadcastToPeer
+	// INFO Prepare a reply to the last message in the chain
+	async replyToMessage(reply, privateKey) { // NOTE: Reply must be a valid message.bundle like object (see libs/messages.js)
+		// First we move the current message hash to the previous hashes
+		this.chain.current.previousHashes.push(this.chain.current.currentMessageHash);
+		// Then we apply the current message to the uplink
+		this.chain.current.currentMessage = reply
+		// Hashing the message for integrity (using the message proper hash)
+		// REVIEW Should we use the message proper hash or recalculate it to see if it is the same?
+		this.chain.current.currentMessageHash = reply.hash
+		// Now we recalculate the signature and hash of the current comlink (containing the previous hashes to have full integrity)
+		await this.hashAndSignCurrent(privateKey);
+		// As the object has been recalculated, we are able to send the message to the peer from the main function
 	}
 	// INFO Broadcast a ComLink object to a peer (usually called by the above methods)
 	async broadcastToPeer(peer, callback=false) {
@@ -154,6 +163,13 @@ class ComLink {
 		// TODO & REVIEW See if we need a listener here or we should just use ResponseRegistry as above
 		_socket.emit("comlink", this) // Emitting this object to the peer
 		return [true, this.muid]
+	}
+	// INFO Support for sending to a socket directly
+	async broadcastToPeerSocket(socket, callback=false) {
+		let compatible_peer = {
+			socket: socket
+		}
+		await this.broadcastToPeer(compatible_peer, callback)
 	}
 }
 // !SECTION Comlink

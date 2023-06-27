@@ -108,7 +108,6 @@ var listeners = {
 				// Taking the message part
 				let content = JSON.parse(request.chain.current.currentMessage)
 				// Sanitizing the request
-				// TODO Should reply by filling the comlink with the new answer
 				if (!request.muid) peerSocket.emit("comlink", { status: "error", message: "No muid specified" })
 				if (!content.message) peerSocket.emit("comlink", { status: "error", message: "No message specified" })
 				// Listening for commands
@@ -116,7 +115,8 @@ var listeners = {
 				//      { method: "methodName", params: { ... }, muid: [number] }
 				// Where muid is a message unique identifier that is used to identify the response
 				var response
-				if (content.type === "nodeCall") { // TODO Separate parsers by type and use a function to retrieve the result (as a comlink anyway)
+				if (content.type === "nodeCall") { 
+					// TODO Leave out all the 'break' and use response to build a message to send back as a comlink (see below)
 					switch (content.message) {
 					case "getLastBlockNumber":
 						console.log("[SERVER] Received getLastBlockNumber")
@@ -145,6 +145,14 @@ var listeners = {
 						_receiver.emit("public", { mempool: response, muid: request.muid })
 						break
 					}
+					// TODO Build a message from response (see messages.js)
+					var response_message
+					// REVIEW I don't think we need to do this every time
+					id_ecdsa = await identity.load.fromFile("./.demos_identity")
+					// REVIEW and TODO: unless specified, we now send back the updated comlink as a response
+					await request.replyToMessage(response_message, id_ecdsa.privateKey)
+					// Sending back the response
+					await request.broadcastToSocketPeer(_receiver)
 				}
 				// TODO See in communications.js and find the best way to validate, check and digest the request
 			})
