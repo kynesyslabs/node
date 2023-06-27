@@ -5,11 +5,12 @@
   "main": "main.js",
   "scripts": {
     "test": "node main.js test",
-    "start": "to_define"
+    "start": "node main.js",
+    "lint": "eslint \"{src,libs}/**/*.ts\" --fix --max-warnings 0"
   },
   "author": "kynesys team",
   "license": "ISC",
-  "devDependencies": {
+  "dependencies": {
     "buffer": "^6.0.3",
     "ethers": "^6.6.0",
     "events": "^3.3.0",
@@ -26,7 +27,7 @@
     "terminal-kit": "^3.0.0",
     "util": "^0.12.5"
   },
-  "dependencies": {
+  "devDependencies": {
     "n": "^9.1.0"
   }
 }
