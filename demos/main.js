@@ -134,7 +134,7 @@ async function sync() {
 		*/
 		let timeout_limit = 2000
 		let timeout_counter = 0
-		while (!responseRegistry.hashResponse(_comlink)) {
+		while (!responseRegistry.hasResponse(_comlink)) {
 			await sleep(100)
 			timeout_counter += 100
 			if (timeout_counter > timeout_limit) {
