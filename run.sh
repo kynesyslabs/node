@@ -10,9 +10,9 @@ export KYN_RAFT=53000
 # Docker run
 docker run \
 	--name $(cat name) \
-	-v $(pwd)/evm:/root/evm \
-	-v $(pwd)/demos:/root/demos \
-	-v $(pwd)/common:/root/common \
+	-v $(pwd)/evm:/usr/src/app/evm \
+	-v $(pwd)/demos:/usr/src/app/demos \
+	-v $(pwd)/common:/usr/src/app/common \
 	-p $DEMOS_PORT:53550 \
 	-p $EVM_RPC:8545 \
 	-p $EVM_WS:8546 \
