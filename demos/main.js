@@ -98,8 +98,8 @@ async function sync() {
     // TODO Implement all the ComLink and responseRegistry mechanism in a standalone function
     let synced = true
     console.log("[SYNC] Our data: fetched")
-    let _currentLastBlockNumber = chainDB.getLastBlockNumber()
-    let _currentLastBlockHash = chainDB.getLastBlockHash()
+    let _currentLastBlockNumber = await chainDB.getLastBlockNumber() // FIXME It doesn't await lol
+    let _currentLastBlockHash = await chainDB.getLastBlockHash()
     // FIXME ^ Why above values go to the end? Because we should await somehow even if it is not async (??) (see chain.js, fixme on read)
     console.log("[SYNC] Fetching data from peers")
     // Asking to all the peers for the last block
@@ -220,7 +220,7 @@ async function peerBootstrap(peers_list) {
 
 // INFO Finding, creating or rejecting the genesis block
 async function findGenesisBlock() {
-    let genesis_block = chainDB.getGenesisBlock()
+    let genesis_block = await chainDB.getGenesisBlock()
     await sleep(1000)
     if (genesis_block.length == 0) {
         // We need to initialize the genesis block

@@ -75,7 +75,7 @@ var listeners = {
             console.log(JSON.stringify(request, null, 2))
             // REVIEW Check if the responseRegistry contains the muid of the request
             let _responseRegistry = imc["states"]["responseRegistry"]
-            let _response = _responseRegistry.get(request.muid)
+            let _response = _responseRegistry[request.muid]
             if (!_response) {
                 console.log("[PEER] No response expected for " + request.muid)
             } else {
@@ -151,10 +151,10 @@ var listeners = {
                     switch (content.message) {
                         case "getLastBlockNumber":
                             console.log("[SERVER] Received getLastBlockNumber")
-                            response = chainDB.getLastBlockNumber()
+                            response = await chainDB.getLastBlockNumber()
                             break
                         case "getLastBlockHash":
-                            response = chainDB.getLastBlockHash()
+                            response = await chainDB.getLastBlockHash()
                             break
                         case "getBlockByNumber":
                             if (!request.parameters.blockNumber) {
@@ -162,7 +162,7 @@ var listeners = {
                                     error: "No block specified",
                                 })
                             }
-                            response = chainDB.getBlockByNumber(
+                            response = await chainDB.getBlockByNumber(
                                 request.parameters.blockNumber,
                             )
                             break
@@ -172,12 +172,12 @@ var listeners = {
                                     error: "No block specified",
                                 })
                             }
-                            response = chainDB.getBlockByHash(
+                            response = await chainDB.getBlockByHash(
                                 request.parameters.blockHash,
                             )
                             break
                         case "getMempool":
-                            response = chainDB.getPendingPool()
+                            response = await chainDB.getPendingPool()
                             break
                     }
                     // REVIEW I don't think we need to do this every time

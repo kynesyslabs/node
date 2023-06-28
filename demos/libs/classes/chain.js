@@ -5,8 +5,7 @@
 	All the methods required to write, validate and operate on the blockchain are defined here.
 */
 
-//const sqlite3 = require("sqlite3").verbose()
-const sqlite3 = require('node-sqlite3')
+const sqlite3 = require("sqlite3").verbose()
 const sha256 = require("sha256")
 
 // NOTE Transaction class
@@ -60,95 +59,95 @@ class ChainDB {
 
     async read(sql_query) {
         return new Promise((resolve, reject) => {
-          this.connection = new sqlite3.Database(
-            "./data/chain.db",
-            sqlite3.OPEN_READONLY,
-            (err) => {
-              if (err) {
-                console.error(err.message);
-                reject(err);
-              }
-              console.log("[CHAIN READ] Connected to the ChainDB database.");
-            }
-          );
-          console.log("[CHAIN READ] Executing: " + sql_query);
-          this.connection.all(sql_query, [], (err, rows) => {
-            if (err) {
-              console.error(err.message);
-              reject(err);
-            }
-            console.log("[CHAIN READ] Rows: " + JSON.stringify(rows));
-            this.connection.close();
-            resolve(rows);
-          });
-        });
-      }
-    
-      async write(sql_query) {
+            this.connection = new sqlite3.Database(
+                "./data/chain.db",
+                sqlite3.OPEN_READONLY,
+                err => {
+                    if (err) {
+                        console.error(err.message)
+                        reject(err)
+                    }
+                    console.log(
+                        "[CHAIN READ] Connected to the ChainDB database.",
+                    )
+                },
+            )
+            console.log("[CHAIN READ] Executing: " + sql_query)
+            this.connection.all(sql_query, [], (err, rows) => {
+                if (err) {
+                    this.connection.close()
+                    console.error(err.message)
+                    reject(err)
+                }
+                console.log("[CHAIN READ] Rows: " + JSON.stringify(rows))
+                this.connection.close()
+                resolve(rows)
+            })
+        })
+    }
+
+    async write(sql_query) {
         return new Promise((resolve, reject) => {
-          this.connection = new sqlite3.Database(
-            "./data/chain.db",
-            sqlite3.OPEN_READWRITE,
-            (err) => {
-              if (err) {
-                console.error(err.message);
-                reject(err);
-              }
-              console.log("[CHAIN WRITE] Connected to the ChainDB database.");
-            }
-          );
-          console.log("[CHAIN WRITE] Executing: " + sql_query);
-          this.connection.run(sql_query, (err) => {
-            if (err) {
-              console.error(err.message);
-              reject(err);
-            }
-            console.log("[CHAIN WRITE] Executed");
-            this.connection.close();
-            resolve(true);
-          });
-        });
-      }
+            this.connection = new sqlite3.Database(
+                "./data/chain.db",
+                sqlite3.OPEN_READWRITE,
+                err => {
+                    if (err) {
+                        console.error(err.message)
+                        reject(err)
+                    }
+                    console.log(
+                        "[CHAIN WRITE] Connected to the ChainDB database.",
+                    )
+                },
+            )
+            console.log("[CHAIN WRITE] Executing: " + sql_query)
+            this.connection.run(sql_query, err => {
+                if (err) {
+                    console.error(err.message)
+                    reject(err)
+                }
+                console.log("[CHAIN WRITE] Executed")
+                this.connection.close()
+                resolve(true)
+            })
+        })
+    }
     // ANCHOR Getters
     // INFO Get the last block number
-    getLastBlockNumber() {
+    async getLastBlockNumber() {
         return this.read(
             "SELECT number FROM blocks ORDER BY number DESC LIMIT 1",
         )[0]
     }
     // INFO Get the last block hash
-    getLastBlockHash() {
+    async getLastBlockHash() {
         return this.read(
             "SELECT hash FROM blocks ORDER BY number DESC LIMIT 1",
         )[0]
     }
     // INFO Get any block by its number
-    getBlockByNumber(number) {
+    async getBlockByNumber(number) {
         return this.read(
             "SELECT * FROM blocks WHERE number='" + number + "'",
         )[0]
     }
     // INFO Get any block by its hash
-    getBlockByHash(hash) {
+    async getBlockByHash(hash) {
         return this.read("SELECT * FROM blocks WHERE hash=" + hash)[0]
     }
     // INFO Get a group of blocks by their status
-    getBlockNumbersByStatus(status) {
+    async getBlockNumbersByStatus(status) {
         return this.read("SELECT number FROM blocks WHERE status=" + status)
     }
     // INFO Get a group of blocks by their proposer
-    getBlockNumbersByProposer(proposer) {
+    async getBlockNumbersByProposer(proposer) {
         return this.read("SELECT number FROM blocks WHERE proposer=" + proposer)
     }
 
     async getGenesisBlock() {
-        const db = new sqlite3.Database(':memory:');
-        await db.open();
-        await db.run("CREATE TABLE blocks (number INT, hash TEXT, previousHash TEXT, timestamp INT, data TEXT)");
-        await db.run("INSERT INTO blocks (number, hash, previousHash, timestamp, data) VALUES (0, '0000000000000000', '0000000000000000', 0, 'Genesis Block')");
-        let rows = await db.all("SELECT * FROM blocks WHERE number=0");
-        await db.close();
-        return rows[0];
+        // Playground for async testing
+        return this.read("SELECT * FROM blocks WHERE number=0")
     }
 
     /*
@@ -160,30 +159,30 @@ class ChainDB {
     */
 
     // INFO Get the current pending transactions pool
-    getPendingPool() {
+    async getPendingPool() {
         return this.read("SELECT * FROM transactions WHERE status='pending'")
     }
     // INFO GLS Related methods
-    getGLSStatusHashTable() {
+    async getGLSStatusHashTable() {
         return this.read("SELECT * FROM status_hashes")
     }
-    getGLSStatusNativeTable() {
+    async getGLSStatusNativeTable() {
         return this.read("SELECT * FROM status_native")
     }
-    getGLSStatusPropertiesTable() {
+    async getGLSStatusPropertiesTable() {
         return this.read("SELECT * FROM status_properties")
     }
-    getGLSLastHash() {
+    async getGLSLastHash() {
         return this.read(
             "SELECT hash FROM status_hashes ORDER BY id DESC LIMIT 1",
         )[0]
     }
-    getGLSNativeFor(address) {
+    async getGLSNativeFor(address) {
         return this.read(
             "SELECT * FROM status_native WHERE address='" + address + "'",
         )[0]
     }
-    getGLSPropertiesFor(address) {
+    async getGLSPropertiesFor(address) {
         return this.read(
             "SELECT * FROM status_properties WHERE address='" + address + "'",
         )
