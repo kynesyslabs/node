@@ -235,6 +235,7 @@ async function findGenesisBlock() {
         let genesis_hash = chainDB.generateGenesisBlock(genesis_json)
         term.green("Genesis block created: " + genesis_hash + "\n")
     } else term.green("Genesis block found: ")
+    console.log(genesis_block)
     console.log(genesis_block[0].hash)
 }
 

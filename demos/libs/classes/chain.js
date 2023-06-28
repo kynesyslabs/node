@@ -70,70 +70,71 @@ class ChainDB {
     // INFO Using a Promise to handle the async behavior
     read(sql_query) {
         return new Promise((resolve, reject) => {
-          let result = [];
-          this.connection = new sqlite3.Database(
-            "./data/chain.db",
-            (err) => {
-              if (err) {
-                console.error(err.message);
-                reject(err);
-              }
-              console.log("[CHAIN READ] Connected to the ChainDB database.");
-            }
-          );
-          console.log("[CHAIN READ] Executing: " + sql_query);
-          this.connection.each(sql_query, [], (err, row) => {
-            if (err) {
-              console.error(err.message);
-              reject(err);
-            }
-            console.log("[CHAIN READ] Row: " + JSON.stringify(row));
-            result.push(row);
-          }, () => {
-            this.connection.close();
-            console.log("[CHAIN READ] Result: " + JSON.stringify(result));
-            resolve(result);
-          });
+            let result = []
+            this.connection = new sqlite3.Database("./data/chain.db", err => {
+                if (err) {
+                    console.error(err.message)
+                    reject(err)
+                }
+                console.log("[CHAIN READ] Connected to the ChainDB database.")
+            })
+            console.log("[CHAIN READ] Executing: " + sql_query)
+            this.connection.each(
+                sql_query,
+                [],
+                (err, row) => {
+                    if (err) {
+                        console.error(err.message)
+                        reject(err)
+                    }
+                    console.log("[CHAIN READ] Row: " + JSON.stringify(row))
+                    result.push(row)
+                },
+                () => {
+                    this.connection.close()
+                    console.log("[CHAIN READ] Result: ")
+                    console.log(result)
+                    resolve(result)
+                },
+            )
         })
-        .then(result => {
-          return result;
-        })
-        .catch(err => {
-          console.error(err.message);
-          return [];
-        });
-      }
-      write(sql_query) {
+            .then(result => {
+                // Return the value of the solved promise
+                return result
+            })
+            .catch(err => {
+                console.error(err.message)
+                return []
+            })
+    }
+    write(sql_query) {
         return new Promise((resolve, reject) => {
-          this.connection = new sqlite3.Database(
-            "./data/chain.db",
-            (err) => {
-              if (err) {
-                console.error(err.message);
-                reject(err);
-              }
-              console.log("[CHAIN WRITE] Connected to the ChainDB database.");
-            }
-          );
-          console.log("[CHAIN WRITE] Executing: " + sql_query);
-          this.connection.run(sql_query, (err) => {
-            if (err) {
-              console.error(err.message);
-              reject(err);
-            }
-            console.log("[CHAIN WRITE] Executed");
-            this.connection.close();
-            resolve(true);
-          });
+            this.connection = new sqlite3.Database("./data/chain.db", err => {
+                if (err) {
+                    console.error(err.message)
+                    reject(err)
+                }
+                console.log("[CHAIN WRITE] Connected to the ChainDB database.")
+            })
+            console.log("[CHAIN WRITE] Executing: " + sql_query)
+            this.connection.run(sql_query, err => {
+                if (err) {
+                    console.error(err.message)
+                    reject(err)
+                }
+                console.log("[CHAIN WRITE] Executed")
+                this.connection.close()
+                resolve(true)
+            })
         })
-        .then(result => {
-          return result;
-        })
-        .catch(err => {
-          console.error(err.message);
-          return false;
-        });
-      }
+            .then(result => {
+                return result
+            })
+            .catch(err => {
+                console.error(err.message)
+                return false
+            })
+    }
     // ANCHOR Getters
     // INFO Get the last block number
     getLastBlockNumber() {
@@ -167,7 +168,8 @@ class ChainDB {
     }
     // INFO Get the genesis block that initialized the current chain
     getGenesisBlock() {
-        return this.read("SELECT * FROM blocks WHERE number=0")
+        let _promise = this.read("SELECT * FROM blocks WHERE number=0")
+        return _promise[Object.keys(_promise)[0]]
     }
     // INFO Get the current pending transactions pool
     getPendingPool() {
