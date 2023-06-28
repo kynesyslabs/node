@@ -5,7 +5,8 @@
 	All the methods required to write, validate and operate on the blockchain are defined here.
 */
 
-const sqlite3 = require("sqlite3").verbose()
+//const sqlite3 = require("sqlite3").verbose()
+const sqlite3 = require('node-sqlite3')
 const sha256 = require("sha256")
 
 // NOTE Transaction class
@@ -57,84 +58,57 @@ class ChainDB {
         this.connection = null
     }
 
-    // create connection
-    createConnection() {
-        // ...
-    }
-
-    // close connection
-    closeConnection() {
-        // ...
-    }
-    // ANCHOR Read and write methods
-    // INFO Using a Promise to handle the async behavior
-    read(sql_query) {
+    async read(sql_query) {
         return new Promise((resolve, reject) => {
-            let result = []
-            this.connection = new sqlite3.Database("./data/chain.db", err => {
-                if (err) {
-                    console.error(err.message)
-                    reject(err)
-                }
-                console.log("[CHAIN READ] Connected to the ChainDB database.")
-            })
-            console.log("[CHAIN READ] Executing: " + sql_query)
-            this.connection.each(
-                sql_query,
-                [],
-                (err, row) => {
-                    if (err) {
-                        console.error(err.message)
-                        reject(err)
-                    }
-                    console.log("[CHAIN READ] Row: " + JSON.stringify(row))
-                    result.push(row)
-                },
-                () => {
-                    this.connection.close()
-                    console.log("[CHAIN READ] Result: ")
-                    console.log(result)
-                    resolve(result)
-                },
-            )
-        })
-            .then(result => {
-                // Return the value of the solved promise
-                return result
-            })
-            .catch(err => {
-                console.error(err.message)
-                return []
-            })
-    }
-    write(sql_query) {
+          this.connection = new sqlite3.Database(
+            "./data/chain.db",
+            sqlite3.OPEN_READONLY,
+            (err) => {
+              if (err) {
+                console.error(err.message);
+                reject(err);
+              }
+              console.log("[CHAIN READ] Connected to the ChainDB database.");
+            }
+          );
+          console.log("[CHAIN READ] Executing: " + sql_query);
+          this.connection.all(sql_query, [], (err, rows) => {
+            if (err) {
+              console.error(err.message);
+              reject(err);
+            }
+            console.log("[CHAIN READ] Rows: " + JSON.stringify(rows));
+            this.connection.close();
+            resolve(rows);
+          });
+        });
+      }
+    
+      async write(sql_query) {
         return new Promise((resolve, reject) => {
-            this.connection = new sqlite3.Database("./data/chain.db", err => {
-                if (err) {
-                    console.error(err.message)
-                    reject(err)
-                }
-                console.log("[CHAIN WRITE] Connected to the ChainDB database.")
-            })
-            console.log("[CHAIN WRITE] Executing: " + sql_query)
-            this.connection.run(sql_query, err => {
-                if (err) {
-                    console.error(err.message)
-                    reject(err)
-                }
-                console.log("[CHAIN WRITE] Executed")
-                this.connection.close()
-                resolve(true)
-            })
-        })
-            .then(result => {
-                return result
-            })
-            .catch(err => {
-                console.error(err.message)
-                return false
-            })
-    }
+          this.connection = new sqlite3.Database(
+            "./data/chain.db",
+            sqlite3.OPEN_READWRITE,
+            (err) => {
+              if (err) {
+                console.error(err.message);
+                reject(err);
+              }
+              console.log("[CHAIN WRITE] Connected to the ChainDB database.");
+            }
+          );
+          console.log("[CHAIN WRITE] Executing: " + sql_query);
+          this.connection.run(sql_query, (err) => {
+            if (err) {
+              console.error(err.message);
+              reject(err);
+            }
+            console.log("[CHAIN WRITE] Executed");
+            this.connection.close();
+            resolve(true);
+          });
+        });
+      }
     // ANCHOR Getters
     // INFO Get the last block number
     getLastBlockNumber() {
@@ -167,16 +141,14 @@ class ChainDB {
         return this.read("SELECT number FROM blocks WHERE proposer=" + proposer)
     }
 
-    getGenesisBlock() {
-        return this
-            .read("SELECT * FROM blocks WHERE number=0")
-            .then(result => {
-                return result[0]
-            })
-            .catch(err => {
-                console.error(err.message)
-                return null
-            })
+    async getGenesisBlock() {
+        const db = new sqlite3.Database(':memory:');
+        await db.open();
+        await db.run("CREATE TABLE blocks (number INT, hash TEXT, previousHash TEXT, timestamp INT, data TEXT)");
+        await db.run("INSERT INTO blocks (number, hash, previousHash, timestamp, data) VALUES (0, '0000000000000000', '0000000000000000', 0, 'Genesis Block')");
+        let rows = await db.all("SELECT * FROM blocks WHERE number=0");
+        await db.close();
+        return rows[0];
     }
 
     /*
