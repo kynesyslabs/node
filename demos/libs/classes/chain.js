@@ -167,16 +167,17 @@ class ChainDB {
         return this.read("SELECT number FROM blocks WHERE proposer=" + proposer)
     }
 
-     etGenesisBlock() {
-        return chainDB.read("SELECT * FROM blocks WHERE number=0")
-          .then(result => {
-            return result[0];
-          })
-          .catch(err => {
-            console.error(err.message);
-            return null;
-          });
-      }
+    getGenesisBlock() {
+        return this
+            .read("SELECT * FROM blocks WHERE number=0")
+            .then(result => {
+                return result[0]
+            })
+            .catch(err => {
+                console.error(err.message)
+                return null
+            })
+    }
 
     /*
     // INFO Get the genesis block that initialized the current chain

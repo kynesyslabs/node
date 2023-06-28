@@ -70,6 +70,7 @@ imc.states["peers"] = {
 imc.broadcast("peers", imc.states["peers"])
 
 let responseRegistry = new communications.ResponseRegistry() // NOTE This will be shared through IMC and is a global registry
+imc.states["responseRegistry"] = responseRegistry
 imc.broadcast("responseRegistry", responseRegistry)
 
 // Main varables to pass around
@@ -126,7 +127,10 @@ async function sync() {
         // Preparing for a response
         _comlink.properties.require_reply = true
         _comlink.properties.is_reply = false
+        // Propagating the responseRegistry actual status
         responseRegistry.requestResponse(_comlink)
+        imc.states["responseRegistry"] = responseRegistry
+        imc.broadcast("responseRegistry", responseRegistry)
         // Ask for the last block
         await _comlink.broadcastMessageToPeer(
             _currentPeer,
