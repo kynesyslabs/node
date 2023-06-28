@@ -166,11 +166,26 @@ class ChainDB {
     getBlockNumbersByProposer(proposer) {
         return this.read("SELECT number FROM blocks WHERE proposer=" + proposer)
     }
+
+     etGenesisBlock() {
+        return chainDB.read("SELECT * FROM blocks WHERE number=0")
+          .then(result => {
+            return result[0];
+          })
+          .catch(err => {
+            console.error(err.message);
+            return null;
+          });
+      }
+
+    /*
     // INFO Get the genesis block that initialized the current chain
     getGenesisBlock() {
         let _promise = this.read("SELECT * FROM blocks WHERE number=0")
         return _promise[Object.keys(_promise)[0]]
     }
+    */
+
     // INFO Get the current pending transactions pool
     getPendingPool() {
         return this.read("SELECT * FROM transactions WHERE status='pending'")
