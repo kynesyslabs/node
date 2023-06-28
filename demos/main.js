@@ -222,6 +222,8 @@ async function peerBootstrap(peers_list) {
 async function findGenesisBlock() {
     let genesis_block = await chainDB.getGenesisBlock()
     await sleep(1000)
+    console.log("=== RETURNED TO MAIN.JS ===")
+    console.log(genesis_block)
     if (genesis_block.length == 0) {
         // We need to initialize the genesis block
         term.yellow("[BOOTSTRAP] Initializing the genesis block\n")

@@ -72,14 +72,16 @@ var listeners = {
         // INFO Managing replies
         peer.socket.on("comlink_reply", async request => { // request is a ComLink object with the same structure as the comlink listener below
             console.log("[PEER] Received reply to " + request.muid)
-            console.log(JSON.stringify(request, null, 2))
+            //console.log(JSON.stringify(request, null, 2))
             // REVIEW Check if the responseRegistry contains the muid of the request
-            let _responseRegistry = imc["states"]["responseRegistry"]
+            let _responseRegistry = imc["states"]["responseRegistry"].list
+            //console.log(_responseRegistry)
             let _response = _responseRegistry[request.muid]
             if (!_response) {
                 console.log("[PEER] No response expected for " + request.muid)
             } else {
                 console.log("[PEER] Received expected response for " + request.muid)
+                // TODO Continue with the response logic (as per filling comlink if needed and verifications and so on)
             }
         })
     },
@@ -122,7 +124,7 @@ var listeners = {
                 let _receiver = peerSocket
                 // We need to check if the message request is valid (is a ComLink object)
                 console.log("[SERVER] Received comlink")
-                console.log(request)
+                //console.log(request)
                 // GIving the request the comlink methods
                 let _comlink_request = new communications.ComLink()
                 _comlink_request.chain = request.chain
