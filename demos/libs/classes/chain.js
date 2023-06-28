@@ -78,22 +78,29 @@ class ChainDB {
                 console.error(err.message);
                 reject(err);
               }
-              console.log("Connected to the ChainDB database.");
+              console.log("[CHAIN READ] Connected to the ChainDB database.");
             }
           );
-          console.log("[CHAIN READ] Executing " + sql_query);
+          console.log("[CHAIN READ] Executing: " + sql_query);
           this.connection.each(sql_query, [], (err, row) => {
             if (err) {
               console.error(err.message);
               reject(err);
             }
-            console.log(row);
+            console.log("[CHAIN READ] Row: " + JSON.stringify(row));
             result.push(row);
           }, () => {
             this.connection.close();
-            console.log("[CHAIN READ] Result: " + result);
+            console.log("[CHAIN READ] Result: " + JSON.stringify(result));
             resolve(result);
           });
+        })
+        .then(result => {
+          return result;
+        })
+        .catch(err => {
+          console.error(err.message);
+          return [];
         });
       }
       write(sql_query) {
@@ -118,6 +125,13 @@ class ChainDB {
             this.connection.close();
             resolve(true);
           });
+        })
+        .then(result => {
+          return result;
+        })
+        .catch(err => {
+          console.error(err.message);
+          return false;
         });
       }
     // ANCHOR Getters
