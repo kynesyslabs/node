@@ -66,45 +66,60 @@ class ChainDB {
     closeConnection() {
         // ...
     }
+    // ANCHOR Read and write methods
+    // INFO Using a Promise to handle the async behavior
     read(sql_query) {
-        let result = []
-        this.connection = new sqlite3.Database("./data/chain.db", err => {
-            if (err) {
-                console.error(err.message)
+        return new Promise((resolve, reject) => {
+          let result = [];
+          this.connection = new sqlite3.Database(
+            "./data/chain.db",
+            (err) => {
+              if (err) {
+                console.error(err.message);
+                reject(err);
+              }
+              console.log("Connected to the ChainDB database.");
             }
-            console.log("Connected to the ChainDB database.")
-        })
-        console.log("[CHAIN READ] Executing " + sql_query)
-        this.connection.each(sql_query, [], (err, row) => {
-            // FIXME Maybe we should use another method to execute the query as this act as async (??)
+          );
+          console.log("[CHAIN READ] Executing " + sql_query);
+          this.connection.each(sql_query, [], (err, row) => {
             if (err) {
-                return []
+              console.error(err.message);
+              reject(err);
             }
-            console.log(row)
-            result.push(row)
-        })
-        this.connection.close()
-        console.log("[CHAIN READ] Result: " + result)
-        return result
-    }
-    write(sql_query) {
-        console.log("[CHAIN WRITE] Executing: " + sql_query)
-        this.connection = new sqlite3.Database("./data/chain.db", err => {
+            console.log(row);
+            result.push(row);
+          }, () => {
+            this.connection.close();
+            console.log("[CHAIN READ] Result: " + result);
+            resolve(result);
+          });
+        });
+      }
+      write(sql_query) {
+        return new Promise((resolve, reject) => {
+          this.connection = new sqlite3.Database(
+            "./data/chain.db",
+            (err) => {
+              if (err) {
+                console.error(err.message);
+                reject(err);
+              }
+              console.log("[CHAIN WRITE] Connected to the ChainDB database.");
+            }
+          );
+          console.log("[CHAIN WRITE] Executing: " + sql_query);
+          this.connection.run(sql_query, (err) => {
             if (err) {
-                console.error(err.message)
+              console.error(err.message);
+              reject(err);
             }
-            console.log("[CHAIN WRITE] Connected to the ChainDB database.")
-        })
-        this.connection.run(sql_query, err => {
-            if (err) {
-                console.error(err.message)
-                return false
-            }
-            console.log("[CHAIN WRITE] Executed")
-            return true
-        })
-        this.connection.close()
-    }
+            console.log("[CHAIN WRITE] Executed");
+            this.connection.close();
+            resolve(true);
+          });
+        });
+      }
     // ANCHOR Getters
     // INFO Get the last block number
     getLastBlockNumber() {
