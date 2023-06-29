@@ -83,7 +83,9 @@ var listeners = {
             if (!_response) {
                 console.log("[PEER] No response expected for " + request.muid)
             } else {
-                console.log("[PEER] Received expected response for " + request.muid)
+                console.log(
+                    "[PEER] Received expected response for " + request.muid,
+                )
                 // TODO Continue with the response logic (as per filling comlink if needed and verifications and so on)
             }
         })
@@ -300,6 +302,12 @@ var listeners = {
             await imc["states"].peers.methods.addPeer(peer)
         })
         print.log("[CLIENT] Listeners set up")
+    },
+    // INFO Listeners for broadcast events internally to the node
+    broadcast_listeners: async function () {
+        imc.broadcast.on("web2", async web2 => {
+            console.log(web2)
+        })
     },
 }
 

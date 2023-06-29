@@ -1,9 +1,9 @@
 // INFO This module contains all the methods needed to interact with web2 on DEMOS chain
-var Web2Data = require("classes/web2class.js")
+var Web2Data = require("./classes/web2class.js")
 
 const sha256 = require("sha256")
 
-var air = require("./air.js")
+var air = require("./classes/air.js")
 var imc = new air()
 imc.initialize("web2")
 
@@ -45,20 +45,22 @@ async function http_request(httpVerb, url, headers) {
     var promise
     const web2Data = new Web2Data()
     web2Data.data.request.timestamp = new Date().getTime()
-    syncData(web2Data, imc["web2"])
+    syncData(web2Data, imc.states["web2"])
 
     switch (httpVerb) {
         case "GET":
             promise = axios.get(url, headers)
             web2Data.status = "pending"
             web2Data.data.request.timestamp = new Date().getTime()
-            syncData(web2Data, imc["web2"])
+            syncData(web2Data, imc.states["web2"])
+            imc.broadcast("web2", imc.states["web2"])
             break
         case "POST":
             promise = axios.post(url, headers)
             web2Data.status = "pending"
             web2Data.data.request.timestamp = new Date().getTime()
-            syncData(web2Data, imc["web2"])
+            syncData(web2Data, imc.states["web2"])
+            imc.broadcast("web2", imc.states["web2"])
             break
         default:
             console.log("Wrong http verb")
@@ -71,12 +73,14 @@ async function http_request(httpVerb, url, headers) {
         web2Data.data.response.timestamp = new Date().getTime()
         web2Data.data.response.result = response.data
         web2Data.data.response.hash = sha256(JSON.stringify(response.data))
-        syncData(web2Data, imc["web2"])
+        syncData(web2Data, imc.states["web2"])
+        imc.broadcast("web2", imc.states["web2"])
     } catch (error) {
         console.error(error)
         web2Data.status = "error"
         web2Data.data.response.timestamp = new Date().getTime()
-        syncData(web2Data, imc["web2"])
+        syncData(web2Data, imc.states["web2"])
+        imc.broadcast("web2", imc.states["web2"])
         throw error
     }
 }

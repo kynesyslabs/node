@@ -1,6 +1,6 @@
 // INFO This class is used by web2.js to store, retrieve and manipulate web2 data
-const { Peer } = require("./classes/peers.js")
-const identity = require("./identity.js")
+const { Peer } = require("./peers.js")
+const identity = require("../identity.js")
 
 class Web2Data {
     constructor() {
