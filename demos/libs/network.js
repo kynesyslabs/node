@@ -27,6 +27,7 @@ const { Peer } = require("./classes/peers.js")
 var transactions = require("./transactions.js")
 
 var communications = require("./communications.js")
+var web2 = require("./web2.js")
 var messages = require("./messages.js")
 
 app.get("/", (req, res) => {
@@ -40,7 +41,8 @@ var { print } = require("./logging")
 var listeners = {
     // INFO Common listeners for both Server and Client
     // NOTE Is automatically called by server_listeners and client_listeners
-    common_listeners: async function (peer) { // FIXME Check if and why this produces two events instead of one
+    common_listeners: async function (peer) {
+        // FIXME Check if and why this produces two events instead of one
         // peer is a peer object
         // Managing disconnection
         peer.socket.on("disconnect", async () => {
@@ -70,7 +72,8 @@ var listeners = {
             console.log(request)
         })
         // INFO Managing replies
-        peer.socket.on("comlink_reply", async request => { // request is a ComLink object with the same structure as the comlink listener below
+        peer.socket.on("comlink_reply", async request => {
+            // request is a ComLink object with the same structure as the comlink listener below
             console.log("[PEER] Received reply to " + request.muid)
             //console.log(JSON.stringify(request, null, 2))
             // REVIEW Check if the responseRegistry contains the muid of the request
@@ -80,7 +83,9 @@ var listeners = {
             if (!_response) {
                 console.log("[PEER] No response expected for " + request.muid)
             } else {
-                console.log("[PEER] Received expected response for " + request.muid)
+                console.log(
+                    "[PEER] Received expected response for " + request.muid,
+                )
                 // TODO Continue with the response logic (as per filling comlink if needed and verifications and so on)
             }
         })
@@ -119,7 +124,8 @@ var listeners = {
             // INFO Adding the peer to the list
             await imc["states"].peers.methods.addPeer(_peerForged)
             // NOTE From now on, the peer is connected and is able to communicate through advanced methods (as below)
-            peerSocket.on("comlink", async request => { // FIXME The below logic needs to be refactored in a separate method as it is used by other listeners too
+            peerSocket.on("comlink", async request => {
+                // FIXME The below logic needs to be refactored in a separate method as it is used by other listeners too
                 // TODO Add responseRegistry support as per main.js and communications.js
                 let _receiver = peerSocket
                 // We need to check if the message request is valid (is a ComLink object)
@@ -149,6 +155,21 @@ var listeners = {
                 // Where muid is a message unique identifier that is used to identify the response
                 var response
                 var require_reply = false
+                if (content.type === "web2Request") {
+                    switch (content.message.action) {
+                        case "getUrl":
+                            console.log("[SERVER] Received getUrl")
+                            response = web2.http_request(
+                                content.message.httpVerb,
+                                content.message.url,
+                                content.message.headers,
+                            )
+                            break
+                        default:
+                            break
+                    }
+                }
+
                 if (content.type === "nodeCall") {
                     switch (content.message) {
                         case "getLastBlockNumber":
@@ -187,8 +208,17 @@ var listeners = {
                         "./.demos_identity",
                     )
                     // Building a message to send back in the comlink
-                    var response_message = new messages.Message(id_ecdsa.privateKey)
-                    response_message.initialize("reply", JSON.stringify(response), id_ecdsa.publicKeyHex, "placeholder", null, null)
+                    var response_message = new messages.Message(
+                        id_ecdsa.privateKey,
+                    )
+                    response_message.initialize(
+                        "reply",
+                        JSON.stringify(response),
+                        id_ecdsa.publicKeyHex,
+                        "placeholder",
+                        null,
+                        null,
+                    )
                     // REVIEW and TODO: unless specified, we now send back the updated comlink as a response
                     _comlink_request.properties.is_reply = true // Setting the reply flag as we are replying
                     _comlink_request.properties.require_reply = require_reply // Setting the require_reply flag as provided above
@@ -272,6 +302,12 @@ var listeners = {
             await imc["states"].peers.methods.addPeer(peer)
         })
         print.log("[CLIENT] Listeners set up")
+    },
+    // INFO Listeners for broadcast events internally to the node
+    broadcast_listeners: async function () {
+        imc.broadcast.on("web2", async web2 => {
+            console.log(web2)
+        })
     },
 }
 

@@ -1,9 +1,10 @@
 // INFO This class is used by web2.js to store, retrieve and manipulate web2 data
-let { Peer } = require("./classes/peers.js")
-let identity = require("./identity.js")
+const { Peer } = require("./peers.js")
+const identity = require("../identity.js")
 
 class Web2Data {
     constructor() {
+        this.status = "new" // new, pending, retrieved, error
         this.data = {
             request: { timestamp: null, status: null },
             response: { timestamp: null, result: null, hash: null },
