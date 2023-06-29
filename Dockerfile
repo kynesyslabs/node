@@ -9,7 +9,7 @@ RUN mkdir common
 
 # Installing basic packages
 RUN apk update
-RUN apk add --no-cache vim wget screen curl bash nodejs npm yarn
+RUN apk add --no-cache vim wget screen curl bash nodejs npm yarn make g++ py3-pip
 RUN hash -r
 RUN npm install -g eslint
 # RUN n 16
