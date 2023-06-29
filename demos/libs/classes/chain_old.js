@@ -5,8 +5,7 @@
 	All the methods required to write, validate and operate on the blockchain are defined here.
 */
 
-const sqlite3 = require("sqlite3")
-const util = require("util")
+const sqlite3 = require("sqlite3").verbose()
 const sha256 = require("sha256")
 
 // NOTE Transaction class
@@ -58,75 +57,97 @@ class ChainDB {
         this.connection = null
     }
 
-    // FIXME Why TF this does not wait until the result is fetched before closing and returning?
     async read(sql_query) {
-        this.connection = new sqlite3.Database("./data/chain.db", sqlite3.OPEN_READONLY)
-        this.connection.all(sql_query, (err, row) => {
-            if (err) {
-                console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
+        return new Promise((resolve, reject) => {
+            this.connection = new sqlite3.Database(
+                "./data/chain.db",
+                sqlite3.OPEN_READONLY,
+                err => {
+                    if (err) {
+                        console.error(err.message)
+                        reject(err)
+                    }
+                    console.log(
+                        "[CHAIN READ] Connected to the ChainDB database.",
+                    )
+                },
+            )
+            console.log("[CHAIN READ] Executing: " + sql_query)
+            this.connection.all(sql_query, [], (err, rows) => {
+                if (err) {
+                    this.connection.close()
+                    console.error(err.message)
+                    reject(err)
+                }
+                console.log("[CHAIN READ] Rows: " + JSON.stringify(rows))
                 this.connection.close()
-                throw err
-            } else {
-                console.log("=== GET RESULT ===")
-                console.log("[ChainDB] [ READ ]: ")
-                console.log(row)
-                this.connection.close()
-                return row
-            }
+                resolve(rows)
+            })
         })
     }
 
     async write(sql_query) {
-        this.connection = new sqlite3.Database("./data/chain.db", sqlite3.OPEN_READWRITE)
-        let await_write = util.promisify(this.connection.run)
-        let result = await await_write(sql_query)
-        console.log("[ChainDB] [ WRITE ]: " + result)
-        this.connection.close()
-        return result
+        return new Promise((resolve, reject) => {
+            this.connection = new sqlite3.Database(
+                "./data/chain.db",
+                sqlite3.OPEN_READWRITE,
+                err => {
+                    if (err) {
+                        console.error(err.message)
+                        reject(err)
+                    }
+                    console.log(
+                        "[CHAIN WRITE] Connected to the ChainDB database.",
+                    )
+                },
+            )
+            console.log("[CHAIN WRITE] Executing: " + sql_query)
+            this.connection.run(sql_query, err => {
+                if (err) {
+                    console.error(err.message)
+                    reject(err)
+                }
+                console.log("[CHAIN WRITE] Executed")
+                this.connection.close()
+                resolve(true)
+            })
+        })
     }
-
     // ANCHOR Getters
     // INFO Get the last block number
     async getLastBlockNumber() {
-        return await this.read(
+        return this.read(
             "SELECT number FROM blocks ORDER BY number DESC LIMIT 1",
         )[0]
     }
     // INFO Get the last block hash
     async getLastBlockHash() {
-        return await this.read(
+        return this.read(
             "SELECT hash FROM blocks ORDER BY number DESC LIMIT 1",
         )[0]
     }
     // INFO Get any block by its number
     async getBlockByNumber(number) {
-        return await this.read(
+        return this.read(
             "SELECT * FROM blocks WHERE number='" + number + "'",
         )[0]
     }
     // INFO Get any block by its hash
     async getBlockByHash(hash) {
-        return await this.read("SELECT * FROM blocks WHERE hash=" + hash)[0]
+        return this.read("SELECT * FROM blocks WHERE hash=" + hash)[0]
     }
     // INFO Get a group of blocks by their status
     async getBlockNumbersByStatus(status) {
-        return await this.read(
-            "SELECT number FROM blocks WHERE status=" + status,
-        )
+        return this.read("SELECT number FROM blocks WHERE status=" + status)
     }
     // INFO Get a group of blocks by their proposer
     async getBlockNumbersByProposer(proposer) {
-        return await this.read(
-            "SELECT number FROM blocks WHERE proposer=" + proposer,
-        )
+        return this.read("SELECT number FROM blocks WHERE proposer=" + proposer)
     }
 
     async getGenesisBlock() {
         // Playground for async testing
-        let _res = await this.read("SELECT * FROM blocks WHERE number=0")
-        console.log("=== AFTER GET ===")
-        console.log(_res) // FIXME Here it is undefined AND it is before the awaited result
-        return _res
+        return this.read("SELECT * FROM blocks WHERE number=0")
     }
 
     /*
@@ -139,39 +160,37 @@ class ChainDB {
 
     // INFO Get the current pending transactions pool
     async getPendingPool() {
-        return await this.read(
-            "SELECT * FROM transactions WHERE status='pending'",
-        )
+        return this.read("SELECT * FROM transactions WHERE status='pending'")
     }
     // INFO GLS Related methods
     async getGLSStatusHashTable() {
-        return await this.read("SELECT * FROM status_hashes")
+        return this.read("SELECT * FROM status_hashes")
     }
     async getGLSStatusNativeTable() {
-        return await this.read("SELECT * FROM status_native")
+        return this.read("SELECT * FROM status_native")
     }
     async getGLSStatusPropertiesTable() {
-        return await this.read("SELECT * FROM status_properties")
+        return this.read("SELECT * FROM status_properties")
     }
     async getGLSLastHash() {
-        return await this.read(
+        return this.read(
             "SELECT hash FROM status_hashes ORDER BY id DESC LIMIT 1",
         )[0]
     }
     async getGLSNativeFor(address) {
-        return await this.read(
+        return this.read(
             "SELECT * FROM status_native WHERE address='" + address + "'",
         )[0]
     }
     async getGLSPropertiesFor(address) {
-        return await this.read(
+        return this.read(
             "SELECT * FROM status_properties WHERE address='" + address + "'",
         )
     }
     // TODO Implement the rest of the db schema for the chain
     // ANCHOR Setters
     // INFO Insert a block into the database
-    async insertBlock(block) {
+    insertBlock(block) {
         // Returns the hash of the block
         // Block() class
         // REVIEW Build the SQL query
@@ -197,7 +216,7 @@ class ChainDB {
             block.timestamp +
             ")"
         // Execute the SQL query
-        await this.write(sql_query)
+        this.write(sql_query)
         return block.hash
     }
     // INFO Generate the genesis block
@@ -220,7 +239,7 @@ class ChainDB {
     // ANCHOR Macro
     // ANCHOR Specific operations
     // INFO Getting the status of a given address either from the native or the properties table
-    async statusOf(address, type) {
+    statusOf(address, type) {
         // Type can be: 0, 1 (native, properties)
         let field
         if (type == 0) {
@@ -230,13 +249,13 @@ class ChainDB {
         }
         let query =
             "SELECT * FROM status_" + field + " WHERE address='" + address + "'"
-        return await this.read(query)[0]
+        return this.read(query)[0]
     } // TODO Implement specific time-saving operations to get specific data (see the tables in the db)
     // INFO Getting the hash of the status at a given block
-    async statusHashAt(block_number) {
+    statusHashAt(block_number) {
         let query =
             "SELECT hash FROM status_hashes WHERE block='" + block_number + "'"
-        return await this.read(query)[0]
+        return this.read(query)[0]
     }
     // TODO And more
 }
