@@ -1,11 +1,12 @@
 /* eslint-disable no-unused-vars */
 const fs = require("fs")
-const sqlite3 = require("sqlite3").verbose()
 const term = require("terminal-kit").terminal
+const _db = require("./model/database")
 
 // SECTION Globals and imports
 // ANCHOR Loading the chain db library to interact with the blockchain
 const { ChainDB, Block, Transaction } = require("./libs/classes/chain.js")
+
 let chainDB = new ChainDB()
 
 // REVIEW Experimental IMC (Inter Module Communication)
@@ -48,6 +49,7 @@ imc.registered_modules.push({
     socket: messages.imc,
 })
 const network = require("./libs/network.js") // Definitions for network activity (server, client, listeners)
+
 imc.registered_modules.push({
     name: "network",
     registered: true,
@@ -98,7 +100,7 @@ async function sync() {
     // TODO Implement all the ComLink and responseRegistry mechanism in a standalone function
     let synced = true
     console.log("[SYNC] Our data: fetched")
-    let _currentLastBlockNumber = await chainDB.getLastBlockNumber() // FIXME It doesn't await lol
+    let _currentLastBlockNumber = await chainDB.getLastBlockNumber()
     let _currentLastBlockHash = await chainDB.getLastBlockHash()
     // FIXME ^ Why above values go to the end? Because we should await somehow even if it is not async (??) (see chain.js, fixme on read)
     console.log("[SYNC] Fetching data from peers")

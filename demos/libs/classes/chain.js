@@ -5,9 +5,9 @@
 	All the methods required to write, validate and operate on the blockchain are defined here.
 */
 
-const sqlite3 = require("sqlite3")
-const util = require("util")
 const sha256 = require("sha256")
+const db = require("../../model/database.js")
+// Use the connection
 
 // NOTE Transaction class
 class Transaction {
@@ -54,35 +54,32 @@ class Block {
 
 // NOTE Class for the chain database
 class ChainDB {
-    constructor() {
-        this.connection = null
-    }
+    constructor() {}
 
-    // FIXME Why TF this does not wait until the result is fetched before closing and returning?
     async read(sql_query) {
-        this.connection = new sqlite3.Database("./data/chain.db", sqlite3.OPEN_READONLY)
-        this.connection.all(sql_query, (err, row) => {
-            if (err) {
-                console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
-                this.connection.close()
-                throw err
-            } else {
-                console.log("=== GET RESULT ===")
-                console.log("[ChainDB] [ READ ]: ")
-                console.log(row)
-                this.connection.close()
-                return row
-            }
-        })
+        try {
+            console.log("=== DB READ ===")
+            const result = await db.getDataSource().query(sql_query)
+            console.log("=== GET RESULT ===")
+            console.log("[ChainDB] [ READ ]: ")
+            console.log(result)
+            return result
+        } catch (err) {
+            console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
+            throw err
+        }
     }
 
     async write(sql_query) {
-        this.connection = new sqlite3.Database("./data/chain.db", sqlite3.OPEN_READWRITE)
-        let await_write = util.promisify(this.connection.run)
-        let result = await await_write(sql_query)
-        console.log("[ChainDB] [ WRITE ]: " + result)
-        this.connection.close()
-        return result
+        try {
+            console.log(db.getDataSource())
+            const result = await db.getDataSource().query(sql_query)
+            console.log("[ChainDB] [ WRITE ]: " + result)
+            return result
+        } catch (err) {
+            console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
+            throw err
+        }
     }
 
     // ANCHOR Getters
@@ -125,7 +122,7 @@ class ChainDB {
         // Playground for async testing
         let _res = await this.read("SELECT * FROM blocks WHERE number=0")
         console.log("=== AFTER GET ===")
-        console.log(_res) // FIXME Here it is undefined AND it is before the awaited result
+        console.log(_res) // FIXME Here dirit is undefined AND it is before the awaited result
         return _res
     }
 
