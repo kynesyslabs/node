@@ -10,4 +10,6 @@ demos/libs/node_modules
 common/libs/node_modules
 demos/.demos_identity
 common/.demos_identity
+demos/yarn.lock
+demos/yarn-error.log
 evm/node/data
