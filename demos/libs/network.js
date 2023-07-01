@@ -42,6 +42,7 @@ let subscriber = function (msg, data) {
 }
 intercom.subscribe("PEERS", subscriber)
 intercom.subscribe("IDENTITY", subscriber)
+intercom.subscribe("RESPONSE_REGISTRY", subscriber)
 // !SECTION Setting up listeners and variables for the intercom
 
 // REVIEW Experimental air module

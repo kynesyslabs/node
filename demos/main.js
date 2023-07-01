@@ -3,58 +3,22 @@ const fs = require("fs")
 const term = require("terminal-kit").terminal
 const _db = require("./model/database")
 
+// INFO intercom (in main.js mainly but can be used by other modules) publish variables initial state and variables modifications
+// Each module (or main.js if another module manages a variable) will need to set up its subscriber (see network.js as an example)
+const intercom = require("./libs/intercom.js")
+const network = require("./libs/network.js") // Definitions for network activity (server, client, listeners) and intercom listeners
+
 // SECTION Globals and imports
 // ANCHOR Loading the chain db library to interact with the blockchain
 const { ChainDB, Block, Transaction } = require("./libs/classes/chain.js")
 
 let chainDB = new ChainDB()
 
-// TODO Replace air.js with intercom.js
-const intercom = require("./libs/intercom.js")
 
-
-// REVIEW Experimental IMC (Inter Module Communication)
-// INFO This is a way to communicate between modules
-// * For every module that will share informations with us, it needs to import air.js
-// * and initialize it with a name, then export the imc interface
-// ** In module.js
-// var air = require("./air.js")
-// var imc = new air()
-// imc.initialize("module_name")
-// * Now in main.js (or any controller script anyway) we can import the module and register it
-// ** In main.js
-// const module = require("./module.js")
-// imc.registered_modules.push({ name: "module_name", registered: true, socket: module.imc })
-// * Now we can set variables valid for all the modules we registered
-// ** In main.js
-// imc.states["variable"] = "value" // Registering locally
-// imc.broadcast("variable", "value") // Broadcasting to all the modules
-// * After this point, the module can access the variable with imc.states["variable"]
-// ** In module.js
-// module.writeFile(imc.states["variable"])
-var air = require("./libs/classes/air.js") // TODO Upgrade to intercom
 // ANCHOR DEMOS Libraries
-
-// Experimental IMC
-var imc = new air()
-imc.initialize("main") // TODO Upgrade to intercom
-
 // For every module we want to communicate with, we need to register its imc interface
 const identity = require("./libs/identity.js") // Provides cryptographical methods
-imc.registered_modules.push({
-    name: "identity",
-    registered: true,
-    socket: identity.imc,
-}) // TODO Upgrade to intercom
-
 const messages = require("./libs/messages.js") // Definition of the structure of messages (see libs/network.js listeners)
-imc.registered_modules.push({
-    name: "messages",
-    registered: true,
-    socket: messages.imc,
-}) // TODO Upgrade to intercom
-
-const network = require("./libs/network.js") // Definitions for network activity (server, client, listeners)
 
 const communications = require("./libs/communications.js") // Module used to manage all kind of peers communication
 const Chainteract = require("./libs/classes/chainteract.js")
@@ -69,12 +33,8 @@ let peers = {
     peerlist: [],
     Peer: Peer,
 }
-// imc.states["peers"] = peers
-// imc.broadcast("peers", peers)
 
-let responseRegistry = new communications.ResponseRegistry() // NOTE This will be shared through IMC and is a global registry
-// imc.states["responseRegistry"] = responseRegistry
-// imc.broadcast("responseRegistry", responseRegistry)
+let responseRegistry = new communications.ResponseRegistry() // NOTE This will be shared through intercom and is a global registry
 
 // Main varables to pass around
 var id = {
@@ -138,8 +98,6 @@ async function sync() {
         // Propagating the responseRegistry actual status
         responseRegistry.requestResponse(_comlink)
         intercom.broadcast("RESPONSE_REGISTRY", responseRegistry)
-        // imc.states["responseRegistry"] = responseRegistry
-        // imc.broadcast("responseRegistry", responseRegistry)
         // Ask for the last block
         await _comlink.broadcastMessageToPeer(
             _currentPeer,
@@ -281,12 +239,8 @@ async function main() {
     // Log identity
     print.log("WE ARE " + id.ecdsa.publicKeyHex)
     // Setting the common variables and propagating them
-    // imc.states["id"] = id
-    // imc.broadcast("id", id)
     intercom.broadcast("IDENTITY", id)
     // Sharing it with the network
-    // imc.states["publicKeyHex"] = id.ecdsa.publicKeyHex
-    // imc.broadcast("publicKeyHex", id.ecdsa.publicKeyHex)
     intercom.broadcast("PUBLIC_HEX_KEY", id.ecdsa.publicKeyHex)
     // INFO Loading the known peers
     if (!fs.existsSync("./demos_peers")) {

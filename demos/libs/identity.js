@@ -8,10 +8,6 @@ var ellipticcurve = require("starkbank-ecdsa")
 var Ecdsa = ellipticcurve.Ecdsa
 var PrivateKey = ellipticcurve.PrivateKey
 
-// REVIEW Experimental air module
-var air = require("./classes/air")
-var imc = new air()
-imc.initialize("identity")
 
 // INFO This library contains methods to manage, create, certify and verify identities
 
@@ -151,4 +147,4 @@ function stringToHex(str) {
     return bufStr.toString("hex")
 }
 
-module.exports = { generate, certify, verify, load, imc }
+module.exports = { generate, certify, verify, load }
