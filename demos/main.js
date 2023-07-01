@@ -3,58 +3,22 @@ const fs = require("fs")
 const term = require("terminal-kit").terminal
 const _db = require("./model/database")
 
+// INFO intercom (in main.js mainly but can be used by other modules) publish variables initial state and variables modifications
+// Each module (or main.js if another module manages a variable) will need to set up its subscriber (see network.js as an example)
+const intercom = require("./libs/intercom.js")
+const network = require("./libs/network.js") // Definitions for network activity (server, client, listeners) and intercom listeners
+
 // SECTION Globals and imports
 // ANCHOR Loading the chain db library to interact with the blockchain
 const { ChainDB, Block, Transaction } = require("./libs/classes/chain.js")
 
 let chainDB = new ChainDB()
 
-// REVIEW Experimental IMC (Inter Module Communication)
-// INFO This is a way to communicate between modules
-// * For every module that will share informations with us, it needs to import air.js
-// * and initialize it with a name, then export the imc interface
-// ** In module.js
-// var air = require("./air.js")
-// var imc = new air()
-// imc.initialize("module_name")
-// * Now in main.js (or any controller script anyway) we can import the module and register it
-// ** In main.js
-// const module = require("./module.js")
-// imc.registered_modules.push({ name: "module_name", registered: true, socket: module.imc })
-// * Now we can set variables valid for all the modules we registered
-// ** In main.js
-// imc.states["variable"] = "value" // Registering locally
-// imc.broadcast("variable", "value") // Broadcasting to all the modules
-// * After this point, the module can access the variable with imc.states["variable"]
-// ** In module.js
-// module.writeFile(imc.states["variable"])
-var air = require("./libs/classes/air.js")
+
 // ANCHOR DEMOS Libraries
-
-// Experimental IMC
-var imc = new air()
-imc.initialize("main")
-
 // For every module we want to communicate with, we need to register its imc interface
 const identity = require("./libs/identity.js") // Provides cryptographical methods
-imc.registered_modules.push({
-    name: "identity",
-    registered: true,
-    socket: identity.imc,
-})
 const messages = require("./libs/messages.js") // Definition of the structure of messages (see libs/network.js listeners)
-imc.registered_modules.push({
-    name: "messages",
-    registered: true,
-    socket: messages.imc,
-})
-const network = require("./libs/network.js") // Definitions for network activity (server, client, listeners)
-
-imc.registered_modules.push({
-    name: "network",
-    registered: true,
-    socket: network.imc,
-})
 
 const communications = require("./libs/communications.js") // Module used to manage all kind of peers communication
 const Chainteract = require("./libs/classes/chainteract.js")
@@ -64,16 +28,13 @@ const { print } = require("./libs/logging.js") // Helper for debugging
 // NOTE Defining peers object and registering it through the modules
 // NOTE peers contains the methods that work on peerlist and related variables (shared)
 var { methods, Peer } = require("./libs/classes/peers.js")
-imc.states["peers"] = {
+let peers = {
     methods: methods,
     peerlist: [],
     Peer: Peer,
 }
-imc.broadcast("peers", imc.states["peers"])
 
-let responseRegistry = new communications.ResponseRegistry() // NOTE This will be shared through IMC and is a global registry
-imc.states["responseRegistry"] = responseRegistry
-imc.broadcast("responseRegistry", responseRegistry)
+let responseRegistry = new communications.ResponseRegistry() // NOTE This will be shared through intercom and is a global registry
 
 // Main varables to pass around
 var id = {
@@ -81,6 +42,11 @@ var id = {
     rsa: null,
 } // An object with { ed25519: keypair + pem + hex, rsa: keypair }
 // !SECTION Globals and imports
+
+// SECTION Publish variables initial state
+intercom.broadcast("PEERS", peers)
+intercom.broadcast("RESPONSE_REGISTRY", responseRegistry)
+// !SECTION Publish variables initial state
 
 // SECTION Methods called by
 // INFO Checking a peer through the id
@@ -105,10 +71,10 @@ async function sync() {
     // FIXME ^ Why above values go to the end? Because we should await somehow even if it is not async (??) (see chain.js, fixme on read)
     console.log("[SYNC] Fetching data from peers")
     // Asking to all the peers for the last block
-    for (let i = 0; i < imc.states["peers"].peerlist.length; i++) {
+    for (let i = 0; i < peers.peerlist.length; i++) {
         // Creating a comlink object
         let _comlink = new communications.ComLink()
-        let _currentPeer = imc.states["peers"].peerlist[i]
+        let _currentPeer = peers.peerlist[i]
         // Generate the message to ask for the last block
         let _blockAskMessage = new messages.Message(id.ecdsa.privateKey)
         _blockAskMessage.initialize(
@@ -131,8 +97,7 @@ async function sync() {
         _comlink.properties.is_reply = false
         // Propagating the responseRegistry actual status
         responseRegistry.requestResponse(_comlink)
-        imc.states["responseRegistry"] = responseRegistry
-        imc.broadcast("responseRegistry", responseRegistry)
+        intercom.broadcast("RESPONSE_REGISTRY", responseRegistry)
         // Ask for the last block
         await _comlink.broadcastMessageToPeer(
             _currentPeer,
@@ -165,7 +130,7 @@ async function sync() {
 
 // INFO Bootstrapping the peers to find at least one valid peer
 async function peerBootstrap(peers_list) {
-    let peerlist = imc.states["peers"]["peerlist"]
+    let peerlist = peers.peerlist
     // Validity check
     for (let i = 0; i < peers_list.length; i++) {
         let _currentPeerURL = peers_list[i] // The url of the peer
@@ -274,11 +239,9 @@ async function main() {
     // Log identity
     print.log("WE ARE " + id.ecdsa.publicKeyHex)
     // Setting the common variables and propagating them
-    imc.states["id"] = id
-    imc.broadcast("id", id)
+    intercom.broadcast("IDENTITY", id)
     // Sharing it with the network
-    imc.states["publicKeyHex"] = id.ecdsa.publicKeyHex
-    imc.broadcast("publicKeyHex", id.ecdsa.publicKeyHex)
+    intercom.broadcast("PUBLIC_HEX_KEY", id.ecdsa.publicKeyHex)
     // INFO Loading the known peers
     if (!fs.existsSync("./demos_peers")) {
         // Exit if there are no peers
@@ -294,11 +257,12 @@ async function main() {
     // Loading the peers
     let peers_list = JSON.parse(fs.readFileSync("./demos_peers", "utf8"))
     // INFO Setting the common variables and propagating them
-    imc.states.peers["peerlist"] = await peerBootstrap(peers_list)
-    //imc.broadcast("peers", imc.states.peers)
+    peers_list = await peerBootstrap(peers_list)
+    peers.peerlist = peers_list
+    intercom.broadcast("PEERS", peers)
     term.green.bold(
         "[BOOTSTRAP] Peers loaded (" +
-            imc.states["peers"]["peerlist"].length +
+            peers.peerlist.length +
             ")\n",
     )
     // INFO Now ensuring we have an initialized chain or initializing the genesis block

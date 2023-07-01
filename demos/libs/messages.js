@@ -2,10 +2,6 @@
 const { Buffer } = require("buffer")
 const sha256 = require("sha256")
 
-// REVIEW Experimental air module
-var air = require("./classes/air")
-var imc = new air()
-imc.initialize("messages")
 var identity = require("./identity")
 
 // SECTION Object based version
@@ -67,4 +63,4 @@ var decode = {
     },
 }
 
-module.exports = { imc, encode, decode, Message }
+module.exports = { encode, decode, Message }
