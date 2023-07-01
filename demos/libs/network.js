@@ -13,16 +13,42 @@ const { io } = require("socket.io-client")
 const io_server = new Server(server)
 const identity = require("./identity")
 const term = require("terminal-kit").terminal
+const intercom = require("./intercom.js")
 var client
 
 // NOTE Data for inspecting the blockchain
 const { ChainDB, Block, Transaction } = require("./classes/chain.js")
 let chainDB = new ChainDB()
 
+// SECTION Setting up listeners and variables for the intercom
+var peers
+var id
+var responseRegistry
+let subscriber = function (msg, data) {
+    console.log("[INTERCOM][" + msg + "] Received data")
+    if (msg === "PEERS") {
+        peers = data
+    }
+    else if (msg === "IDENTITY") {
+        id = data
+    }
+    else if (msg === "RESPONSE_REGISTRY") {
+        responseRegistry = data
+    }
+    // Web2 Listener
+    else if (msg === "WEB2") {
+        console.log(data)
+    }
+}
+intercom.subscribe("PEERS", subscriber)
+intercom.subscribe("IDENTITY", subscriber)
+// !SECTION Setting up listeners and variables for the intercom
+
 // REVIEW Experimental air module
+/*
 var air = require("./classes/air")
 var imc = new air()
-imc.initialize("network")
+imc.initialize("network")*/
 const { Peer } = require("./classes/peers.js")
 var transactions = require("./transactions.js")
 
@@ -49,20 +75,20 @@ var listeners = {
             // TODO Find a way to map peer to peer.socket as in skeleton
             print.log("user disconnected")
             // Removing the peer from the list if it was in
-            await imc["states"].peers.methods.removePeer(peer) // We remove it fully: a peer is 2 way connected
+            await peers.methods.removePeer(peer) // We remove it fully: a peer is 2 way connected
         })
         // INFO Managing authentications queries using imc states (called on connect on both sides)
         peer.socket.on("auth_ask", async data => {
             // REVIEW Signing data.message with the private key
             let _signature = await identity.generate.ecdsa.sign(
                 data.message,
-                imc.states["id"].privateKey,
+                id.privateKey,
             )
             // REVIEW Sending the signature back along with the public key and the message
             let _sendBack = [
                 data.message,
                 _signature,
-                imc.states["id"].publicKey,
+                id.publicKey,
             ]
             peer.socket.emit("auth_reply", _sendBack)
         })
@@ -77,7 +103,7 @@ var listeners = {
             console.log("[PEER] Received reply to " + request.muid)
             //console.log(JSON.stringify(request, null, 2))
             // REVIEW Check if the responseRegistry contains the muid of the request
-            let _responseRegistry = imc["states"]["responseRegistry"].list
+            let _responseRegistry = responseRegistry.list
             //console.log(_responseRegistry)
             let _response = _responseRegistry[request.muid]
             if (!_response) {
@@ -122,7 +148,7 @@ var listeners = {
             peerSocket.emit("auth_ask") // Once we are able to listen for the reply, we send the auth_ask event
             // TODO Adding _peerForged.identity
             // INFO Adding the peer to the list
-            await imc["states"].peers.methods.addPeer(_peerForged)
+            await peers.methods.addPeer(_peerForged)
             // NOTE From now on, the peer is connected and is able to communicate through advanced methods (as below)
             peerSocket.on("comlink", async request => {
                 // FIXME The below logic needs to be refactored in a separate method as it is used by other listeners too
@@ -299,16 +325,16 @@ var listeners = {
             // TODO Authentication by identity verification
             // TODO Adding _peerForged.identity
             // INFO Adding the peer to the list
-            await imc["states"].peers.methods.addPeer(peer)
+            await peers.methods.addPeer(peer)
         })
         print.log("[CLIENT] Listeners set up")
     },
-    // INFO Listeners for broadcast events internally to the node
-    broadcast_listeners: async function () {
+    // INFO Listeners for broadcast events internally to the node (moved to the beginning with broadcast listeners)
+    /*broadcast_listeners: async function () {
         imc.broadcast.on("web2", async web2 => {
             console.log(web2)
         })
-    },
+    },*/
 }
 
 // ANCHOR Events (aka handling incoming data)
@@ -339,7 +365,7 @@ var methods = {
     common: {
         // Getters
         getPeers: async function () {
-            return imc["states"].peers.methods.getPeers() // REVIEW Return of a return but looks like the safer way
+            return peers.methods.getPeers() // REVIEW Return of a return but looks like the safer way
         },
     },
     // INFO Methods for server
@@ -380,4 +406,4 @@ var methods = {
     },
 }
 
-module.exports = { app, events, methods, listeners, imc }
+module.exports = { app, events, methods, listeners }
