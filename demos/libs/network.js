@@ -117,6 +117,7 @@ var listeners = {
             // Checking validity of the comlink
             let valid = await _comlink_request.validateComlink()
             if (!valid[0]) {
+                console.log("[COMLINK VALIDATION ERROR] " + valid[1])
                 peer.socket.emit("comlink", {
                     status: "error",
                     message: valid[1],
@@ -174,6 +175,7 @@ var listeners = {
                 // Checking validity of the comlink
                 let valid = await _comlink_request.validateComlink()
                 if (!valid[0]) {
+                    console.log("[COMLINK VALIDATION ERROR] " + valid[1])
                     peerSocket.emit("comlink", {
                         status: "error",
                         message: valid[1],
