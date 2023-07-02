@@ -102,11 +102,26 @@ var listeners = {
             let _response = _responseRegistry[request.muid]
             if (!_response) {
                 console.log("[PEER] No response expected for " + request.muid)
+                return
             } else {
                 console.log(
                     "[PEER] Received expected response for " + request.muid,
                 )
                 // TODO Continue with the response logic (as per filling comlink if needed and verifications and so on)
+            }
+            // GIving the request the comlink methods
+            let _comlink_request = new communications.ComLink()
+            _comlink_request.chain = request.chain
+            _comlink_request.muid = request.muid
+            _comlink_request.properties = request.properties
+            // Checking validity of the comlink
+            let valid = await _comlink_request.validateComlink()
+            if (!valid[0]) {
+                peer.socket.emit("comlink", {
+                    status: "error",
+                    message: valid[1],
+                })
+                return
             }
         })
     },
