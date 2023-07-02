@@ -140,6 +140,7 @@ var listeners = {
             // REVIEW Authentication by identity verification
             // INFO Managing authentications responses using imc states (called after a auth_ask event as specified above)
             peerSocket.on("auth_reply", async data => {
+                console.log(data)
                 // REVIEW Verify the signature with the public key on the message
                 let _verification = await identity.generate.ecdsa.verify(
                     data[0],

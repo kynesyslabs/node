@@ -105,8 +105,8 @@ class ComLink {
     constructor() {
         this.chain = {
             current: {
-                currentMessage: null, // must be a emptyMessage like object (see libs/messages.js)
-                currentMessageHash: null, // is either null or the hash of the last message in the chain
+                currentMessage: null, // must be a emptyMessage.bundle like object (see libs/messages.js)
+                currentMessageHash: null, // TODO Eliminate as is in current message is either null or the hash of the last message in the chain
                 previousHashes: [], // Keep track of the previous hashes to have full integrity
             },
             comlinkCurrentHash: null, // is the hashed version of .current
@@ -154,7 +154,7 @@ class ComLink {
             )
             // NOTE Setting up the listener to receive the response is useless as we use general listeners
             // Setting the current message as the head of the chain
-            this.chain.current.currentMessage = JSON.stringify(message.content)
+            this.chain.current.currentMessage = JSON.stringify(message)
             // Hashing the message for integrity
             this.chain.current.currentMessageHash = message.hash
             await this.hashAndSignCurrent(privateKey)
@@ -198,33 +198,49 @@ class ComLink {
     }
     // INFO Generic comlink validation function
     async validateComlink() {
-        console.log("[COMLINK VALIDATION DEBUG MODE] Always true")
-        return [true, "debug"] // TODO Returning true for debug
+        let _currentMessage = JSON.parse(this.chain.current.currentMessage)
         // Check if the current message hash matches the message
         let stringifiedMessage = JSON.stringify(
-            this.chain.current.currentMessage,
+            _currentMessage.content,
         )
+        console.log("[COMLINK VALIDATION] Stringified message content successfully")
+        console.log(stringifiedMessage)
         let _derivedMessageHash = sha256(stringifiedMessage)
-        if (!(_derivedMessageHash === this.chain.current.currentMessageHash))
+        console.log("[COMLINK VALIDATION] Reported message hash: " + _currentMessage.hash)
+        console.log("[COMLINK VALIDATION] Message hash derived: " + _derivedMessageHash)
+        if (!(_derivedMessageHash === _currentMessage.hash))
             return [false, "comlink message hash mismatch"]
+        console.log("...OK")
         // Check if current hash matches the current field
         let stringifiedCurrent = JSON.stringify(this.chain.current)
         let _derivedCurrentHash = sha256(stringifiedCurrent)
+        console.log("[COMLINK VALIDATION] Reported current hash: " + this.chain.comlinkCurrentHash)
+        console.log("[COMLINK VALIDATION] Current hash derived: " + _derivedCurrentHash)
         if (!(_derivedCurrentHash === this.chain.comlinkCurrentHash))
             return [false, "current hash mismatch"]
+        console.log("...OK")
+        console.log("[COMLINK VALIDATION] Reported sender: " + _currentMessage.content.sender)
+        let _publicKeyDerived = identity.generate.ecdsa.ingestHex(_currentMessage.content.sender) 
         // Check if the comlink signature matches the comlink sender
+        console.log("[COMLINK VALIDATION] Current Hash Signature: ")
+        console.log(this.chain.comlinkCurrentHashSignature)
+
+        console.log("[COMLINK VALIDATION DEBUG MODE] Always true (on signature)")
+        return [true, "debug"] // TODO Returning true for debug
+        
         let _signatureValidity = await identity.generate.ecdsa.verify(
             this.chain.comlinkCurrentHash,
             this.chain.comlinkCurrentHashSignature,
-            this.chain.current.currentMessage.content.sender,
-        )
+            _publicKeyDerived,
+        ) // FIXME in ecdsa.js (node_modules/starkbank/....) -> math.js -> inv(x, s) - > x.eq(0)
         if (!_signatureValidity)
             return [false, "invalid comlink current hash signature"]
         // Check if the message signature matches the sender too
+        console.log("[COMLINK VALIDATION] Message Hash Signature: " + _currentMessage.signature)
         let _messageSignatureValidity = await identity.generate.ecdsa.verify(
-            this.chain.current.currentMessageHash,
-            this.chain.current.currentMessage.signature,
-            this.chain.current.currentMessage.content.sender,
+            _currentMessage.hash,
+            _currentMessage.signature,
+            _publicKeyDerived,
         )
         if (!_messageSignatureValidity)
             return [false, "invalid message hash signature"]

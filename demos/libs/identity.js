@@ -4,7 +4,7 @@ const forge = require("node-forge")
 const { Buffer } = require("buffer")
 const fs = require("fs")
 var rsa = forge.pki.rsa
-var ellipticcurve = require("starkbank-ecdsa")
+var ellipticcurve = require("starkbank-ecdsa") // FIXME Is this to change? Probably yes!
 var Ecdsa = ellipticcurve.Ecdsa
 var PrivateKey = ellipticcurve.PrivateKey
 
@@ -25,15 +25,7 @@ var generate = {
                 privateKeyHex: stringToHex(privateKey.toPem()),
                 publicKey: publicKey,
                 publicKeyPEM: publicKey.toPem(),
-                publicKeyHex: stringToHex(publicKey.toPem())
-                    .replace(
-                        "2d2d2d2d2d424547494e205055424c4943204b45592d2d2d2d2d",
-                        "",
-                    )
-                    .replace(
-                        "2d2d2d2d2d454e44205055424c4943204b45592d2d2d2d2d0a",
-                        "",
-                    ),
+                publicKeyHex: stringToHex(publicKey.toPem()),
             }
             return keypair
         },
@@ -47,15 +39,7 @@ var generate = {
                 privateKeyHex: stringToHex(privateKey.toPem()),
                 publicKey: publicKey,
                 publicKeyPEM: publicKey.toPem(),
-                publicKeyHex: stringToHex(publicKey.toPem())
-                    .replace(
-                        "2d2d2d2d2d424547494e205055424c4943204b45592d2d2d2d2d",
-                        "",
-                    )
-                    .replace(
-                        "2d2d2d2d2d454e44205055424c4943204b45592d2d2d2d2d0a",
-                        "",
-                    ),
+                publicKeyHex: stringToHex(publicKey.toPem()),
             }
             return keypair
         },
@@ -68,6 +52,15 @@ var generate = {
         verify: async function (message, signature, publicKey) {
             var verified = Ecdsa.verify(message, signature, publicKey)
             return verified // true or false compared to the publicKey provided
+        },
+        // INFO Hex to PublicKey
+        ingestHex: function (hex_public) {
+            let pem_public = hexToString(hex_public) // FIXME Decode it
+            console.log("[DECODED] Public Key to PEM")
+            return ellipticcurve.PublicKey.fromPem(pem_public)
+        },
+        ingestPEM: function (pem_public) {
+            return ellipticcurve.PublicKey.fromPem(pem_public)
         },
     },
     // NOTE RSA is the algorithm used for identities verifications
@@ -145,6 +138,11 @@ function stringToHex(str) {
 
     //with buffer, you can convert it into hex with following code
     return bufStr.toString("hex")
+}
+
+function hexToString(hex) {
+    let bufStr = Buffer.from(hex, "hex")
+    return bufStr.toString("utf-8")
 }
 
 module.exports = { generate, certify, verify, load }
