@@ -195,6 +195,35 @@ class ComLink {
         }
         await this.broadcastToPeer(compatible_peer, callback)
     }
+    // INFO Generic comlink validation function
+    async validateComlink() {
+        // Check if the current message hash matches the message
+        let stringifiedMessage = JSON.stringify(
+            this.chain.current.currentMessage,
+        )
+        let _derivedMessageHash = sha256(stringifiedMessage)
+        if (!(_derivedMessageHash === this.chain.current.currentMessageHash)) return [false, "comlink message hash mismatch"]
+        // Check if current hash matches the current field
+        let stringifiedCurrent = JSON.stringify(this.chain.current)
+        let _derivedCurrentHash = sha256(stringifiedCurrent)
+        if (!(_derivedCurrentHash === this.chain.comlinkCurrentHash)) return [false, "current hash mismatch"]
+        // Check if the comlink signature matches the comlink sender
+        let _signatureValidity = await identity.generate.ecdsa.verify(
+            this.chain.comlinkCurrentHash,
+            this.chain.comlinkCurrentHashSignature,
+            this.chain.current.currentMessage.content.sender,
+        )
+        if (!_signatureValidity) return [false, "invalid comlink current hash signature"]
+        // Check if the message signature matches the sender too
+        let _messageSignatureValidity = await identity.generate.ecdsa.verify(
+            this.chain.current.currentMessageHash,
+            this.chain.current.currentMessage.signature,
+            this.chain.current.currentMessage.content.sender,
+        )
+        if (!_messageSignatureValidity) return [false, "invalid message hash signature"]
+        // If we are here, all is well
+        return [true, "valid"]
+    }
 }
 // !SECTION Comlink
 

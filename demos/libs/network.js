@@ -28,11 +28,9 @@ let subscriber = function (msg, data) {
     console.log("[INTERCOM][" + msg + "] Received data")
     if (msg === "PEERS") {
         peers = data
-    }
-    else if (msg === "IDENTITY") {
+    } else if (msg === "IDENTITY") {
         id = data
-    }
-    else if (msg === "RESPONSE_REGISTRY") {
+    } else if (msg === "RESPONSE_REGISTRY") {
         responseRegistry = data
     }
     // Web2 Listener
@@ -73,7 +71,6 @@ var listeners = {
         // peer is a peer object
         // Managing disconnection
         peer.socket.on("disconnect", async () => {
-            // TODO Find a way to map peer to peer.socket as in skeleton
             print.log("user disconnected")
             // Removing the peer from the list if it was in
             await peers.methods.removePeer(peer) // We remove it fully: a peer is 2 way connected
@@ -86,11 +83,7 @@ var listeners = {
                 id.privateKey,
             )
             // REVIEW Sending the signature back along with the public key and the message
-            let _sendBack = [
-                data.message,
-                _signature,
-                id.publicKey,
-            ]
+            let _sendBack = [data.message, _signature, id.publicKey]
             peer.socket.emit("auth_reply", _sendBack)
         })
         // REVIEW public endpoint is currently for debugging purposes
@@ -163,19 +156,32 @@ var listeners = {
                 _comlink_request.chain = request.chain
                 _comlink_request.muid = request.muid
                 _comlink_request.properties = request.properties
+                // Checking validity of the comlink
+                let valid = await _comlink_request.validateComlink()
+                if (!valid[0]) {
+                    peerSocket.emit("comlink", {
+                        status: "error",
+                        message: valid[1],
+                    })
+                    return
+                }
                 // Taking the message part
                 let content = JSON.parse(request.chain.current.currentMessage)
                 // Sanitizing the request
-                if (!request.muid)
+                if (!request.muid) {
                     peerSocket.emit("comlink", {
                         status: "error",
                         message: "No muid specified",
                     })
-                if (!content.message)
+                    return
+                }
+                if (!content.message) {
                     peerSocket.emit("comlink", {
                         status: "error",
                         message: "No message specified",
                     })
+                    return
+                }
                 // Listening for commands
                 // INFO This switch handles the public methods that should have this structure:
                 //      { method: "methodName", params: { ... }, muid: [number] }
