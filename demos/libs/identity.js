@@ -1,3 +1,4 @@
+// INFO This library contains methods to manage, create, certify and verify identities
 /* eslint-disable indent */
 /* eslint-disable no-unused-vars */
 const forge = require("node-forge")
@@ -8,9 +9,49 @@ var ellipticcurve = require("starkbank-ecdsa") // FIXME Is this to change? Proba
 var Ecdsa = ellipticcurve.Ecdsa
 var PrivateKey = ellipticcurve.PrivateKey
 
+// TODO Replace starkbank-ecdsa with ed25519 or crypto
+const crypto = require("crypto")
+var hash_type = "sha256"
+var curve_type = "secp256k1"
 
-// INFO This library contains methods to manage, create, certify and verify identities
+var cryptography = {
+    new: function () {
+        let {privateKey, publicKey} = crypto.generateKeyPairSync("ec", {
+            namedCurve: curve_type,
+            publicKeyEncoding: { type: "spki", format: "pem" },
+            privateKeyEncoding: { type: "pkcs8", format: "pem" },
+        })
+        let keypair = {
+            privateKey: privateKey,
+            privateKeyB64: privateKey.toString("base64"),
+            privateKeyHex: stringToHex(privateKey.toString("base64")),
+            publicKey: publicKey,
+            publicKeyB64: publicKey.toString("base64"),
+            publicKeyHex: stringToHex(publicKey.toString("base64")),
+        }
+        return keypair
+    },
+    newFromSeed: function (string_seed) {
+        // TODO 
+    },
+    // TODO Ensure hex/b64 to key type conversion and utilities
+    sign: function (message, privateKey) {
+        let sign = crypto.createSign(hash_type)
+        sign.write(message)
+        sign.end()
+        var signature = sign.sign(privateKey, "hex")
+        return signature
+    },
+    verify: function (message, signature, publicKey) {
+        let verify = crypto.createVerify(hash_type)
+        verify.write(message)
+        verify.end()
+        let verified = verify.verify(publicKey, signature, "hex")
+        return verified
+    },
+}
 
+// TODO Replace the below methods for ecdsa with crypto when ready
 var generate = {
     // NOTE ecdsa is the algorithm used for wallets and transactions
     ecdsa: {
