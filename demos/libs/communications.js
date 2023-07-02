@@ -199,7 +199,7 @@ class ComLink {
     // INFO Generic comlink validation function
     async validateComlink() {
         console.log("[COMLINK VALIDATION DEBUG MODE] Always true")
-        return true // TODO Returning true for debug
+        return [true, "debug"] // TODO Returning true for debug
         // Check if the current message hash matches the message
         let stringifiedMessage = JSON.stringify(
             this.chain.current.currentMessage,
