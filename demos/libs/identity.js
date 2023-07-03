@@ -5,48 +5,62 @@ const forge = require("node-forge")
 const { Buffer } = require("buffer")
 const fs = require("fs")
 var rsa = forge.pki.rsa
+var ed25519 = forge.pki.ed25519
 var ellipticcurve = require("starkbank-ecdsa") // FIXME Is this to change? Probably yes!
 var Ecdsa = ellipticcurve.Ecdsa
 var PrivateKey = ellipticcurve.PrivateKey
 
-// TODO Replace starkbank-ecdsa with ed25519 or crypto
-const crypto = require("crypto")
-var hash_type = "sha256"
-var curve_type = "secp256k1"
+// TODO Replace starkbank-ecdsa with ed25519 (above)
 
 var cryptography = {
     new: function () {
-        let {privateKey, publicKey} = crypto.generateKeyPairSync("ec", {
-            namedCurve: curve_type,
-            publicKeyEncoding: { type: "spki", format: "pem" },
-            privateKeyEncoding: { type: "pkcs8", format: "pem" },
-        })
+        // TODO Finish conversions
+        var seed = forge.random.getBytesSync(32)
+        var keys = ed25519.generateKeyPair({ seed: seed })
         let keypair = {
-            privateKey: privateKey,
-            privateKeyB64: privateKey.toString("base64"),
-            privateKeyHex: stringToHex(privateKey.toString("base64")),
-            publicKey: publicKey,
-            publicKeyB64: publicKey.toString("base64"),
-            publicKeyHex: stringToHex(publicKey.toString("base64")),
+            privateKey: keys.privateKey,
+            privateKeyPEM: null,
+            privateKeyHex: null,
+            publicKey: keys.publicKey,
+            publicKeyPEM: null,
+            publicKeyHex: null,
         }
         return keypair
     },
     newFromSeed: function (string_seed) {
-        // TODO 
+        // TODO Finish conversions
+        let bufferSeed = new forge.util.ByteBuffer(string_seed, "utf-8")
+        var keys = ed25519.generateKeyPair({ seed: bufferSeed })
+        let keypair = {
+            privateKey: keys.privateKey,
+            privateKeyPEM: null,
+            privateKeyHex: null,
+            publicKey: keys.publicKey,
+            publicKeyPEM: null,
+            publicKeyHex: null,
+        }
+        return keypair
     },
     // TODO Ensure hex/b64 to key type conversion and utilities
     sign: function (message, privateKey) {
-        let sign = crypto.createSign(hash_type)
-        sign.write(message)
-        sign.end()
-        var signature = sign.sign(privateKey, "hex")
+        let signature = ed25519.sign({
+            message: message,
+            encoding: "utf8",
+            privateKey: privateKey,
+        })
+        // REVIEW If the return is ok
         return signature
     },
     verify: function (message, signature, publicKey) {
-        let verify = crypto.createVerify(hash_type)
-        verify.write(message)
-        verify.end()
-        let verified = verify.verify(publicKey, signature, "hex")
+        var verified = ed25519.verify({
+            message: message,
+            encoding: "utf8",
+            // node.js Buffer, Uint8Array, forge ByteBuffer, or binary string
+            signature: signature,
+            // node.js Buffer, Uint8Array, forge ByteBuffer, or binary string
+            publicKey: publicKey,
+        })
+        // REVIEW If the return is ok
         return verified
     },
 }
