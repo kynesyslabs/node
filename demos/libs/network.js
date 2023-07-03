@@ -78,7 +78,7 @@ var listeners = {
         // INFO Managing authentications queries using imc states (called on connect on both sides)
         peer.socket.on("auth_ask", async data => {
             // REVIEW Signing data.message with the private key
-            let _signature = await identity.generate.ecdsa.sign(
+            let _signature = await identity.cryptography.sign(
                 data.message,
                 id.privateKey,
             )
@@ -142,7 +142,7 @@ var listeners = {
             peerSocket.on("auth_reply", async data => {
                 console.log(data)
                 // REVIEW Verify the signature with the public key on the message
-                let _verification = await identity.generate.ecdsa.verify(
+                let _verification = await identity.cryptography.verify(
                     data[0],
                     data[1],
                     data[2],
@@ -255,17 +255,17 @@ var listeners = {
                             break
                     }
                     // REVIEW I don't think we need to do this every time
-                    const id_ecdsa = await identity.load.fromFile(
+                    const id_ed25519 = await identity.cryptography.load(
                         "./.demos_identity",
                     )
                     // Building a message to send back in the comlink
                     var response_message = new messages.Message(
-                        id_ecdsa.privateKey,
+                        id_ed25519.privateKey,
                     )
                     response_message.initialize(
                         "reply",
                         JSON.stringify(response),
-                        id_ecdsa.publicKeyHex,
+                        id_ed25519.publicKeyHex,
                         "placeholder",
                         null,
                         null,
@@ -275,7 +275,7 @@ var listeners = {
                     _comlink_request.properties.require_reply = require_reply // Setting the require_reply flag as provided above
                     await _comlink_request.replyToMessage(
                         response_message.bundle,
-                        id_ecdsa.privateKey,
+                        id_ed25519.privateKey,
                     )
                     // Sending back the response
                     console.log("[SERVER] Sending back comlink")

@@ -19,11 +19,7 @@ var cryptography = {
         var keys = ed25519.generateKeyPair({ seed: seed })
         let keypair = {
             privateKey: keys.privateKey,
-            privateKeyPEM: null,
-            privateKeyHex: null,
             publicKey: keys.publicKey,
-            publicKeyPEM: null,
-            publicKeyHex: null,
         }
         return keypair
     },
@@ -33,12 +29,21 @@ var cryptography = {
         var keys = ed25519.generateKeyPair({ seed: bufferSeed })
         let keypair = {
             privateKey: keys.privateKey,
-            privateKeyPEM: null,
-            privateKeyHex: null,
             publicKey: keys.publicKey,
-            publicKeyPEM: null,
-            publicKeyHex: null,
         }
+        return keypair
+    },
+    // Methods
+    save: function(keypair, path) {
+        fs.writeFileSync(path, JSON.stringify(keypair.privateKey))
+    },
+    load: function (path) {
+        let keypair = {
+            privateKey: null,
+            publicKey: null,
+        }
+        keypair.privateKey = Buffer.from(JSON.parse(fs.readFileSync(path)))
+        keypair.publicKey = ed25519.publicKeyFromPrivateKey({privateKey: keypair.privateKey})
         return keypair
     },
     // TODO Ensure hex/b64 to key type conversion and utilities
@@ -67,57 +72,6 @@ var cryptography = {
 
 // TODO Replace the below methods for ecdsa with crypto when ready
 var generate = {
-    // NOTE ecdsa is the algorithm used for wallets and transactions
-    ecdsa: {
-        // INFO Generates a new RSA keypair from random 32 bytes seed
-        new: async function () {
-            // Generate new Keys
-            let privateKey = new PrivateKey()
-            let publicKey = privateKey.publicKey()
-            let keypair = {
-                privateKey: privateKey,
-                privateKeyPEM: privateKey.toPem(),
-                privateKeyHex: stringToHex(privateKey.toPem()),
-                publicKey: publicKey,
-                publicKeyPEM: publicKey.toPem(),
-                publicKeyHex: stringToHex(publicKey.toPem()),
-            }
-            return keypair
-        },
-        // INFO Generates a new RSA keypair from a given seed
-        newFromSeed: async function (string_seed) {
-            let privateKey = PrivateKey.fromString(string_seed)
-            let publicKey = privateKey.publicKey()
-            let keypair = {
-                privateKey: privateKey,
-                privateKeyPEM: privateKey.toPem(),
-                privateKeyHex: stringToHex(privateKey.toPem()),
-                publicKey: publicKey,
-                publicKeyPEM: publicKey.toPem(),
-                publicKeyHex: stringToHex(publicKey.toPem()),
-            }
-            return keypair
-        },
-        // INFO signing method
-        sign: async function (message, privateKey) {
-            let signature = Ecdsa.sign(message, privateKey)
-            return signature // A signed message as a native Buffer
-        },
-        // INFO verifying method
-        verify: async function (message, signature, publicKey) {
-            var verified = Ecdsa.verify(message, signature, publicKey)
-            return verified // true or false compared to the publicKey provided
-        },
-        // INFO Hex to PublicKey
-        ingestHex: function (hex_public) {
-            let pem_public = hexToString(hex_public) // FIXME Decode it
-            console.log("[DECODED] Public Key to PEM")
-            return ellipticcurve.PublicKey.fromPem(pem_public)
-        },
-        ingestPEM: function (pem_public) {
-            return ellipticcurve.PublicKey.fromPem(pem_public)
-        },
-    },
     // NOTE RSA is the algorithm used for identities verifications
     rsa: {
         // INFO Generates a new RSA keypair from a given ecdsa private key
@@ -200,4 +154,7 @@ function hexToString(hex) {
     return bufStr.toString("utf-8")
 }
 
-module.exports = { generate, certify, verify, load }
+function hexToBuffer(hex) {
+}
+
+module.exports = { cryptography, generate, certify, verify, load }
