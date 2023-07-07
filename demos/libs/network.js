@@ -55,6 +55,7 @@ var transactions = require("./transactions.js")
 var communications = require("./communications.js")
 var web2 = require("./web2.js")
 var messages = require("./messages.js")
+var messaging = require("./messaging.js")
 var storage = require("./storage.js")
 
 app.get("/", (req, res) => {
@@ -227,7 +228,8 @@ var listeners = {
 
                 // INFO Messaging endpoint
                 else if (content.type === "messages") {
-                    // TODO Call the appropriate lib to parse the request and act
+                    // REVIEW Call the appropriate lib to parse the request and act
+                    response = await messaging.parseRequest(content)
                 } 
 
                 // INFO Storage endpoint

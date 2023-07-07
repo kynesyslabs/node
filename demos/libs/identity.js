@@ -65,6 +65,14 @@ var cryptography = {
     },
 }
 
+var hashing = {
+    sha256(message) {
+        let md = forge.md.sha256.create()
+        md.update(message)
+        return md.digest().toHex()
+    },
+}
+
 var RSA = {
     // INFO Generates a new RSA keypair from a given ecdsa private key
     new: async function (ecdsa_private_key) {
@@ -121,4 +129,4 @@ function hexToString(hex) {
 
 function hexToBuffer(hex) {}
 
-module.exports = { cryptography, RSA }
+module.exports = { cryptography, hashing, RSA }

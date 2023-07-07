@@ -248,8 +248,8 @@ async function main() {
     // INFO We start the server
     term.yellow("[BOOTSTRAP] Starting the server\n")
     await network.methods.server.start(config.serverPort) // NOTE See network.js for the listeners that are automatically added
-    // Sleep 4 seconds
-    await new Promise(r => setTimeout(r, 2000))
+    // Sleep 1 second
+    await new Promise(r => setTimeout(r, 1000))
     // Loading the peers
     let peers_list = JSON.parse(fs.readFileSync("./demos_peers", "utf8"))
     // INFO Setting the common variables and propagating them
