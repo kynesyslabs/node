@@ -38,7 +38,7 @@ let responseRegistry = new communications.ResponseRegistry() // NOTE This will b
 
 // Main varables to pass around
 var id = {
-    ecdsa: null,
+    ed25519: null,
     rsa: null,
 } // An object with { ed25519: keypair + pem + hex, rsa: keypair }
 // !SECTION Globals and imports
@@ -76,11 +76,11 @@ async function sync() {
         let _comlink = new communications.ComLink()
         let _currentPeer = peers.peerlist[i]
         // Generate the message to ask for the last block
-        let _blockAskMessage = new messages.Message(id.ecdsa.privateKey)
+        let _blockAskMessage = new messages.Message(id.ed25519.privateKey)
         _blockAskMessage.initialize(
             "nodeCall",
             "getLastBlockNumber",
-            id.ecdsa.publicKeyHex,
+            id.ed25519.publicKey,
             _currentPeer,
             null,
             null,
@@ -102,7 +102,7 @@ async function sync() {
         await _comlink.broadcastMessageToPeer(
             _currentPeer,
             _blockAskMessage.bundle,
-            id.ecdsa.privateKey,
+            id.ed25519.privateKey,
         )
         /* REVIEW
          * We should use responseRegistry.hasResponse(_comlink) to check periodically if the response is received
@@ -217,16 +217,12 @@ async function ensureIdentity() {
     // INFO First and foremost, we need to either load or create an identity
     if (fs.existsSync("./.demos_identity")) {
         // Loading the identity
-        id.ecdsa = await identity.load.fromFile("./.demos_identity")
+        id.ed25519 = await identity.cryptography.load("./.demos_identity") // TODO Add load with cryptography
         print.log("Loaded ecdsa identity")
     } else {
-        id.ecdsa = await identity.generate.ecdsa.new()
+        id.ed25519 = await identity.cryptography.new()
         // Writing the identity to disk in binary format
-        fs.writeFileSync(
-            "./.demos_identity",
-            id.ecdsa.privateKey.toPem(),
-            "utf8",
-        )
+        identity.cryptography.save(id.ed25519, "./.demos_identity")
         print.log("Generated new identity")
     }
 }
@@ -237,11 +233,11 @@ async function main() {
     // NOTE The whole first part of main ensures the environment is ready to run
     await ensureIdentity()
     // Log identity
-    print.log("WE ARE " + id.ecdsa.publicKeyHex)
+    print.log("WE ARE " + id.ed25519.publicKey.toString("hex"))
     // Setting the common variables and propagating them
     intercom.broadcast("IDENTITY", id)
     // Sharing it with the network
-    intercom.broadcast("PUBLIC_HEX_KEY", id.ecdsa.publicKeyHex)
+    intercom.broadcast("PUBLIC_HEX_KEY", id.ed25519.publicKey.toString("hex"))
     // INFO Loading the known peers
     if (!fs.existsSync("./demos_peers")) {
         // Exit if there are no peers

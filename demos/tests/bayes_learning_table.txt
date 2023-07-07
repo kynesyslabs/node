@@ -1,0 +1,5 @@
+hello|introduction
+hello there|introduction
+hi boy!|introduction
+farewell|end_conversation
+goodbye|end_conversation
