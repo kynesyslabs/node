@@ -17,9 +17,7 @@ axiosRetry(axios, {
 
 // SECTION Broadcast emitter for web2
 const intercom = require("./intercom.js")
-function emit_web2_broadcast(data) {
-    intercom.broadcast("WEB2", data)
-}
+
 // !SECTION Broadcast emitter for web2
 
 // TODO The system will work as following (see classes/web2class.js for more details):
@@ -89,14 +87,8 @@ async function http_request(httpVerb, url, headers) {
     }
 }
 
-function syncData(web2Data, imcObj) {
-    imcObj.status = web2Data.status
-    imcObj.data.request.timestamp = web2Data.data.request.timestamp
-    imcObj.data.request.timestamp = web2Data.data.request.timestamp
-    imcObj.data.response.timestamp = web2Data.data.response.timestamp
-    imcObj.data.response.result = web2Data.data.response.result
-    imcObj.data.response.hash = web2Data.data.response.hash
-    // Add here for other properties you want to sync
+function emit_web2_broadcast(data) {
+    intercom.broadcast("WEB2", data)
 }
 
 module.exports = { methods }
