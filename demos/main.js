@@ -68,7 +68,7 @@ async function sync() {
     console.log("[SYNC] Our data: fetched")
     let _currentLastBlockNumber = await chainDB.getLastBlockNumber()
     let _currentLastBlockHash = await chainDB.getLastBlockHash()
-    // FIXME ^ Why above values go to the end? Because we should await somehow even if it is not async (??) (see chain.js, fixme on read)
+
     console.log("[SYNC] Fetching data from peers")
     // Asking to all the peers for the last block
     for (let i = 0; i < peers.peerlist.length; i++) {

@@ -51,9 +51,11 @@ imc.initialize("network")*/
 const { Peer } = require("./classes/peers.js")
 var transactions = require("./transactions.js")
 
+// NOTE Libraries to handle specific endpoints
 var communications = require("./communications.js")
 var web2 = require("./web2.js")
 var messages = require("./messages.js")
+var storage = require("./storage.js")
 
 app.get("/", (req, res) => {
     res.send("<h1>Hello from your friendly DEMOS layer</h1>")
@@ -206,6 +208,8 @@ var listeners = {
                 // Where muid is a message unique identifier that is used to identify the response
                 var response
                 var require_reply = false
+
+                // INFO Web2 endpoints
                 if (content.type === "web2Request") {
                     switch (content.message.action) {
                         case "getUrl":
@@ -221,7 +225,18 @@ var listeners = {
                     }
                 }
 
-                if (content.type === "nodeCall") {
+                // INFO Messaging endpoint
+                else if (content.type === "messages") {
+                    // TODO Call the appropriate lib to parse the request and act
+                } 
+
+                // INFO Storage endpoint
+                else if (content.type === "storage") {
+                    // TODO Call the appropriate lib to parse the request and act
+                }
+
+                // INFO Node APIs endpoints
+                else if (content.type === "nodeCall") {
                     switch (content.message) {
                         case "getLastBlockNumber":
                             console.log("[SERVER] Received getLastBlockNumber")
