@@ -64,8 +64,54 @@ app.get("/", (req, res) => {
 
 // Peers library import
 var { print } = require("./logging")
+const { parse } = require("path")
+
+// INFO common comlink digestor
+async function parseComlink(request, peerSocket) {
+    // We need to check if the message request is valid (is a ComLink object)
+    console.log("[SERVER] Received comlink")
+    //console.log(request)
+    // GIving the request the comlink methods
+    let _comlink_request = new communications.ComLink()
+    _comlink_request.chain = request.chain
+    _comlink_request.muid = request.muid
+    _comlink_request.properties = request.properties
+    // Checking validity of the comlink
+    let valid = await _comlink_request.validateComlink()
+    if (!valid[0]) {
+        console.log("[COMLINK VALIDATION ERROR] " + valid[1])
+        peerSocket.emit("comlink", {
+            status: "error",
+            message: valid[1],
+        })
+        return false
+    }
+    console.log("[COMLINK PARSING] Parsing comlink message...")
+    // Sanitizing the request
+    if (!request.muid) {
+        peerSocket.emit("comlink", {
+            status: "error",
+            message: "No muid specified",
+        })
+        return false
+    }
+    console.log("[COMLINK PARSING] MUID: " + request.muid)
+    // Taking the message part
+    let content = JSON.parse(request.chain.current.currentMessage).content
+    if (!content.message) {
+        console.log("[COMLINK PARSING] No message specified. Erroring back.")
+        peerSocket.emit("comlink", {
+            status: "error",
+            message: "No message specified",
+        })
+        return false
+    }
+    console.log("[COMLINK PARSING] Message parsed")
+    return [_comlink_request, content]
+}
 
 // ANCHOR Listeners
+// FIXME Refactor listeners to be unified under a single client+server+common set
 var listeners = {
     // INFO Common listeners for both Server and Client
     // NOTE Is automatically called by server_listeners and client_listeners
@@ -112,21 +158,12 @@ var listeners = {
                 )
                 // TODO Continue with the response logic (as per filling comlink if needed and verifications and so on)
             }
-            // GIving the request the comlink methods
-            let _comlink_request = new communications.ComLink()
-            _comlink_request.chain = request.chain
-            _comlink_request.muid = request.muid
-            _comlink_request.properties = request.properties
-            // Checking validity of the comlink
-            let valid = await _comlink_request.validateComlink()
-            if (!valid[0]) {
-                console.log("[COMLINK VALIDATION ERROR] " + valid[1])
-                peer.socket.emit("comlink", {
-                    status: "error",
-                    message: valid[1],
-                })
-                return
-            }
+            console.log(request)
+            // Parsing the comlink
+            let parsed_comlink = await parseComlink(request, peer.socket) // FIXME Cant parse responses
+            if (!parsed_comlink) return 
+            let _comlink_request = parsed_comlink[0]
+            let content = parsed_comlink[1]
         })
     },
     // INFO Listeners for server
@@ -165,44 +202,13 @@ var listeners = {
             await peers.methods.addPeer(_peerForged)
             // NOTE From now on, the peer is connected and is able to communicate through advanced methods (as below)
             peerSocket.on("comlink", async request => {
-                // FIXME The below logic needs to be refactored in a separate method as it is used by other listeners too
                 // TODO Add responseRegistry support as per main.js and communications.js
                 let _receiver = peerSocket
-                // We need to check if the message request is valid (is a ComLink object)
-                console.log("[SERVER] Received comlink")
-                //console.log(request)
-                // GIving the request the comlink methods
-                let _comlink_request = new communications.ComLink()
-                _comlink_request.chain = request.chain
-                _comlink_request.muid = request.muid
-                _comlink_request.properties = request.properties
-                // Checking validity of the comlink
-                let valid = await _comlink_request.validateComlink()
-                if (!valid[0]) {
-                    console.log("[COMLINK VALIDATION ERROR] " + valid[1])
-                    peerSocket.emit("comlink", {
-                        status: "error",
-                        message: valid[1],
-                    })
-                    return
-                }
-                // Taking the message part
-                let content = JSON.parse(request.chain.current.currentMessage)
-                // Sanitizing the request
-                if (!request.muid) {
-                    peerSocket.emit("comlink", {
-                        status: "error",
-                        message: "No muid specified",
-                    })
-                    return
-                }
-                if (!content.message) {
-                    peerSocket.emit("comlink", {
-                        status: "error",
-                        message: "No message specified",
-                    })
-                    return
-                }
+                // FIXME The below logic needs to be refactored in a separate method as it is used by other listeners too
+                let parsed_comlink = await parseComlink(request)
+                if (!parsed_comlink) return 
+                let _comlink_request = parsed_comlink[0]
+                let content = parsed_comlink[1]
                 // Listening for commands
                 // INFO This switch handles the public methods that should have this structure:
                 //      { method: "methodName", params: { ... }, muid: [number] }
@@ -299,8 +305,13 @@ var listeners = {
                     //console.log(JSON.stringify(_comlink_request))
                     _receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
                 }
+                // INFO Default
+                else {
+                    console.log("[COMLINK INVALID] No known type: " + content.type)
+                }
                 // TODO See in communications.js and find the best way to validate, check and digest the request
             })
+            
             // INFO Debug code
             peerSocket.on("hello", async request => {
                 console.log("[DEBUG] hello there")

@@ -2,7 +2,6 @@
 
 // import dependencies
 let Messaging = require("./classes/messaging_class.js")
-let identity = require("./identity.js")
 
 /* NOTE request.content structure for messaging transmission (as is a Message type of object)
  	content: {
@@ -21,7 +20,24 @@ let identity = require("./identity.js")
 
 let messaging = {
     parseRequest: async function (request) {
-    // TODO Handling first contact, subsequent contacts and closing contacts
+    // TODO Detect closing contacts
+        // Applying object
+        let envelope = new Messaging.Envelope()
+        envelope = request.message
+        // As far as it should be, at this point the message is already validated by the comlink
+        let _hexSender = Buffer.from(request.sender).toString("hex")
+        let stringedMessage = JSON.stringify(envelope, null, 2)
+        console.log("[MESSAGE RECEIVED by " + _hexSender + "]")
+        // REVIEW Should we validate the message here?
+        let partecipants = envelope.session.partecipants
+        // Checking if we have one participant (first contact)
+        if (!partecipants[1].address) {
+            console.log("[MESSAGE ANALYSIS] This is a first contact")
+            // TODO Manage first contact
+        } else {
+            console.log("[MESSAGE ANALYSIS] Looks like a reply")
+            // TODO Manage subsequent contacts
+        }
     },
 }
 

@@ -19,6 +19,7 @@ let chainDB = new ChainDB()
 // For every module we want to communicate with, we need to register its imc interface
 const identity = require("./libs/identity.js") // Provides cryptographical methods
 const messages = require("./libs/messages.js") // Definition of the structure of messages (see libs/network.js listeners)
+let Messaging = require("./libs/classes/messaging_class.js") // Classes for writing istant messages
 
 const communications = require("./libs/communications.js") // Module used to manage all kind of peers communication
 const Chainteract = require("./libs/classes/chainteract.js")
@@ -28,6 +29,7 @@ const { print } = require("./libs/logging.js") // Helper for debugging
 // NOTE Defining peers object and registering it through the modules
 // NOTE peers contains the methods that work on peerlist and related variables (shared)
 var { methods, Peer } = require("./libs/classes/peers.js")
+const { sign } = require("crypto")
 let peers = {
     methods: methods,
     peerlist: [],
@@ -60,6 +62,74 @@ function containsPeer(obj, list) {
     }
     return false
 }
+
+// INFO Debug messaging capabilities
+async function message_test() {
+    // TODO Standardize and use a function to quickly create and reply to messages
+    // Creating a message
+    let envelope = new Messaging.Envelope()
+    envelope.session.chain.currentMessage = "test"
+    envelope.session.partecipants[0].address = id.ed25519.publicKey
+    envelope.session.partecipants[0].route = "placeholder" // TODO Public address + port
+    envelope.session.partecipants[0].login_signature.login_message = "I am " + Buffer.from(id.ed25519.publicKey).toString("hex")
+    let signed_id = identity.cryptography.sign(
+        envelope.session.partecipants[0].login_signature.login_message,
+        id.ed25519.privateKey,
+    )
+    envelope.session.partecipants[0].login_signature.signature = signed_id
+    // Compiling the comlink
+    let _comlink = new communications.ComLink()
+    let _currentPeer = peers.peerlist[0]
+    let _blockAskMessage = new messages.Message(id.ed25519.privateKey)
+    _blockAskMessage.initialize(
+        "messages",
+        envelope,
+        id.ed25519.publicKey,
+        _currentPeer,
+        null,
+        null,
+        null,
+    )
+    // Hash and sign it
+    await _blockAskMessage.finalize()
+    // Putting the message into the comlink
+    console.log(
+        "[DEBUG] Sending a message to " + _currentPeer.socket.id,
+    )
+    // Preparing for a response
+    _comlink.properties.require_reply = true
+
+    // Propagating the responseRegistry actual status
+    responseRegistry.requestResponse(_comlink)
+    intercom.broadcast("RESPONSE_REGISTRY", responseRegistry)
+    // Ask for the last block
+    await _comlink.broadcastMessageToPeer(
+        _currentPeer,
+        _blockAskMessage.bundle,
+        id.ed25519.privateKey,
+    )
+    /* REVIEW
+         * We should use responseRegistry.hasResponse(_comlink) to check periodically if the response is received
+         * Or look into communications.js ResponseRegistry for a TODO that explains how to do this in a more elegant way
+         * In any case, here we should wait until the response is received
+         */
+    let timeout_limit = 2000
+    let timeout_counter = 0
+    while (!responseRegistry.hasResponse(_comlink)) {
+        await sleep(100)
+        timeout_counter += 100
+        if (timeout_counter > timeout_limit) {
+            console.log(
+                "[MESSAGING TEST] Timeout limit reached: no response received",
+            )
+            return false // TODO Manage it
+        }
+    }
+    // REVIEW Ensure the above works
+    // LINK https://stackoverflow.com/questions/23893872/how-to-properly-remove-event-listeners-in-node-js-eventemitter
+    // The above link will be used to remove the listeners once the response is received, will be applied to keep clean the peers connections too
+}
+
 
 // INFO Ensure that we are at the head of the chain
 async function sync() {
@@ -263,8 +333,10 @@ async function main() {
     )
     // INFO Now ensuring we have an initialized chain or initializing the genesis block
     await findGenesisBlock()
+    // INFO Testing the messaging endpoint
+    await message_test()
     // INFO Starting the sync loop
-    let synced = sync() // NOTE We don't wait for the sync to finish because it will run indefinitely in the background
+    //let synced = sync() // NOTE We don't wait for the sync to finish because it will run indefinitely in the background
 }
 main()
 

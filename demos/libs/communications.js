@@ -198,7 +198,15 @@ class ComLink {
     }
     // INFO Generic comlink validation function
     async validateComlink() {
-        let _currentMessage = JSON.parse(this.chain.current.currentMessage)
+        var _currentMessage
+        try {
+            _currentMessage = JSON.parse(this.chain.current.currentMessage)
+        } catch (e) {
+            console.log("[ERROR] Cannot parse:")
+            console.log(this.chain.current.currentMessage)
+            console.log("Due to " + e)
+            return [false, "malformed comlink"]
+        }
         // Check if the current message hash matches the message
         let stringifiedMessage = JSON.stringify(
             _currentMessage.content,
