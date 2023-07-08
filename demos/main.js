@@ -18,7 +18,7 @@ let chainDB = new ChainDB()
 // ANCHOR DEMOS Libraries
 // For every module we want to communicate with, we need to register its imc interface
 const identity = require("./libs/identity.js") // Provides cryptographical methods
-const messages = require("./libs/messages.js") // Definition of the structure of messages (see libs/network.js listeners)
+const messages = require("./libs/classes/transmit_class.js") // Definition of the structure of messages (see libs/network.js listeners)
 let Messaging = require("./libs/classes/messaging_class.js") // Classes for writing istant messages
 
 const communications = require("./libs/communications.js") // Module used to manage all kind of peers communication
@@ -77,6 +77,9 @@ async function message_test() {
         id.ed25519.privateKey,
     )
     envelope.session.partecipants[0].login_signature.signature = signed_id
+    // Setting a receiver (in this case, ourselves)
+    envelope.session.partecipants[1].address = id.ed25519.publicKey
+    envelope.session.partecipants[1].route = "placeholder" // TODO Public address + port
     // Compiling the comlink
     let _comlink = new communications.ComLink()
     let _currentPeer = peers.peerlist[0]
@@ -334,9 +337,10 @@ async function main() {
     // INFO Now ensuring we have an initialized chain or initializing the genesis block
     await findGenesisBlock()
     // INFO Testing the messaging endpoint
-    await message_test()
+    // await message_test()
     // INFO Starting the sync loop
-    //let synced = sync() // NOTE We don't wait for the sync to finish because it will run indefinitely in the background
+    console.log("[MAIN] Starting the sync loop\n")
+    let synced = sync() // NOTE We don't wait for the sync to finish because it will run indefinitely in the background
 }
 main()
 

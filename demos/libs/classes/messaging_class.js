@@ -80,6 +80,7 @@ class Envelope {
             ],
             chain: {
                 currentMessage: null, // Is a Message instance
+                designedReceiver: null, // An index that represents one of the partecipants
                 previousHashes: [], // List of hashes of the previous messages
             },
         }

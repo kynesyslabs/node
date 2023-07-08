@@ -203,7 +203,7 @@ class ComLink {
             _currentMessage = JSON.parse(this.chain.current.currentMessage)
         } catch (e) {
             console.log("[ERROR] Cannot parse:")
-            console.log(this.chain.current.currentMessage)
+            console.log(JSON.stringify(this, null, 2))
             console.log("Due to " + e)
             return [false, "malformed comlink"]
         }
@@ -257,5 +257,6 @@ class ComLink {
     }
 }
 // !SECTION Comlink
+
 
 module.exports = { broadcast, ComLink, ResponseRegistry }

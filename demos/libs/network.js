@@ -54,7 +54,7 @@ var transactions = require("./transactions.js")
 // NOTE Libraries to handle specific endpoints
 var communications = require("./communications.js")
 var web2 = require("./web2.js")
-var messages = require("./messages.js")
+var messages = require("./classes/transmit_class.js")
 var messaging = require("./messaging.js")
 var storage = require("./storage.js")
 
@@ -205,7 +205,7 @@ var listeners = {
                 // TODO Add responseRegistry support as per main.js and communications.js
                 let _receiver = peerSocket
                 // FIXME The below logic needs to be refactored in a separate method as it is used by other listeners too
-                let parsed_comlink = await parseComlink(request)
+                let parsed_comlink = await parseComlink(request, peerSocket)
                 if (!parsed_comlink) return 
                 let _comlink_request = parsed_comlink[0]
                 let content = parsed_comlink[1]
