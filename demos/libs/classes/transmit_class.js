@@ -1,8 +1,7 @@
 // INFO This module exposes methods designed to have an unified way of communicate in DEMOS
-const { Buffer } = require("buffer")
 const sha256 = require("sha256")
 
-var identity = require("./identity")
+var identity = require("../identity")
 
 // SECTION Object based version
 class Message {
@@ -49,18 +48,5 @@ class Message {
 }
 // !SECTION Object based version
 
-var encode = {
-    // INFO Given a JSON data, returns an hex encoded string
-    fromJson: async function (json) {
-        return Buffer.from(JSON.stringify(json)).toString("hex")
-    },
-}
 
-var decode = {
-    // INFO Given an hex encoded string, returns a JSON data
-    toJson: async function (hex) {
-        return JSON.parse(Buffer.from(hex, "hex").toString("utf8"))
-    },
-}
-
-module.exports = { encode, decode, Message }
+module.exports = { Message }
