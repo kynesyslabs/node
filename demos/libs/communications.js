@@ -173,7 +173,7 @@ class ComLink {
             this.chain.current.currentMessageHash,
         )
         // Then we apply the current message to the uplink
-        this.chain.current.currentMessage = reply.content
+        this.chain.current.currentMessage = reply
         // Hashing the message for integrity (using the message proper hash)
         // REVIEW Should we use the message proper hash or recalculate it to see if it is the same?
         this.chain.current.currentMessageHash = reply.hash
@@ -200,10 +200,14 @@ class ComLink {
     async validateComlink() {
         var _currentMessage
         try {
-            _currentMessage = JSON.parse(this.chain.current.currentMessage)
+            if (typeof this.chain.current.currentMessage === "string") {
+                _currentMessage = JSON.parse(this.chain.current.currentMessage)
+            } else {
+                _currentMessage = this.chain.current.currentMessage
+            }
         } catch (e) {
             console.log("[ERROR] Cannot parse:")
-            console.log(JSON.stringify(this, null, 2))
+            console.log(this.chain.current.currentMessage)
             console.log("Due to " + e)
             return [false, "malformed comlink"]
         }
@@ -211,26 +215,26 @@ class ComLink {
         let stringifiedMessage = JSON.stringify(
             _currentMessage.content,
         )
-        console.log("[COMLINK VALIDATION] Stringified message content successfully")
-        console.log(stringifiedMessage)
+        //console.log("[COMLINK VALIDATION] Stringified message content successfully")
+        //console.log(stringifiedMessage)
         let _derivedMessageHash = sha256(stringifiedMessage)
-        console.log("[COMLINK VALIDATION] Reported message hash: " + _currentMessage.hash)
-        console.log("[COMLINK VALIDATION] Message hash derived: " + _derivedMessageHash)
+        //console.log("[COMLINK VALIDATION] Reported message hash: " + _currentMessage.hash)
+        //console.log("[COMLINK VALIDATION] Message hash derived: " + _derivedMessageHash)
         if (!(_derivedMessageHash === _currentMessage.hash))
             return [false, "comlink message hash mismatch"]
-        console.log("...OK")
+        //console.log("...OK")
         // Check if current hash matches the current field
         let stringifiedCurrent = JSON.stringify(this.chain.current)
         let _derivedCurrentHash = sha256(stringifiedCurrent)
-        console.log("[COMLINK VALIDATION] Reported current hash: " + this.chain.comlinkCurrentHash)
-        console.log("[COMLINK VALIDATION] Current hash derived: " + _derivedCurrentHash)
+        //console.log("[COMLINK VALIDATION] Reported current hash: " + this.chain.comlinkCurrentHash)
+        //console.log("[COMLINK VALIDATION] Current hash derived: " + _derivedCurrentHash)
         if (!(_derivedCurrentHash === this.chain.comlinkCurrentHash))
             return [false, "current hash mismatch"]
-        console.log("...OK")
+        //console.log("...OK")
         let _publicKey = Buffer.from(_currentMessage.content.sender)
-        console.log("[COMLINK VALIDATION] Reported sender: " + _publicKey.toString("hex"))
+        //console.log("[COMLINK VALIDATION] Reported sender: " + _publicKey.toString("hex"))
         // Check if the comlink signature matches the comlink sender
-        console.log("[COMLINK VALIDATION] Current Hash Signature: " + this.chain.comlinkCurrentHashSignature.toString("hex"))
+        //console.log("[COMLINK VALIDATION] Current Hash Signature: " + this.chain.comlinkCurrentHashSignature.toString("hex"))
         //console.log("[COMLINK VALIDATION DEBUG MODE] Always true (on signature)")
         //return [true, "debug"] // TODO Returning true for debug
         
@@ -243,7 +247,7 @@ class ComLink {
             return [false, "invalid comlink current hash signature"]
         // Check if the message signature matches the sender too
         _currentMessage.signature = Buffer.from(_currentMessage.signature)
-        console.log("[COMLINK VALIDATION] Message Hash Signature: " + _currentMessage.signature.toString("hex"))
+        //console.log("[COMLINK VALIDATION] Message Hash Signature: " + _currentMessage.signature.toString("hex"))
         let _messageSignatureValidity = await identity.cryptography.verify(
             _currentMessage.hash,
             _currentMessage.signature,

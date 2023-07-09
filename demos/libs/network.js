@@ -89,19 +89,24 @@ async function parseComlink(request, peerSocket) {
     console.log("[COMLINK PARSING] Parsing comlink message...")
     // Sanitizing the request
     if (!request.muid) {
-        peerSocket.emit("comlink", {
-            status: "error",
+        peerSocket.emit("error", {
+            muid: null,
             message: "No muid specified",
         })
         return false
     }
     console.log("[COMLINK PARSING] MUID: " + request.muid)
     // Taking the message part
-    let content = JSON.parse(request.chain.current.currentMessage).content
+    let content
+    if (!(typeof(request.chain.current.currentMessage)==="object")) {
+        content = JSON.parse(request.chain.current.currentMessage).content
+    } else {
+        content = request.chain.current.currentMessage
+    }
     if (!content.message) {
         console.log("[COMLINK PARSING] No message specified. Erroring back.")
-        peerSocket.emit("comlink", {
-            status: "error",
+        peerSocket.emit("error", {
+            muid: request.muid,
             message: "No message specified",
         })
         return false
@@ -165,6 +170,11 @@ var listeners = {
             let _comlink_request = parsed_comlink[0]
             let content = parsed_comlink[1]
         })
+        // INFO Managing errors
+        peer.socket.on("error", async request => {
+            console.log("[PEER] Received error:")
+            console.log(request)
+        })
     },
     // INFO Listeners for server
     server_listeners: async function () {
@@ -202,6 +212,10 @@ var listeners = {
             await peers.methods.addPeer(_peerForged)
             // NOTE From now on, the peer is connected and is able to communicate through advanced methods (as below)
             peerSocket.on("comlink", async request => {
+                // REVIEW I don't think we need to do this every time
+                const id_ed25519 = await identity.cryptography.load(
+                    "./.demos_identity",
+                )
                 // TODO Add responseRegistry support as per main.js and communications.js
                 let _receiver = peerSocket
                 // FIXME The below logic needs to be refactored in a separate method as it is used by other listeners too
@@ -249,6 +263,7 @@ var listeners = {
                         case "getLastBlockNumber":
                             console.log("[SERVER] Received getLastBlockNumber")
                             response = await chainDB.getLastBlockNumber()
+                            console.log(response)
                             break
                         case "getLastBlockHash":
                             response = await chainDB.getLastBlockHash()
@@ -277,40 +292,41 @@ var listeners = {
                             response = await chainDB.getPendingPool()
                             break
                     }
-                    // REVIEW I don't think we need to do this every time
-                    const id_ed25519 = await identity.cryptography.load(
-                        "./.demos_identity",
-                    )
-                    // Building a message to send back in the comlink
-                    var response_message = new messages.Message(
-                        id_ed25519.privateKey,
-                    )
-                    response_message.initialize(
-                        "reply",
-                        JSON.stringify(response),
-                        id_ed25519.publicKeyHex,
-                        "placeholder",
-                        null,
-                        null,
-                    )
-                    // REVIEW and TODO: unless specified, we now send back the updated comlink as a response
-                    _comlink_request.properties.is_reply = true // Setting the reply flag as we are replying
-                    _comlink_request.properties.require_reply = require_reply // Setting the require_reply flag as provided above
-                    await _comlink_request.replyToMessage(
-                        response_message.bundle,
-                        id_ed25519.privateKey,
-                    )
-                    // Sending back the response
-                    console.log("[SERVER] Sending back comlink")
-                    //console.log(JSON.stringify(_comlink_request))
-                    _receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
+                    
                 }
                 // INFO Default
                 else {
                     console.log("[COMLINK INVALID] No known type: " + content.type)
                 }
+                // ANCHOR Reply logic
+                // REVIEW unless specified, we now send back the updated comlink as a response  
+                // Building a message to send back in the comlink
+                var response_message = new messages.Message(
+                    id_ed25519.privateKey,
+                )
+                response_message.initialize( // TODO Specify the answer so that it has a type AND a message
+                    "reply",
+                    JSON.stringify(response), // FIXME Here goes undefined, not good
+                    id_ed25519.publicKey,
+                    "placeholder", // FIXME Also here goes undefined, not good
+                    null,
+                    null,
+                )
+                await response_message.finalize()
+                // Populating the comlink
+                _comlink_request.properties.is_reply = true // Setting the reply flag as we are replying
+                _comlink_request.properties.require_reply = require_reply // Setting the require_reply flag as provided above
+                await _comlink_request.replyToMessage(
+                    response_message.bundle,
+                    id_ed25519.privateKey,
+                )
+                // Sending back the response
+                console.log("[SERVER] Sending back comlink")
+                //console.log(JSON.stringify(_comlink_request))
+                _receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
+            },
                 // TODO See in communications.js and find the best way to validate, check and digest the request
-            })
+            )
             
             // INFO Debug code
             peerSocket.on("hello", async request => {
