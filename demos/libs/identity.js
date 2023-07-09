@@ -5,105 +5,77 @@ const forge = require("node-forge")
 const { Buffer } = require("buffer")
 const fs = require("fs")
 var rsa = forge.pki.rsa
+var ed25519 = forge.pki.ed25519
 var ellipticcurve = require("starkbank-ecdsa") // FIXME Is this to change? Probably yes!
 var Ecdsa = ellipticcurve.Ecdsa
 var PrivateKey = ellipticcurve.PrivateKey
 
-// TODO Replace starkbank-ecdsa with ed25519 or crypto
-const crypto = require("crypto")
-var hash_type = "sha256"
-var curve_type = "secp256k1"
+// TODO Replace starkbank-ecdsa with ed25519 (above)
 
 var cryptography = {
     new: function () {
-        let {privateKey, publicKey} = crypto.generateKeyPairSync("ec", {
-            namedCurve: curve_type,
-            publicKeyEncoding: { type: "spki", format: "pem" },
-            privateKeyEncoding: { type: "pkcs8", format: "pem" },
-        })
+        // TODO Finish conversions
+        var seed = forge.random.getBytesSync(32)
+        var keys = ed25519.generateKeyPair({ seed: seed })
         let keypair = {
-            privateKey: privateKey,
-            privateKeyB64: privateKey.toString("base64"),
-            privateKeyHex: stringToHex(privateKey.toString("base64")),
-            publicKey: publicKey,
-            publicKeyB64: publicKey.toString("base64"),
-            publicKeyHex: stringToHex(publicKey.toString("base64")),
+            privateKey: keys.privateKey,
+            publicKey: keys.publicKey,
         }
         return keypair
     },
     newFromSeed: function (string_seed) {
-        // TODO 
+        // TODO Finish conversions
+        let bufferSeed = new forge.util.ByteBuffer(string_seed, "utf-8")
+        var keys = ed25519.generateKeyPair({ seed: bufferSeed })
+        let keypair = {
+            privateKey: keys.privateKey,
+            publicKey: keys.publicKey,
+        }
+        return keypair
+    },
+    // Methods
+    save: function (keypair, path) {
+        fs.writeFileSync(path, JSON.stringify(keypair.privateKey))
+    },
+    load: function (path) {
+        let keypair = {
+            privateKey: null,
+            publicKey: null,
+        }
+        console.log("keypair.privateKey")
+        keypair.privateKey = Buffer.from(JSON.parse(fs.readFileSync(path)))
+        console.log(keypair.privateKey)
+        keypair.publicKey = ed25519.publicKeyFromPrivateKey({
+            privateKey: keypair.privateKey,
+        })
+        return keypair
     },
     // TODO Ensure hex/b64 to key type conversion and utilities
     sign: function (message, privateKey) {
-        let sign = crypto.createSign(hash_type)
-        sign.write(message)
-        sign.end()
-        var signature = sign.sign(privateKey, "hex")
+        let signature = ed25519.sign({
+            message: message,
+            encoding: "utf8",
+            privateKey: privateKey,
+        })
+        // REVIEW If the return is ok
         return signature
     },
     verify: function (message, signature, publicKey) {
-        let verify = crypto.createVerify(hash_type)
-        verify.write(message)
-        verify.end()
-        let verified = verify.verify(publicKey, signature, "hex")
+        var verified = ed25519.verify({
+            message: message,
+            encoding: "utf8",
+            // node.js Buffer, Uint8Array, forge ByteBuffer, or binary string
+            signature: signature,
+            // node.js Buffer, Uint8Array, forge ByteBuffer, or binary string
+            publicKey: publicKey,
+        })
+        // REVIEW If the return is ok
         return verified
     },
 }
 
 // TODO Replace the below methods for ecdsa with crypto when ready
 var generate = {
-    // NOTE ecdsa is the algorithm used for wallets and transactions
-    ecdsa: {
-        // INFO Generates a new RSA keypair from random 32 bytes seed
-        new: async function () {
-            // Generate new Keys
-            let privateKey = new PrivateKey()
-            let publicKey = privateKey.publicKey()
-            let keypair = {
-                privateKey: privateKey,
-                privateKeyPEM: privateKey.toPem(),
-                privateKeyHex: stringToHex(privateKey.toPem()),
-                publicKey: publicKey,
-                publicKeyPEM: publicKey.toPem(),
-                publicKeyHex: stringToHex(publicKey.toPem()),
-            }
-            return keypair
-        },
-        // INFO Generates a new RSA keypair from a given seed
-        newFromSeed: async function (string_seed) {
-            let privateKey = PrivateKey.fromString(string_seed)
-            let publicKey = privateKey.publicKey()
-            let keypair = {
-                privateKey: privateKey,
-                privateKeyPEM: privateKey.toPem(),
-                privateKeyHex: stringToHex(privateKey.toPem()),
-                publicKey: publicKey,
-                publicKeyPEM: publicKey.toPem(),
-                publicKeyHex: stringToHex(publicKey.toPem()),
-            }
-            return keypair
-        },
-        // INFO signing method
-        sign: async function (message, privateKey) {
-            let signature = Ecdsa.sign(message, privateKey)
-            return signature // A signed message as a native Buffer
-        },
-        // INFO verifying method
-        verify: async function (message, signature, publicKey) {
-            var verified = Ecdsa.verify(message, signature, publicKey)
-            return verified // true or false compared to the publicKey provided
-        },
-        // INFO Hex to PublicKey
-        ingestHex: function (hex_public) {
-            let pem_public = hexToString(hex_public) // FIXME Decode it
-            console.log("[DECODED] Public Key to PEM")
-            return ellipticcurve.PublicKey.fromPem(pem_public)
-        },
-        ingestPEM: function (pem_public) {
-            return ellipticcurve.PublicKey.fromPem(pem_public)
-        },
-    },
     // NOTE RSA is the algorithm used for identities verifications
     rsa: {
         // INFO Generates a new RSA keypair from a given ecdsa private key
@@ -186,4 +158,6 @@ function hexToString(hex) {
     return bufStr.toString("utf-8")
 }
 
-module.exports = { generate, certify, verify, load }
+function hexToBuffer(hex) {}
+
+module.exports = { cryptography, generate, certify, verify, load }

@@ -41,7 +41,7 @@ class Message {
         // Hash the content
         this.bundle.hash = sha256(JSON.stringify(this.bundle.content)) // REVIEW is this ok?
         // Sign the hash
-        this.bundle.signature = await identity.generate.ecdsa.sign(
+        this.bundle.signature = await identity.cryptography.sign(
             this.bundle.hash,
             this.privateKey,
         ) // REVIEW We shouldn't have to stringify the hash

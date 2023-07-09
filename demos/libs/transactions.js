@@ -22,8 +22,8 @@ function sign(tx, privateKey) {
     if (!tx.content) {
         return [false, "Missing tx.content"]
     }
-    // Sign using identity.generate.ecdsa.sign(tx.content, privateKey)
-    let _signature = identity.generate.ecdsa.sign(tx.content, privateKey)
+    // Sign using identity.cryptography.sign(tx.content, privateKey)
+    let _signature = identity.cryptography.sign(tx.content, privateKey)
     if (!_signature) {
         return [false, "Failed to sign transaction"]
     }
@@ -40,8 +40,8 @@ function verify(tx) {
     if (!tx.signature) {
         return [false, "Missing tx.signature"]
     }
-    // verify using identity.generate.ecdsa.verify(tx.content, tx.signature, publicKey)
-    let _verified = identity.generate.ecdsa.verify(
+    // verify using identity.cryptography.verify(tx.content, tx.signature, publicKey)
+    let _verified = identity.cryptography.verify(
         tx.content,
         tx.signature,
         tx.from,
