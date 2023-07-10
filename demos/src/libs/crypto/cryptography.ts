@@ -27,9 +27,12 @@ export default class Cryptography {
         keypair.privateKey = JSON.parse(loadedData.toString())
         console.log("Loaded keypair from " + path)
         console.log(keypair)
+
+        const privateKeyBuffer = Buffer.from(keypair.privateKey.data)
         keypair.publicKey = ed25519.publicKeyFromPrivateKey({
-            privateKey: keypair.privateKey,
+            privateKey: privateKeyBuffer,
         })
+
         return keypair
     }
 
