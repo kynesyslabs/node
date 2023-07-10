@@ -12,7 +12,7 @@ class Datasource {
             database: "./data/chain.db",
             entities: [BlockSchema, TransactionSchema],
             synchronize: true, // set this to false in production
-            logging: false,
+            logging: true,
         })
     }
 
