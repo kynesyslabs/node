@@ -1,7 +1,7 @@
 // INFO This module allows DEMOS to talk to different chains providing an unified API to interact with them
 
 let chains = require("./multichain/blockchains_support.js")
-let crosschain_execution = require("./multichain/crosschain_execution.js")
+// let crosschain_execution = require("./multichain/crosschain_execution.js")
 
 class Chainteract {
     constructor(chain, rpc_url, private_key = null) {

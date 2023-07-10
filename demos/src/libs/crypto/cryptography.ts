@@ -1,36 +1,33 @@
-import forge, { pki, random } from "node-forge"
+import forge, { pki, ed25519, KeyPair, random } from "node-forge"
 import { promises as fs } from "fs"
 
 export default class Cryptography {
     // INFO Generates a new RSA keypair from a given ecdsa private key
     static new() {
         const seed = random.getBytesSync(32)
-        const keys = pki.ed25519.generateKeyPair({ seed })
+        const keys = ed25519.generateKeyPair({ seed })
         return keys
     }
 
     // INFO Method to generate a new key pair from a seed
     static newFromSeed(stringSeed: string) {
         const bufferSeed = new forge.util.ByteBuffer(stringSeed, "utf-8")
-        const keys = pki.ed25519.generateKeyPair({ seed: bufferSeed })
+        const keys = ed25519.generateKeyPair({ seed: bufferSeed })
         return keys
     }
 
-    static async save(keypair: pki.ed25519.KeyPair, path: string) {
+    static async save(keypair: KeyPair, path: string) {
         await fs.writeFile(path, JSON.stringify(keypair.privateKey))
     }
 
-    static async load(path: string) {
-        const keypair: pki.ed25519.KeyPair = {
-            privateKey: null,
-            publicKey: null,
-        }
+    static async load(path: string): Promise<KeyPair> {
+        const keypair: KeyPair = {}
         console.log("Loading keypair from " + path)
         const loadedData = await fs.readFile(path, "utf8")
         keypair.privateKey = JSON.parse(loadedData.toString())
         console.log("Loaded keypair from " + path)
         console.log(keypair)
-        keypair.publicKey = pki.ed25519.publicKeyFromPrivateKey({
+        keypair.publicKey = ed25519.publicKeyFromPrivateKey({
             privateKey: keypair.privateKey,
         })
         return keypair

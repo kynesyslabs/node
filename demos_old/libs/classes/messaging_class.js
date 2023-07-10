@@ -10,7 +10,7 @@ const identity = require("../identity")
  * Once received, Message instance are able to self decrypt using the right RSA private key
  * Messaging.session instances contains also a chain composed of the last message plus the hash chain until now
  * To further certify integrity, Messaging.session is then hashed and signed
-*/
+ */
 
 // INFO Identity class for the partecipants
 class Partecipant {
@@ -29,11 +29,15 @@ class Partecipant {
     // INFO Generating a login challenge that the client must sign
     login_challenge() {
         let timestamp = Date.now()
-        this.login_signature.login_message = "Logging " + this.address + " @ " + timestamp
+        this.login_signature.login_message =
+            "Logging " + this.address + " @ " + timestamp
     }
     // INFO Verifying a login message against the challenge
     login_verify(signature) {
-        return identity.cryptography.verify(this.login_signature.login_message, signature)
+        return identity.cryptography.verify(
+            this.login_signature.login_message,
+            signature,
+        )
     }
 }
 
@@ -52,20 +56,13 @@ class Message {
     // INFO This function is used to hash and sign a message
     finalize(privateKey, receiver_rsa_public_key) {
         // Encrypting the message
-        this.content = identity.RSA.encrypt(this.content, receiver_rsa_public_key)
+        this.content = identity.RSA.encrypt(
+            this.content,
+            receiver_rsa_public_key,
+        )
         // Hashing the encrypted
         this.hash = identity.hashing.sha256(this.content)
         this.signed_hash = identity.cryptography.sign(this.hash, privateKey)
-    }
-    // INFO Easy to use verification
-    verify(publicKey) {
-        let result = [true, true] // Hash and signature verification
-        // Verifying the hash
-        let _supposedHash = identity.hashing.sha256(this.content)
-        result[0] = (_supposedHash === this.signed_hash)
-        // Verifying the signature
-        result[1] = identity.cryptography.verify(this.signed_hash, publicKey)
-        return result
     }
 }
 
@@ -88,4 +85,4 @@ class Envelope {
     }
 }
 
-module.exports = { Envelope, Partecipant, Message}
+module.exports = { Envelope, Partecipant, Message }
