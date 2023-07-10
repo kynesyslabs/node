@@ -242,7 +242,7 @@ class ComLink {
             this.chain.comlinkCurrentHash,
             this.chain.comlinkCurrentHashSignature,
             _publicKey,
-        ) // FIXME in ecdsa.js (node_modules/starkbank/....) -> math.js -> inv(x, s) - > x.eq(0)
+        ) 
         if (!_signatureValidity)
             return [false, "invalid comlink current hash signature"]
         // Check if the message signature matches the sender too
