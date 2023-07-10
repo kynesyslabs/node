@@ -40,7 +40,7 @@ export default async function Sync(id: any) {
             "nodeCall",
             "getLastBlockNumber",
             id.ed25519.publicKey,
-            _currentPeer,
+            _currentPeer.identity,
             null,
             null,
         )
