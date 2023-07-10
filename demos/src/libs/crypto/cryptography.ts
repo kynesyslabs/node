@@ -1,42 +1,41 @@
-import forge, { pki, ed25519, KeyPair, random } from "node-forge"
+import forge, { jsbn, pki, random, util } from "node-forge"
 import { promises as fs } from "fs"
 
 export default class Cryptography {
     // INFO Generates a new RSA keypair from a given ecdsa private key
     static new() {
         const seed = random.getBytesSync(32)
-        const keys = ed25519.generateKeyPair({ seed })
+        const keys = pki.ed25519.generateKeyPair({ seed })
+        console.log("Generated new keypair")
         return keys
     }
 
     // INFO Method to generate a new key pair from a seed
     static newFromSeed(stringSeed: string) {
-        const bufferSeed = new forge.util.ByteBuffer(stringSeed, "utf-8")
-        const keys = ed25519.generateKeyPair({ seed: bufferSeed })
+        const keys = pki.ed25519.generateKeyPair({ seed: stringSeed })
         return keys
     }
 
-    static async save(keypair: KeyPair, path: string) {
-        await fs.writeFile(path, JSON.stringify(keypair.privateKey))
+    static async save(keypair, path: string) {
+        const pem = pki.privateKeyToPem(keypair.privateKey)
+        await fs.writeFile(path, pem)
     }
 
-    static async load(path: string): Promise<KeyPair> {
-        const keypair: KeyPair = {}
-        console.log("Loading keypair from " + path)
-        const loadedData = await fs.readFile(path, "utf8")
-        keypair.privateKey = JSON.parse(loadedData.toString())
-        console.log("Loaded keypair from " + path)
-        console.log(keypair)
+    static async load(path) {
+        let keypair: pki.KeyPair = {
+            privateKey: null,
+            publicKey: null,
+        }
 
-        const privateKeyBuffer = Buffer.from(keypair.privateKey.data)
-        keypair.publicKey = ed25519.publicKeyFromPrivateKey({
-            privateKey: privateKeyBuffer,
+        const pem = await fs.readFile(path, "utf8")
+        keypair.privateKey = Buffer.from(JSON.parse(pem))
+        keypair.publicKey = pki.ed25519.publicKeyFromPrivateKey({
+            privateKey: keypair.privateKey,
         })
-
         return keypair
     }
 
-    static sign(message: string, privateKey: forge.pki.ed25519.PrivateKey) {
+    static sign(message: string, privateKey: pki.ed25519.BinaryBuffer) {
         const signature = pki.ed25519.sign({
             message,
             encoding: "utf8",
@@ -47,8 +46,8 @@ export default class Cryptography {
 
     static verify(
         message: string,
-        signature: forge.pki.ed25519.Signature,
-        publicKey: forge.pki.ed25519.PublicKey,
+        signature: pki.ed25519.BinaryBuffer,
+        publicKey: pki.ed25519.BinaryBuffer,
     ) {
         const verified = pki.ed25519.verify({
             message,

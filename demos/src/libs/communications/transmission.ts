@@ -8,7 +8,7 @@ import { Peer } from "../peer"
 export default class Transmission {
     bundle: Bundle
     receiver_peer: Peer // TODO Do peer interface
-    privateKey: forge.pki.ed25519.PrivateKey
+    privateKey: pki.ed25519.BinaryBuffer
 
     constructor(privateKey) {
         this.bundle = {

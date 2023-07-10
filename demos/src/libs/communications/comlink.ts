@@ -12,7 +12,7 @@ export default class ComLink {
     chain: {
         current: Current
         comlinkCurrentHash: string
-        comlinkCurrentHashSignature: forge.pki.ed25519.Signature
+        comlinkCurrentHashSignature: pki.ed25519.BinaryBuffer
     }
     muid: string
     properties: Properties
@@ -49,7 +49,7 @@ export default class ComLink {
     }
 
     // INFO Method to hash and sign the current iteration of the message
-    async hashAndSignCurrent(privateKey: forge.pki.ed25519.PrivateKey) {
+    async hashAndSignCurrent(privateKey: pki.ed25519.BinaryBuffer) {
         let stringifiedMessage = JSON.stringify(this.chain.current)
         this.chain.comlinkCurrentHash = Hashing.sha256(stringifiedMessage)
         let signature = await Cryptography.sign(
@@ -64,7 +64,7 @@ export default class ComLink {
     async broadcastMessageToPeer(
         peer: Peer,
         message: Transmission,
-        privateKey: forge.pki.ed25519.PrivateKey,
+        privateKey: pki.ed25519.BinaryBuffer,
     ) {
         // REVIEW Sanitize message and type
         if (!message.bundle.content.type) {
@@ -92,7 +92,7 @@ export default class ComLink {
     // INFO Prepare a reply to the last message in the chain
     async replyToMessage(
         reply: Transmission,
-        privateKey: forge.pki.ed25519.PrivateKey,
+        privateKey: pki.ed25519.BinaryBuffer,
     ) {
         // NOTE: Reply must be a valid message.bundle like object (see libs/messages.js)
         // First we move the current message hash to the previous hashes

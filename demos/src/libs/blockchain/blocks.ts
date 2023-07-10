@@ -1,6 +1,4 @@
-import Hashing from "../crypto/hashing"
-import Cryptography from "../crypto/cryptography"
-import forge, { pki } from "node-forge"
+import { pki } from "node-forge"
 import BlockContent from "./types/blocks"
 
 // NOTE Block class
@@ -9,7 +7,7 @@ export default class Block {
     hash: string
     status: string
     content: BlockContent // TODO
-    proposer: forge.pki.ed25519.publicKey
+    proposer: pki.PublicKey
     validation_data: Buffer
     timestamp: number
 

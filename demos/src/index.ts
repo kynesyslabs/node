@@ -62,7 +62,7 @@ async function main() {
     // await message_test()
     // INFO Starting the sync loop
     logger.log("[MAIN] Starting the sync loop\n")
-    let synced = Sync(id) // NOTE We don't wait for the sync to finish because it will run indefinitely in the background
+    Sync(id) // NOTE We don't wait for the sync to finish because it will run indefinitely in the background
 }
 
 main()

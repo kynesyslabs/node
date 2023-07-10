@@ -32,9 +32,10 @@ export default class CommonListeners {
     private authAskListener = async () => {
         this.peer.socket.on("auth_ask", async data => {
             // REVIEW Signing data.message with the private key
+            console.log(typeof Identity.getInstance().ed25519.privateKey)
             let _signature = await cryptography.sign(
                 data.message,
-                Identity.getInstance().ed25519.privateKey,
+                Identity.getInstance().ed25519.privateKey as any,
             )
             // REVIEW Sending the signature back along with the public key and the message
             let _sendBack = [

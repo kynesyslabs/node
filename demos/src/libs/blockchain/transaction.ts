@@ -2,12 +2,12 @@
 // NOTE It also exposes methods that will be used to process transactions
 
 import Cryptography from "../crypto/cryptography"
-import forge from "node-forge"
+import forge, { pki } from "node-forge"
 import { TransactionContent } from "./types/transactions"
 
 export default class Transaction {
     content: TransactionContent
-    signature: forge.pki.ed25519.Signature
+    signature: pki.ed25519.BinaryBuffer
     hash: string
     confirmations: any // TODO Invent something
     state_changes: any // TODO Invent something
@@ -28,7 +28,7 @@ export default class Transaction {
     }
 
     // INFO Given a transaction, sign it with the private key of the sender
-    static sign(tx: Transaction, privateKey: forge.pki.ed25519.privateKey) {
+    static sign(tx: Transaction, privateKey: pki.ed25519.BinaryBuffer) {
         // Check sanity of the structure of the tx object
         if (!tx.content) {
             return [false, "Missing tx.content"]

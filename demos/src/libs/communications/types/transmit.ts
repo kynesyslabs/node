@@ -3,8 +3,8 @@ import forge, { pki } from "node-forge"
 export interface BundleContent {
     type: string
     message: string
-    sender: forge.pki.ed25519.PublicKey
-    receiver: forge.pki.ed25519.PublicKey
+    sender: any // TODO improve interface
+    receiver: any // TODO improve interface
     timestamp: number
     data: Buffer
     extra: Buffer
@@ -13,5 +13,5 @@ export interface BundleContent {
 export interface Bundle {
     content: BundleContent
     hash: string
-    signature: forge.pki.ed25519.Signature
+    signature: any // TODO improve interface
 }

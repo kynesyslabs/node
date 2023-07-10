@@ -1,4 +1,5 @@
 import { rsa, hashing, cryptography } from "../../libs/crypto" // Ensure correct path
+import { pki } from "node-forge"
 
 /* INFO Messaging workflow
  * Each messaging session is unique and is exchanged back and forth between partecipants
@@ -15,7 +16,7 @@ import { rsa, hashing, cryptography } from "../../libs/crypto" // Ensure correct
 export class Message {
     content: string | null
     hash: string | null
-    signed_hash: string | null
+    signed_hash: pki.ed25519.NativeBuffer | null
 
     constructor() {
         this.content = null // Usually utf-8 text
@@ -24,7 +25,7 @@ export class Message {
     }
 
     // Decrypting a message using our own private key
-    async decrypt(rsaPrivateKey: string): Promise<string> {
+    async decrypt(rsaPrivateKey: pki.rsa.PrivateKey): Promise<string> {
         let decrypted = await rsa.decrypt(this.content, rsaPrivateKey)
         return decrypted
     }
@@ -32,7 +33,7 @@ export class Message {
     // This function is used to hash and sign a message
     async finalize(
         privateKey: string,
-        receiverRsaPublicKey: string,
+        receiverRsaPublicKey: pki.rsa.PublicKey,
     ): Promise<void> {
         // Encrypting the message
         this.content = await rsa.encrypt(this.content!, receiverRsaPublicKey)
@@ -45,7 +46,9 @@ export class Message {
     async verify(publicKey: string): Promise<boolean[]> {
         let result: boolean[] = [true, true] // Hash and signature verification
         // Verifying the hash
-        let supposedHash = hashing.sha256(this.content!)
+        let supposedHash = hashing.sha256(
+            this.content!,
+        ) as unknown as pki.ed25519.NativeBuffer
         result[0] = supposedHash === this.signed_hash
         // Verifying the signature
         result[1] = cryptography.verify(this.hash, this.signed_hash, publicKey)

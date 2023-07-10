@@ -1,16 +1,15 @@
 import * as fs from "fs"
 import { cryptography } from "../crypto"
 import Logger from "../utils/logger"
+import { pki } from "node-forge"
 
 export default class Identity {
     private static instance: Identity
-    public ed25519: { publicKey?: Buffer; privateKey?: Buffer } | null
-    public rsa: any
+    public ed25519: pki.KeyPair
 
     // Make the constructor private.
     private constructor() {
         this.ed25519 = null
-        this.rsa = null
     }
 
     // Create a public static method to get the instance of the Identity class
