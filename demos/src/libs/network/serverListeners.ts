@@ -1,5 +1,5 @@
 import { cryptography } from "src/libs/crypto"
-import { Peer, PeerManager } from "src/libs/peer"
+import { Peer } from "src/libs/peer"
 import { comlinkUtils } from "src/libs/communications"
 import { Messaging, Message } from "src/features/messaging"
 import { Identity } from "src/libs/identity"
