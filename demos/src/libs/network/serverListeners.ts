@@ -14,9 +14,17 @@ export default class ServerListeners {
         this.peer = peer
     }
 
+    async runListeners() {
+        await this.authReplyListener()
+        await this.authAskEmit()
+        await this.comlinkListener()
+        await this.helloListener()
+        await this.transactionsListener()
+    }
+
     authReplyListener = async () => {
         this.peer.socket.on("auth_reply", async data => {
-            console.log(data)
+            console.log("[SERVER] Received auth reply")
             // REVIEW Verify the signature with the public key on the message
             let _verification = await cryptography.verify(
                 data[0],
@@ -38,13 +46,10 @@ export default class ServerListeners {
         await this.peer.socket.emit("auth_ask")
     }
 
-    addPeer = async (_peerForged: any) => {
-        await PeerManager.getInstance().addPeer(_peerForged)
-    }
-
     comlinkListener = async () => {
         this.peer.socket.on("comlink", async request => {
             // REVIEW I don't think we need to do this every time
+            console.log("[SERVER] Received comlink")
             const id_ed25519 = await cryptography.load("./.demos_identity")
             // TODO Add responseRegistry support as per main.js and communications.js
             let _receiver = this.peer.socket

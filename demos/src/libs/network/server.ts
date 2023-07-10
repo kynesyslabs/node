@@ -2,6 +2,7 @@ import { Server as ServerType } from "socket.io"
 import { logger } from "../utils"
 import { PeerManager, Peer } from "../peer"
 import { Identity } from "../identity"
+import ServerListeners from "./serverListeners"
 
 const identity = Identity.getInstance()
 
@@ -11,13 +12,11 @@ export default class Server {
             logger.log("[SERVER] Peer connected")
 
             const newPeer = new Peer()
-            this.addPeer(newPeer, peerSocket)
+            newPeer.setSocket(peerSocket)
+            newPeer.setIdentity(identity.ed25519)
+            PeerManager.getInstance().addPeer(newPeer)
+            const serverListeners = new ServerListeners(newPeer)
+            serverListeners.runListeners()
         })
-    }
-
-    static addPeer = function (peer: Peer, peerSocket) {
-        peer.setSocket(peerSocket)
-        peer.setIdentity(identity.ed25519)
-        PeerManager.getInstance().addPeer(peer)
     }
 }

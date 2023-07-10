@@ -14,15 +14,18 @@ export class Messaging {
             // Used for first contacts
             // Filling the partecipants[1] field with ourselves if we are the receivers
             const id = Identity.getInstance()
-            let _ourselves = Buffer.from(id.ed25519.publicKey).toString("hex")
+            let _ourselves = Buffer.from(id.ed25519.publicKey as any).toString(
+                "hex",
+            )
             if (_hexSender === _ourselves) {
                 envelope.session.partecipants[1].route = "placeholder" // TODO Public address + port
                 envelope.session.partecipants[1].login_signature.login_message =
-                    "I am " + Buffer.from(id.ed25519.publicKey).toString("hex")
+                    "I am " +
+                    Buffer.from(id.ed25519.publicKey as any).toString("hex")
                 let signed_id = cryptography.sign(
                     envelope.session.partecipants[1].login_signature
                         .login_message,
-                    id.ed25519.privateKey,
+                    id.ed25519.privateKey as any,
                 )
                 envelope.session.partecipants[1].login_signature.signature =
                     signed_id

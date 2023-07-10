@@ -32,9 +32,9 @@ export default async function Sync(id: any) {
         let _comlink = new ComLink()
         let _currentPeer = peerlist[i]
         // Generate the message to ask for the last block
-        logger.warn("id.ed25519.privateKey")
-        logger.warn(typeof id.ed25519.privateKey)
-        logger.warn(JSON.stringify(id.ed25519.privateKey))
+        // logger.warn("id.ed25519.privateKey")
+        // logger.warn(typeof id.ed25519.privateKey)
+        // logger.warn(JSON.stringify(id.ed25519.privateKey))
         let _blockAskMessage = new Transmission(id.ed25519.privateKey)
         _blockAskMessage.initialize(
             "nodeCall",

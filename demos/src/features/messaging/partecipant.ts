@@ -1,10 +1,11 @@
 // INFO Identity class for the partecipants
 
 import { cryptography } from "src/libs/crypto"
+import { pki } from "node-forge"
 
 interface LoginSignature {
     login_message: string | null
-    signature: string | null
+    signature: pki.ed25519.NativeBuffer | null
 }
 
 export class Partecipant {
@@ -34,7 +35,7 @@ export class Partecipant {
     }
 
     // INFO Verifying a login message against the challenge
-    login_verify(signature: string, pubKey: string): Promise<boolean> {
+    login_verify(signature: string, pubKey: string): boolean {
         return cryptography.verify(
             this.login_signature.login_message as string,
             signature,
