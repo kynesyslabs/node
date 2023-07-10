@@ -1,0 +1,77 @@
+// INFO This module contain classes and methods used to manage on chain instant messaging
+
+// import dependencies
+let Messaging = require("./classes/messaging_class.js")
+let identity = require("./identity.js")
+const intercom = require("./intercom.js")
+
+// SECTION Setting up listeners and variables for the intercom
+var id
+let subscriber = function (msg, data) {
+    //console.log("[INTERCOM][" + msg + "] Received data")
+    if (msg === "IDENTITY") {
+        id = data
+    } 
+}
+intercom.subscribe("IDENTITY", subscriber)
+// !SECTION Setting up listeners and variables for the intercom
+
+/* NOTE request.content structure for messaging transmission (as is a Message type of object)
+ 	content: {
+                type: "messaging",
+                message: {
+					stage: "handshake" | "chat" | "closing",
+					data: Messaging.Envelope object (see messaging_class.js)
+				},
+                sender: address,
+                receiver: address,
+                timestamp: timestamp,
+                data: null
+                extra: null,
+            }
+*/
+
+let messaging = {
+    parseRequest: async function (request) {
+        // Applying object
+        let envelope = new Messaging.Envelope()
+        envelope = request.message
+        // As far as it should be, at this point the message is already validated by the comlink
+        let _hexSender = Buffer.from(request.sender).toString("hex")
+        // ANCHOR Internal methods
+        let estabilishContact = async function () { // Used for first contacts
+            // Filling the partecipants[1] field with ourselves if we are the receivers
+            let _ourselves = Buffer.from(id.ed25519.publicKey).toString("hex")
+            if (_hexSender === _ourselves) {
+                envelope.session.partecipants[1].route = "placeholder" // TODO Public address + port
+                envelope.session.partecipants[1].login_signature.login_message = "I am " + Buffer.from(id.ed25519.publicKey).toString("hex")
+                let signed_id = identity.cryptography.sign(
+                    envelope.session.partecipants[1].login_signature.login_message,
+                    id.ed25519.privateKey,
+                )
+                envelope.session.partecipants[1].login_signature.signature = signed_id
+                console.log("[MESSAGE ANALYSIS] Message is for us! Added our identity to the path")
+                // TODO Do stuff
+            } else {
+                console.log("[MESSAGE ANALYSIS] We are not the receivers, routing")
+                // TODO Add routing methods to send the message to the receiver
+            }
+        }
+        // TODO Detect closing contacts
+        //let stringedMessage = JSON.stringify(envelope, null, 2)
+        console.log("[MESSAGE RECEIVED by " + _hexSender + "]")
+        // REVIEW Should we validate the message here?
+        let partecipants = envelope.session.partecipants
+        // Checking if we have one participant (first contact)
+        if (!partecipants[1].login_signature.signature) {
+            console.log("[MESSAGE ANALYSIS] This is a first contact")
+            // TODO Manage first contact
+            await estabilishContact()
+        } else {
+            console.log("[MESSAGE ANALYSIS] Looks like a reply")
+            // TODO Manage subsequent contacts
+        }
+    },
+}
+
+module.exports = messaging

@@ -1,0 +1,13 @@
+{
+    "$schema": "http://json.schemastore.org/prettierrc",
+    "arrowParens": "avoid",
+    "bracketSpacing": true,
+    "endOfLine": "lf",
+    "printWidth": 80,
+    "singleQuote": false,
+    "tabWidth": 4,
+    "semi": false,
+    "trailingComma": "all",
+    "useTabs": false,
+    "SwitchCase": 1
+}

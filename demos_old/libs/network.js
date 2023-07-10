@@ -54,9 +54,12 @@ intercom.subscribe("RESPONSE_REGISTRY", subscriber)
 const { Peer } = require("./classes/peers.js")
 var transactions = require("./transactions.js")
 
+// NOTE Libraries to handle specific endpoints
 var communications = require("./communications.js")
 var web2 = require("./web2.js")
-var messages = require("./messages.js")
+var messages = require("./classes/transmit_class.js")
+var messaging = require("./messaging.js")
+var storage = require("./storage.js")
 
 app.get("/", (req, res) => {
     res.send("<h1>Hello from your friendly DEMOS layer</h1>")
@@ -64,8 +67,59 @@ app.get("/", (req, res) => {
 
 // Peers library import
 var { print } = require("./logging")
+const { parse } = require("path")
+
+// INFO common comlink digestor
+async function parseComlink(request, peerSocket) {
+    // We need to check if the message request is valid (is a ComLink object)
+    console.log("[SERVER] Received comlink")
+    //console.log(request)
+    // GIving the request the comlink methods
+    let _comlink_request = new communications.ComLink()
+    _comlink_request.chain = request.chain
+    _comlink_request.muid = request.muid
+    _comlink_request.properties = request.properties
+    // Checking validity of the comlink
+    let valid = await _comlink_request.validateComlink()
+    if (!valid[0]) {
+        console.log("[COMLINK VALIDATION ERROR] " + valid[1])
+        peerSocket.emit("comlink", {
+            status: "error",
+            message: valid[1],
+        })
+        return false
+    }
+    console.log("[COMLINK PARSING] Parsing comlink message...")
+    // Sanitizing the request
+    if (!request.muid) {
+        peerSocket.emit("error", {
+            muid: null,
+            message: "No muid specified",
+        })
+        return false
+    }
+    console.log("[COMLINK PARSING] MUID: " + request.muid)
+    // Taking the message part
+    let content
+    if (!(typeof request.chain.current.currentMessage === "object")) {
+        content = JSON.parse(request.chain.current.currentMessage).content
+    } else {
+        content = request.chain.current.currentMessage
+    }
+    if (!content.message) {
+        console.log("[COMLINK PARSING] No message specified. Erroring back.")
+        peerSocket.emit("error", {
+            muid: request.muid,
+            message: "No message specified",
+        })
+        return false
+    }
+    console.log("[COMLINK PARSING] Message parsed")
+    return [_comlink_request, content]
+}
 
 // ANCHOR Listeners
+// FIXME Refactor listeners to be unified under a single client+server+common set
 var listeners = {
     // INFO Common listeners for both Server and Client
     // NOTE Is automatically called by server_listeners and client_listeners
@@ -112,21 +166,17 @@ var listeners = {
                 )
                 // TODO Continue with the response logic (as per filling comlink if needed and verifications and so on)
             }
-            // GIving the request the comlink methods
-            let _comlink_request = new communications.ComLink()
-            _comlink_request.chain = request.chain
-            _comlink_request.muid = request.muid
-            _comlink_request.properties = request.properties
-            // Checking validity of the comlink
-            let valid = await _comlink_request.validateComlink()
-            if (!valid[0]) {
-                console.log("[COMLINK VALIDATION ERROR] " + valid[1])
-                peer.socket.emit("comlink", {
-                    status: "error",
-                    message: valid[1],
-                })
-                return
-            }
+            console.log(request)
+            // Parsing the comlink
+            let parsed_comlink = await parseComlink(request, peer.socket) // FIXME Cant parse responses
+            if (!parsed_comlink) return
+            let _comlink_request = parsed_comlink[0]
+            let content = parsed_comlink[1]
+        })
+        // INFO Managing errors
+        peer.socket.on("error", async request => {
+            console.log("[PEER] Received error:")
+            console.log(request)
         })
     },
     // INFO Listeners for server
@@ -164,163 +214,116 @@ var listeners = {
             // INFO Adding the peer to the list
             await peers.methods.addPeer(_peerForged)
             // NOTE From now on, the peer is connected and is able to communicate through advanced methods (as below)
-            peerSocket.on("comlink", async request => {
-                // FIXME The below logic needs to be refactored in a separate method as it is used by other listeners too
-                // TODO Add responseRegistry support as per main.js and communications.js
-                let _receiver = peerSocket
-                // We need to check if the message request is valid (is a ComLink object)
-                console.log("[SERVER] Received comlink")
-                //console.log(request)
-                // GIving the request the comlink methods
-                let requestObject
-                let hasError = false
-                try {
-                    console.log("[SERVER] Parsing JSON")
-                    console.log(request)
-                    if (typeof request === "string") {
-                        requestObject = JSON.parse(request)
-                    } else {
-                        requestObject = request
-                    }
-                } catch (error) {
-                    console.log("[COMLINK JSON PARSING ERROR] " + error)
-                    hasError = true
-                }
-
-                if (hasError) {
-                    return
-                }
-
-                const validationResult = comLinkSchema.validate(
-                    requestObject,
-                    async function (err, value) {
-                        if (err) {
-                            console.log("[COMLINK Joi VALIDATION ERROR] " + err)
-                            _receiver.emit("comlink", {
-                                status: "error",
-                                message: err,
-                            })
-                            return
-                        }
-                    },
-                )
-
-                if (validationResult.error) {
-                    console.log(
-                        "[COMLINK exposed VALIDATION ERROR] " +
-                            validationResult.error,
-                    )
-                    _receiver.emit("comlink", {
-                        status: "error",
-                        message: validationResult.error,
-                    })
-                    return
-                }
-
-                console.log("[SERVER] Comlink validated")
-
-                let _comlink_request = new communications.ComLink()
-                _comlink_request.chain = request.chain
-                _comlink_request.muid = request.muid
-                _comlink_request.properties = request.properties
-                // Checking validity of the comlink
-                let valid = await _comlink_request.validateComlink()
-                if (!valid[0]) {
-                    console.log("[COMLINK VALIDATION ERROR] " + valid[1])
-                    peerSocket.emit("comlink", {
-                        status: "error",
-                        message: valid[1],
-                    })
-                    return
-                }
-                // Taking the message part
-                let content = JSON.parse(request.chain.current.currentMessage)
-                // Sanitizing the request
-                if (!request.muid) {
-                    peerSocket.emit("comlink", {
-                        status: "error",
-                        message: "No muid specified",
-                    })
-                    return
-                }
-                if (!content.message) {
-                    peerSocket.emit("comlink", {
-                        status: "error",
-                        message: "No message specified",
-                    })
-                    return
-                }
-                // Listening for commands
-                // INFO This switch handles the public methods that should have this structure:
-                //      { method: "methodName", params: { ... }, muid: [number] }
-                // Where muid is a message unique identifier that is used to identify the response
-                var response
-                var require_reply = false
-                if (content.type === "web2Request") {
-                    switch (content.message.action) {
-                        case "getUrl":
-                            console.log("[SERVER] Received getUrl")
-                            response = web2.http_request(
-                                content.message.httpVerb,
-                                content.message.url,
-                                content.message.headers,
-                            )
-                            break
-                        default:
-                            break
-                    }
-                }
-
-                if (content.type === "nodeCall") {
-                    switch (content.message) {
-                        case "getLastBlockNumber":
-                            console.log("[SERVER] Received getLastBlockNumber")
-                            response = await chainDB.getLastBlockNumber()
-                            break
-                        case "getLastBlockHash":
-                            response = await chainDB.getLastBlockHash()
-                            break
-                        case "getBlockByNumber":
-                            if (!request.parameters.blockNumber) {
-                                _receiver.emit("public", {
-                                    error: "No block specified",
-                                })
-                            }
-                            response = await chainDB.getBlockByNumber(
-                                request.parameters.blockNumber,
-                            )
-                            break
-                        case "getBlockByHash":
-                            if (!request.parameters.blockHash) {
-                                _receiver.emit("public", {
-                                    error: "No block specified",
-                                })
-                            }
-                            response = await chainDB.getBlockByHash(
-                                request.parameters.blockHash,
-                            )
-                            break
-                        case "getMempool":
-                            response = await chainDB.getPendingPool()
-                            break
-                    }
+            peerSocket.on(
+                "comlink",
+                async request => {
                     // REVIEW I don't think we need to do this every time
                     const id_ed25519 = await identity.cryptography.load(
                         "./.demos_identity",
                     )
+                    // TODO Add responseRegistry support as per main.js and communications.js
+                    let _receiver = peerSocket
+                    // FIXME The below logic needs to be refactored in a separate method as it is used by other listeners too
+                    let parsed_comlink = await parseComlink(request, peerSocket)
+                    if (!parsed_comlink) return
+                    let _comlink_request = parsed_comlink[0]
+                    let content = parsed_comlink[1]
+                    // Listening for commands
+                    // INFO This switch handles the public methods that should have this structure:
+                    //      { method: "methodName", params: { ... }, muid: [number] }
+                    // Where muid is a message unique identifier that is used to identify the response
+                    var response
+                    var require_reply = false
+
+                    // INFO Web2 endpoints
+                    if (content.type === "web2Request") {
+                        console.log("[SERVER] Received web2Request")
+                        switch (content.message.action) {
+                            case "getUrl":
+                                console.log("[SERVER] Received getUrl")
+                                response = web2.http_request(
+                                    content.message.httpVerb,
+                                    content.message.url,
+                                    content.message.headers,
+                                )
+                                break
+                            default:
+                                break
+                        }
+                    }
+
+                    // INFO Messaging endpoint
+                    else if (content.type === "messages") {
+                        // REVIEW Call the appropriate lib to parse the request and act
+                        response = await messaging.parseRequest(content)
+                    }
+
+                    // INFO Storage endpoint
+                    else if (content.type === "storage") {
+                        // TODO Call the appropriate lib to parse the request and act
+                    }
+
+                    // INFO Node APIs endpoints
+                    else if (content.type === "nodeCall") {
+                        switch (content.message) {
+                            case "getLastBlockNumber":
+                                console.log(
+                                    "[SERVER] Received getLastBlockNumber",
+                                )
+                                response = await chainDB.getLastBlockNumber()
+                                console.log(response)
+                                break
+                            case "getLastBlockHash":
+                                response = await chainDB.getLastBlockHash()
+                                break
+                            case "getBlockByNumber":
+                                if (!request.parameters.blockNumber) {
+                                    _receiver.emit("public", {
+                                        error: "No block specified",
+                                    })
+                                }
+                                response = await chainDB.getBlockByNumber(
+                                    request.parameters.blockNumber,
+                                )
+                                break
+                            case "getBlockByHash":
+                                if (!request.parameters.blockHash) {
+                                    _receiver.emit("public", {
+                                        error: "No block specified",
+                                    })
+                                }
+                                response = await chainDB.getBlockByHash(
+                                    request.parameters.blockHash,
+                                )
+                                break
+                            case "getMempool":
+                                response = await chainDB.getPendingPool()
+                                break
+                        }
+                    }
+                    // INFO Default
+                    else {
+                        console.log(
+                            "[COMLINK INVALID] No known type: " + content.type,
+                        )
+                    }
+                    // ANCHOR Reply logic
+                    // REVIEW unless specified, we now send back the updated comlink as a response
                     // Building a message to send back in the comlink
                     var response_message = new messages.Message(
                         id_ed25519.privateKey,
                     )
                     response_message.initialize(
+                        // TODO Specify the answer so that it has a type AND a message
                         "reply",
-                        JSON.stringify(response),
-                        id_ed25519.publicKeyHex,
-                        "placeholder",
+                        JSON.stringify(response), // FIXME Here goes undefined, not good
+                        id_ed25519.publicKey,
+                        "placeholder", // FIXME Also here goes undefined, not good
                         null,
                         null,
                     )
-                    // REVIEW and TODO: unless specified, we now send back the updated comlink as a response
+                    await response_message.finalize()
+                    // Populating the comlink
                     _comlink_request.properties.is_reply = true // Setting the reply flag as we are replying
                     _comlink_request.properties.require_reply = require_reply // Setting the require_reply flag as provided above
                     await _comlink_request.replyToMessage(
@@ -331,9 +334,10 @@ var listeners = {
                     console.log("[SERVER] Sending back comlink")
                     //console.log(JSON.stringify(_comlink_request))
                     _receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
-                }
+                },
                 // TODO See in communications.js and find the best way to validate, check and digest the request
-            })
+            )
+
             // INFO Debug code
             peerSocket.on("hello", async request => {
                 console.log("[DEBUG] hello there")

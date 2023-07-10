@@ -1,0 +1,64 @@
+import ComLink from "./comlink"
+import { ResponseRegistryElement } from "./types/responseregistry"
+import Transmission from "./transmission"
+
+export default class ResponseRegistry {
+    list: { [key: string]: ResponseRegistryElement }
+
+    // The instance of ResponseRegistry
+    private static instance: ResponseRegistry
+
+    private constructor() {
+        this.list = {}
+    }
+
+    // Method to get the instance of ResponseRegistry
+    static getInstance(): ResponseRegistry {
+        if (!ResponseRegistry.instance) {
+            ResponseRegistry.instance = new ResponseRegistry()
+        }
+        return ResponseRegistry.instance
+    }
+    // INFO Register a response request
+    requestResponse(comlink: ComLink) {
+        if (!comlink.properties.require_reply)
+            return [
+                false,
+                "ComLink object must have required_reply property set to true",
+            ]
+        if (this.list[comlink.muid])
+            return [false, "Response has already been requested"]
+        this.list[comlink.muid] = {
+            comlink: comlink,
+            timestamp: Date.now(),
+            response: {
+                message: null,
+                timestamp: null, // Set to now once received
+            },
+        }
+        return [true, this.list[comlink.muid]]
+    }
+
+    // INFO Check if a response has been received
+    hasResponse(comlink: ComLink) {
+        if (!this.list[comlink.muid])
+            return [false, "No response has been requested"]
+        if (!this.list[comlink.muid].response)
+            return [false, "No response has been received"]
+        return [true, this.list[comlink.muid].response]
+    }
+
+    // INFO Register a response received
+    registerResponse(message: Transmission, comlink: ComLink) {
+        if (!comlink.properties.require_reply)
+            return [
+                false,
+                "ComLink object must have required_reply property set to true",
+            ]
+        if (!this.list[comlink.muid])
+            return [false, "No response has been requested"]
+        this.list[comlink.muid].response.message = message
+        this.list[comlink.muid].response.timestamp = Date.now()
+        return [true, this.list[comlink.muid]]
+    }
+}

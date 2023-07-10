@@ -1,11 +1,15 @@
 // INFO This module exposes methods designed to have an unified way of communicate in DEMOS
-const { Buffer } = require("buffer")
-const sha256 = require("sha256")
+import Hashing from "../crypto/hashing"
+import Cryptography from "../crypto/cryptography"
+import forge, { pki } from "node-forge"
+import { Bundle } from "./types/transmit"
+import { Peer } from "../peer"
 
-var identity = require("./identity")
+export default class Transmission {
+    bundle: Bundle
+    receiver_peer: Peer // TODO Do peer interface
+    privateKey: forge.pki.ed25519.PrivateKey
 
-// SECTION Object based version
-class Message {
     constructor(privateKey) {
         this.bundle = {
             content: {
@@ -39,28 +43,11 @@ class Message {
     // INFO Hash and sign a message
     async finalize() {
         // Hash the content
-        this.bundle.hash = sha256(JSON.stringify(this.bundle.content)) // REVIEW is this ok?
+        this.bundle.hash = Hashing.sha256(JSON.stringify(this.bundle.content)) // REVIEW is this ok?
         // Sign the hash
-        this.bundle.signature = await identity.cryptography.sign(
+        this.bundle.signature = await Cryptography.sign(
             this.bundle.hash,
             this.privateKey,
         ) // REVIEW We shouldn't have to stringify the hash
     }
 }
-// !SECTION Object based version
-
-var encode = {
-    // INFO Given a JSON data, returns an hex encoded string
-    fromJson: async function (json) {
-        return Buffer.from(JSON.stringify(json)).toString("hex")
-    },
-}
-
-var decode = {
-    // INFO Given an hex encoded string, returns a JSON data
-    toJson: async function (hex) {
-        return JSON.parse(Buffer.from(hex, "hex").toString("utf8"))
-    },
-}
-
-module.exports = { encode, decode, Message }

@@ -1,66 +1,16 @@
-/* INFO
-	The chain.js module defines classes and methods to act on the blockchain.
-	It defines Transaction and Block classes as well as chainDB class representing the blockchain
-	as read from the database.
-	All the methods required to write, validate and operate on the blockchain are defined here.
-*/
+import Block from "./blocks"
+import Transaction from "./transaction"
+import Hashing from "../crypto/hashing"
+import Cryptography from "../crypto/cryptography"
+import Datasource from "src/model/datasource"
+import forge, { pki } from "node-forge"
 
-const sha256 = require("sha256")
-const db = require("../../model/database.js")
-// Use the connection
-
-// NOTE Transaction class
-class Transaction {
-    constructor() {
-        this.content = {
-            type: null,
-            from: null,
-            to: null,
-            amount: null,
-            data: null,
-        }
-        this.signature = null
-        this.hash = null
-        this.confirmations = null
-        // REVIEW Should we add state changes?
-        this.state_changes = {}
-    }
-
-    // ANCHOR Getters
-
-    // ANCHOR Setters
-}
-
-// NOTE Block class
-class Block {
-    constructor() {
-        this.number = null
-        this.hash = null // Calculated on the content
-        this.status = null
-        this.content = {
-            transactions: [],
-            web2data: {}, // objects containing hashes of fetched web2data
-            previousHash: null,
-        }
-        this.proposer = null
-        this.validation_data = null
-        this.timestamp = null
-    }
-
-    // ANCHOR Getters
-
-    // ANCHOR Setters
-}
-
-// NOTE Class for the chain database
-class ChainDB {
-    constructor() {}
-
-    async read(sql_query) {
+export default class Chain {
+    static async read(sql_query: string) {
         try {
-            console.log("=== DB READ ===")
+            const db = await Datasource.getInstance()
             const result = await db.getDataSource().query(sql_query)
-            console.log("=== GET RESULT ===")
+
             console.log("[ChainDB] [ READ ]: ")
             console.log(result)
             return result
@@ -70,9 +20,9 @@ class ChainDB {
         }
     }
 
-    async write(sql_query) {
+    static async write(sql_query: string) {
         try {
-            console.log(db.getDataSource())
+            const db = await Datasource.getInstance()
             const result = await db.getDataSource().query(sql_query)
             console.log("[ChainDB] [ WRITE ]: " + result)
             return result
@@ -84,41 +34,41 @@ class ChainDB {
 
     // ANCHOR Getters
     // INFO Get the last block number
-    async getLastBlockNumber() {
+    static async getLastBlockNumber() {
         return await this.read(
             "SELECT number FROM blocks ORDER BY number DESC LIMIT 1",
         )[0]
     }
     // INFO Get the last block hash
-    async getLastBlockHash() {
+    static async getLastBlockHash() {
         return await this.read(
             "SELECT hash FROM blocks ORDER BY number DESC LIMIT 1",
         )[0]
     }
     // INFO Get any block by its number
-    async getBlockByNumber(number) {
+    static async getBlockByNumber(number: number) {
         return await this.read(
             "SELECT * FROM blocks WHERE number='" + number + "'",
         )[0]
     }
     // INFO Get any block by its hash
-    async getBlockByHash(hash) {
+    static async getBlockByHash(hash: string) {
         return await this.read("SELECT * FROM blocks WHERE hash=" + hash)[0]
     }
     // INFO Get a group of blocks by their status
-    async getBlockNumbersByStatus(status) {
+    static async getBlockNumbersByStatus(status: string) {
         return await this.read(
             "SELECT number FROM blocks WHERE status=" + status,
         )
     }
     // INFO Get a group of blocks by their proposer
-    async getBlockNumbersByProposer(proposer) {
+    static async getBlockNumbersByProposer(proposer: string) {
         return await this.read(
             "SELECT number FROM blocks WHERE proposer=" + proposer,
         )
     }
 
-    async getGenesisBlock() {
+    static async getGenesisBlock() {
         // Playground for async testing
         let _res = await this.read("SELECT * FROM blocks WHERE number=0")
         console.log("=== AFTER GET ===")
@@ -126,41 +76,34 @@ class ChainDB {
         return _res
     }
 
-    /*
-    // INFO Get the genesis block that initialized the current chain
-    getGenesisBlock() {
-        let _promise = this.read("SELECT * FROM blocks WHERE number=0")
-        return _promise[Object.keys(_promise)[0]]
-    }
-    */
-
     // INFO Get the current pending transactions pool
-    async getPendingPool() {
+    static async getPendingPool() {
         return await this.read(
             "SELECT * FROM transactions WHERE status='pending'",
         )
     }
     // INFO GLS Related methods
-    async getGLSStatusHashTable() {
+    static async getGLSStatusHashTable() {
         return await this.read("SELECT * FROM status_hashes")
     }
-    async getGLSStatusNativeTable() {
+
+    static async getGLSStatusNativeTable() {
         return await this.read("SELECT * FROM status_native")
     }
-    async getGLSStatusPropertiesTable() {
+    static async getGLSStatusPropertiesTable() {
         return await this.read("SELECT * FROM status_properties")
     }
-    async getGLSLastHash() {
+    static async getGLSLastHash() {
         return await this.read(
             "SELECT hash FROM status_hashes ORDER BY id DESC LIMIT 1",
         )[0]
     }
-    async getGLSNativeFor(address) {
+    static async getGLSNativeFor(address: string) {
         return await this.read(
             "SELECT * FROM status_native WHERE address='" + address + "'",
         )[0]
     }
-    async getGLSPropertiesFor(address) {
+    static async getGLSPropertiesFor(address: string) {
         return await this.read(
             "SELECT * FROM status_properties WHERE address='" + address + "'",
         )
@@ -168,7 +111,7 @@ class ChainDB {
     // TODO Implement the rest of the db schema for the chain
     // ANCHOR Setters
     // INFO Insert a block into the database
-    async insertBlock(block) {
+    static async insertBlock(block: Block) {
         // Returns the hash of the block
         // Block() class
         // REVIEW Build the SQL query
@@ -198,7 +141,8 @@ class ChainDB {
         return block.hash
     }
     // INFO Generate the genesis block
-    generateGenesisBlock(genesis_json) {
+    static generateGenesisBlock(genesis_json: any) {
+        // TODO Add a type for the block json
         console.log(genesis_json)
         let genesis_block = new Block()
         genesis_block.number = 0
@@ -206,18 +150,20 @@ class ChainDB {
         let genesis_tx = new Transaction()
         genesis_tx.content.type = "genesis"
         genesis_tx.content.data = genesis_json
-        genesis_tx.hash = sha256(JSON.stringify(genesis_tx.content))
+        genesis_tx.hash = Hashing.sha256(JSON.stringify(genesis_tx.content))
         // Build a block containing the genesis tx
         genesis_block.content.transactions.push(genesis_tx)
-        genesis_block.content.previousHash = 0x0
-        genesis_block.hash = sha256(JSON.stringify(genesis_block.content))
+        genesis_block.content.previousHash = "0x0"
+        genesis_block.hash = Hashing.sha256(
+            JSON.stringify(genesis_block.content),
+        )
         // Insert the genesis block into the database
         return this.insertBlock(genesis_block)
     }
     // ANCHOR Macro
     // ANCHOR Specific operations
     // INFO Getting the status of a given address either from the native or the properties table
-    async statusOf(address, type) {
+    static async statusOf(address: string, type: number) {
         // Type can be: 0, 1 (native, properties)
         let field
         if (type == 0) {
@@ -230,12 +176,10 @@ class ChainDB {
         return await this.read(query)[0]
     } // TODO Implement specific time-saving operations to get specific data (see the tables in the db)
     // INFO Getting the hash of the status at a given block
-    async statusHashAt(block_number) {
+    static async statusHashAt(block_number: number) {
         let query =
             "SELECT hash FROM status_hashes WHERE block='" + block_number + "'"
         return await this.read(query)[0]
     }
     // TODO And more
 }
-
-module.exports = { ChainDB, Block, Transaction }
