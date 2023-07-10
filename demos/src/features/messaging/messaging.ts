@@ -1,5 +1,5 @@
 import { cryptography } from "src/libs/crypto"
-import { Envelope } from "./"
+import { Envelope } from "src/features/messaging"
 import { Identity } from "src/libs/identity"
 
 export class Messaging {

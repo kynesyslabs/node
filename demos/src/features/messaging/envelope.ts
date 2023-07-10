@@ -1,5 +1,5 @@
-import { Partecipant } from "./partecipant"
-import { Message } from "./message"
+import { Partecipant } from "src/features/messaging/partecipant"
+import { Message } from "src/features/messaging/message"
 
 // INFO Messaging session used to represent a conversion between two parties
 export interface Session {
@@ -15,6 +15,7 @@ export interface Session {
 export class Envelope {
     session: Session
     session_signature: string | null
+
     constructor() {
         this.session = {
             uid: null,

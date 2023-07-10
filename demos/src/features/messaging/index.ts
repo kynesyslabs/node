@@ -1,4 +1,4 @@
-export { Message } from "./message"
-export { Envelope } from "./envelope"
-export { Partecipant } from "./partecipant"
-export { Messaging } from "./messaging"
+export { Message } from "src/features/messaging/message"
+export { Envelope } from "src/features/messaging/envelope"
+export { Partecipant } from "src/features/messaging/partecipant"
+export { Messaging } from "src/features/messaging/messaging"

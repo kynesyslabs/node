@@ -1,4 +1,4 @@
-import Chain from "../chain"
+import Chain from "src/libs/blockchain/chain"
 import * as fs from "fs"
 
 // NOTE Sleep function
