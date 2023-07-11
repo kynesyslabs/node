@@ -43,7 +43,7 @@ export default class ServerListeners {
     }
 
     authAskEmit = async () => {
-        await this.peer.socket.emit("auth_ask")
+        await this.peer.socket.emit("auth_ask", "sign this")
     }
 
     comlinkListener = async () => {

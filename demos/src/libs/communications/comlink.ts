@@ -76,6 +76,11 @@ export default class ComLink {
             console.log(
                 "[COMMUNICATIONS] Sending message to peer " + peer.socket.id,
             )
+            // NOTE Removing privated key from message if present
+            if(message.privateKey) {
+                message.privateKey = null
+                console.log("[COMMUNICATIONS] Removing private key from message (WARNING it should not be stored)")
+            }
             // NOTE Setting up the listener to receive the response is useless as we use general listeners
             // Setting the current message as the head of the chain
             this.chain.current.currentMessage = message
@@ -114,6 +119,11 @@ export default class ComLink {
     async broadcastToPeer(peer: Peer) {
         let _socket = peer.socket
         console.log("[COMMUNICATIONS] Sending message to peer")
+        // NOTE Here we make sure that we dont have private data in the message
+        if(this.chain.current.currentMessage.privateKey) {
+            console.log("[WARNING] Private data in message, cleaning up but not a great idea")
+            this.chain.current.currentMessage.privateKey = null
+        }
         // TODO & REVIEW See if we need a listener here or we should just use ResponseRegistry as above
         _socket.emit("comlink", this) // Emitting this object to the peer
         return [true, this.muid]

@@ -33,7 +33,6 @@ export default class CommonListeners {
         this.peer.socket.on("auth_ask", async (data: { message: string }) => {
             console.log(data)
             // REVIEW Signing data.message with the private key
-            console.log(typeof Identity.getInstance().ed25519.privateKey)
             let _signature = cryptography.sign(
                 data.message,
                 Identity.getInstance().ed25519.privateKey as any,
