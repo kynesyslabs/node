@@ -156,7 +156,7 @@ export default class ServerListeners {
             _comlink_request.properties.is_reply = true // Setting the reply flag as we are replying
             _comlink_request.properties.require_reply = require_reply // Setting the require_reply flag as provided above
             await _comlink_request.replyToMessage(
-                response_message.bundle,
+                response_message,
                 id_ed25519.privateKey,
             )
             // Sending back the response

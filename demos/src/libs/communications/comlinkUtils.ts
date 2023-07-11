@@ -1,4 +1,5 @@
 import ComLink from "./comlink"
+import { Bundle } from './types/transmit';
 
 export default class ComLinkUtils {
     // INFO common comlink digestor
@@ -37,13 +38,14 @@ export default class ComLinkUtils {
         // Taking the message part
         let content
         if (!(typeof request.chain.current.currentMessage === "object")) {
-            content = JSON.parse(request.chain.current.currentMessage).content
+            content = JSON.parse(request.chain.current.currentMessage).bundle.content
         } else {
-            content = request.chain.current.currentMessage
+            content = request.chain.current.currentMessage.bundle.content
         }
         if (!content.message) {
             console.log(
                 "[COMLINK PARSING] No message specified. Erroring back.",
+                console.log(content)
             )
             peerSocket.emit("error", {
                 muid: request.muid,

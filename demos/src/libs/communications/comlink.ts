@@ -3,8 +3,9 @@ import Cryptography from "../crypto/cryptography"
 import forge, { pki } from "node-forge"
 import { Socket } from "socket.io"
 import Transmission from "./transmission"
-import { Bundle } from "./types/transmit"
+import { Bundle } from './types/transmit';
 import Peer from "../peer/Peer"
+
 
 import type { Current, Properties } from "./types/comlink"
 
@@ -90,7 +91,7 @@ export default class ComLink {
     }
 
     // INFO Prepare a reply to the last message in the chain
-    async replyToMessage(
+    async replyToMessage( // TODO Strip out private key from Transmission reply
         reply: Transmission,
         privateKey: pki.ed25519.BinaryBuffer,
     ) {
@@ -103,13 +104,13 @@ export default class ComLink {
         this.chain.current.currentMessage = reply
         // Hashing the message for integrity (using the message proper hash)
         // REVIEW Should we use the message proper hash or recalculate it to see if it is the same?
+        //console.log(reply)
         this.chain.current.currentMessageHash = reply.bundle.hash
         // Now we recalculate the signature and hash of the current comlink (containing the previous hashes to have full integrity)
         await this.hashAndSignCurrent(privateKey)
         // As the object has been recalculated, we are able to send the message to the peer from the main function
     }
     // INFO Broadcast a ComLink object to a peer (usually called by the above methods)
-    // TODO Add peer class to peer
     async broadcastToPeer(peer: Peer) {
         let _socket = peer.socket
         console.log("[COMMUNICATIONS] Sending message to peer")
