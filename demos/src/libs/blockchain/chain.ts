@@ -11,8 +11,8 @@ export default class Chain {
             const db = await Datasource.getInstance()
             const result = await db.getDataSource().query(sql_query)
 
-            console.log("[ChainDB] [ READ ]: ")
-            console.log(result)
+            //console.log("[ChainDB] [ READ ]: ")
+            //console.log(result)
             return result
         } catch (err) {
             console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
@@ -24,8 +24,8 @@ export default class Chain {
         try {
             const db = await Datasource.getInstance()
             const result = await db.getDataSource().query(sql_query)
-            console.log("[ChainDB] [ WRITE ]: " + result)
-            return result
+            //console.log("[ChainDB] [ WRITE ]: " + result)
+            //return result
         } catch (err) {
             console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
             throw err

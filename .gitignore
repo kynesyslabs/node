@@ -13,3 +13,4 @@ common/.demos_identity
 demos/yarn.lock
 demos/yarn-error.log
 evm/node/data
+demos_old

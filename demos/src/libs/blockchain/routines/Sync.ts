@@ -6,6 +6,7 @@ import { responseRegistry } from "../../communications"
 import forge, { pki } from "node-forge"
 import * as fs from "fs"
 import { logger } from "src/libs/utils"
+import { promises } from "dns"
 
 const peerManager = PeerManager.getInstance()
 
@@ -26,6 +27,10 @@ export default async function Sync(id: any) {
 
     console.log("[SYNC] Fetching data from peers")
     let peerlist = peerManager.getPeers()
+
+    // NOTE This array contains all the responses promises and is filled step by step
+    let responses: Promise<any>[] = []
+
     // Asking to all the peers for the last block
     for (let i = 0; i < peerlist.length; i++) {
         // Creating a comlink object
@@ -55,34 +60,44 @@ export default async function Sync(id: any) {
         _comlink.properties.is_reply = false
         // Propagating the responseRegistry actual status
 
-        responseRegistry.getInstance().requestResponse(_comlink) // TODO Do a singleton here too
+        responseRegistry.getInstance().requestResponse(_comlink)
 
         // Ask for the last block
         await _comlink.broadcastMessageToPeer(
             _currentPeer,
-            _blockAskMessage, // TODO DELETE sensitivde info here
+            _blockAskMessage, 
             id.ed25519.privateKey,
         )
-        /* REVIEW
-         * We should use responseRegistry.hasResponse(_comlink) to check periodically if the response is received
-         * Or look into communications.js ResponseRegistry for a TODO that explains how to do this in a more elegant way
-         * In any case, here we should wait until the response is received
-         */
-        let timeout_limit = 2000
-        let timeout_counter = 0
-        while (!responseRegistry.getInstance().hasResponse(_comlink)) {
-            await sleep(100)
-            timeout_counter += 100
-            if (timeout_counter > timeout_limit) {
-                console.log(
-                    "[SYNC] Timeout limit reached: no response received",
-                )
-                return false // TODO Manage it
-            }
-        }
-        // REVIEW Ensure the above works
+        
+        // Add the response promise to the responses array
+        let promise = responseRegistry.getInstance().checkResponse(_comlink.muid)
+        responses.push(promise)
+
         // LINK https://stackoverflow.com/questions/23893872/how-to-properly-remove-event-listeners-in-node-js-eventemitter
         // The above link will be used to remove the listeners once the response is received, will be applied to keep clean the peers connections too
     }
+
+        /* NOTE
+         * Using the following code, we are waiting for all the responses to be received without blocking for each one
+         * This is used to avoid returning to the main thread before each node has replied or timed out, but allows
+         * sending the same message to a lot of nodes without blocking and just waiting for the responses to be received at the end.
+        */
+       console.log("[SYNC] Waiting for the responses")
+       // Waiting all the responses
+       let results = await Promise.all(responses)
+       console.log("[SYNC] All responses received")
+       console.log(results)
+
+       // TODO Continue with checking the responses and determining if we need to sync or not
+       for (let i = 0; i < results.length; i++) {
+        let _result = results[i]
+        if (!_result[0]) {
+            console.log("[SYNC] Response " + i + " not received")
+        } else {
+            console.log("[SYNC] Response " + i + " received")
+            console.log(_result[1].message) // TODO Typize better
+        }
+       }
+
     return synced
 }

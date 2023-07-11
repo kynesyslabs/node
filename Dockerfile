@@ -22,6 +22,7 @@ RUN npm install -g eslint
 COPY demos/package.json demos/yarn.lock ./demos/
 RUN yarn --cwd ./demos install
 COPY . .
+RUN cd demos && yarn && cd ..
 
 
 COPY requirements/geth /usr/local/bin/

@@ -4,6 +4,7 @@ import { responseRegistry } from "../communications"
 import { comlinkUtils } from "../communications"
 import { logger } from "../utils"
 import { cryptography } from "../crypto"
+import chain from 'src/libs/blockchain/chain';
 
 export default class CommonListeners {
     private peer: any
@@ -70,9 +71,8 @@ export default class CommonListeners {
                 console.log(
                     "[PEER] Received expected response for " + request.muid,
                 )
-                // TODO Continue with the response logic (as per filling comlink if needed and verifications and so on)
             }
-            console.log(request)
+            //console.log(request)
             // Parsing the comlink
             let parsed_comlink = await comlinkUtils.parseComlink(
                 request,
@@ -81,6 +81,8 @@ export default class CommonListeners {
             if (!parsed_comlink) return
             let _comlink_request = parsed_comlink[0]
             let content = parsed_comlink[1]
+            // Registering the response
+            responseRegistry.getInstance().registerResponse(request.chain.current.currentMessage, request.muid)
         })
     }
 

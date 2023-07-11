@@ -2,6 +2,12 @@ import ComLink from "./comlink"
 import { ResponseRegistryElement } from "./types/responseregistry"
 import Transmission from "./transmission"
 
+async function sleep(ms) {
+    return new Promise(resolve => {
+        setTimeout(resolve, ms)
+    })
+}
+
 export default class ResponseRegistry {
     list: { [key: string]: ResponseRegistryElement }
 
@@ -49,16 +55,23 @@ export default class ResponseRegistry {
     }
 
     // INFO Register a response received
-    registerResponse(message: Transmission, comlink: ComLink) {
-        if (!comlink.properties.require_reply)
-            return [
-                false,
-                "ComLink object must have required_reply property set to true",
-            ]
-        if (!this.list[comlink.muid])
+    registerResponse(message: Transmission, comlink_muid: string) {
+        if (!this.list[comlink_muid])
             return [false, "No response has been requested"]
-        this.list[comlink.muid].response.message = message
-        this.list[comlink.muid].response.timestamp = Date.now()
-        return [true, this.list[comlink.muid]]
+        this.list[comlink_muid].response.message = message.bundle.content.message
+        this.list[comlink_muid].response.timestamp = Date.now()
+        // TODO Insert a socket here?
+        return [true, this.list[comlink_muid]]
+    }
+
+    // INFO Check with the muid if a response has been received and return a promise
+     async checkResponse(muid: string) {
+            let timeout = 0
+            while (!this.list[muid].response.message) {
+                await sleep(100)
+                timeout += 100
+                if (timeout > 2000) return [false, "No response has been received in " + timeout + "ms"]
+            }
+            return [true, this.list[muid].response]
     }
 }
