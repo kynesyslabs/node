@@ -35,25 +35,29 @@ export default class Chain {
     // ANCHOR Getters
     // INFO Get the last block number
     static async getLastBlockNumber() {
-        return await this.read(
-            "SELECT number FROM blocks ORDER BY number DESC LIMIT 1",
-        )[0]
+        let response = await this.read(
+            "SELECT number FROM blocks ORDER BY number ASC LIMIT 1",
+        )
+        return response[0]
     }
     // INFO Get the last block hash
-    static async getLastBlockHash() {
-        return await this.read(
-            "SELECT hash FROM blocks ORDER BY number DESC LIMIT 1",
-        )[0]
+    static async getLastBlockHash() { 
+        let response = await this.read(
+            "SELECT hash FROM blocks ORDER BY number ASC LIMIT 1",
+        )
+        return response[0]
     }
     // INFO Get any block by its number
     static async getBlockByNumber(number: number) {
-        return await this.read(
+        let response = await this.read(
             "SELECT * FROM blocks WHERE number='" + number + "'",
-        )[0]
+        )
+        return response[0]
     }
     // INFO Get any block by its hash
     static async getBlockByHash(hash: string) {
-        return await this.read("SELECT * FROM blocks WHERE hash=" + hash)[0]
+        let response = await this.read("SELECT * FROM blocks WHERE hash=" + hash)
+        return response[0]
     }
     // INFO Get a group of blocks by their status
     static async getBlockNumbersByStatus(status: string) {
@@ -71,8 +75,6 @@ export default class Chain {
     static async getGenesisBlock() {
         // Playground for async testing
         let _res = await this.read("SELECT * FROM blocks WHERE number=0")
-        console.log("=== AFTER GET ===")
-        console.log(_res) // FIXME Here dirit is undefined AND it is before the awaited result
         return _res
     }
 
@@ -94,14 +96,16 @@ export default class Chain {
         return await this.read("SELECT * FROM status_properties")
     }
     static async getGLSLastHash() {
-        return await this.read(
+        let response = await this.read(
             "SELECT hash FROM status_hashes ORDER BY id DESC LIMIT 1",
-        )[0]
+        )
+        return response[0]
     }
     static async getGLSNativeFor(address: string) {
-        return await this.read(
+        let response = await this.read(
             "SELECT * FROM status_native WHERE address='" + address + "'",
-        )[0]
+        )
+        return response[0]
     }
     static async getGLSPropertiesFor(address: string) {
         return await this.read(

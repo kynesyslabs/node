@@ -102,6 +102,7 @@ export default class ServerListeners {
                     case "getLastBlockNumber":
                         console.log("[SERVER] Received getLastBlockNumber")
                         response = await chain.getLastBlockNumber()
+                        console.log("[CHAIN.ts] Received reply from the database") // REVIEW Debug
                         console.log(response)
                         break
                     case "getLastBlockHash":

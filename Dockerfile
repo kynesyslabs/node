@@ -7,13 +7,18 @@ RUN mkdir demos
 RUN mkdir common
 
 
-# Installing basic packages
+
 RUN apk update
+
+
+# Installing basic packages
 RUN apk add --no-cache vim wget screen curl bash nodejs npm yarn make g++ py3-pip
 RUN hash -r
 RUN npm install -g eslint
 # RUN n 16
 
+
+# Installing required packages with yarn
 COPY demos/package.json demos/yarn.lock ./demos/
 RUN yarn --cwd ./demos install
 COPY . .
