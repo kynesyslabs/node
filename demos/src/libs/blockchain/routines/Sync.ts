@@ -86,16 +86,27 @@ export default async function Sync(id: any) {
        // Waiting all the responses
        let results = await Promise.all(responses)
        console.log("[SYNC] All responses received")
-       console.log(results)
+       //console.log(results)
 
-       // TODO Continue with checking the responses and determining if we need to sync or not
+       // Ingesting the valid responses
+       let _block_numbers = {}
        for (let i = 0; i < results.length; i++) {
         let _result = results[i]
         if (!_result[0]) {
             console.log("[SYNC] Response " + i + " not received")
         } else {
             console.log("[SYNC] Response " + i + " received")
-            console.log(_result[1].message) // TODO As the promise can have two types, how to handle it?
+            let peer_identity = _result[1].identity
+            _block_numbers[peer_identity] = {
+                socket: _result[1].socket,
+                block_number: JSON.parse(_result[1].message).number,
+                timestamp: _result[1].timestamp,
+            }
+            console.log(
+                "[SYNC FETCHED] Peer " + peer_identity.toString("hex") + 
+                " has the block number " + _block_numbers[peer_identity].block_number + 
+                " at timestamp " + _block_numbers[peer_identity].timestamp,
+            ) // REVIEW As the promise can have two types, how to handle it?
         }
        }
 

@@ -41,7 +41,8 @@ export default class ResponseRegistry {
             response: {
                 message: null,
                 timestamp: null, // Set to now once received
-                socket: null
+                socket: null,
+                identity: null
             },
         }
         return [true, this.list[comlink.muid]]
@@ -60,10 +61,10 @@ export default class ResponseRegistry {
     registerResponse(message: Transmission, comlink_muid: string, socket: Socket) {
         if (!this.list[comlink_muid])
             return [false, "No response has been requested"]
-        this.list[comlink_muid].response.message = message.bundle.content.message
         this.list[comlink_muid].response.timestamp = Date.now()
         this.list[comlink_muid].response.socket = socket
-        // TODO Insert a socket here?
+        this.list[comlink_muid].response.identity = message.bundle.content.sender
+        this.list[comlink_muid].response.message = message.bundle.content.message
         return [true, this.list[comlink_muid]]
     }
 
