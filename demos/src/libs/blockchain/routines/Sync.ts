@@ -9,6 +9,7 @@ import { logger } from "src/libs/utils"
 import { promises } from "dns"
 
 const peerManager = PeerManager.getInstance()
+import {  Response } from "../../communications/types/responseregistry"
 
 // NOTE Sleep function
 async function sleep(ms) {
@@ -29,7 +30,7 @@ export default async function Sync(id: any) {
     let peerlist = peerManager.getPeers()
 
     // NOTE This array contains all the responses promises and is filled step by step
-    let responses: Promise<[true,Response]|[boolean,any]>[] = []
+    let responses: Promise<[boolean, Response]>[] = []
 
     // Asking to all the peers for the last block
     for (let i = 0; i < peerlist.length; i++) {
@@ -97,16 +98,17 @@ export default async function Sync(id: any) {
         } else {
             console.log("[SYNC] Response " + i + " received")
             let peer_identity = _result[1].identity
-            _block_numbers[peer_identity] = {
+            _block_numbers[peer_identity.toString("hex")] = {
                 socket: _result[1].socket,
                 block_number: JSON.parse(_result[1].message).number,
                 timestamp: _result[1].timestamp,
+                peer: peer_identity
             }
             console.log(
                 "[SYNC FETCHED] Peer " + peer_identity.toString("hex") + 
-                " has the block number " + _block_numbers[peer_identity].block_number + 
-                " at timestamp " + _block_numbers[peer_identity].timestamp,
-            ) // REVIEW As the promise can have two types, how to handle it?
+                " has the block number " + _block_numbers[peer_identity.toString("hex")].block_number + 
+                " at timestamp " + _block_numbers[peer_identity.toString("hex")].timestamp,
+            ) 
         }
        }
 

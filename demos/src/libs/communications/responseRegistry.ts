@@ -1,5 +1,5 @@
 import ComLink from "./comlink"
-import { ResponseRegistryElement } from "./types/responseregistry"
+import { ResponseRegistryElement, Response } from "./types/responseregistry"
 import Transmission from "./transmission"
 import { Socket } from "socket.io"
 
@@ -69,12 +69,12 @@ export default class ResponseRegistry {
     }
 
     // INFO Check with the muid if a response has been received and return a promise
-     async checkResponse(muid: string): Promise<[true,Response]|[boolean,any]> {
+     async checkResponse(muid: string): Promise<[boolean,Response]> {
             let timeout = 0
             while (!this.list[muid].response.message) {
                 await sleep(100)
                 timeout += 100
-                if (timeout > 2000) return [false, "No response has been received in " + timeout + "ms"]
+                if (timeout > 2000) return [false, this.list[muid].response]
             }
             return [true, this.list[muid].response]
     }
