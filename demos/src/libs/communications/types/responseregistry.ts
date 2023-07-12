@@ -1,9 +1,11 @@
 import ComLink from "../comlink"
-import { Transmission } from "../transmission"
+import Transmission from "../transmission"
+import {Socket} from "socket.io"
 
 export interface Response {
-    message: Transmission // TODO Add message type
+    message: string // TODO Add message type
     timestamp: number
+    socket: Socket
 }
 
 export interface ResponseRegistryElement {

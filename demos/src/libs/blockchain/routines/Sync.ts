@@ -29,7 +29,7 @@ export default async function Sync(id: any) {
     let peerlist = peerManager.getPeers()
 
     // NOTE This array contains all the responses promises and is filled step by step
-    let responses: Promise<any>[] = []
+    let responses: Promise<[true,Response]|[boolean,any]>[] = []
 
     // Asking to all the peers for the last block
     for (let i = 0; i < peerlist.length; i++) {
@@ -95,7 +95,7 @@ export default async function Sync(id: any) {
             console.log("[SYNC] Response " + i + " not received")
         } else {
             console.log("[SYNC] Response " + i + " received")
-            console.log(_result[1].message) // TODO Typize better
+            console.log(_result[1].message) // TODO As the promise can have two types, how to handle it?
         }
        }
 

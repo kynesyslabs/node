@@ -1,6 +1,7 @@
 import ComLink from "./comlink"
 import { ResponseRegistryElement } from "./types/responseregistry"
 import Transmission from "./transmission"
+import { Socket } from "socket.io"
 
 async function sleep(ms) {
     return new Promise(resolve => {
@@ -40,6 +41,7 @@ export default class ResponseRegistry {
             response: {
                 message: null,
                 timestamp: null, // Set to now once received
+                socket: null
             },
         }
         return [true, this.list[comlink.muid]]
@@ -55,17 +57,18 @@ export default class ResponseRegistry {
     }
 
     // INFO Register a response received
-    registerResponse(message: Transmission, comlink_muid: string) {
+    registerResponse(message: Transmission, comlink_muid: string, socket: Socket) {
         if (!this.list[comlink_muid])
             return [false, "No response has been requested"]
         this.list[comlink_muid].response.message = message.bundle.content.message
         this.list[comlink_muid].response.timestamp = Date.now()
+        this.list[comlink_muid].response.socket = socket
         // TODO Insert a socket here?
         return [true, this.list[comlink_muid]]
     }
 
     // INFO Check with the muid if a response has been received and return a promise
-     async checkResponse(muid: string) {
+     async checkResponse(muid: string): Promise<[true,Response]|[boolean,any]> {
             let timeout = 0
             while (!this.list[muid].response.message) {
                 await sleep(100)

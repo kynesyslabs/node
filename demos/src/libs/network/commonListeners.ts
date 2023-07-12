@@ -82,7 +82,7 @@ export default class CommonListeners {
             let _comlink_request = parsed_comlink[0]
             let content = parsed_comlink[1]
             // Registering the response
-            responseRegistry.getInstance().registerResponse(request.chain.current.currentMessage, request.muid)
+            responseRegistry.getInstance().registerResponse(request.chain.current.currentMessage, request.muid, this.peer.socket)
         })
     }
 
