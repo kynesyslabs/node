@@ -11,7 +11,8 @@
         "lint": "eslint . --ext .ts",
         "prettier-format": "prettier --config .prettierrc.json modules/**/*.ts --write",
         "test": "echo \"Error: no test specified\" && exit 1",
-        "start": "node --loader ts-node/esm -r tsconfig-paths/register src/index.ts"
+        "start": "node --loader ts-node/esm -r tsconfig-paths/register src/index.ts",
+        "start:dev": "npx nodemon --exec ts-node -r tsconfig-paths/register src/index.ts"
     },
     "devDependencies": {
         "@types/node": "^18.16.19",
@@ -21,6 +22,7 @@
         "eslint-config-prettier": "^8.5.0",
         "eslint-plugin-import": "^2.26.0",
         "eslint-plugin-prettier": "^4.2.1",
+        "nodemon": "^3.0.1",
         "prettier": "^2.8.0",
         "rimraf": "^3.0.2",
         "ts-node": "^10.9.1",
