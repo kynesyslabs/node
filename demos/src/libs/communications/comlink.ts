@@ -1,7 +1,7 @@
 import Hashing from "../crypto/hashing"
 import Cryptography from "../crypto/cryptography"
 import forge, { pki } from "node-forge"
-import { Socket } from "socket.io"
+import { Socket } from "socket.io-client"
 import Transmission from "./transmission"
 import { Bundle } from './types/transmit';
 import Peer from "../peer/Peer"

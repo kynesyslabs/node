@@ -131,6 +131,11 @@ export default class ServerListeners {
                     case "getMempool":
                         response = await chain.getPendingPool()
                         break
+                    // INFO Authentication listener
+                    case "getPeerIdentity": 
+                        // NOTE We don't need to sign anything as the comlink is signed already
+                        response = "I am " + id_ed25519.publicKey.toString("hex")
+                        break
                 }
             }
             // INFO Default

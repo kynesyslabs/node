@@ -1,9 +1,11 @@
 import type { IPeerConfig } from "./types/Peer"
+import { Socket } from "socket.io-client"
+import * as forge from "node-forge"
 
 export default class Peer {
     connectionString: string
-    socket: any
-    identity: string
+    socket: Socket
+    identity: forge.pki.ed25519.BinaryBuffer
 
     constructor(config?: IPeerConfig) {
         this.connectionString = config?.connectionString
@@ -23,5 +25,10 @@ export default class Peer {
     // INFO Set the identity of the peer
     setIdentity(identity) {
         this.identity = identity
+    }
+
+    // INFO Getting the socket
+    getSocket() {
+        return this.socket
     }
 }

@@ -77,7 +77,7 @@ export default class CommonListeners {
             let parsed_comlink = await comlinkUtils.parseComlink(
                 request,
                 this.peer.socket,
-            ) // FIXME Cant parse responses
+            ) 
             if (!parsed_comlink) return
             let _comlink_request = parsed_comlink[0]
             let content = parsed_comlink[1]

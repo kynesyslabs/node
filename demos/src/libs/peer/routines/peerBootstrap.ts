@@ -1,9 +1,12 @@
 import PeerManager from "../PeerManager"
 import Client from "../../network/client"
+import getPeerIdentity from "./getPeerIdentity"
+import { cryptography } from "src/libs/crypto"
 
 const peerManager = PeerManager.getInstance()
 
 export default async function peerBootstrap(local_list: string[]) {
+    const id_ed25519 = await cryptography.load("./.demos_identity")
     let peerlist = peerManager.getPeers()
 
     // Validity check
@@ -29,6 +32,9 @@ export default async function peerBootstrap(local_list: string[]) {
             currentPeerPort,
         ) // Returns the Peer object 
         if (_currentPeerObject) { 
+            // Adding identity if any
+            console.log("[BOOTSTRAP] Testing " + currentPeerAddress + " identity")
+            _currentPeerObject = await getPeerIdentity(_currentPeerObject, id_ed25519)
             console.log(
                 "[BOOTSTRAP] OK: Valid peer " +
                     currentPeerAddress +
@@ -48,7 +54,10 @@ export default async function peerBootstrap(local_list: string[]) {
                     "\n",
             )
         }
-        console.log(peerlist)
+        // Nice printing of the peerlist
+        for (let i = 0; i < peerlist.length; i++) {
+            console.log(peerlist[i].identity.toString("hex"))
+        }
     }
     // Dying if there are no valid peers
     if (peerlist.length == 0) {
