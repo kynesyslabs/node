@@ -6,6 +6,15 @@ import Datasource from "src/model/datasource"
 import forge, { pki } from "node-forge"
 
 export default class Chain {
+    private static instance: Chain
+
+    static getInstance(): Chain {
+        if (!this.instance) {
+            this.instance = new Chain()
+        }
+        return this.instance
+    } // TODO When possible let's make it a singleton
+
     static async read(sql_query: string) {
         try {
             const db = await Datasource.getInstance()
@@ -82,34 +91,6 @@ export default class Chain {
     static async getPendingPool() {
         return await this.read(
             "SELECT * FROM transactions WHERE status='pending'",
-        )
-    }
-    // INFO GLS Related methods
-    static async getGLSStatusHashTable() {
-        return await this.read("SELECT * FROM status_hashes")
-    }
-
-    static async getGLSStatusNativeTable() {
-        return await this.read("SELECT * FROM status_native")
-    }
-    static async getGLSStatusPropertiesTable() {
-        return await this.read("SELECT * FROM status_properties")
-    }
-    static async getGLSLastHash() {
-        let response = await this.read(
-            "SELECT hash FROM status_hashes ORDER BY id DESC LIMIT 1",
-        )
-        return response[0]
-    }
-    static async getGLSNativeFor(address: string) {
-        let response = await this.read(
-            "SELECT * FROM status_native WHERE address='" + address + "'",
-        )
-        return response[0]
-    }
-    static async getGLSPropertiesFor(address: string) {
-        return await this.read(
-            "SELECT * FROM status_properties WHERE address='" + address + "'",
         )
     }
     // TODO Implement the rest of the db schema for the chain

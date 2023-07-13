@@ -67,9 +67,12 @@ export default class ServerListeners {
             // Where muid is a message unique identifier that is used to identify the response
             var response
             var require_reply = false
-
+            // INFO Transaction endpoints
+            if (content.type === "transaction") {
+                // TODO
+            }
             // INFO Web2 endpoints
-            if (content.type === "web2Request") {
+            else if (content.type === "web2Request") {
                 console.log("[SERVER] Received web2Request")
                 switch (content.message.action) {
                     case "getUrl":
@@ -179,8 +182,13 @@ export default class ServerListeners {
         })
     }
 
+    // INFO Listen on the 'transactions' endpoint
     transactionsListener = async () => {
         this.peer.socket.on("transactions", async request => {
+            // Loading identity
+            const id_ed25519 = await cryptography.load("./.demos_identity")
+            let publicKey = Buffer.from(id_ed25519.publicKey.toString("hex"))
+            let privateKey = Buffer.from(id_ed25519.privateKey.toString("hex"))
             // Refusing the request if there is no muid
             if (!request.muid) {
                 this.peer.socket.emit("transactions", {
@@ -189,38 +197,26 @@ export default class ServerListeners {
                 })
                 return
             }
-            // request.tx is the signed tx (or should be)
-            let integrity = await Transaction.sanityCheck(request.tx)
-            if (!integrity) {
-                this.peer.socket.emit("transactions", {
-                    status: "error",
-                    message: "Invalid transaction",
+            // Ingesting a transaction
+            let tx = new Transaction()
+            tx.content = request.tx.content
+            tx.signature = request.tx.signature
+            tx.hash = request.tx.hash
+            tx.confirmations = request.tx.confirmations
+            tx.state_changes = request.tx.state_changes 
+            // Verify tx validity           
+            let verified = Transaction.confirmTx(tx, privateKey, publicKey) // REVIEW Are the buffers ok?
+            if (!verified) {
+                this.peer.socket.emit("error", {
                     muid: request.muid,
+                    message: "Invalid signature or hash for tx",
                 })
                 return
             }
-            // If the tx is valid, we verify the signature
-            let verification = await Transaction.verify(request.tx)
-            if (!verification[0]) {
-                this.peer.socket.emit("transactions", {
-                    status: "error",
-                    message: "Failed verification",
-                    muid: request.muid,
-                })
-                return
-            }
-            // TODO Put the tx into the blockchain as pending
-            // Verify coherence of the tx
-            let coherence = await Transaction.isCoherent(request.tx)
-            if (!coherence[0]) {
-                this.peer.socket.emit("transactions", {
-                    status: "error",
-                    message: "Failed coherence",
-                    muid: request.muid,
-                })
-                return
-                // TODO handle the transactions execution
-            }
+            // TODO EXecute or Revert the transaction
+            // If the tx is valid and executable, we confirm it
+            tx.confirmations.push(verified)
+            // TODO Add to the mempool and broadcast the tx to our peers
         })
     }
 }
