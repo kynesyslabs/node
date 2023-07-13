@@ -1,5 +1,7 @@
 import Chain from "../chain"
-
+import Token from "./types/Token"
+import NFT from "./types/NFT"
+import * as express from 'express';
 
 export default class GLS {
 
@@ -31,10 +33,35 @@ export default class GLS {
             "SELECT * FROM status_properties WHERE address='" + address + "'",
         )
     }
+
+    // ANCHOR Balances retrieval
+
+    static async getGLSNativeBalance(address: string) {
+        let response = await Chain.read(
+                    "SELECT balance FROM status_native WHERE address='" + address + "'",
+                )
+        return response[0].balance
+    }
+
+    static async getGLSTokenBalance(address: string, token_address: string) {
+        let response = await Chain.read(
+                    "SELECT tokens FROM status_properties WHERE address='",
+                )
+        let full_tokens_balance = response[0]
+        return full_tokens_balance.tokens[token_address]
+    }
+
+    static async getGLSNFTBalance(address: string, nft_address: string) {
+        let response = await Chain.read(
+                    "SELECT nfts FROM status_properties WHERE address='",
+                )
+        let full_nfts_balance = response[0]
+        return full_nfts_balance.nfts[nft_address]
+    }
     // !SECTION Getters
 
 	// SECTION Setters
-    static async setGLSNative(address: string, native: number, tx_hash: string) {
+    static async setGLSNativeBalance(address: string, native: number, tx_hash: string) {
         // Updating tx list
         let tx_list = await Chain.read(
             "SELECT tx_list FROM status_native WHERE address='" + address + "'",
@@ -53,6 +80,6 @@ export default class GLS {
     }
 
     // TODO Build objects for tokens and nfts and write setters for them
-    
+
 	// !SECTION Setters
 }
