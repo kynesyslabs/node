@@ -34,6 +34,25 @@ export default class GLS {
     // !SECTION Getters
 
 	// SECTION Setters
+    static async setGLSNative(address: string, native: number, tx_hash: string) {
+        // Updating tx list
+        let tx_list = await Chain.read(
+            "SELECT tx_list FROM status_native WHERE address='" + address + "'",
+        )
+        tx_list = JSON.parse(tx_list[0].tx_list)
+        tx_list.push(tx_hash)
+        tx_list = JSON.stringify(tx_list)
+        // Updating balance and tx_list on db
+        let balance_response = await Chain.write(
+            "UPDATE status_native SET balance=" + native + " WHERE address='" + address + "'",
+        )
+        let tx_list_response = await Chain.write(
+            "UPDATE status_native SET tx_list='" + tx_list + "' WHERE address='" + address + "'",
+        )
+        return [balance_response, tx_list_response]
+    }
 
+    // TODO Build objects for tokens and nfts and write setters for them
+    
 	// !SECTION Setters
 }

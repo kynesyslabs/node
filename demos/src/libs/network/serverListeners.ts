@@ -154,9 +154,9 @@ export default class ServerListeners {
             response_message.initialize(
                 // TODO Specify the answer so that it has a type AND a message
                 "reply",
-                JSON.stringify(response), // FIXME Here goes undefined, not good
+                JSON.stringify(response),
                 id_ed25519.publicKey,
-                "placeholder", // FIXME Also here goes undefined, not good
+                "placeholder", // TODO Add the receiver
                 null,
                 null,
             )
