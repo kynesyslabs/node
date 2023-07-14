@@ -35,7 +35,12 @@ async function testIt() {
     let _blockAskMessage = new Transmission(id.ed25519.privateKey)
     _blockAskMessage.initialize(
         "web2Request",
-        `{"httpVerb": "GET", "url": "https://google.com", "headers": ""}`,
+        {
+            action: "getUrl",
+            httpVerb: "GET",
+            url: "https://google.com",
+            headers: "",
+        },
         id.ed25519.publicKey,
         _currentPeer.identity,
         null,

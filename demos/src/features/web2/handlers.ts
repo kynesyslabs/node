@@ -1,7 +1,6 @@
 // INFO This module contains all the methods needed to interact with web2 on DEMOS chain
 import { Web2Data } from "./web2class"
-
-import sha256 from "sha256"
+import { sha256 } from "node-forge"
 
 import axios from "axios"
 import axiosRetry from "axios-retry"
@@ -35,6 +34,7 @@ const handlers = {
 
 // INFO Provides a method to retrieve a web2 data from a url (simple GET request)
 async function http_request(httpVerb: string, url: string, headers: any) {
+    console.log("[WEB2] Received http_request")
     if (httpVerb !== "GET" && httpVerb !== "POST") {
         console.log("Wrong http verb")
         return
@@ -71,7 +71,11 @@ async function http_request(httpVerb: string, url: string, headers: any) {
         web2Data.status = "retrieved"
         web2Data.data.response.timestamp = new Date().getTime()
         web2Data.data.response.result = response.data
-        web2Data.data.response.hash = sha256(JSON.stringify(response.data))
+
+        let md = sha256.create()
+        md.update(JSON.stringify(response.data))
+        web2Data.data.response.hash = md.digest().toHex()
+
         //syncData(web2Data, imc.states["web2"])
         emit_web2_broadcast(web2Data)
     } catch (error) {
