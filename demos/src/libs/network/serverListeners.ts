@@ -7,7 +7,7 @@ import Transmission from "src/libs/communications/transmission"
 import Transaction from "src/libs/blockchain/transaction"
 import Mempool from "src/libs/blockchain/mempool"
 import chain from "src/libs/blockchain/chain"
-import web2 from "src/libs/web2"
+import { handlers as web2 } from "src/features/web2"
 export default class ServerListeners {
     peer: Peer
 
@@ -207,8 +207,8 @@ export default class ServerListeners {
             tx.signature = request.tx.signature
             tx.hash = request.tx.hash
             tx.confirmations = request.tx.confirmations
-            tx.state_changes = request.tx.state_changes 
-            // Verify tx validity           
+            tx.state_changes = request.tx.state_changes
+            // Verify tx validity
             let verified = Transaction.confirmTx(tx, privateKey, publicKey) // REVIEW Are the buffers ok?
             if (!verified) {
                 this.peer.socket.emit("error", {

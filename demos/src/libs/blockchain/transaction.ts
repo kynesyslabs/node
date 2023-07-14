@@ -5,9 +5,9 @@ import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import forge, { pki } from "node-forge"
 import { TransactionContent } from "./types/transactions"
-import { sha256 } from 'node-forge';
-import StateChange from "./gls/types/StateChange";
-import Confirmation from "./types/confirmation";
+import { sha256 } from "node-forge"
+import StateChange from "./gls/types/StateChange"
+import Confirmation from "./types/confirmation"
 
 export default class Transaction {
     content: TransactionContent
@@ -32,7 +32,7 @@ export default class Transaction {
     }
 
     // INFO Given a transaction, sign it with the private key of the sender
-    static sign(tx: Transaction, privateKey: pki.ed25519.BinaryBuffer) {
+    public static sign(tx: Transaction, privateKey: pki.ed25519.BinaryBuffer) {
         // Check sanity of the structure of the tx object
         if (!tx.content) {
             return [false, "Missing tx.content"]
@@ -79,8 +79,12 @@ export default class Transaction {
     }
 
     // INFO Compile a verification for a transaction and spit out the resulting tx
-    static confirmTx(tx: Transaction, publicKey: pki.ed25519.BinaryBuffer, privateKey: pki.ed25519.BinaryBuffer) {
-        let confirmed = (this.sanityCheck(tx) && this.isCoherent(tx))
+    static confirmTx(
+        tx: Transaction,
+        publicKey: pki.ed25519.BinaryBuffer,
+        privateKey: pki.ed25519.BinaryBuffer,
+    ) {
+        let confirmed = this.sanityCheck(tx) && this.isCoherent(tx)
         if (confirmed) {
             let confirmation = new Confirmation()
             confirmation.data.validator = publicKey
@@ -95,19 +99,21 @@ export default class Transaction {
         }
     }
 
-    // ANCHOR Private methods
-
     // INFO Checks the integrity of a transaction
-    private static sanityCheck(tx: Transaction) {
-        let _result = Cryptography.verify(JSON.stringify(tx.content), tx.signature, tx.content.from)
+    public static sanityCheck(tx: Transaction) {
+        let _result = Cryptography.verify(
+            JSON.stringify(tx.content),
+            tx.signature,
+            tx.content.from,
+        )
         return _result
     }
 
     // INFO Checking if the tx is coherent to the current state of the blockchain (and the txs pending before it)
-    private static isCoherent(tx: Transaction) {
+    public static isCoherent(tx: Transaction) {
         let _result = true
         let _derived_hash = Hashing.sha256(JSON.stringify(tx.content))
-        _result = (_derived_hash!== tx.hash)
+        _result = _derived_hash !== tx.hash
         return _result
     }
 }
