@@ -5,6 +5,7 @@ import { Messaging, Message } from "src/features/messaging"
 import { Identity } from "src/libs/identity"
 import Transmission from "src/libs/communications/transmission"
 import Transaction from "src/libs/blockchain/transaction"
+import Mempool from "src/libs/blockchain/mempool"
 import chain from "src/libs/blockchain/chain"
 import web2 from "src/libs/web2"
 export default class ServerListeners {
@@ -18,7 +19,6 @@ export default class ServerListeners {
         await this.authReplyListener()
         await this.authAskEmit()
         await this.comlinkListener()
-        await this.helloListener()
         await this.transactionsListener()
     }
 
@@ -67,9 +67,12 @@ export default class ServerListeners {
             // Where muid is a message unique identifier that is used to identify the response
             var response
             var require_reply = false
-
+            // INFO Transaction endpoints
+            if (content.type === "transaction") {
+                // TODO
+            }
             // INFO Web2 endpoints
-            if (content.type === "web2Request") {
+            else if (content.type === "web2Request") {
                 console.log("[SERVER] Received web2Request")
                 switch (content.message.action) {
                     case "getUrl":
@@ -94,6 +97,13 @@ export default class ServerListeners {
             // INFO Storage endpoint
             else if (content.type === "storage") {
                 // TODO Call the appropriate lib to parse the request and act
+            }
+
+            // INFO Mempool endpoint
+            else if (content.type === "mempool") {
+                // Getting the mempool instance
+                let mempool = Mempool.getInstance()
+                response = await mempool.receive(content.message)
             }
 
             // INFO Node APIs endpoints
@@ -154,9 +164,9 @@ export default class ServerListeners {
             response_message.initialize(
                 // TODO Specify the answer so that it has a type AND a message
                 "reply",
-                JSON.stringify(response), // FIXME Here goes undefined, not good
+                JSON.stringify(response),
                 id_ed25519.publicKey,
-                "placeholder", // FIXME Also here goes undefined, not good
+                "placeholder", // TODO Add the receiver
                 null,
                 null,
             )
@@ -176,14 +186,13 @@ export default class ServerListeners {
         // TODO See in communications.js and find the best way to validate, check and digest the request
     }
 
-    helloListener = async () => {
-        this.peer.socket.on("hello", async request => {
-            console.log("[DEBUG] hello there")
-        })
-    }
-
+    // INFO Listen on the 'transactions' endpoint (different from comlink to avoid overheads)
     transactionsListener = async () => {
         this.peer.socket.on("transactions", async request => {
+            // Loading identity
+            const id_ed25519 = await cryptography.load("./.demos_identity")
+            let publicKey = Buffer.from(id_ed25519.publicKey.toString("hex"))
+            let privateKey = Buffer.from(id_ed25519.privateKey.toString("hex"))
             // Refusing the request if there is no muid
             if (!request.muid) {
                 this.peer.socket.emit("transactions", {
@@ -192,38 +201,26 @@ export default class ServerListeners {
                 })
                 return
             }
-            // request.tx is the signed tx (or should be)
-            let integrity = await Transaction.sanityCheck(request.tx)
-            if (!integrity) {
-                this.peer.socket.emit("transactions", {
-                    status: "error",
-                    message: "Invalid transaction",
+            // Ingesting a transaction
+            let tx = new Transaction()
+            tx.content = request.tx.content
+            tx.signature = request.tx.signature
+            tx.hash = request.tx.hash
+            tx.confirmations = request.tx.confirmations
+            tx.state_changes = request.tx.state_changes 
+            // Verify tx validity           
+            let verified = Transaction.confirmTx(tx, privateKey, publicKey) // REVIEW Are the buffers ok?
+            if (!verified) {
+                this.peer.socket.emit("error", {
                     muid: request.muid,
+                    message: "Invalid signature or hash for tx",
                 })
                 return
             }
-            // If the tx is valid, we verify the signature
-            let verification = await Transaction.verify(request.tx)
-            if (!verification[0]) {
-                this.peer.socket.emit("transactions", {
-                    status: "error",
-                    message: "Failed verification",
-                    muid: request.muid,
-                })
-                return
-            }
-            // TODO Put the tx into the blockchain as pending
-            // Verify coherence of the tx
-            let coherence = await Transaction.isCoherent(request.tx)
-            if (!coherence[0]) {
-                this.peer.socket.emit("transactions", {
-                    status: "error",
-                    message: "Failed coherence",
-                    muid: request.muid,
-                })
-                return
-                // TODO handle the transactions execution
-            }
+            // TODO EXecute or Revert the transaction
+            // If the tx is valid and executable, we confirm it
+            tx.confirmations.push(verified)
+            // TODO Add to the mempool and broadcast the tx to our peers
         })
     }
 }
