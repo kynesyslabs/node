@@ -51,14 +51,12 @@ async function http_request(httpVerb: string, url: string, headers: any) {
             promise = axios.get(url, headers)
             web2Data.status = "pending"
             web2Data.data.request.timestamp = new Date().getTime()
-            //syncData(web2Data, imc.states["web2"])
             emit_web2_broadcast(web2Data)
             break
         case "POST":
             promise = axios.post(url, headers)
             web2Data.status = "pending"
             web2Data.data.request.timestamp = new Date().getTime()
-            //syncData(web2Data, imc.states["web2"])
             emit_web2_broadcast(web2Data)
             break
         default:
@@ -89,7 +87,7 @@ async function http_request(httpVerb: string, url: string, headers: any) {
 }
 
 function emit_web2_broadcast(data: any) {
-    console.log(data)
+    console.log("[WEB2] Emitting web2 broadcast", data)
 }
 
 export default handlers
