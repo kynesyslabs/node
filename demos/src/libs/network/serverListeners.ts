@@ -6,7 +6,7 @@ import { Identity } from "src/libs/identity"
 import Transmission from "src/libs/communications/transmission"
 import Transaction from "src/libs/blockchain/transaction"
 import chain from "src/libs/blockchain/chain"
-
+import web2 from "src/libs/web2"
 export default class ServerListeners {
     peer: Peer
 
@@ -74,11 +74,11 @@ export default class ServerListeners {
                 switch (content.message.action) {
                     case "getUrl":
                         console.log("[SERVER] Received getUrl")
-                        // response = web2.http_request(
-                        //     content.message.httpVerb,
-                        //     content.message.url,
-                        //     content.message.headers,
-                        // )
+                        response = web2.http_request(
+                            content.message.httpVerb,
+                            content.message.url,
+                            content.message.headers,
+                        )
                         break
                     default:
                         break
@@ -102,7 +102,9 @@ export default class ServerListeners {
                     case "getLastBlockNumber":
                         console.log("[SERVER] Received getLastBlockNumber")
                         response = await chain.getLastBlockNumber()
-                        console.log("[CHAIN.ts] Received reply from the database") // REVIEW Debug
+                        console.log(
+                            "[CHAIN.ts] Received reply from the database",
+                        ) // REVIEW Debug
                         console.log(response)
                         break
                     case "getLastBlockHash":
@@ -132,9 +134,10 @@ export default class ServerListeners {
                         response = await chain.getPendingPool()
                         break
                     // INFO Authentication listener
-                    case "getPeerIdentity": 
+                    case "getPeerIdentity":
                         // NOTE We don't need to sign anything as the comlink is signed already
-                        response = "I am " + id_ed25519.publicKey.toString("hex")
+                        response =
+                            "I am " + id_ed25519.publicKey.toString("hex")
                         break
                 }
             }
