@@ -84,6 +84,16 @@ export default class ServerListeners {
                             content.message.headers,
                         )
                         break
+                    case "attestGetUrl":
+                        console.log(
+                            "[SERVER] Received attestation request for getUrl",
+                        )
+                        response = web2.http_request(
+                            content.message.httpVerb,
+                            content.message.url,
+                            content.message.headers,
+                        )
+                        break
                     default:
                         break
                 }

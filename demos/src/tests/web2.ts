@@ -51,13 +51,13 @@ async function testIt() {
     await _blockAskMessage.finalize()
     // Putting the message into the comlink
     console.log(
-        "[SYNC] Asking " + _currentPeer.socket.id + " for the last block",
+        "[WEB2/TEST] Asking " + _currentPeer.socket.id + " for a web2 request",
     )
     // Preparing for a response
     comLink.properties.require_reply = true
     comLink.properties.is_reply = false
-    // Propagating the responseRegistry actual status
 
+    // Propagating the responseRegistry actual status
     responseRegistry.getInstance().requestResponse(comLink)
 
     // Ask for the last block

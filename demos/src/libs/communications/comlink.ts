@@ -1,11 +1,9 @@
 import Hashing from "../crypto/hashing"
 import Cryptography from "../crypto/cryptography"
-import forge, { pki } from "node-forge"
+import { pki } from "node-forge"
 import { Socket } from "socket.io-client"
 import Transmission from "./transmission"
-import { Bundle } from './types/transmit';
 import Peer from "../peer/Peer"
-
 
 import type { Current, Properties } from "./types/comlink"
 
@@ -77,9 +75,11 @@ export default class ComLink {
                 "[COMMUNICATIONS] Sending message to peer " + peer.socket.id,
             )
             // NOTE Removing privated key from message if present
-            if(message.privateKey) {
+            if (message.privateKey) {
                 message.privateKey = null
-                console.log("[COMMUNICATIONS] Removing private key from message (WARNING it should not be stored)")
+                console.log(
+                    "[COMMUNICATIONS] Removing private key from message (WARNING it should not be stored)",
+                )
             }
             // NOTE Setting up the listener to receive the response is useless as we use general listeners
             // Setting the current message as the head of the chain
@@ -96,7 +96,8 @@ export default class ComLink {
     }
 
     // INFO Prepare a reply to the last message in the chain
-    async replyToMessage( // TODO Strip out private key from Transmission reply
+    async replyToMessage(
+        // TODO Strip out private key from Transmission reply
         reply: Transmission,
         privateKey: pki.ed25519.BinaryBuffer,
     ) {
@@ -120,8 +121,10 @@ export default class ComLink {
         let _socket = peer.socket
         console.log("[COMMUNICATIONS] Sending message to peer")
         // NOTE Here we make sure that we dont have private data in the message
-        if(this.chain.current.currentMessage.privateKey) {
-            console.log("[WARNING] Private data in message, cleaning up but not a great idea")
+        if (this.chain.current.currentMessage.privateKey) {
+            console.log(
+                "[WARNING] Private data in message, cleaning up but not a great idea",
+            )
             this.chain.current.currentMessage.privateKey = null
         }
         // TODO & REVIEW See if we need a listener here or we should just use ResponseRegistry as above

@@ -4,6 +4,7 @@ import { sha256 } from "node-forge"
 
 import axios from "axios"
 import axiosRetry from "axios-retry"
+import { sendMessageToPeers } from "./peerMessaging"
 
 axiosRetry(axios, {
     retries: 3, // number of retries
@@ -51,13 +52,18 @@ async function http_request(httpVerb: string, url: string, headers: any) {
             promise = axios.get(url, headers)
             web2Data.status = "pending"
             web2Data.data.request.timestamp = new Date().getTime()
-            emit_web2_broadcast(web2Data)
+            emit_web2_broadcast({
+                action: "attestGetUrl",
+                httpVerb: "GET",
+                url: url,
+                headers: headers,
+            })
             break
         case "POST":
             promise = axios.post(url, headers)
             web2Data.status = "pending"
             web2Data.data.request.timestamp = new Date().getTime()
-            emit_web2_broadcast(web2Data)
+            await emit_web2_broadcast(web2Data)
             break
         default:
             console.log("Wrong http verb")
@@ -75,19 +81,19 @@ async function http_request(httpVerb: string, url: string, headers: any) {
         web2Data.data.response.hash = md.digest().toHex()
 
         //syncData(web2Data, imc.states["web2"])
-        emit_web2_broadcast(web2Data)
+        await emit_web2_broadcast(web2Data)
     } catch (error) {
         console.error(error)
         web2Data.status = "error"
         web2Data.data.response.timestamp = new Date().getTime()
         //syncData(web2Data, imc.states["web2"])
-        emit_web2_broadcast(web2Data)
+        await emit_web2_broadcast(web2Data)
         throw error
     }
 }
 
-function emit_web2_broadcast(data: any) {
-    console.log("[WEB2] Emitting web2 broadcast", data)
+async function emit_web2_broadcast(data: any) {
+    await sendMessageToPeers(data)
 }
 
 export default handlers
