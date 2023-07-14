@@ -9,6 +9,9 @@ const id = Identity.getInstance()
 
 export async function sendMessageToPeers(messageContent: any) {
     let peerlist = peerManager.getPeers()
+    console.log(
+        `[WEB2/PEERMESSAGING] Sending message to ${peerlist.length} peers`,
+    )
 
     for (const currentPeer of peerlist) {
         const comLink = new ComLink()
