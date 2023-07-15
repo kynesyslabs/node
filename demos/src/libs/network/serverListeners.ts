@@ -50,6 +50,7 @@ export default class ServerListeners {
         this.peer.socket.on("comlink", async request => {
             // REVIEW I don't think we need to do this every time
             console.log("[SERVER] Received comlink")
+            console.log(request)
             const id_ed25519 = await cryptography.load("./.demos_identity")
             // TODO Add responseRegistry support as per main.js and communications.js
             let _receiver = this.peer.socket

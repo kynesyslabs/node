@@ -89,6 +89,8 @@ export default class ComLink {
             await this.hashAndSignCurrent(privateKey)
             // Emitting the message
             let result = await this.broadcastToPeer(peer)
+            console.log("[COMMUNICATIONS] Message sent")
+            console.log(result)
             return result
         }
         console.log("[COMMUNICATIONS] Invalid peer")
@@ -119,7 +121,7 @@ export default class ComLink {
     // INFO Broadcast a ComLink object to a peer (usually called by the above methods)
     async broadcastToPeer(peer: Peer) {
         let _socket = peer.socket
-        console.log("[COMMUNICATIONS] Sending message to peer")
+        console.log("[COMMUNICATIONS] Broadcast message to peer")
         // NOTE Here we make sure that we dont have private data in the message
         if (this.chain.current.currentMessage.privateKey) {
             console.log(

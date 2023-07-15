@@ -12,8 +12,18 @@ export async function sendMessageToPeers(messageContent: any) {
     console.log(
         `[WEB2/PEERMESSAGING] Sending message to ${peerlist.length} peers`,
     )
+    for (const peer of peerlist) {
+        // console.log(peer)
+    }
 
     for (const currentPeer of peerlist) {
+        if (
+            currentPeer.connectionString === "" ||
+            currentPeer.connectionString === null ||
+            currentPeer.connectionString === undefined
+        ) {
+            continue
+        }
         const comLink = new ComLink()
         console.log(
             "WEB2/PEERMESSAGING: Sending message to peer " + currentPeer,
@@ -40,6 +50,7 @@ export async function sendMessageToPeers(messageContent: any) {
 
         console.log("WEB2/PEERMESSAGING: Message being sent")
         // Send the message
+        console.log(JSON.stringify(message))
         await comLink.broadcastMessageToPeer(
             currentPeer,
             message,

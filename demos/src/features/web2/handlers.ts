@@ -45,7 +45,8 @@ async function http_request(httpVerb: string, url: string, headers: any) {
     const web2Data = new Web2Data()
     web2Data.data.request.timestamp = new Date().getTime()
     // syncData(web2Data, imc.states["web2"])
-    emit_web2_broadcast(web2Data)
+    // emit_web2_broadcast(web2Data)
+    // Fixme: mark as operator??
 
     switch (httpVerb) {
         case "GET":

@@ -1,5 +1,5 @@
 import ComLink from "./comlink"
-import { Bundle } from './types/transmit';
+import { Bundle } from "./types/transmit"
 
 export default class ComLinkUtils {
     // INFO common comlink digestor
@@ -8,8 +8,8 @@ export default class ComLinkUtils {
         peerSocket,
     ): Promise<[ComLink, any] | boolean> {
         // We need to check if the message request is valid (is a ComLink object)
-        console.log("[SERVER] Received comlink")
-        //console.log(request)
+        console.log("[COMLINKUTILS] Received comlink")
+        console.log(JSON.stringify(request))
         // GIving the request the comlink methods
         let _comlink_request = new ComLink()
         _comlink_request.chain = request.chain
@@ -38,14 +38,15 @@ export default class ComLinkUtils {
         // Taking the message part
         let content
         if (!(typeof request.chain.current.currentMessage === "object")) {
-            content = JSON.parse(request.chain.current.currentMessage).bundle.content
+            content = JSON.parse(request.chain.current.currentMessage).bundle
+                .content
         } else {
             content = request.chain.current.currentMessage.bundle.content
         }
         if (!content.message) {
             console.log(
                 "[COMLINK PARSING] No message specified. Erroring back.",
-                console.log(content)
+                console.log(content),
             )
             peerSocket.emit("error", {
                 muid: request.muid,

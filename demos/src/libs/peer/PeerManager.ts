@@ -20,6 +20,8 @@ export default class PeerManager {
     }
 
     addPeer(peer: Peer) {
+        console.log("[PEERMANAGER] Adding peer")
+        console.log(peer)
         this.peerList.push(peer)
     }
 
