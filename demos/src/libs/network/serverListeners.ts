@@ -9,6 +9,7 @@ import chain from "src/libs/blockchain/chain"
 import { handlers as web2 } from "src/features/web2"
 import convalidateWeb2 from "../blockchain/routines/convalidateWeb2"
 import convalidateTransaction from "../blockchain/routines/convalidateTransaction"
+
 export default class ServerListeners {
     peer: Peer
 

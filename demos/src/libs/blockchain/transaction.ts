@@ -29,7 +29,9 @@ export default class Transaction {
             from: null,
             to: null,
             amount: null,
-            data: null,
+            data: [null, null],
+            nonce: null,
+            timestamp: null
         }
         this.signature = null
         this.hash = null

@@ -3,7 +3,47 @@ import Token from "./types/Token"
 import NFT from "./types/NFT"
 import * as express from 'express';
 
+interface OperationResult {
+    success: boolean;
+    message: string;
+}
+
+export interface Operation {
+    operator: string;
+    actor: string;
+    amount: number;
+    hash: string;
+    nonce: number;
+    timestamp: number;
+}
+
+// INFO Besides the static methods, the GLS store all the operations to be done in the current block so that they can be executed in order
 export default class GLS {
+    private static instance: GLS
+    operations: Operation[]
+
+    private constructor() {
+        this.operations = []
+    }
+
+    // Singleton logic
+    static getInstance(): GLS {
+        if (!this.instance) {
+            this.instance = new GLS()
+        }
+        return this.instance
+    }
+
+    // ANCHOR Execute operations
+    executeOperations(): OperationResult {
+        let result: OperationResult
+        for (let i = 0; i < this.operations.length; i++) {
+            let hash = this.operations[i].hash
+            // TODO Implement nonce and timestamp verification to execute a transaction
+        }
+        // TODO Apply the operations and return the success and message for each operation
+        return result
+    }
 
     // SECTION Getters
     static async getGLSStatusHashTable() {

@@ -1,5 +1,6 @@
 import { cryptography } from "src/libs/crypto"
 import Transaction from "../transaction"
+import executeTransaction from "./executeTransaction"
 
 // INFO Cryptographically convalidate a transaction and see if the execution is valid
 export default async function convalidateTransaction(request: any): Promise<Transaction> {
@@ -19,7 +20,11 @@ export default async function convalidateTransaction(request: any): Promise<Tran
 	if (!verified) {
 		return null
 	}
-	// TODO EXecute or Revert the transaction
+	// REVIEW Execute or Revert the transaction
+	let execution = await executeTransaction(tx)
+	if (!execution[0]) {
+        return null
+    }
 	// If the tx is valid and executable, we confirm it
 	tx.confirmations.push(verified)
 	return tx
