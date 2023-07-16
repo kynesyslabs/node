@@ -2,6 +2,17 @@ import Transaction from '../transaction';
 import GLS from '../gls/gls';
 import { Operation } from "../gls/gls"
 
+/* NOTE 
+
+Rationale: transactions arrives with a nonce and a timestamp.
+
+The operations contained in a transaction are calculated by executeTransaction, the output is stored
+as Operation objects in the GLS.
+
+Each block, the nodes execute the Operation objects ordering them by their timestamp and nonce (see GLS).
+
+*/
+
 // INFO Given a transaction, use GLS to see if it is executable and return a result
 export default async function executeTransaction(transaction: Transaction): Promise<[boolean, string]> {
 	let gls: GLS
