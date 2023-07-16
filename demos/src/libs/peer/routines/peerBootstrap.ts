@@ -1,4 +1,5 @@
 import PeerManager from "../PeerManager"
+import isPeerInList from "./isPeerInList"
 import Client from "../../network/client"
 import getPeerIdentity from "./getPeerIdentity"
 import { cryptography } from "src/libs/crypto"
@@ -15,15 +16,17 @@ export default async function peerBootstrap(local_list: string[]) {
         // If there is a : in the url, we assume it's a address + port
         let currentPeerAddress
         let currentPeerPort
+        let currentPublicKey
         if (_currentPeerURL.includes(">")) {
             currentPeerAddress = _currentPeerURL.split(">")[0]
             currentPeerPort = _currentPeerURL.split(">")[1]
+            currentPublicKey = _currentPeerURL.split(">")[2]
         } else {
             currentPeerAddress = _currentPeerURL
             currentPeerPort = 53550
         }
         console.log(
-            "[BOOTSTRAP] Testing " + currentPeerAddress + ":" + currentPeerPort,
+            "[BOOTSTRAP] Testing " + currentPeerAddress + ":" + currentPeerPort + ":" + currentPublicKey,
         )
         // REVIEW Connection test and add to valid_peers
         // Trying to connect and retrieve the socket for the given peer using Peer class
@@ -34,7 +37,7 @@ export default async function peerBootstrap(local_list: string[]) {
         if (_currentPeerObject) { 
             // Adding identity if any
             console.log("[BOOTSTRAP] Testing " + currentPeerAddress + " identity")
-            _currentPeerObject = await getPeerIdentity(_currentPeerObject, id_ed25519)
+            _currentPeerObject = await getPeerIdentity(_currentPeerObject, id_ed25519, currentPublicKey)
             console.log(
                 "[BOOTSTRAP] OK: Valid peer " +
                     currentPeerAddress +

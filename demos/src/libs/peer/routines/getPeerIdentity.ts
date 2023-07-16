@@ -5,7 +5,7 @@ import { responseRegistry } from "../../communications"
 import { Socket } from 'socket.io';
 
 
-export default async function getPeerIdentity(peer: Peer, id: any): Promise<Peer> {
+export default async function getPeerIdentity(peer: Peer, id: any, expectedKey: string): Promise<Peer> {
 	// A peer object must have a valid socket
 	if (!peer.socket) {
 		return null;
@@ -38,6 +38,12 @@ export default async function getPeerIdentity(peer: Peer, id: any): Promise<Peer
 	if (response[0]) {
 		console.log("[PEER AUTHENTICATION] Received response")
 		console.log(response[1].identity.toString("hex"))
+		if (response[1].identity.toString("hex") === expectedKey) {
+			console.log("[PEER AUTHENTICATION] Identity is the expected one")
+		} else {
+			console.log("[PEER AUTHENTICATION] Identity is not the expected one")
+            return null
+		}
 		// Adding the property to the peer
 		peer.identity = response[1].identity
 	} else {

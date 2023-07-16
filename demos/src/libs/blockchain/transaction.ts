@@ -9,6 +9,13 @@ import { sha256 } from "node-forge"
 import StateChange from "./gls/types/StateChange"
 import Confirmation from "./types/confirmation"
 
+interface TransactionResponse {
+    status: string
+    code: number
+    message: string
+    data: {}
+}
+
 export default class Transaction {
     content: TransactionContent
     signature: pki.ed25519.BinaryBuffer
@@ -29,6 +36,13 @@ export default class Transaction {
         this.confirmations = []
         // REVIEW Should we add state changes?
         this.state_changes = []
+    }
+
+    // INFO Populate self with transaction data, if is valid
+    ingest(tx: Transaction) {
+        let result: TransactionResponse
+        // TODO
+        return result
     }
 
     // INFO Given a transaction, sign it with the private key of the sender

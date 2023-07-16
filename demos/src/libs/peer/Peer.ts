@@ -5,7 +5,7 @@ import * as forge from "node-forge"
 export default class Peer {
     connectionString: string
     socket: Socket
-    identity: forge.pki.ed25519.BinaryBuffer
+    identity: forge.pki.ed25519.BinaryBuffer // public key
 
     constructor(config?: IPeerConfig) {
         this.connectionString = config?.connectionString
@@ -31,4 +31,5 @@ export default class Peer {
     getSocket() {
         return this.socket
     }
+
 }

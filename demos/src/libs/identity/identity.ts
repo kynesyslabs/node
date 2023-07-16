@@ -3,6 +3,7 @@ import { cryptography } from "../crypto"
 import Logger from "../utils/logger"
 import { pki } from "node-forge"
 
+
 export default class Identity {
     private static instance: Identity
     public ed25519: pki.KeyPair

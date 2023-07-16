@@ -1,13 +1,14 @@
 import { cryptography } from "src/libs/crypto"
-import { Peer } from "src/libs/peer"
+import { Peer, PeerManager } from "src/libs/peer"
 import { comlinkUtils } from "src/libs/communications"
 import { Messaging, Message } from "src/features/messaging"
 import { Identity } from "src/libs/identity"
 import Transmission from "src/libs/communications/transmission"
-import Transaction from "src/libs/blockchain/transaction"
 import Mempool from "src/libs/blockchain/mempool"
 import chain from "src/libs/blockchain/chain"
 import { handlers as web2 } from "src/features/web2"
+import convalidateWeb2 from "../blockchain/routines/convalidateWeb2"
+import convalidateTransaction from "../blockchain/routines/convalidateTransaction"
 export default class ServerListeners {
     peer: Peer
 
@@ -16,10 +17,9 @@ export default class ServerListeners {
     }
 
     async runListeners() {
-        await this.authReplyListener()
-        await this.authAskEmit()
+        await this.authReplyListener() // REVIEW Is this used?
+        await this.authAskEmit() // REVIEW Is this used?
         await this.comlinkListener()
-        await this.transactionsListener()
     }
 
     authReplyListener = async () => {
@@ -66,12 +66,35 @@ export default class ServerListeners {
             // INFO This switch handles the public methods that should have this structure:
             //      { method: "methodName", params: { ... }, muid: [number] }
             // Where muid is a message unique identifier that is used to identify the response
-            var response
+            var response: any
+            var extra: string = null
             var require_reply = false
-            // INFO Transaction endpoints
-            if (content.type === "transaction") {
+
+            // INFO Validation endpoint
+            if (content.type == "tx") {
+                require_reply = true // REVIEW Sure?
+                // Verify and execute the transaction
+                response = await convalidateTransaction(content.message)
+                if (!response) {
+                    extra = "error"
+                    response = "Invalid Transaction"
+                }
+                // Are we the first one to receive this message?
+                let first_seen_now = false
+                if (response.confirmations.length === 1) {
+                    // Yes, we are
+                    first_seen_now = true
+                }
+                // TODO Manage the mempool and send stuff back
+                // TODO Broadcast the tx
+                // Response is then sent back automatically as a reply (with our validation)
+            }
+            
+            else if (content.type == "convalidate_web2") {
+                response = await convalidateWeb2(content.data)
                 // TODO
             }
+
             // INFO Web2 endpoints
             else if (content.type === "web2Request") {
                 console.log("[SERVER] Received web2Request")
@@ -121,6 +144,18 @@ export default class ServerListeners {
             // INFO Node APIs endpoints
             else if (content.type === "nodeCall") {
                 switch (content.message) {
+                    case "getPeerlist":
+                        console.log("[SERVER] Received getPeerlist")
+                        // Getting our current peerlist
+                        let socketized_response =
+                            PeerManager.getInstance().getPeers()
+                        response = []
+                        // Filling response with peers without socket objects
+                        for (let peer of socketized_response) {
+                            peer.socket = null
+                            response.push(peer)
+                        }
+                        break
                     case "getLastBlockNumber":
                         console.log("[SERVER] Received getLastBlockNumber")
                         response = await chain.getLastBlockNumber()
@@ -180,7 +215,7 @@ export default class ServerListeners {
                 id_ed25519.publicKey,
                 "placeholder", // TODO Add the receiver
                 null,
-                null,
+                extra,
             )
             await response_message.finalize()
             // Populating the comlink
@@ -198,41 +233,5 @@ export default class ServerListeners {
         // TODO See in communications.js and find the best way to validate, check and digest the request
     }
 
-    // INFO Listen on the 'transactions' endpoint (different from comlink to avoid overheads)
-    transactionsListener = async () => {
-        this.peer.socket.on("transactions", async request => {
-            // Loading identity
-            const id_ed25519 = await cryptography.load("./.demos_identity")
-            let publicKey = Buffer.from(id_ed25519.publicKey.toString("hex"))
-            let privateKey = Buffer.from(id_ed25519.privateKey.toString("hex"))
-            // Refusing the request if there is no muid
-            if (!request.muid) {
-                this.peer.socket.emit("transactions", {
-                    status: "error",
-                    message: "No muid specified",
-                })
-                return
-            }
-            // Ingesting a transaction
-            let tx = new Transaction()
-            tx.content = request.tx.content
-            tx.signature = request.tx.signature
-            tx.hash = request.tx.hash
-            tx.confirmations = request.tx.confirmations
-            tx.state_changes = request.tx.state_changes
-            // Verify tx validity
-            let verified = Transaction.confirmTx(tx, privateKey, publicKey) // REVIEW Are the buffers ok?
-            if (!verified) {
-                this.peer.socket.emit("error", {
-                    muid: request.muid,
-                    message: "Invalid signature or hash for tx",
-                })
-                return
-            }
-            // TODO EXecute or Revert the transaction
-            // If the tx is valid and executable, we confirm it
-            tx.confirmations.push(verified)
-            // TODO Add to the mempool and broadcast the tx to our peers
-        })
-    }
+    
 }

@@ -13,9 +13,8 @@ export default class ClientListeners {
     }
 
     private connectListener = async () => {
-        this.peer.socket.on("connect", async () => {
+        this.peer.socket.on("connect", async (connected_socket) => {
             logger.log("[CLIENT] Connected to peer")
-
             PeerManager.getInstance().addPeer(this.peer)
         })
     }
