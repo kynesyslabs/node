@@ -1,18 +1,13 @@
-// INFO This module exposes a set of method for crosschain interoperability (READ and WRITE - send transactions)
-// NOTE It works for EVM chains, Bitcoin, Solana and Polkadot.
-//
-
 import { sha256 } from "node-forge"
-import { TransactionContent } from "../../libs/blockchain/types/transactions"
+import { TransactionContent } from "../blockchain/types/transactions"
 import { JsonRpcProvider } from "@ethersproject/providers"
 import { Wallet } from "@ethersproject/wallet"
 import fetch from 'node-fetch'
-import { ECPair, TransactionBuilder, networks } from 'bitcoinjs-lib'
+import { Psbt, networks } from 'bitcoinjs-lib'
+import fromWIF  from 'bip32'
 import axios from 'axios'
 import { TransactionRequest } from "@ethersproject/providers"
-//import { BigNumber } from "ethers"
-//import { Connection } from '@solana/web3.js'
-//import { PublicKey } from '@solana/web3.js'
+import { ethers } from 'ethers'
 
 interface TransactionParams {
     from: string
@@ -70,15 +65,18 @@ const chains: { [key: string]: Chain } = {
             return balance
         },
         sendTransaction: async function(this: Chain, { from, to, value, privateKey }: TransactionParams) {
-            const keyPair = ECPair.fromWIF(privateKey, networks.bitcoin);
-            const txb = new TransactionBuilder(networks.bitcoin);
+            const keyPair = fromWIF(privateKey, networks.bitcoin);
+            const psbt = new Psbt({ network: networks.bitcoin });
 
             const txData = await axios.get(`https://blockchain.info/unspent?active=${from}`);
             const inputs = txData.data.unspent_outputs;
 
             let totalValue = 0;
             for (let input of inputs) {
-                txb.addInput(input.tx_hash_big_endian, input.tx_output_n);
+                psbt.addInput({
+                    hash: input.tx_hash_big_endian,
+                    index: input.tx_output_n,
+                });
                 totalValue += input.value;
                 if (totalValue >= value) break;
             }
@@ -88,17 +86,25 @@ const chains: { [key: string]: Chain } = {
             const fee = 10000; // Set transaction fee here (in Satoshis)
             const sendValue = totalValue - fee;
 
-            txb.addOutput(to, sendValue);
+            psbt.addOutput({
+                address: to,
+                value: sendValue,
+            });
             if (totalValue > sendValue) {
                 // Create change output
-                txb.addOutput(from, totalValue - sendValue - fee);
+                psbt.addOutput({
+                    address: from,
+                    value: totalValue - sendValue - fee,
+                });
             }
 
             for (let i = 0; i < inputs.length; i++) {
-                txb.sign(i, keyPair);
+                psbt.signInput(i, keyPair);
             }
 
-            const rawTransaction = txb.build().toHex();
+            psbt.finalizeAllInputs();
+
+            const rawTransaction = psbt.extractTransaction().toHex();
 
             const response = await axios.post('https://api.blockcypher.com/v1/btc/main/txs/push', {
                 tx: rawTransaction,
@@ -106,27 +112,6 @@ const chains: { [key: string]: Chain } = {
             return response.data.hash;
         },
     },
-    
-    //NOTE: Solana is not supported yet
-    /*
-    solana: {
-        provider: null,
-        connect: async function(rpc: string, private_key: string | null = null) {
-            const conn = new Connection(rpc, "confirmed")
-            if (private_key) {
-                const wallet = new Wallet(new Uint8Array(JSON.parse(private_key)), conn)
-                this.provider = wallet
-            } else {
-                this.provider = conn
-            }
-            return this.provider
-        },
-        getBalance: async function(this: Chain, address: string) {
-            const balance = await this.provider!.getBalance(new PublicKey(address))
-            return balance.toString()
-        },
-    },
-    */
 }
 
 function generateTransactionId(transaction: TransactionContent): string {
@@ -140,3 +125,4 @@ function generateTransactionId(transaction: TransactionContent): string {
 
 export default chains
 export { generateTransactionId }
+
