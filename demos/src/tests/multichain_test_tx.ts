@@ -1,4 +1,4 @@
-import chains from "../libs/crosschain/crosschain_support" // update this with your actual file path
+import chains from "../features/multichain/crosschain_support" // update this with your actual file path
 import { ethers } from "ethers";
 import Provider from "ethers"
 

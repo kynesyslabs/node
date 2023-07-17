@@ -3,7 +3,7 @@
 //
 
 import { sha256 } from "node-forge"
-import { TransactionContent } from "../blockchain/types/transactions"
+import { TransactionContent } from "../../libs/blockchain/types/transactions"
 import { JsonRpcProvider } from "@ethersproject/providers"
 import { Wallet } from "@ethersproject/wallet"
 import fetch from 'node-fetch'
