@@ -12,6 +12,7 @@
         "prettier-format": "prettier --config .prettierrc.json modules/**/*.ts --write",
         "test": "echo \"Error: no test specified\" && exit 1",
         "test:web2": "npx nodemon --exec ts-node -r tsconfig-paths/register src/tests/web2.ts",
+        "test:xrpl": "npx nodemon --exec ts-node -r tsconfig-paths/register src/tests/xrpl.ts",
         "start": "node --loader ts-node/esm -r tsconfig-paths/register src/index.ts",
         "start:dev": "npx nodemon --exec ts-node -r tsconfig-paths/register src/index.ts"
     },
@@ -43,6 +44,8 @@
         "socket.io-client": "^4.7.1",
         "sqlite3": "^5.1.6",
         "terminal-kit": "^3.0.0",
-        "typeorm": "^0.3.17"
+        "typeorm": "^0.3.17",
+        "ws": "^8.13.0",
+        "xrpl": "^2.9.0"
     }
 }
