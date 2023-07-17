@@ -1,0 +1,109 @@
+import * as xrpl from 'xrpl';
+import xrplWSListeners from './routines/xrpl_ws_listeners';
+import * as WebSocket from 'ws';
+
+// LINK https://js.xrpl.org/
+
+// TODO https://xrpl.org/monitor-incoming-payments-with-websocket.html
+
+export default class XRPL {
+	client: xrpl.Client;
+	socket: WebSocket;
+	wallet: xrpl.Wallet;
+
+	constructor() {
+		this.client = null
+		this.wallet = null
+		this.socket = null
+    }
+
+	// SECTION Initializations
+
+	// INFO Connects to a XRP rpc server
+	async connect(rpc: string) {
+		this.client = new xrpl.Client(rpc);
+		await this.client.connect();
+		this.socket = new WebSocket(rpc)
+		await xrplWSListeners(this.socket)
+	}
+
+	// INFO Connects to a wallet on XRPL
+	async connectWallet(seed: string) {
+        this.wallet = xrpl.Wallet.fromSeed(seed)
+    }
+
+	// INFO Creates a new wallet
+	async createWallet() {
+		this.wallet = xrpl.Wallet.generate()
+	}
+
+	// !SECTION Initializations
+
+	// SECTION Reads
+
+	// INFO Generic account info
+	async accountInfo(address: string): Promise<xrpl.AccountInfoResponse> {
+        return await this.client.request({
+			command: 'account_info',
+			account: address,
+			ledger_index: "validated"
+		})
+    }
+
+	// INFO Getting balance for an address (supports both XRP and other tokens)
+	async getBalance(address: string, multi: boolean = true) {
+		let response = null
+		if (multi) {
+			response = await this.client.getBalances(address)
+		} else {
+			response = await this.client.getXrpBalance(address)
+		}
+		return response
+	}
+
+	// !SECTION Reads
+
+	// SECTION Writes
+
+	// INFO Generic sign, send and await (if not specified) a tx
+	async sendTx(prepared: any, wait:boolean=true): Promise<xrpl.TxResponse> {
+		// Signing the tx
+		let signed = this.wallet.sign(prepared)
+		console.log("Hash: " + signed.hash)
+		console.log("Blob: " + signed.tx_blob)
+		// Sending the tx
+		let tx_promise = this.client.submitAndWait(signed.tx_blob)
+		if (wait) {
+            return await tx_promise
+        } else {
+            return tx_promise
+        }
+	}
+
+	// INFO Sending XRP to an address
+	async pay(receiver: string, amount: number): Promise<xrpl.TxResponse> {
+		// Preparing a payment tx
+		const prepared = await this.client.autofill({
+			"TransactionType": "Payment",
+			"Account": this.wallet.address,
+			"Amount": xrpl.xrpToDrops(amount),
+			"Destination": receiver
+		})
+
+		// FIXME See below
+		/*const max_ledger = prepared.LastLedgerSequence
+		console.log("Prepared transaction instructions:", prepared)
+		console.log("Transaction cost:", xrpl.dropsToXrp(prepared.Fee), "XRP")
+		console.log("Transaction expires after ledger:", max_ledger) */
+		return await this.sendTx(prepared)
+	}
+
+
+	// !SECTION Writes
+
+	// INFO Manages a clean exit
+	disconnect() {
+		this.client.disconnect();
+	}
+
+}
