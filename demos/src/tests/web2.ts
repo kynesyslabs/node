@@ -7,6 +7,7 @@ import * as fs from "fs"
 import * as dotenv from "dotenv"
 import peerBootstrap from "src/libs/peer/routines/peerBootstrap"
 import { responseRegistry } from "src/libs/communications"
+import { Peer } from "src/libs/peer"
 
 dotenv.config()
 
@@ -26,7 +27,10 @@ async function testIt() {
     await id.ensureIdentity()
 
     const peerList = await peerBootstrap(PEER_LIST)
-    peerManager.setPeerList(peerList)
+    for (const peer of peerList) {
+        const newPeer = new Peer()
+        peerManager.addPeer(peer)
+    }
 
     const _currentPeer = peerManager.getPeers()[0]
 

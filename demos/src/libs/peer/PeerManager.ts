@@ -2,10 +2,10 @@ import type Peer from "./Peer"
 
 export default class PeerManager {
     private static instance: PeerManager
-    private peerList: Peer[]
+    private peerList: Record<string, Peer>
 
     private constructor() {
-        this.peerList = []
+        this.peerList = {}
     }
 
     static getInstance(): PeerManager {
@@ -16,23 +16,26 @@ export default class PeerManager {
     }
 
     getPeers(): Peer[] {
-        return this.peerList
+        const peerList: Peer[] = []
+        for (const peer in this.peerList) {
+            peerList.push(this.peerList[peer])
+        }
+        return peerList
+    }
+
+    getPeer(identity: string): Peer {
+        return this.peerList[identity]
     }
 
     addPeer(peer: Peer) {
         console.log("[PEERMANAGER] Adding peer")
-        console.log(peer)
-        this.peerList.push(peer)
+        const identity = peer.identity.toString("hex")
+        this.peerList[identity] = peer
     }
 
     removePeer(peer: Peer) {
-        const index = this.peerList.indexOf(peer)
-        if (index > -1) {
-            this.peerList.splice(index, 1)
+        if (this.peerList[peer.identity.toString("hex")]) {
+            delete this.peerList[peer.identity.toString("hex")]
         }
-    }
-
-    setPeerList(peerList: Peer[]) {
-        this.peerList = peerList
     }
 }

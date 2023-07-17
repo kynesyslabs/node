@@ -12,9 +12,6 @@ export async function sendMessageToPeers(messageContent: any) {
     console.log(
         `[WEB2/PEERMESSAGING] Sending message to ${peerlist.length} peers`,
     )
-    for (const peer of peerlist) {
-        // console.log(peer)
-    }
 
     for (const currentPeer of peerlist) {
         if (

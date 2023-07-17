@@ -1,12 +1,14 @@
 import PeerManager from "../PeerManager"
-import isPeerInList from "./isPeerInList"
 import Client from "../../network/client"
 import getPeerIdentity from "./getPeerIdentity"
 import { cryptography } from "src/libs/crypto"
+import Peer from "../Peer"
 
 const peerManager = PeerManager.getInstance()
 
-export default async function peerBootstrap(local_list: string[]) {
+export default async function peerBootstrap(
+    local_list: string[],
+): Promise<Peer[]> {
     const id_ed25519 = await cryptography.load("./.demos_identity")
     let peerlist = peerManager.getPeers()
 
@@ -26,18 +28,29 @@ export default async function peerBootstrap(local_list: string[]) {
             currentPeerPort = 53550
         }
         console.log(
-            "[BOOTSTRAP] Testing " + currentPeerAddress + ":" + currentPeerPort + ":" + currentPublicKey,
+            "[BOOTSTRAP] Testing " +
+                currentPeerAddress +
+                ":" +
+                currentPeerPort +
+                ":" +
+                currentPublicKey,
         )
         // REVIEW Connection test and add to valid_peers
         // Trying to connect and retrieve the socket for the given peer using Peer class
         let _currentPeerObject = await Client.connectToPeer(
             currentPeerAddress,
             currentPeerPort,
-        ) // Returns the Peer object 
-        if (_currentPeerObject) { 
+        ) // Returns the Peer object
+        if (_currentPeerObject) {
             // Adding identity if any
-            console.log("[BOOTSTRAP] Testing " + currentPeerAddress + " identity")
-            _currentPeerObject = await getPeerIdentity(_currentPeerObject, id_ed25519, currentPublicKey)
+            console.log(
+                "[BOOTSTRAP] Testing " + currentPeerAddress + " identity",
+            )
+            _currentPeerObject = await getPeerIdentity(
+                _currentPeerObject,
+                id_ed25519,
+                currentPublicKey,
+            )
             console.log(
                 "[BOOTSTRAP] OK: Valid peer " +
                     currentPeerAddress +
