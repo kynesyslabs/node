@@ -12,18 +12,19 @@ KyneSys Labs: https://www.kynesys.xyz/
 import * as xrpl from 'xrpl';
 import xrplWSListeners from '../routines/xrpl_ws_listeners';
 import * as WebSocket from 'ws';
+import defaultChain from './types/defaultChain'
 
 // LINK https://js.xrpl.org/
 
 // TODO https://xrpl.org/monitor-incoming-payments-with-websocket.html
 
-export default class XRPL {
-	client: xrpl.Client;
+export default class XRPL  implements defaultChain {
+	provider: xrpl.Client;
 	socket: WebSocket;
 	wallet: xrpl.Wallet;
 
 	constructor() {
-		this.client = null
+		this.provider = null
 		this.wallet = null
 		this.socket = null
     }
@@ -31,9 +32,9 @@ export default class XRPL {
 	// SECTION Initializations
 
 	// INFO Connects to a XRP rpc server
-	async connect(rpc: string) {
-		this.client = new xrpl.Client(rpc);
-		await this.client.connect();
+	public async connect(rpc: string) {
+		this.provider = new xrpl.Client(rpc);
+		await this.provider.connect();
 		this.socket = new WebSocket(rpc)
 		await xrplWSListeners(this.socket)
 	}
@@ -54,7 +55,7 @@ export default class XRPL {
 
 	// INFO Generic account info
 	async accountInfo(address: string): Promise<xrpl.AccountInfoResponse> {
-        return await this.client.request({
+        return await this.provider.request({
 			command: 'account_info',
 			account: address,
 			ledger_index: "validated"
@@ -65,9 +66,9 @@ export default class XRPL {
 	async getBalance(address: string, multi: boolean = true) {
 		let response = null
 		if (multi) {
-			response = await this.client.getBalances(address)
+			response = await this.provider.getBalances(address)
 		} else {
-			response = await this.client.getXrpBalance(address)
+			response = await this.provider.getXrpBalance(address)
 		}
 		return response
 	}
@@ -77,13 +78,13 @@ export default class XRPL {
 	// SECTION Writes
 
 	// INFO Generic sign, send and await (if not specified) a tx
-	async sendTx(prepared: any, wait:boolean=true): Promise<xrpl.TxResponse> {
+	async sendTransaction(prepared: any, wait:boolean=true): Promise<xrpl.TxResponse> {
 		// Signing the tx
 		let signed = this.wallet.sign(prepared)
 		console.log("Hash: " + signed.hash)
 		console.log("Blob: " + signed.tx_blob)
 		// Sending the tx
-		let tx_promise = this.client.submitAndWait(signed.tx_blob)
+		let tx_promise = this.provider.submitAndWait(signed.tx_blob)
 		if (wait) {
             return await tx_promise
         } else {
@@ -94,7 +95,7 @@ export default class XRPL {
 	// INFO Sending XRP to an address
 	async pay(receiver: string, amount: number): Promise<xrpl.TxResponse> {
 		// Preparing a payment tx
-		const prepared = await this.client.autofill({
+		const prepared = await this.provider.autofill({
 			"TransactionType": "Payment",
 			"Account": this.wallet.address,
 			"Amount": xrpl.xrpToDrops(amount),
@@ -106,7 +107,7 @@ export default class XRPL {
 		console.log("Prepared transaction instructions:", prepared)
 		console.log("Transaction cost:", xrpl.dropsToXrp(prepared.Fee), "XRP")
 		console.log("Transaction expires after ledger:", max_ledger) */
-		return await this.sendTx(prepared)
+		return await this.sendTransaction(prepared)
 	}
 
 
@@ -114,7 +115,7 @@ export default class XRPL {
 
 	// INFO Manages a clean exit
 	disconnect() {
-		this.client.disconnect();
+		this.provider.disconnect();
 	}
 
 }

@@ -10,35 +10,41 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import * as solanaWeb3 from "@solana/web3.js";
+import defaultChain from './types/defaultChain'
 
 // LINK https://docs.solana.com/developing/clients/javascript-api
 
-export default class SOLANA {
+export default class SOLANA  implements defaultChain  {
 	private static instance: SOLANA;
 
-	keypair: solanaWeb3.Keypair;
-	connection: solanaWeb3.Connection;
+	wallet: solanaWeb3.Keypair;
+	provider: solanaWeb3.Connection;
 
 	constructor(rpc_url: string) {
-		this.connection = new solanaWeb3.Connection(rpc_url);
+		this.provider = new solanaWeb3.Connection(rpc_url);
 	}
 
 	// ANCHOR Public methods
-	connect(privateKey: string) {
-		this.keypair = solanaWeb3.Keypair.fromSecretKey(Buffer.from(privateKey, "hex")); // REVIEW is this ok?
+	connectWallet(privateKey: string) {
+		this.wallet = solanaWeb3.Keypair.fromSecretKey(Buffer.from(privateKey, "hex")); // REVIEW is this ok?
+	}
+
+	async getBalance (address: string): Promise<string> {
+		// TODO
+		return ""
 	}
 
 	// INFO Sending a transfer transaction on Solana network
-	sendTransaction(to: solanaWeb3.PublicKey, amount: number) {
+	sendTransaction({to, amount}) {
 		let tx = new solanaWeb3.Transaction();
 		tx.add(
             solanaWeb3.SystemProgram.transfer({
-				fromPubkey: this.keypair.publicKey,
+				fromPubkey: this.wallet.publicKey,
                 toPubkey: to,
                 lamports: amount * solanaWeb3.LAMPORTS_PER_SOL,
             })
 		)
-		let result = solanaWeb3.sendAndConfirmTransaction(this.connection, tx, [this.keypair]);
+		let result = solanaWeb3.sendAndConfirmTransaction(this.provider, tx, [this.wallet]);
 		return result;
 	}
 

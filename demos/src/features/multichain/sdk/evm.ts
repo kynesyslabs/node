@@ -12,9 +12,10 @@ import { ethers } from 'ethers'
 import { JsonRpcProvider } from "@ethersproject/providers"
 import { Wallet } from "@ethersproject/wallet"
 import { TransactionRequest } from "@ethersproject/providers"
+import defaultChain from './types/defaultChain'
 
 
-export default class EVM {
+export default class EVM  implements defaultChain {
 	// A singleton for each chain_id
     private static instances: Map<number, EVM> = new Map<number, EVM>();
 	// Chain properties
