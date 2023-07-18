@@ -5,6 +5,17 @@ import PeerManager from "src/libs/peer/PeerManager"
 import { responseRegistry } from "src/libs/communications"
 
 const peerManager = PeerManager.getInstance()
+/* LICENSE
+
+© 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
+
+Full license text: https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode
+Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
+
+KyneSys Labs: https://www.kynesys.xyz/
+
+*/
+
 const id = Identity.getInstance()
 
 export async function sendMessageToPeers(messageContent: any) {

@@ -1,3 +1,14 @@
+/* LICENSE
+
+© 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
+
+Full license text: https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode
+Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
+
+KyneSys Labs: https://www.kynesys.xyz/
+
+*/
+
 // INFO This module exposes methods designed to have an unified way of communicate in DEMOS
 import Hashing from "../crypto/hashing"
 import Cryptography from "../crypto/cryptography"

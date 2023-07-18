@@ -1,3 +1,14 @@
+/* LICENSE
+
+© 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
+
+Full license text: https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode
+Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
+
+KyneSys Labs: https://www.kynesys.xyz/
+
+*/
+
 import ComLink from "./comlink"
 import { ResponseRegistryElement, Response } from "./types/responseregistry"
 import Transmission from "./transmission"
@@ -59,6 +70,7 @@ export default class ResponseRegistry {
 
     // INFO Register a response received
     // FIXME: this will eventually run the instance out of memory
+    // TODO Do it in db
 
     registerResponse(
         message: Transmission,
