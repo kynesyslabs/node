@@ -34,7 +34,7 @@ export class Web2Data {
         this.data = {
             request: { timestamp: null, status: null },
             response: { timestamp: null, result: null, hash: null },
-            operator: new Peer(),
+            operator: null,
         }
         this.witnesses = {}
         this.data_signature = null

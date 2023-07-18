@@ -6,7 +6,7 @@ import { Identity } from "src/libs/identity"
 import Transmission from "src/libs/communications/transmission"
 import Mempool from "src/libs/blockchain/mempool"
 import chain from "src/libs/blockchain/chain"
-import { handlers as web2 } from "src/features/web2"
+import { handlers as web2handlers } from "src/features/web2"
 import convalidateWeb2 from "../blockchain/routines/convalidateWeb2"
 import convalidateTransaction from "../blockchain/routines/convalidateTransaction"
 
@@ -89,9 +89,7 @@ export default class ServerListeners {
                 // TODO Manage the mempool and send stuff back
                 // TODO Broadcast the tx
                 // Response is then sent back automatically as a reply (with our validation)
-            }
-            
-            else if (content.type == "convalidate_web2") {
+            } else if (content.type == "convalidate_web2") {
                 response = await convalidateWeb2(content.data)
                 // TODO
             }
@@ -103,7 +101,7 @@ export default class ServerListeners {
                 switch (content.message.action) {
                     case "getUrl":
                         console.log("[SERVER] Received getUrl")
-                        response = web2.http_request(
+                        response = web2handlers.http_request(
                             content.message.httpVerb,
                             content.message.url,
                             content.message.headers,
@@ -113,7 +111,7 @@ export default class ServerListeners {
                         console.log(
                             "[SERVER] Received attestation request for getUrl",
                         )
-                        response = web2.http_request(
+                        response = web2handlers.http_request(
                             content.message.httpVerb,
                             content.message.url,
                             content.message.headers,
@@ -233,6 +231,4 @@ export default class ServerListeners {
         })
         // TODO See in communications.js and find the best way to validate, check and digest the request
     }
-
-    
 }

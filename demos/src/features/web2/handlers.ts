@@ -5,6 +5,7 @@ import { sha256 } from "node-forge"
 import axios from "axios"
 import axiosRetry from "axios-retry"
 import { sendMessageToPeers } from "./peerMessaging"
+import { Peer } from "src/libs/peer"
 
 axiosRetry(axios, {
     retries: 3, // number of retries
@@ -42,7 +43,11 @@ async function http_request(httpVerb: string, url: string, headers: any) {
     }
 
     let promise: Promise<any>
+
     const web2Data = new Web2Data()
+    const peer = new Peer()
+    // peer.identity = Identity.getInstance().identity
+    web2Data.data.operator = peer
     web2Data.data.request.timestamp = new Date().getTime()
     // syncData(web2Data, imc.states["web2"])
     // emit_web2_broadcast(web2Data)

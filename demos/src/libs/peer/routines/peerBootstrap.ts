@@ -60,7 +60,13 @@ export default async function peerBootstrap(
             )
             /*if (containsPeer(_currentPeerObject, peerlist)) { // FIXME Disabled as was not working. Should be fixed
 				term.yellow("[BOOTSTRAP] WARNING: Duplicate peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
-			} else */ peerlist.push(_currentPeerObject)
+			} else */
+            console.warn("[PEERBOOTSTRAP] Adding peer to peerlist")
+            console.warn(_currentPeerObject)
+            if (_currentPeerObject !== null) {
+                PeerManager.getInstance().addPeer(_currentPeerObject)
+                // peerlist.push(_currentPeerObject)
+            }
         } else {
             console.log(
                 "[BOOTSTRAP] ERROR: Invalid peer " +
@@ -72,6 +78,9 @@ export default async function peerBootstrap(
         }
         // Nice printing of the peerlist
         for (let i = 0; i < peerlist.length; i++) {
+            console.log(peerlist)
+            console.log("wat")
+            console.debug(peerlist[i])
             console.log(peerlist[i].identity.toString("hex"))
         }
     }

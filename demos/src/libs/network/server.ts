@@ -13,7 +13,7 @@ export default class Server {
 
             const newPeer = new Peer()
             newPeer.setSocket(peerSocket)
-            newPeer.setIdentity(identity.ed25519)
+            newPeer.setIdentity(identity.ed25519.publicKey)
             PeerManager.getInstance().addPeer(newPeer)
             const serverListeners = new ServerListeners(newPeer)
             serverListeners.runListeners()

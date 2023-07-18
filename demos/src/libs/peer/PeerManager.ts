@@ -20,6 +20,8 @@ export default class PeerManager {
         for (const peer in this.peerList) {
             peerList.push(this.peerList[peer])
         }
+        console.warn("[PEERMANAGER] getPeers")
+        console.warn(peerList)
         return peerList
     }
 

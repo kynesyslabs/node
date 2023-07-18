@@ -31,5 +31,4 @@ export default class Peer {
     getSocket() {
         return this.socket
     }
-
 }
