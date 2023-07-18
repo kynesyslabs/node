@@ -10,7 +10,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import * as xrpl from 'xrpl';
-import xrplWSListeners from './routines/xrpl_ws_listeners';
+import xrplWSListeners from '../routines/xrpl_ws_listeners';
 import * as WebSocket from 'ws';
 
 // LINK https://js.xrpl.org/
