@@ -12,9 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import Transaction from "./transaction"
 import Hashing from "../crypto/hashing"
-import Cryptography from "../crypto/cryptography"
 import Datasource from "src/model/datasource"
-import forge, { pki } from "node-forge"
 
 export default class Chain {
     private static instance: Chain
@@ -45,7 +43,7 @@ export default class Chain {
             const db = await Datasource.getInstance()
             const result = await db.getDataSource().query(sql_query)
             //console.log("[ChainDB] [ WRITE ]: " + result)
-            //return result
+            return result
         } catch (err) {
             console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
             throw err

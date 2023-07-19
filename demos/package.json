@@ -16,6 +16,7 @@
         "test:multichain_write": "npx nodemon --exec ts-node -r tsconfig-paths/register src/tests/multichain_test_tx.ts",
         "test:xrpl": "npx nodemon --exec ts-node -r tsconfig-paths/register src/tests/xrpl.ts",
         "start": "node --loader ts-node/esm -r tsconfig-paths/register src/index.ts",
+        "start:advanced": "node --loader ts-node/esm -r tsconfig-paths/register src/index.ts {$0}",
         "start:dev": "npx nodemon --exec ts-node -r tsconfig-paths/register src/index.ts"
     },
     "devDependencies": {
@@ -57,4 +58,5 @@
         "ws": "^8.13.0",
         "xrpl": "^2.9.0"
     }
+    
 }

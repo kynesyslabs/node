@@ -13,7 +13,7 @@ import forge, { jsbn, pki, random, util } from "node-forge"
 import { promises as fs } from "fs"
 
 export default class Cryptography {
-    // INFO Generates a new RSA keypair from a given ecdsa private key
+    // TODO Generates a new RSA keypair from a given ecdsa private key
     static new() {
         const seed = random.getBytesSync(32)
         const keys = pki.ed25519.generateKeyPair({ seed })
@@ -67,5 +67,15 @@ export default class Cryptography {
             publicKey,
         })
         return verified
+    }
+
+    // ANCHOR Encryption part
+
+    static async encrypt(message: any, rsa_public_key: pki.rsa.PublicKey): Promise<any> {
+        // TODO
+    }
+
+    static async decrypt(message: any, rsa_private_key: pki.rsa.PrivateKey): Promise<any> {
+        // TODO
     }
 }

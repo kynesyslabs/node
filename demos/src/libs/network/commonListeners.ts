@@ -15,7 +15,8 @@ import { responseRegistry } from "../communications"
 import { comlinkUtils } from "../communications"
 import { logger } from "../utils"
 import { cryptography } from "../crypto"
-import chain from 'src/libs/blockchain/chain';
+import chain from "src/libs/blockchain/chain"
+import ResponseRegistry from "../communications/responseRegistry"
 
 export default class CommonListeners {
     private peer: any
@@ -59,6 +60,8 @@ export default class CommonListeners {
         })
     }
 
+    
+
     private publicListener = () => {
         this.peer.socket.on("public", request => {
             console.log("[PEER] Received")
@@ -72,9 +75,7 @@ export default class CommonListeners {
             console.log("[PEER] Received reply to " + request.muid)
             //console.log(JSON.stringify(request, null, 2))
             // REVIEW Check if the responseRegistry contains the muid of the request
-            const responseRegistryList = responseRegistry.getInstance().list
-            //console.log(_responseRegistry)
-            const response = responseRegistryList[request.muid]
+            const response = ResponseRegistry.hasResponse(request.muid)
             if (!response) {
                 console.log("[PEER] No response expected for " + request.muid)
                 return
@@ -93,7 +94,7 @@ export default class CommonListeners {
             let _comlink_request = parsed_comlink[0]
             let content = parsed_comlink[1]
             // Registering the response
-            responseRegistry.getInstance().registerResponse(request.chain.current.currentMessage, request.muid, this.peer.socket)
+            ResponseRegistry.registerResponse(request.chain.current.currentMessage, request.muid, this.peer.socket)
         })
     }
 

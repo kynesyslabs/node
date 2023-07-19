@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import Peer from "../Peer"
 import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
-import { responseRegistry } from "../../communications"
+import ResponseRegistry from "../../communications/responseRegistry"
 import { Socket } from 'socket.io';
 
 
@@ -36,7 +36,7 @@ export default async function getPeerIdentity(peer: Peer, id: any, expectedKey: 
 	comlink.properties.require_reply = true
 	comlink.properties.is_reply = false
 	// Adding the response request
-	responseRegistry.getInstance().requestResponse(comlink)
+	ResponseRegistry.requestResponse(comlink)
 	// Broadcasting the request
 	await comlink.broadcastMessageToPeer(
 		peer,
@@ -44,7 +44,7 @@ export default async function getPeerIdentity(peer: Peer, id: any, expectedKey: 
 		id.privateKey,
 	)
 	// Awaiting the response
-	let response = await responseRegistry.getInstance().checkResponse(comlink.muid)
+	let response = await ResponseRegistry.checkResponse(comlink.muid)
 	// Response management
 	if (response[0]) {
 		console.log("[PEER AUTHENTICATION] Received response")

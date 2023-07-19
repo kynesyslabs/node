@@ -3,6 +3,7 @@ import Transmission from "src/libs/communications/transmission"
 import { Identity } from "src/libs/identity"
 import PeerManager from "src/libs/peer/PeerManager"
 import { responseRegistry } from "src/libs/communications"
+import ResponseRegistry from "src/libs/communications/responseRegistry"
 
 const peerManager = PeerManager.getInstance()
 /* LICENSE
@@ -54,7 +55,7 @@ export async function sendMessageToPeers(messageContent: any) {
         comLink.properties.is_reply = false
 
         // Propagating the responseRegistry actual status
-        responseRegistry.getInstance().requestResponse(comLink)
+        ResponseRegistry.requestResponse(comLink)
 
         console.log("WEB2/PEERMESSAGING: Message being sent")
         // Send the message
@@ -66,9 +67,7 @@ export async function sendMessageToPeers(messageContent: any) {
         )
 
         // Wait for the response
-        let response = await responseRegistry
-            .getInstance()
-            .checkResponse(comLink.muid)
+        let response = await ResponseRegistry.checkResponse(comLink.muid)
         console.log("WEB2/PEERMESSAGING: Message received")
         console.log(response)
 

@@ -34,6 +34,7 @@ export default class ServerListeners {
         await this.comlinkListener()
     }
 
+    // INFO Register or update a peer identity and connection string
     authReplyListener = async () => {
         this.peer.socket.on("auth_reply", async data => {
             console.log("[SERVER] Received auth reply")
@@ -48,14 +49,20 @@ export default class ServerListeners {
                 this.peer.socket.emit("auth_fail")
                 this.peer.socket.disconnect()
             }
-            // TODO We add the peer to the list
+            // We add the peer to the list
+            let actual_peerlist = PeerManager.getInstance().getPeers()
+            actual_peerlist[data[2]].identity = Buffer.from(data[2])
+            // TODO Add also the connection string
+            let ip = data
+            console.log(ip)
+            process.exit(0)
             // And we reply ok
             this.peer.socket.emit("auth_ok")
         })
     }
 
     authAskEmit = async () => {
-        await this.peer.socket.emit("auth_ask", "sign this")
+        await this.peer.socket.emit("auth_ask", "sign this") // FIXME ?
     }
 
     comlinkListener = async () => {
@@ -153,11 +160,12 @@ export default class ServerListeners {
 
             // INFO Node APIs endpoints
             else if (content.type === "nodeCall") {
+                let socketized_response: Peer[]
                 switch (content.message) {
                     case "getPeerlist":
                         console.log("[SERVER] Received getPeerlist")
                         // Getting our current peerlist
-                        let socketized_response =
+                        socketized_response =
                             PeerManager.getInstance().getPeers()
                         response = []
                         // Filling response with peers without socket objects

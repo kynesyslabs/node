@@ -7,7 +7,10 @@ module.exports = {
     extends: "eslint:recommended",
     parserOptions: {
         ecmaVersion: 2018,
+        "sourceType": "module",
     },
+    "parser": "@typescript-eslint/parser",
+    "plugins": ["@typescript-eslint"],
     rules: {
         indent: ["error", 4, { SwitchCase: 1 }],
         "linebreak-style": ["error", "unix"],
@@ -18,5 +21,6 @@ module.exports = {
         "switch-colon-spacing": ["error", { after: true, before: false }],
         "no-extra-semi": "error",
         "comma-dangle": ["error", "always-multiline"],
+        "no-restricted-imports": ["warn"],
     },
 }

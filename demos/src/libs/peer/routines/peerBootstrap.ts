@@ -21,7 +21,6 @@ export default async function peerBootstrap(
     local_list: string[],
 ): Promise<Peer[]> {
     const id_ed25519 = await cryptography.load("./.demos_identity")
-    let peerlist = peerManager.getPeers()
 
     // Validity check
     for (let i = 0; i < local_list.length; i++) {
@@ -73,8 +72,8 @@ export default async function peerBootstrap(
 				term.yellow("[BOOTSTRAP] WARNING: Duplicate peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
 			} else */
             console.warn("[PEERBOOTSTRAP] Adding peer to peerlist")
-            console.warn(_currentPeerObject)
-            if (_currentPeerObject !== null) {
+            //console.warn(_currentPeerObject)
+            if (_currentPeerObject.socket.connected) {
                 PeerManager.getInstance().addPeer(_currentPeerObject)
                 // peerlist.push(_currentPeerObject)
             }
@@ -87,20 +86,12 @@ export default async function peerBootstrap(
                     "\n",
             )
         }
-        // Nice printing of the peerlist
-        for (let i = 0; i < peerlist.length; i++) {
-            console.log(peerlist)
-            console.log("wat")
-            console.debug(peerlist[i])
-            console.log(peerlist[i].identity.toString("hex"))
-        }
+        
     }
     // Dying if there are no valid peers
-    if (peerlist.length == 0) {
+    if (peerManager.getPeers().length == 0) {
         // Exit if there are no valid peers
-        console.log("No valid peers found, exiting")
-        // eslint-disable-next-line no-undef
-        process.exit(-3)
+        console.log("No valid peers found, listening for connections...")
     }
-    return peerlist
+    return peerManager.getPeers()
 }

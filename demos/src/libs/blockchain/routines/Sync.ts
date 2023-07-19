@@ -13,19 +13,11 @@ import Chain from "../chain"
 import PeerManager from "../../peer/PeerManager"
 import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
-import { responseRegistry } from "../../communications"
-import forge, { pki } from "node-forge"
-import { logger } from "src/libs/utils"
 
 const peerManager = PeerManager.getInstance()
 import { Response } from "../../communications/types/responseregistry"
+import ResponseRegistry from "src/libs/communications/responseRegistry"
 
-// NOTE Sleep function
-async function sleep(ms) {
-    return new Promise(resolve => {
-        setTimeout(resolve, ms)
-    })
-}
 
 export default async function Sync(id: any) {
     // TODO Give the type
@@ -37,6 +29,7 @@ export default async function Sync(id: any) {
 
     console.log("[SYNC] Fetching data from peers")
     let peerlist = peerManager.getPeers()
+    console.log(peerlist)
 
     // NOTE This array contains all the responses promises and is filled step by step
     let responses: Promise<[boolean, Response]>[] = []
@@ -70,7 +63,7 @@ export default async function Sync(id: any) {
         _comlink.properties.is_reply = false
         // Propagating the responseRegistry actual status
 
-        responseRegistry.getInstance().requestResponse(_comlink)
+        ResponseRegistry.requestResponse(_comlink)
 
         // Ask for the last block
         await _comlink.broadcastMessageToPeer(
@@ -80,8 +73,7 @@ export default async function Sync(id: any) {
         )
 
         // Add the response promise to the responses array
-        let promise = responseRegistry
-            .getInstance()
+        let promise = ResponseRegistry
             .checkResponse(_comlink.muid)
         responses.push(promise)
 

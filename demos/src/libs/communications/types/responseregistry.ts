@@ -8,11 +8,20 @@ Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
 KyneSys Labs: https://www.kynesys.xyz/
 
 */
+import Datasource from "src/model/datasource"
 
 import ComLink from "../comlink"
 import Transmission from "../transmission"
-import {Socket} from "socket.io"
+import { Socket } from "socket.io"
 import forge, { pki } from "node-forge"
+
+
+async function sleep(ms) {
+    return new Promise(resolve => {
+        setTimeout(resolve, ms)
+    })
+}
+
 
 export interface Response {
     message: string // TODO Add message type

@@ -26,13 +26,22 @@ import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import Sync from "./libs/blockchain/routines/Sync"
 
+let enough_peers = true
 // INFO Loading the known peers
 if (!fs.existsSync("./demos_peers")) {
-    throw new Error("No peers found, exiting")
+    enough_peers = false
+    console.log("No peers found, listening for peers...")
 }
 
-const SERVER_PORT = parseInt(process.env.SERVER_PORT, 10) || 53550
-const PEER_LIST = JSON.parse(fs.readFileSync("./demos_peers", "utf8"))
+
+// ANCHOR Overrides
+let OVERRIDE_PORT = null
+let OVERRIDE_PEER_LIST_FILE = null
+
+let SERVER_PORT: number = parseInt(process.env.SERVER_PORT, 10) || 53550
+let PEER_LIST_FILE = "./demos_peers"
+
+let PEER_LIST: any
 
 const id = Identity.getInstance()
 const app = express()
@@ -47,7 +56,45 @@ const io_server = new Server(server, {
 // Instances of classes we need to keep in memory for the rest of the modules, as we use them as state containers which will be passed around
 const peerManager = PeerManager.getInstance()
 
+
+// ANCHOR Routine to handle parameters in advanced mode
+async function digestArguments() {
+    let args = process.argv
+    if (args.length > 3) {
+        console.log("digest arguments")
+        for (let i = 3; i < args.length; i++) {
+            // Handle simple commands
+            if (!(args[i].includes("="))) {
+                console.log("cmd: " + args[i])
+                process.exit(0)
+            }
+            // Handle configurations
+            let param = args[i].split("=")
+            // NOTE These are all the parameters supported
+            switch (param[0]) {
+                case "port":   
+                    console.log("Overriding port")
+                    OVERRIDE_PORT = param[1]
+                    break
+                case "peerfile":
+                    console.log("Overriding peer list file")
+                    OVERRIDE_PEER_LIST_FILE = param[1]
+                    break
+                default:
+                    console.log("Invalid parameter: " + param)
+
+            }
+        }
+    }
+}
+
+// ANCHOR Entry point
 async function main() {
+    // NOTE Overriding if necessary
+    if (OVERRIDE_PORT) SERVER_PORT = OVERRIDE_PORT
+    if (OVERRIDE_PEER_LIST_FILE) PEER_LIST_FILE = OVERRIDE_PEER_LIST_FILE
+    PEER_LIST = JSON.parse(fs.readFileSync(PEER_LIST_FILE, "utf8"))
+
     // NOTE The whole first part of main ensures the environment is ready to run
     await id.ensureIdentity()
     // Log identity
@@ -58,6 +105,9 @@ async function main() {
     await server.listen(SERVER_PORT)
     logger.bootstrapSuccess("[SERVER] listening on *:" + SERVER_PORT + "\n")
     await networkServer.setupListeners(io_server)
+
+    // INFO Now ensuring we have an initialized chain or initializing the genesis block
+    await findGenesisBlock()
 
     // Loading the peers
 
@@ -70,13 +120,20 @@ async function main() {
     logger.bootstrapSuccess(
         "[BOOTSTRAP] Peers loaded (" + peerManager.getPeers().length + ")\n",
     )
-    // INFO Now ensuring we have an initialized chain or initializing the genesis block
-    await findGenesisBlock()
-    // INFO Testing the messaging endpoint
-    // await message_test()
-    // INFO Starting the sync loop
-    logger.log("[MAIN] Starting the sync loop\n")
-    Sync(id) // NOTE We don't wait for the sync to finish because it will run indefinitely in the background
+    // Checking for listening mode
+    if (peerManager.getPeers().length < 1) {
+        console.log("[WARNING] No peers detected, listening...")
+        enough_peers = false
+    }
+    // TODO Enough_peers will be shared between modules so that can be checked async
+    if (enough_peers) {
+        // INFO Testing the messaging endpoint
+        // await message_test()
+        // INFO Starting the sync loop
+        logger.log("[MAIN] Starting the sync loop\n")
+        Sync(id) // NOTE We don't wait for the sync to finish because it will run indefinitely in the background
+    }
 }
 
+digestArguments()
 main()

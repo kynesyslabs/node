@@ -42,6 +42,7 @@ export default class PeerManager {
 
     addPeer(peer: Peer) {
         console.log("[PEERMANAGER] Adding peer")
+        if (peer.identity === "placeholder") return
         const identity = peer.identity.toString("hex")
         this.peerList[identity] = peer
     }
