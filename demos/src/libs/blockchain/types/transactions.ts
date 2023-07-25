@@ -11,6 +11,13 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import forge, { pki } from "node-forge"
 
+interface LockFee {
+    amount: number
+    message: string
+    signature: forge.pki.ed25519.BinaryBuffer
+    identity: forge.pki.ed25519.BinaryBuffer
+}
+
 export interface TransactionContent {
     type: string
     from: forge.pki.ed25519.BinaryBuffer
@@ -19,4 +26,5 @@ export interface TransactionContent {
     data: [string, string] // type as string and content in hex string
     nonce: number // Increments every time a transaction is sent from the same account
     timestamp: number // Is the registered unix timestamp when the transaction was sent the first time
+    lock_fee: LockFee // Is the signed message where the sender locks X tokens until the tx is confirmed
 }

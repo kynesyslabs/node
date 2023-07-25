@@ -50,7 +50,8 @@ export default class Chain {
         }
     }
 
-    // ANCHOR Getters
+
+    // SECTION Getters
     // INFO Get the last block number
     static async getLastBlockNumber() {
         let response = await this.read(
@@ -102,8 +103,17 @@ export default class Chain {
             "SELECT * FROM transactions WHERE status='pending'",
         )
     }
+
+    // ANCHOR Transactions
+    static async getTransactionFromHash(hash: string): Promise<any> {
+        let tx = await Chain.read("SELECT * FROM transactions WHERE hash = '" + hash + "'")
+        // TODO Would be nice to fit it into a Transaction object
+        return tx
+    }
     // TODO Implement the rest of the db schema for the chain
-    // ANCHOR Setters
+    // !SECTION Getters
+
+    // SECTION  Setters
     // INFO Insert a block into the database
     static async insertBlock(block: Block) {
         // Returns the hash of the block
@@ -154,8 +164,9 @@ export default class Chain {
         // Insert the genesis block into the database
         return this.insertBlock(genesis_block)
     }
-    // ANCHOR Macro
-    // ANCHOR Specific operations
+    // !SECTION Setters
+
+    // SECTION Specific operations
     // INFO Getting the status of a given address either from the native or the properties table
     static async statusOf(address: string, type: number) {
         // Type can be: 0, 1 (native, properties)
@@ -175,5 +186,5 @@ export default class Chain {
             "SELECT hash FROM status_hashes WHERE block='" + block_number + "'"
         return await this.read(query)[0]
     }
-    // TODO And more
+    // !SECTION Specific operations
 }

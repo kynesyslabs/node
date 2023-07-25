@@ -27,7 +27,7 @@ import { Peer } from "src/libs/peer"
 export default async function chooseValidator(peers: Peer[]) {
     let block = Mempool.getInstance().getProposedBlock()
     // REVIEW Is better to hex the bytes directly?
-    let block_hash = await Hashing.sha256(JSON.stringify(block))
+    let block_hash = await Hashing.sha256(JSON.stringify(block)) // FIXME Replace with something that is order-resistant
     // TODO See how it returns and parse it correctly
     let last_block_hash = await Chain.getLastBlockHash()
     // REVIEW Pseudo random number with the above variables as seed

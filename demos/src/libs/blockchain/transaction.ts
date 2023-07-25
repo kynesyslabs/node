@@ -33,16 +33,9 @@ interface TransactionResponse {
     data: {}
 }
 
-interface LockFee {
-    amount: number
-    message: string
-    signature: forge.pki.ed25519.BinaryBuffer
-    identity: forge.pki.ed25519.BinaryBuffer
-}
 
 export default class Transaction {
     content: TransactionContent
-    lock_fee : LockFee
     signature: pki.ed25519.BinaryBuffer
     hash: string
     confirmations: Confirmation[]
@@ -57,13 +50,13 @@ export default class Transaction {
             data: [null, null],
             nonce: null,
             timestamp: null,
-        }
-        this.lock_fee = {
-            amount: null,
-            message: null,
-            signature: null,
-            identity: null,
-
+            lock_fee: {
+                amount: null,
+                message: null,
+                signature: null,
+                identity: null,
+    
+            },
         }
         this.signature = null
         this.hash = null

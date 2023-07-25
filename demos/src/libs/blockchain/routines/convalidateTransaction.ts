@@ -26,8 +26,7 @@ export default async function convalidateTransaction(request: any): Promise<Tran
     tx.hash = request.tx.hash
     tx.confirmations = request.tx.confirmations
     tx.state_changes = request.tx.state_changes
-    tx.lock_fee = request.tx.lock_fee
-    // TODO Lock the fee and write somewhere that it has to be returned (db: table transactions -> return_fee)
+    // TODO Lock the fee and write somewhere that it has to be returned (db: table transactions -> return_fee) (tx.content.lock_fee)
     // Verify tx validity
     let verified = Transaction.confirmTx(tx, privateKey, publicKey) // REVIEW Are the buffers ok?
     if (!verified) {

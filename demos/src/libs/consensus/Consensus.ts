@@ -7,13 +7,14 @@ export interface ConsensusRound {
 	lastBlockHash: string;
 	lastBlockTimestamp: number;
 	lastConsensusHash: string;
+    validators: Map<string, Peer>;
 }
 
 export default class Consensus {
     private static instance: Consensus
+    private round_number: number
 
     rounds: Map<number, ConsensusRound>
-    validators: Map<string, Peer>
 
     constructor() {
         // TODO Implement datasource also for this registry that will be included in the block
@@ -32,13 +33,13 @@ export default class Consensus {
     async chooseValidators() {
         // REVIEW Select minimum of 4 validators with a 2.5 seconds timeout
         let ms = 0
-        while (this.validators.size < 4 && ms < 2500) {
+        while (this.rounds[this.round_number].validators.size < 4 && ms < 2500) {
             ms += 100
             await new Promise(resolve => setTimeout(resolve, 100))
             // Choosing peer deterministically
             let chosenPeer = await chooseValidator(PeerManager.getInstance().getPeers())
             let identity = chosenPeer.identity.toString("hex")
-            this.validators.set(identity, chosenPeer)
+            this.rounds[this.round_number].validators.set(identity, chosenPeer)
         }
     }
 
