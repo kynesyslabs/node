@@ -37,6 +37,7 @@ export default class ServerListeners {
     // INFO Register or update a peer identity and connection string
     authReplyListener = async () => {
         this.peer.socket.on("auth_reply", async data => {
+            let identity = await cryptography.load("./.demos_identity")
             console.log("[SERVER] Received auth reply")
             // REVIEW Verify the signature with the public key on the message
             let _verification = await cryptography.verify(
@@ -51,13 +52,16 @@ export default class ServerListeners {
             }
             // We add the peer to the list
             let actual_peerlist = PeerManager.getInstance().getPeers()
+            if (!actual_peerlist[data[2]]) actual_peerlist[data[2]] = new Peer()
+            actual_peerlist[data[2]].socket = this.peer.socket
             actual_peerlist[data[2]].identity = Buffer.from(data[2])
-            // TODO Add also the connection string
-            let ip = data
-            console.log(ip)
-            process.exit(0)
-            // And we reply ok
-            this.peer.socket.emit("auth_ok")
+            // And we reply ok with our signature too
+            let _signature = cryptography.sign("auth_ok", identity.privateKey)
+            let _reply = {
+                signature: _signature,
+                identity: identity.publicKey,
+            }
+            this.peer.socket.emit("auth_ok", _reply)
         })
     }
 

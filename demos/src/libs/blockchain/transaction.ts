@@ -12,6 +12,12 @@ KyneSys Labs: https://www.kynesys.xyz/
 // INFO This module exposes a set of functions that can be used to work on transactions
 // NOTE It also exposes methods that will be used to process transactions
 
+/* TODO About being gas free
+
+NOTE: The fee is locked by the node and released when the block itself is confirmed
+
+*/
+
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import forge, { pki } from "node-forge"
@@ -27,8 +33,16 @@ interface TransactionResponse {
     data: {}
 }
 
+interface LockFee {
+    amount: number
+    message: string
+    signature: forge.pki.ed25519.BinaryBuffer
+    identity: forge.pki.ed25519.BinaryBuffer
+}
+
 export default class Transaction {
     content: TransactionContent
+    lock_fee : LockFee
     signature: pki.ed25519.BinaryBuffer
     hash: string
     confirmations: Confirmation[]
@@ -42,7 +56,14 @@ export default class Transaction {
             amount: null,
             data: [null, null],
             nonce: null,
-            timestamp: null
+            timestamp: null,
+        }
+        this.lock_fee = {
+            amount: null,
+            message: null,
+            signature: null,
+            identity: null,
+
         }
         this.signature = null
         this.hash = null

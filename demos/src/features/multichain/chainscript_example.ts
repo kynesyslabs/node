@@ -31,38 +31,38 @@ async function main() {
 
     // ANCHOR Experiments!
 
-	// INFO Adjust this value > 1 to have an outcome on the other chain or < 1 to have another outcome
+    // INFO Adjust this value > 1 to have an outcome on the other chain or < 1 to have another outcome
     let treshold_balance = 1.5
 
-	// NOTE Let's set the accounts to read from during this example
+    // NOTE Let's set the accounts to read from during this example
     let ripple_outcome_1 = "rMQ98K56yXJbDGv49ZSmW51sLn94Xe1mu1"
     let ripple_outcome_2 = "rUeDDFNp2q7Ymvyv75hFGC8DAcygVyJbNF"
-	let evm_address = "0x00000000219ab540356cbb839cbe05303d7705fa"
+    let evm_address = "0x00000000219ab540356cbb839cbe05303d7705fa"
 
-	// NOTE Preparing a variable to store the outcome
-	let chosen_ripple_account: string
+    // NOTE Preparing a variable to store the outcome
+    let chosen_ripple_account: string
 
-	// INFO Reading from ETH Mainnet
-	console.log("Checking EVM balance...")
+    // INFO Reading from ETH Mainnet
+    console.log("Checking EVM balance...")
     let evm_balance_outcome = await evm.getBalance(evm_address)
-	let evm_balance = parseFloat(evm_balance_outcome)
-	console.log("EVM Balance is: " + evm_balance)
+    let evm_balance = parseFloat(evm_balance_outcome)
+    console.log("EVM Balance is: " + evm_balance)
 
-	// NOTE Calculating the treshold and the outcome
-	let treshold = evm_balance * treshold_balance
-	console.log("Treshold is: " + treshold)
+    // NOTE Calculating the treshold and the outcome
+    let treshold = evm_balance * treshold_balance
+    console.log("Treshold is: " + treshold)
     if ((evm_balance/2) < treshold) {
-		chosen_ripple_account = ripple_outcome_1
-		console.log("EVM balance is less than treshold, choosing account: " + chosen_ripple_account)
+        chosen_ripple_account = ripple_outcome_1
+        console.log("EVM balance is less than treshold, choosing account: " + chosen_ripple_account)
     } else {
-		chosen_ripple_account = ripple_outcome_2
-		console.log("EVM balance is greater than treshold, choosing account: " + chosen_ripple_account)
-	}
+        chosen_ripple_account = ripple_outcome_2
+        console.log("EVM balance is greater than treshold, choosing account: " + chosen_ripple_account)
+    }
 
-	// INFO Reading from XRPL Mainnet based on the result of the ETH Mainnet data
-	console.log("Getting XRPL balance...")
-	let chosen_ripple_balance = await xrpl.getBalance(chosen_ripple_account, false)
-	console.log("Balance of chosen account: " + chosen_ripple_balance)
+    // INFO Reading from XRPL Mainnet based on the result of the ETH Mainnet data
+    console.log("Getting XRPL balance...")
+    let chosen_ripple_balance = await xrpl.getBalance(chosen_ripple_account, false)
+    console.log("Balance of chosen account: " + chosen_ripple_balance)
 }
 
 main()

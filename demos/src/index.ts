@@ -22,6 +22,8 @@ import { logger } from "./libs/utils"
 import { PeerManager } from "./libs/peer"
 import { server as networkServer } from "./libs/network"
 
+import commandLine from "./utilities/commandLine"
+
 import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import Sync from "./libs/blockchain/routines/Sync"
@@ -37,6 +39,8 @@ if (!fs.existsSync("./demos_peers")) {
 // ANCHOR Overrides
 let OVERRIDE_PORT = null
 let OVERRIDE_PEER_LIST_FILE = null
+let OVERRIDE_IS_TESTER = null
+let COMMANDLINE_MODE = null
 
 let SERVER_PORT: number = parseInt(process.env.SERVER_PORT, 10) || 53550
 let PEER_LIST_FILE = "./demos_peers"
@@ -80,6 +84,14 @@ async function digestArguments() {
                     console.log("Overriding peer list file")
                     OVERRIDE_PEER_LIST_FILE = param[1]
                     break
+                case "tester":
+                    console.log("Starting in tester mode")
+                    OVERRIDE_IS_TESTER = true
+                    break
+                case "cli":
+                    console.log("Starting in cli mode")
+                    COMMANDLINE_MODE = true
+                    break
                 default:
                     console.log("Invalid parameter: " + param)
 
@@ -99,6 +111,14 @@ async function main() {
     await id.ensureIdentity()
     // Log identity
     logger.log("WE ARE " + id.ed25519.publicKey.toString("hex"))
+
+    try {
+        await Identity.getInstance().getPublicIP()
+        logger.log("IP: " + Identity.getInstance().publicIP)
+    } catch (e) {
+        console.log(e)
+        console.log("[WARN] {OFFLINE?} Failed to get public IP")
+    }
 
     // INFO We start the server
     logger.bootstrap("[BOOTSTRAP] Starting the server\n")
@@ -130,6 +150,8 @@ async function main() {
         // INFO Testing the messaging endpoint
         // await message_test()
         // INFO Starting the sync loop
+        if (OVERRIDE_IS_TESTER) return await commandLine() // Testing mode is just for debugging or showcase purposes
+        if (COMMANDLINE_MODE) commandLine() // While doing the rest of the stuff needed, a comand line interface is available
         logger.log("[MAIN] Starting the sync loop\n")
         Sync(id) // NOTE We don't wait for the sync to finish because it will run indefinitely in the background
     }

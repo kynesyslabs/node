@@ -55,7 +55,7 @@ export async function sendMessageToPeers(messageContent: any) {
         comLink.properties.is_reply = false
 
         // Propagating the responseRegistry actual status
-        ResponseRegistry.requestResponse(comLink)
+        ResponseRegistry.getInstance().requestResponse(comLink)
 
         console.log("WEB2/PEERMESSAGING: Message being sent")
         // Send the message
@@ -67,7 +67,7 @@ export async function sendMessageToPeers(messageContent: any) {
         )
 
         // Wait for the response
-        let response = await ResponseRegistry.checkResponse(comLink.muid)
+        let response = await ResponseRegistry.getInstance().checkResponse(comLink.muid)
         console.log("WEB2/PEERMESSAGING: Message received")
         console.log(response)
 

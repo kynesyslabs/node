@@ -13,6 +13,7 @@ import Datasource from "src/model/datasource"
 import ComLink from "../comlink"
 import Transmission from "../transmission"
 import { Socket } from "socket.io"
+import * as socket_client from "socket.io-client"
 import forge, { pki } from "node-forge"
 
 
@@ -26,7 +27,7 @@ async function sleep(ms) {
 export interface Response {
     message: string // TODO Add message type
     timestamp: number
-    socket: Socket
+    socket: Socket | socket_client.Socket
     identity: forge.pki.ed25519.BinaryBuffer // Public key of the sender
 }
 

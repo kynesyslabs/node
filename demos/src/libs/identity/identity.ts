@@ -13,15 +13,18 @@ import * as fs from "fs"
 import { cryptography } from "../crypto"
 import Logger from "../utils/logger"
 import { pki } from "node-forge"
+import getRemoteIP from "../network/routines/getRemoteIP"
 
 
 export default class Identity {
     private static instance: Identity
     public ed25519: pki.KeyPair
+    public publicIP: string
 
     // Make the constructor private.
     private constructor() {
         this.ed25519 = null
+        this.publicIP = null
     }
 
     // Create a public static method to get the instance of the Identity class
@@ -43,6 +46,11 @@ export default class Identity {
             cryptography.save(this.ed25519, "./.demos_identity")
             Logger.log("Generated new identity")
         }
+    }
+
+    async getPublicIP(): Promise<string> {
+        this.publicIP = await getRemoteIP()
+        return await this.publicIP
     }
 
     getPublicKeyHex(): string | undefined {

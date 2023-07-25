@@ -146,7 +146,7 @@ export default class Chain {
         genesis_tx.content.data = genesis_json
         genesis_tx.hash = Hashing.sha256(JSON.stringify(genesis_tx.content))
         // Build a block containing the genesis tx
-        genesis_block.content.transactions.push(genesis_tx)
+        genesis_block.content.ordered_transactions.push(genesis_tx)
         genesis_block.content.previousHash = "0x0"
         genesis_block.hash = Hashing.sha256(
             JSON.stringify(genesis_block.content),

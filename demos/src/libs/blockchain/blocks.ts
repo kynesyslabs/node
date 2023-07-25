@@ -27,7 +27,8 @@ export default class Block {
         this.hash = null // Calculated on the content
         this.status = null
         this.content = {
-            transactions: [],
+            ordered_transactions: [],
+            per_address_transactions: null,
             web2data: {}, // objects containing hashes of fetched web2data
             previousHash: null,
         }

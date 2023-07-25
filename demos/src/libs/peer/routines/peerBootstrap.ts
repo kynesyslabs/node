@@ -14,6 +14,7 @@ import Client from "../../network/client"
 import getPeerIdentity from "./getPeerIdentity"
 import { cryptography } from "src/libs/crypto"
 import Peer from "../Peer"
+import getPeerConnectionString from "./getPeerConnectionString"
 
 const peerManager = PeerManager.getInstance()
 
@@ -61,6 +62,7 @@ export default async function peerBootstrap(
                 id_ed25519,
                 currentPublicKey,
             )
+            _currentPeerObject.connectionString = _currentPeerURL // Adding this step
             console.log(
                 "[BOOTSTRAP] OK: Valid peer " +
                     currentPeerAddress +
@@ -74,8 +76,13 @@ export default async function peerBootstrap(
             console.warn("[PEERBOOTSTRAP] Adding peer to peerlist")
             //console.warn(_currentPeerObject)
             if (_currentPeerObject.socket.connected) {
-                PeerManager.getInstance().addPeer(_currentPeerObject)
+                let inserted = PeerManager.getInstance().addPeer(_currentPeerObject)
+                if (!inserted) {
+                    console.log("[PEERBOOTSTRAP] Could not add peer to peerlist (see above)")
                 // peerlist.push(_currentPeerObject)
+                } else {
+                    console.log("[PEERBOOTSTRAP] Refusing to add peer " + currentPeerAddress + " as it is not connected")
+                }
             }
         } else {
             console.log(

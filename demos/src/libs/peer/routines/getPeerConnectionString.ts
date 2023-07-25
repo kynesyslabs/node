@@ -9,6 +9,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+// TODO Do the same but with connectionString
+
 import Peer from "../Peer"
 import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
@@ -16,7 +18,7 @@ import ResponseRegistry from "../../communications/responseRegistry"
 import { Socket } from "socket.io"
 
 
-export default async function getPeerIdentity(peer: Peer, id: any, expectedKey: string): Promise<Peer> {
+export default async function getPeerConnectionString(peer: Peer, id: any): Promise<Peer> {
     // A peer object must have a valid socket
     if (!peer.socket) {
         return null
@@ -26,7 +28,7 @@ export default async function getPeerIdentity(peer: Peer, id: any, expectedKey: 
     let identity_ask = new Transmission(id.privateKey)
     identity_ask.initialize(
         "nodeCall",
-        "getPeerIdentity",
+        "getPeerConnectionString",
         id.publicKey,
         "placeholder",
         null,
@@ -47,18 +49,11 @@ export default async function getPeerIdentity(peer: Peer, id: any, expectedKey: 
     let response = await ResponseRegistry.getInstance().checkResponse(comlink.muid)
     // Response management
     if (response[0]) {
-        console.log("[PEER AUTHENTICATION] Received response")
-        console.log(response[1].identity.toString("hex"))
-        if (response[1].identity.toString("hex") === expectedKey) {
-            console.log("[PEER AUTHENTICATION] Identity is the expected one")
-        } else {
-            console.log("[PEER AUTHENTICATION] Identity is not the expected one")
-            return null
-        }
-        // Adding the property to the peer
-        peer.identity = response[1].identity
+        console.log("[PEER CONNECTION] Received response")
+        console.log(response[1])
+        peer.connectionString = response[1].message
     } else {
-        console.log("[PEER AUTHENTICATION] No response received")
+        console.log("[PEER CONNECTION] No response received")
     }
     return peer
 }

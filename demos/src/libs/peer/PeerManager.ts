@@ -31,8 +31,7 @@ export default class PeerManager {
         for (const peer in this.peerList) {
             peerList.push(this.peerList[peer])
         }
-        console.warn("[PEERMANAGER] getPeers")
-        console.warn(peerList)
+        console.warn("[PEERMANAGER] Peerlist length: " + peerList.length)
         return peerList
     }
 
@@ -42,9 +41,19 @@ export default class PeerManager {
 
     addPeer(peer: Peer) {
         console.log("[PEERMANAGER] Adding peer")
-        if (peer.identity === "placeholder") return
+        if (peer.identity === "placeholder") {
+            console.log("[WARN] No identity detected: refusing to add peer")
+            console.log(peer)
+            return false
+        }
         const identity = peer.identity.toString("hex")
         this.peerList[identity] = peer
+        console.log("[PEERMANAGER] Peer added")
+        console.log("Identity: "  + peer.identity.toString("hex"))
+        console.log("Connection string: " + peer.connectionString)
+        if (!peer.connectionString) console.log("[WARN] No connection string detected")
+        // FIXME Run the routine in peers to get it
+        return true
     }
 
     removePeer(peer: Peer) {

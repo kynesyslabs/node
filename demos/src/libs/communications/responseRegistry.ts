@@ -13,6 +13,7 @@ import ComLink from "./comlink"
 import { ResponseRegistryElement, Response } from "./types/responseregistry"
 import Transmission from "./transmission"
 import { Socket } from "socket.io"
+import * as socket_client from "socket.io-client"
 import Datasource from "src/model/datasource"
 
 async function sleep(ms) {
@@ -24,7 +25,7 @@ async function sleep(ms) {
 // INFO Singleton API to the chain registry db
 // REVIEW Should work properly but who knows
 // FIXME Reorder fields in the table and check what is not working (in Sync.ts?)
-export default class ResponseRegistry {
+export class ResponseRegistry_db {
     private static instance: ResponseRegistry
 
     static async read(sql_query: string) {
@@ -156,23 +157,23 @@ export default class ResponseRegistry {
 }
 
 // NOTE This is a legacy, memory based implementation of the response registry.
-export class ResponseRegistry_old {
+export default class ResponseRegistry {
     list: { [key: string]: ResponseRegistryElement }
     database: any
 
     // The instance of ResponseRegistry
-    private static instance: ResponseRegistry_old
+    private static instance: ResponseRegistry
 
     private constructor() {
         this.list = {}
     }
 
     // Method to get the instance of ResponseRegistry
-    static getInstance(): ResponseRegistry_old {
-        if (!ResponseRegistry_old.instance) {
-            ResponseRegistry_old.instance = new ResponseRegistry_old()
+    static getInstance(): ResponseRegistry {
+        if (!ResponseRegistry.instance) {
+            ResponseRegistry.instance = new ResponseRegistry()
         }
-        return ResponseRegistry_old.instance
+        return ResponseRegistry.instance
     }
     // INFO Register a response request
     requestResponse(comlink: ComLink) {
@@ -211,7 +212,7 @@ export class ResponseRegistry_old {
     registerResponse(
         message: Transmission,
         comlink_muid: string,
-        socket: Socket,
+        socket: Socket | socket_client.Socket,
     ) {
         if (!this.list[comlink_muid])
             return [false, "No response has been requested"]

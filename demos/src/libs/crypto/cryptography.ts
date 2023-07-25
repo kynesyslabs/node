@@ -46,7 +46,7 @@ export default class Cryptography {
         return keypair
     }
 
-    static sign(message: string, privateKey: pki.ed25519.BinaryBuffer) {
+    static sign(message: string, privateKey: pki.ed25519.BinaryBuffer | any) {
         const signature = pki.ed25519.sign({
             message,
             encoding: "utf8",

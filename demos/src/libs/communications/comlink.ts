@@ -74,7 +74,7 @@ export default class ComLink {
     async broadcastMessageToPeer(
         peer: Peer,
         message: Transmission,
-        privateKey: pki.ed25519.BinaryBuffer,
+        privateKey: pki.ed25519.BinaryBuffer | any,
     ) {
         // REVIEW Sanitize message and type
         if (!message.bundle.content.type) {

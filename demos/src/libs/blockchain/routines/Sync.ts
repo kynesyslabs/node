@@ -63,7 +63,7 @@ export default async function Sync(id: any) {
         _comlink.properties.is_reply = false
         // Propagating the responseRegistry actual status
 
-        ResponseRegistry.requestResponse(_comlink)
+        ResponseRegistry.getInstance().requestResponse(_comlink)
 
         // Ask for the last block
         await _comlink.broadcastMessageToPeer(
@@ -74,7 +74,7 @@ export default async function Sync(id: any) {
 
         // Add the response promise to the responses array
         let promise = ResponseRegistry
-            .checkResponse(_comlink.muid)
+            .getInstance().checkResponse(_comlink.muid)
         responses.push(promise)
 
         // LINK https://stackoverflow.com/questions/23893872/how-to-properly-remove-event-listeners-in-node-js-eventemitter

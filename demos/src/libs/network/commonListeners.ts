@@ -37,7 +37,7 @@ export default class CommonListeners {
         this.peer.socket.on("disconnect", async () => {
             logger.log("user disconnected")
             // Removing the peer from the list if it was in
-            logger.log("[SERVER] Peer disconnected")
+            logger.log("[COMMON] Peer disconnected")
             PeerManager.getInstance().removePeer(this.peer)
         })
     }
@@ -61,11 +61,26 @@ export default class CommonListeners {
     }
 
     
-
-    private publicListener = () => {
-        this.peer.socket.on("public", request => {
+    // INFO For non sensitive data
+    private publicListener = async () => {
+        this.peer.socket.on("public", request => async () => {
             console.log("[PEER] Received")
-            console.log(request)
+            let response = {
+                muid: request.muid,
+                data: null,
+            }
+            console.log(request.cmd) // TODO Create a type for the request format
+            if (request === "public_ip") {
+                let ip = await Identity.getInstance().getPublicIP()
+                response.data = ip
+            }
+            // else if
+            else {
+                response.data = "Unknown command: " + request.cmd
+            }
+            // Once the response should be processed, we need to send it back
+            // TODO Would be better to have requests with is_reply set to true or false instead of two listeners
+            this.peer.socket.emit("public_reply", response)
         })
     }
 
@@ -75,7 +90,7 @@ export default class CommonListeners {
             console.log("[PEER] Received reply to " + request.muid)
             //console.log(JSON.stringify(request, null, 2))
             // REVIEW Check if the responseRegistry contains the muid of the request
-            const response = ResponseRegistry.hasResponse(request.muid)
+            const response = ResponseRegistry.getInstance().hasResponse(request.muid)
             if (!response) {
                 console.log("[PEER] No response expected for " + request.muid)
                 return
@@ -94,7 +109,7 @@ export default class CommonListeners {
             let _comlink_request = parsed_comlink[0]
             let content = parsed_comlink[1]
             // Registering the response
-            ResponseRegistry.registerResponse(request.chain.current.currentMessage, request.muid, this.peer.socket)
+            ResponseRegistry.getInstance().registerResponse(request.chain.current.currentMessage, request.muid, this.peer.socket)
         })
     }
 

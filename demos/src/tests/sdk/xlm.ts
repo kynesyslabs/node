@@ -8,12 +8,3 @@ Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
 KyneSys Labs: https://www.kynesys.xyz/
 
 */
-
-import Transactions from "../transaction"
-
-export default interface BlockContent {
-    ordered_transactions: Transactions[]
-    per_address_transactions: Map<string, Transactions[]>
-    web2data: {} // TODO Add Web2 class
-    previousHash: string
-}
