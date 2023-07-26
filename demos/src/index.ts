@@ -14,6 +14,10 @@ import * as express from "express"
 const http = require("http") // FIXME: Use import but it breaks...
 import { Server } from "socket.io"
 
+import mainLoop from "./utilities/mainLoop"
+import sharedState from "./utilities/sharedState"
+
+
 import * as dotenv from "dotenv"
 dotenv.config()
 
@@ -152,6 +156,8 @@ async function main() {
         // INFO Starting the sync loop
         if (OVERRIDE_IS_TESTER) return await commandLine() // Testing mode is just for debugging or showcase purposes
         if (COMMANDLINE_MODE) commandLine() // While doing the rest of the stuff needed, a comand line interface is available
+        logger.log("[MAIN] Starting the background loop\n")
+        mainLoop() // Is an async function so running without waiting send that to the background
         logger.log("[MAIN] Starting the sync loop\n")
         Sync(id) // NOTE We don't wait for the sync to finish because it will run indefinitely in the background
     }

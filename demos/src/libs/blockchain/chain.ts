@@ -24,7 +24,7 @@ export default class Chain {
         return this.instance
     } // TODO When possible let's make it a singleton
 
-    static async read(sql_query: string) {
+    static async read(sql_query: string): Promise<any> {
         try {
             const db = await Datasource.getInstance()
             const result = await db.getDataSource().query(sql_query)
