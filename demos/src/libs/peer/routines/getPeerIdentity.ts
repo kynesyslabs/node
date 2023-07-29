@@ -13,7 +13,6 @@ import Peer from "../Peer"
 import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
 import ResponseRegistry from "../../communications/responseRegistry"
-import { Socket } from "socket.io"
 
 
 export default async function getPeerIdentity(peer: Peer, id: any, expectedKey: string): Promise<Peer> {

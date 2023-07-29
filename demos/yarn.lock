@@ -3859,7 +3859,7 @@ tar@^6.0.2, tar@^6.1.11, tar@^6.1.2:
 
 terminal-kit@^3.0.0:
   version "3.0.0"
-  resolved "https://registry.npmjs.org/terminal-kit/-/terminal-kit-3.0.0.tgz"
+  resolved "https://registry.yarnpkg.com/terminal-kit/-/terminal-kit-3.0.0.tgz#dda22245f3a6b991c2e14b45dcac1024168b1b17"
   integrity sha512-GSJGYF0+hoFylKJXmq0ntE42b4S7zUkxFpf7FqHGwKFPCNeGkuv3jV0tmGquZkmfh5mYb/B2xoPJiP40mJsQrg==
   dependencies:
     "@cronvel/get-pixels" "^3.4.1"

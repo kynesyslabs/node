@@ -11,6 +11,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import ComLink from "./comlink"
 import { Bundle } from "./types/transmit"
+var term = require("terminal-kit").terminal
 
 export default class ComLinkUtils {
     // INFO common comlink digestor
@@ -19,23 +20,27 @@ export default class ComLinkUtils {
         peerSocket,
     ): Promise<[ComLink, any] | boolean> {
         // We need to check if the message request is valid (is a ComLink object)
-        console.log("[COMLINKUTILS] Received comlink")
-        console.log(JSON.stringify(request))
+        term.yellow("[COMLINKUTILS] Received comlink\n")
         // GIving the request the comlink methods
         let _comlink_request = new ComLink()
         _comlink_request.chain = request.chain
         _comlink_request.muid = request.muid
         _comlink_request.properties = request.properties
-        // Checking validity of the comlink
-        let valid = await _comlink_request.validateComlink()
-        if (!valid[0]) {
-            console.log("[COMLINK VALIDATION ERROR] " + valid[1])
-            peerSocket.emit("comlink", {
-                status: "error",
-                message: valid[1],
-            })
-            return false
-        }
+
+        // Checking validity of the comlink for non nodeCall transactions
+        // NOTE nodeCall transactions are read only and can be called by any client even without authentication
+        if (!(_comlink_request.chain.current.currentMessage.bundle.content.type === "nodeCall")) {
+            let valid = await _comlink_request.validateComlink()
+            if (!valid[0]) {
+                term.red("[COMLINK VALIDATION ERROR] " + valid[1] + "\n")
+                peerSocket.emit("comlink", {
+                    status: "error",
+                    message: valid[1],
+                })
+                return false
+            }
+        } else term.green("[COMLINK] nodeCall received (no auth required)\n")
+
         console.log("[COMLINK PARSING] Parsing comlink message...")
         // Sanitizing the request
         if (!request.muid) {

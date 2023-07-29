@@ -18,6 +18,7 @@ export interface Current {
 }
 
 export interface Properties {
+    connection_string: string
     require_reply: boolean
     is_reply: boolean
 }

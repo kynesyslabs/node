@@ -17,6 +17,8 @@ import { logger } from "../utils"
 import { cryptography } from "../crypto"
 import chain from "src/libs/blockchain/chain"
 import ResponseRegistry from "../communications/responseRegistry"
+import getRemoteIP from "../network/routines/getRemoteIP"
+import sharedState from "src/utilities/sharedState"
 
 export default class CommonListeners {
     private peer: any
@@ -109,7 +111,9 @@ export default class CommonListeners {
             let _comlink_request = parsed_comlink[0]
             let content = parsed_comlink[1]
             // Registering the response
-            ResponseRegistry.getInstance().registerResponse(request.chain.current.currentMessage, request.muid, this.peer.socket)
+            let connection_string: string = await getRemoteIP()
+            connection_string = "http://" + connection_string + ":" + sharedState.getInstance().serverPort
+            ResponseRegistry.getInstance().registerResponse(request.chain.current.currentMessage, request.muid, this.peer.socket, connection_string)
         })
     }
 

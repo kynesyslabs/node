@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { cryptography } from "src/libs/crypto"
 import { Peer, PeerManager } from "src/libs/peer"
 import { comlinkUtils } from "src/libs/communications"
-import { Messaging, Message } from "src/features/messaging"
+import InstantMessaging from "src/features/messaging/instantMessaging"
 import { Identity } from "src/libs/identity"
 import Transmission from "src/libs/communications/transmission"
 import Mempool from "src/libs/blockchain/mempool"
@@ -36,25 +36,23 @@ export default class ServerListeners {
 
     // INFO Register or update a peer identity and connection string
     authReplyListener = async () => {
+        // FIXME Auth reply listener should not add a client to the peerlist if is read only
         this.peer.socket.on("auth_reply", async data => {
             let identity = await cryptography.load("./.demos_identity")
             console.log("[SERVER] Received auth reply")
-            // REVIEW Verify the signature with the public key on the message
-            let _verification = await cryptography.verify(
-                data[0],
-                data[1],
-                data[2],
-            )
-            // Disconnect if the verification is false
-            if (!_verification) {
-                this.peer.socket.emit("auth_fail")
-                this.peer.socket.disconnect()
-            }
-            // We add the peer to the list
-            let actual_peerlist = PeerManager.getInstance().getPeers()
-            if (!actual_peerlist[data[2]]) actual_peerlist[data[2]] = new Peer()
-            actual_peerlist[data[2]].socket = this.peer.socket
-            actual_peerlist[data[2]].identity = Buffer.from(data[2])
+            if (!(data==="readonly")) {
+                // REVIEW Verify the signature with the public key on the message
+                let _verification = await cryptography.verify(
+                    data[0],
+                    data[1],
+                    data[2],
+                )
+                // Disconnect if the verification is false
+                if (!_verification) {
+                    this.peer.socket.emit("auth_fail")
+                    this.peer.socket.disconnect()
+                }
+            } else console.log("[SERVER] Client is read only: not asking for authentication")
             // And we reply ok with our signature too
             let _signature = cryptography.sign("auth_ok", identity.privateKey)
             let _reply = {
@@ -66,14 +64,14 @@ export default class ServerListeners {
     }
 
     authAskEmit = async () => {
-        await this.peer.socket.emit("auth_ask", "sign this") // FIXME ?
+        await this.peer.socket.emit("auth_ask", "sign this")
     }
 
     comlinkListener = async () => {
         this.peer.socket.on("comlink", async request => {
             // REVIEW I don't think we need to do this every time
             console.log("[SERVER] Received comlink")
-            console.log(request)
+            //console.log(request)
             const id_ed25519 = await cryptography.load("./.demos_identity")
             // TODO Add responseRegistry support as per main.js and communications.js
             let _receiver = this.peer.socket
@@ -97,7 +95,7 @@ export default class ServerListeners {
             if (content.type == "tx") {
                 require_reply = true // REVIEW Sure?
                 // Verify and execute the transaction
-                response = await convalidateTransaction(content.message)
+                response = await convalidateTransaction(content.type, content.message)
                 if (!response) {
                     extra = "error"
                     response = "Invalid Transaction"
@@ -147,7 +145,7 @@ export default class ServerListeners {
             // INFO Messaging endpoint
             else if (content.type === "messages") {
                 // REVIEW Call the appropriate lib to parse the request and act
-                response = await Messaging.parseRequest(content)
+                response = await InstantMessaging.parseMessage(content)
             }
 
             // INFO Storage endpoint
@@ -162,7 +160,7 @@ export default class ServerListeners {
                 response = await mempool.receive(content.message)
             }
 
-            // INFO Node APIs endpoints
+            // INFO Node APIs endpoints (valid without authentication too)
             else if (content.type === "nodeCall") {
                 let socketized_response: Peer[]
                 switch (content.message) {

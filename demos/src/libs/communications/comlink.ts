@@ -17,8 +17,13 @@ import Transmission from "./transmission"
 import Peer from "../peer/Peer"
 
 import type { Current, Properties } from "./types/comlink"
+import getRemoteIP from "../network/routines/getRemoteIP"
+import sharedState from "src/utilities/sharedState"
+
 
 export default class ComLink {
+    private static instances: Map<string, ComLink> = new Map()
+
     chain: {
         current: Current
         comlinkCurrentHash: string
@@ -37,11 +42,16 @@ export default class ComLink {
             comlinkCurrentHash: null, // is the hashed version of .current
             comlinkCurrentHashSignature: null, // is the signature of the hashed version of.current
         }
-        this.muid = this.generateMuid()
+        let muid = this.generateMuid()
+        this.muid = muid
         this.properties = {
+            connection_string: null, // NOTE This is dynamically adjusted each time a comlink is sent or sent back
             require_reply: false,
             is_reply: false,
         }
+        // REVIEW Does it clone the object? Hopefully not
+        ComLink.instances.set(muid, this)
+
     }
 
     // INFO Muid generator
@@ -67,6 +77,11 @@ export default class ComLink {
             privateKey,
         )
         this.chain.comlinkCurrentHashSignature = signature
+
+        // Also includes the connection_string
+        let connection_string: string = await getRemoteIP()
+        connection_string = "http://" + connection_string + ":" + sharedState.getInstance().serverPort
+        this.properties.connection_string = connection_string
     }
 
     // INFO Prepare and send the (usually) first message in the chain

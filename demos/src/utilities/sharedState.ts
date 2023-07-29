@@ -10,6 +10,7 @@ export default class sharedState {
     runMainLoop: boolean = true
     mainLoopPaused: boolean = false
     consensusMode: boolean = false
+    serverPort: number = 53550
 
     // !SECTION shared state variables
 

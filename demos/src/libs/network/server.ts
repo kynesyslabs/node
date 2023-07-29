@@ -12,10 +12,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { Server as ServerType } from "socket.io"
 import { logger } from "../utils"
 import { PeerManager, Peer } from "../peer"
-import { Identity } from "../identity"
+// import { Identity } from "../identity"
 import ServerListeners from "./serverListeners"
 
-const identity = Identity.getInstance()
+// const identity = Identity.getInstance()
 
 export default class Server {
     static setupListeners = async function (server: ServerType) {
@@ -24,8 +24,8 @@ export default class Server {
 
             const newPeer = new Peer()
             newPeer.setSocket(peerSocket)
-            newPeer.setIdentity(identity.ed25519.publicKey)
-            PeerManager.getInstance().addPeer(newPeer)
+            //newPeer.setIdentity(identity.ed25519.publicKey) 
+            //PeerManager.getInstance().addPeer(newPeer)
             const serverListeners = new ServerListeners(newPeer)
             serverListeners.runListeners()
         })

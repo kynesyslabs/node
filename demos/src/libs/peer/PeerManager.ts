@@ -14,6 +14,7 @@ import type Peer from "./Peer"
 export default class PeerManager {
     private static instance: PeerManager
     private peerList: Record<string, Peer>
+    // TODO Use a mapping too to link a connection string to a peer?
 
     private constructor() {
         this.peerList = {}
@@ -29,7 +30,9 @@ export default class PeerManager {
     getPeers(): Peer[] {
         const peerList: Peer[] = []
         for (const peer in this.peerList) {
-            peerList.push(this.peerList[peer])
+            let _peer = this.peerList[peer]
+            if (_peer.identity != undefined) peerList.push(this.peerList[peer])
+            else console.log("[PEERMANAGER] This peer has no identity: treating it as a read only peer")
         }
         console.warn("[PEERMANAGER] Peerlist length: " + peerList.length)
         return peerList

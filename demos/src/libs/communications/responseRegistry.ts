@@ -55,6 +55,7 @@ export class ResponseRegistryDB {
             timestamp: null, // Set to now once received
             socket: null,
             identity: null,
+            connection_string: null,
         }
 
         let responseRegistry_write = await Chain.write(
@@ -174,6 +175,7 @@ export default class ResponseRegistry {
                 timestamp: null, // Set to now once received
                 socket: null,
                 identity: null,
+                connection_string: null,
             },
         }
         return [true, this.list[comlink.muid]]
@@ -195,6 +197,7 @@ export default class ResponseRegistry {
         message: Transmission,
         comlink_muid: string,
         socket: Socket | socket_client.Socket,
+        connection_string: string,
     ) {
         if (!this.list[comlink_muid])
             return [false, "No response has been requested"]
@@ -204,6 +207,7 @@ export default class ResponseRegistry {
             message.bundle.content.sender
         this.list[comlink_muid].response.message =
             message.bundle.content.message
+        this.list[comlink_muid].response.connection_string = connection_string
         return [true, this.list[comlink_muid]]
     }
 
@@ -215,6 +219,7 @@ export default class ResponseRegistry {
             timeout += 100
             if (timeout > 2000) return [false, this.list[muid].response]
         }
+        console.log("[RESPONSES] " + this.list[muid].response.connection_string + " replied to " + muid)
         return [true, this.list[muid].response]
     }
 }

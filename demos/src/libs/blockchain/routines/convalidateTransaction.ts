@@ -14,7 +14,7 @@ import Transaction from "../transaction"
 import executeTransaction from "./executeTransaction"
 
 // INFO Cryptographically convalidate a transaction and see if the execution is valid
-export default async function convalidateTransaction(request: any): Promise<Transaction> {
+export default async function convalidateTransaction(type: string, request: any): Promise<Transaction> {
     // Loading identity
     const id_ed25519 = await cryptography.load("./.demos_identity")
     let publicKey = Buffer.from(id_ed25519.publicKey.toString("hex"))

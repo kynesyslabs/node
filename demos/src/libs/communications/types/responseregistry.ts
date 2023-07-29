@@ -14,14 +14,8 @@ import ComLink from "../comlink"
 import Transmission from "../transmission"
 import { Socket } from "socket.io"
 import * as socket_client from "socket.io-client"
-import forge, { pki } from "node-forge"
+import forge from "node-forge"
 
-
-async function sleep(ms) {
-    return new Promise(resolve => {
-        setTimeout(resolve, ms)
-    })
-}
 
 
 export interface Response {
@@ -29,6 +23,7 @@ export interface Response {
     timestamp: number
     socket: Socket | socket_client.Socket
     identity: forge.pki.ed25519.BinaryBuffer // Public key of the sender
+    connection_string: string
 }
 
 export interface ResponseRegistryElement {

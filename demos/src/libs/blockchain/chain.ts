@@ -22,7 +22,7 @@ export default class Chain {
             this.instance = new Chain()
         }
         return this.instance
-    } // TODO When possible let's make it a singleton
+    }
 
     static async read(sql_query: string): Promise<any> {
         try {

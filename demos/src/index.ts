@@ -8,10 +8,11 @@ Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
 KyneSys Labs: https://www.kynesys.xyz/
 
 */
+var term = require( "terminal-kit" ).terminal
 
 import * as fs from "fs"
 import * as express from "express"
-const http = require("http") // FIXME: Use import but it breaks...
+const http = require("http")
 import { Server } from "socket.io"
 
 import mainLoop from "./utilities/mainLoop"
@@ -30,7 +31,6 @@ import commandLine from "./utilities/commandLine"
 
 import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
-import Sync from "./libs/blockchain/routines/Sync"
 
 let enough_peers = true
 // INFO Loading the known peers
@@ -108,26 +108,27 @@ async function digestArguments() {
 async function main() {
     // NOTE Overriding if necessary
     if (OVERRIDE_PORT) SERVER_PORT = OVERRIDE_PORT
+    sharedState.getInstance().serverPort = SERVER_PORT // Sharing this with any module that needs it
     if (OVERRIDE_PEER_LIST_FILE) PEER_LIST_FILE = OVERRIDE_PEER_LIST_FILE
     PEER_LIST = JSON.parse(fs.readFileSync(PEER_LIST_FILE, "utf8"))
 
     // NOTE The whole first part of main ensures the environment is ready to run
     await id.ensureIdentity()
     // Log identity
-    logger.log("WE ARE " + id.ed25519.publicKey.toString("hex"))
+    term.green("[MAIN] WE ARE " + id.ed25519.publicKey.toString("hex") + "\n")
 
     try {
         await Identity.getInstance().getPublicIP()
         logger.log("IP: " + Identity.getInstance().publicIP)
     } catch (e) {
         console.log(e)
-        console.log("[WARN] {OFFLINE?} Failed to get public IP")
+        term.orange("[WARN] {OFFLINE?} Failed to get public IP\n")
     }
 
     // INFO We start the server
-    logger.bootstrap("[BOOTSTRAP] Starting the server\n")
+    term.yellow("[BOOTSTRAP] Starting the server\n")
     await server.listen(SERVER_PORT)
-    logger.bootstrapSuccess("[SERVER] listening on *:" + SERVER_PORT + "\n")
+    term.green("[SERVER] listening on *:" + SERVER_PORT + "\n")
     await networkServer.setupListeners(io_server)
 
     // INFO Now ensuring we have an initialized chain or initializing the genesis block
@@ -157,9 +158,7 @@ async function main() {
         if (OVERRIDE_IS_TESTER) return await commandLine() // Testing mode is just for debugging or showcase purposes
         if (COMMANDLINE_MODE) commandLine() // While doing the rest of the stuff needed, a comand line interface is available
         logger.log("[MAIN] Starting the background loop\n")
-        mainLoop() // Is an async function so running without waiting send that to the background
-        logger.log("[MAIN] Starting the sync loop\n")
-        Sync(id) // NOTE We don't wait for the sync to finish because it will run indefinitely in the background
+        mainLoop(id) // Is an async function so running without waiting send that to the background
     }
 }
 

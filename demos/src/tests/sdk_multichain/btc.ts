@@ -10,7 +10,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { sha256 } from "node-forge"
-import { TransactionContent } from "../../../libs/blockchain/types/transactions"
 import fetch from "node-fetch"
 import { Psbt, networks } from "bitcoinjs-lib"
 import fromWIF from "bip32"
@@ -18,7 +17,7 @@ import axios from "axios"
 import { TransactionRequest } from "@ethersproject/providers"
 import { JsonRpcProvider } from "@ethersproject/providers"
 import { Wallet } from "@ethersproject/wallet"
-import defaultChain from './types/defaultChain'
+import defaultChain from "./types/defaultChain"
 
 
 interface TransactionParams {
@@ -53,7 +52,7 @@ export default class BTC  implements defaultChain {
     async sendTransaction(
         { from, to, value }: TransactionParams,
     ) {
-		if (!this.wallet) { throw new Error("Wallet not connected") }
+        if (!this.wallet) { throw new Error("Wallet not connected") }
 		
         const keyPair = fromWIF(this.wallet.privateKey, networks.bitcoin)
         const psbt = new Psbt({ network: networks.bitcoin })
@@ -110,15 +109,15 @@ export default class BTC  implements defaultChain {
     // Static singleton puller
     public static getInstance(): BTC|boolean {
         if (!BTC.instance) {
-			return false
+            return false
         }
         return BTC.instance
     }
 
-	public static createInstance(rpc_url: string): BTC {
-		if (!BTC.instance) {
+    public static createInstance(rpc_url: string): BTC {
+        if (!BTC.instance) {
             BTC.instance = new BTC(rpc_url)
         }
         return BTC.instance
-	}
+    }
 }
