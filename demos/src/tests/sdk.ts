@@ -1,10 +1,22 @@
 import Demos from "sdk/demos"
 
-async function testSDK() {
+// ANCHOR Ingesting arguments
+let args: any[] = []
+process.argv.forEach(function (val, index, array) {
+    if (index > 1) { args.push(val) }
+})
+
+// NOTE Getting the last block number
+async function getblocknumber() {
     let demos = new Demos()
     await demos.connect("http", "localhost", 53550) // Will throw an error if not connected
     demos.getLastBlockNumber()
-    // FIXME Why the server keeps trying to sync with a non identity based client? (see onAny above)
 }
 
-testSDK()
+// INFO Entry point
+if (args.length > 0) {
+    if (args[0] === "getblocknumber") {
+        getblocknumber()
+    }
+}
+

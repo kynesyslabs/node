@@ -65,16 +65,49 @@ export default class Demos {
     }
 
 
-    // INFO Get the last block number easily
+    
+
+    // NOTE Get the last block number easily
     getLastBlockNumber() {
+        this.nodeCall("getLastBlockNumber")
+    }
+
+    // NOTE Get the last block hash easily
+    getLastBlockHash() {
+        this.nodeCall("getLastBlockHash")
+    }
+
+    // NOTE Get the peer list
+    getPeerList() {
+        this.nodeCall("getPeerlist")
+    }
+    
+    // NOTE Get a block by its number eily
+    getBlockByNumber(num: number) {
+        this.nodeCall("getBlockByNumber", num)
+    } 
+
+    // NOTE Get a block by its hash
+    getBlockByHash(hash: string) {
+        console.log("getBlockByHash called with hash", hash)
+        this.nodeCall("getBlockByHash", hash)
+    }
+
+    // NOTE Get the node mempool if authorized
+    getMempool() { 
+        this.nodeCall("getMempool")
+    }
+
+    // INFO NodeCalls use the same structure
+    nodeCall(message: string, args: any = null) {
         if (!this.socket.connected) { console.log("[ERROR] We are disconnected"); return }
         let comlink = new ComLink()
         let transmission = new Transmission()
         transmission.bundle.content.type = "nodeCall"
-        transmission.bundle.content.message = "getLastBlockNumber"
+        transmission.bundle.content.message = message
         comlink.chain.current.currentMessage = transmission
         console.log("Sending message to server with muid: " + comlink.muid)
-        this.socket.emit ("comlink", comlink)
+        this.socket.emit ("comlink", comlink, args)
     }
 
 }

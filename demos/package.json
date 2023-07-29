@@ -11,7 +11,7 @@
         "lint": "eslint . --ext .ts",
         "prettier-format": "prettier --config .prettierrc.json modules/**/*.ts --write",
         "test": "echo \"Error: no test specified\" && exit 1",
-        "test:sdk": "npx nodemon --exec ts-node -r tsconfig-paths/register src/tests/sdk.ts",
+        "test:sdk:getblocknumber": "npx nodemon --exec ts-node -r tsconfig-paths/register src/tests/sdk.ts getblocknumber",
 	    "test:consensustime": "npx nodemon --exec ts-node -r tsconfig-paths/register src/libs/consensus/routines/checkConsensusTime.ts",
         "test:crosschain": "npx nodemon --exec ts-node -r tsconfig-paths/register src/tests/chainscript/chainscript_example.ts",
         "test:web2": "npx nodemon --exec ts-node -r tsconfig-paths/register src/tests/web2.ts",
