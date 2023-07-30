@@ -1,0 +1,66 @@
+body {
+	background-image: url("./assets/cube.webp");
+	background-repeat: no-repeat;
+    background-size: cover;
+    background-position: center;
+}
+
+/*  Decorators  */
+
+.oneline {
+	white-space: nowrap;
+}
+
+.oneline * {
+	display: inline;
+}
+
+
+/* Elements */
+
+.title {
+	border-radius: 5px;
+	background-color: #dedede;
+}
+
+.card {
+	border: 1px solid #959595;
+	background-color: #ececec;
+	border-radius: 10px;
+	padding: 10px;
+    margin: 10px;
+	text-align: center;
+}
+
+.translucid {
+	opacity: 90%;
+}
+
+.info {
+	font-size: 12px;
+	padding: 5px !important;
+	margin: 5px !important;
+}
+
+.search_card {
+	background-color: white !important;
+	width: 80vw;
+	margin:auto
+}
+
+.right_side {
+	background-color: white!important;
+	float: right;
+    margin:1px !important;
+	width:34vw !important;
+	height: 100vw;
+}
+
+.left_side {
+    background-color: white!important;
+	float: left;
+    margin:1px!important;
+    width: 63.5vw !important;
+	height: 100vw;
+
+}

@@ -1,4 +1,4 @@
-import XRPL from "../features/multichain/sdk/xrpl"
+import XRPL from "sdk/multichain/xrpl"
 
 
 // Testnet credentials
