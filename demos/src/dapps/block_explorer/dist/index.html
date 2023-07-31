@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/milligram/1.2.3/milligram.min.css">
+  <link rel="stylesheet" type="text/css" href="/index.2cdaf7bc.css">
+  <title>DEMOS Block Explorer</title>
+</head>
+
+<body>
+  <!-- Introduction -->
+  <div class="card">
+    DEMOS Block Explorer - Beta Release
+  </div>
+  <div class="card info oneline">
+    Connected to: <div id="rpcUrl">not connected yet</div>
+  </div>
+
+  <!-- Search Box -->
+  <div class="card search_card translucid">
+    <p>Search an Hash:</p>
+    <input type="search" id="hashSearchInput" placeholder="0x...">
+    <button type="button" id="searchWithHash">Go</button>
+  </div>
+
+  <br>
+  <!-- Main -->
+  <div class="card left_side translucid">
+    <div class="title">
+      Latest Transactions
+    </div>
+    <div class="transactions" id="latestTransactions">
+      <!-- Filled by js -->
+    </div>
+  </div>
+  <div class="card right_side translucid">
+    <div class="title">
+      Latest Blocks
+    </div>
+    <div class="blocks" id="latestBlocks">;
+      <!-- Filled by js -->
+    </div>
+
+  </div>
+<script src="/block_explorer.59712999.js"></script></body>
+
+<script src="https://cdn.socket.io/4.6.0/socket.io.min.js" integrity="sha384-c79GN5VsunZvi+Q/WObgk2in0CbZsHnjEqvFxC5DxHn9lTfNce2WW6h2pH6u/kF+" crossorigin="anonymous"></script>
+<script src="/index.ec553b3d.js"></script>
+<script src="/index.44983732.js"></script>
+</html>

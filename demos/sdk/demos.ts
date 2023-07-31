@@ -1,3 +1,15 @@
+
+/* LICENSE
+
+© 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
+
+Full license text: https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode
+Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
+
+KyneSys Labs: https://www.kynesys.xyz/
+
+*/
+
 import ComLink from "src/libs/communications/comlink"
 import Transmission from "src/libs/communications/transmission"
 import * as socket_client from "socket.io-client"
@@ -5,7 +17,6 @@ import { io } from "socket.io-client"
 const  term = require("terminal-kit").terminal
 
 export default class Demos {
-
     socket: socket_client.Socket
 
     constructor() {
@@ -52,12 +63,18 @@ export default class Demos {
         this.socket.on("comlink_reply", (data) => {
             console.log("[ComLink Reply] Received data") 
             //console.log(data)
-            console.log(data.chain.current.currentMessage.bundle.content.message)
+            let response = JSON.parse(data.chain.current.currentMessage.bundle.content.message)
+            console.log(response)
+        })
+
+        this.socket.on("error", (data) => {
+            console.log("[Error] Received data") 
+            console.log(data)
         })
 
         // Fallback
 
-        this.socket.onAny((eventName, data) => { // FIXME Why the server keeps trying to sync with a non identity based client?
+        this.socket.onAny((eventName, data) => { 
             console.log("[RECEIVED] " + eventName)
             //console.log (data)	
             //console.log("\n======")
@@ -84,13 +101,14 @@ export default class Demos {
     
     // NOTE Get a block by its number eily
     getBlockByNumber(num: number) {
-        this.nodeCall("getBlockByNumber", num)
+        console.log("getBlockByNumber: num = " + num)
+        this.nodeCall("getBlockByNumber", {blockNumber: num})
     } 
 
     // NOTE Get a block by its hash
     getBlockByHash(hash: string) {
         console.log("getBlockByHash called with hash", hash)
-        this.nodeCall("getBlockByHash", hash)
+        this.nodeCall("getBlockByHash", {hash: hash})
     }
 
     // NOTE Get the node mempool if authorized
@@ -99,15 +117,16 @@ export default class Demos {
     }
 
     // INFO NodeCalls use the same structure
-    nodeCall(message: string, args: any = null) {
+    nodeCall(message: string, args: any = {}) {
         if (!this.socket.connected) { console.log("[ERROR] We are disconnected"); return }
         let comlink = new ComLink()
         let transmission = new Transmission()
         transmission.bundle.content.type = "nodeCall"
         transmission.bundle.content.message = message
+        transmission.bundle.content.data = args
         comlink.chain.current.currentMessage = transmission
         console.log("Sending message to server with muid: " + comlink.muid)
-        this.socket.emit ("comlink", comlink, args)
+        this.socket.emit ("comlink", comlink)
     }
 
 }

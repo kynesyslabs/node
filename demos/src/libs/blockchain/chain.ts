@@ -1,4 +1,3 @@
-import Block from "./blocks"
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
@@ -10,6 +9,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+import Block from "./blocks"
 import Transaction from "./transaction"
 import Hashing from "../crypto/hashing"
 import Datasource from "src/model/datasource"
@@ -75,7 +75,7 @@ export default class Chain {
     }
     // INFO Get any block by its hash
     static async getBlockByHash(hash: string) {
-        let response = await this.read("SELECT * FROM blocks WHERE hash=" + hash)
+        let response = await this.read("SELECT * FROM blocks WHERE hash='" + hash + "'")
         return response[0]
     }
     // INFO Get a group of blocks by their status

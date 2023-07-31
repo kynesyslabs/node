@@ -163,6 +163,8 @@ export default class ServerListeners {
             // INFO Node APIs endpoints (valid without authentication too)
             else if (content.type === "nodeCall") {
                 let socketized_response: Peer[]
+                let data = content.data
+                console.log(typeof(data))
                 switch (content.message) {
                     case "getPeerlist":
                         console.log("[SERVER] Received getPeerlist")
@@ -188,23 +190,27 @@ export default class ServerListeners {
                         response = await chain.getLastBlockHash()
                         break
                     case "getBlockByNumber":
-                        if (!request.parameters.blockNumber) {
-                            _receiver.emit("public", {
+                        if (data.blockNumber === undefined || data.blockNumber === null) {
+                            console.log("[SERVER ERROR] Missing blockNumber")
+                            console.log(data)
+                            _receiver.emit("error", {
                                 error: "No block specified",
                             })
+                            break // FIXME Add a flag to avoid sending back a response too
                         }
+                        console.log("[SERVER] Received getBlockByNumber: " + data.blockNumber)
                         response = await chain.getBlockByNumber(
-                            request.parameters.blockNumber,
+                            data.blockNumber,
                         )
                         break
                     case "getBlockByHash":
-                        if (!request.parameters.blockHash) {
+                        if (!data.hash) {
                             _receiver.emit("public", {
                                 error: "No block specified",
                             })
                         }
                         response = await chain.getBlockByHash(
-                            request.parameters.blockHash,
+                            data.hash,
                         )
                         break
                     case "getMempool":
