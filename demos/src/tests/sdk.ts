@@ -1,4 +1,3 @@
-
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
@@ -18,11 +17,13 @@ import { ethers } from "ethers"
 // ANCHOR Ingesting arguments
 let args: any[] = []
 process.argv.forEach(function (val, index, array) {
-    if (index > 1) { args.push(val) }
+    if (index > 1) {
+        args.push(val)
+    }
 })
 
 // NOTE Getting the last block number
-async function geLastBlockNumber() {
+async function getLastBlockNumber() {
     let demos = new Demos()
     await demos.connect("http", "localhost", 53550) // Will throw an error if not connected
     demos.getLastBlockNumber()
@@ -31,14 +32,16 @@ async function geLastBlockNumber() {
 // NOTE Getting a block content from its number
 async function getBlockByNumber(blockNumber: number = 0) {
     let demos = new Demos()
-    await demos.connect("http", "localhost", 53550) // Will throw an error if not connected 
+    await demos.connect("http", "localhost", 53550) // Will throw an error if not connected
     demos.getBlockByNumber(blockNumber)
 }
 
 // NOTE Getting a block content from its hash
-async function getBlockByHash(blockHash: string = "5651c41856e9602f36213e2c963841df93590644666fc7d8872ec34c4ba53fcd") {
+async function getBlockByHash(
+    blockHash: string = "5651c41856e9602f36213e2c963841df93590644666fc7d8872ec34c4ba53fcd",
+) {
     let demos = new Demos()
-    await demos.connect("http", "localhost", 53550) // Will throw an error if not connected 
+    await demos.connect("http", "localhost", 53550) // Will throw an error if not connected
     demos.getBlockByHash(blockHash)
 }
 
@@ -51,8 +54,15 @@ async function crosschainWriteTest() {
 
     // INFO EVM Addresses and objects
     let contract_address = "0x2921449f72634a5b647b8e5d8756fe135f62b076"
-    let contract_abi = fs.readFileSync("src/tests/chainscript/chainscript_example_abi.json", "utf-8")
-    let contract_instance = new ethers.Contract(contract_address, contract_abi, evm.provider)
+    let contract_abi = fs.readFileSync(
+        "src/tests/chainscript/chainscript_example_abi.json",
+        "utf-8",
+    )
+    let contract_instance = new ethers.Contract(
+        contract_address,
+        contract_abi,
+        evm.provider,
+    )
 
     // INFO Ripple Testnet credentials and connection
     let xrp_test_key_1 = "ss9QaGYDxi96NSSzFy8w3mv2JN4Sz"
@@ -78,28 +88,25 @@ async function crosschainWriteTest() {
     } else {
         console.log("[*] We cannot initiate the payment on XRPL")
     }
-
 }
 
 // INFO Entry point
 if (args.length > 0) {
-    if (args[0] === "geLastBlockNumber") {
-        geLastBlockNumber()
-    }
-    else if (args[0] === "getBlockByNumber") {
+    if (args[0] === "getLastBlockNumber") {
+        getLastBlockNumber()
+    } else if (args[0] === "getBlockByNumber") {
         getBlockByNumber()
-    }
-    else if (args[0] === "getBlockByHash") {
+    } else if (args[0] === "getBlockByHash") {
         getBlockByHash()
-    }
-    else if (args[0] === "crosschainWriteTest") {
+    } else if (args[0] === "crosschainWriteTest") {
         crosschainWriteTest()
     }
 } else {
-    console.log("[x] No arguments provided. Please provide one of the following:")
-    console.log("[*] geLastBlockNumber")
+    console.log(
+        "[x] No arguments provided. Please provide one of the following:",
+    )
+    console.log("[*] getLastBlockNumber")
     console.log("[*] getBlockByNumber")
     console.log("[*] getBlockByHash")
     console.log("[*] crosschainWriteTest")
 }
-
