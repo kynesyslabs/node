@@ -43,7 +43,7 @@ export default class Identity {
         } else {
             this.ed25519 = await cryptography.new()
             // Writing the identity to disk in binary format
-            cryptography.save(this.ed25519, "./.demos_identity")
+            await cryptography.save(this.ed25519, "./.demos_identity")
             Logger.log("Generated new identity")
         }
     }
