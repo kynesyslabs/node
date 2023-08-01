@@ -28,6 +28,7 @@ export default class Cryptography {
     }
 
     static async save(keypair, path: string) {
+        console.log(keypair.privateKey)
         const pem = pki.privateKeyToPem(keypair.privateKey)
         await fs.writeFile(path, pem)
     }
