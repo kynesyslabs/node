@@ -27,10 +27,16 @@ export default class Cryptography {
         return keys
     }
 
-    static async save(keypair: pki.KeyPair, path: string) {
+    static async saveRSA(keypair: pki.KeyPair, path: string) {
         console.log(keypair.privateKey)
         const pem = pki.privateKeyToPem(keypair.privateKey)
         await fs.writeFile(path, pem)
+    }
+
+    static async save(keypair: pki.KeyPair, path: string) {
+        console.log(keypair.privateKey)
+        await fs.writeFile(path, JSON.stringify(keypair.privateKey))
+
     }
 
     static async load(path) {
