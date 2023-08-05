@@ -195,13 +195,14 @@ export default class ServerListeners {
                             console.log(data)
                             _receiver.emit("error", {
                                 error: "No block specified",
+                                muid: content.muid,
                             })
-                            break // FIXME Add a flag to avoid sending back a response too
+                        } else {
+                            console.log("[SERVER] Received getBlockByNumber: " + data.blockNumber)
+                            response = await chain.getBlockByNumber(
+                                data.blockNumber,
+                            )
                         }
-                        console.log("[SERVER] Received getBlockByNumber: " + data.blockNumber)
-                        response = await chain.getBlockByNumber(
-                            data.blockNumber,
-                        )
                         break
                     case "getBlockByHash":
                         if (!data.hash) {

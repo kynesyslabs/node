@@ -1,3 +1,5 @@
+.parcel-cache
+dist
 kyntainer.tar
 node_modules
 .vscode

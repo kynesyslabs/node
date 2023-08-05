@@ -5,12 +5,20 @@ body {
   background-size: cover;
 }
 
-.oneline {
-  white-space: nowrap;
+.oneliner {
+  flex: 1;
 }
 
-.oneline * {
-  display: inline;
+.oneliner:first-child {
+  margin-right: 5px;
+}
+
+.oneline {
+  display: flex;
+}
+
+.lineblock {
+  font-size: 14px;
 }
 
 .title {

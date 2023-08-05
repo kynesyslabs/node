@@ -7,14 +7,21 @@ body {
 
 /*  Decorators  */
 
+.oneliner {
+    flex: 1;
+}
+
+.oneliner:first-child {
+    margin-right: 5px;
+} 
+
 .oneline {
-	white-space: nowrap;
+	display: flex;
 }
 
-.oneline * {
-	display: inline;
+.lineblock {
+	font-size: 14;
 }
-
 
 /* Elements */
 
