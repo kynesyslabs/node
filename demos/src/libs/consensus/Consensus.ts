@@ -66,4 +66,9 @@ export default class Consensus {
         }
     }
 
+    async finalizeBlock(): Promise<void> {
+        // TODO Once the consensus is done, finalize the block by editing the blockchain itself and
+        // TODO Executing the GLS operations
+    }
+
 }
