@@ -14,7 +14,17 @@ var rpc = "http://85.208.48.187:53550"
 // eslint-disable-next-line no-unused-vars
 async function inspectBlock(block_number) {
     let block_content = await demos.getBlockByNumber(block_number) // Getting the block content continuously
-    blockInspector.innerHTML = JSON.stringify(block_content, null, 2) // Converting the block content to a string
+    //blockInspector.innerHTML = JSON.stringify(block_content, null, 2) // Converting the block content to a string
+    let blockNumber = document.getElementById("blockNumber")
+    blockNumber.innerHTML = block_content.number
+    let blockStatus = document.getElementById("blockStatus")
+    blockStatus.innerHTML = block_content.status
+    let blockHash = document.getElementById("blockHash")
+    blockHash.innerHTML = block_content.hash
+    let blockTransactions = document.getElementById("blockTransactions")
+    blockTransactions.innerHTML = block_content.content.transactions.length
+    let blockPreviousHash = document.getElementById("blockPreviousHash")
+    blockPreviousHash.innerHTML = JSON.stringify(block_content.content.previousHash)
 }
 
 async function watchdog() { // Executed every 2 seconds

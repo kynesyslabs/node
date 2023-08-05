@@ -12,8 +12,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { cryptography } from "src/libs/crypto"
 import Transaction from "../transaction"
 import executeTransaction from "./executeTransaction"
+import GLS from "../gls/gls"
+import { Operation } from "../gls/gls"
 
-// INFO Cryptographically convalidate a transaction and see if the execution is valid
+// INFO Cryptographically convalidate a transaction, calculate gas and see if the execution is valid
 export default async function convalidateTransaction(type: string, request: any): Promise<Transaction> {
     // Loading identity
     const id_ed25519 = await cryptography.load("./.demos_identity")
@@ -26,7 +28,23 @@ export default async function convalidateTransaction(type: string, request: any)
     tx.hash = request.tx.hash
     tx.confirmations = request.tx.confirmations
     tx.state_changes = request.tx.state_changes
-    // TODO Lock the fee and write somewhere that it has to be returned (db: table transactions -> return_fee) (tx.content.lock_fee)
+    // NOTE Charge the gas for the transaction
+    let from = request.tx.from.toString("hex")
+    let fromBalance = GLS.getGLSNativeBalance(from)
+    let gasAmount = null // TODO Calculate gas
+    if (fromBalance < gasAmount) {
+        return null // No gas money? No transaction!
+    }
+    // Deducting the gas from the account
+    let operation: Operation = {
+        operator: "pay_gas",
+        actor: from,
+        amount: gasAmount,
+        hash: tx.hash,
+        nonce: tx.content.nonce,
+        timestamp: tx.content.timestamp,
+    }
+    GLS.getInstance().operations.push(operation)
     // Verify tx validity
     let verified = Transaction.confirmTx(tx, privateKey, publicKey) // REVIEW Are the buffers ok?
     if (!verified) {

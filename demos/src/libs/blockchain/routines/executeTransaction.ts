@@ -26,13 +26,11 @@ Each block, the nodes execute the Operation objects ordering them by their times
 
 // INFO Given a transaction, use GLS to see if it is executable and return a result
 export default async function executeTransaction(transaction: Transaction): Promise<[boolean, string]> {
-    let gls: GLS
+
     let success: boolean
     let message: string
 
-    // Getting the GLS instance
-    gls = GLS.getInstance()
-
+ 
     // ANCHOR Managing simple value transfer
     if (transaction.content.amount > 0) {
         let operation: Operation
@@ -55,7 +53,7 @@ export default async function executeTransaction(transaction: Transaction): Prom
             nonce: transaction.content.nonce,
             timestamp: transaction.content.timestamp,
         }
-        gls.operations.push(operation)
+        GLS.getInstance().operations.push(operation)
         // Subtract value from sender's balance
         operation = {
             operator: "subtract",
@@ -65,7 +63,7 @@ export default async function executeTransaction(transaction: Transaction): Prom
             nonce: transaction.content.nonce,
             timestamp: transaction.content.timestamp,
         }
-        gls.operations.push(operation)
+        GLS.getInstance().operations.push(operation)
         success = true
         message = "Transaction successful"
         return [success, message]

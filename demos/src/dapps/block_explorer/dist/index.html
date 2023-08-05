@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/milligram/1.2.3/milligram.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
   <link rel="stylesheet" type="text/css" href="/index.2cdaf7bc.css">
   <title>DEMOS Block Explorer</title>
 </head>
@@ -41,7 +41,7 @@
       <div class="title">
         Latest Blocks
       </div>
-      <div class="blocks" id="latestBlocks">;
+      <div class="blocks" id="latestBlocks">
         <!-- Filled by js -->
       </div>
     </div>
@@ -49,7 +49,33 @@
 
   <!-- Block inspector -->
   <div class="card" id="blockInspector">
-    
+    <p class="title">Block Inspector</p>
+    <div class="oneline">
+        <p class="oneliner">Block Number: </p>
+        <p class="oneliner" id="blockNumber"></p>
+    </div>
+    <div class="oneline">
+      <p class="oneliner">Hash: </p>
+      <p class="oneliner" id="blockHash"></p>
+    </div>
+    <div class="oneline">
+      <p class="oneliner">Status: </p>
+      <p class="oneliner" id="blockStatus"></p>
+    </div>
+    <div class="oneline">
+      <p class="oneliner">Transactions: </p>
+      <p class="oneliner" id="blockTransactions"></p>
+    </div>
+    <div class="oneline">
+      <p class="oneliner">Previous Hash: </p>
+      <p class="oneliner" id="blockPreviousHash"></p>
+    </div>
+  </div>
+
+  <!--Transactions Inspector-->
+  <div class="card" id="transactionsInspector">
+    <p class="title">Transactions</p>
+
   </div>
 <script src="/block_explorer.59712999.js"></script></body>
 

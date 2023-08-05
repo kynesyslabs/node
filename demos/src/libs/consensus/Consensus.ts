@@ -1,6 +1,9 @@
 import Peer from "../network/peers"
 import { PeerManager } from "../peer"
 import chooseValidator from "./routines/chooseValidator"
+import Block from "../blockchain/blocks"
+import Mempool from "../blockchain/mempool"
+import buildProposedBlock from "../blockchain/routines/buildProposedBlock"
 
 export interface ConsensusRound {
 	number: number;
@@ -15,6 +18,7 @@ export default class Consensus {
     private round_number: number
 
     rounds: Map<number, ConsensusRound>
+    proposedBlock: Block
 
     constructor() {
         // TODO Implement datasource also for this registry that will be included in the block
@@ -27,9 +31,17 @@ export default class Consensus {
         return Consensus.instance
     }
 
+    // NOTE THis will inspect the proposed block of the other validators of this round
+    static async inspectProposedBlock(proposedBlock: Block): Promise<boolean> {
+        let valid = true
+        // TODO Inspect block using our mempool/block
+        return valid
+    }
+
+
     // ANCHOR Object methods
 
-    // INFO Select a validator (or a group of them)
+    // NOTE Select a validator (or a group of them)
     async chooseValidators() {
         // REVIEW Select minimum of 4 validators with a 2.5 seconds timeout
         let ms = 0
@@ -40,6 +52,17 @@ export default class Consensus {
             let chosenPeer = await chooseValidator(PeerManager.getInstance().getPeers())
             let identity = chosenPeer.identity.toString("hex")
             this.rounds[this.round_number].validators.set(identity, chosenPeer)
+        }
+    }
+
+    // NOTE This is an handy method to make stuff simpler
+    async getProposedBlock(): Promise<void> {
+        this.proposedBlock = Mempool.getInstance().getProposedBlock()
+    }
+
+    async broadcastProposedBlock(): Promise<void> {
+        for (let validator of this.rounds[this.round_number].validators.values()) {
+            // TODO For each validator, broadcast the proposed block using a comlink
         }
     }
 
