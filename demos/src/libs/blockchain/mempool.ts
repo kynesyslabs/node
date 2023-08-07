@@ -9,6 +9,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+// TODO Test the db instance of mempool and check if all the tables are ok
+
 // INFO Singleton Mempool class
 import Transaction from "./transaction"
 import PeerManager from "../peer/PeerManager"
