@@ -11,6 +11,7 @@ export default class sharedState {
     mainLoopPaused: boolean = false
     consensusMode: boolean = false
     serverPort: number = 53550
+    rpcFee: number = 0
 
     // !SECTION shared state variables
 
