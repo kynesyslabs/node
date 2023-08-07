@@ -14,6 +14,7 @@ import Transaction from "../transaction"
 import executeTransaction from "./executeTransaction"
 import GLS from "../gls/gls"
 import { Operation } from "../gls/gls"
+import calculateCurrentGas from "./calculateCurrentGas"
 
 // INFO Cryptographically convalidate a transaction, calculate gas and see if the execution is valid
 export default async function convalidateTransaction(type: string, request: any): Promise<Transaction> {
@@ -30,8 +31,8 @@ export default async function convalidateTransaction(type: string, request: any)
     tx.state_changes = request.tx.state_changes
     // NOTE Charge the gas for the transaction
     let from = request.tx.from.toString("hex")
-    let fromBalance = GLS.getGLSNativeBalance(from)
-    let gasAmount = null // TODO Calculate gas
+    let fromBalance = await GLS.getGLSNativeBalance(from)
+    let gasAmount = await calculateCurrentGas(tx)
     if (fromBalance < gasAmount) {
         return null // No gas money? No transaction!
     }
