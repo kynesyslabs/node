@@ -25,9 +25,9 @@ import { Peer } from "src/libs/peer"
 //      using some unique cryptographic numbers common to all the nodes that obtained
 //		the same proposed block.
 export default async function chooseValidator(peers: Peer[]) {
-    let block = Mempool.getInstance().getProposedBlock()
+    let block = await Mempool.getProposedBlock()
     // REVIEW Is better to hex the bytes directly?
-    let block_hash = await Hashing.sha256(JSON.stringify(block)) // FIXME Replace with something that is order-resistant
+    let block_hash = Hashing.sha256(JSON.stringify(block)) // FIXME Replace with something that is order-resistant
     /* TODO Choose the right variables for the CVSA
         - Sorted mempool with invalid tx scrapped, encrypted
         - Using only transactions < consensus timestamp to ensure synchronization

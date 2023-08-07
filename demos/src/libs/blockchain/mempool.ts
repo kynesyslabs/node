@@ -14,46 +14,51 @@ import Transaction from "./transaction"
 import PeerManager from "../peer/PeerManager"
 import buildProposedBlock from "./routines/buildProposedBlock"
 import Block from "./blocks"
+import Chain from "./chain"
 
-export default class Mempool {
-    private static instance: Mempool
-    // Class variables
+
+export interface MempoolData {
+    current: number
     transactions: Transaction[]
     proposedBlock: Block
+}
 
-    constructor() {
-        this.transactions = []
+export default class Mempool {
+    // INFO Reading the whole mempool
+    public static async getMempool(): Promise<MempoolData> {
+        let mempool = await Chain.read("SELECT * from mempool WHERE current = 1")
+        return mempool
     }
 
+
     // INFO The mempool contains a dynamic proposedBlock Block object
-    getProposedBlock(): Block {
-        if (!this.proposedBlock) {
-            this.proposedBlock = buildProposedBlock()
+    public static async getProposedBlock(): Promise <Block> {
+        let mempool = await Mempool.getMempool()
+        if (!mempool.proposedBlock) {
+            mempool.proposedBlock = buildProposedBlock()
+            await Chain.write("UPDATE mempool SET proposedBlock ='" + JSON.stringify(mempool.proposedBlock) + "' WHERE current = 1")
         }
-        return this.proposedBlock
+        return mempool.proposedBlock
     }
 
     // INFO Broadcasting the mempool to all the peers
-    async broadcast() {
+    public static async broadcast() {
         // Retrieve peerlist
         let peerlist = PeerManager.getInstance().getPeers()
         // TODO For cycle sending mempool to peerlist
     }
 
-    async receive(mempool: Mempool) {
+    public static async receive(mempool: MempoolData) {
         // TODO Parse, verify and call merge
-        let success = await this.merge(mempool)
+        let success = await Mempool.merge(mempool)
         return success
     }
 
     // INFO Merging the mempool received
-    private async merge(mempool: Mempool) {
+    private static async merge(received_mempool: MempoolData) {
+        let mempool = await Mempool.getMempool()
         // Merge the mempool with our one
-        this.transactions.concat(mempool.transactions) // TODO Add double items checking
-    }
-
-    // INFO Singleton instance
-    public static getInstance() {
-        return this.instance || (this.instance = new this())
+        mempool.transactions.concat(received_mempool.transactions) // TODO Add double items checking
+        await Chain.write("UPDATE mempool SET transactions = '" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")
     }
 }

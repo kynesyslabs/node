@@ -57,7 +57,7 @@ export default class Consensus {
 
     // NOTE This is an handy method to make stuff simpler
     async getProposedBlock(): Promise<void> {
-        this.proposedBlock = Mempool.getInstance().getProposedBlock()
+        this.proposedBlock = await Mempool.getProposedBlock()
     }
 
     async broadcastProposedBlock(): Promise<void> {
