@@ -14,9 +14,10 @@ import Block from "../blocks"
 import Transaction from "../transaction"
 
 // INFO Using its Mempool, each node can generate the same block having the same content
-export default function buildProposedBlock(): Block{
+export default async function buildProposedBlock(): Promise<Block>{
     let block = new Block()
-    let txs = Mempool.getInstance().transactions
+    let mempool = await Mempool.getMempool()
+    let txs = mempool.transactions
     let ordered_txs: Transaction[]
     let per_user_txs: Map<string, Transaction[]>
     // TODO Do stuff to sort per timestamp and so on

@@ -37,7 +37,7 @@ export default class Mempool {
     public static async getProposedBlock(): Promise <Block> {
         let mempool = await Mempool.getMempool()
         if (!mempool.proposedBlock) {
-            mempool.proposedBlock = buildProposedBlock()
+            mempool.proposedBlock = await buildProposedBlock()
             await Chain.write("UPDATE mempool SET proposedBlock ='" + JSON.stringify(mempool.proposedBlock) + "' WHERE current = 1")
         }
         return mempool.proposedBlock
