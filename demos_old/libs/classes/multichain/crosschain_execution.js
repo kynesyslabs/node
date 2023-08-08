@@ -1,1 +1,0 @@
-// INFO This module contains the methods for executing crosschain contracts/logic functions

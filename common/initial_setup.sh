@@ -1,1 +1,0 @@
-# INFO In this file will be the initial setup that will be ran after the container creation to set up identities and prerequisites
