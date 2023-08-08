@@ -40,7 +40,7 @@ export default class ServerListeners {
         this.peer.socket.on("auth_reply", async data => {
             let identity = await cryptography.load("./.demos_identity")
             console.log("[SERVER] Received auth reply")
-            if (!(data==="readonly")) {
+            if (!(data === "readonly")) {
                 // REVIEW Verify the signature with the public key on the message
                 let _verification = await cryptography.verify(
                     data[0],
@@ -52,7 +52,10 @@ export default class ServerListeners {
                     this.peer.socket.emit("auth_fail")
                     this.peer.socket.disconnect()
                 }
-            } else console.log("[SERVER] Client is read only: not asking for authentication")
+            } else
+                console.log(
+                    "[SERVER] Client is read only: not asking for authentication",
+                )
             // And we reply ok with our signature too
             let _signature = cryptography.sign("auth_ok", identity.privateKey)
             let _reply = {
@@ -95,7 +98,10 @@ export default class ServerListeners {
             if (content.type == "tx") {
                 require_reply = true // REVIEW Sure?
                 // Verify and execute the transaction
-                response = await convalidateTransaction(content.type, content.message)
+                response = await convalidateTransaction(
+                    content.type,
+                    content.message,
+                )
                 if (!response) {
                     extra = "error"
                     response = "Invalid Transaction"
@@ -118,6 +124,9 @@ export default class ServerListeners {
             else if (content.type === "web2Request") {
                 console.log("[SERVER] Received web2Request")
 
+                const currentPeerString =
+                    Identity.getInstance().getConnectionString()
+
                 switch (content.message.action) {
                     case "getUrl":
                         console.log("[SERVER] Received getUrl")
@@ -125,6 +134,7 @@ export default class ServerListeners {
                             content.message.httpVerb,
                             content.message.url,
                             content.message.headers,
+                            currentPeerString,
                         )
                         break
                     case "attestGetUrl":
@@ -135,6 +145,8 @@ export default class ServerListeners {
                             content.message.httpVerb,
                             content.message.url,
                             content.message.headers,
+                            currentPeerString,
+                            content.message.web2Data,
                         )
                         break
                     default:
@@ -164,7 +176,7 @@ export default class ServerListeners {
             else if (content.type === "nodeCall") {
                 let socketized_response: Peer[]
                 let data = content.data
-                console.log(typeof(data))
+                console.log(typeof data)
                 switch (content.message) {
                     case "getPeerlist":
                         console.log("[SERVER] Received getPeerlist")
@@ -190,7 +202,10 @@ export default class ServerListeners {
                         response = await chain.getLastBlockHash()
                         break
                     case "getBlockByNumber":
-                        if (data.blockNumber === undefined || data.blockNumber === null) {
+                        if (
+                            data.blockNumber === undefined ||
+                            data.blockNumber === null
+                        ) {
                             console.log("[SERVER ERROR] Missing blockNumber")
                             console.log(data)
                             _receiver.emit("error", {
@@ -198,7 +213,10 @@ export default class ServerListeners {
                                 muid: content.muid,
                             })
                         } else {
-                            console.log("[SERVER] Received getBlockByNumber: " + data.blockNumber)
+                            console.log(
+                                "[SERVER] Received getBlockByNumber: " +
+                                    data.blockNumber,
+                            )
                             response = await chain.getBlockByNumber(
                                 data.blockNumber,
                             )
@@ -210,9 +228,7 @@ export default class ServerListeners {
                                 error: "No block specified",
                             })
                         }
-                        response = await chain.getBlockByHash(
-                            data.hash,
-                        )
+                        response = await chain.getBlockByHash(data.hash)
                         break
                     case "getMempool":
                         response = await chain.getPendingPool()

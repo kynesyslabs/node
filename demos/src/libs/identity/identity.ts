@@ -15,16 +15,17 @@ import Logger from "../utils/logger"
 import { pki } from "node-forge"
 import getRemoteIP from "../network/routines/getRemoteIP"
 
-
 export default class Identity {
     private static instance: Identity
     public ed25519: pki.KeyPair
     public publicIP: string
+    public publicPort: string
 
     // Make the constructor private.
     private constructor() {
         this.ed25519 = null
         this.publicIP = null
+        this.publicPort = null
     }
 
     // Create a public static method to get the instance of the Identity class
@@ -55,5 +56,15 @@ export default class Identity {
 
     getPublicKeyHex(): string | undefined {
         return this.ed25519?.publicKey?.toString("hex")
+    }
+
+    setPublicPort(port: string): void {
+        this.publicPort = port
+    }
+
+    getConnectionString(): string {
+        return `http://${this.publicIP}>${
+            this.publicPort
+        }>${this.getPublicKeyHex()}`
     }
 }

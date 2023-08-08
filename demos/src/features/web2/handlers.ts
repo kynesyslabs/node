@@ -10,7 +10,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 // INFO This module contains all the methods needed to interact with web2 on DEMOS chain
-import { Web2Data } from "./web2class"
+import { Web2Data } from "src/features/web2"
 import { sha256 } from "node-forge"
 
 import axios from "axios"
@@ -46,41 +46,54 @@ const handlers = {
 }
 
 // INFO Provides a method to retrieve a web2 data from a url (simple GET request)
-async function http_request(httpVerb: string, url: string, headers: any) {
+async function http_request(
+    httpVerb: string,
+    url: string,
+    headers: any,
+    currentPeerString: string,
+    web2Data?: Web2Data,
+) {
     console.log("[WEB2] Received http_request")
     if (httpVerb !== "GET" && httpVerb !== "POST") {
         console.log("Wrong http verb")
         return
     }
 
+    if (!web2Data) {
+        web2Data = new Web2Data()
+    }
+
     let promise: Promise<any>
 
-    const web2Data = new Web2Data()
     const peer = new Peer()
-    // peer.identity = Identity.getInstance().identity
+    peer.setConnectionString(currentPeerString)
     web2Data.data.operator = peer
     web2Data.data.request.timestamp = new Date().getTime()
-    // syncData(web2Data, imc.states["web2"])
-    // emit_web2_broadcast(web2Data)
-    // Fixme: mark as operator??
 
     switch (httpVerb) {
         case "GET":
             promise = axios.get(url, headers)
             web2Data.status = "pending"
             web2Data.data.request.timestamp = new Date().getTime()
-            emit_web2_broadcast({
+            await emit_web2_broadcast({
                 action: "attestGetUrl",
                 httpVerb: "GET",
                 url: url,
                 headers: headers,
+                web2Data: web2Data,
             })
             break
         case "POST":
             promise = axios.post(url, headers)
             web2Data.status = "pending"
             web2Data.data.request.timestamp = new Date().getTime()
-            await emit_web2_broadcast(web2Data)
+            await emit_web2_broadcast({
+                action: "attestPostUrl",
+                httpVerb: "POST",
+                url: url,
+                headers: headers,
+                web2Data: web2Data,
+            })
             break
         default:
             console.log("Wrong http verb")
