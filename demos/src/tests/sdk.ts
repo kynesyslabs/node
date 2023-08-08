@@ -9,8 +9,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import Demos from "sdk/demos"
-import * as multichain from "sdk/multichain"
+import Demos from "sdk/localsdk/demos"
+import * as multichain from "sdk/localsdk/multichain"
 import * as fs from "fs"
 import { ethers } from "ethers"
 

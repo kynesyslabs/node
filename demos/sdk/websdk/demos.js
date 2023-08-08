@@ -68,7 +68,7 @@ let demos = {
 
     // SECTION Connection and listeners
     connect: function(rpc_url) {
-        demos.socket = io.connect(rpc, {
+        demos.socket = io.connect(rpc_url, {
             extraHeaders: {
                 "Access-Control-Allow-Origin": "*",
             },

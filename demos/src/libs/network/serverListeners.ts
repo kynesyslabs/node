@@ -168,8 +168,7 @@ export default class ServerListeners {
             // INFO Mempool endpoint
             else if (content.type === "mempool") {
                 // Getting the mempool instance
-                let mempool = Mempool.getInstance()
-                response = await mempool.receive(content.message)
+                response = await Mempool.receive(content.message)
             }
 
             // INFO Node APIs endpoints (valid without authentication too)

@@ -68,7 +68,7 @@ let demos = {
 
     // SECTION Connection and listeners
     connect: function(rpc_url) {
-        demos.socket = io.connect(rpc, {
+        demos.socket = io.connect(rpc_url, {
             extraHeaders: {
                 "Access-Control-Allow-Origin": "*",
             },
@@ -121,6 +121,12 @@ let demos = {
     // SECTION NodeCall prototype
     // INFO NodeCalls use the same structure
     nodeCall: async function (message, args={}) {
+        // let timeout = 5000 // 5 seconds
+        //while (!demos.socket.connected) { 
+        // await new Promise((resolve) => setTimeout(resolve, 100)) 
+        // timeout -= 100
+        //}
+        // if (timeout <1) { console.log("[ERROR] We are disconnected"); return }
         if (!demos.socket.connected) { console.log("[ERROR] We are disconnected"); return }
         let _muid = demos.generateMuid()
         let comlink = {

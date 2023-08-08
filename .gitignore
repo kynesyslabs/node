@@ -16,3 +16,6 @@ demos/yarn.lock
 demos/yarn-error.log
 evm/node/data
 demos_old
+demos/src/dapps/yarn-error.log
+demos/src/dapps/block_explorer/.parcel-cache
+demos/src/dapps/block_explorer/node_modules

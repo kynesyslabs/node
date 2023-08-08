@@ -46,6 +46,8 @@ let OVERRIDE_PEER_LIST_FILE = null
 let OVERRIDE_IS_TESTER = null
 let COMMANDLINE_MODE = null
 
+let RPC_FEE: number = parseInt(process.env.RPC_FEE) || 10
+
 let SERVER_PORT: number = parseInt(process.env.SERVER_PORT, 10) || 53550
 let PEER_LIST_FILE = "./demos_peers"
 
@@ -110,6 +112,7 @@ async function main() {
     // NOTE Overriding if necessary
     if (OVERRIDE_PORT) SERVER_PORT = OVERRIDE_PORT
     sharedState.getInstance().serverPort = SERVER_PORT // Sharing this with any module that needs it
+    sharedState.getInstance().rpcFee = RPC_FEE
     if (OVERRIDE_PEER_LIST_FILE) PEER_LIST_FILE = OVERRIDE_PEER_LIST_FILE
     PEER_LIST = JSON.parse(fs.readFileSync(PEER_LIST_FILE, "utf8"))
 

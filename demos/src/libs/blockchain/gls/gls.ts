@@ -109,6 +109,13 @@ export default class GLS {
         let full_nfts_balance = response[0]
         return full_nfts_balance.nfts[nft_address]
     }
+
+    static async getGLSGasMultiplier() {
+        let response = await Chain.read(
+            "SELECT gas_multiplier FROM status_properties", // TODO Implement and make it dynamic
+        )
+        return response[0].gas_multiplier
+    }
     // !SECTION Getters
 
     // SECTION Setters

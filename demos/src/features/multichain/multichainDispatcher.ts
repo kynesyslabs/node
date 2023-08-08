@@ -9,9 +9,17 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+/* TODO
+
+- Signature su entrambe le chain se richiedono sender
+- Signature per conto di se possibile
+- No signature per pubblici e from
+
+*/
+
 // INFO Entry point for the multichain endpoint
 export default function multichainDispatcher(request) {
-	let response;
-	// TODO
-	return response
+    let response
+    // TODO
+    return response
 }
