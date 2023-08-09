@@ -141,7 +141,7 @@ export default class ServerListeners {
                         console.log(
                             "[SERVER] Received attestation request for getUrl",
                         )
-                        response = web2handlers.http_request(
+                        response = web2handlers.http_attest(
                             content.message.httpVerb,
                             content.message.url,
                             content.message.headers,

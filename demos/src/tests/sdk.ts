@@ -16,7 +16,7 @@ import { ethers } from "ethers"
 
 // ANCHOR Ingesting arguments
 let args: any[] = []
-process.argv.forEach(function (val, index, array) {
+process.argv.forEach(function (val, index) {
     if (index > 1) {
         args.push(val)
     }

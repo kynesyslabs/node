@@ -14,19 +14,27 @@ import { pki } from "node-forge"
 
 import { Peer } from "src/libs/peer"
 
+export interface IRequest {
+    timestamp: number
+    status: string
+    url: string
+    verb: string
+}
+
+export interface IResponse {
+    timestamp: number
+    result: string
+    hash: string
+}
 export interface IData {
-    request: { timestamp: null | number; status: null | string }
-    response: {
-        timestamp: null | number
-        result: null | string
-        hash: null | string
-    }
-    operator: Peer
+    request?: IRequest
+    response?: IResponse
+    operator?: Peer
 }
 
 export interface IWitness {
-    response: { peer: Peer; timestamp: null | number; hash: null | string }
-    signature: null | string
+    response: { peer: Peer; timestamp: number; hash: string }
+    signature: string
 }
 
 export interface IWitnesses {
@@ -43,7 +51,7 @@ export class Web2Data {
     constructor() {
         this.status = "new"
         this.data = {
-            request: { timestamp: null, status: null },
+            request: { timestamp: null, status: null, url: null, verb: null },
             response: { timestamp: null, result: null, hash: null },
             operator: null,
         }
