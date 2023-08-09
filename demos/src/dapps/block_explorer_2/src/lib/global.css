@@ -1,0 +1,48 @@
+:root{
+    --accent:#0a84ff;
+    --accent-accessible:rgb(64, 156, 255);
+    --border-color: #303030;
+    --border-radius: 8px;
+}
+
+a{
+    color: var(--accent);
+    text-decoration: none;
+}
+
+html {
+    box-sizing: border-box;
+  }
+  *, *:before, *:after {
+    box-sizing: inherit;
+  }
+
+body{
+    background-color: #101010;
+    color: white;
+    font-family: 'HelveticaN', sans-serif;
+    margin: 0;
+    font-size: 1rem;
+}
+
+input{
+    padding: 0.7rem;
+    font-size: 1rem;
+}
+
+@font-face {
+    font-family: 'Neue Machina';
+    src: url('/nm/NeueMachina-Light.otf');
+}
+
+@font-face {
+    font-family: 'HelveticaN';
+    src: url('/helveticaN.otf');
+    font-weight: normal;
+}
+
+@font-face {
+    font-family: 'HelveticaN';
+    src: url('/helveticaNBold.otf');
+    font-weight: bold;
+}
