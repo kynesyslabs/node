@@ -29,10 +29,10 @@ export default class web2Registry {
         ] = web2Data
     }
 
-    public getEntry(web2Data: Web2Data): void {
-        this.registry[
+    public getEntry(web2Data: Web2Data): Web2Data {
+        return (this.registry[
             web2Data.data.request.url + web2Data.data.request.timestamp
-        ] = web2Data
+        ] = web2Data)
     }
 
     public removeEntry(web2Data: Web2Data): void {

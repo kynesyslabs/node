@@ -135,6 +135,7 @@ export default class ServerListeners {
                             content.message.url,
                             content.message.headers,
                             currentPeerString,
+                            PeerManager.getInstance().getPeers().length,
                         )
                         break
                     case "attestGetUrl":
@@ -142,6 +143,18 @@ export default class ServerListeners {
                             "[SERVER] Received attestation request for getUrl",
                         )
                         response = web2handlers.http_attest(
+                            content.message.httpVerb,
+                            content.message.url,
+                            content.message.headers,
+                            currentPeerString,
+                            content.message.web2Data,
+                        )
+                        break
+                    case "process_attestGetUrl":
+                        console.log(
+                            "[SERVER] Received process_attestGetUrl request",
+                        )
+                        response = web2handlers.http_process_attestation(
                             content.message.httpVerb,
                             content.message.url,
                             content.message.headers,

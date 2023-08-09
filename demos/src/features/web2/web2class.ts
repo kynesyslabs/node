@@ -1,3 +1,4 @@
+import { time } from "console"
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
@@ -11,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { rsa } from "src/libs/crypto"
 import { pki } from "node-forge"
-
+import Hashing from "src/libs/crypto/hashing"
 import { Peer } from "src/libs/peer"
 
 export interface IRequest {
@@ -47,6 +48,7 @@ export class Web2Data {
     witnesses: IWitnesses
     data_signature: null | string
     witnesses_signature: null | string
+    peer_count: number | null
 
     constructor() {
         this.status = "new"
@@ -58,6 +60,7 @@ export class Web2Data {
         this.witnesses = {}
         this.data_signature = null
         this.witnesses_signature = null
+        this.peer_count = null
     }
 
     async signData(privateKey: pki.rsa.PrivateKey): Promise<void> {
@@ -65,6 +68,24 @@ export class Web2Data {
             JSON.stringify(this.data),
             privateKey,
         )
+    }
+
+    async addWitness(
+        publicKey: any, //TODO - improve types for keys
+        privateKey: any, //TODO - improve types for keys
+        peer: Peer,
+        data: IResponse,
+        timestamp: number,
+    ): Promise<void> {
+        let witness: IWitness = {
+            response: {
+                peer: peer,
+                timestamp: timestamp,
+                hash: Hashing.sha256(JSON.stringify(data)),
+            },
+            signature: await rsa.sign(JSON.stringify(data), privateKey),
+        }
+        this.witnesses[publicKey as unknown as string] = witness //TODO - Horrible typing. Fix this
     }
 
     async signWitnesses(privateKey: pki.rsa.PrivateKey): Promise<void> {

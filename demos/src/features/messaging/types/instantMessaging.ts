@@ -3,7 +3,6 @@ import Hashing from "src/libs/crypto/hashing"
 import * as forge from "node-forge"
 import { rsa } from "src/libs/crypto" // Ensure correct path
 import { pki } from "node-forge"
-import { Hash } from "crypto"
 
 // INFO A Letter is a single message with data, sender and receiver and methods to work with it
 export class Letter {
@@ -12,8 +11,8 @@ export class Letter {
     data: Buffer
 
     constructor() {
-        this.from = null,
-        this.to = null,
+        this.from = null
+        this.to = null
         this.data = null
     }
 
@@ -24,18 +23,17 @@ export class Letter {
         encrypted.letter = await rsa.encrypt(stringed, publicKeyRSA)
         return encrypted
     }
-
 }
 
 // INFO An encryptedLetter is a Letter after being encrypted with the receiver's public key
 export interface encryptedLetter {
-    letter: string;
+    letter: string
 }
 
 // INFO A MessageContent includes a Letter, its hash and the signature of the sender for that hash
 export class MessageContent {
     content: encryptedLetter
-    hash: string 
+    hash: string
     signature: forge.pki.ed25519.BinaryBuffer
 
     constructor() {
@@ -48,7 +46,7 @@ export class MessageContent {
     // NOTE Now the message is ready to be sent
     async finalize(privateKeyED25519: pki.ed25519.BinaryBuffer) {
         this.hash = Hashing.sha256(JSON.stringify(this.content))
-        this.signature =  Cryptography.sign(this.hash, privateKeyED25519)
+        this.signature = Cryptography.sign(this.hash, privateKeyED25519)
     }
 }
 
@@ -56,7 +54,10 @@ export class MessageContent {
 // INFO An InstantMessagingSession is a session between two users and contains the current message (hashed and signed) as well
 //      as a list of hashes from the previous messages. currentHash ensures that the chain of hashes is not broken.
 export class InstantMessagingSession {
-    private static instances: Map<string, InstantMessagingSession> = new Map<string, InstantMessagingSession>()
+    private static instances: Map<string, InstantMessagingSession> = new Map<
+        string,
+        InstantMessagingSession
+    >()
 
     // Properties
     current: {
@@ -100,15 +101,16 @@ export class InstantMessagingSession {
     // ANCHOR Privates
     private static makeid(length: number): string {
         let result = ""
-        const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+        const characters =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
         const charactersLength = characters.length
         let counter = 0
         while (counter < length) {
-            result += characters.charAt(Math.floor(Math.random() * charactersLength))
+            result += characters.charAt(
+                Math.floor(Math.random() * charactersLength),
+            )
             counter += 1
         }
         return result
     }
-    
-
 }
