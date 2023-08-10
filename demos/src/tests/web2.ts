@@ -72,6 +72,7 @@ async function testIt() {
     let response = await responseRegistry
         .getInstance()
         .checkResponse(comLink.muid)
+    console.log("final response from node: ")
     console.log(response)
 }
 

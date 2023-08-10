@@ -81,30 +81,36 @@ async function http_request(
     // This was intended to be used to store the state so that it cant get manipulated by the peer,
     // but we should probably just use the web2Data object directly and not store it in the registry
 
+    let attestedResponseWeb2Data
+
     switch (httpVerb) {
         case "GET":
             promise = axios.get(url, headers)
             web2Data.status = "pending"
             web2Data.data.request.timestamp = new Date().getTime()
-            await emit_web2_broadcast({
+            attestedResponseWeb2Data = await emit_web2_broadcast({
                 action: "attestGetUrl",
                 httpVerb: "GET",
                 url: url,
                 headers: headers,
                 web2Data: web2Data,
             })
+            console.log("received attestedResponseWeb2Data")
+            console.log(JSON.stringify(attestedResponseWeb2Data))
             break
         case "POST":
             promise = axios.post(url, headers)
             web2Data.status = "pending"
             web2Data.data.request.timestamp = new Date().getTime()
-            await emit_web2_broadcast({
+            attestedResponseWeb2Data = await emit_web2_broadcast({
                 action: "attestPostUrl",
                 httpVerb: "POST",
                 url: url,
                 headers: headers,
                 web2Data: web2Data,
             })
+            console.log("received attestedResponseWeb2Data")
+            console.log(JSON.stringify(attestedResponseWeb2Data))
             break
         default:
             console.log("Wrong http verb")
@@ -113,24 +119,23 @@ async function http_request(
 
     try {
         const response = await promise
-        web2Data.status = "retrieved_by_primary"
-        web2Data.data.response.timestamp = new Date().getTime()
-        web2Data.data.response.result = response.data //TODO - consider extracting data via a mapping function with some selector?
-        web2Data.signData(id.ed25519.privateKey as any) //TODO - improve types for keys
+
+        const finalWeb2Data = new Web2Data(attestedResponseWeb2Data)
+
+        finalWeb2Data.status = "retrieved_by_primary"
+        finalWeb2Data.data.response.timestamp = new Date().getTime()
+        finalWeb2Data.data.response.result = response.data //TODO - consider extracting data via a mapping function with some selector?
+        await finalWeb2Data.signData(id.ed25519.privateKey as any) //TODO - improve types for keys
 
         let md = sha256.create()
         md.update(JSON.stringify(response.data))
-        web2Data.data.response.hash = md.digest().toHex()
+        finalWeb2Data.data.response.hash = md.digest().toHex()
 
-        //syncData(web2Data, imc.states["web2"])
-        await emit_web2_broadcast(web2Data)
-
-        return web2Data
+        return finalWeb2Data
     } catch (error) {
         console.error(error)
         web2Data.status = "error"
         web2Data.data.response.timestamp = new Date().getTime()
-        //syncData(web2Data, imc.states["web2"])
         await emit_web2_broadcast(web2Data)
         throw error
     }
@@ -192,7 +197,7 @@ async function http_attest(
             timestamp,
         )
         console.log("Added witness to web2Data")
-        await emit_web2_broadcast({
+        const processedAttestationResponse = await emit_web2_broadcast({
             action: "process_attestGetUrl",
             httpVerb: "GET",
             url: url,
@@ -200,7 +205,7 @@ async function http_attest(
             web2Data: web2Data,
         })
 
-        return web2Data
+        return processedAttestationResponse
     } catch (error) {
         console.error(error)
         // We should probably not send data back to the original peer now, right?
@@ -286,8 +291,9 @@ async function http_process_attestation(
     }
 }
 
-async function emit_web2_broadcast(data: any) {
-    await sendMessageToPeers(data)
+async function emit_web2_broadcast(data: any): Promise<unknown> {
+    const response = await sendMessageToPeers(data)
+    return response
 }
 
 export default handlers
