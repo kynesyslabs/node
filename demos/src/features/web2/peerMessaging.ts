@@ -75,7 +75,9 @@ export async function sendMessageToPeers(
         console.log(response)
 
         if (response[0]) {
-            return response[1]
+            if (response[1]?.message) {
+                return JSON.parse(response[1].message)
+            }
         }
 
         // Todo: improve error handling. if response[0] is a falsy value, we should handle this better
