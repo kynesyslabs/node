@@ -42,6 +42,15 @@ export interface IWitnesses {
     [publicKey: string]: IWitness
 }
 
+export interface IWeb2Data {
+    status: string
+    data: IData
+    witnesses: IWitnesses
+    data_signature: null | pki.ed25519.BinaryBuffer
+    witnesses_signature: null | any
+    peer_count: number | null
+}
+
 export class Web2Data {
     status: string
     data: IData
@@ -50,7 +59,7 @@ export class Web2Data {
     witnesses_signature: null | any
     peer_count: number | null
 
-    constructor(existingWeb2DataObj?: Web2Data) {
+    constructor(existingWeb2DataObj?: IWeb2Data) {
         if (existingWeb2DataObj) {
             this.status = existingWeb2DataObj.status
             this.data = existingWeb2DataObj.data
@@ -74,6 +83,17 @@ export class Web2Data {
             this.data_signature = null
             this.witnesses_signature = null
             this.peer_count = null
+        }
+    }
+
+    getData(): IWeb2Data {
+        return {
+            status: this.status,
+            data: this.data,
+            witnesses: this.witnesses,
+            data_signature: this.data_signature,
+            witnesses_signature: this.witnesses_signature,
+            peer_count: this.peer_count,
         }
     }
 

@@ -74,6 +74,11 @@ export async function sendMessageToPeers(
         console.log("WEB2/PEERMESSAGING: Message received")
         console.log(response)
 
-        return response
+        if (response[0]) {
+            return response[1]
+        }
+
+        // Todo: improve error handling. if response[0] is a falsy value, we should handle this better
+        return null
     }
 }

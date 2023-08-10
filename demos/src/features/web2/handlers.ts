@@ -131,7 +131,13 @@ async function http_request(
         md.update(JSON.stringify(response.data))
         finalWeb2Data.data.response.hash = md.digest().toHex()
 
-        return finalWeb2Data
+        const isItReallyGood = finalWeb2Data.getData()
+
+        console.log("is it really good?")
+        console.log(Object.keys(isItReallyGood))
+        console.log(JSON.stringify(isItReallyGood))
+
+        return isItReallyGood
     } catch (error) {
         console.error(error)
         web2Data.status = "error"
@@ -204,6 +210,10 @@ async function http_attest(
             headers: headers,
             web2Data: web2Data,
         })
+
+        console.log("Received processedAttestationResponse")
+        console.log(Object.keys(processedAttestationResponse))
+        console.log(processedAttestationResponse)
 
         return processedAttestationResponse
     } catch (error) {
@@ -278,7 +288,7 @@ async function http_process_attestation(
             "Web2Data object is valid and witnesses have successfully attested it",
         )
 
-        return web2Data
+        return web2Data.getData()
     } catch (error) {
         console.error(error)
         // We should probably not send data back to the original peer now, right?
