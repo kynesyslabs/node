@@ -126,7 +126,7 @@ export default class ServerListeners {
             // INFO Web2 endpoints
             else if (content.type === "web2Request") {
                 console.log("[SERVER] Received web2Request")
-
+                console.log(JSON.stringify(request))
                 const currentPeerString =
                     Identity.getInstance().getConnectionString()
 

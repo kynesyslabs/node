@@ -47,20 +47,34 @@ export class Web2Data {
     data: IData
     witnesses: IWitnesses
     data_signature: null | pki.ed25519.BinaryBuffer
-    witnesses_signature: null | string
+    witnesses_signature: null | any
     peer_count: number | null
 
-    constructor() {
-        this.status = "new"
-        this.data = {
-            request: { timestamp: null, status: null, url: null, verb: null },
-            response: { timestamp: null, result: null, hash: null },
-            operator: null,
+    constructor(existingWeb2DataObj?: Web2Data) {
+        if (existingWeb2DataObj) {
+            this.status = existingWeb2DataObj.status
+            this.data = existingWeb2DataObj.data
+            this.witnesses = existingWeb2DataObj.witnesses
+            this.data_signature = existingWeb2DataObj.data_signature
+            this.witnesses_signature = existingWeb2DataObj.witnesses_signature
+            this.peer_count = existingWeb2DataObj.peer_count
+        } else {
+            this.status = "new"
+            this.data = {
+                request: {
+                    timestamp: null,
+                    status: null,
+                    url: null,
+                    verb: null,
+                },
+                response: { timestamp: null, result: null, hash: null },
+                operator: null,
+            }
+            this.witnesses = {}
+            this.data_signature = null
+            this.witnesses_signature = null
+            this.peer_count = null
         }
-        this.witnesses = {}
-        this.data_signature = null
-        this.witnesses_signature = null
-        this.peer_count = null
     }
 
     async signData(privateKey: pki.ed25519.BinaryBuffer): Promise<void> {
@@ -93,7 +107,7 @@ export class Web2Data {
     }
 
     async signWitnesses(privateKey: pki.rsa.PrivateKey): Promise<void> {
-        this.witnesses_signature = await rsa.sign(
+        this.witnesses_signature = await Cryptography.sign(
             JSON.stringify(this.witnesses),
             privateKey,
         )

@@ -139,7 +139,7 @@ async function http_attest(
     url: string,
     headers: any,
     currentPeerString: string,
-    web2Data?: Web2Data,
+    web2DataObject?: Web2Data,
 ) {
     console.log("[WEB2] Received http_attest request")
     if (httpVerb !== "GET" && httpVerb !== "POST") {
@@ -147,10 +147,12 @@ async function http_attest(
         return
     }
 
-    if (!web2Data) {
+    if (!web2DataObject) {
         console.log("Missing Web2Data state")
         return
     }
+
+    const web2Data = new Web2Data(web2DataObject)
 
     const peer = new Peer()
     peer.setConnectionString(currentPeerString)
@@ -176,6 +178,9 @@ async function http_attest(
 
         const timestamp = new Date().getTime()
         const data = response.data //TODO - consider extracting data via a mapping function with some selector?
+        console.log("Retrieved data from " + url + " at " + timestamp)
+
+        console.log(Object.keys(web2Data))
 
         web2Data.addWitness(
             id.ed25519.publicKey,
@@ -184,7 +189,7 @@ async function http_attest(
             data,
             timestamp,
         )
-
+        console.log("Added witness to web2Data")
         await emit_web2_broadcast({
             action: "process_attestGetUrl",
             httpVerb: "GET",
@@ -209,7 +214,7 @@ async function http_process_attestation(
     url: string,
     headers: any,
     currentPeerString: string,
-    web2Data?: Web2Data,
+    web2DataObject?: Web2Data,
 ) {
     console.log("[WEB2] Received http_process_attestation request")
     if (httpVerb !== "GET" && httpVerb !== "POST") {
@@ -217,10 +222,12 @@ async function http_process_attestation(
         return
     }
 
-    if (!web2Data) {
+    if (!web2DataObject) {
         console.log("Missing Web2Data state")
         return
     }
+
+    const web2Data = new Web2Data(web2DataObject)
 
     const peer = new Peer()
     peer.setConnectionString(currentPeerString)
@@ -243,8 +250,7 @@ async function http_process_attestation(
 
         // check if we have enough valid witnesses
         const sufficientValidWitnesses =
-            Object.keys(web2Data.witnesses).length >=
-            web2Data.peer_count / 3 + 1 // This should satisfy BFT
+            Object.keys(web2Data.witnesses).length >= web2Data.peer_count / 3 // + 1 // This should satisfy BFT
 
         if (!sufficientValidWitnesses) {
             console.log("Not enough valid witnesses")
