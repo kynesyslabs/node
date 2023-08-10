@@ -164,6 +164,10 @@ export default class ServerListeners {
                             currentPeerString,
                             content.message.web2Data,
                         )
+                        console.log(
+                            "[SERVER] Response from http process attestation is: " +
+                                JSON.stringify(response),
+                        )
                         break
                     default:
                         break
@@ -261,6 +265,9 @@ export default class ServerListeners {
                 console.log("[COMLINK INVALID] No known type: " + content.type)
             }
 
+            console.log("content.type: " + content.type)
+            console.log("content.message: " + content.message)
+            console.log("content.message.action: " + content.message.action)
             console.log("[SERVER] Response is: " + JSON.stringify(response))
 
             // ANCHOR Reply logic

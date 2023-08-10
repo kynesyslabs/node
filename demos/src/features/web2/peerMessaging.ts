@@ -18,7 +18,9 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 const id = Identity.getInstance()
 
-export async function sendMessageToPeers(messageContent: any) {
+export async function sendMessageToPeers(
+    messageContent: any,
+): Promise<unknown> {
     let peerlist = peerManager.getPeers()
     console.log(
         `[WEB2/PEERMESSAGING] Sending message to ${peerlist.length} peers`,

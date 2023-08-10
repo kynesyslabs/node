@@ -113,7 +113,7 @@ async function http_request(
 
     try {
         const response = await promise
-        web2Data.status = "retrieved"
+        web2Data.status = "retrieved_by_primary"
         web2Data.data.response.timestamp = new Date().getTime()
         web2Data.data.response.result = response.data //TODO - consider extracting data via a mapping function with some selector?
         web2Data.signData(id.ed25519.privateKey as any) //TODO - improve types for keys
@@ -124,6 +124,8 @@ async function http_request(
 
         //syncData(web2Data, imc.states["web2"])
         await emit_web2_broadcast(web2Data)
+
+        return web2Data
     } catch (error) {
         console.error(error)
         web2Data.status = "error"
@@ -197,6 +199,8 @@ async function http_attest(
             headers: headers,
             web2Data: web2Data,
         })
+
+        return web2Data
     } catch (error) {
         console.error(error)
         // We should probably not send data back to the original peer now, right?
@@ -216,7 +220,7 @@ async function http_process_attestation(
     currentPeerString: string,
     web2DataObject?: Web2Data,
 ) {
-    console.log("[WEB2] Received http_process_attestation request")
+    console.log("[WEB2 GGGG] 2 Received http_process_attestation request")
     if (httpVerb !== "GET" && httpVerb !== "POST") {
         console.log("Wrong http verb")
         return
@@ -258,6 +262,8 @@ async function http_process_attestation(
             console.log("Not enough valid witnesses")
             return
         }
+
+        web2Data.status = "retrieved_by_witnesses"
 
         web2Data.signWitnesses(id.ed25519.privateKey as any)
 
