@@ -248,6 +248,8 @@ async function http_process_attestation(
             }
         }
 
+        // Check if the witnesses signature corresponds to the data
+
         // check if we have enough valid witnesses
         const sufficientValidWitnesses =
             Object.keys(web2Data.witnesses).length >= web2Data.peer_count / 3 // + 1 // This should satisfy BFT
@@ -264,6 +266,8 @@ async function http_process_attestation(
         console.log(
             "Web2Data object is valid and witnesses have successfully attested it",
         )
+
+        return web2Data
     } catch (error) {
         console.error(error)
         // We should probably not send data back to the original peer now, right?
