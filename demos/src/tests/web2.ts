@@ -42,7 +42,7 @@ async function testIt() {
         {
             action: "getUrl",
             httpVerb: "GET",
-            url: "https://google.com",
+            url: "https://google.com/robots.txt",
             headers: "",
         },
         id.ed25519.publicKey,
