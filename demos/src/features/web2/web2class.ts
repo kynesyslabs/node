@@ -1,4 +1,3 @@
-import { time } from "console"
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
@@ -65,7 +64,10 @@ export class Web2Data {
     }
 
     async signData(privateKey: pki.ed25519.BinaryBuffer): Promise<void> {
-        this.data_signature = Cryptography.sign(JSON.stringify(this.data), privateKey)
+        this.data_signature = Cryptography.sign(
+            JSON.stringify(this.data),
+            privateKey,
+        )
         /*await rsa.sign(
             JSON.stringify(this.data),
             privateKey,

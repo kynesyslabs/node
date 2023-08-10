@@ -10,7 +10,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import forge, { pki } from "node-forge"
-import { promises as fs } from "fs"
 
 export default class RSA {
     // INFO Generates a new RSA keypair from a given ecdsa private key

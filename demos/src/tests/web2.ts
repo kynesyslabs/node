@@ -1,4 +1,3 @@
-import { io } from "socket.io-client"
 import ComLink from "src/libs/communications/comlink"
 import Transmission from "src/libs/communications/transmission"
 import { Identity } from "src/libs/identity"
@@ -7,18 +6,17 @@ import * as fs from "fs"
 import * as dotenv from "dotenv"
 import peerBootstrap from "src/libs/peer/routines/peerBootstrap"
 import { responseRegistry } from "src/libs/communications"
-import { Peer } from "src/libs/peer"
 
 dotenv.config()
 
-const SERVER_PORT = parseInt(process.env.SERVER_PORT, 10) || 53550
+// const SERVER_PORT = parseInt(process.env.SERVER_PORT, 10) || 53550
 const PEER_LIST = JSON.parse(fs.readFileSync("./demos_peers", "utf8"))
 
 const peerManager = PeerManager.getInstance()
 
 // connect to a local socket.io server
 
-const socket = io(`http://localhost:${SERVER_PORT}`)
+// const socket = io(`http://localhost:${SERVER_PORT}`)
 
 // handle the event sent with socket.send()
 
@@ -28,7 +26,6 @@ async function testIt() {
 
     const peerList = await peerBootstrap(PEER_LIST)
     for (const peer of peerList) {
-        const newPeer = new Peer()
         peerManager.addPeer(peer)
     }
 
@@ -75,7 +72,6 @@ async function testIt() {
     let response = await responseRegistry
         .getInstance()
         .checkResponse(comLink.muid)
-    console.log("[WEB2/TEST] Response: ")
     console.log(response)
 }
 

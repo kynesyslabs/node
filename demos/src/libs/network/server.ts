@@ -11,7 +11,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { Server as ServerType } from "socket.io"
 import { logger } from "../utils"
-import { PeerManager, Peer } from "../peer"
+import { Peer } from "../peer"
 // import { Identity } from "../identity"
 import ServerListeners from "./serverListeners"
 
