@@ -98,10 +98,11 @@ export default class ServerListeners {
             if (content.type == "tx") {
                 require_reply = true // REVIEW Sure?
                 // Verify and execute the transaction
-                response = await convalidateTransaction(
+                let validatedTx = await convalidateTransaction(
                     content.type,
                     content.message,
                 )
+                response = validatedTx
                 if (!response) {
                     extra = "error"
                     response = "Invalid Transaction"
@@ -112,8 +113,10 @@ export default class ServerListeners {
                     // Yes, we are
                     first_seen_now = true
                 }
-                // TODO Manage the mempool and send stuff back
-                // TODO Broadcast the tx
+                // Adding the valid tx to the mempool
+                Mempool.addTransaction(validatedTx)
+                // TODO Manage the mempool/state registry and send stuff back
+                // TODO Broadcast the tx to the other peers
                 // Response is then sent back automatically as a reply (with our validation)
             } else if (content.type == "convalidate_web2") {
                 response = await convalidateWeb2(content.data)
