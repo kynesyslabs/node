@@ -6,7 +6,6 @@ node_modules
 evm/node_modules
 common/node_modules
 requirements/geth
-demos/data/chain.db
 demos/node_modules
 demos/libs/node_modules
 common/libs/node_modules

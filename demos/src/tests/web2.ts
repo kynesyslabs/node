@@ -75,6 +75,7 @@ async function testIt() {
     let response = await responseRegistry
         .getInstance()
         .checkResponse(comLink.muid)
+    console.log("[WEB2/TEST] Response: ")
     console.log(response)
 }
 

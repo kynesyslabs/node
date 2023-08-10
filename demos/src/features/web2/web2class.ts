@@ -13,6 +13,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { rsa } from "src/libs/crypto"
 import { pki } from "node-forge"
 import Hashing from "src/libs/crypto/hashing"
+import Cryptography from "src/libs/crypto/cryptography"
 import { Peer } from "src/libs/peer"
 
 export interface IRequest {
@@ -35,7 +36,7 @@ export interface IData {
 
 export interface IWitness {
     response: { peer: Peer; timestamp: number; hash: string }
-    signature: string
+    signature: pki.ed25519.BinaryBuffer
 }
 
 export interface IWitnesses {
@@ -46,7 +47,7 @@ export class Web2Data {
     status: string
     data: IData
     witnesses: IWitnesses
-    data_signature: null | string
+    data_signature: null | pki.ed25519.BinaryBuffer
     witnesses_signature: null | string
     peer_count: number | null
 
@@ -63,11 +64,12 @@ export class Web2Data {
         this.peer_count = null
     }
 
-    async signData(privateKey: pki.rsa.PrivateKey): Promise<void> {
-        this.data_signature = await rsa.sign(
+    async signData(privateKey: pki.ed25519.BinaryBuffer): Promise<void> {
+        this.data_signature = Cryptography.sign(JSON.stringify(this.data), privateKey)
+        /*await rsa.sign(
             JSON.stringify(this.data),
             privateKey,
-        )
+        )*/
     }
 
     async addWitness(
@@ -83,7 +85,7 @@ export class Web2Data {
                 timestamp: timestamp,
                 hash: Hashing.sha256(JSON.stringify(data)),
             },
-            signature: await rsa.sign(JSON.stringify(data), privateKey),
+            signature: Cryptography.sign(JSON.stringify(data), privateKey),
         }
         this.witnesses[publicKey as unknown as string] = witness //TODO - Horrible typing. Fix this
     }
