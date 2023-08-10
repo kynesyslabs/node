@@ -20,16 +20,14 @@ This library contains all the functions that are used to interact with the demos
 // NOTE Including all in a class
 
 let demos = {
-
     // ANCHOR Properties
     socket: null,
     connected: false,
     registry: {},
 
-
     // SECTION Registry
     replies: {
-    // INFO Insert a muid in the reply registry
+        // INFO Insert a muid in the reply registry
         waitReply: function (muid) {
             if (!demos.registry[muid]) {
                 demos.registry[muid] = null
@@ -37,10 +35,10 @@ let demos = {
                 console.log(demos.registry)
             }
         },
-    
+
         // INFO Check if a muid is in the registry
         needReply: function (muid) {
-            if (demos.registry[muid]===undefined) {
+            if (demos.registry[muid] === undefined) {
                 return false
             } else {
                 return true
@@ -48,16 +46,16 @@ let demos = {
         },
 
         // INFO Get a reply from a muid
-        getReply: function(muid) {
+        getReply: function (muid) {
             return demos.registry[muid]
         },
 
         // NOTE As this method returns a promise, we can use it to asynchronously await for a reply
-        checkReply: async function(muid) {
+        checkReply: async function (muid) {
             let timeout = 5000 // 5 seconds
             let reply = demos.replies.getReply(muid)
             while (reply === null && timeout > 0) {
-                await new Promise((resolve) => setTimeout(resolve, 100))
+                await new Promise(resolve => setTimeout(resolve, 100))
                 reply = demos.replies.getReply(muid)
                 timeout -= 100
             }
@@ -67,7 +65,7 @@ let demos = {
     // !SECTION Registry
 
     // SECTION Connection and listeners
-    connect: function(rpc_url) {
+    connect: function (rpc_url) {
         demos.socket = io.connect(rpc_url, {
             extraHeaders: {
                 "Access-Control-Allow-Origin": "*",
@@ -90,16 +88,16 @@ let demos = {
             console.log("[DEMOS] Received comlink_reply: " + _muid)
             if (demos.replies.needReply(_muid)) {
                 console.log("[DEMOS] Received an expected reply!")
-                demos.registry[_muid] = reply.chain.current.currentMessage.bundle.content.message
-            //console.log(reply.chain.current.currentMessage.bundle.content.message)
+                demos.registry[_muid] =
+                    reply.chain.current.currentMessage.bundle.content.message
+                //console.log(reply.chain.current.currentMessage.bundle.content.message)
             } else {
                 console.log("[DEMOS] Received an unexpected reply!")
             }
-    
         })
 
         // ANCHOR Catch-all (mainly for debug purposes)
-        demos.socket.onAny( (event, data) => {
+        demos.socket.onAny((event, data) => {
             console.log(event)
             console.log(data)
         })
@@ -107,7 +105,7 @@ let demos = {
     // !SECTION Connection and listeners
 
     // INFO MUID generator
-    generateMuid: function() {
+    generateMuid: function () {
         let number_1 =
             Math.random().toString(36).substring(2, 15) +
             Math.random().toString(36).substring(2, 15)
@@ -120,12 +118,15 @@ let demos = {
 
     // SECTION NodeCall prototype
     // INFO NodeCalls use the same structure
-    nodeCall: async function (message, args={}) {
-        if (!demos.socket.connected) { console.log("[ERROR] We are disconnected"); return }
+    nodeCall: async function (message, args = {}) {
+        if (!demos.socket.connected) {
+            console.log("[ERROR] We are disconnected")
+            return
+        }
         let _muid = demos.generateMuid()
         let comlink = {
             muid: _muid,
-            properties:  {
+            properties: {
                 connection_string: null, // NOTE We don't have a connection_string as we are clients
                 require_reply: true,
                 is_reply: false,
@@ -159,55 +160,64 @@ let demos = {
         transmission.bundle.content.message = message
         transmission.bundle.content.data = args
         comlink.chain.current.currentMessage = transmission
-        console.log("Sending message " + message + " to server with muid: " + comlink.muid)
+        console.log(
+            "Sending message " +
+                message +
+                " to server with muid: " +
+                comlink.muid,
+        )
         // Registering the reply request
         demos.replies.waitReply(_muid)
-        demos.socket.emit ("comlink", comlink)
+        demos.socket.emit("comlink", comlink)
         // Waiting for a reply
         return await demos.replies.checkReply(_muid)
     },
     // !SECTION NodeCall prototype
 
     // SECTION Predefined calls
-    getLastBlockNumber: async function() {
+    getLastBlockNumber: async function () {
         return await demos.nodeCall("getLastBlockNumber")
     },
-    getLastBlockHash: async function() {
+    getLastBlockHash: async function () {
         return await demos.nodeCall("getLastBlockHash")
     },
-    getBlockByNumber: async function(blockNumber) {
-        let block = await demos.nodeCall("getBlockByNumber", {blockNumber: blockNumber})
+    getBlockByNumber: async function (blockNumber) {
+        let block = await demos.nodeCall("getBlockByNumber", {
+            blockNumber: blockNumber,
+        })
         block = JSON.parse(block)
         block.content = JSON.parse(block.content)
-        console.log(typeof(block))
+        console.log(typeof block)
         return block
     },
-    getBlockByHash: async function(blockHash) {
-        let block = await demos.nodeCall("getBlockByHash", {blockHash: blockHash})
+    getBlockByHash: async function (blockHash) {
+        let block = await demos.nodeCall("getBlockByHash", {
+            blockHash: blockHash,
+        })
         block = JSON.parse(block)
         block.content = JSON.parse(block.content)
-        console.log(typeof(block))
+        console.log(typeof block)
         return block
     },
-    getPeerlist: async function() {
+    getPeerlist: async function () {
         return await demos.nodeCall("getPeerlist")
     },
-    getMempool: async function() {
+    getMempool: async function () {
         return await demos.nodeCall("getMempool")
     },
-    getPeerIdentity: async function() {
+    getPeerIdentity: async function () {
         return await demos.nodeCall("getPeerIdentity")
     },
     // !SECTION Predefined calls
 
+    getWeb2Data: async function () {
+        return await demos.nodeCall("getWeb2Data")
+    },
 }
-
-
 
 async function sleep(time) {
     return new Promise(resolve => setTimeout(resolve, time))
 }
-
 
 // Creating a demos class
 //let demos = new Demos()

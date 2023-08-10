@@ -133,7 +133,7 @@ export default class ServerListeners {
                 switch (content.message.action) {
                     case "getUrl":
                         console.log("[SERVER] Received getUrl")
-                        response = web2handlers.http_request(
+                        response = await web2handlers.http_request(
                             content.message.httpVerb,
                             content.message.url,
                             content.message.headers,
@@ -145,7 +145,7 @@ export default class ServerListeners {
                         console.log(
                             "[SERVER] Received attestation request for getUrl",
                         )
-                        response = web2handlers.http_attest(
+                        response = await web2handlers.http_attest(
                             content.message.httpVerb,
                             content.message.url,
                             content.message.headers,
@@ -157,7 +157,7 @@ export default class ServerListeners {
                         console.log(
                             "[SERVER] Received process_attestGetUrl request",
                         )
-                        response = web2handlers.http_process_attestation(
+                        response = await web2handlers.http_process_attestation(
                             content.message.httpVerb,
                             content.message.url,
                             content.message.headers,
