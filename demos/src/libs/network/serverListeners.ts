@@ -260,6 +260,9 @@ export default class ServerListeners {
             else {
                 console.log("[COMLINK INVALID] No known type: " + content.type)
             }
+
+            console.log("[SERVER] Response is: " + JSON.stringify(response))
+
             // ANCHOR Reply logic
             // REVIEW unless specified, we now send back the updated comlink as a response
             // Building a message to send back in the comlink
