@@ -268,7 +268,6 @@ export default class ServerListeners {
             console.log("content.type: " + content.type)
             console.log("content.message: " + content.message)
             console.log("content.message.action: " + content.message.action)
-            console.log("[SERVER] Response is: " + JSON.stringify(response))
 
             // ANCHOR Reply logic
             // REVIEW unless specified, we now send back the updated comlink as a response
