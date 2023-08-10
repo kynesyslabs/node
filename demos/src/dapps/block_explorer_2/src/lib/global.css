@@ -5,6 +5,9 @@
     --border-radius: 8px;
 }
 
+
+/*ELEMENTS*/
+
 a{
     color: var(--accent);
     text-decoration: none;
@@ -23,6 +26,33 @@ body{
     font-family: 'HelveticaN', sans-serif;
     margin: 0;
     font-size: 1rem;
+}
+
+h1{
+    font-family: 'Neue Machina', sans-serif;
+    font-size: 4rem;
+    text-align: center;
+    font-weight: 300;
+    margin-bottom: 0;
+}
+h4{
+    font-size: 1.1rem;
+    margin: 0 0 8px;
+}
+input{
+    background-color: #404040;
+    color: white;
+    font-size: 1.4rem;
+    font-family: 'Helvetica', 'sans-serif';
+    display: block;
+    margin: auto;
+    border-radius: var(--border-radius);
+    border: none;
+    width: 500px;
+    max-width: 100%;
+}
+input::placeholder{
+    opacity: .3;
 }
 
 input{
@@ -45,4 +75,28 @@ input{
     font-family: 'HelveticaN';
     src: url('/helveticaNBold.otf');
     font-weight: bold;
+}
+
+
+/* ATTRIBUTES*/
+.fake-link{
+    color: var(--accent-accessible);
+}
+
+.generic-shadow{
+    box-shadow: rgba(17, 17, 26, 0.05) 0px 4px 16px, rgba(17, 17, 26, 0.05) 0px 8px 32px;
+}
+
+/* COMPONENTS */
+.card{
+    margin: 0 0 16px;
+    background-color: #202020;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+}
+
+.card-header{
+    border-bottom: 1px solid var(--border-color);
+    padding: 16px;
+    margin: 0;
 }

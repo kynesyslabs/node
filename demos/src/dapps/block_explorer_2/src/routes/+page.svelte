@@ -2,8 +2,8 @@
     import demos from '$lib/demos.js';
     import Fa from 'svelte-fa'
     import { faArrowRightLong, faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons'
-    import {faTwitter} from "@fortawesome/free-brands-svg-icons"
     import '$lib/global.css'
+	import Footer from '$lib/components/Footer.svelte';
     /*const rpc = "http://85.208.48.187:53550";
     demos.connect(rpc);
     var lastBlockNumber;
@@ -127,60 +127,14 @@
             amount:0.0023,
         }
     ]
-    const links = [
-        {
-            label: "DOCS",
-            url: "https://uploads-ssl.webflow.com/637666f7c0a45f6ef07fab12/64b5bebfccca8da619a1ea72_DEMOS%20Yellow%20Paper.pdf"
-        },
-        {
-            label:"TWITTER",
-            url:"https://twitter.com/KynesysLabs"
-        }
-    ]
 </script>
 
 <style>
-    h1{
-        font-family: 'Neue Machina', sans-serif;
-        font-size: 4rem;
-        text-align: center;
-        font-weight: 300;
-        margin-bottom: 0;
-    }
-    h4{
-        font-size: 1.1rem;
-        margin: 0 0 8px;
-    }
-    input{
-        background-color: #404040;
-        color: white;
-        font-size: 1.4rem;
-        font-family: 'Helvetica', 'sans-serif';
-        display: block;
-        margin: auto;
-        border-radius: var(--border-radius);
-        border: none;
-        width: 500px;
-        max-width: 100%;
-    }
-    input::placeholder{
-        opacity: .3;
-    }
+    
     .subtitle{
         text-align: center;
         margin-top: 0;
         font-family: 'Neue Machina', sans-serif;
-    }
-    .card{
-        margin: 0 0 16px;
-        background-color: #202020;
-        border-radius: var(--border-radius);
-        border: 1px solid var(--border-color);
-    }
-    .card-header{
-        border-bottom: 1px solid var(--border-color);
-        padding: 16px;
-        margin: 0;
     }
     .card-footer{
         padding: 16px;
@@ -252,9 +206,6 @@
     .generic-shadow{
         box-shadow: rgba(17, 17, 26, 0.05) 0px 4px 16px, rgba(17, 17, 26, 0.05) 0px 8px 32px;
     }
-    .fake-link{
-        color: var(--accent-accessible);
-    }
     .reward-container{
         display:flex;
         justify-content: center;
@@ -267,24 +218,7 @@
         font-size: .8rem;
         margin: 8px;
     }
-    .footer{
-        padding: 16px 32px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-    .footer-links{
-        display: flex;
-        gap: 16px;
-    }
-    .footer-link{
-        color:white;
-        font-weight: bold;
-    }
-    .companyname{
-        font-weight: bold;
-        font-size: 1.2rem;
-    }
+
 </style>
 
 
@@ -362,15 +296,7 @@
 
 </div>
 
-<div class="footer">
-    <p class="companyname">//. kynesys</p>
-    <div class="footer-links">
-        {#each links as link}
-            <a class="footer-link" href={link.url}>{link.label}</a>
-        {/each}
-    </div>
-    <p>All rights reserved</p>
-</div>
+<Footer/>
 
 </div>
 <!--{#if inspector !== undefined}
