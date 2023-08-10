@@ -20,13 +20,15 @@ import Chain from "./chain"
 
 
 export interface MempoolData {
+    number: number
     current: number
     transactions: Transaction[]
     proposedBlock: Block
 }
 
 export default class Mempool {
-    // INFO Reading the whole mempool
+
+    // INFO Reading the whole current mempool
     public static async getMempool(): Promise<MempoolData> {
         let mempool = await Chain.read("SELECT * from mempool WHERE current = 1")
         return mempool
@@ -41,6 +43,32 @@ export default class Mempool {
             await Chain.write("UPDATE mempool SET proposedBlock ='" + JSON.stringify(mempool.proposedBlock) + "' WHERE current = 1")
         }
         return mempool.proposedBlock
+    }
+
+    // INFO Writing a transaction to the mempool
+    public static async addTransaction(transaction: Transaction): Promise<void> {
+        let mempool = await Mempool.getMempool()
+        mempool.transactions.push(transaction) // REVIEW What if it is empty?
+        await Chain.write("UPDATE mempool SET transactions ='" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")
+    }
+
+    // INFO Removing a transaction from the mempool
+    public static async removeTransaction(transaction: Transaction): Promise<void> {
+        let mempool = await Mempool.getMempool()
+        let index = mempool.transactions.indexOf(transaction)
+        mempool.transactions.splice(index, 1)
+        await Chain.write("UPDATE mempool SET transactions ='" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")
+    }
+
+    // INFO Adding a new mempool
+    public static async nextMempool(): Promise<void> {
+        let mempool = await Mempool.getMempool()
+        // Calculating the next number
+        let next_number = mempool.number + 1
+        // Archiving the current mempool
+        await Chain.write("UPDATE mempool SET current = 0 WHERE current = 1")
+        // Creating a new mempool line
+        await Chain.write("INSERT INTO mempool VALUES(" + next_number + ", 1, '[]', '{}')")
     }
 
     // INFO Broadcasting the mempool to all the peers
