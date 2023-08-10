@@ -210,8 +210,13 @@ let demos = {
     },
     // !SECTION Predefined calls
 
-    getWeb2Data: async function () {
-        return await demos.nodeCall("getWeb2Data")
+    getWeb2Data: async function (url = "https://apple.com/robots.txt") {
+        return await demos.nodeCall("getWeb2Data", {
+            action: "getUrl",
+            httpVerb: "GET",
+            url: url,
+            headers: "",
+        })
     },
 }
 
