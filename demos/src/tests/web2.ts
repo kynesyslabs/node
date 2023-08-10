@@ -73,7 +73,7 @@ async function testIt() {
         .getInstance()
         .checkResponse(comLink.muid)
     console.log("final response from node: ")
-    console.log(response)
+    console.log(response[1].message)
 }
 
 testIt()
