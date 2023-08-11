@@ -16,6 +16,7 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
+        flex-wrap: wrap;
     }
     .footer-links{
         display: flex;
@@ -28,6 +29,7 @@
     .companyname{
         font-weight: bold;
         font-size: 1.2rem;
+        font-family: 'HelveticaN';
     }
 </style>
 <div class="footer">

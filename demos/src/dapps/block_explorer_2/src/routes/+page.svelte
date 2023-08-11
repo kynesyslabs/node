@@ -1,36 +1,13 @@
 <script>
     import demos from '$lib/demos.js';
     import Fa from 'svelte-fa'
-    import { faArrowRightLong, faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons'
+    import { faArrowRightLong } from '@fortawesome/free-solid-svg-icons'
     import '$lib/global.css'
 	import Footer from '$lib/components/Footer.svelte';
-    /*const rpc = "http://85.208.48.187:53550";
-    demos.connect(rpc);
-    var lastBlockNumber;
-    var lastBlockHash;
-    var inspector;
-    async function getLastBlockInfo(){
-        demos.getLastBlockNumber().then((blockNumber) => {
-            lastBlockNumber = JSON.parse(blockNumber).number;
-        });
-        demos.getLastBlockHash().then((blockHash) => {
-            lastBlockHash = JSON.parse(blockHash).hash;
-        });
-        console.log( await demos.getPeerIdentity());
-    }
-    $: if(demos.connected){
-        getLastBlockInfo();
-    }
-    async function inspectBlock(blockNumber)
-    {
-        var result;
-        result = await demos.getBlockByNumber(blockNumber);
-        inspector = result;
-    }
-    $: if(lastBlockNumber !== undefined){
-        inspectBlock(lastBlockNumber);
-    }
-    $:console.log(inspector);*/
+	import Header from '$lib/components/Header.svelte';
+    export let data;
+    const latestBlocks = [data.block];
+    console.log(data);
 
     const placeholderBlocks = [
         {
@@ -130,12 +107,6 @@
 </script>
 
 <style>
-    
-    .subtitle{
-        text-align: center;
-        margin-top: 0;
-        font-family: 'Neue Machina', sans-serif;
-    }
     .card-footer{
         padding: 16px;
         text-align: center;
@@ -148,34 +119,7 @@
         color: var(--accent);
         cursor: pointer;
     }
-    .logo{
-        border-radius: 50%;
-        width: 100px;
-        margin: 16px;
-    }
-    .label{
-        margin-bottom: 8px;
-        opacity: .75;
-        text-align: center;
-        font-size: 1rem;
-    }
-    .inputContainer{
-        width: 500px;
-        max-width: 100%;
-        margin: 32px auto;
-        position: relative;
-        top: 24px;
-    }
-    .inputButton{
-        background-color: var(--accent);
-        position: absolute;
-        right: 8px;
-        top: 32px;
-        border: none;
-        font-size: 1.4rem;
-        color: white;
-        border-radius: var(--border-radius);
-    }
+    
     .main-grid{
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -183,12 +127,27 @@
         padding: 16px;
         align-items: start;
     }
+    @media only screen and (max-width: 1250px) {
+        .main-grid{
+            grid-template-columns: 1fr;
+        }
+    }
     .block-card{
         display: grid;
-        grid-template-columns: 55px auto 1fr 100px;
+        grid-template-columns: auto 1fr 100px;
         padding: 16px;
         border-bottom: 1px solid var(--border-color);
         gap: 16px;
+    }
+    .block-card-header{
+        display: flex;
+        gap: 16px;
+        align-items: center;
+    }
+    @media only screen and (max-width:650px) {
+        .block-card{
+            grid-template-columns: 1fr;
+        }
     }
     .block-icon-container{
         width:55px;
@@ -223,33 +182,27 @@
 
 
 <div class="container">
-    <div style="background:url('/poster.jpg');background-position:center;">
-        <img alt="logo" class="logo" src="/logo.jpg"/>
-        <h1>Demos</h1>
-        <h2 class="subtitle">Block explorer</h2>
-        <div class="inputContainer">
-            <p class="label">Search by hash</p>
-            <input placeholder=""/>
-            <button class="inputButton"><Fa icon={faMagnifyingGlass}></Fa></button>
-        </div>
-    </div>
+
+<Header/>
 
 <div class="main-grid">
 
     <div class="card generic-shadow">
         <h4 class="card-header">Latest blocks</h4>
-        {#each placeholderBlocks as block}
+        {#each latestBlocks as block}
             <div class="block-card">
-                <div class="block-icon-container generic-shadow">
-                    <img class="block-icon" alt="Block icon" src="/icons/cube-icon.png"/>
-                </div>
-                <div style="width: 100px;">
-                    <p class="fake-link" style="margin-top:0;margin-bottom:8px;">{block.number}</p>
-                    <p style="margin: 0; opacity:.5; font-size:.9rem;">{block.age}</p>
+                <div class="block-card-header">
+                    <div class="block-icon-container generic-shadow">
+                        <img class="block-icon" alt="Block icon" src="/icons/cube-icon.png"/>
+                    </div>
+                    <div style="width: 100px;">
+                        <a class="accessible" href={`/blocks/${block.number}`}><p style="margin-top:0;margin-bottom:8px;">{block.number}</p></a>
+                        <p style="margin: 0; opacity:.5; font-size:.9rem;">{block.timestamp}</p>
+                    </div>
                 </div>
                 <div>
-                    <p style="margin-top:0;margin-bottom:8px;">Fee recipient <span class="fake-link">{block.recipient}</span></p>
-                    <p style="margin: 0;font-size:.9rem;"><span class="fake-link">{block.txns} txns</span> <span style="opacity:.5">{block.time/100} secs</span></p>
+                    <p style="margin-top:0;margin-bottom:8px;">Proposer <span class="fake-link">{block.proposer}</span></p>
+                    <a class="accessible" href={`/blocks/${block.number}#transactions`}><p style="margin: 0;font-size:.9rem;"><span>{block.content.transactions.length} transactions</span><!--<span style="opacity:.5"> {block.time/100} secs</span>--></p></a>
                 </div>
                 <div class="reward-container generic-shadow">
                     <p class="reward" style="font-size:.8rem">{block.reward} DEM</p>
@@ -264,12 +217,14 @@
         <h4 class="card-header">Latest transactions</h4>
         {#each placeholderTransactions as transaction}
         <div class="block-card">
-            <div class="block-icon-container generic-shadow">
-                <img class="block-icon" alt="Block icon" src="/icons/agreement-icon.png"/>
-            </div>
-            <div style="width: 200px;">
-                <p class="fake-link" style="margin-top:0;margin-bottom:8px;">{transaction.hash}</p>
-                <p style="margin: 0; opacity:.5; font-size:.9rem;">{transaction.age}</p>
+            <div class="block-card-header">
+                <div class="block-icon-container generic-shadow">
+                    <img class="block-icon" alt="Block icon" src="/icons/agreement-icon.png"/>
+                </div>
+                <div style="width: 200px;">
+                    <p class="fake-link" style="margin-top:0;margin-bottom:8px;">{transaction.hash}</p>
+                    <p style="margin: 0; opacity:.5; font-size:.9rem;">{transaction.age}</p>
+                </div>
             </div>
             <div>
                 <p style="margin-top:0;margin-bottom:8px;">From <span class="fake-link">{transaction.from}</span></p>

@@ -12,6 +12,9 @@ a{
     color: var(--accent);
     text-decoration: none;
 }
+a.accessible{
+    color: var(--accent-accessible);
+}
 
 html {
     box-sizing: border-box;
@@ -23,7 +26,7 @@ html {
 body{
     background-color: #101010;
     color: white;
-    font-family: 'HelveticaN', sans-serif;
+    font-family: 'Helvetica', sans-serif;
     margin: 0;
     font-size: 1rem;
 }
@@ -58,6 +61,10 @@ input::placeholder{
 input{
     padding: 0.7rem;
     font-size: 1rem;
+}
+
+button{
+    border: none;
 }
 
 @font-face {
