@@ -18,6 +18,7 @@ This library contains all the functions that are used to interact with the demos
 /* eslint-disable no-undef */
 
 // NOTE Including all in a class
+import io from "socket.io-client"
 
 let demos = {
     // ANCHOR Properties
@@ -236,3 +237,4 @@ async function sleep(time) {
 
 // Creating a demos class
 //let demos = new Demos()
+export default demos;
