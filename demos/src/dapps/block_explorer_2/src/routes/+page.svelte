@@ -202,7 +202,7 @@
                 </div>
                 <div>
                     <p style="margin-top:0;margin-bottom:8px;">Proposer <span class="fake-link">{block.proposer}</span></p>
-                    <a class="accessible" href={`/blocks/${block.number}#transactions`}><p style="margin: 0;font-size:.9rem;"><span>{block.content.transactions.length} transactions</span><!--<span style="opacity:.5"> {block.time/100} secs</span>--></p></a>
+                    <a class="accessible" href={`/blocks/${block.number}`}><p style="margin: 0;font-size:.9rem;"><span>{block.content.transactions.length} transactions</span><!--<span style="opacity:.5"> {block.time/100} secs</span>--></p></a>
                 </div>
                 <div class="reward-container generic-shadow">
                     <p class="reward" style="font-size:.8rem">{block.reward} DEM</p>
