@@ -249,6 +249,14 @@ export default class ServerListeners {
                         }
                         response = await chain.getBlockByHash(data.hash)
                         break
+                    case "getTxByHash":
+                        if (!data.hash) {
+                            _receiver.emit("public", {
+                                error: "No tx specified",
+                            })
+                        }
+                        response = await chain.getTxByHash(data.hash)
+                        break
                     case "getMempool":
                         response = await chain.getPendingPool()
                         break

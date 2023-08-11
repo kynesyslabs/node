@@ -52,6 +52,14 @@ export default class Chain {
 
 
     // SECTION Getters
+
+    // INFO Returns a transaction by its hash
+    static async getTxByHash(hash: string): Promise<any> {
+        let sql_query = "SELECT * FROM transactions WHERE hash = '" + hash + "';"
+        let response = await Chain.read(sql_query)
+        return response[0]
+    }
+
     // INFO Get the last block number
     static async getLastBlockNumber() {
         let response = await this.read(
