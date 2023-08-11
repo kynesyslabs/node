@@ -211,6 +211,16 @@ let demos = {
         console.log(typeof tx)
         return tx
     },
+
+    getWeb2Data: async function (url = "https://apple.com/robots.txt") {
+        return await demos.nodeCall("getWeb2Data", {
+            action: "getUrl",
+            httpVerb: "GET",
+            url: url,
+            headers: "",
+        })
+    },
+
     getPeerlist: async function () {
         return await demos.nodeCall("getPeerlist")
     },
@@ -222,14 +232,6 @@ let demos = {
     },
     // !SECTION Predefined calls
 
-    getWeb2Data: async function (url = "https://apple.com/robots.txt") {
-        return await demos.nodeCall("getWeb2Data", {
-            action: "getUrl",
-            httpVerb: "GET",
-            url: url,
-            headers: "",
-        })
-    },
 }
 
 async function sleep(time) {
@@ -238,4 +240,4 @@ async function sleep(time) {
 
 // Creating a demos class
 //let demos = new Demos()
-export default demos;
+export default demos
