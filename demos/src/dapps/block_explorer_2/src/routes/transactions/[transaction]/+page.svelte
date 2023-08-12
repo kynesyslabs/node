@@ -3,7 +3,7 @@
     import demos from '$lib/demos';
     export let data;
     import Fa from 'svelte-fa'
-    import { faArrowLeftLong, faArrowRightLong, faChevronLeft, faChevronRight, faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons';
+    import { faArrowLeftLong, faArrowRightLong, faChevronLeft, faChevronRight, faCopy, faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons';
     import Footer from '$lib/components/Footer.svelte';
 	import Header from '$lib/components/Header.svelte';
     let selectedTab = 0;
@@ -16,6 +16,24 @@
 <style>
     main{
         padding: 16px;
+    }
+
+    .info-title{
+        font-weight: bold;
+        margin: 0;
+    }
+
+    .info-text{
+        margin: 0;
+        opacity: .8;
+    }
+
+    .info{
+        word-wrap: break-word;
+        word-break: break-all;
+        display: flex;
+        align-items: center;
+        gap: 8px;
     }
 
     .logo{
@@ -80,6 +98,7 @@
         display: flex;
         align-items: center;
         gap: 16px;
+        width: 100%;
     }
 
     .adjacent-button{
@@ -123,7 +142,11 @@
         padding: 16px 0;
     }
 
-    .card-body{
+    .info-grid{
+        display: grid;
+        grid-template-columns: 100px 1fr;
+        width: 100%;
+        gap: 16px;
         padding: 16px;
     }
 
@@ -198,65 +221,60 @@
 <Header></Header>
 
 <main>
-<!--<div class="card generic-shadow">
+<div class="card generic-shadow">
     <div class="card-header">
-        <div class="adjacent-button">
+        <!--<div class="adjacent-button">
             <Fa style="position:relative;top:2px;" icon={faArrowLeftLong}></Fa>
-        </div>
+        </div>-->
         <div class="block-header">
             <div class="block-icon-container generic-shadow">
-                <img class="block-icon" alt="Block icon" src="/icons/cube-icon.png"/>
+                <img class="block-icon" alt="Block icon" src="/icons/agreement-icon.png"/>
             </div>
-            <h4 style="margin: 0;">Block #{data.block.number}</h4>
+            <h4 class="ellipsis" style="margin: 0;">Transaction details</h4>
         </div>
-        <div class="adjacent-button">
+        <!--<div class="adjacent-button">
             <Fa style="position:relative;top:2px;" icon={faArrowRightLong}></Fa>
-        </div>        
+        </div>-->        
     </div>
-    <div class="tab-container">
+    <!--<div class="tab-container">
         <div role={`Block info tab ${selectedTab==0?"(selected)":""}`} on:click={()=>{changeTab(0)}} class={`tab ${selectedTab==0?"tab-selected":""}`}>
             <p class="tab-label">BLOCK INFO</p>
         </div>
         <div role={`Transaction tab ${selectedTab==1?"(selected)":""}`} on:click={()=>{changeTab(1)}} class={`tab ${selectedTab==1?"tab-selected":""}`}>
             <p class="tab-label">TRANSACTIONS</p>
         </div>
+    </div>-->
+    <div class="info-grid">
+        <p class="info-title">Hash:</p>
+        <div class="info"><p class="info-text">{data.transaction.hash}</p> <button class="page-controller-button"><Fa icon={faCopy}></Fa></button></div>
+        <!--<p class="info">Timestamp: {data.block.timestamp}</p>
+        <p class="info">Proposer: {data.block.proposer}</p>
+        <p class="info">Transactions: <span class="fake-link">{data.block.content.transactions.length} transactions</span> in this block</p>-->
     </div>
-    {#if selectedTab==0}
-        <div class="card-body">
-            <p class="info">Status: {data.block.status}</p>
-            <p class="info">Timestamp: {data.block.timestamp}</p>
-            <p class="info">Proposer: {data.block.proposer}</p>
-            <p class="info">Transactions: <span class="fake-link">{data.block.content.transactions.length} transactions</span> in this block</p>
-        </div>
-    {:else}
-        <div class="transactions-info">
-            <p class="transaction-number-label">A total of {data.block.content.transactions.length} transactions found</p>
-        </div>
-        <div class="transactions-grid grid-header-row">
-            <p class="grid-header-label">Hash</p>
-            <p class="grid-header-label">From</p>
-            <p class="grid-header-label">To</p>
-            <p class="grid-header-label">Amount</p>
-        </div>
-        <div class="transactions-grid">
-            {#each data.block.content.transactions as transaction}
-                <p class="grid-cell fake-link">{transaction.hash}</p>
-                <p class="grid-cell">{transaction.content.from}</p>
-                <p class="grid-cell">{transaction.content.to}</p>
-                <p class="grid-cell">{transaction.content.amount}</p>
-            {/each}
-        </div>
-        <div class="card-footer">
-            <div class="page-controller">
-                <button class="page-controller-button">First</button>
-                <button class="page-controller-button"><Fa icon={faChevronLeft}/></button>
-                    <p class="page-controller-label">Page 1 of 1</p>
-                <button class="page-controller-button"><Fa icon={faChevronRight}/></button>
-                <button class="page-controller-button">Last</button>
-            </div>
-        </div>
-    {/if}
-</div>-->
+    <div class="info-grid">
+        <p class="info-title">Type:</p>
+        <div class="info"><p class="info-text">{data.transaction.content.content.type}</p></div>
+    </div>
+    <div class="info-grid">
+        <p class="info-title">Currency:</p>
+        <div class="info"><p class="info-text">{data.transaction.content.content.data.properties.name} ({data.transaction.content.content.data.properties.currency})</p></div>
+    </div>
+    <div class="info-grid">
+        <p class="info-title">From:</p>
+        <div class="info"><p class="info-text">{data.transaction.content.content.from}</p> <button class="page-controller-button"><Fa icon={faCopy}></Fa></button></div>
+        <!--<p class="info">Timestamp: {data.block.timestamp}</p>
+        <p class="info">Proposer: {data.block.proposer}</p>
+        <p class="info">Transactions: <span class="fake-link">{data.block.content.transactions.length} transactions</span> in this block</p>-->
+    </div>
+    <div class="info-grid">
+        <p class="info-title">To:</p>
+        <div class="info"><p class="info-text">{data.transaction.content.content.to}</p> <button class="page-controller-button"><Fa icon={faCopy}></Fa></button></div>
+    </div>
+    <div class="info-grid">
+        <p class="info-title">Amount:</p>
+        <div class="info"><p class="info-text">{data.transaction.content.content.amount}</p></div>
+    </div>
+</div>
 </main>
 
 <Footer/>
