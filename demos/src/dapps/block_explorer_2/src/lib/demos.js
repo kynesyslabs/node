@@ -219,6 +219,7 @@ let demos = {
 
     // INFO Web2 Endpoints
     getWeb2Data: async function (url = "https://apple.com/robots.txt") {
+        console.log("[DEMOS] Requesting url: " + url)
         return await demos.nodeCall("web2Request", {
             action: "getUrl",
             httpVerb: "GET",

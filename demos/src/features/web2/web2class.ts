@@ -61,7 +61,6 @@ export class Web2Data {
 
     constructor(existingWeb2DataObj?: IWeb2Data) {
         if (existingWeb2DataObj) {
-            this.status = existingWeb2DataObj.status
             this.data = existingWeb2DataObj.data
             this.witnesses = existingWeb2DataObj.witnesses
             this.data_signature = existingWeb2DataObj.data_signature

@@ -49,7 +49,7 @@ async function crosschainWriteTest() {
     // INFO EVM connection
     const chain_id = 5
     const evm_rpc = "https://rpc.ankr.com/eth_goerli"
-    const evm = localsdk.multichain.EVM.createInstance(chain_id, evm_rpc)
+    const evm = localsdk.multichain.EVM.createInstance(chain_id, evm_rpc) 
 
     // INFO EVM Addresses and objects
     let contract_address = "0x2921449f72634a5b647b8e5d8756fe135f62b076"
@@ -60,14 +60,14 @@ async function crosschainWriteTest() {
     let contract_instance = new ethers.Contract(
         contract_address,
         contract_abi,
-        evm.provider,
+        null, // FIXME This should be the signer or the provider at least (also a read only if it is read only) but complains about ContractRunner
     )
 
     // INFO Ripple Testnet credentials and connection
     let xrp_test_key_1 = "ss9QaGYDxi96NSSzFy8w3mv2JN4Sz"
     // let xrp_test_key_2 = "sahCwK3XZS6q5kuqqHc5XvKPDbmUo"
     let xrp_test_account_2 = "r9j6DZS1TEQoFNvry9UxR64dSREAfEgHPV"
-    let ripple = new multichain.XRPL()
+    let ripple = new localsdk.multichain.XRPL()
     await ripple.connect("wss://s.altnet.rippletest.net:51233")
     await ripple.connectWallet(xrp_test_key_1)
     console.log("[*] Our ripple wallet is: ")
