@@ -204,7 +204,7 @@ let demos = {
     getTxByHash: async function (txHash="e25860ec6a7cccff0371091fed3a4c6839b1231ccec8cf2cb36eca3533af8f11") {
         // Defaulting to the genesis tx of course
         let tx = await demos.nodeCall("getTxByHash", {
-            txHash: txHash,
+            hash: txHash,
         })
         tx = JSON.parse(tx)
         tx.content = JSON.parse(tx.content)
@@ -213,7 +213,7 @@ let demos = {
     },
 
     getWeb2Data: async function (url = "https://apple.com/robots.txt") {
-        return await demos.nodeCall("getWeb2Data", {
+        return await demos.nodeCall("web2Request", {
             action: "getUrl",
             httpVerb: "GET",
             url: url,
