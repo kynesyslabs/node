@@ -10,6 +10,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { sha256 } from "node-forge"
+import { TransactionContent } from "../../src/libs/blockchain/types/transactions"
 import fetch from "node-fetch"
 import { Psbt, networks } from "bitcoinjs-lib"
 import fromWIF from "bip32"

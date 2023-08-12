@@ -21,6 +21,7 @@ import { handlers as web2handlers } from "src/features/web2"
 import convalidateWeb2 from "../blockchain/routines/convalidateWeb2"
 import convalidateTransaction from "../blockchain/routines/convalidateTransaction"
 import multichainDispatcher from "src/features/multichain/multichainDispatcher"
+import multichainStatus from "sdk/localsdk/multichain/types/capabilities"
 
 export default class ServerListeners {
     peer: Peer
@@ -122,7 +123,13 @@ export default class ServerListeners {
             }
             // ANCHOR Crosschain endpoints
             else if (content.type == "crosschain_operation" || content.type == "multichain_operation") {
+                // NOTE Remember that crosschain operations are in chainscript syntax (see chainscript_example.ts)
                 response = await multichainDispatcher(content.data)
+                // TODO
+            }
+
+            else if (content.type == "crosschain_status" || content.type == "multichain_status") {
+                response = await multichainStatus()
                 // TODO
             }
             

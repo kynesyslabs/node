@@ -20,6 +20,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import Hashing from "src/libs/crypto/hashing"
 import Cryptography from "src/libs/crypto/cryptography"
 import forge from "node-forge"
+import * as sdk from "sdk/localsdk"
 
 export interface IParams {
     key: string;

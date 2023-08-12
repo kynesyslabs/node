@@ -17,7 +17,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 // NOTE By importing ./sdk through sdk/index.ts we get all the initialized and iimplemented chains from demos sdk
-import * as demosdk from "./sdk"
+import * as demosdk from "../../../sdk/localsdk"
 
 console.log(demosdk)
 

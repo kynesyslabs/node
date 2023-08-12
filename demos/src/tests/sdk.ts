@@ -9,8 +9,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import Demos from "sdk/localsdk/demos"
-import * as multichain from "sdk/localsdk/multichain"
+import * as localsdk from "sdk/localsdk"
 import * as fs from "fs"
 import { ethers } from "ethers"
 
@@ -24,14 +23,14 @@ process.argv.forEach(function (val, index) {
 
 // NOTE Getting the last block number
 async function getLastBlockNumber() {
-    let demos = new Demos()
+    let demos = new localsdk.multichain.DEMOS()
     await demos.connect("http", "localhost", 53550) // Will throw an error if not connected
     demos.getLastBlockNumber()
 }
 
 // NOTE Getting a block content from its number
 async function getBlockByNumber(blockNumber: number = 0) {
-    let demos = new Demos()
+    let demos = new localsdk.multichain.DEMOS()
     await demos.connect("http", "localhost", 53550) // Will throw an error if not connected
     demos.getBlockByNumber(blockNumber)
 }
@@ -40,7 +39,7 @@ async function getBlockByNumber(blockNumber: number = 0) {
 async function getBlockByHash(
     blockHash: string = "5651c41856e9602f36213e2c963841df93590644666fc7d8872ec34c4ba53fcd",
 ) {
-    let demos = new Demos()
+    let demos = new localsdk.multichain.DEMOS()
     await demos.connect("http", "localhost", 53550) // Will throw an error if not connected
     demos.getBlockByHash(blockHash)
 }
@@ -50,7 +49,7 @@ async function crosschainWriteTest() {
     // INFO EVM connection
     const chain_id = 5
     const evm_rpc = "https://rpc.ankr.com/eth_goerli"
-    const evm = multichain.EVM.createInstance(chain_id, evm_rpc)
+    const evm = localsdk.multichain.EVM.createInstance(chain_id, evm_rpc)
 
     // INFO EVM Addresses and objects
     let contract_address = "0x2921449f72634a5b647b8e5d8756fe135f62b076"
