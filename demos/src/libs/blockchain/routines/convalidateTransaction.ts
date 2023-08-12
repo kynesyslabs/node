@@ -15,7 +15,7 @@ import executeTransaction from "./executeTransaction"
 import GLS from "../gls/gls"
 import { Operation } from "../gls/gls"
 import calculateCurrentGas from "./calculateCurrentGas"
-
+ 
 // INFO Cryptographically convalidate a transaction, calculate gas and see if the execution is valid
 export default async function convalidateTransaction(type: string, request: any): Promise<Transaction> {
     // Loading identity

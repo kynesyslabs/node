@@ -46,7 +46,7 @@ export default class Mempool {
     }
 
     // INFO Writing a transaction to the mempool
-    public static async addTransaction(transaction: Transaction): Promise<void> {
+    public static async addTransaction(transaction: Transaction): Promise<void> { 
         let mempool = await Mempool.getMempool()
         mempool.transactions.push(transaction) // REVIEW What if it is empty?
         await Chain.write("UPDATE mempool SET transactions ='" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")

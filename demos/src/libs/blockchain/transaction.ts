@@ -125,7 +125,7 @@ export default class Transaction {
         publicKey: pki.ed25519.BinaryBuffer,
         privateKey: pki.ed25519.BinaryBuffer,
     ) {
-        let confirmed = this.sanityCheck(tx) && this.isCoherent(tx)
+        let confirmed = this.sanityCheck(tx) && this.isCoherent(tx) && this.structured(tx)
         if (confirmed) {
             let confirmation = new Confirmation()
             confirmation.data.validator = publicKey
@@ -157,4 +157,12 @@ export default class Transaction {
         _result = _derived_hash !== tx.hash
         return _result
     }
+
+    // INFO Checking if a tx has all the necessary informations
+    public static structured(tx: Transaction) {
+        let _structured = true
+        // TODO Do this
+        return _structured
+    }
 }
+
