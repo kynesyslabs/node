@@ -10,11 +10,11 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import * as solanaWeb3 from "@solana/web3.js"
-import defaultChain from "./types/defaultChain"
+import DefaultChain from "./types/defaultChain"
 
 // LINK https://docs.solana.com/developing/clients/javascript-api
 
-export default class SOLANA  implements defaultChain  {
+export default class SOLANA  implements DefaultChain  {
     private static instance: SOLANA
 
     wallet: solanaWeb3.Keypair

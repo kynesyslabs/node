@@ -12,13 +12,13 @@ KyneSys Labs: https://www.kynesys.xyz/
 import * as xrpl from "xrpl"
 import xrplWSListeners from "./types/xrpl_ws_listeners"
 import * as WebSocket from "ws"
-import defaultChain from "./types/defaultChain"
+import DefaultChain from "./types/defaultChain"
 
 // LINK https://js.xrpl.org/
 
 // TODO https://xrpl.org/monitor-incoming-payments-with-websocket.html
 
-export default class XRPL  implements defaultChain {
+export default class XRPL  extends DefaultChain {
     provider: xrpl.Client
     socket: WebSocket
     wallet: xrpl.Wallet

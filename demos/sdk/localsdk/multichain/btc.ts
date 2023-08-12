@@ -17,7 +17,7 @@ import axios from "axios"
 import { TransactionRequest } from "@ethersproject/providers"
 import { JsonRpcProvider } from "@ethersproject/providers"
 import { Wallet } from "@ethersproject/wallet"
-import defaultChain from "./types/defaultChain"
+import DefaultChain from "./types/defaultChain"
 import { TransactionContent } from "../../../src/libs/blockchain/types/transactions"
 
 
@@ -29,7 +29,7 @@ interface TransactionParams {
 }
 
 
-export default class BTC  implements defaultChain {
+export default class BTC  extends DefaultChain {
     private static instance: BTC
     provider: JsonRpcProvider
     wallet: Wallet

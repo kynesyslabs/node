@@ -13,15 +13,15 @@ import { JsonRpcProvider } from "@ethersproject/providers"
 import { JsonRpcSigner } from "@ethersproject/providers"
 import { Wallet } from "@ethersproject/wallet"
 import { TransactionRequest } from "@ethersproject/providers"
-import defaultChain from "./types/defaultChain"
+import DefaultChain from "./types/defaultChain"
 
 
-export default class EVM  implements defaultChain {
+export default class EVM  extends DefaultChain {
     // A singleton for each chain_id
     private static instances: Map<number, EVM> = new Map<number, EVM>()
     // Chain properties
-    provider: JsonRpcProvider
-    wallet: Wallet
+    provider: JsonRpcProvider = null
+    wallet: Wallet = null
 
     /**
      * The Singleton's constructor should always be private to prevent direct
@@ -29,10 +29,19 @@ export default class EVM  implements defaultChain {
      */
 
     private constructor(chain_id: number, rpc_url: string) {
-        this.provider = new JsonRpcProvider(rpc_url)
-        // TODO Check network connectivity and id
+        super(rpc_url)
     }
 
+    connect(rpc_url: string): boolean{
+        this.provider = new JsonRpcProvider(rpc_url)
+        // TODO Check network connectivity and id
+        this.connected = true
+        return true
+    }
+
+    disconnect() {
+        // TODO
+    }
 
     // INFO Connect a wallet to the EVM provider using a private key
     connectWallet(privateKey: string): Wallet {
@@ -52,6 +61,16 @@ export default class EVM  implements defaultChain {
         if (!this.wallet) { throw new Error("Wallet not connected") }
         const txResponse = await this.wallet.sendTransaction(transaction)
         return txResponse.hash
+    }
+
+    async pay(address: string, amount: string): Promise<any> {
+        // TODO
+    }
+
+    async info(): Promise<string> {
+        let info = ""
+        // TODO
+        return info
     }
 
     /**
