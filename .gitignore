@@ -20,3 +20,4 @@ demos/src/dapps/block_explorer/.parcel-cache
 demos/src/dapps/block_explorer/node_modules
 demos/src/dapps/block_explorer_2/yarn.lock
 demos/src/dapps/block_explorer_2/.*
+.DS_Store
