@@ -14,11 +14,16 @@ This library contains all the functions that are used to interact with the demos
 
 */
 
+/* NOTE Libraries Required
+ - https://cdn.jsdelivr.net/npm/node-forge@1.3.1/lib/index.min.js
+ - https://cdn.socket.io/4.6.0/socket.io.min.js
+*/
+
 /* eslint-disable no-unused-vars */
 /* eslint-disable no-undef */
 
 // NOTE Including all in a class
-import io from "socket.io-client"
+//import io from "socket.io-client"
 
 let demos = {
     // ANCHOR Properties
@@ -212,6 +217,7 @@ let demos = {
         return tx
     },
 
+    // INFO Web2 Endpoints
     getWeb2Data: async function (url = "https://apple.com/robots.txt") {
         return await demos.nodeCall("web2Request", {
             action: "getUrl",
@@ -231,6 +237,66 @@ let demos = {
         return await demos.nodeCall("getPeerIdentity")
     },
     // !SECTION Predefined calls
+
+    // SECTION Crosschain support endpoints
+    crosschain: {
+        // INFO Executing a precompiled multichain operation
+        execute: async function (multichain_operation) {
+            let response = await demos.nodeCall("crosschain_operation", {multichain_operation})
+            response = JSON.parse(response)
+            return response
+        },
+    },
+    // !SECTION Crosschain support endpoints
+
+    // SECTION Supporting txs
+    transactions: {
+        prepare: async function (data) {
+            let thisTx = demos.skeletons.transaction
+            // TODO: Implement
+            thisTx.content = data
+            return thisTx
+        },
+        sign: async function (raw_tx, private_key) {
+        // TODO: Implement
+            raw_tx.signature = forge.pki.ed25519.sign(raw_tx.content, private_key) // REVIEW if it is working right
+            return raw_tx
+        },
+        broadcast: async function (signed_tx) {
+        // TODO: Implement
+            return await demos.nodeCall("tx", {
+                tx: signed_tx,
+            }) // And review
+        },
+    },
+    // !SECTION Supporting txs
+
+    // INFO Calling demos.skeletons.NAME provides an empty skeleton that can be used for reference while calling other demos functions
+    // SECTION Objects skeletons
+    skeletons: {
+        // INFO An empty transaction
+        transaction: {
+            content: {
+                type: "", // string
+                from: null, // forge.pki.ed25519.BinaryBuffer
+                to: null, // forge.pki.ed25519.BinaryBuffer
+                amount: 0, // number
+                data: ["", ""], // [string, string] // type as string and content in hex string
+                nonce: 0, // number // Increments every time a transaction is sent from the same account
+                timestamp: 0, // number // Is the registered unix timestamp when the transaction was sent the first time
+                lock_fee: 0, // LockFee // Is the signed message where the sender locks X tokens until the tx is confirmed}, // TransactionContent
+            },
+            signature: null, // pki.ed25519.BinaryBuffer
+            hash: null, // string
+            confirmations: [], // Confirmation[]
+            state_changes: [], // StateChange[] 
+        },
+        // INFO An empty crosschain operation object
+        crosschain_operation: {
+            // TODO Implement as specified in multichainDispatcher.js if any
+        },
+    },
+    // !SECTION Objects skeletons
 
 }
 

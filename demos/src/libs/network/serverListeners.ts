@@ -20,6 +20,7 @@ import chain from "src/libs/blockchain/chain"
 import { handlers as web2handlers } from "src/features/web2"
 import convalidateWeb2 from "../blockchain/routines/convalidateWeb2"
 import convalidateTransaction from "../blockchain/routines/convalidateTransaction"
+import multichainDispatcher from "src/features/multichain/multichainDispatcher"
 
 export default class ServerListeners {
     peer: Peer
@@ -118,7 +119,15 @@ export default class ServerListeners {
                 // TODO Manage the mempool/state registry and send stuff back
                 // TODO Broadcast the tx to the other peers
                 // Response is then sent back automatically as a reply (with our validation)
-            } else if (content.type == "convalidate_web2") {
+            }
+            // ANCHOR Crosschain endpoints
+            else if (content.type == "crosschain_operation" || content.type == "multichain_operation") {
+                response = await multichainDispatcher(content.data)
+                // TODO
+            }
+            
+            // ANCHOR Web2 endpoints
+            else if (content.type == "convalidate_web2") {
                 response = await convalidateWeb2(content.data)
                 // TODO
             }
