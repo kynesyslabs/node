@@ -1,14 +1,16 @@
 <script>
     import '$lib/global.css';
+    import demos from '$lib/demos';
     export let data;
     import Fa from 'svelte-fa'
-    import { faArrowLeftLong, faArrowRightLong, faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
+    import { faArrowLeftLong, faArrowRightLong, faChevronLeft, faChevronRight, faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons';
     import Footer from '$lib/components/Footer.svelte';
 	import Header from '$lib/components/Header.svelte';
     let selectedTab = 0;
     function changeTab(index){
         selectedTab = index;
     }
+    console.log(data.transaction);
 </script>
 
 <style>
@@ -196,7 +198,7 @@
 <Header></Header>
 
 <main>
-<div class="card generic-shadow">
+<!--<div class="card generic-shadow">
     <div class="card-header">
         <div class="adjacent-button">
             <Fa style="position:relative;top:2px;" icon={faArrowLeftLong}></Fa>
@@ -254,7 +256,7 @@
             </div>
         </div>
     {/if}
-</div>
+</div>-->
 </main>
 
 <Footer/>

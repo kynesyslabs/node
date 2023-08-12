@@ -139,6 +139,11 @@
         border-bottom: 1px solid var(--border-color);
         gap: 16px;
     }
+    .block-cell{
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
     .block-card-header{
         display: flex;
         gap: 16px;
@@ -215,23 +220,23 @@
     </div>
     <div class="card">
         <h4 class="card-header">Latest transactions</h4>
-        {#each placeholderTransactions as transaction}
+        {#each data.block.content.transactions as transaction}
         <div class="block-card">
             <div class="block-card-header">
                 <div class="block-icon-container generic-shadow">
                     <img class="block-icon" alt="Block icon" src="/icons/agreement-icon.png"/>
                 </div>
                 <div style="width: 200px;">
-                    <p class="fake-link" style="margin-top:0;margin-bottom:8px;">{transaction.hash}</p>
+                    <a href={`/transactions/${transaction.hash}`} class="accessible"><p class="block-cell" style="margin-top:0;margin-bottom:8px;">{transaction.hash}</p></a>
                     <p style="margin: 0; opacity:.5; font-size:.9rem;">{transaction.age}</p>
                 </div>
             </div>
             <div>
-                <p style="margin-top:0;margin-bottom:8px;">From <span class="fake-link">{transaction.from}</span></p>
-                <p style="margin: 0;">To <span class="fake-link">{transaction.to}</span></p>
+                <p style="margin-top:0;margin-bottom:8px;">From <span class="fake-link">{transaction.content.from}</span></p>
+                <p style="margin: 0;">To <span class="fake-link">{transaction.content.to}</span></p>
             </div>
             <div class="reward-container generic-shadow">
-                <p class="reward" style="font-size:.8rem">{transaction.amount} DEM</p>
+                <p class="reward" style="font-size:.8rem">{transaction.content.amount} DEM</p>
             </div>
         </div>
         {/each}
