@@ -55,14 +55,6 @@ export default class EVM  extends DefaultChain {
         const balance = await this.provider.getBalance(address)
         return balance.toString()
     }
-
-    // INFO If the wallet is connected, send a transaction
-    async sendTransaction (transaction: TransactionRequest): Promise<string> {
-        if (!this.wallet) { throw new Error("Wallet not connected") }
-        const txResponse = await this.wallet.sendTransaction(transaction)
-        return txResponse.hash
-    }
-
     async pay(address: string, amount: string): Promise<any> {
         // TODO
     }
@@ -72,6 +64,14 @@ export default class EVM  extends DefaultChain {
         // TODO
         return info
     }
+
+    // INFO If the wallet is connected, send a transaction
+    async sendTransaction (transaction: TransactionRequest): Promise<string> {
+        if (!this.wallet) { throw new Error("Wallet not connected") }
+        const txResponse = await this.wallet.sendTransaction(transaction)
+        return txResponse.hash
+    }
+
 
     /**
      * The static method that controls the access to the singleton instance.

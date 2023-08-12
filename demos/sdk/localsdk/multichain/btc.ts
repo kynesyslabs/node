@@ -31,15 +31,25 @@ interface TransactionParams {
 
 export default class BTC  extends DefaultChain {
     private static instance: BTC
-    provider: JsonRpcProvider
-    wallet: Wallet
+    provider: JsonRpcProvider = null
+    wallet: Wallet = null
 
     constructor(rpc_url: string) {
-        this.provider = new JsonRpcProvider(rpc_url)
+        super(rpc_url)
     }
 
-    async connect(private_key: string): Promise<void> {
-        const wallet = new Wallet(private_key, this.provider)
+    connect(url: string): boolean {
+        this.provider = new JsonRpcProvider(url)
+        return true
+    }
+
+    disconnect() {
+        this.provider = null
+        // TODO If anything else is todo lets do it here
+    }
+
+    async connectWallet(private_key: string): Promise<void> {
+        this.wallet = new Wallet(private_key, this.provider)
     }
 
     async getBalance(address: string): Promise<string> {
@@ -50,12 +60,16 @@ export default class BTC  extends DefaultChain {
         return balance
     }
 
+    async pay(address: string, amount: string): Promise<any> {
+        // TODO: implement
+    }
+
     async sendTransaction(
         { from, to, value }: TransactionParams,
     ) {
         if (!this.wallet) { throw new Error("Wallet not connected") }
 		
-        const keyPair = fromWIF(this.wallet.privateKey, networks.bitcoin)
+        const keyPair = fromWIF(this.wallet.privateKey, networks.bitcoin) // FIXME
         const psbt = new Psbt({ network: networks.bitcoin })
 
         const txData = await axios.get(
@@ -105,6 +119,12 @@ export default class BTC  extends DefaultChain {
             },
         )
         return response.data.hash
+    }
+
+    async info(): Promise<string> {
+        let info = ""
+        // TODO
+        return info
     }
 
     // Static singleton puller

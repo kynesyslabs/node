@@ -19,24 +19,37 @@ import DefaultChain from "./types/defaultChain"
 // TODO https://xrpl.org/monitor-incoming-payments-with-websocket.html
 
 export default class XRPL  extends DefaultChain {
-    provider: xrpl.Client
-    socket: WebSocket
-    wallet: xrpl.Wallet
+    provider: xrpl.Client = null
+    wallet: xrpl.Wallet = null
+    socket: WebSocket = null
 
-    constructor() {
-        this.provider = null
-        this.wallet = null
-        this.socket = null
+    constructor(rpc_url: string) {
+        super(rpc_url)
     }
+
 
     // SECTION Initializations
 
     // INFO Connects to a XRP rpc server
-    public async connect(rpc: string) {
+    public connect(rpc: string): any {
+        this._connect(rpc).then(res => {
+            // TODO something
+            console.log(res)
+            // TODO Check if connected
+            return true
+        })
+    }
+    private async _connect(rpc: string) {
         this.provider = new xrpl.Client(rpc)
         await this.provider.connect()
         this.socket = new WebSocket(rpc)
         await xrplWSListeners(this.socket)
+        return this.provider
+    }
+
+    // INFO Manages a clean exit
+    disconnect() {
+        this.provider.disconnect()
     }
 
     // INFO Connects to a wallet on XRPL
@@ -77,23 +90,8 @@ export default class XRPL  extends DefaultChain {
 
     // SECTION Writes
 
-    // INFO Generic sign, send and await (if not specified) a tx
-    async sendTransaction(prepared: any, wait:boolean=true): Promise<xrpl.TxResponse> {
-        // Signing the tx
-        let signed = this.wallet.sign(prepared)
-        console.log("Hash: " + signed.hash)
-        console.log("Blob: " + signed.tx_blob)
-        // Sending the tx
-        let tx_promise = this.provider.submitAndWait(signed.tx_blob)
-        if (wait) {
-            return await tx_promise
-        } else {
-            return tx_promise
-        }
-    }
-
     // INFO Sending XRP to an address
-    async pay(receiver: string, amount: number): Promise<xrpl.TxResponse> {
+    async pay(receiver: string, amount: string): Promise<xrpl.TxResponse> {
         // Preparing a payment tx
         const prepared = await this.provider.autofill({
             "TransactionType": "Payment",
@@ -110,12 +108,28 @@ export default class XRPL  extends DefaultChain {
         return await this.sendTransaction(prepared)
     }
 
+    async info(): Promise<string> {
+        let info = ""
+        // TODO Implement
+        return info
+    }
+
+
+    // INFO Generic sign, send and await (if not specified) a tx
+    async sendTransaction(prepared: any, wait:boolean=true): Promise<xrpl.TxResponse> {
+        // Signing the tx
+        let signed = this.wallet.sign(prepared)
+        console.log("Hash: " + signed.hash)
+        console.log("Blob: " + signed.tx_blob)
+        // Sending the tx
+        let tx_promise = this.provider.submitAndWait(signed.tx_blob)
+        if (wait) {
+            return await tx_promise
+        } else {
+            return tx_promise
+        }
+    }
 
     // !SECTION Writes
-
-    // INFO Manages a clean exit
-    disconnect() {
-        this.provider.disconnect()
-    }
 
 }
