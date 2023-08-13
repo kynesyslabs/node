@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 /*
  TODO 
- Attestation must be done in a path like 1peer -> 1peer until the 10th peer is reached.
+ Attestation must be done in a path like 1peer -> 1peer until the 10th peer is reached (not all 9 selected by the first one).
 */
 
 import { rsa } from "src/libs/crypto"

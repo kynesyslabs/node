@@ -109,12 +109,6 @@ export default class ServerListeners {
                     extra = "error"
                     response = "Invalid Transaction"
                 }
-                // Are we the first one to receive this message?
-                let first_seen_now = false
-                if (response.confirmations.length === 1) {
-                    // Yes, we are
-                    first_seen_now = true
-                }
                 // Adding the valid tx to the mempool
                 Mempool.addTransaction(validatedTx)
                 // TODO Manage the mempool/state registry and send stuff back
