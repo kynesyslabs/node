@@ -71,13 +71,6 @@ export default class Mempool {
         await Chain.write("INSERT INTO mempool VALUES(" + next_number + ", 1, '[]', '{}')")
     }
 
-    // INFO Broadcasting the mempool to all the peers
-    public static async broadcast() {
-        // Retrieve peerlist
-        let peerlist = PeerManager.getInstance().getPeers()
-        // TODO For cycle sending mempool to peerlist
-    }
-
     public static async receive(mempool: MempoolData) {
         // TODO Parse, verify and call merge
         let success = await Mempool.merge(mempool)
@@ -90,5 +83,19 @@ export default class Mempool {
         // Merge the mempool with our one
         mempool.transactions.concat(received_mempool.transactions) // TODO Add double items checking
         await Chain.write("UPDATE mempool SET transactions = '" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")
+    }
+
+    /* TODO Representative Shard
+
+    Deterministic group selection
+    - The group sync the mempool and exclude the invalid transactions
+    - mempool sort by gas fee bid (see gas fee in yp) -> market of nodes buziness
+    - BFT
+    */
+    // INFO Broadcasting the mempool to all the peers
+    public static async broadcast() {
+    // Retrieve peerlist
+        let peerlist = PeerManager.getInstance().getPeers()
+        // TODO For cycle sending mempool to peerlist
     }
 }

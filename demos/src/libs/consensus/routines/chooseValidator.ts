@@ -52,3 +52,10 @@ export default async function chooseValidator(peers: Peer[]) {
     return peers[control] // Validator chosen
 }
 
+/* TODO Representative Shard
+
+    Deterministic group selection
+    - The group sync the mempool and exclude the invalid transactions
+    - mempool sort by gas fee bid (see gas fee in yp) -> market of nodes buziness
+    - BFT
+    */
