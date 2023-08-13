@@ -55,7 +55,12 @@ export default async function chooseValidator(peers: Peer[]) {
 /* TODO Representative Shard
 
     Deterministic group selection
+    - Sending a tx include a pre approval for base fee + node fees
+        - node fees are paid to the node directly immediately
+        - base fees are accrued by the network and divided in the validator shard (see below) at 50%
+        - the other 50% is ours
     - The group sync the mempool and exclude the invalid transactions
     - mempool sort by gas fee bid (see gas fee in yp) -> market of nodes buziness
     - BFT
+    - Each validator takes its transactions fees
     */

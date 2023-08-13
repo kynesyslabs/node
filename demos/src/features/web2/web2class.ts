@@ -9,6 +9,12 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+
+/*
+ TODO 
+ Attestation must be done in a path like 1peer -> 1peer until the 10th peer is reached.
+*/
+
 import { rsa } from "src/libs/crypto"
 import { pki } from "node-forge"
 import Hashing from "src/libs/crypto/hashing"
