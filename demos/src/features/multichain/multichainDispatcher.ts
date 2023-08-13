@@ -20,7 +20,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import Hashing from "src/libs/crypto/hashing"
 import Cryptography from "src/libs/crypto/cryptography"
 import forge from "node-forge"
-import * as sdk from "sdk/localsdk"
+import * as localsdk from "sdk/localsdk"
 
 export interface IParams {
     key: string;
@@ -40,6 +40,7 @@ export interface IChainOperation {
     content: IRawChainOperation
     hash: string
     signature: forge.pki.ed25519.BinaryBuffer
+    // TODO Expand it
 }
 
 // INFO Interface for the multichain request content, aka the group of chain operations
@@ -103,7 +104,11 @@ export class MultichainRequest {
 
 // INFO Entry point for the multichain endpoint
 export default async function multichainDispatcher(request: IMultichainRequest) {
-    let response = "not yet implemented"
-    // TODO
+    let response: any
+    // TODO Sanity check using the above interfaces
+    // Building the request based on the multichain request content
+    let requestClass = new MultichainRequest()
+    requestClass.data = request
+    // TODO Check and eventually execute or do whatever with the request
     return response
 }

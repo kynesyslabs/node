@@ -21,7 +21,7 @@ import { handlers as web2handlers } from "src/features/web2"
 import convalidateWeb2 from "../blockchain/routines/convalidateWeb2"
 import convalidateTransaction from "../blockchain/routines/convalidateTransaction"
 import multichainDispatcher from "src/features/multichain/multichainDispatcher"
-import multichainStatus from "sdk/localsdk/multichain/types/capabilities"
+import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 
 export default class ServerListeners {
     peer: Peer
@@ -129,8 +129,7 @@ export default class ServerListeners {
             }
 
             else if (content.type == "crosschain_status" || content.type == "multichain_status") {
-                response = await multichainStatus()
-                // TODO
+                response = await multichainCapabilities()
             }
             
             // ANCHOR Web2 endpoints
