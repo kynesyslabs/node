@@ -1,16 +1,24 @@
 <script>
     import '$lib/global.css';
-    import demos from '$lib/demos';
     export let data;
     import Fa from 'svelte-fa'
-    import { faArrowLeftLong, faArrowRightLong, faChevronLeft, faChevronRight, faCopy, faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons';
-    import Footer from '$lib/components/Footer.svelte';
-	import Header from '$lib/components/Header.svelte';
+    import { faCopy } from '@fortawesome/free-solid-svg-icons';
     let selectedTab = 0;
-    function changeTab(index){
-        selectedTab = index;
-    }
+    let copied = false;
+    import transIcon from '$lib/assets/icons/agreement-icon.png';
+    import { fade } from 'svelte/transition';
+
     console.log(data.transaction);
+    function copy(value)
+    {
+        var aux = document.createElement("input");
+        aux.setAttribute("value", value);
+        document.body.appendChild(aux);
+        aux.select();
+        document.execCommand("copy");
+        document.body.removeChild(aux);
+        copied = true;
+    }
 </script>
 
 <style>
@@ -34,43 +42,6 @@
         display: flex;
         align-items: center;
         gap: 8px;
-    }
-
-    .logo{
-        border-radius: 50%;
-        width: 100px;
-        margin: 16px;
-    }
-
-    .subtitle{
-        text-align: center;
-        margin-top: 0;
-        font-family: 'Neue Machina', sans-serif;
-    }
-
-    .label{
-        margin-bottom: 8px;
-        opacity: .75;
-        text-align: center;
-        font-size: 1rem;
-    }
-
-    .inputContainer{
-        width: 500px;
-        max-width: 100%;
-        margin: 32px auto;
-        position: relative;
-        top: 24px;
-    }
-    .inputButton{
-        background-color: var(--accent);
-        position: absolute;
-        right: 8px;
-        top: 32px;
-        border: none;
-        font-size: 1.4rem;
-        color: white;
-        border-radius: var(--border-radius);
     }
 
     .block-icon-container{
@@ -101,47 +72,6 @@
         width: 100%;
     }
 
-    .adjacent-button{
-        background-color: #404040;
-        border-radius: 50%;
-        padding: 8px;
-        border: none;
-        color: white;
-        cursor: pointer;
-        width: 37px;
-        height: 37px;
-        display: flex;
-        justify-content: center;
-    }
-
-    .tab-container{
-        display: flex;
-        justify-content: center;
-        margin: 16px 0;
-        gap: 16px;
-    }
-
-    .tab{
-        width: 120px;
-        border: 1px solid var(--border-color);
-        border-radius: var(--border-radius);
-        text-align: center;
-        cursor: pointer;
-        background-color: #404040;
-        font-size: .8rem;
-    }
-
-    .tab-selected{
-        background-color: var(--accent);
-        color: white;
-        font-weight: bold;
-    }
-
-    .tab-label{
-        margin: 0;
-        padding: 16px 0;
-    }
-
     .info-grid{
         display: grid;
         grid-template-columns: 100px 1fr;
@@ -150,21 +80,6 @@
         padding: 16px;
     }
 
-    .card-footer{
-        padding: 16px;
-        text-align: center;
-        background-color: #252525;
-        font-weight: bold;
-        color: white;
-        border-radius: 0 0 var(--border-radius) var(--border-radius);
-    }
-
-    .page-controller{
-        display: flex;
-        gap:4px;
-        align-items: center;
-        justify-content: right;
-    }
 
     .page-controller-button{
         background-color: #404040;
@@ -172,53 +87,10 @@
         padding: 4px 8px;
         border-radius: var(--border-radius);
         box-shadow: rgba(17, 17, 26, 0.05) 0px 4px 16px, rgba(17, 17, 26, 0.05) 0px 8px 32px;
-    }
-    .page-controller-label{
-        margin:0;
-        font-size: .8rem;
-        position: relative;
-        margin-top: 4px;
-    }
-    .transactions-info{
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 16px;
-        border-bottom: 1px solid var(--border-color);
+        cursor: pointer;
     }
 
-    .transactions-grid{
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr 1fr;
-        gap: 16px;
-        border-bottom: 1px solid var(--border-color);
-        padding: 16px;
-    }
-
-    .transaction-number-label{
-        margin: 0;
-        position: relative;
-        top: 4px;
-    }
-
-    .grid-header-row{
-        background-color: #252525;
-    }
-
-    .grid-header-label{
-        font-weight: bold;
-        margin:0;
-    }
-
-    .grid-cell{
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        margin: 0;
-    }
 </style>
-
-<Header></Header>
 
 <main>
 <div class="card generic-shadow">
@@ -228,7 +100,7 @@
         </div>-->
         <div class="block-header">
             <div class="block-icon-container generic-shadow">
-                <img class="block-icon" alt="Block icon" src="/icons/agreement-icon.png"/>
+                <img class="block-icon" alt="Block icon" src={transIcon}/>
             </div>
             <h4 class="ellipsis" style="margin: 0;">Transaction details</h4>
         </div>
@@ -246,35 +118,17 @@
     </div>-->
     <div class="info-grid">
         <p class="info-title">Hash:</p>
-        <div class="info"><p class="info-text">{data.transaction.hash}</p> <button class="page-controller-button"><Fa icon={faCopy}></Fa></button></div>
-        <!--<p class="info">Timestamp: {data.block.timestamp}</p>
-        <p class="info">Proposer: {data.block.proposer}</p>
-        <p class="info">Transactions: <span class="fake-link">{data.block.content.transactions.length} transactions</span> in this block</p>-->
-    </div>
-    <div class="info-grid">
+        <div class="info"><p class="info-text">{data.transaction.hash}</p><button on:click={()=>{copy(data.transaction.hash)}} on:mouseleave={()=>{copied=false;}} class="page-controller-button tooltip"><span class="tooltiptext">{copied?"Copied!":"Copy"}</span><Fa icon={faCopy}></Fa></button></div>
         <p class="info-title">Type:</p>
         <div class="info"><p class="info-text">{data.transaction.content.content.type}</p></div>
-    </div>
-    <div class="info-grid">
         <p class="info-title">Currency:</p>
         <div class="info"><p class="info-text">{data.transaction.content.content.data.properties.name} ({data.transaction.content.content.data.properties.currency})</p></div>
-    </div>
-    <div class="info-grid">
         <p class="info-title">From:</p>
-        <div class="info"><p class="info-text">{data.transaction.content.content.from}</p> <button class="page-controller-button"><Fa icon={faCopy}></Fa></button></div>
-        <!--<p class="info">Timestamp: {data.block.timestamp}</p>
-        <p class="info">Proposer: {data.block.proposer}</p>
-        <p class="info">Transactions: <span class="fake-link">{data.block.content.transactions.length} transactions</span> in this block</p>-->
-    </div>
-    <div class="info-grid">
+        <div class="info"><p class="info-text">{data.transaction.content.content.from}</p> <button on:click={()=>{copy(data.transaction.content.content.from)}} on:mouseleave={()=>{copied=false;}} class="page-controller-button tooltip"><span class="tooltiptext">{copied?"Copied!":"Copy"}</span><Fa class="tooltip" icon={faCopy}></Fa></button></div>
         <p class="info-title">To:</p>
-        <div class="info"><p class="info-text">{data.transaction.content.content.to}</p> <button class="page-controller-button"><Fa icon={faCopy}></Fa></button></div>
-    </div>
-    <div class="info-grid">
+        <div class="info"><p class="info-text">{data.transaction.content.content.to}</p> <button on:click={()=>{copy(data.transaction.content.content.to)}} on:mouseleave={()=>{copied=false;}} class="page-controller-button tooltip"><span class="tooltiptext">{copied?"Copied!":"Copy"}</span><Fa icon={faCopy}></Fa></button></div>
         <p class="info-title">Amount:</p>
         <div class="info"><p class="info-text">{data.transaction.content.content.amount}</p></div>
     </div>
 </div>
 </main>
-
-<Footer/>

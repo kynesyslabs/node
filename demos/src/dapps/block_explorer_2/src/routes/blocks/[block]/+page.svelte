@@ -5,6 +5,7 @@
     import { faArrowLeftLong, faArrowRightLong, faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
     import Footer from '$lib/components/Footer.svelte';
 	import Header from '$lib/components/Header.svelte';
+    import blockIcon from '$lib/assets/icons/cube-icon.png';
     let selectedTab = 0;
     function changeTab(index){
         selectedTab = index;
@@ -14,43 +15,6 @@
 <style>
     main{
         padding: 16px;
-    }
-
-    .logo{
-        border-radius: 50%;
-        width: 100px;
-        margin: 16px;
-    }
-
-    .subtitle{
-        text-align: center;
-        margin-top: 0;
-        font-family: 'Neue Machina', sans-serif;
-    }
-
-    .label{
-        margin-bottom: 8px;
-        opacity: .75;
-        text-align: center;
-        font-size: 1rem;
-    }
-
-    .inputContainer{
-        width: 500px;
-        max-width: 100%;
-        margin: 32px auto;
-        position: relative;
-        top: 24px;
-    }
-    .inputButton{
-        background-color: var(--accent);
-        position: absolute;
-        right: 8px;
-        top: 32px;
-        border: none;
-        font-size: 1.4rem;
-        color: white;
-        border-radius: var(--border-radius);
     }
 
     .block-icon-container{
@@ -93,20 +57,26 @@
         justify-content: center;
     }
 
+    .tab-container-container{
+        display: flex;
+        justify-content: center;
+    }
+
     .tab-container{
         display: flex;
         justify-content: center;
         margin: 16px 0;
-        gap: 16px;
+        background-color: #252525;
+        padding: 4px;
+        border-radius: var(--border-radius);
+        gap: 4px;
     }
 
     .tab{
         width: 120px;
-        border: 1px solid var(--border-color);
         border-radius: var(--border-radius);
         text-align: center;
         cursor: pointer;
-        background-color: #404040;
         font-size: .8rem;
     }
 
@@ -118,11 +88,7 @@
 
     .tab-label{
         margin: 0;
-        padding: 16px 0;
-    }
-
-    .card-body{
-        padding: 16px;
+        padding: 12px 0;
     }
 
     .card-footer{
@@ -168,6 +134,7 @@
         gap: 16px;
         border-bottom: 1px solid var(--border-color);
         padding: 16px;
+        width: 100%;
     }
 
     .transaction-number-label{
@@ -191,9 +158,33 @@
         text-overflow: ellipsis;
         margin: 0;
     }
-</style>
 
-<Header></Header>
+    .info-grid{
+        display: grid;
+        grid-template-columns: 100px 1fr;
+        width: 100%;
+        gap: 16px;
+        padding: 16px;
+    }
+
+    .info-title{
+        font-weight: bold;
+        margin: 0;
+    }
+
+    .info-text{
+        margin: 0;
+        opacity: .8;
+    }
+
+    .info{
+        word-wrap: break-word;
+        word-break: break-all;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+</style>
 
 <main>
 <div class="card generic-shadow">
@@ -203,7 +194,7 @@
         </div>
         <div class="block-header">
             <div class="block-icon-container generic-shadow">
-                <img class="block-icon" alt="Block icon" src="/icons/cube-icon.png"/>
+                <img class="block-icon" alt="Block icon" src={blockIcon}/>
             </div>
             <h4 style="margin: 0;">Block #{data.block.number}</h4>
         </div>
@@ -211,6 +202,7 @@
             <Fa style="position:relative;top:2px;" icon={faArrowRightLong}></Fa>
         </div>        
     </div>
+    <div class="tab-container-container">
     <div class="tab-container">
         <div role={`Block info tab ${selectedTab==0?"(selected)":""}`} on:click={()=>{changeTab(0)}} class={`tab ${selectedTab==0?"tab-selected":""}`}>
             <p class="tab-label">BLOCK INFO</p>
@@ -219,12 +211,17 @@
             <p class="tab-label">TRANSACTIONS</p>
         </div>
     </div>
+    </div>
     {#if selectedTab==0}
-        <div class="card-body">
-            <p class="info">Status: {data.block.status}</p>
-            <p class="info">Timestamp: {data.block.timestamp}</p>
-            <p class="info">Proposer: {data.block.proposer}</p>
-            <p class="info">Transactions: <span class="fake-link">{data.block.content.transactions.length} transactions</span> in this block</p>
+        <div class="info-grid">
+            <p class="info-title">Status:</p>
+            <p class="info-text">{data.block.status}</p>
+            <p class="info-title">Timestamp:</p>
+            <p class="info-text">{data.block.timestamp}</p>
+            <p class="info-title">Proposer:</p>
+            <p class="info-text">{data.block.proposer}</p>
+            <p class="info-title">Transactions:</p>
+            <p class="info-text">{data.block.content.transactions.length} transactions in this block</p>
         </div>
     {:else}
         <div class="transactions-info">
@@ -238,7 +235,7 @@
         </div>
         <div class="transactions-grid">
             {#each data.block.content.transactions as transaction}
-                <p class="grid-cell fake-link">{transaction.hash}</p>
+                <a class="accessible grid-cell" href={`/transactions/${transaction.hash}`}><p class="grid-cell">{transaction.hash}</p></a>
                 <p class="grid-cell">{transaction.content.from}</p>
                 <p class="grid-cell">{transaction.content.to}</p>
                 <p class="grid-cell">{transaction.content.amount}</p>
@@ -256,5 +253,3 @@
     {/if}
 </div>
 </main>
-
-<Footer/>
