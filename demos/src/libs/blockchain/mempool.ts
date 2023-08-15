@@ -152,13 +152,13 @@ export default class Mempool {
     // INFO Sorting the mempool in place (final step)
     private static async sort() {
         let mempool = await Mempool.getMempool()
+
         mempool.transactions.sort((tx1, tx2) => {
-            if (tx1.content.lock_fee > tx2.content.lock_fee) { // TODO lock_fee will be the bribe_fee or similar in the future
+            let comparison = parseInt(tx1.content.transaction_fee.rpc_fee) >= parseInt(tx2.content.transaction_fee.rpc_fee)
+            if (comparison) { 
                 return -1
-            } else if (tx1.content.lock_fee < tx2.content.lock_fee) {
-                return 1
             } else {
-                return 0
+                return 1
             }
         })
         await Chain.write("UPDATE mempool SET transactions = '" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")

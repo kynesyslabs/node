@@ -12,12 +12,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 import forge, { pki } from "node-forge"
 import { networks } from "bitcoinjs-lib"
 
-interface LockFee {
-    amount: number
-    message: string
-    signature: forge.pki.ed25519.BinaryBuffer
-    identity: forge.pki.ed25519.BinaryBuffer
-}
 
 interface TxFee {
     network_fee: null,
