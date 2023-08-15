@@ -18,8 +18,8 @@ export default class Block {
     hash: string
     status: string
     content: BlockContent // TODO
-    proposer: pki.PublicKey
-    validation_data: Buffer
+    proposer: pki.PublicKey | pki.ed25519.BinaryBuffer
+    validation_data: any
     timestamp: number
 
     constructor() {

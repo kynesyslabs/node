@@ -1,5 +1,7 @@
 // INFO This singleton is used to store the state of the application through different parts of the application.
 
+import * as forge from "node-forge"
+
 export default class sharedState {
     private static instance: sharedState
 
@@ -12,7 +14,9 @@ export default class sharedState {
     consensusMode: boolean = false
     serverPort: number = 53550
     rpcFee: number = 0
-
+    publicKey: forge.pki.ed25519.BinaryBuffer
+    privateKey: forge.pki.ed25519.BinaryBuffer
+    
     // !SECTION shared state variables
 
     constructor() {

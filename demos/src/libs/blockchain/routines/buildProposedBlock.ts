@@ -12,14 +12,18 @@ KyneSys Labs: https://www.kynesys.xyz/
 import Mempool from "../mempool"
 import Block from "../blocks"
 import Transaction from "../transaction"
+import sharedState from "src/utilities/sharedState"
+import Hashing from "src/libs/crypto/hashing"
+import Cryptography from "src/libs/crypto/cryptography"
+import { sign } from "crypto"
 
 // INFO Using its Mempool, each node can generate the same block having the same content
 export default async function buildProposedBlock(): Promise<Block>{
-    let block = new Block()
+    let proposedBlock = new Block()
     let mempool = await Mempool.getMempool()
     let txs = mempool.transactions
     let ordered_txs: Transaction[]
-    let per_user_txs: Map<string, Transaction[]>
+    let per_user_txs: Map<string, Transaction[]> = new Map<string, Transaction[]>()
     // NOTE Order transactions by rpc fee (aka divide gas fee in rpc and network)
     mempool = await Mempool.sort(mempool)
     // Iterating through the transactions in the mempool to sort them and exclude invalid ones
@@ -27,11 +31,22 @@ export default async function buildProposedBlock(): Promise<Block>{
         console.log("Processing transaction " + txs[i].hash)
         // If an address has two txs with the same nonce, the richest replaces the other
         mempool = await Mempool.checkNonce(txs[i])
+        // We also update the per_user_txs map
+        per_user_txs[txs[i].content.from.toString("hex")] = txs[i]
     }
     // REVIEW Setting the block content
-    block.content.ordered_transactions = ordered_txs
-    block.content.per_address_transactions = per_user_txs
+    proposedBlock.content.ordered_transactions = ordered_txs
+    proposedBlock.content.per_address_transactions = per_user_txs
     // Now we have all the transactions in the mempool, sorted by tx fee and with nonce applied
-    // TODO Cryptography on the block
-    return block
+    // We complete the block
+    proposedBlock.proposer = sharedState.getInstance().publicKey
+    proposedBlock.timestamp = new Date().getTime()
+    // Cryptography on the block
+    proposedBlock.hash = Hashing.sha256(JSON.stringify(proposedBlock.content))
+    if (!proposedBlock.validation_data) { 
+        proposedBlock.validation_data = {}
+    }
+    let signed_hash = Cryptography.sign(proposedBlock.hash, sharedState.getInstance().privateKey)
+    proposedBlock.validation_data[sharedState.getInstance().publicKey.toString("hex")] = signed_hash
+    return proposedBlock
 }
