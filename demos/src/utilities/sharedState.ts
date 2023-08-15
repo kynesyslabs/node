@@ -13,10 +13,12 @@ export default class sharedState {
     mainLoopPaused: boolean = false
     consensusMode: boolean = false
     serverPort: number = 53550
-    rpcFee: number = 0
-    publicKey: forge.pki.ed25519.BinaryBuffer
-    privateKey: forge.pki.ed25519.BinaryBuffer
-    
+
+    // SECTION shared useful variables
+    rpcFee: number = 0 // TODO Implement
+    publicKey: forge.pki.ed25519.BinaryBuffer // TODO Implement
+    privateKey: forge.pki.ed25519.BinaryBuffer // TODO Implement
+
     // !SECTION shared state variables
 
     constructor() {

@@ -20,6 +20,7 @@ import Chain from "./chain"
 import Hashing from "../crypto/hashing"
 import Cryptography from "../crypto/cryptography"
 import { sha256 } from "node-forge"
+import { ConsensusRequest } from "src/libs/consensus/Consensus"
 
 export interface MempoolData {
     number: number
@@ -133,7 +134,7 @@ export default class Mempool {
     }
 
     // INFO Merging the mempool received (second step)
-    private static async merge(received_mempool: MempoolData): Promise<boolean> {
+    public static async merge(received_mempool: MempoolData): Promise<boolean> {
         let mempool = await Mempool.getMempool()
         // REVIEW Checking and excluding duplicates
         for (let i = 0; i < received_mempool.transactions.length; i++) {
@@ -169,13 +170,12 @@ export default class Mempool {
         let local_mempool = await Mempool.getMempool()
         for (let i = 0; i < local_mempool.transactions.length; i++) {
             let pooled_tx = local_mempool.transactions[i]
-            if (pooled_tx.content.from == pooled_tx.content.from) {
-                if (tx.content.nonce == tx.content.nonce) {
-                    if (replace) {
-                        local_mempool.transactions[i] = null
-                        await Chain.write("UPDATE mempool SET transactions = '" + JSON.stringify(local_mempool.transactions) + "' WHERE current = 1")
-                    }
-                }
+            if ((pooled_tx.content.from == pooled_tx.content.from) &&
+                (tx.content.nonce == tx.content.nonce) &&
+                (replace)) {
+                local_mempool.transactions[i] = null
+                await Chain.write("UPDATE mempool SET transactions = '" + JSON.stringify(local_mempool.transactions) + "' WHERE current = 1")
+
             }
         }
         

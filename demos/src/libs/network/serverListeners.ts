@@ -15,6 +15,7 @@ import { comlinkUtils } from "src/libs/communications"
 import InstantMessaging from "src/features/messaging/instantMessaging"
 import { Identity } from "src/libs/identity"
 import Transmission from "src/libs/communications/transmission"
+import { ConsensusRequest } from "../consensus/Consensus"
 import Mempool from "src/libs/blockchain/mempool"
 import chain from "src/libs/blockchain/chain"
 import { handlers as web2handlers } from "src/features/web2"
@@ -22,6 +23,7 @@ import validateWeb2 from "../blockchain/routines/validateWeb2"
 import validateTransaction from "../blockchain/routines/validateTransaction"
 import multichainDispatcher from "src/features/multichain/multichainDispatcher"
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
+import sharedState from "src/utilities/sharedState"
 
 export default class ServerListeners {
     peer: Peer
@@ -186,6 +188,48 @@ export default class ServerListeners {
                         break
                 }
             }
+
+            // INFO Consensus endpoint
+            else if (content.type == "consensus") {
+                console.log("[SERVER] Received consensus request")
+                if (!sharedState.getInstance().consensusMode) {
+                    response = { "error": "We are not in consensus mode" }
+                }
+                let consensus_request: ConsensusRequest = content.message
+                let stage = consensus_request.stage // This is the stage of the consensus we are in and is a string representing the operation
+                switch (stage) {
+                    // REVIEW Define all the stages of the consensus where validators will talk to each other
+                    case "mempool_sync":
+                        console.log("[SERVER] Received mempool sync request")
+                        if (consensus_request.extra == "send") {
+                            // REVIEW It should work
+                            console.log("[SERVER] Received mempool sync data: checking and maybe merging")
+                            let success = await Mempool.receive(consensus_request.data) // This is the mempool we should sync with ours
+                            if (!success) {
+                                response = { "error": "Mempool sync failed" }
+                                break
+                            }
+                            let formattedData = await Mempool.sort(consensus_request.data)
+                            success = await Mempool.merge(formattedData)
+                            if (!success) {
+                                response = { "error": "Mempool merge failed" }
+                                break
+                            }
+                            response = { "success": "Mempool merged" }
+                        } else {
+                            // REVIEW Should we identify somehow or comlink id is enough?
+                            console.log("[SERVER] Received mempool sync request: sending data")
+                            let mempool = await Mempool.getMempool()
+                            response = { "mempool": mempool }
+                        }
+                        break
+                    default:
+                        response = { "error": "Unknown consensus stage" }
+                        break
+                }
+            }
+
+            // ANCHOR Web3 endpoints
 
             // INFO Messaging endpoint
             else if (content.type === "messages") {

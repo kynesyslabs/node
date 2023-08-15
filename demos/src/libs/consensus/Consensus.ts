@@ -5,6 +5,13 @@ import Block from "../blockchain/blocks"
 import Mempool from "../blockchain/mempool"
 import buildProposedBlock from "../blockchain/routines/buildProposedBlock"
 
+// NOTE This class is to handle effectively nodeCalls of the consensus subgroup
+export interface ConsensusRequest {
+    stage: string // "mempool_sync", "proposed_block" ...
+    extra: any // Specify stage operations (receive, send, broadcast...)
+    data: any
+}
+
 export interface ConsensusRound {
 	number: number;
 	lastBlockHash: string;
