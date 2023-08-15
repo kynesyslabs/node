@@ -20,16 +20,18 @@ export default async function buildProposedBlock(): Promise<Block>{
     let txs = mempool.transactions
     let ordered_txs: Transaction[]
     let per_user_txs: Map<string, Transaction[]>
+    // NOTE Order transactions by rpc fee (aka divide gas fee in rpc and network)
+    mempool = await Mempool.sort(mempool)
     // Iterating through the transactions in the mempool to sort them and exclude invalid ones
     for (let i = 0; i < txs.length; i++) {
         console.log("Processing transaction " + txs[i].hash)
-        // TODO Order transactions by rpc fee (aka divide gas fee in rpc and network)
-        // TODO If an address has two txs with the same nonce, the richest replaces the other
-        // TODO In this case (the above one) ordered_txs will be updated to show the replaced status of the tx
+        // If an address has two txs with the same nonce, the richest replaces the other
+        mempool = await Mempool.checkNonce(txs[i])
     }
-    // Setting the block content
+    // REVIEW Setting the block content
     block.content.ordered_transactions = ordered_txs
     block.content.per_address_transactions = per_user_txs
+    // Now we have all the transactions in the mempool, sorted by tx fee and with nonce applied
     // TODO Cryptography on the block
     return block
 }

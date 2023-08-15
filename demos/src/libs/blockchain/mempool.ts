@@ -150,8 +150,7 @@ export default class Mempool {
     }
 
     // INFO Sorting the mempool in place (final step)
-    private static async sort() {
-        let mempool = await Mempool.getMempool()
+    public static async sort(mempool: MempoolData): Promise<MempoolData> {
 
         mempool.transactions.sort((tx1, tx2) => {
             let comparison = parseInt(tx1.content.transaction_fee.rpc_fee) >= parseInt(tx2.content.transaction_fee.rpc_fee)
@@ -162,7 +161,26 @@ export default class Mempool {
             }
         })
         await Chain.write("UPDATE mempool SET transactions = '" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")
+        return mempool
     }
 
+    // INFO Checking for double nonces for same address
+    public static async checkNonce(tx: Transaction, replace: boolean = true): Promise<MempoolData> {
+        let local_mempool = await Mempool.getMempool()
+        for (let i = 0; i < local_mempool.transactions.length; i++) {
+            let pooled_tx = local_mempool.transactions[i]
+            if (pooled_tx.content.from == pooled_tx.content.from) {
+                if (tx.content.nonce == tx.content.nonce) {
+                    if (replace) {
+                        local_mempool.transactions[i] = null
+                        await Chain.write("UPDATE mempool SET transactions = '" + JSON.stringify(local_mempool.transactions) + "' WHERE current = 1")
+                    }
+                }
+            }
+        }
+        
+        return local_mempool
+
+    }
 
 }
