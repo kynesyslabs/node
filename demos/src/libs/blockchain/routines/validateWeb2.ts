@@ -16,6 +16,4 @@ import Mempool from "../mempool"
 import { Web2Data } from "src/features/web2"
 
 // INFO Convalidating (attesting) a web2 data received from a peer
-export default async function convalidateWeb2(web2data: Web2Data) {
-
-}
+export default async function validateWeb2(web2data: Web2Data) {}

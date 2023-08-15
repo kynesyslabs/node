@@ -15,9 +15,12 @@ import executeTransaction from "./executeTransaction"
 import GLS from "../gls/gls"
 import { Operation } from "../gls/gls"
 import calculateCurrentGas from "./calculateCurrentGas"
- 
-// INFO Cryptographically convalidate a transaction, calculate gas and see if the execution is valid
-export default async function convalidateTransaction(type: string, request: any): Promise<Transaction> {
+
+// INFO Cryptographically validate a transaction, calculate gas and see if the execution is valid
+export default async function validateTransaction(
+    type: string,
+    request: any,
+): Promise<Transaction> {
     // Loading identity
     const id_ed25519 = await cryptography.load("./.demos_identity")
     let publicKey = Buffer.from(id_ed25519.publicKey.toString("hex"))

@@ -18,8 +18,8 @@ import Transmission from "src/libs/communications/transmission"
 import Mempool from "src/libs/blockchain/mempool"
 import chain from "src/libs/blockchain/chain"
 import { handlers as web2handlers } from "src/features/web2"
-import convalidateWeb2 from "../blockchain/routines/convalidateWeb2"
-import convalidateTransaction from "../blockchain/routines/convalidateTransaction"
+import validateWeb2 from "../blockchain/routines/validateWeb2"
+import validateTransaction from "../blockchain/routines/validateTransaction"
 import multichainDispatcher from "src/features/multichain/multichainDispatcher"
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 
@@ -100,7 +100,7 @@ export default class ServerListeners {
             if (content.type == "tx") {
                 require_reply = true // REVIEW Sure?
                 // Verify and execute the transaction
-                let validatedTx = await convalidateTransaction(
+                let validatedTx = await validateTransaction(
                     content.type,
                     content.message,
                 )
@@ -116,19 +116,23 @@ export default class ServerListeners {
                 // Response is then sent back automatically as a reply (with our validation)
             }
             // ANCHOR Crosschain endpoints
-            else if (content.type == "crosschain_operation" || content.type == "multichain_operation") {
+            else if (
+                content.type == "crosschain_operation" ||
+                content.type == "multichain_operation"
+            ) {
                 // NOTE Remember that crosschain operations are in chainscript syntax (see chainscript_example.ts)
                 response = await multichainDispatcher(content.data)
                 // TODO
-            }
-
-            else if (content.type == "crosschain_status" || content.type == "multichain_status") {
+            } else if (
+                content.type == "crosschain_status" ||
+                content.type == "multichain_status"
+            ) {
                 response = await multichainCapabilities()
             }
-            
+
             // ANCHOR Web2 endpoints
-            else if (content.type == "convalidate_web2") {
-                response = await convalidateWeb2(content.data)
+            else if (content.type == "validate_web2") {
+                response = await validateWeb2(content.data)
                 // TODO
             }
 
