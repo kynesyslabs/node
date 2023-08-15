@@ -50,12 +50,11 @@ export default class Transaction {
             data: [null, null],
             nonce: null,
             timestamp: null,
-            lock_fee: {
-                amount: null,
-                message: null,
-                signature: null,
-                identity: null,
-    
+            transaction_fee: {
+                network_fee: null,
+                rpc_fee: null,
+                additional_fee: null,
+
             },
         }
         this.signature = null

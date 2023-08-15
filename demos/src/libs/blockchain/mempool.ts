@@ -17,7 +17,9 @@ import PeerManager from "../peer/PeerManager"
 import buildProposedBlock from "./routines/buildProposedBlock"
 import Block from "./blocks"
 import Chain from "./chain"
-
+import Hashing from "../crypto/hashing"
+import Cryptography from "../crypto/cryptography"
+import { sha256 } from "node-forge"
 
 export interface MempoolData {
     number: number
@@ -71,20 +73,6 @@ export default class Mempool {
         await Chain.write("INSERT INTO mempool VALUES(" + next_number + ", 1, '[]', '{}')")
     }
 
-    public static async receive(mempool: MempoolData) {
-        // TODO Parse, verify and call merge
-        let success = await Mempool.merge(mempool)
-        return success
-    }
-
-    // INFO Merging the mempool received
-    private static async merge(received_mempool: MempoolData) {
-        let mempool = await Mempool.getMempool()
-        // Merge the mempool with our one
-        mempool.transactions.concat(received_mempool.transactions) // TODO Add double items checking
-        await Chain.write("UPDATE mempool SET transactions = '" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")
-    }
-
     /* TODO Representative Shard
 
     Deterministic group selection
@@ -98,4 +86,83 @@ export default class Mempool {
         let peerlist = PeerManager.getInstance().getPeers()
         // TODO For cycle sending mempool to peerlist
     }
+
+    // INFO Once receivinga mempool, we either merge or refuse it based on the following method ingesting it (first step)
+    public static async receive(mempool: MempoolData): Promise<boolean> {
+        // REVIEW and expand: parse, verify and call merge
+        // Basic features that must be identical to us
+        let local_mempool = await Mempool.getMempool()
+        // We need to have the same forecasted block number, of course
+        if (local_mempool.number != mempool.number) {
+            return false
+        }
+        // Checking all the txs one by one for the signatures
+        for (let i = 0; i < mempool.transactions.length; i++) {
+            let tx = mempool.transactions[i]
+            // NOTE Verifying the hash of the transaction
+            let tx_hash = tx.hash
+            console.log("[MEMPOOL VERIFICATION] Verifying the hash of the transaction: " + tx_hash)
+            let calculated_hash =  Hashing.sha256(JSON.stringify(tx.content))
+            if (calculated_hash!= tx_hash) {
+                console.log("[X] [MEMPOOL VERIFICATION] The hash of the transaction is invalid")
+                return false
+            }
+            console.log("[+] [MEMPOOL VERIFICATION] The hash of the transaction is valid")
+            // NOTE Verifying the signature against the verified hash using from as public key
+            console.log("[MEMPOOL VERIFICATION] Verifying the signature")
+            let signature = tx.signature
+            console.log("[MEMPOOL VERIFICATION] Signature: " + signature.toString("hex"))
+            let public_key = tx.content.from
+            console.log("[MEMPOOL VERIFICATION] Public key: " + public_key.toString("hex"))
+            let signature_valid = Cryptography.verify(tx_hash, signature, public_key)
+            if (!signature_valid) {
+                console.log("[X] [MEMPOOL VERIFICATION] The signature is invalid")
+                return false
+            }
+        }
+        console.log("[+] [MEMPOOL VERIFICATION] The signature is valid")
+        // If everything is fine, we can merge the mempool
+        console.log("[MEMPOOL MERGING] Merging the mempool")
+        let success = await Mempool.merge(mempool)
+        if (success) {
+            console.log("[+] [MEMPOOL MERGING] The mempool has been merged")
+        } else {
+            console.log("[X] [MEMPOOL MERGING] The mempool has not been merged")
+        }
+        return success
+    }
+
+    // INFO Merging the mempool received (second step)
+    private static async merge(received_mempool: MempoolData): Promise<boolean> {
+        let mempool = await Mempool.getMempool()
+        // REVIEW Checking and excluding duplicates
+        for (let i = 0; i < received_mempool.transactions.length; i++) {
+            let tx = received_mempool.transactions[i]
+            let index = mempool.transactions.indexOf(tx)
+            if (index!= -1) {
+                mempool.transactions.splice(index, 1)
+            }
+        }
+        // Merge the mempool with our one
+        mempool.transactions.concat(received_mempool.transactions)
+        await Chain.write("UPDATE mempool SET transactions = '" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")
+        return true
+    }
+
+    // INFO Sorting the mempool in place (final step)
+    private static async sort() {
+        let mempool = await Mempool.getMempool()
+        mempool.transactions.sort((tx1, tx2) => {
+            if (tx1.content.lock_fee > tx2.content.lock_fee) { // TODO lock_fee will be the bribe_fee or similar in the future
+                return -1
+            } else if (tx1.content.lock_fee < tx2.content.lock_fee) {
+                return 1
+            } else {
+                return 0
+            }
+        })
+        await Chain.write("UPDATE mempool SET transactions = '" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")
+    }
+
+
 }

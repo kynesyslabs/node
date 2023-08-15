@@ -49,7 +49,7 @@ export default async function chooseValidator(peers: Peer[]) {
             control =0
         }
     }
-    return peers[control] // Validator chosen
+    return peers[control] // Validator chosen aka Representative Shard
 }
 
 /* TODO Representative Shard

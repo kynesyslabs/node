@@ -20,12 +20,11 @@ export default async function buildProposedBlock(): Promise<Block>{
     let txs = mempool.transactions
     let ordered_txs: Transaction[]
     let per_user_txs: Map<string, Transaction[]>
-    // TODO Do stuff to sort per timestamp and so on
+    // Iterating through the transactions in the mempool to sort them and exclude invalid ones
     for (let i = 0; i < txs.length; i++) {
         console.log("Processing transaction " + txs[i].hash)
-        // TODO Order transactions by timestamp
-        // TODO Order transactions by address
-        // TODO If an address has two txs with the same nonce, the second replaces the first
+        // TODO Order transactions by rpc fee (aka divide gas fee in rpc and network)
+        // TODO If an address has two txs with the same nonce, the richest replaces the other
         // TODO In this case (the above one) ordered_txs will be updated to show the replaced status of the tx
     }
     // Setting the block content
