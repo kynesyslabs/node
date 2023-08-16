@@ -93,6 +93,10 @@ let demos = {
         })
         // NOTE Reply to comlink messages
         demos.socket.on("comlink_reply", function (reply) {
+            if (! reply.chain.current.currentMessage.bundle.content.message) {
+                console.log("[!] [DEMOS] Received a comlink_reply without a message!")
+                return
+            }
             let _muid = reply.muid
             console.log("[DEMOS] Received comlink_reply: " + _muid)
             if (demos.replies.needReply(_muid)) {
