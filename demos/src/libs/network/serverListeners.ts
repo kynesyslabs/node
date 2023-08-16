@@ -98,8 +98,8 @@ export default class ServerListeners {
             var extra: string = null
             var require_reply = false
 
-            // INFO Validation endpoint
-            if (content.type == "tx") {
+            // INFO Validation endpoint (labeled for easy break statements)
+            type_selector: if (content.type == "tx") {
                 require_reply = true // REVIEW Sure?
                 // Verify and execute the transaction
                 let validatedTx = await validateTransaction(
@@ -194,7 +194,16 @@ export default class ServerListeners {
                 console.log("[SERVER] Received consensus request")
                 if (!sharedState.getInstance().consensusMode) {
                     response = { "error": "We are not in consensus mode" }
+                    break type_selector
                 }
+                // TODO Check if once we are in consensus, we also are validators
+                let authorized = true
+                // TODO Check if we are a validator
+                if (!authorized) {
+                    response = { "error": "Not authorized" }
+                    break type_selector
+                }
+
                 let consensus_request: ConsensusRequest = content.message
                 let stage = consensus_request.stage // This is the stage of the consensus we are in and is a string representing the operation
                 switch (stage) {
