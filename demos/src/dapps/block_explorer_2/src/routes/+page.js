@@ -1,4 +1,7 @@
+/* eslint-disable no-unused-vars */
 import demos from '$lib/demos.js';
+import * as forge from "node-forge"
+
 export async function load ({params})
 {
     /*demos.connect(rpc);
@@ -27,6 +30,12 @@ export async function load ({params})
         inspectBlock(lastBlockNumber);
     }
     $:console.log(inspector);*/
+    // INFO Testing crypto capabilities
+    var md = forge.md.sha256.create();
+    md.update('The quick brown fox jumps over the lazy dog');
+    console.log(md.digest().toHex());
+    console.log("[crypto capabilities ready]")
+    // INFO Testing the rpc connection
     const rpc = "http://85.208.48.187:53550";
     let block;
     demos.connect(rpc);

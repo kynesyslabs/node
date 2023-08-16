@@ -24,6 +24,7 @@ This library contains all the functions that are used to interact with the demos
 
 // NOTE Including all in a class
 import io from "socket.io-client"
+import * as forge from "node-forge"
 
 let demos = {
     // ANCHOR Properties
@@ -221,6 +222,45 @@ let demos = {
         transmission.bundle.content.message = message
         transmission.bundle.content.data = args
         comlink.chain.current.currentMessage = transmission
+
+        // REVIEW Prior to sending the message, we hash and sign the comlink and the transmission objects
+        // Hashing the comlink current property
+        let stringifiedMessage = JSON.stringify(comlink.chain.current)
+        let digestor = forge.md.sha256.create()
+        digestor.update(stringifiedMessage)
+        let hashed =  digestor.digest().toHex()
+        console.log(hashed + " is the hashed version of comlink.chain.current")
+        comlink.chain.comlinkCurrentHash = hashed
+        // Signing the hash
+        // TODO Eliminate this: generating a random identity for the signature
+        let seed =forge.random.getBytesSync(32)
+        let keys = forge.pki.ed25519.generateKeyPair(seed)
+        let privkey = keys.privateKey
+        console.log(keys)
+        //console.log(keys.publicKey.toHex() + " is the public key of the signing key")
+        //console.log(keys.privateKey.toHex() + " is the private key of the signing key")
+        let signature = forge.pki.ed25519.sign({
+            message: hashed,
+            encoding: "utf8",
+            privateKey: privkey
+        })
+        console.log(signature.toString("hex") + " is the signature of the hashed version of comlink.chain.current")
+        comlink.chain.comlinkCurrentHashSignature = signature.toString("hex")
+        // NOTE Doing the same for the transmission object
+        let stringifiedTransmission = JSON.stringify(comlink.chain.current.currentMessage.bundle.content)
+        let t_digestor = forge.md.sha256.create()
+        t_digestor.update(stringifiedTransmission)
+        let t_hashed =  t_digestor.digest().toHex()
+        console.log(t_hashed + " is the hashed version of comlink.chain.current.currentMessage.bundle.content")
+        comlink.chain.current.currentMessage.bundle.hash = t_hashed
+        comlink.chain.current.currentMessageHash = t_hashed
+        // And signing it
+        signature = forge.pki.ed25519.sign({
+            message: t_hashed,
+            encoding: "utf8",
+            privateKey: privkey
+        })
+
         console.log(
             "Sending message " +
                 message +
@@ -229,6 +269,7 @@ let demos = {
         )
         // Registering the reply request
         demos.replies.waitReply(_muid)
+        console.log(comlink)
         demos.socket.emit("comlink", comlink)
         // Waiting for a reply
         return await demos.replies.checkReply(_muid)

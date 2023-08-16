@@ -173,12 +173,12 @@ export default class ComLink {
         let stringifiedMessage = JSON.stringify(_currentMessage.bundle.content)
         let _derivedMessageHash = Hashing.sha256(stringifiedMessage)
         if (!(_derivedMessageHash === _currentMessage.bundle.hash))
-            return [false, "comlink message hash mismatch"]
+            return [false, "comlink message hash mismatch: " + _derivedMessageHash]
         // Check if current hash matches the current field
         let stringifiedCurrent = JSON.stringify(this.chain.current)
         let _derivedCurrentHash = Hashing.sha256(stringifiedCurrent)
         if (!(_derivedCurrentHash === this.chain.comlinkCurrentHash))
-            return [false, "current hash mismatch"]
+            return [false, "current hash mismatch: " + _derivedCurrentHash]
         // Check if the comlink signature matches the comlink sender
         let _publicKey = Buffer.from(_currentMessage.bundle.content.sender) // REVIEW Isnt this useless now?
         let _signatureValidity = await Cryptography.verify(
