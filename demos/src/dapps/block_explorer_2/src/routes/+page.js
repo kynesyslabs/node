@@ -1,6 +1,8 @@
 /* eslint-disable no-unused-vars */
 import demos from '$lib/demos.js';
 import * as forge from "node-forge"
+import { sha256 } from "js-sha256"
+
 
 export async function load ({params})
 {
@@ -31,9 +33,9 @@ export async function load ({params})
     }
     $:console.log(inspector);*/
     // INFO Testing crypto capabilities
-    var md = forge.md.sha256.create();
+    var md = sha256.create();
     md.update('The quick brown fox jumps over the lazy dog');
-    console.log(md.digest().toHex());
+    console.log(md.hex());
     console.log("[crypto capabilities ready]")
     // INFO Testing the rpc connection
     const rpc = "http://85.208.48.187:53550";

@@ -24,7 +24,9 @@ This library contains all the functions that are used to interact with the demos
 
 // NOTE Including all in a class
 import io from "socket.io-client"
-import * as forge from "node-forge"
+import forge from "node-forge"
+const md = forge.md
+import { sha256 } from "js-sha256"
 
 let demos = {
     // ANCHOR Properties
@@ -234,9 +236,9 @@ let demos = {
         comlink.chain.current.currentMessage.bundle.content.sender = keys.publicKey
         // NOTE Doing the cryptography for the transmission object
         let stringifiedTransmission = JSON.stringify(comlink.chain.current.currentMessage.bundle.content)
-        let t_digestor = forge.md.sha256.create()
+        let t_digestor = sha256.create()
         t_digestor.update(stringifiedTransmission)
-        let t_hashed =  t_digestor.digest().toHex() // FIXME ??? Differs!
+        let t_hashed =  t_digestor.hex()
         console.log(t_hashed + " is the hashed version of comlink.chain.current.currentMessage.bundle.content")
         comlink.chain.current.currentMessage.bundle.hash = t_hashed
         comlink.chain.current.currentMessageHash = t_hashed
@@ -251,9 +253,9 @@ let demos = {
         
         // NOTE Also hashing the comlink current property
         let stringifiedMessage = JSON.stringify(comlink.chain.current)
-        let digestor = forge.md.sha256.create()
+        let digestor = sha256.create()
         digestor.update(stringifiedMessage)
-        let hashed =  digestor.digest().toHex()
+        let hashed =  digestor.hex()
         console.log(hashed + " is the hashed version of comlink.chain.current")
         comlink.chain.comlinkCurrentHash = hashed
         // Signing the hash
