@@ -224,7 +224,32 @@ let demos = {
         comlink.chain.current.currentMessage = transmission
 
         // REVIEW Prior to sending the message, we hash and sign the comlink and the transmission objects
-        // Hashing the comlink current property
+        
+        // TODO Eliminate this: generating a random identity for the signature
+        let seed =forge.random.getBytesSync(32)
+        let keys = forge.pki.ed25519.generateKeyPair(seed)
+        let privkey = keys.privateKey
+        console.log(keys)
+        // Signaling our identity
+        comlink.chain.current.currentMessage.bundle.content.sender = keys.publicKey
+        // NOTE Doing the cryptography for the transmission object
+        let stringifiedTransmission = JSON.stringify(comlink.chain.current.currentMessage.bundle.content)
+        let t_digestor = forge.md.sha256.create()
+        t_digestor.update(stringifiedTransmission)
+        let t_hashed =  t_digestor.digest().toHex() // FIXME ??? Differs!
+        console.log(t_hashed + " is the hashed version of comlink.chain.current.currentMessage.bundle.content")
+        comlink.chain.current.currentMessage.bundle.hash = t_hashed
+        comlink.chain.current.currentMessageHash = t_hashed
+        // And signing it
+        let t_signature = forge.pki.ed25519.sign({
+            message: t_hashed,
+            encoding: "utf8",
+            privateKey: privkey
+        })
+        console.log(t_signature.toString("hex") + " is the signature of the hashed version of comlink.chain.current.currentMessage.bundle.content")
+        comlink.chain.current.currentMessage.bundle.signature = t_signature
+        
+        // NOTE Also hashing the comlink current property
         let stringifiedMessage = JSON.stringify(comlink.chain.current)
         let digestor = forge.md.sha256.create()
         digestor.update(stringifiedMessage)
@@ -232,11 +257,6 @@ let demos = {
         console.log(hashed + " is the hashed version of comlink.chain.current")
         comlink.chain.comlinkCurrentHash = hashed
         // Signing the hash
-        // TODO Eliminate this: generating a random identity for the signature
-        let seed =forge.random.getBytesSync(32)
-        let keys = forge.pki.ed25519.generateKeyPair(seed)
-        let privkey = keys.privateKey
-        console.log(keys)
         //console.log(keys.publicKey.toHex() + " is the public key of the signing key")
         //console.log(keys.privateKey.toHex() + " is the private key of the signing key")
         let signature = forge.pki.ed25519.sign({
@@ -245,21 +265,7 @@ let demos = {
             privateKey: privkey
         })
         console.log(signature.toString("hex") + " is the signature of the hashed version of comlink.chain.current")
-        comlink.chain.comlinkCurrentHashSignature = signature.toString("hex")
-        // NOTE Doing the same for the transmission object
-        let stringifiedTransmission = JSON.stringify(comlink.chain.current.currentMessage.bundle.content)
-        let t_digestor = forge.md.sha256.create()
-        t_digestor.update(stringifiedTransmission)
-        let t_hashed =  t_digestor.digest().toHex()
-        console.log(t_hashed + " is the hashed version of comlink.chain.current.currentMessage.bundle.content")
-        comlink.chain.current.currentMessage.bundle.hash = t_hashed
-        comlink.chain.current.currentMessageHash = t_hashed
-        // And signing it
-        signature = forge.pki.ed25519.sign({
-            message: t_hashed,
-            encoding: "utf8",
-            privateKey: privkey
-        })
+        comlink.chain.comlinkCurrentHashSignature = signature // FIXME TypeError in comlink.ts
 
         console.log(
             "Sending message " +
