@@ -17,26 +17,19 @@ This library contains all the functions that are used to interact with the demos
 /* NOTE Libraries Required
  - https://cdn.jsdelivr.net/npm/node-forge@1.3.1/lib/index.min.js
  - https://cdn.socket.io/4.6.0/socket.io.min.js
- - https://cdn.jsdelivr.net/npm/js-sha256@0.9.0/src/sha256.min.js
 */
 
 /* eslint-disable no-unused-vars */
 /* eslint-disable no-undef */
 
 // NOTE Including all in a class
-//import io from "socket.io-client"
+import io from "socket.io-client"
 
 let demos = {
     // ANCHOR Properties
-    socket: null, // Socket.io connection
-    connected: false, // Boolean to check if the connection is established
-    registry: {}, // Registry of muids to replies
-    identity: null, // Checking if the user is authorized or not on the chain
-
-    // INFO Giving the user the list of keys of the demos object
-    capabilities: () => { 
-        return Objects.keys(capabilities)
-    },
+    socket: null,
+    connected: false,
+    registry: {},
 
     // SECTION Registry
     replies: {
@@ -78,8 +71,6 @@ let demos = {
     // !SECTION Registry
 
     // SECTION Connection and listeners
-
-    // INFO Connect to the demos blockchain
     connect: function (rpc_url) {
         demos.socket = io.connect(rpc_url, {
             extraHeaders: {
@@ -117,32 +108,6 @@ let demos = {
             console.log(data)
         })
     },
-
-    // INFO This method load an identity and attach it to our demos object
-    attach(private_key=null, path=null) {
-        if (!this.connected) { throw new Error("[ERROR] We are not connected") }
-        if (!private_key && !path) { throw new Error("[ERROR] You must provide a private key or a path") }
-        if (private_key && path) { throw new Error("[ERROR] You can't provide both a private key and a path") }
-        // Loading identity through a private key
-        if (private_key) {
-            let private_key_buffer = Buffer.from(private_key, "hex") // REVIEW Is this working?
-            this.identity = {
-                privateKey: private_key_buffer,
-                publicKey: forge.pki.ed25519.publicKeyFromPrivateKey({
-                    privateKey: private_key_buffer,
-                }),
-            }
-        }
-        // Or through a path 
-        else {
-            keypair.privateKey = Buffer.from(JSON.parse(pem))
-            keypair.publicKey = pki.ed25519.publicKeyFromPrivateKey({
-                privateKey: keypair.privateKey,
-            })
-            // TODO: Load the private key from a file
-            throw new Error("[ERROR] You must provide a private key as path is not implemented yet")
-        }
-    },
     // !SECTION Connection and listeners
 
     // INFO MUID generator
@@ -160,10 +125,10 @@ let demos = {
     // SECTION NodeCall prototype
     // INFO NodeCalls use the same structure
     nodeCall: async function (message, args = {}) {
-        if (!demos.socket.connected) {
+        /*if (!demos.socket.connected) {
             console.log("[ERROR] We are disconnected")
             return
-        }
+        }*/
         let _muid = demos.generateMuid()
         let comlink = {
             muid: _muid,
@@ -198,6 +163,61 @@ let demos = {
             signature: null,
         }
         transmission.bundle.content.type = "nodeCall"
+        transmission.bundle.content.message = message
+        transmission.bundle.content.data = args
+        comlink.chain.current.currentMessage = transmission
+        console.log(
+            "Sending message " +
+                message +
+                " to server with muid: " +
+                comlink.muid,
+        )
+        // Registering the reply request
+        demos.replies.waitReply(_muid)
+        demos.socket.emit("comlink", comlink)
+        // Waiting for a reply
+        return await demos.replies.checkReply(_muid)
+    },
+    // INFO NodeCalls use the same structure
+    call: async function (type, message, args = {}) {
+        /*if (!demos.socket.connected) {
+            console.log("[ERROR] We are disconnected")
+            return
+        }*/
+        let _muid = demos.generateMuid()
+        let comlink = {
+            muid: _muid,
+            properties: {
+                connection_string: null, // NOTE We don't have a connection_string as we are clients
+                require_reply: true,
+                is_reply: false,
+            },
+            chain: {
+                current: {
+                    currentMessage: null,
+                    currentMessageHash: null,
+                    previousHashes: [], // Keep track of the previous hashes to have full integrity
+                },
+                comlinkCurrentHash: null, // is the hashed version of .current
+                comlinkCurrentHashSignature: null, // is the signature of the hashed version of.current
+            },
+        }
+        let transmission = {
+            bundle: {
+                content: {
+                    type: null,
+                    message: null,
+                    sender: null,
+                    receiver: null,
+                    timestamp: null,
+                    data: null,
+                    extra: null,
+                },
+            },
+            hash: null,
+            signature: null,
+        }
+        transmission.bundle.content.type = type
         transmission.bundle.content.message = message
         transmission.bundle.content.data = args
         comlink.chain.current.currentMessage = transmission
@@ -253,8 +273,9 @@ let demos = {
     },
 
     // INFO Web2 Endpoints
-    getWeb2Data: async function (url="https://apple.com/robots.txt") {
-        return await demos.nodeCall("web2Request", {
+    getWeb2Data: async function (url = "https://apple.com/robots.txt") {
+        console.log("[DEMOS] Requesting url: " + url)
+        return await demos.call("web2Request", {
             action: "getUrl",
             httpVerb: "GET",
             url: url,
@@ -277,16 +298,9 @@ let demos = {
     crosschain: {
         // INFO Executing a precompiled multichain operation
         execute: async function (multichain_operation) {
-            // Let's be sure that we have all the fields
-            // TODO Sanity check please
-            let thisOperation = demos.skeletons.multichain_operation
-            thisOperation = multichain_operation
             let response = await demos.nodeCall("crosschain_operation", {multichain_operation})
             response = JSON.parse(response)
             return response
-        },
-        capabilities: async function () {
-            return await demos.nodeCall("crosschain_status")
         },
     },
     // !SECTION Crosschain support endpoints
@@ -295,16 +309,13 @@ let demos = {
     transactions: {
         prepare: async function (data) {
             let thisTx = demos.skeletons.transaction
-            // TODO: Sanity checks based on types
+            // TODO: Implement
             thisTx.content = data
             return thisTx
         },
         sign: async function (raw_tx, private_key) {
-            let raw_content = JSON.stringify(raw_tx.content)
-            let digest = sha256.create()
-            digest.update(raw_content)
-            hash = Buffer.from(digest.hex()) // REVIEW is this working?
-            raw_tx.signature = forge.pki.ed25519.sign(hash, private_key) // REVIEW if it is working right
+        // TODO: Implement
+            raw_tx.signature = forge.pki.ed25519.sign(raw_tx.content, private_key) // REVIEW if it is working right
             return raw_tx
         },
         broadcast: async function (signed_tx) {
@@ -319,7 +330,6 @@ let demos = {
     // INFO Calling demos.skeletons.NAME provides an empty skeleton that can be used for reference while calling other demos functions
     // SECTION Objects skeletons
     skeletons: {
-
         // INFO An empty transaction
         transaction: {
             content: {
@@ -337,20 +347,9 @@ let demos = {
             confirmations: [], // Confirmation[]
             state_changes: [], // StateChange[] 
         },
-
         // INFO An empty crosschain operation object
         crosschain_operation: {
-            // NOTE Implemented as specified in multichainDispatcher.js
-            content: {
-                type: "", // "read" | "write",
-                chain: "", // REVIEW Force check on the chain availability?
-                operation: "", // TODO This will be called by the multichain object based on its keys
-                parameters: [{
-                    key: "",
-                    value: ""}],
-            },
-            hash: "",
-            signature: null, // forge.pki.ed25519.BinaryBuffer
+            // TODO Implement as specified in multichainDispatcher.js if any
         },
     },
     // !SECTION Objects skeletons
