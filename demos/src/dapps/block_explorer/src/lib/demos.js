@@ -322,7 +322,7 @@ let demos = {
         },
         broadcast: async function (signed_tx) {
         // TODO: Implement
-            return await demos.nodeCall("tx", {
+            return await demos.call("tx", {
                 tx: signed_tx,
             }) // And review
         },
