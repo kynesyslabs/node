@@ -3,6 +3,7 @@
     import { faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons';
     import video from "$lib/assets/videos/morph-bg.mp4";
     import { goto } from '$app/navigation';
+    import '$lib/global.css';
 
     function onSearch(hash)
     {
@@ -47,6 +48,8 @@
     .inputElement{
         width: calc(100% - 50px);
         border-radius: var(--border-radius) 0 0 var(--border-radius);
+        font-size: 1.4rem;
+        margin: auto;
     }
     .inputButton{
         background-color: var(--accent);
