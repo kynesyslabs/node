@@ -32,6 +32,7 @@ export default async function validateTransaction(
     tx.hash = request.tx.hash
     tx.confirmations = request.tx.confirmations
     tx.state_changes = request.tx.state_changes
+    tx.content.transaction_fee = request.tx.content.transaction_fee
     // NOTE Charge the gas for the transaction
     let from = request.tx.from.toString("hex")
     let fromBalance = await GLS.getGLSNativeBalance(from)
@@ -47,6 +48,8 @@ export default async function validateTransaction(
         hash: tx.hash,
         nonce: tx.content.nonce,
         timestamp: tx.content.timestamp,
+        status: "pending",
+        fees: tx.content.transaction_fee,
     }
     GLS.getInstance().operations.push(operation)
     // Verify tx validity

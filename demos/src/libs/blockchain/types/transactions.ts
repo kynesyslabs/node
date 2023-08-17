@@ -13,7 +13,7 @@ import forge, { pki } from "node-forge"
 import { networks } from "bitcoinjs-lib"
 
 
-interface TxFee {
+export interface TxFee {
     network_fee: null,
     rpc_fee: null,
     additional_fee: null

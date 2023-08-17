@@ -119,7 +119,7 @@ export default class Chain {
         return tx
     }
 
-    // INFO Giving back all the properties of an address
+    // REVIEW Giving back all the properties of an address
     static async getAddressInfo(address: string): Promise<any> {
         return await Chain.read("SELECT * FROM addresses WHERE address = '" + address + "'")
     }

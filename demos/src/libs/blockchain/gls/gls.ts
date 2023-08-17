@@ -13,6 +13,7 @@ import Chain from "../chain"
 import Token from "./types/Token"
 import NFT from "./types/NFT"
 import * as express from "express"
+import { TxFee } from "../types/transactions"
 
 interface OperationResult {
     success: boolean;
@@ -26,6 +27,8 @@ export interface Operation {
     hash: string;
     nonce: number;
     timestamp: number;
+    status: boolean | "pending";
+    fees: TxFee;
 }
 
 // INFO Besides the static methods, the GLS store all the operations to be done in the current block so that they can be executed in order
@@ -45,15 +48,23 @@ export default class GLS {
         return this.instance
     }
 
-    // ANCHOR Execute operations
-    executeOperations(): OperationResult {
-        let result: OperationResult
+    // ANCHOR Execute operations and merge GLS registry into the chain based on the status
+    executeOperations(): Map <Operation, OperationResult> {
+        let results: Map <Operation, OperationResult> = new Map()
         for (let i = 0; i < this.operations.length; i++) {
             let hash = this.operations[i].hash
+            let error = "no error occurred"
+            let valid = true // Until proven otherwise
             // TODO Implement nonce and timestamp verification to execute a transaction
+            // TODO Here we will have to build a complex temporary registry divided by addresses to check things
+            this.operations[i].status = valid
+            results.set(this.operations[i], {
+                success: valid,
+                message: valid? "Transaction executed" : "Transaction failed due to: " + error,
+            })
         }
-        // TODO Apply the operations and return the success and message for each operation
-        return result
+        // Returns the success and message for each operation
+        return results
     }
 
     // SECTION Getters

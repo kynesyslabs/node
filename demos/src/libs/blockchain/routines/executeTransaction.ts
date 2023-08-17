@@ -53,6 +53,8 @@ export default async function executeTransaction(transaction: Transaction): Prom
             hash: transaction.hash,
             nonce: transaction.content.nonce,
             timestamp: transaction.content.timestamp,
+            status: "pending",
+            fees: transaction.content.transaction_fee,
         }
         GLS.getInstance().operations.push(operation)
         // Subtract value from sender's balance
@@ -63,6 +65,8 @@ export default async function executeTransaction(transaction: Transaction): Prom
             hash: transaction.hash,
             nonce: transaction.content.nonce,
             timestamp: transaction.content.timestamp,
+            status: "pending",
+            fees: transaction.content.transaction_fee,
         }
         GLS.getInstance().operations.push(operation)
         success = true

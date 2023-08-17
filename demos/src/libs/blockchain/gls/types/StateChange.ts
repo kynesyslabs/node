@@ -9,7 +9,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import forge from 'node-forge';
+import forge from "node-forge"
 
 interface TokenTransfer {
 	address: string
