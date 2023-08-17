@@ -86,6 +86,11 @@
         font-weight: bold;
     }
 
+    .tab-selected-background{
+        background-color: var(--accent);
+        width: 100%;
+    }
+
     .tab-label{
         margin: 0;
         padding: 12px 0;
@@ -204,10 +209,11 @@
     </div>
     <div class="tab-container-container">
     <div class="tab-container">
-        <div role={`Block info tab ${selectedTab==0?"(selected)":""}`} on:click={()=>{changeTab(0)}} class={`tab ${selectedTab==0?"tab-selected":""}`}>
+        <div></div>
+        <div role={`Block info tab ${selectedTab==0?"(selected)":""}`} on:click={()=>{changeTab(0)}} class={`color-transition tab ${selectedTab==0?"tab-selected":""}`}>
             <p class="tab-label">BLOCK INFO</p>
         </div>
-        <div role={`Transaction tab ${selectedTab==1?"(selected)":""}`} on:click={()=>{changeTab(1)}} class={`tab ${selectedTab==1?"tab-selected":""}`}>
+        <div role={`Transaction tab ${selectedTab==1?"(selected)":""}`} on:click={()=>{changeTab(1)}} class={`color-transition tab ${selectedTab==1?"tab-selected":""}`}>
             <p class="tab-label">TRANSACTIONS</p>
         </div>
     </div>

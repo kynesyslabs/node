@@ -6,6 +6,7 @@
 }
 
 
+
 /*ELEMENTS*/
 
 a{
@@ -61,7 +62,6 @@ input::placeholder{
 button{
     border: none;
 }
-
 @font-face {
     font-family: 'Neue Machina';
     src: url('/nm/NeueMachina-Light.otf');
@@ -94,6 +94,9 @@ button{
     overflow: hidden;
     text-overflow: ellipsis;
 }
+.color-transition{
+    transition: background-color .2s ease-in-out, color .2s ease-in-out;
+}
 
 /* COMPONENTS */
 .card{
@@ -122,7 +125,8 @@ button{
   
 /* Tooltip text */
 .tooltip .tooltiptext {
-    visibility: hidden;
+    opacity: 0;
+    transition: opacity .2s ease-in-out;
     width: 120px;
     background-color: black;
     color: #fff;
@@ -135,11 +139,13 @@ button{
     bottom: calc(100% + 8px);
     left: 50%;
     margin-left: -60px; /* Use half of the width (120/2 = 60), to center the tooltip */
+    pointer-events: none;
+
 }
   
 /* Show the tooltip text when you mouse over the tooltip container */
   .tooltip:hover .tooltiptext {
-    visibility: visible;
+    opacity: 1;
 }
 .tooltip .tooltiptext::after {
     content: " ";

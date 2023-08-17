@@ -1,20 +1,17 @@
 <script>
     export let options;
     export let value;
+    export let onChange;
 	import { faCheck, faChevronDown, faPray } from "@fortawesome/free-solid-svg-icons";
     import Fa from "svelte-fa";
     let open = false;
-    import { fade, scale } from 'svelte/transition';
-    import { cubicInOut, elasticInOut, elasticOut, quadInOut } from 'svelte/easing';
+    import { cubicInOut } from 'svelte/easing';
     import {clickOutside} from '$lib/eventhandlers/clickOutside.js'
 
-    function customAnimation(node, { delay, duration, easing, x, y, opacity }) {
+    function customAnimation(node, {duration, easing}) {
         return {
-            delay,
-            duration,
-            easing,
             css: t => {
-                const eased = cubicInOut(t);
+                const eased = easing(t);
                 return `
                     transform: scaleY(${eased}) translateY(-50%);
                     opacity: ${eased};
@@ -22,6 +19,12 @@
                 );`;
             }
         };
+    }
+
+    function handleChange(newvalue)
+    {
+        value=newvalue;
+        onChange(newvalue);
     }
 </script>
 <style>
@@ -55,11 +58,15 @@
     }
 </style>
 <div use:clickOutside role={`Select element`} on:click={()=>{open=!open}} on:click_outside={()=>{open=false}} class="combobox">
-    {options.find((o)=>o.id===value).label}<Fa icon={faChevronDown}></Fa>
+    {#if options.find(o=>o.id===value)}
+        {options.find((o)=>o.id===value).label}<Fa icon={faChevronDown}></Fa>
+    {:else}
+        <p style="margin:0;opacity:.5">Select option</p><Fa icon={faChevronDown}></Fa>
+    {/if}
     {#if open}
-    <div transition:customAnimation={{duration:400, easing:quadInOut}} class="combobox-dialog">
+    <div transition:customAnimation={{duration:350, easing:cubicInOut}} class="combobox-dialog">
         {#each options as option, i}
-            <div role={`Element`} class="combobox-option" style={`border-radius:${i==options.length-1?"0 0 var(--border-radius) var(--border-radius)":i==0?"var(--border-radius) var(--border-radius) 0 0":"0"}`} on:click={()=>{value=option.id}}>
+            <div role={`Element`} class="combobox-option" style={`border-radius:${i==options.length-1?"0 0 var(--border-radius) var(--border-radius)":i==0?"var(--border-radius) var(--border-radius) 0 0":"0"}`} on:click={()=>{handleChange(option.id)}}>
                 {#if option.id===value}
                 <Fa icon={faCheck}></Fa>
                 {:else}

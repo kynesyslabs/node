@@ -121,7 +121,7 @@
             </div>
         {/each}
         <a href="/blocks">
-            <div class="card-footer">
+            <div class="card-footer color-transition">
                 View all blocks<Fa style="position:relative;top:2px;margin-left:8px" icon={faArrowRightLong}></Fa>
             </div>
         </a>
@@ -149,7 +149,7 @@
         </div>
         {/each}
         <a href="/transactions">
-            <div class="card-footer">
+            <div class="card-footer color-transition">
                 View all transactions<Fa style="position:relative;top:2px;margin-left:8px" icon={faArrowRightLong}></Fa>
             </div>
         </a>
