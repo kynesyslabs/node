@@ -24,8 +24,9 @@ This library contains all the functions that are used to interact with the demos
 
 // NOTE Including all in a class
 import io from "socket.io-client"
-import * as forge from "node-forge"
+import forge from "node-forge"
 const md = forge.md
+import { sha256 } from "js-sha256"
 
 let demos = {
     // ANCHOR Properties
@@ -92,6 +93,10 @@ let demos = {
         })
         // NOTE Reply to comlink messages
         demos.socket.on("comlink_reply", function (reply) {
+            if (! reply.chain.current.currentMessage.bundle.content.message) {
+                console.log("[!] [DEMOS] Received a comlink_reply without a message!")
+                return
+            }
             let _muid = reply.muid
             console.log("[DEMOS] Received comlink_reply: " + _muid)
             if (demos.replies.needReply(_muid)) {
@@ -127,58 +132,7 @@ let demos = {
     // SECTION NodeCall prototype
     // INFO NodeCalls use the same structure
     nodeCall: async function (message, args = {}) {
-        /*if (!demos.socket.connected) {
-            console.log("[ERROR] We are disconnected")
-            return
-        }*/
-        let _muid = demos.generateMuid()
-        let comlink = {
-            muid: _muid,
-            properties: {
-                connection_string: null, // NOTE We don't have a connection_string as we are clients
-                require_reply: true,
-                is_reply: false,
-            },
-            chain: {
-                current: {
-                    currentMessage: null,
-                    currentMessageHash: null,
-                    previousHashes: [], // Keep track of the previous hashes to have full integrity
-                },
-                comlinkCurrentHash: null, // is the hashed version of .current
-                comlinkCurrentHashSignature: null, // is the signature of the hashed version of.current
-            },
-        }
-        let transmission = {
-            bundle: {
-                content: {
-                    type: null,
-                    message: null,
-                    sender: null,
-                    receiver: null,
-                    timestamp: null,
-                    data: null,
-                    extra: null,
-                },
-            },
-            hash: null,
-            signature: null,
-        }
-        transmission.bundle.content.type = "nodeCall"
-        transmission.bundle.content.message = message
-        transmission.bundle.content.data = args
-        comlink.chain.current.currentMessage = transmission
-        console.log(
-            "Sending message " +
-                message +
-                " to server with muid: " +
-                comlink.muid,
-        )
-        // Registering the reply request
-        demos.replies.waitReply(_muid)
-        demos.socket.emit("comlink", comlink)
-        // Waiting for a reply
-        return await demos.replies.checkReply(_muid)
+        return await demos.call("nodeCall", message, args)
     },
     // INFO NodeCalls use the same structure
     call: async function (type, message, args = {}) {
@@ -235,9 +189,9 @@ let demos = {
         comlink.chain.current.currentMessage.bundle.content.sender = keys.publicKey
         // NOTE Doing the cryptography for the transmission object
         let stringifiedTransmission = JSON.stringify(comlink.chain.current.currentMessage.bundle.content)
-        let t_digestor = md.sha256.create()
+        let t_digestor = sha256.create()
         t_digestor.update(stringifiedTransmission)
-        let t_hashed =  t_digestor.digest().toHex() // FIXME ??? Differs!
+        let t_hashed =  t_digestor.hex()
         console.log(t_hashed + " is the hashed version of comlink.chain.current.currentMessage.bundle.content")
         comlink.chain.current.currentMessage.bundle.hash = t_hashed
         comlink.chain.current.currentMessageHash = t_hashed
@@ -245,16 +199,16 @@ let demos = {
         let t_signature = forge.pki.ed25519.sign({
             message: t_hashed,
             encoding: "utf8",
-            privateKey: privkey,
+            privateKey: privkey
         })
         console.log(t_signature.toString("hex") + " is the signature of the hashed version of comlink.chain.current.currentMessage.bundle.content")
         comlink.chain.current.currentMessage.bundle.signature = t_signature
         
         // NOTE Also hashing the comlink current property
         let stringifiedMessage = JSON.stringify(comlink.chain.current)
-        let digestor = md.sha256.create()
+        let digestor = sha256.create()
         digestor.update(stringifiedMessage)
-        let hashed =  digestor.digest().toHex()
+        let hashed =  digestor.hex()
         console.log(hashed + " is the hashed version of comlink.chain.current")
         comlink.chain.comlinkCurrentHash = hashed
         // Signing the hash
@@ -263,7 +217,7 @@ let demos = {
         let signature = forge.pki.ed25519.sign({
             message: hashed,
             encoding: "utf8",
-            privateKey: privkey,
+            privateKey: privkey
         })
         console.log(signature.toString("hex") + " is the signature of the hashed version of comlink.chain.current")
         comlink.chain.comlinkCurrentHashSignature = signature // FIXME TypeError in comlink.ts
@@ -284,14 +238,6 @@ let demos = {
     // !SECTION NodeCall prototype
 
     // SECTION Predefined calls
-    getMultichainStatus: async function () {    // TODO Test it with davide
-        return await demos.call("crosschain_status", "")
-    },
-
-    multichainExecution: async function (message) {     // TODO Test it with davide
-        return await demos.call("crosschain_operation",  message)
-    },
-
     getLastBlockNumber: async function () {
         return await demos.nodeCall("getLastBlockNumber")
     },
@@ -316,7 +262,7 @@ let demos = {
         console.log(typeof block)
         return block
     },
-
+    // TODO Test it with davide
     getTxByHash: async function (txHash="e25860ec6a7cccff0371091fed3a4c6839b1231ccec8cf2cb36eca3533af8f11") {
         // Defaulting to the genesis tx of course
         let tx = await demos.nodeCall("getTxByHash", {
@@ -329,14 +275,14 @@ let demos = {
     },
 
     // INFO Web2 Endpoints
-    getWeb2Data: async function (url = "https://apple.com/robots.txt") {     // TODO Test it with davide
+    getWeb2Data: async function (url = "https://apple.com/robots.txt") {
         console.log("[DEMOS] Requesting url: " + url)
         return await demos.call("web2Request", {
             action: "getUrl",
             httpVerb: "GET",
             url: url,
             headers: "",
-        })
+        });
     },
 
     getPeerlist: async function () {

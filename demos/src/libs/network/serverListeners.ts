@@ -332,7 +332,18 @@ export default class ServerListeners {
                         response =
                             "I am " + id_ed25519.publicKey.toString("hex")
                         break
+
+                    // INFO Address info endpoint
+                    case "getAddressInfo":
+                        if (!data.address) {
+                            _receiver.emit("public", {
+                                error: "No address specified",
+                            })
+                        }
+                        response = await chain.getAddressInfo(data.address)
+                        break
                 }
+
             }
             // INFO Default
             else {

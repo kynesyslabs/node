@@ -118,7 +118,14 @@ export default class Chain {
         // TODO Would be nice to fit it into a Transaction object
         return tx
     }
+
+    // INFO Giving back all the properties of an address
+    static async getAddressInfo(address: string): Promise<any> {
+        return await Chain.read("SELECT * FROM addresses WHERE address = '" + address + "'")
+    }
+
     // TODO Implement the rest of the db schema for the chain
+
     // !SECTION Getters
 
     // SECTION  Setters

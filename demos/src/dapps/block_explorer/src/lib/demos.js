@@ -132,58 +132,7 @@ let demos = {
     // SECTION NodeCall prototype
     // INFO NodeCalls use the same structure
     nodeCall: async function (message, args = {}) {
-        /*if (!demos.socket.connected) {
-            console.log("[ERROR] We are disconnected")
-            return
-        }*/
-        let _muid = demos.generateMuid()
-        let comlink = {
-            muid: _muid,
-            properties: {
-                connection_string: null, // NOTE We don't have a connection_string as we are clients
-                require_reply: true,
-                is_reply: false,
-            },
-            chain: {
-                current: {
-                    currentMessage: null,
-                    currentMessageHash: null,
-                    previousHashes: [], // Keep track of the previous hashes to have full integrity
-                },
-                comlinkCurrentHash: null, // is the hashed version of .current
-                comlinkCurrentHashSignature: null, // is the signature of the hashed version of.current
-            },
-        }
-        let transmission = {
-            bundle: {
-                content: {
-                    type: null,
-                    message: null,
-                    sender: null,
-                    receiver: null,
-                    timestamp: null,
-                    data: null,
-                    extra: null,
-                },
-            },
-            hash: null,
-            signature: null,
-        }
-        transmission.bundle.content.type = "nodeCall"
-        transmission.bundle.content.message = message
-        transmission.bundle.content.data = args
-        comlink.chain.current.currentMessage = transmission
-        console.log(
-            "Sending message " +
-                message +
-                " to server with muid: " +
-                comlink.muid,
-        )
-        // Registering the reply request
-        demos.replies.waitReply(_muid)
-        demos.socket.emit("comlink", comlink)
-        // Waiting for a reply
-        return await demos.replies.checkReply(_muid)
+        return await demos.call("nodeCall", message, args)
     },
     // INFO NodeCalls use the same structure
     call: async function (type, message, args = {}) {
