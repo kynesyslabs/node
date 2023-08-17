@@ -284,6 +284,14 @@ let demos = {
     // !SECTION NodeCall prototype
 
     // SECTION Predefined calls
+    getMultichainStatus: async function () {    // TODO Test it with davide
+        return await demos.call("crosschain_status", "")
+    },
+
+    multichainExecution: async function (message) {     // TODO Test it with davide
+        return await demos.call("crosschain_operation",  message)
+    },
+
     getLastBlockNumber: async function () {
         return await demos.nodeCall("getLastBlockNumber")
     },
@@ -308,7 +316,7 @@ let demos = {
         console.log(typeof block)
         return block
     },
-    // TODO Test it with davide
+
     getTxByHash: async function (txHash="e25860ec6a7cccff0371091fed3a4c6839b1231ccec8cf2cb36eca3533af8f11") {
         // Defaulting to the genesis tx of course
         let tx = await demos.nodeCall("getTxByHash", {
@@ -321,7 +329,7 @@ let demos = {
     },
 
     // INFO Web2 Endpoints
-    getWeb2Data: async function (url = "https://apple.com/robots.txt") {
+    getWeb2Data: async function (url = "https://apple.com/robots.txt") {     // TODO Test it with davide
         console.log("[DEMOS] Requesting url: " + url)
         return await demos.call("web2Request", {
             action: "getUrl",
