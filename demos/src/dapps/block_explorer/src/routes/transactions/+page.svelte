@@ -13,7 +13,6 @@
         display: flex;
         align-items: center;
         gap: 16px;
-        background-color: #252525;
         border-bottom: 0;
     }
 
@@ -24,7 +23,7 @@
     .card-footer{
         padding: 16px;
         text-align: center;
-        background-color: #252525;
+        background-color: var(--header-color);
         font-weight: bold;
         color: white;
         border-radius: 0 0 var(--border-radius) var(--border-radius);
@@ -61,7 +60,7 @@
     }
 
     .grid-header-row{
-        background-color: #252525;
+        background-color: var(--header-color);
     }
 
     .grid-header-label{

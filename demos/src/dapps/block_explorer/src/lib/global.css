@@ -2,6 +2,7 @@
     --accent:#0a84ff;
     --accent-accessible:rgb(64, 156, 255);
     --border-color: #303030;
+    --header-color: #303030;
     --border-radius: 8px;
 }
 
@@ -110,11 +111,8 @@ button{
     border-bottom: 1px solid var(--border-color);
     padding: 16px;
     margin: 0;
-    background-color: #252525;
-}
-
-.combobox{
-
+    background-color: var(--header-color);
+    border-radius: var(--border-radius) var(--border-radius) 0 0;
 }
 
 /* Tooltip container */

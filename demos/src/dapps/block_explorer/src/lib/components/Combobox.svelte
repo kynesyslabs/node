@@ -2,6 +2,7 @@
     export let options;
     export let value;
     export let onChange;
+    export let style;
 	import { faCheck, faChevronDown, faPray } from "@fortawesome/free-solid-svg-icons";
     import Fa from "svelte-fa";
     let open = false;
@@ -42,7 +43,7 @@
         width: 100%;
         border-radius: var(--border-radius);
         box-shadow: var(--box-shadow);
-        z-index: 1;
+        z-index: 100;
         transform: translateY(-50%);
         background-color: #505050;
     }
@@ -57,7 +58,7 @@
         background-color: var(--accent);
     }
 </style>
-<div use:clickOutside role={`Select element`} on:click={()=>{open=!open}} on:click_outside={()=>{open=false}} class="combobox">
+<div use:clickOutside role={`Select element`} on:click={()=>{open=!open}} on:click_outside={()=>{open=false}} style={style} class="combobox">
     {#if options.find(o=>o.id===value)}
         {options.find((o)=>o.id===value).label}<Fa icon={faChevronDown}></Fa>
     {:else}

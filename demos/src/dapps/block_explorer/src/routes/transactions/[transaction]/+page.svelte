@@ -64,7 +64,7 @@
         display: flex;
         align-items: center;
         gap: 16px;
-        background-color: #252525;
+        background-color: var(--header-color);
     }
 
     .block-header{
