@@ -199,7 +199,7 @@ let demos = {
         let t_signature = forge.pki.ed25519.sign({
             message: t_hashed,
             encoding: "utf8",
-            privateKey: privkey
+            privateKey: privkey,
         })
         console.log(t_signature.toString("hex") + " is the signature of the hashed version of comlink.chain.current.currentMessage.bundle.content")
         comlink.chain.current.currentMessage.bundle.signature = t_signature
@@ -217,7 +217,7 @@ let demos = {
         let signature = forge.pki.ed25519.sign({
             message: hashed,
             encoding: "utf8",
-            privateKey: privkey
+            privateKey: privkey,
         })
         console.log(signature.toString("hex") + " is the signature of the hashed version of comlink.chain.current")
         comlink.chain.comlinkCurrentHashSignature = signature // FIXME TypeError in comlink.ts
@@ -282,7 +282,7 @@ let demos = {
             httpVerb: "GET",
             url: url,
             headers: "",
-        });
+        })
     },
 
     getPeerlist: async function () {
@@ -293,6 +293,12 @@ let demos = {
     },
     getPeerIdentity: async function () {
         return await demos.nodeCall("getPeerIdentity")
+    },
+
+    getAddressInfo: async function (address) {
+        return await demos.nodeCall("getAddressInfo", {
+            address: address,
+        })
     },
     // !SECTION Predefined calls
 
@@ -322,7 +328,7 @@ let demos = {
         },
         broadcast: async function (signed_tx) {
         // TODO: Implement
-            return await demos.call("tx", {
+            return await demos.nodeCall("tx", {
                 tx: signed_tx,
             }) // And review
         },
