@@ -19,7 +19,7 @@ import calculateCurrentGas from "./calculateCurrentGas"
 // INFO Cryptographically validate a transaction, calculate gas and see if the execution is valid
 export default async function validateTransaction(
     type: string,
-    request: any,
+    request: any, // Must contain a tx property being a Transaction object
 ): Promise<Transaction> {
     // Loading identity
     const id_ed25519 = await cryptography.load("./.demos_identity")

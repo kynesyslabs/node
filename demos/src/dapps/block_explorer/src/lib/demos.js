@@ -314,18 +314,30 @@ let demos = {
     // !SECTION Crosschain support endpoints
 
     // SECTION Supporting txs
-    transactions: {
+    transactions: { // REVIEW All this part
+        // NOTE A courtesy to get a skeleton of transactions
+        empty: function () {
+            return demos.skeletons.transaction
+        },
+        // NOTE Building a transaction without signing or hashing it
         prepare: async function (data) {
             let thisTx = demos.skeletons.transaction
-            // TODO: Implement
+            if (!data.timestamp) data.timestamp = Date.now()
+            // Assigning the transaction data to our object
             thisTx.content = data
             return thisTx
         },
+        // NOTE Signing a transaction after hashing it
         sign: async function (raw_tx, private_key) {
-        // TODO: Implement
-            raw_tx.signature = forge.pki.ed25519.sign(raw_tx.content, private_key) // REVIEW if it is working right
-            return raw_tx
+            // Hashing the content of the transaction
+            let md = forge.md.sha256.create()
+            md.update(JSON.stringify(raw_tx.content))
+            raw_tx.hash = md.digest().toString("hex")
+            // Signing the hash of the content
+            raw_tx.signature = forge.pki.ed25519.sign(raw_tx.hash, private_key) // REVIEW if it is working right
+            return raw_tx // Hashed and signed
         },
+        // NOTE Sending a transaction after signing it
         broadcast: async function (signed_tx) {
         // TODO: Implement
             return await demos.nodeCall("tx", {
@@ -348,7 +360,11 @@ let demos = {
                 data: ["", ""], // [string, string] // type as string and content in hex string
                 nonce: 0, // number // Increments every time a transaction is sent from the same account
                 timestamp: 0, // number // Is the registered unix timestamp when the transaction was sent the first time
-                lock_fee: 0, // LockFee // Is the signed message where the sender locks X tokens until the tx is confirmed}, // TransactionContent
+                transaction_fee: {
+                    network_fee: 0,
+                    rpc_fee: 0,
+                    additional_fee: 0,
+                }, 
             },
             signature: null, // pki.ed25519.BinaryBuffer
             hash: null, // string
