@@ -106,14 +106,16 @@ export default class ServerListeners {
                     content.type,
                     content.message,
                 )
-                response = validatedTx
-                if (!response) {
-                    extra = "error"
-                    response = "Invalid Transaction"
+                // Returning an appropriate response
+                if (!validatedTx[0]) {
+                    extra = "InvalidTransaction: " + validatedTx[1]
+                    response = false
+                } else {
+                    // Adding the valid tx to the mempool
+                    Mempool.addTransaction(validatedTx[1]) // Works by writing the registry
+                    extra = validatedTx[1].hash
+                    response = true
                 }
-                // Adding the valid tx to the mempool
-                Mempool.addTransaction(validatedTx)
-                // TODO Manage the mempool/state registry and send stuff back
                 // TODO Broadcast the tx to the other peers
                 // Response is then sent back automatically as a reply (with our validation)
             }

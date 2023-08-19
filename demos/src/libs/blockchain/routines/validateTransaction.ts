@@ -17,10 +17,11 @@ import { Operation } from "../gls/gls"
 import calculateCurrentGas from "./calculateCurrentGas"
 
 // INFO Cryptographically validate a transaction, calculate gas and see if the execution is valid
+// REVIEW is it overkill to write an interface for the return value?
 export default async function validateTransaction(
     type: string,
     request: any, // Must contain a tx property being a Transaction object
-): Promise<Transaction> {
+): Promise<[boolean, any]> {
     // Loading identity
     const id_ed25519 = await cryptography.load("./.demos_identity")
     let publicKey = Buffer.from(id_ed25519.publicKey.toString("hex"))
@@ -55,14 +56,14 @@ export default async function validateTransaction(
     // Verify tx validity
     let verified = Transaction.confirmTx(tx, privateKey, publicKey) // REVIEW Are the buffers ok?
     if (!verified) {
-        return null
+        return [false, "Transaction not verified: " + tx.hash]
     }
     // REVIEW Execute or Revert the transaction
     let execution = await executeTransaction(tx)
     if (!execution[0]) {
-        return null
+        return [false, "Execution failed: " + execution[1]]
     }
     // If the tx is valid and executable, we confirm it
     tx.confirmations.push(verified)
-    return tx
+    return [true, tx]
 }

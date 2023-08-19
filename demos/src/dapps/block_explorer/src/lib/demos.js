@@ -27,7 +27,9 @@ import io from "socket.io-client"
 import forge from "node-forge"
 const md = forge.md
 import { sha256 } from "js-sha256"
+import SharedState from "./demos_libs/shared"
 
+// TODO Absolutely modularize this behemoth
 let demos = {
     // ANCHOR Properties
     socket: null,
@@ -116,6 +118,19 @@ let demos = {
         })
     },
     // !SECTION Connection and listeners
+
+    // INFO Authenticating with a private key on demos
+    authenticate: async function (private_key) {
+        await SharedState.getInstance().setIdentity(private_key)
+        let id = SharedState.getInstance().getIdentity()
+        if (id === null) {
+            console.log("[ERROR] Could not authenticate with private key!")
+            return false
+        }
+        console.log("[DEMOS] Authenticated with private key!")
+        console.log(id)
+        return true
+    },
 
     // INFO MUID generator
     generateMuid: function () {
@@ -328,7 +343,16 @@ let demos = {
             return thisTx
         },
         // NOTE Signing a transaction after hashing it
-        sign: async function (raw_tx, private_key) {
+        sign: async function (raw_tx, private_key=null) {
+            // If necessary, the private key is loaded from the state
+            if (!private_key) {
+                let id = await SharedState.getInstance().getIdentity()
+                private_key = id.privateKey
+                console.log("Private key loaded from state")
+            } else {
+                console.log("Private key provided")
+            }
+            console.log(private_key)
             // Hashing the content of the transaction
             let md = forge.md.sha256.create()
             md.update(JSON.stringify(raw_tx.content))
@@ -339,10 +363,10 @@ let demos = {
         },
         // NOTE Sending a transaction after signing it
         broadcast: async function (signed_tx) {
-        // TODO: Implement
+        // TODO: Implement and for god sake do some error handling
             return await demos.nodeCall("tx", {
                 tx: signed_tx,
-            }) // And review
+            }) // REVIEW It should returns either false + error or true + hash
         },
     },
     // !SECTION Supporting txs
