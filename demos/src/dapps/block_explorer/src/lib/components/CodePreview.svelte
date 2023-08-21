@@ -15,12 +15,14 @@
         editor.setOptions({
             maxLines: Infinity
         });
+
     });
 </script>
 
 <style>
     .text-editor{
         width: 100%;
+        height: 100%;
         border: none;
         outline: none;
         resize: none;
