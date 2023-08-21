@@ -81,7 +81,7 @@ export default class ServerListeners {
             //console.log(request)
             const id_ed25519 = await cryptography.load("./.demos_identity")
             // TODO Add responseRegistry support as per main.js and communications.js
-            let _receiver = this.peer.socket
+            const receiver = this.peer.socket
             // FIXME The below logic needs to be refactored in a separate method as it is used by other listeners too
             let parsed_comlink = await comlinkUtils.parseComlink(
                 request,
@@ -119,6 +119,7 @@ export default class ServerListeners {
                 // TODO Broadcast the tx to the other peers
                 // Response is then sent back automatically as a reply (with our validation)
             }
+
             // ANCHOR Crosschain endpoints
             else if (
                 content.type == "crosschain_operation" ||
@@ -195,14 +196,14 @@ export default class ServerListeners {
             else if (content.type == "consensus") {
                 console.log("[SERVER] Received consensus request")
                 if (!sharedState.getInstance().consensusMode) {
-                    response = { "error": "We are not in consensus mode" }
+                    response = { error: "We are not in consensus mode" }
                     break type_selector
                 }
                 // TODO Check if once we are in consensus, we also are validators
                 let authorized = true
                 // TODO Check if we are a validator
                 if (!authorized) {
-                    response = { "error": "Not authorized" }
+                    response = { error: "Not authorized" }
                     break type_selector
                 }
 
@@ -214,28 +215,36 @@ export default class ServerListeners {
                         console.log("[SERVER] Received mempool sync request")
                         if (consensus_request.extra == "send") {
                             // REVIEW It should work
-                            console.log("[SERVER] Received mempool sync data: checking and maybe merging")
-                            let success = await Mempool.receive(consensus_request.data) // This is the mempool we should sync with ours
+                            console.log(
+                                "[SERVER] Received mempool sync data: checking and maybe merging",
+                            )
+                            let success = await Mempool.receive(
+                                consensus_request.data,
+                            ) // This is the mempool we should sync with ours
                             if (!success) {
-                                response = { "error": "Mempool sync failed" }
+                                response = { error: "Mempool sync failed" }
                                 break
                             }
-                            let formattedData = await Mempool.sort(consensus_request.data)
+                            let formattedData = await Mempool.sort(
+                                consensus_request.data,
+                            )
                             success = await Mempool.merge(formattedData)
                             if (!success) {
-                                response = { "error": "Mempool merge failed" }
+                                response = { error: "Mempool merge failed" }
                                 break
                             }
-                            response = { "success": "Mempool merged" }
+                            response = { success: "Mempool merged" }
                         } else {
                             // REVIEW Should we identify somehow or comlink id is enough?
-                            console.log("[SERVER] Received mempool sync request: sending data")
+                            console.log(
+                                "[SERVER] Received mempool sync request: sending data",
+                            )
                             let mempool = await Mempool.getMempool()
-                            response = { "mempool": mempool }
+                            response = { mempool: mempool }
                         }
                         break
                     default:
-                        response = { "error": "Unknown consensus stage" }
+                        response = { error: "Unknown consensus stage" }
                         break
                 }
             }
@@ -295,7 +304,7 @@ export default class ServerListeners {
                         ) {
                             console.log("[SERVER ERROR] Missing blockNumber")
                             console.log(data)
-                            _receiver.emit("error", {
+                            receiver.emit("error", {
                                 error: "No block specified",
                                 muid: content.muid,
                             })
@@ -311,7 +320,7 @@ export default class ServerListeners {
                         break
                     case "getBlockByHash":
                         if (!data.hash) {
-                            _receiver.emit("public", {
+                            receiver.emit("public", {
                                 error: "No block specified",
                             })
                         }
@@ -319,7 +328,7 @@ export default class ServerListeners {
                         break
                     case "getTxByHash":
                         if (!data.hash) {
-                            _receiver.emit("public", {
+                            receiver.emit("public", {
                                 error: "No tx specified",
                             })
                         }
@@ -338,14 +347,13 @@ export default class ServerListeners {
                     // INFO Address info endpoint
                     case "getAddressInfo":
                         if (!data.address) {
-                            _receiver.emit("public", {
+                            receiver.emit("public", {
                                 error: "No address specified",
                             })
                         }
                         response = await chain.getAddressInfo(data.address)
                         break
                 }
-
             }
             // INFO Default
             else {
@@ -367,7 +375,7 @@ export default class ServerListeners {
                 "reply",
                 JSON.stringify(response),
                 id_ed25519.publicKey,
-                "placeholder", // TODO Add the receiver
+                "placeholder", // TODO Add the receiver // FIXME: DONT WE HAVE THIS IN THE receiver object already?
                 null,
                 extra,
             )
@@ -382,7 +390,7 @@ export default class ServerListeners {
             // Sending back the response
             console.log("[SERVER] Sending back comlink")
             //console.log(JSON.stringify(_comlink_request))
-            _receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
+            receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
         })
         // TODO See in communications.js and find the best way to validate, check and digest the request
     }
