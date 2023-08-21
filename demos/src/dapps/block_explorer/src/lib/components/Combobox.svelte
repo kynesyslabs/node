@@ -11,10 +11,11 @@
 
     function customAnimation(node, {duration, easing}) {
         return {
+            duration,
             css: t => {
                 const eased = easing(t);
                 return `
-                    transform: scaleY(${eased}) translateY(-50%);
+                    transform: scaleY(${0.8 + eased/5}) translateY(-50%);
                     opacity: ${eased};
                     transform-origin:top center;
                 );`;
@@ -65,7 +66,7 @@
         <p style="margin:0;opacity:.5">Select option</p><Fa icon={faChevronDown}></Fa>
     {/if}
     {#if open}
-    <div transition:customAnimation={{duration:350, easing:cubicInOut}} class="combobox-dialog">
+    <div transition:customAnimation={{duration:200, easing:cubicInOut}} class="combobox-dialog">
         {#each options as option, i}
             <div role={`Element`} class="combobox-option" style={`border-radius:${i==options.length-1?"0 0 var(--border-radius) var(--border-radius)":i==0?"var(--border-radius) var(--border-radius) 0 0":"0"}`} on:click={()=>{handleChange(option.id)}}>
                 {#if option.id===value}

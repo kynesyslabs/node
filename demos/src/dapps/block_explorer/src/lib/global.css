@@ -62,6 +62,7 @@ input::placeholder{
 
 button{
     border: none;
+    cursor: pointer;
 }
 @font-face {
     font-family: 'Neue Machina';
