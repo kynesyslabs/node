@@ -3,13 +3,13 @@
     export let data;
     import Fa from 'svelte-fa'
     import { faArrowLeftLong, faArrowRightLong, faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
-    import Footer from '$lib/components/Footer.svelte';
-	import Header from '$lib/components/Header.svelte';
     import blockIcon from '$lib/assets/icons/cube-icon.png';
     let selectedTab = 0;
     function changeTab(index){
         selectedTab = index;
     }
+
+    //console.log(data.pblock);
 </script>
 
 <style>
@@ -31,11 +31,14 @@
         width: 35px;
     }
 
+    .card-header-container{
+        background-color: var(--header-color);
+    }
+
     .card-header{
         display: flex;
         align-items: center;
         gap: 16px;
-        background-color: var(--header-color);
     }
 
     .block-header{
@@ -57,44 +60,48 @@
         justify-content: center;
     }
 
-    .tab-container-container{
-        display: flex;
-        justify-content: center;
-    }
-
     .tab-container{
         display: flex;
-        justify-content: center;
-        margin: 16px 0;
-        background-color: #252525;
-        padding: 4px;
-        border-radius: var(--border-radius);
-        gap: 4px;
+        align-items: end;
+        margin: 0 4px;
+        gap: -8px;
     }
-
     .tab{
-        width: 120px;
-        border-radius: var(--border-radius);
-        text-align: center;
-        cursor: pointer;
-        font-size: .8rem;
-    }
-
-    .tab-selected{
-        background-color: var(--accent);
+        background-color: #202020;
+        border-radius: var(--border-radius) var(--border-radius) 0 0;
         color: white;
         font-weight: bold;
+        display: flex;
+        align-items: center;
+        width: 150px;
+        justify-content: center;
+        padding: 8px 0;
+        border-bottom: none;
+        border: 1px solid var(--border-color);
+        border-bottom: none;
+        position: relative;
     }
-
-    .tab-selected-background{
-        background-color: var(--accent);
+    .tab-secondary{
+        background-color: var(--header-color);
+        border: none;
+    }
+    .tab-secondary:hover{
+        background-color: #252525;
+        cursor: pointer;
+    }
+    .tab-selected::after{
+        content: "";
+        display: block;
         width: 100%;
+        height: 1px;
+        background-color: #202020;
+        position: absolute;
+        bottom: -1px;
     }
-
     .tab-label{
         margin: 0;
-        padding: 12px 0;
     }
+    
 
     .card-footer{
         padding: 16px;
@@ -193,31 +200,34 @@
 
 <main>
 <div class="card generic-shadow">
-    <div class="card-header">
-        <div class="adjacent-button">
-            <Fa style="position:relative;top:2px;" icon={faArrowLeftLong}></Fa>
-        </div>
-        <div class="block-header">
-            <div class="block-icon-container generic-shadow">
-                <img class="block-icon" alt="Block icon" src={blockIcon}/>
+    <div class="card-header-container">
+        <div class="card-header">
+            <div class="adjacent-button">
+                <Fa style="position:relative;top:2px;" icon={faArrowLeftLong}></Fa>
             </div>
-            <h4 style="margin: 0;">Block #{data.block.number}</h4>
+            <div class="block-header">
+                <div class="block-icon-container generic-shadow">
+                    <img class="block-icon" alt="Block icon" src={blockIcon}/>
+                </div>
+                <h4 style="margin: 0;">Block #{data.block.number}</h4>
+            </div>
+            <div class="adjacent-button">
+                <Fa style="position:relative;top:2px;" icon={faArrowRightLong}></Fa>
+            </div>        
         </div>
-        <div class="adjacent-button">
-            <Fa style="position:relative;top:2px;" icon={faArrowRightLong}></Fa>
-        </div>        
-    </div>
-    <div class="tab-container-container">
-    <div class="tab-container">
-        <div></div>
-        <div role={`Block info tab ${selectedTab==0?"(selected)":""}`} on:click={()=>{changeTab(0)}} class={`color-transition tab ${selectedTab==0?"tab-selected":""}`}>
-            <p class="tab-label">BLOCK INFO</p>
-        </div>
-        <div role={`Transaction tab ${selectedTab==1?"(selected)":""}`} on:click={()=>{changeTab(1)}} class={`color-transition tab ${selectedTab==1?"tab-selected":""}`}>
-            <p class="tab-label">TRANSACTIONS</p>
+        <div class="tab-container-container">
+            <div class="tab-container">
+                <div></div>
+                <div role={`Block info tab ${selectedTab==0?"(selected)":""}`} on:click={()=>{changeTab(0)}} class={`color-transition tab ${selectedTab==0?"tab-selected":"tab-secondary"}`}>
+                    <p class="tab-label">Block info</p>
+                </div>
+                <div role={`Transaction tab ${selectedTab==1?"(selected)":""}`} on:click={()=>{changeTab(1)}} class={`color-transition tab ${selectedTab==1?"tab-selected":"tab-secondary"}`}>
+                    <p class="tab-label">Transactions</p>
+                </div>
+            </div>
         </div>
     </div>
-    </div>
+
     {#if selectedTab==0}
         <div class="info-grid">
             <p class="info-title">Status:</p>
