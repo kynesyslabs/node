@@ -1,5 +1,8 @@
 import { Operation, OperationResult } from "./executeOperations"
 import GLS from "../gls/gls"
+import Genesis from "../types/genesis_schema"
+import Chain from "../chain"
+import Block from "../blocks"
 
 // REVIEW Is this working?
 export default class subOperations {
@@ -10,12 +13,30 @@ export default class subOperations {
     constructor() {}
 
     // INFO Compiling the genesis status if not already done
-    static async genesis(operation: Operation): Promise<OperationResult> {
+    static async genesis(operation: Operation, genesis_block: Block): Promise<OperationResult> {
         let result: OperationResult = {
             success: true,
             message: "No error occurred",
         }
-        // TODO Insert blindly stuff into the GLS if no genesis is present
+        // NOTE Insert blindly stuff into the GLS if no genesis is present
+        // Using the genesis schema it is easy to follow the structure of the genesis file
+        console.log(operation.params)
+        let genesis_content: Genesis = operation.params
+        // Let's extract the genesis transaction from the genesis block
+        let genesis_tx = genesis_block.content.ordered_transactions[0]
+        // NOTE Writing the tx to the chain tx table as it is the genesis one
+        await Chain.write("INSERT INTO transactions (hash, content, signature, confirmations, state_changes) VALUES ( \
+			'" + genesis_tx.hash + "', \
+			'" + JSON.stringify(genesis_tx.content) + "', \
+			'genesis', '0', '[]')" )
+        // NOTE Balances
+        let balances = genesis_content.balances
+        for (let i = 0; i < balances.length; i++) {
+            let balance_operation = balances[i]
+            let receiver = balance_operation[0]
+            let amount = balance_operation[1]
+            await GLS.setGLSNativeBalance(receiver, parseInt(amount), operation.hash)
+        }
         return result
     }
 

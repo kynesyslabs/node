@@ -21,7 +21,6 @@ async function sleep(ms) {
 
 export default async function findGenesisBlock() {
     let genesis_block = await Chain.getGenesisBlock()
-    //await sleep(1000)
     console.log(genesis_block)
     if (genesis_block.length == 0) {
         // We need to initialize the genesis block
@@ -39,6 +38,7 @@ export default async function findGenesisBlock() {
         // Adding the genesis block to the chain
         let genesis_hash = await Chain.generateGenesisBlock(genesis_json)
         console.log("Genesis block created: " + genesis_hash + "\n")
+        genesis_block = await Chain.getGenesisBlock()
     } else console.log("Genesis block found: ")
     console.log(genesis_block)
     console.log(genesis_block[0].hash)

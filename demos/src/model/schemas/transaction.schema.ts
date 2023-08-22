@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 const typeorm = require("typeorm")
 
 const TransactionSchema = new typeorm.EntitySchema({
-    name: "Transaction",
+    name: "Transactions",
     columns: {
         id: {
             primary: true,

@@ -160,7 +160,7 @@ export default class Chain {
         // Execute the SQL query
         await this.write(sql_query)
         // Calling the operations of the block on the GLS
-        await executeOperations(operations)
+        await executeOperations(operations, block)
         return block.hash
     }
     // INFO Generate the genesis block
@@ -174,7 +174,12 @@ export default class Chain {
         genesis_tx.content.type = "genesis"
         genesis_tx.content.data = genesis_json
         genesis_tx.hash = Hashing.sha256(JSON.stringify(genesis_tx.content))
+        if (!genesis_json.timestamp) {
+            genesis_tx.content.timestamp = Date.now()
+        } else genesis_tx.content.timestamp = genesis_json.timestamp
+        console.log(genesis_tx)
         // Build a block containing the genesis tx
+        genesis_block.timestamp = genesis_tx.content.timestamp
         genesis_block.content.ordered_transactions.push(genesis_tx)
         genesis_block.content.previousHash = "0x0"
         genesis_block.hash = Hashing.sha256(
@@ -196,6 +201,7 @@ export default class Chain {
             },
         }
         // Insert the genesis block into the database
+        console.log(genesis_block)
         return await this.insertBlock(genesis_block, [genesis_op])
     }
     // !SECTION Setters

@@ -19,6 +19,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { TxFee } from "../types/transactions"
 import subOperations from "./subOperations"
+import Block from "../blocks"
 
 export interface OperationResult {
     success: boolean;
@@ -42,7 +43,8 @@ export interface Actor {
 }
 
 // ANCHOR Execute operations and merge GLS registry into the chain based on the status
-export default async function executeOperations(operations: Operation[]): Promise<Map<string, Actor>> {
+export default async function executeOperations(operations: Operation[], block: Block = null): Promise<Map<string, Actor>> {
+    console.log("executeOperations", operations)
     let results = new Map<string, Actor>
     // First of all we divide the operations into groups of addresses
     let groups: Map <string, Operation[]> = new Map()
@@ -57,7 +59,7 @@ export default async function executeOperations(operations: Operation[]): Promis
     // For every group we execute the operations and set the results
     for (let group of sorted_groups.values()) {
         let address = group[0].actor
-        let group_results = await executeSequence(group)
+        let group_results = await executeSequence(group, block)
         results.set(address, group_results)
     }
     // Returns the complex result
@@ -67,8 +69,10 @@ export default async function executeOperations(operations: Operation[]): Promis
 // ANCHOR Non exported internal methods and mechanisms
 
 // INFO Execute a sorted sequence of operations made by the same operator
-async function executeSequence(operations: Operation[]): Promise<Actor> {
-    let results: Actor
+async function executeSequence(operations: Operation[], block: Block = null): Promise<Actor> {
+    let results: Actor = {
+        operations: new Map<Operation, OperationResult>(),
+    }
     // Execute the operations sequentially
     for (let i = 0; i < operations.length; i++) {
         let hash = operations[i].hash
@@ -83,7 +87,8 @@ async function executeSequence(operations: Operation[]): Promise<Actor> {
         // Dispatching the operation to the appropriate method
         switch (operations[i].operator) {
             case "genesis":
-                result = await subOperations.genesis(operations[i])
+                console.log("Genesis block: applying genesis operations")
+                result = await subOperations.genesis(operations[i], block)
                 break
             case "transfer_native":
                 result = await subOperations.transferNative(operations[i])
@@ -121,7 +126,7 @@ async function executeSequence(operations: Operation[]): Promise<Actor> {
 
 // INFO Given a list of operations and a property name, sort the list by that property value
 function sortByNumeric(list: Operation[], key: string, ascending=true): Operation[] {
-    let sorted: Operation[]
+    let sorted: Operation[] = []
     for (let i = 0; i < list.length; i++) {
         let operation = list[i]
         // Creating the first element if is not present yet

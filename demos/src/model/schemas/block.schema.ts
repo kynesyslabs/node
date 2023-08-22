@@ -12,12 +12,15 @@ KyneSys Labs: https://www.kynesys.xyz/
 const typeorm = require("typeorm")
 
 const BlockSchema = new typeorm.EntitySchema({
-    name: "Block",
+    name: "Blocks",
     columns: {
         id: {
             primary: true,
             type: "int",
             generated: true,
+        },
+        content: {
+            type: "json",
         },
         number: {
             type: "int",

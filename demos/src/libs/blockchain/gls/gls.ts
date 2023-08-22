@@ -119,11 +119,18 @@ export default class GLS {
     // !SECTION Getters
 
     // SECTION Setters
-    static async setGLSNativeBalance(address: string, native: number, tx_hash: string) {
+    static async setGLSNativeBalance(address: string, native: number, tx_hash: string) { 
         // Updating tx list
         let tx_list = await Chain.read(
             "SELECT tx_list FROM status_native WHERE address='" + address + "'",
         )
+        // Create it if it doesn't exist
+        console.log(tx_list)
+        if (tx_list.length === 0) {
+            tx_list = [{tx_list: "[]"}]
+            await Chain.write("INSERT INTO status_native(address, balance, nonce, tx_list) VALUES('" + address + "','0','0', '[]')")
+        }
+        console.log(tx_list)
         tx_list = JSON.parse(tx_list[0].tx_list)
         tx_list.push(tx_hash)
         tx_list = JSON.stringify(tx_list)
@@ -134,6 +141,7 @@ export default class GLS {
         let tx_list_response = await Chain.write(
             "UPDATE status_native SET tx_list='" + tx_list + "' WHERE address='" + address + "'",
         )
+        // TODO Decide if we should use status_hashes too
         return [balance_response, tx_list_response]
     }
 
