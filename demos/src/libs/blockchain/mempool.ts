@@ -154,7 +154,7 @@ export default class Mempool {
     public static async sort(mempool: MempoolData): Promise<MempoolData> {
 
         mempool.transactions.sort((tx1, tx2) => {
-            let comparison = parseInt(tx1.content.transaction_fee.rpc_fee) >= parseInt(tx2.content.transaction_fee.rpc_fee)
+            let comparison = tx1.content.transaction_fee.rpc_fee >= tx2.content.transaction_fee.rpc_fee
             if (comparison) { 
                 return -1
             } else {
