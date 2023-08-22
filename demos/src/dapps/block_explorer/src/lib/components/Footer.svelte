@@ -9,14 +9,19 @@
             url:"https://twitter.com/KynesysLabs"
         }
     ]
+
+    import "$lib/assets/backgrounds/bubblesbg.jpeg";
 </script>
 <style>
+
     .footer{
         padding: 16px 32px;
         display: flex;
         justify-content: space-between;
         align-items: center;
         flex-wrap: wrap;
+        background-color: rgb(20, 20, 20);
+        margin-top: auto;
     }
     .footer-links{
         display: flex;
@@ -31,7 +36,18 @@
         font-size: 1.2rem;
         font-family: 'HelveticaN';
     }
+    .background{
+        position: fixed;
+        background: url("/backgrounds/bubblesbg.jpg") no-repeat center center;
+        background-size: cover;
+        height: 100dvh;
+        width: 100%;
+        z-index: -2;
+        bottom: 0;
+    }
 </style>
+<div class="background">
+</div>
 <div class="footer">
     <p class="companyname">//. kynesys</p>
     <div class="footer-links">

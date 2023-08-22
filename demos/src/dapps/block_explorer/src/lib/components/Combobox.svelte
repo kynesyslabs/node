@@ -57,6 +57,7 @@
     }
     .combobox-option:hover{
         background-color: var(--accent);
+        color: black;
     }
 </style>
 <div use:clickOutside role={`Select element`} on:click={()=>{open=!open}} on:click_outside={()=>{open=false}} style={style} class="combobox">

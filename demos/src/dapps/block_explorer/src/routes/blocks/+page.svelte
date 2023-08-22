@@ -15,6 +15,7 @@
         gap: 16px;
         border-bottom: 0;
         border-radius: var(--border-radius) var(--border-radius) 0 0;
+        padding: 16px;
     }
 
     .card-header-label{
@@ -78,7 +79,7 @@
 </style>
 
 <main>
-    <div class="card generic-shadow">
+    <div class="grid-card">
         <div class="card-header">   
             <p class="card-header-label">Total of 1 blocks</p>
         </div>

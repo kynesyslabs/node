@@ -1,87 +1,33 @@
 <script>
-    import Fa from 'svelte-fa';
-    import { faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons';
-    import video from "$lib/assets/videos/morph-bg.mp4";
-    import { goto } from '$app/navigation';
     import '$lib/global.css';
 
-    function onSearch(hash)
-    {
-        goto(`/blocks/${hash}`);
-    }
 </script>
 
 <style>
-    .container{
-        position: relative;
-        background-color: black;
-        min-height: 25dvh;
-    }
-    .header-body{
-        position: relative;
-    }
     .logo{
-        border-radius: 50%;
-        width: 100px;
-        margin: 16px;
+        width: 150px;
+        margin: 24px 32px;
     }
-    .label{
-        margin-bottom: 8px;
-        opacity: .75;
-        text-align: center;
-        font-size: 1rem;
-
-    }
-    .inputComponent{
-        position: relative;
-        top: 20px;
-        margin: 32px 0;
-    }
-    .inputContainer{
-        width: 500px;
-        max-width: calc(100% - 32px);
-        margin: 0 auto 32px;
-        background-color: #404040;
-        display: flex;
-        border-radius: var(--border-radius);
-    }
-    .inputElement{
-        width: calc(100% - 50px);
-        border-radius: var(--border-radius) 0 0 var(--border-radius);
-        font-size: 1.4rem;
-        margin: auto;
-    }
-    .inputButton{
-        background-color: var(--accent);
-        border: none;
-        color: white;
-        border-radius: 0 var(--border-radius) var(--border-radius) 0;
-        width: 50px;
-        font-size: 20px;
-        cursor: pointer;
-    }
-    .subtitle{
-        text-align: center;
-        margin-top: 0;
-        font-family: 'Neue Machina', sans-serif;
-    }
-    .video{
-        position: absolute;
-        top: 0;
-        left: 0;
+    .header{
+        background: rgba(255, 255, 255, 0.02);
+        backdrop-filter: blur(15px);
         width: 100%;
-        height: 100%;
-        object-fit: cover;
-        z-index: 0;
     }
 </style>
 
-<div class="container">
+<div class="header">
+    <a href="/">
+        <div>
+            <img alt="logo" class="logo" src="/LOGOMorph.svg"/>
+        </div>
+    </a>
+</div>
+
+<!--<div class="container">
     <video class="video" autoplay muted loop>
         <source src={video} type="video/mp4"/>
     </video>
     <div class="header-body">
-        <a href="/"><img alt="logo" class="logo" src="/logo.jpg"/></a>
         <h1>Demos</h1>
         <h2 class="subtitle">Block explorer</h2>
         <div class="inputComponent">
@@ -92,4 +38,4 @@
             </form>
         </div>
     </div>
-</div>
+</div>-->
