@@ -1,0 +1,8 @@
+{
+	"properties": {
+		"id": 1,
+		"name": "DEMOS",
+		"currency": "KYN"
+	},
+	"balances": []
+}

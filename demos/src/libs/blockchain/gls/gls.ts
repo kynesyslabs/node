@@ -15,17 +15,17 @@ import NFT from "./types/NFT"
 import * as express from "express"
 import { TxFee } from "../types/transactions"
 import executeOperations from "../routines/executeOperations"
-import { Operator } from "../routines/executeOperations"
+import { Actor } from "../routines/executeOperations"
 
 interface OperationResult {
     success: boolean;
     message: string;
 }
 
-export interface Operation {
+export interface Operation { 
     operator: string;
     actor: string;
-    amount: number;
+    params: {}; // Documented in the chain itself
     hash: string;
     nonce: number;
     timestamp: number;
@@ -51,7 +51,7 @@ export default class GLS {
     }
 
     // NOTE Due to the complexity of this method, it is imported by the appropriate module
-    async executeOperations(): Promise<Map<string, Operator>> {
+    async executeOperations(): Promise<Map<string, Actor>> {
         const result = await executeOperations(this.operations)
         return result
     }

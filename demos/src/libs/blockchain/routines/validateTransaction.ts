@@ -45,7 +45,7 @@ export default async function validateTransaction(
     let operation: Operation = {
         operator: "pay_gas",
         actor: from,
-        amount: gasAmount,
+        params: { amount: gasAmount.toString() },
         hash: tx.hash,
         nonce: tx.content.nonce,
         timestamp: tx.content.timestamp,

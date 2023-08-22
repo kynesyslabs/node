@@ -2,7 +2,9 @@
 	"properties": {
 		"id": 1,
 		"name": "DEMOS",
-		"currency": "KYN"
+		"currency": "DEM"
 	},
-	"balances": []
+	"balances": {
+		"address": "1000000000000000000000000000"
+	}
 }

@@ -1,14 +1,15 @@
 import { TxFee } from "../types/transactions"
+import subOperations from "./subOperations"
 
-interface OperationResult {
+export interface OperationResult {
     success: boolean;
     message: string;
 }
 
-export interface Operation {
+export interface Operation { // TODO Add parameters as a property
     operator: string;
     actor: string;
-    amount: number;
+    params: {};
     hash: string;
     nonce: number;
     timestamp: number;
@@ -16,27 +17,27 @@ export interface Operation {
     fees: TxFee;
 }
 
-// NOTE The operator object is designed to represent a single operator and the status of its operations
-export interface Operator {
+// NOTE The Actor object is designed to represent a single operator and the status of its operations
+export interface Actor {
 	operations: Map<Operation, OperationResult>;
 }
 
 // ANCHOR Execute operations and merge GLS registry into the chain based on the status
-export default async function executeOperations(operations: Operation[]): Promise<Map<string, Operator>> {
-    let results = new Map<string, Operator>
+export default async function executeOperations(operations: Operation[]): Promise<Map<string, Actor>> {
+    let results = new Map<string, Actor>
     // First of all we divide the operations into groups of addresses
     let groups: Map <string, Operation[]> = new Map()
     let sorted_groups = groups
     groups = divideByAddress(operations)
     // Then for each group we sort it by fees
     for (let group of groups.values()) {
-        let address = group[0].operator // Each group should have the same operator
+        let address = group[0].actor // Each group should have the same actor
         group = sortByNumeric(group, "fees")
         sorted_groups.set(address, group)
     }
     // For every group we execute the operations and set the results
     for (let group of sorted_groups.values()) {
-        let address = group[0].operator
+        let address = group[0].actor
         let group_results = await executeSequence(group)
         results.set(address, group_results)
     }
@@ -47,15 +48,42 @@ export default async function executeOperations(operations: Operation[]): Promis
 // ANCHOR Non exported internal methods and mechanisms
 
 // INFO Execute a sorted sequence of operations made by the same operator
-async function executeSequence(operations: Operation[]): Promise<Operator> {
-    let results: Operator
+async function executeSequence(operations: Operation[]): Promise<Actor> {
+    let results: Actor
     // Execute the operations sequentially
     for (let i = 0; i < operations.length; i++) {
         let hash = operations[i].hash
         let error = "no error occurred"
         let valid = true // Until proven otherwise
+        let result: OperationResult = {
+            success: true,
+            message: error,
+        }
         // TODO Implement nonce verification united to fee control to expose replacements
         // TODO How to handle all the txs together? In the results registry we will have to tinker a lot
+        // Dispatching the operation to the appropriate method
+        switch (operations[i].operator) {
+            case "add_native":
+                result = await subOperations.addNative(operations[i])
+                results.operations.set(operations[i], result)
+                break
+            case "remove_native":
+                result = await subOperations.removeNative(operations[i])
+                results.operations.set(operations[i], result)
+                break
+            case "add_asset":
+                result = await subOperations.addAsset(operations[i])
+                results.operations.set(operations[i], result)
+                break
+            case "remove_asset":
+                result = await subOperations.removeAsset(operations[i])
+                results.operations.set(operations[i], result)
+                break
+            default:
+                valid = false
+                error = "unknown operator"
+                break
+        }
         operations[i].status = valid
         results.operations.set(operations[i], {
             success: valid,
@@ -94,7 +122,7 @@ function sortByNumeric(list: Operation[], key: string, ascending=true): Operatio
 function divideByAddress(operations: Operation[]): Map <string, Operation[]> {
     let divided: Map <string, Operation[]> = new Map()
     for (let i = 0; i < operations.length; i++) {
-        let address = operations[i].operator
+        let address = operations[i].actor
         if (!divided.has(address)) {
             divided.set(address, [operations[i]])
         } else {

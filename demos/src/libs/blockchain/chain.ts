@@ -178,6 +178,7 @@ export default class Chain {
         )
         // Insert the genesis block into the database
         return this.insertBlock(genesis_block)
+        // TODO Change the GLS to reflect the genesis block instructions
     }
     // !SECTION Setters
 

@@ -47,9 +47,9 @@ export default async function executeTransaction(transaction: Transaction): Prom
         }
         // Add value to receiver's balance
         operation = {
-            operator: "add",
+            operator: "add_native",
             actor: receiver,
-            amount: transaction.content.amount,
+            params: {amount: transaction.content.amount},
             hash: transaction.hash,
             nonce: transaction.content.nonce,
             timestamp: transaction.content.timestamp,
@@ -59,9 +59,9 @@ export default async function executeTransaction(transaction: Transaction): Prom
         GLS.getInstance().operations.push(operation)
         // Subtract value from sender's balance
         operation = {
-            operator: "subtract",
+            operator: "remove_native",
             actor: sender,
-            amount: transaction.content.amount,
+            params: {amount: transaction.content.amount},
             hash: transaction.hash,
             nonce: transaction.content.nonce,
             timestamp: transaction.content.timestamp,
