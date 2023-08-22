@@ -1,3 +1,22 @@
+/* LICENSE
+
+© 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
+
+Full license text: https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode
+Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
+
+KyneSys Labs: https://www.kynesys.xyz/
+
+*/
+
+
+/* NOTE
+    executeOperations is called AFTER the transaction validated by the consensus (or immediately if
+	it is the genesis transaction) and is responsible for reflecting the changes in the database.
+
+	executeSequence is called for each address to execute the operations contained.
+*/
+
 import { TxFee } from "../types/transactions"
 import subOperations from "./subOperations"
 
@@ -9,7 +28,7 @@ export interface OperationResult {
 export interface Operation { // TODO Add parameters as a property
     operator: string;
     actor: string;
-    params: {};
+    params: any;
     hash: string;
     nonce: number;
     timestamp: number;
@@ -63,6 +82,9 @@ async function executeSequence(operations: Operation[]): Promise<Actor> {
         // TODO How to handle all the txs together? In the results registry we will have to tinker a lot
         // Dispatching the operation to the appropriate method
         switch (operations[i].operator) {
+            case "transfer_native":
+                result = await subOperations.transferNative(operations[i])
+                break
             case "add_native":
                 result = await subOperations.addNative(operations[i])
                 results.operations.set(operations[i], result)

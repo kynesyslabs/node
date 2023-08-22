@@ -9,6 +9,11 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+/* NOTE
+    executeTransaction is called BEFORE the transaction is reflected in the GLS, which happens AFTER the
+    consensus has confirmed the transaction in the block.
+*/
+
 
 import Transaction from "../transaction"
 import GLS from "../gls/gls"
