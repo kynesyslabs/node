@@ -56,10 +56,14 @@ export default async function peerBootstrap(
             console.log(
                 "[BOOTSTRAP] Testing " + currentPeerAddress + " identity",
             )
+
             _currentPeerObject = await getPeerIdentity(
                 _currentPeerObject,
                 id_ed25519,
                 currentPublicKey,
+            )
+            console.log(
+                "[BOOSTRAP: overriding connectionstring] " + _currentPeerURL,
             )
             _currentPeerObject.connectionString = _currentPeerURL // Adding this step
             console.log(
@@ -69,6 +73,9 @@ export default async function peerBootstrap(
                     currentPeerPort +
                     "\n",
             )
+
+            console.log("[BOOTSTRAP] _currentPeerObject", _currentPeerObject)
+
             /*if (containsPeer(_currentPeerObject, peerlist)) { // FIXME Disabled as was not working. Should be fixed
 				term.yellow("[BOOTSTRAP] WARNING: Duplicate peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
 			} else */

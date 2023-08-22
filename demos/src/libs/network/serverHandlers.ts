@@ -245,6 +245,7 @@ export default class ServerHandlers {
         let socketized_response: Peer[]
         let data = content.data
         console.log(typeof data)
+        console.log(JSON.stringify(content))
         switch (content.message) {
             case "getPeerlist":
                 console.log("[SERVER] Received getPeerlist")
@@ -308,6 +309,7 @@ export default class ServerHandlers {
             case "getPeerIdentity":
                 // NOTE We don't need to sign anything as the comlink is signed already
                 response = "I am " + id_ed25519.publicKey.toString("hex")
+                console.log(response)
                 break
 
             // INFO Address info endpoint

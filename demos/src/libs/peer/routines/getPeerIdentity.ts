@@ -14,12 +14,21 @@ import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
 import ResponseRegistry from "../../communications/responseRegistry"
 
-
-export default async function getPeerIdentity(peer: Peer, id: any, expectedKey: string): Promise<Peer> {
+export default async function getPeerIdentity(
+    peer: Peer,
+    id: any,
+    expectedKey: string,
+): Promise<Peer> {
     // A peer object must have a valid socket
     if (!peer.socket) {
         return null
     }
+
+    console.warn("[PEER AUTHENTICATION] Getting peer identity")
+    console.log(peer)
+    console.log(id)
+    console.log(expectedKey)
+
     // Asking the peer for its identity
     let comlink = new ComLink()
     let identity_ask = new Transmission(id.privateKey)
@@ -31,19 +40,23 @@ export default async function getPeerIdentity(peer: Peer, id: any, expectedKey: 
         null,
         null,
     )
+    console.log("[PEER AUTHENTICATION] Identity Ask")
+    console.log(identity_ask)
     await identity_ask.finalize()
     comlink.properties.require_reply = true
     comlink.properties.is_reply = false
+    console.log("[PEER AUTHENTICATION] Sending comlink")
+    console.log(comlink)
     // Adding the response request
     ResponseRegistry.getInstance().requestResponse(comlink)
     // Broadcasting the request
-    await comlink.broadcastMessageToPeer(
-        peer,
-        identity_ask, 
-        id.privateKey,
-    )
+    await comlink.broadcastMessageToPeer(peer, identity_ask, id.privateKey)
     // Awaiting the response
-    let response = await ResponseRegistry.getInstance().checkResponse(comlink.muid)
+    let response = await ResponseRegistry.getInstance().checkResponse(
+        comlink.muid,
+    )
+    console.log("[PEER AUTHENTICATION] Response received")
+    console.log(response)
     // Response management
     if (response[0]) {
         console.log("[PEER AUTHENTICATION] Received response")
@@ -51,7 +64,9 @@ export default async function getPeerIdentity(peer: Peer, id: any, expectedKey: 
         if (response[1].identity.toString("hex") === expectedKey) {
             console.log("[PEER AUTHENTICATION] Identity is the expected one")
         } else {
-            console.log("[PEER AUTHENTICATION] Identity is not the expected one")
+            console.log(
+                "[PEER AUTHENTICATION] Identity is not the expected one",
+            )
             return null
         }
         // Adding the property to the peer

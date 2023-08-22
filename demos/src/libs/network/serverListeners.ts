@@ -15,14 +15,14 @@ export default class ServerListeners {
     }
 
     async runListeners() {
-        await this.authReplyListener()
-        await this.authAskEmit()
+        // await this.authReplyListener()
+        // await this.authAskEmit()
         await this.comlinkListener()
     }
 
     async comlinkListener() {
         this.peer.socket.on("comlink", async request => {
-            logger.log("Received comlink")
+            logger.log("[SERVER] Received comlink")
             const id_ed25519 = await cryptography.load("./.demos_identity")
             const receiver = this.peer.socket
 
@@ -113,32 +113,30 @@ export default class ServerListeners {
             // REVIEW unless specified, we now send back the updated comlink as a response
             // Building a message to send back in the comlink
 
-            if (require_reply) {
-                var response_message = new Transmission(
-                    Identity.getInstance().ed25519.privateKey,
-                )
-                response_message.initialize(
-                    // TODO Specify the answer so that it has a type AND a message
-                    "reply",
-                    JSON.stringify(response),
-                    id_ed25519.publicKey,
-                    "placeholder", // TODO Add the receiver, don't we already have it in the receiver object?
-                    null,
-                    extra,
-                )
-                await response_message.finalize()
-                // Populating the comlink
-                _comlink_request.properties.is_reply = true // Setting the reply flag as we are replying
-                _comlink_request.properties.require_reply = require_reply // Setting the require_reply flag as provided above
-                await _comlink_request.replyToMessage(
-                    response_message,
-                    id_ed25519.privateKey,
-                )
-                // Sending back the response
-                console.log("[SERVER] Sending back comlink")
-                //console.log(JSON.stringify(_comlink_request))
-                receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
-            }
+            var response_message = new Transmission(
+                Identity.getInstance().ed25519.privateKey,
+            )
+            response_message.initialize(
+                // TODO Specify the answer so that it has a type AND a message
+                "reply",
+                JSON.stringify(response),
+                id_ed25519.publicKey,
+                "placeholder", // TODO Add the receiver, don't we already have it in the receiver object?
+                null,
+                extra,
+            )
+            await response_message.finalize()
+            // Populating the comlink
+            _comlink_request.properties.is_reply = true // Setting the reply flag as we are replying
+            _comlink_request.properties.require_reply = require_reply // Setting the require_reply flag as provided above
+            await _comlink_request.replyToMessage(
+                response_message,
+                id_ed25519.privateKey,
+            )
+            // Sending back the response
+            console.log("[SERVER] Sending back comlink")
+            //console.log(JSON.stringify(_comlink_request))
+            receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
         })
         // TODO See in communications.js and find the best way to validate, check and digest the request
     }
