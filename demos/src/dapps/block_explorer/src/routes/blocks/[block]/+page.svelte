@@ -4,6 +4,8 @@
     import Fa from 'svelte-fa'
     import { faArrowLeftLong, faArrowRightLong, faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
     import blockIcon from '$lib/assets/icons/cube-icon.png';
+    import infoIcon from '$lib/assets/icons/Circle_Info.svg';
+    import transIcon from '$lib/assets/icons/Arrow_Down_Up.svg';
     let selectedTab = 0;
     function changeTab(index){
         selectedTab = index;
@@ -15,12 +17,15 @@
 <style>
     main{
         padding: 16px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
     }
 
     .block-icon-container{
         width:55px;
         height: 45px;
-        background-color: #404040;
         border-radius: var(--border-radius);
         display: flex;
         justify-content: center;
@@ -28,75 +33,68 @@
     }
     .block-icon{
         filter: invert();
-        width: 35px;
+        width: 50px;
     }
 
-    .card-header-container{
-        background-color: var(--header-color);
-    }
 
     .card-header{
         display: flex;
         align-items: center;
         gap: 16px;
+        justify-content: center;
     }
 
     .block-header{
         display: flex;
         align-items: center;
-        gap: 16px;
     }
 
     .adjacent-button{
-        background-color: #404040;
+        border: var(--border);
         border-radius: 50%;
         padding: 8px;
-        border: none;
         color: white;
         cursor: pointer;
         width: 37px;
         height: 37px;
         display: flex;
         justify-content: center;
+        position: relative;
     }
 
     .tab-container{
         display: flex;
         align-items: end;
-        margin: 0 4px;
+        margin: 0 0 16px;
         gap: -8px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.08);
+        backdrop-filter: blur(15px);
+        padding: 6px;
+        border: var(--border);
     }
     .tab{
-        background-color: #202020;
-        border-radius: var(--border-radius) var(--border-radius) 0 0;
+        border-radius: 8px;
         color: white;
-        font-weight: bold;
         display: flex;
         align-items: center;
-        width: 150px;
+        width: 250px;
         justify-content: center;
-        padding: 8px 0;
+        padding: 12px 0;
         border-bottom: none;
         border: 1px solid var(--border-color);
         border-bottom: none;
         position: relative;
     }
     .tab-secondary{
-        background-color: var(--header-color);
         border: none;
     }
     .tab-secondary:hover{
-        background-color: #252525;
         cursor: pointer;
     }
-    .tab-selected::after{
-        content: "";
-        display: block;
-        width: 100%;
-        height: 1px;
-        background-color: #202020;
-        position: absolute;
-        bottom: -1px;
+    .tab-selected{
+        background-color: var(--accent);
+        color: black;
     }
     .tab-label{
         margin: 0;
@@ -176,7 +174,7 @@
         grid-template-columns: 100px 1fr;
         width: 100%;
         gap: 16px;
-        padding: 16px;
+        padding: 28px;
     }
 
     .info-title{
@@ -199,35 +197,34 @@
 </style>
 
 <main>
-<div class="card generic-shadow">
-    <div class="card-header-container">
-        <div class="card-header">
-            <div class="adjacent-button">
-                <Fa style="position:relative;top:2px;" icon={faArrowLeftLong}></Fa>
-            </div>
-            <div class="block-header">
-                <div class="block-icon-container generic-shadow">
-                    <img class="block-icon" alt="Block icon" src={blockIcon}/>
-                </div>
-                <h4 style="margin: 0;">Block #{data.block.number}</h4>
-            </div>
-            <div class="adjacent-button">
-                <Fa style="position:relative;top:2px;" icon={faArrowRightLong}></Fa>
-            </div>        
+<div class="card" style="width: fit-content;">
+    <div class="card-header">
+        <div class="adjacent-button">
+            <Fa style="position:relative;top:1px;" icon={faArrowLeftLong}></Fa>
         </div>
-        <div class="tab-container-container">
-            <div class="tab-container">
-                <div></div>
-                <div role={`Block info tab ${selectedTab==0?"(selected)":""}`} on:click={()=>{changeTab(0)}} class={`color-transition tab ${selectedTab==0?"tab-selected":"tab-secondary"}`}>
-                    <p class="tab-label">Block info</p>
-                </div>
-                <div role={`Transaction tab ${selectedTab==1?"(selected)":""}`} on:click={()=>{changeTab(1)}} class={`color-transition tab ${selectedTab==1?"tab-selected":"tab-secondary"}`}>
-                    <p class="tab-label">Transactions</p>
-                </div>
+        <div class="block-header">
+            <div class="block-icon-container generic-shadow">
+                <img class="block-icon" alt="Block icon" src={blockIcon}/>
             </div>
+            <h3 style="margin: 0; margin-right:8px;">Block #{data.block.number}</h3>
         </div>
+        <div class="adjacent-button">
+            <Fa style="position:relative;top:1px;" icon={faArrowRightLong}></Fa>
+        </div>        
     </div>
+</div>
 
+<div class="tab-container">
+    <div></div>
+    <div role={`Block info tab ${selectedTab==0?"(selected)":""}`} on:click={()=>{changeTab(0)}} class={`color-transition tab ${selectedTab==0?"tab-selected":"tab-secondary"}`}>
+        <img class={`${selectedTab==0?"invert":""}`} src={infoIcon} alt="Info icon" style="margin-right: 8px;"/><p class="tab-label">Block info</p>
+    </div>
+    <div role={`Transaction tab ${selectedTab==1?"(selected)":""}`} on:click={()=>{changeTab(1)}} class={`color-transition tab ${selectedTab==1?"tab-selected":"tab-secondary"}`}>
+        <img class={`${selectedTab==1?"invert":""}`} src={transIcon} alt="Info icon" style="margin-right: 8px; height:24px;"/><p class="tab-label">Transactions</p>
+    </div>
+</div>
+
+<div class="grid-card" style="max-width:1250px; margin:auto;">
     {#if selectedTab==0}
         <div class="info-grid">
             <p class="info-title">Status:</p>

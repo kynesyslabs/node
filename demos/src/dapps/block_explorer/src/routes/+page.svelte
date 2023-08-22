@@ -1,27 +1,91 @@
 <script>
     import Fa from 'svelte-fa'
     import { faArrowRightLong } from '@fortawesome/free-solid-svg-icons'
+    import { faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons';
     import '$lib/global.css'
     export let data;
     const latestBlocks = [data.block];
     import blockIcon from '$lib/assets/icons/cube-icon.png';
     import transIcon from '$lib/assets/icons/agreement-icon.png';
+    import video from "$lib/assets/videos/morph-bg.mp4";
+    import { goto } from '$app/navigation';
+
+
+
+    function onSearch(hash)
+    {
+        goto(`/blocks/${hash}`);
+    }
 </script>
 
 <style>
+    .header-body{
+        position: relative;
+    }
+
+    .label{
+        margin-bottom: 8px;
+        opacity: .75;
+        text-align: center;
+        font-size: 1rem;
+
+    }
+    .inputComponent{
+        position: relative;
+        top: 20px;
+        margin: 32px 0;
+    }
+    .inputContainer{
+        width: 500px;
+        max-width: calc(100% - 32px);
+        margin: 0 auto 32px;
+        background-color: #404040;
+        display: flex;
+        border-radius: var(--border-radius);
+    }
+    .inputElement{
+        width: calc(100% - 50px);
+        border-radius: var(--border-radius) 0 0 var(--border-radius);
+        font-size: 1.4rem;
+        margin: auto;
+    }
+    .inputButton{
+        background-color: var(--accent);
+        border: none;
+        color: black;
+        border-radius: 0 var(--border-radius) var(--border-radius) 0;
+        width: 50px;
+        font-size: 20px;
+        cursor: pointer;
+    }
+    .subtitle{
+        text-align: center;
+        margin-top: 0;
+        font-family: 'Neue Machina', sans-serif;
+    }
+    .video{
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 50dvh;
+        object-fit: cover;
+        z-index: -1;
+        aspect-ratio: 16 / 9;
+    }
     .card-header{
         display: flex;
         align-items: center;
         gap: 16px;
         border-radius: var(--border-radius) var(--border-radius) 0 0;
+        margin-bottom: 28px;
     }
     .card-footer{
-        padding: 16px;
-        text-align: center;
-        background-color: var(--header-color);
+        text-align: right;
         font-weight: bold;
         color: white;
         border-radius: 0 0 var(--border-radius) var(--border-radius);
+        margin-top: 24px;
     }
     .card-footer:hover{
         color: var(--accent);
@@ -43,7 +107,6 @@
     .block-card{
         display: grid;
         grid-template-columns: auto 1fr 100px;
-        padding: 16px;
         border-bottom: 1px solid var(--border-color);
         gap: 16px;
     }
@@ -93,13 +156,30 @@
 
 </style>
 
+<div>
+    <video class="video" autoplay muted loop>
+        <source src={video} type="video/mp4"/>
+    </video>
+    <div class="header-body">
+        <h1>Demos</h1>
+        <h2 class="subtitle">Block explorer</h2>
+        <div class="inputComponent">
+            <p class="label">Search by hash</p>
+            <form on:submit={(e)=>{e.preventDefault();onSearch(e.target.elements.hash.value)}} class="inputContainer">
+                <input class="inputElement" name="hash" placeholder=""/>
+                <button type="submit" class="inputButton"><Fa style="cursor:pointer;" icon={faMagnifyingGlass}></Fa></button>
+            </form>
+        </div>
+    </div>
+</div>
+
 
 <div class="container">
 
 <div class="main-grid">
 
-    <div class="card generic-shadow">
-        <h4 class="card-header">Latest blocks</h4>
+    <div style="width: 100%;" class="card">
+        <h3 class="card-header">Latest blocks</h3>
         {#each latestBlocks as block}
             <div class="block-card">
                 <div class="block-card-header">
@@ -126,8 +206,8 @@
             </div>
         </a>
     </div>
-    <div class="card">
-        <h4 class="card-header">Latest transactions</h4>
+    <div style="width: 100%;" class="card">
+        <h3 class="card-header">Latest transactions</h3>
         {#each data.block.content.transactions as transaction}
         <div class="block-card">
             <div class="block-card-header">

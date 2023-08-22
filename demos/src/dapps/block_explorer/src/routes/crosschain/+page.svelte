@@ -5,6 +5,7 @@
     import { v4 as uuidv4 } from "uuid";
     import { cubicInOut } from 'svelte/easing';
 
+
     let txblocks = [
         {
             id:uuidv4(),
@@ -79,26 +80,20 @@ export default function main(){
         border-radius: 0 0 var(--border-radius) var(--border-radius);
         gap: 16px;
         flex-wrap: wrap;
-    }
-    .card-footer-button{
-        text-align: center;
-        padding: 12px 16px;
-        border-radius: var(--border-radius);
-        width: 200px;
-        cursor: pointer;
+        max-width: 1250px;
+        margin: 0 auto;
     }
     
 </style>
 
 <main>
-        <h4 style="margin-bottom:16px;">Crosschain transaction</h4>
         {#each txblocks as txblock, i (txblock.id)}
             <div transition:customAnimation={{duration:350, easing:cubicInOut}}>
                 <TxBlock onBlockchainSelect={(v)=>{txblocks[i].blockchain = v}} txblock={txblock} onOperationSelect={(v)=>{txblocks[i].operation = v}} index={i} onRemove={()=>{txblocks.splice(i, 1); txblocks=txblocks}}/>
             </div>
         {/each}
         <div class="action-buttons">
-            <div role={`Add operation`} on:click={()=>{addOperation()}} style="border:1px solid var(--border-color); background-color:var(--header-color);" class="card-footer-button color-transition generic-shadow"><Fa icon={faPlus} style="margin-right:8px;"></Fa>Add operation</div>
-            <div class="card-footer-button color-transition generic-shadow" style="background-color: var(--accent);">Execute<Fa style="margin-left:8px;" icon={faLongArrowRight}></Fa></div>
+            <button class="secondary color-transition" on:click={()=>{addOperation()}}><Fa icon={faPlus} style="margin-right:8px;"></Fa>Add operation</button>
+            <button class="primary color-transition">Execute<Fa style="margin-left:8px;" icon={faLongArrowRight}></Fa></button>
         </div>
 </main>

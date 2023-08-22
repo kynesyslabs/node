@@ -1,9 +1,10 @@
 :root{
-    --accent:#0a84ff;
-    --accent-accessible:rgb(64, 156, 255);
-    --border-color: #303030;
-    --header-color: #303030;
-    --border-radius: 8px;
+    --accent:#5AF660;
+    --accent-accessible:#B5FFB7;
+    --border-color: none;
+    --header-color: rgba(255, 255, 255, 0.08);
+    --border-radius: 14px;
+    --border: .5px solid rgba(255, 255, 255, 0.08);
 }
 
 
@@ -26,11 +27,12 @@ html {
   }
 
 body{
-    background-color: #101010;
+    background-color: black;
     color: white;
-    font-family: 'Helvetica', sans-serif;
+    font-family: 'Helvetica Neue Light', sans-serif;
     margin: 0;
     font-size: 1rem;
+    height: 100%;
 }
 
 h1{
@@ -40,6 +42,9 @@ h1{
     font-weight: 300;
     margin-bottom: 0;
 }
+h3{
+    font-family: 'Neue Machina', sans-serif;
+}
 h4{
     font-size: 1.1rem;
     margin: 0 0 8px;
@@ -47,7 +52,7 @@ h4{
 input, .combobox{
     background-color: #404040;
     color: white;
-    font-family: 'Helvetica', 'sans-serif';
+    font-family: 'Helvetica Neue Light', 'sans-serif';
     display: block;
     border-radius: var(--border-radius);
     border: none;
@@ -64,14 +69,15 @@ button{
     border: none;
     cursor: pointer;
 }
+
 @font-face {
     font-family: 'Neue Machina';
     src: url('/nm/NeueMachina-Light.otf');
 }
 
 @font-face {
-    font-family: 'HelveticaN';
-    src: url('/helveticaN.otf');
+    font-family: 'Helvetica Neue Light';
+    src: url('/fonts/HelveticaNeue Light.ttf');
     font-weight: normal;
 }
 
@@ -100,19 +106,37 @@ button{
     transition: background-color .2s ease-in-out, color .2s ease-in-out;
 }
 
+.invert{
+    filter: invert();
+}
+
 /* COMPONENTS */
 .card{
+    margin: 0 auto 16px;
+    /*border: 1px solid var(--border-color);*/
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(15px);
+    border: .5px solid rgba(255, 255, 255, 0.08);
+    padding: 28px;
+    max-width: 1250px;
+}
+
+.grid-card{
     margin: 0 0 16px;
-    background-color: #202020;
-    border-radius: var(--border-radius);
-    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(15px);
+    border: .5px solid rgba(255, 255, 255, 0.08);
+    max-width: 1250px;
+    margin: auto;
 }
 
 .card-header{
     border-bottom: 1px solid var(--border-color);
-    padding: 16px;
     margin: 0;
-    background-color: var(--header-color);
+    /*margin-bottom: 24px;*/
+    /*background-color: var(--header-color);*/
     border-radius: var(--border-radius) var(--border-radius) 0 0;
 }
 
@@ -156,3 +180,25 @@ button{
     border-style: solid;
     border-color: black transparent transparent transparent;
   }
+
+button.primary{
+    width: 250px;
+    max-width: 100%;
+    font-size: 1rem;
+    background-color: var(--accent);
+    border-radius: 8px;
+    height: 50px;
+    font-family: "Helvetica Neue Light", sans-serif;
+}
+
+button.secondary{
+    width: 250px;
+    max-width: 100%;
+    font-size: 1rem;
+    background-color: rgb(20, 20, 20);
+    border-radius: 8px;
+    height: 50px;
+    font-family: "Helvetica Neue Light", sans-serif;
+    color: white;
+    border: var(--border);
+}

@@ -49,7 +49,6 @@
     .block-icon-container{
         width:55px;
         height: 45px;
-        background-color: #404040;
         border-radius: var(--border-radius);
         display: flex;
         justify-content: center;
@@ -57,21 +56,20 @@
     }
     .block-icon{
         filter: invert();
-        width: 35px;
+        width: 50px;
     }
 
     .card-header{
         display: flex;
         align-items: center;
         gap: 16px;
-        background-color: var(--header-color);
     }
 
     .block-header{
         display: flex;
         align-items: center;
-        gap: 16px;
         width: 100%;
+        margin-bottom: 28px;
     }
 
     .info-grid{
@@ -87,25 +85,26 @@
         background-color: #404040;
         color: white;
         padding: 4px 8px;
-        border-radius: var(--border-radius);
+        border-radius: 8px;
         box-shadow: rgba(17, 17, 26, 0.05) 0px 4px 16px, rgba(17, 17, 26, 0.05) 0px 8px 32px;
         cursor: pointer;
     }
 
     .page-controller-button:hover{
         background-color: var(--accent);
+        color: black;
     }
 
 </style>
 
 <main>
-<div class="card generic-shadow">
+<div class="card" style="width: fit-content; margin:auto;">
     <div class="card-header">
         <div class="block-header">
             <div class="block-icon-container generic-shadow">
                 <img class="block-icon" alt="Block icon" src={transIcon}/>
             </div>
-            <h4 class="ellipsis" style="margin: 0;">Transaction details</h4>
+            <h3 class="ellipsis" style="margin: 0;">Transaction details</h3>
         </div>      
     </div>
     <div class="info-grid">
