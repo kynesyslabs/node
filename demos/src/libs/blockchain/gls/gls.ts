@@ -14,6 +14,8 @@ import Token from "./types/Token"
 import NFT from "./types/NFT"
 import * as express from "express"
 import { TxFee } from "../types/transactions"
+import executeOperations from "../routines/executeOperations"
+import { Operator } from "../routines/executeOperations"
 
 interface OperationResult {
     success: boolean;
@@ -48,23 +50,10 @@ export default class GLS {
         return this.instance
     }
 
-    // ANCHOR Execute operations and merge GLS registry into the chain based on the status
-    executeOperations(): Map <Operation, OperationResult> {
-        let results: Map <Operation, OperationResult> = new Map()
-        for (let i = 0; i < this.operations.length; i++) {
-            let hash = this.operations[i].hash
-            let error = "no error occurred"
-            let valid = true // Until proven otherwise
-            // TODO Implement nonce and timestamp verification to execute a transaction
-            // TODO Here we will have to build a complex temporary registry divided by addresses to check things
-            this.operations[i].status = valid
-            results.set(this.operations[i], {
-                success: valid,
-                message: valid? "Transaction executed" : "Transaction failed due to: " + error,
-            })
-        }
-        // Returns the success and message for each operation
-        return results
+    // NOTE Due to the complexity of this method, it is imported by the appropriate module
+    async executeOperations(): Promise<Map<string, Operator>> {
+        const result = await executeOperations(this.operations)
+        return result
     }
 
     // SECTION Getters
