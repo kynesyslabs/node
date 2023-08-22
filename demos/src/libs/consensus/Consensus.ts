@@ -4,6 +4,8 @@ import chooseValidator from "./routines/chooseValidator"
 import Block from "../blockchain/blocks"
 import Mempool from "../blockchain/mempool"
 import buildProposedBlock from "../blockchain/routines/buildProposedBlock"
+import executeOperations from "../blockchain/routines/executeOperations"
+import GLS from "../blockchain/gls/gls"
 
 // NOTE This class is to handle effectively nodeCalls of the consensus subgroup
 export interface ConsensusRequest {
@@ -73,9 +75,25 @@ export default class Consensus {
         }
     }
 
-    async finalizeBlock(): Promise<void> {
-        // TODO Once the consensus is done, finalize the block by editing the blockchain itself and
-        // TODO Executing the GLS operations
+
+    // INFO This is called after the consensus, when proposedBlock is already in sync with the others
+    async finalizeBlock(): Promise<boolean> {
+        // REVIEW Once the consensus is done, finalize the block by editing the blockchain itself and
+        // executing the GLS operations
+        // NOTE Specifically, use executeOperations as imported and all the GLS stuff are done there
+        let gls_changes = GLS.getInstance().operations
+        let outcome = await executeOperations(gls_changes)
+        if (!outcome) {
+            throw new Error("Failed to finalize block") // REVIEW Or return null?
+        }
+        // REVIEW if this is valid
+        this.rounds[this.round_number].lastBlockHash = this.proposedBlock.hash
+        this.rounds[this.round_number].lastBlockTimestamp = this.proposedBlock.timestamp
+        this.rounds[this.round_number].lastConsensusHash = this.proposedBlock.hash
+        this.rounds[this.round_number].validators.clear()
+        this.round_number += 1
+        this.proposedBlock = null
+        return true
     }
 
 }

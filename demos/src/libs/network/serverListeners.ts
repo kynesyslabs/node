@@ -36,7 +36,7 @@ export default class ServerListeners {
             let _comlink_request = parsed_comlink[0]
             let content = parsed_comlink[1]
 
-            let extra, require_reply, response
+            let extra: any, require_reply: any, response: any
 
             switch (content.type) {
                 case "tx":

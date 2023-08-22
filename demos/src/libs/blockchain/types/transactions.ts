@@ -14,9 +14,9 @@ import { networks } from "bitcoinjs-lib"
 
 
 export interface TxFee {
-    network_fee: null,
-    rpc_fee: null,
-    additional_fee: null
+    network_fee: number,
+    rpc_fee: number,
+    additional_fee: number
 }
 
 export interface TransactionContent {

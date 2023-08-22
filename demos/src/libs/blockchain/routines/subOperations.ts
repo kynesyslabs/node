@@ -9,6 +9,16 @@ export default class subOperations {
     }
     constructor() {}
 
+    // INFO Compiling the genesis status if not already done
+    static async genesis(operation: Operation): Promise<OperationResult> {
+        let result: OperationResult = {
+            success: true,
+            message: "No error occurred",
+        }
+        // TODO Insert blindly stuff into the GLS if no genesis is present
+        return result
+    }
+
     // INFO Remove & Add transfer operation
     static async transferNative(operation: Operation): Promise<OperationResult> {
         let from: string = operation.params.from

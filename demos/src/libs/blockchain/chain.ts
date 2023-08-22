@@ -13,6 +13,8 @@ import Block from "./blocks"
 import Transaction from "./transaction"
 import Hashing from "../crypto/hashing"
 import Datasource from "src/model/datasource"
+import { Operation } from "./gls/gls"
+import executeOperations from "./routines/executeOperations"
 
 export default class Chain {
     private static instance: Chain
@@ -124,13 +126,13 @@ export default class Chain {
         return await Chain.read("SELECT * FROM addresses WHERE address = '" + address + "'")
     }
 
-    // TODO Implement the rest of the db schema for the chain
-
     // !SECTION Getters
 
     // SECTION  Setters
     // INFO Insert a block into the database
-    static async insertBlock(block: Block) {
+    // NOTE Inserting a block is done after the consensus, so that together
+    // with the block, we can write the GLS status changes to the chain.
+    static async insertBlock(block: Block, operations:Operation[]=[]) {
         // Returns the hash of the block
         // Block() class
         // REVIEW Build the SQL query
@@ -157,10 +159,12 @@ export default class Chain {
             ")"
         // Execute the SQL query
         await this.write(sql_query)
+        // Calling the operations of the block on the GLS
+        await executeOperations(operations)
         return block.hash
     }
     // INFO Generate the genesis block
-    static generateGenesisBlock(genesis_json: any) {
+    static async generateGenesisBlock(genesis_json: any): Promise<string> {
         // TODO Add a type for the block json
         console.log(genesis_json)
         let genesis_block = new Block()
@@ -176,9 +180,23 @@ export default class Chain {
         genesis_block.hash = Hashing.sha256(
             JSON.stringify(genesis_block.content),
         )
+        // REVIEW Create a GLS Operation and execute it
+        let genesis_op: Operation = {
+            operator: "genesis",
+            actor: null,
+            params: genesis_json,
+            hash: genesis_block.hash,
+            nonce: 0,
+            timestamp: genesis_block.timestamp,
+            status: true,
+            fees: {
+                network_fee: 0,
+                rpc_fee: 0,
+                additional_fee: 0,
+            },
+        }
         // Insert the genesis block into the database
-        return this.insertBlock(genesis_block)
-        // TODO Change the GLS to reflect the genesis block instructions
+        return await this.insertBlock(genesis_block, [genesis_op])
     }
     // !SECTION Setters
 

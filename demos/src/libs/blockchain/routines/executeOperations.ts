@@ -82,6 +82,9 @@ async function executeSequence(operations: Operation[]): Promise<Actor> {
         // TODO How to handle all the txs together? In the results registry we will have to tinker a lot
         // Dispatching the operation to the appropriate method
         switch (operations[i].operator) {
+            case "genesis":
+                result = await subOperations.genesis(operations[i])
+                break
             case "transfer_native":
                 result = await subOperations.transferNative(operations[i])
                 break
