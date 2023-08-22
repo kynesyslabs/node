@@ -128,7 +128,6 @@
     .block-icon-container{
         width:55px;
         height: 45px;
-        background-color: #404040;
         border-radius: var(--border-radius);
         display: flex;
         justify-content: center;
@@ -136,7 +135,7 @@
     }
     .block-icon{
         filter: invert();
-        width: 35px;
+        width: 40px;
     }
     .generic-shadow{
         box-shadow: rgba(17, 17, 26, 0.05) 0px 4px 16px, rgba(17, 17, 26, 0.05) 0px 8px 32px;
