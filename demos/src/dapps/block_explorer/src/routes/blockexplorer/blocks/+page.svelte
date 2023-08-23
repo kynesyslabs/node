@@ -93,7 +93,7 @@
                 <!--{#each data.block.content.transactions as transaction}-->
                     <a class="accessible grid-cell" href={`/blocks/${data.block.number}`}><p class="grid-cell">{data.block.number}</p></a>
                     <p class="grid-cell">{data.block.timestamp}</p>
-                    <p class="grid-cell">{data.block.content.transactions.length}</p>
+                    <p class="grid-cell">{data.block.content.ordered_transactions.length}</p>
                     <p class="grid-cell">{data.block.proposer}</p>
                 <!--{/each}-->
             </div>

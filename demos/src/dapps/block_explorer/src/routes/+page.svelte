@@ -10,7 +10,7 @@
     import video from "$lib/assets/videos/morph-bg.mp4";
     import { goto } from '$app/navigation';
 
-
+    console.log(data);
 
     function onSearch(hash)
     {
@@ -98,6 +98,8 @@
         grid-gap: 16px;
         padding: 16px;
         align-items: start;
+        max-width: 1500px;
+        margin: auto;
     }
     @media only screen and (max-width: 1250px) {
         .main-grid{
@@ -172,11 +174,7 @@
     </div>
 </div>
 
-
-<div class="container">
-
 <div class="main-grid">
-
     <div style="width: 100%;" class="card">
         <h3 class="card-header">Latest blocks</h3>
         {#each latestBlocks as block}
@@ -186,20 +184,20 @@
                         <img class="block-icon" alt="Block icon" src={blockIcon}/>
                     </div>
                     <div style="width: 100px;">
-                        <a class="accessible" href={`/blocks/${block.number}`}><p style="margin-top:0;margin-bottom:8px;">{block.number}</p></a>
+                        <a class="accessible" href={`/blockexplorer/blocks/${block.number}`}><p style="margin-top:0;margin-bottom:8px;">{block.number}</p></a>
                         <p style="margin: 0; opacity:.5; font-size:.9rem;">{block.timestamp}</p>
                     </div>
                 </div>
                 <div>
                     <p style="margin-top:0;margin-bottom:8px;">Proposer <span class="fake-link">{block.proposer}</span></p>
-                    <p style="margin: 0;font-size:.9rem;opacity:.5;"><span>{block.content.transactions.length} transactions</span><!--<span style="opacity:.5"> {block.time/100} secs</span>--></p>
+                    <p style="margin: 0;font-size:.9rem;opacity:.5;"><span>{block.content.ordered_transactions.length} transactions</span></p>
                 </div>
                 <div class="reward-container generic-shadow">
                     <p class="reward" style="font-size:.8rem">{block.reward} DEM</p>
                 </div>
             </div>
         {/each}
-        <a href="/blocks">
+        <a href="/blockexplorer/blocks">
             <div class="card-footer color-transition">
                 View all blocks<Fa style="position:relative;top:2px;margin-left:8px" icon={faArrowRightLong}></Fa>
             </div>
@@ -207,14 +205,14 @@
     </div>
     <div style="width: 100%;" class="card">
         <h3 class="card-header">Latest transactions</h3>
-        {#each data.block.content.transactions as transaction}
+        {#each data.block.content.ordered_transactions as transaction}
         <div class="block-card">
             <div class="block-card-header">
                 <div class="block-icon-container generic-shadow">
                     <img class="block-icon" alt="Block icon" src={transIcon}/>
                 </div>
                 <div style="width: 200px;">
-                    <a href={`/transactions/${transaction.hash}`} class="accessible"><p class="block-cell" style="margin-top:0;margin-bottom:8px;">{transaction.hash}</p></a>
+                    <a href={`/blockexplorer/transactions/${transaction.hash}`} class="accessible"><p class="block-cell" style="margin-top:0;margin-bottom:8px;">{transaction.hash}</p></a>
                     <p style="margin: 0; opacity:.5; font-size:.9rem;">{transaction.age}</p>
                 </div>
             </div>
@@ -227,12 +225,10 @@
             </div>
         </div>
         {/each}
-        <a href="/transactions">
+        <a href="/blockexplorer/transactions">
             <div class="card-footer color-transition">
                 View all transactions<Fa style="position:relative;top:2px;margin-left:8px" icon={faArrowRightLong}></Fa>
             </div>
         </a>
     </div>
-</div>
-
 </div>

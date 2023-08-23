@@ -44,7 +44,7 @@
         width: 100%;
         border-radius: var(--border-radius);
         box-shadow: var(--box-shadow);
-        z-index: 100;
+        z-index: 200;
         transform: translateY(-50%);
         background-color: #505050;
     }

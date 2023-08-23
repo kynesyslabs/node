@@ -92,12 +92,12 @@
             </div>
             <div class="transactions-grid">
                 <!--{#each data.block.content.transactions as transaction}-->
-                    <a class="accessible grid-cell" href={`/blocks/${data.transaction.hash}`}><p class="grid-cell">{data.transaction.hash}</p></a>
-                    <p class="grid-cell">{data.transaction.content.content.type}</p>
-                    <p class="grid-cell">{data.transaction.content.content.data.properties.name} ({data.transaction.content.content.data.properties.currency})</p>
-                    <p class="grid-cell">{data.transaction.content.content.from}</p>
-                    <p class="grid-cell">{data.transaction.content.content.to}</p>
-                    <p class="grid-cell">{data.transaction.content.content.amount}</p>
+                    <a class="accessible grid-cell" href={`/blockexplorer/blocks/${data.transaction.hash}`}><p class="grid-cell">{data.transaction.hash}</p></a>
+                    <p class="grid-cell">{data.transaction.content.type}</p>
+                    <p class="grid-cell">{data.transaction.content.data.properties.name} ({data.transaction.content.data.properties.currency})</p>
+                    <p class="grid-cell">{data.transaction.content.from}</p>
+                    <p class="grid-cell">{data.transaction.content.to}</p>
+                    <p class="grid-cell">{data.transaction.content.amount}</p>
                 <!--{/each}-->
             </div>
             <div class="card-footer">

@@ -11,6 +11,8 @@
         selectedTab = index;
     }
 
+    console.log(data.block)
+
     //console.log(data.pblock);
 </script>
 
@@ -65,7 +67,7 @@
     .tab-container{
         display: flex;
         align-items: end;
-        margin: 0 0 16px;
+        margin: 0 0 32px;
         gap: -8px;
         border-radius: 14px;
         background: rgba(255, 255, 255, 0.08);
@@ -234,11 +236,11 @@
             <p class="info-title">Proposer:</p>
             <p class="info-text">{data.block.proposer}</p>
             <p class="info-title">Transactions:</p>
-            <p class="info-text">{data.block.content.transactions.length} transactions in this block</p>
+            <p class="info-text">{data.block.content.ordered_transactions.length} transactions in this block</p>
         </div>
     {:else}
         <div class="transactions-info">
-            <p class="transaction-number-label">A total of {data.block.content.transactions.length} transactions found</p>
+            <p class="transaction-number-label">A total of {data.block.content.ordered_transactions.length} transactions found</p>
         </div>
         <div class="transactions-grid grid-header-row">
             <p class="grid-header-label">Hash</p>
@@ -247,8 +249,8 @@
             <p class="grid-header-label">Amount</p>
         </div>
         <div class="transactions-grid">
-            {#each data.block.content.transactions as transaction}
-                <a class="accessible grid-cell" href={`/transactions/${transaction.hash}`}><p class="grid-cell">{transaction.hash}</p></a>
+            {#each data.block.content.ordered_transactions as transaction}
+                <a class="accessible grid-cell" href={`/blockexplorer/transactions/${transaction.hash}`}><p class="grid-cell">{transaction.hash}</p></a>
                 <p class="grid-cell">{transaction.content.from}</p>
                 <p class="grid-cell">{transaction.content.to}</p>
                 <p class="grid-cell">{transaction.content.amount}</p>
