@@ -15,9 +15,9 @@ import Transaction from "../transaction"
 import sharedState from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import Cryptography from "src/libs/crypto/cryptography"
-import { sign } from "crypto"
 
 // INFO Using its Mempool, each node can generate the same block having the same content
+// NOTE This is tought to be executed after the mempool syncing between nodes
 export default async function buildProposedBlock(): Promise<Block>{
     let proposedBlock = new Block()
     let mempool = await Mempool.getMempool()
@@ -32,7 +32,8 @@ export default async function buildProposedBlock(): Promise<Block>{
         // If an address has two txs with the same nonce, the richest replaces the other
         mempool = await Mempool.checkNonce(txs[i])
         // We also update the per_user_txs map
-        per_user_txs[txs[i].content.from.toString("hex")] = txs[i]
+        let user = txs[i].content.from.toString("hex")
+        per_user_txs[user].push(txs[i]) // REVIEW Does it works on empty lists?
     }
     // REVIEW Setting the block content
     proposedBlock.content.ordered_transactions = ordered_txs

@@ -145,7 +145,7 @@ export default class Mempool {
             }
         }
         // Merge the mempool with our one
-        mempool.transactions.concat(received_mempool.transactions)
+        mempool.transactions.concat(received_mempool.transactions) // REVIEW is this the best way to merge?
         await Chain.write("UPDATE mempool SET transactions = '" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")
         return true
     }

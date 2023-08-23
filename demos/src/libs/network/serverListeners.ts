@@ -42,7 +42,7 @@ export default class ServerListeners {
                 request,
                 this.peer.socket,
             )
-            if (!parsed_comlink) return
+            if (!parsed_comlink) return // TODO Better error handling
 
             let _comlink_request = parsed_comlink[0]
             let content = parsed_comlink[1]
