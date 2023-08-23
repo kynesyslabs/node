@@ -16,8 +16,9 @@ import * as express from "express"
 import { TxFee } from "../types/transactions"
 import executeOperations from "../routines/executeOperations"
 import { Actor } from "../routines/executeOperations"
+import * as fs from "fs"
 
-interface OperationResult {
+export interface OperationResult {
     success: boolean;
     message: string;
 }
@@ -33,10 +34,50 @@ export interface Operation {
     fees: TxFee;
 }
 
+// WIP Making 'operations' registry more stable through db writing or file writing
+interface OperationRegistrySlot {
+    operation: Operation;
+    status: boolean | "pending";
+    result: OperationResult;
+    timestamp: number;
+}
+
+export class OperationsRegistry {
+    path: string = "data/operations.json"
+    operations: OperationRegistrySlot[] = []
+
+    constructor() {
+        // Creating an empty registry if it doesn't exist
+        if (!fs.existsSync(this.path)) fs.writeFileSync(this.path, "[]")
+        this.operations = JSON.parse(fs.readFileSync(this.path).toString())
+    }
+
+    // INFO Adding an operation to the registry
+    add(operation: Operation) {
+        this.operations.push({
+            operation: operation,
+            status: "pending",
+            result: {
+                success: false,
+                message: "ot yet processed",
+            },
+            timestamp: Date.now(),
+        })
+        fs.writeFileSync(this.path, JSON.stringify(this.operations))
+    }
+
+    // INFO Getting the full list of operations currently in the registry
+    get(): OperationRegistrySlot[] {
+        return this.operations
+    }
+
+
+}
+
 // INFO Besides the static methods, the GLS store all the operations to be done in the current block so that they can be executed in order
 export default class GLS {
     private static instance: GLS
-    operations: Operation[]
+    operations: Operation[] // TODO It will become the above implementation
 
     private constructor() {
         this.operations = []

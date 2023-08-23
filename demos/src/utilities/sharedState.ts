@@ -45,7 +45,9 @@ export default class sharedState {
 
     public getTimePassed(genesisTimestamp: number): number {
         this.getTimestamp()
-        return this.currentTimestamp - this.lastTimestamp + genesisTimestamp // Take into account the genesis timestamp
+        let delta = this.currentTimestamp - this.lastTimestamp + genesisTimestamp // Take into account the genesis timestamp
+        this.setLastTimestamp()
+        return delta
     }
 
 }

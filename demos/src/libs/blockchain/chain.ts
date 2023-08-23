@@ -128,8 +128,8 @@ export default class Chain {
         let properties_state = await Chain.read("SELECT * FROM status_properties WHERE address = '" + address + "'")
         properties_state = properties_state[0]? properties_state[0] : null
         return {
-            native: native_state[0],
-            properties: properties_state[0],
+            native: native_state,
+            properties: properties_state,
         }
     }
 
