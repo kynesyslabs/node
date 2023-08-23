@@ -123,7 +123,14 @@ export default class Chain {
 
     // REVIEW Giving back all the properties of an address
     static async getAddressInfo(address: string): Promise<any> {
-        return await Chain.read("SELECT * FROM addresses WHERE address = '" + address + "'")
+        let native_state = await Chain.read("SELECT * FROM status_native WHERE address = '" + address + "'")
+        native_state = native_state[0]? native_state[0] : null
+        let properties_state = await Chain.read("SELECT * FROM status_properties WHERE address = '" + address + "'")
+        properties_state = properties_state[0]? properties_state[0] : null
+        return {
+            native: native_state[0],
+            properties: properties_state[0],
+        }
     }
 
     // !SECTION Getters
