@@ -358,9 +358,9 @@ let demos = {
             // Hashing the content of the transaction
             let md = forge.md.sha256.create()
             md.update(JSON.stringify(raw_tx.content))
-            raw_tx.hash = md.digest().toString("hex")
+            raw_tx.hash = md.digest().toHex();
             // Signing the hash of the content
-            raw_tx.signature = forge.pki.ed25519.sign(raw_tx.hash, private_key) // REVIEW if it is working right
+            raw_tx.signature = forge.pki.ed25519.sign({message: raw_tx.hash, encoding:"utf8", privateKey: private_key}) // REVIEW if it is working right
             return raw_tx // Hashed and signed
         },
         // NOTE Sending a transaction after signing it
