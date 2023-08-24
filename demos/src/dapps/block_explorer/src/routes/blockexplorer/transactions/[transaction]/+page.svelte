@@ -1,10 +1,9 @@
 <script>
     import '$lib/global.css';
     export let data;
-    import Fa from 'svelte-fa'
-    import { faCopy } from '@fortawesome/free-solid-svg-icons';
     let copied = false;
     import transIcon from '$lib/assets/icons/agreement-icon.png';
+	import CopyButton from '../../../../lib/components/CopyButton.svelte';
 
     function copy(value)
     {
@@ -110,15 +109,15 @@
         </div>
         <div class="info-grid">
             <p class="info-title">Hash:</p>
-            <div class="info"><p class="info-text">{data.transaction.hash}</p><button on:click={()=>{copy(data.transaction.hash)}} on:mouseenter={mouseenterHandler} class="page-controller-button tooltip color-transition"><span class="tooltiptext">{copied?"Copied!":"Copy"}</span><Fa icon={faCopy}></Fa></button></div>
+            <div class="info"><p class="info-text">{data.transaction.hash}</p><CopyButton text={data.transaction.hash}/></div>
             <p class="info-title">Type:</p>
             <div class="info"><p class="info-text">{data.transaction.content.type}</p></div>
             <p class="info-title">Currency:</p>
             <div class="info"><p class="info-text">{data.transaction.content.data.properties.name} ({data.transaction.content.data.properties.currency})</p></div>
             <p class="info-title">From:</p>
-            <div class="info"><p class="info-text">{data.transaction.content.from}</p> <button on:click={()=>{copy(data.transaction.content.from)}} on:mouseenter={mouseenterHandler} class="page-controller-button tooltip color-transition"><span class="tooltiptext">{copied?"Copied!":"Copy"}</span><Fa class="tooltip" icon={faCopy}></Fa></button></div>
+            <div class="info"><p class="info-text">{data.transaction.content.from}</p><CopyButton text={data.transaction.content.from}></CopyButton></div>
             <p class="info-title">To:</p>
-            <div class="info"><p class="info-text">{data.transaction.content.to}</p> <button on:click={()=>{copy(data.transaction.content.to)}} on:mouseenter={mouseenterHandler} class="page-controller-button tooltip color-transition"><span class="tooltiptext">{copied?"Copied!":"Copy"}</span><Fa icon={faCopy}></Fa></button></div>
+            <div class="info"><p class="info-text">{data.transaction.content.to}</p><CopyButton text={data.transaction.content.to}></CopyButton></div>
             <p class="info-title">Amount:</p>
             <div class="info"><p class="info-text">{data.transaction.content.amount}</p></div>
         </div>
