@@ -311,9 +311,11 @@ let demos = {
     },
 
     getAddressInfo: async function (address) {
-        return JSON.parse(await demos.nodeCall("getAddressInfo", {
+        let add = JSON.parse(await demos.nodeCall("getAddressInfo", {
             address: address,
-        }))
+        }));
+        add.native.tx_list = JSON.parse(add.native.tx_list);
+        return add;
     },
     // !SECTION Predefined calls
 
