@@ -341,7 +341,7 @@ let demos = {
             let thisTx = demos.skeletons.transaction
             if (!data.timestamp) data.timestamp = Date.now()
             // Assigning the transaction data to our object
-            thisTx.content = data
+            //thisTx.content = data
             return thisTx
         },
         // NOTE Signing a transaction after hashing it
