@@ -1,0 +1,87 @@
+.engageCard {
+    width: 20%;
+    padding: 0 15px;
+}
+
+.engageCard a {
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(15px);
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 22px 16px 28px;
+    text-decoration: unset;
+}
+
+.engageCard a svg {
+    font-size: 32px;
+    margin: 0 auto 10px;
+}
+
+.engageCard a span {
+    font-size: 18px;
+    font-weight: 500;
+    line-height: 1.4444;
+    letter-spacing: 0.311px;
+}
+
+@media (max-width: 1199px) {
+    .engageCard {
+        width: 20%;
+        padding: 0 10px;
+    }
+    
+    .engageCard a {
+        border-radius: 13px;
+        padding: 22px 15px 26px;
+    }
+    
+    .engageCard a svg {
+        font-size: 30px;
+        margin: 0 auto 10px;
+    }
+    
+    .engageCard a span {
+        font-size: 17px;
+        line-height: 1.4444;
+    }
+}
+
+
+@media (max-width: 991px) {
+    .engageCard {
+        width: 33.33%;
+        padding: 0 10px 20px;
+    }
+    
+    .engageCard a {
+        border-radius: 12px;
+        padding: 22px 15px 24px;
+    }
+    
+    
+    .engageCard a span {
+        font-size: 16px;
+        line-height: 1.4444;
+    }
+}
+
+
+@media (max-width: 767px) {
+    .engageCard {
+        width: 50%;
+    }
+
+    .engageCard a svg {
+        font-size: 28px;
+        margin: 0 auto 8px;
+    }
+
+    .engageCard a {
+        border-radius: 10px;
+        padding: 20px 15px 22px;
+    }
+}

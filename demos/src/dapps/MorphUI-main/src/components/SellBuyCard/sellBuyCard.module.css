@@ -1,0 +1,285 @@
+.sellBuyWrap {
+    width: 100%;
+    margin-bottom: 14px;
+}
+
+.sellBuyHeading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.dropdownBtnWrap {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    max-width: calc(100% - 35px);
+}
+
+.dropdownBtnWrap span {
+    color: #A8ACAF;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.625;
+    margin-right: 14px;
+}
+
+.dropdownBtnWrap .dropdownBtn {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    color: #FFF;
+    font-size: 18px;
+    font-weight: 500;
+    line-height: 1.4445;
+    letter-spacing: 0.311px;
+    padding: 0;
+    border: 0;
+    background: transparent !important;
+    outline: unset !important;
+    gap: 8px;
+}
+
+.dropdownBtn img {
+    max-width: 32px;
+    max-height: 32px;
+    object-fit: contain;
+}
+
+.dropdownBtn svg {
+    font-size: 22px;
+}
+
+.dropdownBtn svg path {
+    fill: #A8ACAF;
+}
+
+.settingWrap {
+    position: relative;
+    z-index: 5;
+}
+
+.settingWrap .settingBtn {
+    padding: 0;
+    border: 0;
+    background: transparent !important;
+    outline: unset !important;
+    line-height: 1;
+}
+
+.sellBuyCard {
+    padding: 1px 0 0 1px;
+    position: relative;
+    z-index: 2;
+    border-radius: 16px;
+    background: linear-gradient(20deg, #000000,#000000, rgba(255, 255, 255, 0.5), #000000, #000000 );
+    position: relative;
+    padding: 20px;
+}
+
+.sellBuyCard::before {
+    content: "";
+    left: 1px;
+    top: 1px;
+    width: calc(100% - 1px);
+    height: calc(100% - 1px);
+    -webkit-backdrop-filter: blur(15px);
+    backdrop-filter: blur(15px);
+    background: #000;
+    border-radius: 16px;
+    position: absolute;
+    padding: 20px;
+}
+
+.sellBuyInnerHeading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+    position: relative;
+}
+
+.sellBuyInnerHeading h4 {
+    color: #A8ACAF;
+    font-size: 22px;
+    font-weight: 500;
+    line-height: 1.18182;
+    letter-spacing: 0.311px;
+    padding-right: 15px;
+    font-family: 'Helvetica Neue', sans-serif;
+    margin: 0;
+}
+
+.sellBuyInnerHeading h3 {
+    color: #FFF;
+    text-align: right;
+    font-size: 36px;
+    font-weight: 400;
+    line-height: 1.52778;
+    font-family: 'Helvetica Neue', sans-serif;
+    margin: 0;
+}
+
+.sellBuyCard ul {
+    position: relative;
+}
+
+.sellBuyCard ul li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+}
+
+.sellBuyCard ul li p {
+    color: #A8ACAF;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.625;
+    margin: 0;
+}
+
+.sellBuyCard ul li span {
+    color: #FF3535;
+}
+
+@media (max-width: 1199px) {
+    .sellBuyWrap {
+        margin-bottom: 14px;
+    }
+    
+    .dropdownBtnWrap span {
+        font-size: 15px;
+        margin-right: 14px;
+    }
+    
+    .dropdownBtnWrap .dropdownBtn {
+        font-size: 17px;
+        gap: 8px;
+    }
+    
+    .dropdownBtn svg {
+        font-size: 21px;
+    }
+
+    .sellBuyCard {
+        border-radius: 15px;
+        padding: 18px;
+    }
+    
+    .sellBuyCard::before {
+        background: #000;
+        border-radius: 15px;
+    }
+    
+    .sellBuyInnerHeading {
+        margin-bottom: 22px;
+    }
+    
+    .sellBuyInnerHeading h4 {
+        font-size: 21px;
+    }
+    
+    .sellBuyInnerHeading h3 {
+        font-size: 33px;
+    }
+
+    .sellBuyCard ul li p {
+        font-size: 16px;
+        line-height: 25px;
+    }
+}
+
+@media (max-width: 991px) {
+    .sellBuyWrap {
+        margin-bottom: 14px;
+    }
+    
+    .dropdownBtnWrap span {
+        font-size: 15px;
+        margin-right: 14px;
+    }
+    
+    .dropdownBtnWrap .dropdownBtn {
+        font-size: 16px;
+        gap: 7px;
+    }
+    
+    .dropdownBtn svg {
+        font-size: 20px;
+    }
+
+    .sellBuyCard {
+        border-radius: 14px;
+        padding: 16px;
+    }
+    
+    .sellBuyCard::before {
+        border-radius: 14px;
+    }
+    
+    .sellBuyInnerHeading {
+        margin-bottom: 20px;
+    }
+    
+    .sellBuyInnerHeading h4 {
+        font-size: 20px;
+    }
+    
+    .sellBuyInnerHeading h3 {
+        font-size: 30px;
+    }
+
+    .sellBuyCard ul li p {
+        font-size: 15px;
+        line-height: 24px;
+    }
+}
+
+@media (max-width: 767px) {
+    .sellBuyWrap {
+        margin-bottom: 12px;
+    }
+    
+    .dropdownBtnWrap span {
+        font-size: 14px;
+        margin-right: 12px;
+    }
+    
+    .dropdownBtnWrap .dropdownBtn {
+        gap: 6px;
+    }
+    
+    .dropdownBtn svg {
+        font-size: 18px;
+    }
+
+    .sellBuyCard {
+        border-radius: 12px;
+        padding: 15px;
+    }
+    
+    .sellBuyCard::before {
+        border-radius: 12px;
+    }
+    
+    .sellBuyInnerHeading {
+        margin-bottom: 16px;
+    }
+    
+    .sellBuyInnerHeading h4 {
+        font-size: 18px;
+    }
+    
+    .sellBuyInnerHeading h3 {
+        font-size: 26px;
+    }
+
+    .sellBuyCard ul li p {
+        font-size: 14px;
+        line-height: 24px;
+    }
+}

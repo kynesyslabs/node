@@ -1,0 +1,883 @@
+.bannerSwap {
+    background: url(../../assets/images/chain-support-bg.png) top center no-repeat;
+    background-size: cover;
+    padding: 40px 0 120px;
+}
+
+.swapCard {
+    padding: 35px;
+    max-width: 604px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(15px);
+    margin: 51px auto 0;
+}
+
+.inverseOrder {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    flex-direction: column-reverse;
+}
+
+.exchangeBtn {
+    position: relative;
+    border-radius: 8px !important;
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.3), #000000, #000000 ) !important;
+    margin-bottom: 14px;
+    width: 50px;
+    height: 50px;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    border: 0 !important;
+    padding: 0 !important;
+    margin: 0 auto 10px;
+}
+
+.exchangeBtn::before {
+    content: "";
+    left: 1px;
+    top: 1px;
+    width: calc(100% - 1px);
+    height: calc(100% - 1px);
+    -webkit-backdrop-filter: blur(15px);
+    backdrop-filter: blur(15px);
+    background: #000;
+    border-radius: 8px 8px 6px 8px;
+    position: absolute;
+}
+
+.exchangeBtn img {
+    width: 38px;
+    height: 38px;
+    object-fit: contain;
+    position: relative;
+}
+
+.infoContent {
+    position: relative;
+    border-radius: 8px;
+    background: linear-gradient(5deg, #000000,#000000, rgba(255, 255, 255, 0.5), #000000, #000000 );
+    margin-bottom: 14px;
+    padding: 12px 20px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+}
+
+.infoContent::before {
+    content: "";
+    left: 1px;
+    top: 1px;
+    width: calc(100% - 1px);
+    height: calc(100% - 1px);
+    -webkit-backdrop-filter: blur(15px);
+    backdrop-filter: blur(15px);
+    background: #000;
+    border-radius: 8px;
+    position: absolute;
+}
+
+.infoContent p {
+    color: #FFF;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.625;
+    margin: 0;
+    position: relative;
+}
+
+.infoContent p svg {
+    font-size: 24px;
+    color: #fff;
+    margin-right: 8px;
+}
+
+.infoContent p span {
+    color: #A8ACAF;
+}
+
+.infoContent button {
+    color: #A8ACAF !important;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.625; 
+    border: 0;
+    background: transparent !important;
+    padding: 0 3.5px;
+    outline: unset !important;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    position: relative;
+}
+
+.infoContent button svg {
+    font-size: 24px;
+}
+
+.infoContent button svg path {
+    fill: #A8ACAF;
+}
+
+
+.swapModeCard {
+    position: relative;
+    border-radius: 16px;
+    background: linear-gradient(48deg, #000000,#000000, rgba(255, 255, 255, 0.5), #000000, #000000 );
+    margin-bottom: 14px;
+    padding: 20px 20px;
+}
+
+.swapModeCard::before {
+    content: "";
+    left: 1px;
+    top: 1px;
+    width: calc(100% - 1px);
+    height: calc(100% - 1px);
+    -webkit-backdrop-filter: blur(15px);
+    backdrop-filter: blur(15px);
+    background: #000;
+    border-radius: 16px 16px 12px 16px;
+    position: absolute;
+}
+
+.swapModeHeading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin-bottom: 13.5px;
+    position: relative;
+}
+
+.swapModeHeading h6 {
+    color: #FFF;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.625;
+    margin: 0;
+}
+
+.swapModeHeading button {
+    padding: 0;
+    background: transparent !important;
+    border: 0;
+    color: #A8ACAF;
+    line-height: 1;
+}
+
+.swapModeHeading button svg {
+    font-size: 24px;
+    fill: #A8ACAF;
+}
+
+.swapRow {
+    margin: 0 -5px !important;
+    position: relative;
+}
+
+.swapRow .swapCol {
+    padding: 0 5px 10px;
+}
+
+.fusionModeCard {
+    padding: 1px 0 0 1px;
+    position: relative;
+    z-index: 1;
+    border-radius: 16px;
+    background: linear-gradient(15deg, #000000,#000000, rgba(255, 255, 255, 0.5), #000000, #000000 );
+}
+
+.fusionModeCard::before {
+    content: "";
+    left: 1px;
+    top: 1px;
+    width: calc(100% - 1px);
+    height: calc(100% - 1px);
+    background: #000;
+    position: absolute;
+    z-index: 1;
+    border-radius: 16px;
+}
+
+.fusionModeCard .fusionMode {
+    padding: 19px;
+    position: relative;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.08);
+    -webkit-backdrop-filter: blur(15px);
+    backdrop-filter: blur(15px);
+    z-index: 2;
+}
+
+.fusionMode .fusionModeHeading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+
+.fusionMode .fusionModeHeading h5 {
+    color: #FFF;
+    font-size: 18px;
+    font-weight: 500;
+    line-height: 1.4445;
+    letter-spacing: 0.311px;
+    margin: 0;
+}
+
+.fusionMode .fusionModeHeading span {
+    color: #A8ACAF;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.64286; 
+}
+
+.fusionMode ul {
+    margin: 0;
+    padding: 0;
+}
+
+.fusionMode ul li {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+}
+
+.fusionMode ul li p,
+.fusionMode ul li span {
+    color: #A8ACAF;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 23px;
+    margin: 0;
+}
+
+.fusionMode ul li span {
+    color: #FBFBFB;
+} 
+
+.modeOfferCard {
+    padding: 1px 0 0 1px;
+    position: relative;
+    z-index: 1;
+    border-radius: 16px;
+    background: linear-gradient(15deg, #000000,#000000, rgba(255, 255, 255, 0.5), #000000, #000000 );
+}
+
+.modeOfferCard::before {
+    content: "";
+    left: 1px;
+    top: 1px;
+    width: calc(100% - 1px);
+    height: calc(100% - 1px);
+    background: #000;
+    position: absolute;
+    z-index: 1;
+    border-radius: 16px;
+}
+
+.modeOfferCard .modeOffer {
+    padding: 19px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    position: relative;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.08);
+    -webkit-backdrop-filter: blur(15px);
+    backdrop-filter: blur(15px);
+    z-index: 2;
+}
+
+.modeOfferCard .modeOffer p {
+    color: #FFF;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.64286;
+    padding-right: 16px;
+    max-width: 270px;
+    margin: 0;
+}
+
+.modeOfferCard .modeOffer a {
+    color: #545459;
+    font-size: 18px;
+    font-weight: 500;
+    line-height: 1.44444;
+    letter-spacing: 0.311px;
+    text-decoration: unset;
+    display: flex;
+}
+
+.modeOfferCard .modeOffer a svg {
+    margin-left: 8px;
+    font-size: 22px;
+    margin-top: 1px;
+}
+
+.modeOfferCard .modeOffer a svg path {
+    color: #545459;
+}
+
+.networkFree {
+    padding: 0;
+    margin: 0;
+    position: relative;
+}
+
+.networkFree li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.networkFree li p {
+    color: #A8ACAF;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.64286;
+    margin: 0;
+}
+
+.networkFree li p:last-child {
+    text-align: right;
+}
+
+.networkFree li p span {
+    margin-left: 10px;
+    color: #FFF;
+    display: inline-block;
+}
+
+.networkFree li p.greenClr {
+    color: #5AF660;
+}
+
+.priceImpact {
+    border-radius: 8px;
+    background: #1A1B1C;
+    backdrop-filter: blur(15px);
+    padding: 9px 20px;
+}
+
+.priceImpact p {
+    color: #FF3535;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.625;
+    margin: 0;
+}
+
+.swapCardBtn {
+    margin-top: 35px;
+    display: flex;
+    flex-wrap: wrap;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.swapCardBtn .generalBtn {
+    font-size: 22px;
+    font-weight: 500;
+    line-height: 1.18182;
+    letter-spacing: 0.311px;
+    border-radius: 14px;
+    border: 1px solid #5AF660 !important;
+    background: #5AF660 !important;
+    padding: 21.2px 30px;
+    text-align: center;
+    color: #242526 !important;
+    text-decoration: unset;
+    text-align: center;
+    width: 100%;
+    margin-bottom: 24px;
+}
+
+.swapCardBtn .learnMoreBtn {
+    color: #545459;
+    text-decoration: unset;
+    font-size: 18px;
+    font-weight: 500;
+    line-height: 1.44445;
+    letter-spacing: 0.311px;
+    display: inline-flex;
+    align-items: flex-start;
+}
+
+.swapCardBtn .learnMoreBtn svg {
+    font-size: 22px;
+    margin-left: 8px;
+}
+
+.swapCardBtn .learnMoreBtn svg path {
+    color: #545459;
+}
+
+@media (max-width: 1199px) {
+    .bannerSwap {
+        padding: 40px 0 100px;
+    }
+    
+    .swapCard {
+        padding: 30px;
+        max-width: 580px;
+        margin: 48px auto 0;
+    }
+    
+    .exchangeBtn {
+        border-radius: 8px !important;
+        width: 50px;
+        height: 50px;
+    }
+    
+    .exchangeBtn img {
+        width: 36px;
+        height: 36px;
+    }
+    
+    .infoContent {
+        border-radius: 8px;
+        margin-bottom: 14px;
+        padding: 12px 20px;
+    }
+    
+    .infoContent::before {
+        border-radius: 8px;
+    }
+    
+    .infoContent p {        
+        font-size: 16px;
+        line-height: 1.625;
+    }
+    
+    .infoContent p svg {
+        font-size: 24px;
+        margin-right: 8px;
+    }
+    
+    .infoContent button {
+        font-size: 16px;
+        line-height: 1.625;
+    }
+    
+    .infoContent button svg {
+        font-size: 23px;
+    }
+    
+    .swapModeCard {
+        border-radius: 15px;
+        margin-bottom: 14px;
+        padding: 19px;
+    }
+    
+    .swapModeCard::before {
+        border-radius: 15px 15px 12px 15px;
+    }
+    
+    .swapModeHeading {
+        margin-bottom: 13px;
+    }
+    
+    .swapModeHeading h6 {
+        font-size: 16px;
+        line-height: 1.625;
+    }
+    
+    .swapModeHeading button svg {
+        font-size: 23px;
+    }
+    
+    .fusionModeCard {
+        border-radius: 15px;
+    }
+    
+    .fusionModeCard::before {
+        border-radius: 15px;
+    }
+    
+    .fusionModeCard .fusionMode {
+        padding: 18px;
+        border-radius: 15px;
+    }
+    
+    .fusionMode .fusionModeHeading {
+        margin-bottom: 18px;
+    }
+    
+    .fusionMode .fusionModeHeading h5 {
+        font-size: 17px;
+    }
+    
+    .modeOfferCard {
+        border-radius: 15px;
+    }
+    
+    .modeOfferCard::before {
+        border-radius: 15px;
+    }
+    
+    .modeOfferCard .modeOffer {
+        padding: 18px;
+        border-radius: 15px;
+    }
+    
+    .modeOfferCard .modeOffer p {
+        padding-right: 15px;
+        max-width: 265px;
+    }
+    
+    .modeOfferCard .modeOffer a {
+        font-size: 17px;
+    }
+    
+    .modeOfferCard .modeOffer a svg {
+        margin-left: 7px;
+        font-size: 21px;
+        margin-top: 1px;
+    }
+    
+    .priceImpact {
+        border-radius: 8px;
+        padding: 9px 20px;
+    }
+    
+    .priceImpact p {
+        font-size: 16px;
+        line-height: 1.625;
+    }
+    
+    .swapCardBtn {
+        margin-top: 30px;
+    }
+    
+    .swapCardBtn .generalBtn {
+        font-size: 21px;
+        border-radius: 14px;
+        padding: 19.2px 28px;
+        margin-bottom: 20px;
+    }
+    
+    .swapCardBtn .learnMoreBtn {
+        font-size: 17px;
+    }
+    
+    .swapCardBtn .learnMoreBtn svg {
+        font-size: 21px;
+        margin-left: 7px;
+    }
+}
+
+@media (max-width: 991px) {
+    .bannerSwap {
+        padding: 40px 0 80px;
+    }
+    
+    .swapCard {
+        padding: 25px;
+        margin: 40px auto 0;
+    }
+    
+    .exchangeBtn {
+        border-radius: 7px !important;
+        width: 45px;
+        height: 45px;
+    }
+    
+    .exchangeBtn img {
+        width: 32px;
+        height: 32px;
+    }
+    
+    .infoContent {
+        border-radius: 7px;
+        margin-bottom: 13px;
+        padding: 12px 18px;
+    }
+    
+    .infoContent::before {
+        border-radius: 7px;
+    }
+    
+    .infoContent p {        
+        font-size: 15px;
+        line-height: 1.625;
+    }
+    
+    .infoContent p svg {
+        font-size: 23px;
+        margin-right: 7px;
+    }
+    
+    .infoContent button {
+        font-size: 15px;
+        line-height: 1.625;
+    }
+    
+    .infoContent button svg {
+        font-size: 22px;
+    }
+    
+    .swapModeCard {
+        border-radius: 14px;
+        margin-bottom: 13px;
+        padding: 18px;
+    }
+    
+    .swapModeCard::before {
+        border-radius: 14px 14px 10px 14px;
+    }
+    
+    .swapModeHeading {
+        margin-bottom: 12px;
+    }
+    
+    .swapModeHeading h6 {
+        font-size: 15px;
+        line-height: 1.625;
+    }
+    
+    .swapModeHeading button svg {
+        font-size: 22px;
+    }
+    
+    .fusionModeCard {
+        border-radius: 14px;
+    }
+    
+    .fusionModeCard::before {
+        border-radius: 14px;
+    }
+    
+    .fusionModeCard .fusionMode {
+        padding: 16px;
+        border-radius: 14px;
+    }
+    
+    .fusionMode .fusionModeHeading {
+        margin-bottom: 16px;
+    }
+    
+    .fusionMode .fusionModeHeading h5 {
+        font-size: 16px;
+    }
+    
+    .modeOfferCard {
+        border-radius: 14px;
+    }
+    
+    .modeOfferCard::before {
+        border-radius: 14px;
+    }
+    
+    .modeOfferCard .modeOffer {
+        padding: 18px;
+        border-radius: 14px;
+    }
+    
+    .modeOfferCard .modeOffer p {
+        padding-right: 14px;
+        max-width: 265px;
+    }
+    
+    .modeOfferCard .modeOffer a {
+        font-size: 16px;
+    }
+    
+    .modeOfferCard .modeOffer a svg {
+        margin-left: 6px;
+        font-size: 20px;
+        margin-top: 1px;
+    }
+    
+    .priceImpact {
+        border-radius: 7px;
+        padding: 9px 18px;
+    }
+    
+    .priceImpact p {
+        font-size: 15px;
+        line-height: 1.625;
+    }
+    
+    .swapCardBtn {
+        margin-top: 25px;
+    }
+    
+    .swapCardBtn .generalBtn {
+        font-size: 20px;
+        border-radius: 12px;
+        padding: 16px 25px;
+        margin-bottom: 18px;
+    }
+    
+    .swapCardBtn .learnMoreBtn {
+        font-size: 16px;
+    }
+    
+    .swapCardBtn .learnMoreBtn svg {
+        font-size: 20px;
+        margin-left: 6px;
+    }
+}
+
+@media (max-width: 767px) {
+    .bannerSwap {
+        padding: 30px 0 60px;
+    }
+    
+    .swapCard {
+        padding: 20px 18px;
+        margin: 30px auto 0;
+    }
+    
+    .exchangeBtn {
+        border-radius: 6px !important;
+        width: 42px;
+        height: 42px;
+    }
+    
+    .exchangeBtn img {
+        width:  28px;
+        height: 28px;
+    }
+    
+    .infoContent {
+        border-radius: 6px;
+        margin-bottom: 12px;
+        padding: 12px 16px;
+    }
+    
+    .infoContent::before {
+        border-radius: 6px;
+    }
+    
+    .infoContent p {        
+        font-size: 14px;
+        line-height: 1.625;
+    }
+    
+    .infoContent p svg {
+        font-size: 22px;
+        margin-right: 6px;
+    }
+    
+    .infoContent button {
+        font-size: 14px;
+        line-height: 1.625;
+    }
+    
+    .infoContent button svg {
+        font-size: 20px;
+    }
+    
+    .swapModeCard {
+        border-radius: 12px;
+        margin-bottom: 12px;
+        padding: 16px;
+    }
+    
+    .swapModeCard::before {
+        border-radius: 12px 12px 8px 12px;
+    }
+    
+    .swapModeHeading {
+        margin-bottom: 12px;
+    }
+    
+    .swapModeHeading h6 {
+        font-size: 14px;
+        line-height: 1.625;
+    }
+    
+    .swapModeHeading button svg {
+        font-size: 20px;
+    }
+    
+    .fusionModeCard {
+        border-radius: 12px;
+    }
+    
+    .fusionModeCard::before {
+        border-radius: 12px;
+    }
+    
+    .fusionModeCard .fusionMode {
+        padding: 16px;
+        border-radius: 12px;
+    }
+    
+    .fusionMode .fusionModeHeading {
+        margin-bottom: 15px;
+    }
+    
+    .fusionMode .fusionModeHeading h5 {
+        font-size: 16px;
+    }
+    
+    .modeOfferCard {
+        border-radius: 12px;
+    }
+    
+    .modeOfferCard::before {
+        border-radius: 12px;
+    }
+    
+    .modeOfferCard .modeOffer {
+        padding: 18px;
+        border-radius: 12px;
+        gap: 10px;
+    }
+    
+    .modeOfferCard .modeOffer p {
+        padding-right: 0;
+        max-width: 265px;
+    }
+    
+    .modeOfferCard .modeOffer a svg {
+        margin-left: 6px;
+        font-size: 19px;
+        margin-top: 0.5px;
+    }
+    
+    .priceImpact {
+        border-radius: 6px;
+        padding: 8px 16px;
+    }
+    
+    .priceImpact p {
+        font-size: 14px;
+        line-height: 1.5;
+    }
+    
+    .swapCardBtn {
+        margin-top: 20px;
+    }
+    
+    .swapCardBtn .generalBtn {
+        font-size: 18px;
+        border-radius: 10px;
+        padding: 15px 25px;
+        margin-bottom: 16px;
+    }
+    
+    .networkFree li p {
+        max-width: 50%;
+    }
+
+    .networkFree li p:first-child {
+        padding-right: 10px;
+    }
+
+    .networkFree li p span {
+        display: block;
+    }    
+}

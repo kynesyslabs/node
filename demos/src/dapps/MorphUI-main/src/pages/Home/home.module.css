@@ -1,0 +1,1046 @@
+.cookiesCardWrap {
+    position: fixed;
+    left: 60px;
+    bottom: 40px;
+    z-index: 50;
+    max-width: 644px;
+    padding: 0.5px 0 0 0.5px;
+    border-radius: 14px;
+    background: linear-gradient(13deg,  #000000,#000000, rgba(255, 255, 255, 0.4), #000000, #000000 );
+}
+
+.cookiesCardWrap::before {
+    content: "";
+    left: 0.5px;
+    top: 0.5px;
+    width: calc(100% - 0.5px);
+    height: calc(100% - 0.5px);
+    background: #000;
+    position: absolute;
+    z-index: 1;
+    border-radius: 14px;
+}
+
+.cookiesCard {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    padding: 29px 40px;
+    border-radius: 14px;
+    background: linear-gradient(0deg, #1A1B1C 0%, #1A1B1C 100%), rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(15px);
+    position: relative;
+    z-index: 1;
+}
+
+.cookiesCard p {
+    color: #FFF;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 23px;
+    width: calc(100% - 207px);
+    margin: 0;
+}
+
+.cookiesCard p a {
+    color: #5AF660;
+    text-decoration: unset;
+}
+
+.cookiesCard p a:hover {
+    text-decoration: underline;
+}
+
+.cookiesCard button {
+    min-width: 177px;
+}
+
+.banner {
+    text-align: center;
+    padding: 40px 0 0;
+    background: url(../../assets/images/banner-bg.png) center center no-repeat;
+    background-size: cover;
+    position: relative;
+}
+
+.bannerVideo {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.searchToken {
+    margin: 50px auto 80px;
+    max-width: 500px;
+    position: relative;
+}
+
+.searchToken svg {
+    font-size: 20.5px;
+    fill: #A8ACAF;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%); 
+    left: 22px;
+    z-index: 1;
+    pointer-events: unset;
+}
+
+
+.searchToken input {
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.08) !important;
+    backdrop-filter: blur(15px);
+    padding: 0 60px 0 52px;
+    height: 70px;
+    color: #fff;
+    font-size: 18px;
+    font-weight: 400;
+    line-height: 1.4444;
+    letter-spacing: 0.311px;
+    border: 0 !important;
+}
+
+.searchToken input::placeholder {
+    color: #545459;
+}
+
+.searchToken input:focus {
+    box-shadow: unset;
+}
+
+.searchToken button {
+    border: 0 !important;
+    background: transparent !important;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%); 
+    right: 22px;
+    pointer-events: unset;
+    font-size: 0;
+    z-index: 1;
+}
+
+.searchToken button img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.banner h2 {
+    position: relative;
+    z-index: 1;
+    max-width: 944px;
+    margin: 0 auto 40px;
+}
+
+.banner a {
+    position: relative;
+    z-index: 1;
+}
+
+.banner .playBtn {
+    background: rgba(255, 255, 255, 0.08) !important;
+    backdrop-filter: blur(15px);
+    width: 60px;
+    height: 60px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border-radius: 50%;
+    border: 0 !important;
+    margin: 125px 0 80px auto;
+    padding: 0 0 0 4px;
+}
+
+.banner .playBtn svg {
+    fill: #A8ACAF;
+    font-size: 30px;
+}
+
+.socialLinks {
+    text-align: center;
+}
+
+.socialCardRow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    max-width: 1120px;
+    margin: 0 auto;
+}
+
+.chainSupportWrap {
+    position: relative;
+    z-index: 2;
+}
+
+.chainSupportContent {
+    padding: 180px 0 210px;
+}
+
+.chainSupportWrap::before {
+    content: "";
+    background: url(../../assets/images/chain-support-bg.png) center center no-repeat;
+    background-size: cover;
+    width: 100%;
+    height: 889px;
+    top: 0;
+    left: 0;
+    position: absolute;
+}
+
+.chainSupportContent h2 {
+    text-align: center;
+    max-width: 760px;
+    margin: 0 auto 14px;
+    position: relative;
+    z-index: 1;
+}
+
+.chainSupportContent p {
+    color: #FFF;
+    text-align: center;
+    font-size: 18px;
+    font-weight: 300;
+    line-height: 1.44444;
+    letter-spacing: 0.311px;
+    max-width: 574px;
+    margin: 0 auto 40px;
+    position: relative;
+    z-index: 1;
+}
+
+.invertTradeEarnWrap {
+    padding: 468px 0 330px;
+    position: relative;
+    overflow: hidden;
+}
+
+.lottie {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: 0;
+    width: 100%;
+}
+
+.invertTradeEarn {
+    border-radius: 24px;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(150px);
+    padding: 84px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 70px;
+    position: relative;
+    z-index: 1;
+}
+
+.downloadMorph {
+    max-width: 594px;
+    width: 100%;
+    padding-top: 13px;
+}
+
+.downloadMorph h2 {
+    text-align: left;
+    max-width: 100%;
+    margin-bottom: 24px;
+}
+
+.downloadIcons {
+    padding-top: 16px;
+    display: flex;
+    flex-direction: column;
+}
+
+.downloadLink {
+    width: 57px;
+    height: 57px;
+    margin-bottom: 15px;
+}
+
+.downloadLink:last-child {
+    margin: 0;
+}
+
+.downloadLink img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.downloadAppCardWrap {
+    position: relative;
+    border-radius: 16px;
+    padding: 0.5px 0 0 0.6px;
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.2) 60%, #000000 );
+}
+
+.downloadAppCardWrap::before {
+    content: "";
+    left: 0.5px;
+    top: 0.5px;
+    width: calc(100% - 1px);
+    height: calc(100% - 1px);
+    background: #000;
+    position: absolute;
+    z-index: 1;
+    border-radius: 16px;
+}
+
+.downloadAppCard {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 18px;
+    border-radius: 16px;
+    max-width: 361px;
+    width: 100%;
+    background: rgba(255, 255, 255, 0.08);
+    -webkit-backdrop-filter: blur(150px);
+    backdrop-filter: blur(150px);
+    position: relative;
+    z-index: 2;
+}
+
+.downloadAppCard .qrCode {
+    width: 124px;
+    height: 124px;
+    border-radius: 14px;
+}
+
+
+.downloadAppCard .downloadApp {
+    width: calc(100% - 124px);
+    padding-left: 32px;
+}
+
+.downloadApp h6 {
+    color: #FFF;
+    font-size: 18px;
+    font-weight: 500;
+    line-height: 1.4444;
+    letter-spacing: 0.311px;
+    margin: 0;
+}
+
+.downloadApp span {
+    color: #A8ACAF;
+    font-size: 18px;
+    font-weight: 300;
+    line-height: 1.4444;
+    letter-spacing: 0.311px;
+}
+
+.supportTrust {
+    max-width: 713px;
+    margin: 0 auto;
+    text-align: center;
+    position: relative;
+    z-index: 1;
+}
+
+.supportTrust::after {
+    content: "";
+    background: url(../../assets/images/support-trust-bg.png) center center no-repeat;
+    background-size: cover;
+    width: 100%;
+    height: 712px;
+    top: -250px;
+    left: 50%;
+    transform: translateX(-50%);
+    position: absolute;
+}
+
+.supportTrust h2 {
+    position: relative;
+    max-width: 100%;
+    margin-bottom: 40px;
+    z-index: 1;
+}
+
+.supportTrust a {
+    position: relative;
+    z-index: 1;
+}
+
+.ecosystemProductWrap {
+    text-align: center;
+    position: relative;
+}
+
+.ecosystemProductWrap::before {
+    content: "";
+    background: url(../../assets/images/learn-more-bg.png) center bottom no-repeat;
+    background-size: cover;
+    left: 0;
+    top: 109px;
+    width: 100%;
+    height: calc(100% + 3px);
+    position: absolute;
+}
+
+.ecosystemProductContent {
+    position: relative;
+    z-index: 1;
+    padding-bottom: 220px;
+}
+
+.socialSecRow {
+    margin-bottom: 220px;
+}
+
+.ecosystemProductWrap h2 {
+    max-width: 944px;
+    margin: 0 auto 40px;
+}
+
+.ecosystemProductWrap h3 {
+    text-align: center;
+    margin: 220px auto 40px;
+}
+
+@media (max-width: 1399px) {
+    .tokensImg {
+        left: 58px;
+        top: 156px;
+    }
+
+    .cookiesCardWrap {
+        left: 50px;
+        bottom: 35px;
+        max-width: 560px;
+        padding: 0.5px 0 0 0.5px;
+        border-radius: 13px;
+    }
+    
+    .cookiesCardWrap::before {
+        border-radius: 13px;
+    }
+    
+    .cookiesCard {
+        padding: 25px 35px;
+        border-radius: 13px;
+    }
+    
+    .cookiesCard p {
+        line-height: 22px;
+        width: calc(100% - 180px);
+    }
+    
+    .cookiesCard button {
+        min-width: 150px;
+    }
+    
+    .searchToken {
+        margin: 45px auto 70px;
+        max-width: 480px;
+    }
+    
+    .searchToken svg {
+        font-size: 20px;
+    }
+    
+    .searchToken input {
+        height: 65px;
+    }
+    
+    .banner .playBtn {
+        width: 57px;
+        height: 57px;
+        margin: 110px 0 65px auto;
+    }
+    
+    .banner .playBtn svg {
+        font-size: 28px;
+    }
+    
+    .chainSupportContent {
+        padding: 160px 0 200px;
+    }
+    
+    .chainSupportWrap::before {
+        height: 800px;
+    }
+    
+    .lottie {
+        width: 114%;
+    }
+
+    .invertTradeEarnWrap {
+        padding: 440px 0 330px;
+    }
+    
+    .invertTradeEarn {
+        border-radius: 24px;
+        padding: 75px 50px;
+        gap: 55px;
+    }
+
+    .downloadMorph {
+        max-width: 530px;
+        padding-top: 5px;
+    }
+
+    .downloadMorph h2 {
+        margin-bottom: 24px;
+    }
+
+    .downloadIcons {
+        padding-top: 8px;
+    }
+
+    .downloadLink {
+        width: 55px;
+        height: 55px;
+        margin-bottom: 14px;
+    }
+
+    .downloadAppCard {
+        padding: 17px;
+        border-radius: 15px;
+        max-width: 320px;
+    }
+
+    .downloadAppCard .qrCode {
+        width: 110px;
+        height: 110px;
+        border-radius: 13px;
+    }
+
+    .downloadAppCard .downloadApp {
+        width: calc(100% - 110px);
+        padding-left: 28px;
+    }
+
+    .supportTrust {
+        max-width: 680px;
+    }
+
+    .supportTrust::after {
+        height: 680px;
+        top: -240px;
+    }
+
+    .supportTrust h2 {
+        margin-bottom: 40px;
+    }
+
+    .ecosystemProductWrap::before {
+        top: 109px;
+        height: calc(100% - 7px);
+    }
+
+    .ecosystemProductContent {
+        padding-bottom: 200px;
+    }
+
+    .socialSecRow {
+        margin-bottom: 200px;
+    }
+
+    .ecosystemProductWrap h2 {
+        margin: 0 auto 40px;
+    }
+
+    .ecosystemProductWrap h3 {
+        margin: 200px auto 40px;
+    }
+}
+
+@media (max-width: 1199px) {
+    .cookiesCardWrap {
+        left: 30px;
+        bottom: 25px;
+        max-width: 500px;
+    }
+    
+    .cookiesCard {
+        padding: 20px 30px;
+    }
+    
+    .cookiesCard p {
+        line-height: 21px;
+        width: calc(100% - 170px);
+    }
+    
+    .cookiesCard button {
+        min-width: 140px;
+    }
+    
+    .searchToken {
+        margin: 40px auto 55px;
+        max-width: 460px;
+    }
+    
+    .searchToken svg {
+        font-size: 20px;
+    }
+    
+    .searchToken input {
+        height: 62px;
+        font-size: 17px;
+    }
+    
+    .banner .playBtn {
+        width: 55px;
+        height: 55px;
+        margin: 80px 0 55px auto;
+    }
+    
+    .banner .playBtn svg {
+        font-size: 26px;
+    }
+    
+    .chainSupportContent {
+        padding: 130px 0 165px;
+    }
+    
+    .chainSupportWrap::before {
+        height: 750px;
+    }
+
+    .chainSupportContent h2 {
+        max-width: 680px;
+    }
+    
+    .chainSupportContent p {
+        font-size: 17px;
+        max-width: 520px;
+        margin: 0 auto 35px;
+    }
+    
+    .invertTradeEarnWrap {
+        padding: 300px 0 270px;
+    }
+
+    .lottie {
+        width: 116%;
+        top: -25px;
+    }
+    
+    .invertTradeEarn {
+        border-radius: 20px;
+        padding: 55px 40px;
+        gap: 30px;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .downloadMorph {
+        max-width: 530px;
+        padding-top: 0;
+    }
+
+    .downloadMorph h2 {
+        text-align: center;
+        margin-bottom: 14px;
+    }
+
+    .downloadMorph h3 {
+        text-align: center;
+    }
+
+    .downloadIcons {
+        flex-direction: unset;
+        padding-top: 0;
+    }
+
+    .downloadLink {
+        width: 52px;
+        height: 52px;
+        margin: 0 16px 0 0;
+    }
+
+    .downloadAppCard {
+        padding: 16px;
+        border-radius: 14px;
+        max-width: 350px;
+    }
+
+    .downloadAppCard .qrCode {
+        width: 110px;
+        height: 110px;
+        border-radius: 13px;
+    }
+
+    .downloadAppCard .downloadApp {
+        width: calc(100% - 110px);
+        padding-left: 28px;
+    }
+
+    .supportTrust {
+        max-width: 600px;
+    }
+
+    .supportTrust::after {
+        height: 600px;
+        top: -215px;
+    }
+
+    .supportTrust h2 {
+        margin-bottom: 35px;
+    }
+
+    .ecosystemProductWrap::before {
+        top: 90px;
+        height: calc(100% - 10px);
+    }
+
+    .ecosystemProductContent {
+        padding-bottom: 160px;
+    }
+
+    .socialSecRow {
+        margin-bottom: 160px;
+    }
+
+    .ecosystemProductWrap h2 {
+        margin: 0 auto 35px;
+    }
+
+    .ecosystemProductWrap h3 {
+        margin: 150px auto 35px;
+    }
+}
+
+@media (max-width: 991px) {
+    .cookiesCardWrap {
+        left: 30px;
+        bottom: 25px;
+        max-width: 450px;
+    }
+    
+    .cookiesCard {
+        padding: 16px 22px;
+    }
+    
+    .cookiesCard p {
+        line-height: 20px;
+        width: calc(100% - 150px);
+    }
+    
+    .cookiesCard button {
+        min-width: 130px;
+    }
+    
+    .searchToken {
+        margin: 35px auto 50px;
+        max-width: 460px;
+    }
+    
+    .searchToken svg {
+        font-size: 20px;
+    }
+    
+    .searchToken input {
+        height: 58px;
+        font-size: 16px;
+    }
+    
+    .banner .playBtn {
+        width: 52px;
+        height: 52px;
+        margin: 70px 0 45px auto;
+    }
+    
+    .banner .playBtn svg {
+        font-size: 25px;
+    }
+    
+    .chainSupportContent {
+        padding: 110px 0 140px;
+    }
+    
+    .chainSupportWrap::before {
+        height: 700px;
+    }
+    
+    .chainSupportContent p {
+        font-size: 16px;
+        max-width: 500px;
+        margin: 0 auto 35px;
+    }
+    
+    .invertTradeEarnWrap {
+        padding: 200px 0 200px;
+    }
+
+    .lottie {
+        width: 125%;
+        top: -45px;
+    }
+    
+    .invertTradeEarn {
+        border-radius: 18px;
+        padding: 45px 30px;
+        gap: 30px;
+    }
+
+    .downloadMorph {
+        max-width: 530px;
+    }
+
+    .downloadMorph h2 {
+        margin-bottom: 12px;
+    }
+
+    .downloadLink {
+        width: 50px;
+        height: 50px;
+        margin: 0 15px 0 0;
+    }
+
+    .downloadAppCard {
+        padding: 15px;
+        border-radius: 13px;
+        max-width: 320px;
+    }
+
+    .downloadAppCard .qrCode {
+        width: 95px;
+        height: 95px;
+        border-radius: 13px;
+    }
+
+    .downloadAppCard .downloadApp {
+        width: calc(100% - 95px);
+        padding-left: 22px;
+    }
+
+    .downloadApp h6,
+    .downloadApp span {
+        font-size: 17px;
+    }
+
+    .supportTrust {
+        max-width: 500px;
+        padding: 0 10px;
+    }
+
+    .supportTrust::after {
+        height: 500px;
+        top: -160px;
+    }
+
+    .supportTrust h2 {
+        margin-bottom: 35px;
+    }
+
+    .ecosystemProductWrap::before {
+        top: 50px;
+        height: calc(100% - 10px);
+    }
+
+    .ecosystemProductContent {
+        padding-bottom: 120px;
+    }
+
+    .socialSecRow {
+        margin-bottom: 120px;
+    }
+
+    .ecosystemProductWrap h2 {
+        margin: 0 auto 35px;
+    }
+
+    .ecosystemProductWrap h3 {
+        margin: 120px auto 30px;
+    }
+
+    .socialCardRow {
+        margin: 0 auto -20px;
+    }
+
+    .customCardCol {
+        margin-bottom: 20px;
+    }
+
+    .customCardCol:last-child {
+        margin: 0;
+    }
+}
+
+@media (max-width: 767px) {
+    .cookiesCardWrap {
+        left: 50%;
+        transform: translateX(-50%);
+        bottom: 20px;
+        max-width: 320px;
+        width: calc(100% - 30px);
+    }
+    
+    .cookiesCard {
+        padding: 16px 20px;
+        gap: 14px;
+        text-align: center;
+        justify-content: center;
+    }
+    
+    .cookiesCard p {
+        line-height: 20px;
+        width: 100%;
+    }
+    
+    .cookiesCard button {
+        min-width: 120px;
+    }
+    
+    .searchToken {
+        margin: 30px auto 45px;
+        max-width: 420px;
+    }
+    
+    .searchToken svg {
+        font-size: 20px;
+        left: 18px;
+    }
+    
+    .searchToken input {
+        height: 52px;
+        font-size: 16px;
+        padding: 0 55px 0 50px;
+        border-radius: 10px;
+    }
+    
+    .searchToken button {
+        right: 16px;
+    }
+
+    .banner h2 {
+        margin-bottom: 30px;
+    }
+
+    .banner .playBtn {
+        width: 48px;
+        height: 48px;
+        margin: 55px 0 35px auto;
+    }
+    
+    .banner .playBtn svg {
+        font-size: 24px;
+    }
+    
+    .chainSupportContent {
+        padding: 70px 0 80px;
+    }
+    
+    .chainSupportWrap::before {
+        height: 580px;
+    }
+    
+    .chainSupportContent p {
+        font-size: 16px;
+        max-width: 500px;
+        margin: 0 auto;
+    }
+    
+    .invertTradeEarnWrap {
+        padding: 55px 0 80px;
+    }
+
+    .lottie {
+        display: none;
+    }
+    
+    .invertTradeEarn {
+        border-radius: 15px;
+        padding: 35px 20px;
+        gap: 28px;
+    }
+
+    .downloadMorph {
+        max-width: 100%;
+    }
+
+    .downloadMorph h2 {
+        margin-bottom: 12px;
+    }
+
+    .downloadLink {
+        width: 45px;
+        height: 45px;
+        margin: 0 15px 0 0;
+    }
+
+    .downloadAppCard {
+        padding: 14px;
+        border-radius: 12px;
+        max-width: 295px;
+    }
+
+    .downloadAppCard .qrCode {
+        width: 85px;
+        height: 85px;
+        border-radius: 12px;
+    }
+
+    .downloadAppCard .downloadApp {
+        width: calc(100% - 85px);
+        padding-left: 16px;
+    }
+
+    .downloadApp h6,
+    .downloadApp span {
+        font-size: 16px;
+    }
+
+    .supportTrust {
+        max-width: 300px;
+        padding: 0 10px;
+    }
+
+    .supportTrust::after {
+        height: 300px;
+        top: -50px;
+    }
+
+    .supportTrust h2 {
+        margin-bottom: 30px;
+    }
+
+    .ecosystemProductWrap::before {
+        top: 0px;
+        height: calc(100% + 30px);
+    }
+
+    .ecosystemProductContent {
+        padding-bottom: 70px;
+    }
+
+    .socialSecRow {
+        margin-bottom: 70px;
+    }
+
+    .ecosystemProductWrap h2 {
+        margin: 0 auto 30px;
+    }
+
+    .ecosystemProductWrap h3 {
+        margin: 80px auto 30px;
+    }
+
+    .socialCardRow {
+        margin: 0 auto -18px;
+    }
+
+    .customCardCol {
+        margin-bottom: 18px;
+    }
+
+    .customCardCol:last-child {
+        margin: 0;
+    }
+}

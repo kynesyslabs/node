@@ -1,0 +1,124 @@
+.cardWrap {
+    padding: 1px 0 0 1px;
+    position: relative;
+    z-index: 2;
+    border-radius: 14px; 
+    background: linear-gradient(28deg,  #000000,#000000, rgba(255, 255, 255, 0.5), #000000, #000000 );
+}
+
+.cardWrap::before {
+    content: "";
+    left: 1px;
+    top: 1px;
+    width: calc(100% - 1px);
+    height: calc(100% - 1px);
+    background: #000;
+    position: absolute;
+    z-index: 1;
+    border-radius: 14px;
+}
+
+.cardInnerWrap {
+    position: relative;
+    text-align: center;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(15px);
+    padding: 58px 40px 49px;
+    z-index: 2;
+}
+
+.cardWrap .cardInnerWrap h3 {
+    line-height: 1.52778;
+    max-width: 315px;
+    margin: 0 auto 14px;
+}
+
+.cardInnerWrap p {
+    max-width: 315px;
+    color: #A8ACAF;
+    font-size: 16px;
+    line-height: 1.625; 
+    margin: 0 auto 40px;
+}
+
+.cardInnerWrap a {
+    min-width: 180px;
+}
+
+@media (max-width: 1199px) {
+    .cardWrap {
+        border-radius: 13px; 
+    }
+    
+    .cardWrap::before {
+        border-radius: 13px;
+    }
+    
+    .cardInnerWrap {
+        border-radius: 13px;
+        padding: 50px 30px 45px;
+    }
+    
+    .cardWrap .cardInnerWrap h3 {
+        margin: 0 auto 14px;
+    }
+    
+    .cardInnerWrap p {
+        margin: 0 auto 35px;
+    }    
+}
+
+@media (max-width: 991px) {
+    .cardWrap {
+        border-radius: 12px; 
+    }
+    
+    .cardWrap::before {
+        border-radius: 12px;
+    }
+    
+    .cardInnerWrap {
+        border-radius: 12px;
+        padding: 45px 30px 40px;
+    }
+    
+    .cardWrap .cardInnerWrap h3 {
+        margin: 0 auto 14px;
+    }
+    
+    .cardInnerWrap p {
+        margin: 0 auto 30px;
+    }  
+    
+    .cardInnerWrap a {
+        min-width: 160px;
+    }
+}
+
+@media (max-width: 991px) {
+    .cardWrap {
+        border-radius: 10px; 
+    }
+    
+    .cardWrap::before {
+        border-radius: 10px;
+    }
+    
+    .cardInnerWrap {
+        border-radius: 10px;
+        padding: 35px 20px 30px;
+    }
+    
+    .cardWrap .cardInnerWrap h3 {
+        margin: 0 auto 12px;
+    }
+    
+    .cardInnerWrap p {
+        margin: 0 auto 20px;
+    }  
+    
+    .cardInnerWrap a {
+        min-width: 140px;
+    }
+}

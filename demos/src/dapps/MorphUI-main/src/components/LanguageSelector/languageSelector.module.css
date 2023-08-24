@@ -1,0 +1,113 @@
+.languageSelector {
+    position: relative;
+}
+
+.languageSelector button {
+    background: transparent !important;
+    padding: 0;
+    border: 0;
+    text-transform: uppercase;
+    font-size: 18px;
+    font-weight: 500;
+    line-height: 26px;
+    letter-spacing: 0.3px;
+    display: flex;
+    align-items: center;
+}
+
+.languageSelector button img {
+    width: 24px;
+    height: 24px;
+    margin-right: 8px;
+}
+
+.languageSelector button:after {
+    background: url(../../assets/images/chevronDown.svg);
+    border: 0;
+    width: 24px;
+    height: 24px;
+    margin-left: 5px;
+    vertical-align: middle;
+}
+
+.languageSelector .dropdownMenu {
+    background: transparent;
+    min-width: unset;
+    background: rgba(255, 255, 255, 0.02);
+    backdrop-filter: blur(15px);
+    padding: 0;
+    left: auto !important;
+    right: 0 !important;
+    margin: 24px 0 !important;
+}
+
+.languageSelector .dropdownMenu div {
+    border-radius: 8px;
+    min-width: 64px;
+    padding: 16px 0;
+    background: #000;
+}
+
+.languageSelector .dropdownMenu div::before {
+    content: "";
+    background: linear-gradient(to bottom, #000, rgba(255,255,255,0.5));
+    position: absolute;
+    left: -1px;
+    top: -1px;
+    width: calc(100% + 2px);
+    height: calc(100% + 2px);
+    z-index: -1;
+    border-radius: 8px;
+}
+
+.dropdownMenu a {
+    font-size: 18px;
+    font-style: normal;
+    font-weight: 500;
+    line-height: 26px;
+    letter-spacing: 0.311px;
+    color: #fff;
+    padding: 0 20px;
+    margin-bottom: 10px;
+    background: transparent !important;
+}
+
+.dropdownMenu a:hover {
+    color: #5AF660;
+}
+
+.dropdownMenu a:last-child {
+    margin-bottom: 0;
+}
+
+@media (max-width: 767px) {
+    .languageSelector .dropdownMenu {
+        margin: 15px 0 !important;
+    }
+
+    .languageSelector button:after {
+        width: 22px;
+        height: 22px;
+    }
+    
+    .languageSelector button img {
+        display: none;
+    }
+
+    .dropdownMenu a,
+    .languageSelector button {
+        font-size: 16px;
+        line-height: 24px;
+    }
+
+    .dropdownMenu a {
+        padding: 0 18px;
+        margin-bottom: 9px;
+    }
+
+    .dropdownMenu {
+        border-radius: 6px;
+        min-width: 60px;
+        padding: 12px 0;
+    }
+}

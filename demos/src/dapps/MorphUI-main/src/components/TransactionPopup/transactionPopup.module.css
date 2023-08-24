@@ -1,0 +1,216 @@
+.settingModal {
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(10px);
+    padding: 20px;
+    position: absolute;
+    right: -9px;
+    top: calc(100% + 14px);
+    width: 366px;
+}
+
+.settingHeading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+}
+
+.settingHeading h6 {
+    color: #FFF;
+    font-size: 22px;
+    font-weight: 500;
+    line-height: 1.18182;
+    letter-spacing: 0.311px;
+}
+
+.settingHeading .closeBtn {
+    padding: 0;
+    background: transparent !important;
+    border: 0;
+    outline: unset !important;
+    line-height: 1;
+}
+
+.settingHeading .closeBtn svg {
+    font-size: 24px;
+}
+
+.settingHeading .closeBtn svg path {
+    fill: #A8ACAF;
+}
+
+.transactionForm .formGroup {
+    margin-bottom: 24px;
+}
+
+.formGroup > label,
+.txDeadline > label {
+    color:  #A8ACAF;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 23px;
+    display: block;
+    margin-bottom: 10px;
+}
+
+.txDeadline > label {
+    margin-bottom: 0;
+}
+
+.formGroup > label svg,
+.txDeadline > label svg {
+    font-size: 18px;
+}
+
+.formGroup > label svg path,
+.txDeadline > label svg path {
+    color:  #A8ACAF;
+}
+
+.checkboxWrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px
+}
+
+.formCheck {
+    display: inline-block;
+    position: relative;
+}
+
+.formCheck input {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 20px;
+    opacity: 0;
+    z-index: 1;
+    cursor: pointer;
+}
+
+.formCheck input:checked ~ label {
+    background: #5AF660;
+    color: #000;
+}
+
+.formCheck label {
+    position: relative;
+    border-radius: 24px;
+    background:  #545459;
+    padding: 2px 14px;
+    color:  #FFF;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 23px;
+    transition: 0.4s all ease;
+    margin: 0;
+}
+
+.txDeadline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.formGroup input[type="text"],
+.txDeadline input {
+    padding: 0 14px;
+    border-radius: 16px;
+    background: #000 !important;
+    border: 0;
+    outline: unset !important;
+    box-shadow: unset !important;
+    backdrop-filter: blur(15px);
+    color: #FFF;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 23px; 
+    width: 44px;
+    height: 27px;
+    text-align: center;
+}
+
+.formGroup input[type="text"] {
+    width: 56px;
+}
+
+.formGroup span {
+    color: #FFF;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 23px; 
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+@media (max-width: 1199px) {
+    .settingHeading {
+        margin-bottom: 22px;
+    }
+    
+    .settingHeading h6 {
+        font-size: 22px;
+    }
+    
+    
+    .settingHeading .closeBtn svg {
+        font-size: 23px;
+    }
+    
+    .transactionForm .formGroup {
+        margin-bottom: 22px;
+    }
+}
+
+@media (max-width: 991px) {
+    .settingHeading {
+        margin-bottom: 20px;
+    }
+    
+    .settingHeading h6 {
+        font-size: 20px;
+    }
+    
+    
+    .settingHeading .closeBtn svg {
+        font-size: 22px;
+    }
+    
+    .transactionForm .formGroup {
+        margin-bottom: 24px;
+    }
+}
+
+@media (max-width: 767px) {
+    .settingModal {
+        border-radius: 14px;
+        padding: 20px 16px;
+        right: -9px;
+        top: calc(100% + 5px);
+        width: 290px;
+        backdrop-filter: blur(4px);
+    }
+    
+    .settingHeading {
+        margin-bottom: 18px;
+    }
+    
+    .settingHeading h6 {
+        font-size: 18px;
+    }
+    
+    
+    .settingHeading .closeBtn svg {
+        font-size: 20px;
+    }
+    
+    .transactionForm .formGroup {
+        margin-bottom: 16px;
+    }
+}

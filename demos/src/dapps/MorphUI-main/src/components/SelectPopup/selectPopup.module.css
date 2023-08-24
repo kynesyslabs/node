@@ -1,0 +1,604 @@
+.selectCard {
+    max-width: 604px;
+    border-radius: 16px;
+    padding: 1px 0 0 1px;
+    position: relative;
+    background: linear-gradient(165deg, rgba(255, 255, 255, 0.5), #000000, #000000, #000000, #000000 );
+    margin: 51px auto 0;
+}
+
+.selectCard::before {
+    content: "";
+    left: 1px;
+    top: 1px;
+    width: calc(100% - 1px);
+    height: calc(100% - 1px);
+    background: #000;
+    position: absolute;
+    z-index: 1;
+    border-radius: 14px;
+}
+
+.selectCardInner {
+    position: relative;
+    text-align: center;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.08);
+    -webkit-backdrop-filter: blur(15px);
+    backdrop-filter: blur(15px);
+    padding: 35px;
+    z-index: 2;
+}
+
+.selectCardHeading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+}
+
+.selectCardHeading h6 {
+    color: #FFF;
+    font-size: 22px;
+    font-weight: 500;
+    line-height: 1.18182;
+    letter-spacing: 0.311px;
+}
+
+.selectCardHeading .closeBtn {
+    padding: 0;
+    background: transparent !important;
+    border: 0;
+    outline: unset !important;
+    line-height: 1;
+}
+
+.selectCardHeading .closeBtn svg {
+    font-size: 24px;
+}
+
+.selectCardHeading .closeBtn svg path {
+    fill: #A8ACAF;
+}
+
+.searchTokenWrap {
+    margin-bottom: 24px;
+    max-width: 100%;
+    position: relative;
+}
+
+.searchToken {
+    position: relative;
+    padding: 1px 0 0 1px;
+    z-index: 2;
+    border-radius: 14px;
+    background: linear-gradient(175deg, rgba(255, 255, 255, 0.3), #000000, #000000);
+    position: relative;
+}
+
+.searchToken::before {
+    content: "";
+    left: 1px;
+    top: 1px;
+    width: calc(100% - 1px);
+    height: calc(100% - 1px);
+    -webkit-backdrop-filter: blur(15px);
+    backdrop-filter: blur(15px);
+    background: #000;
+    border-radius: 14px;
+    position: absolute;
+    padding: 20px;
+}
+
+.searchToken svg {
+    font-size: 20.5px;
+    fill: #A8ACAF;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%); 
+    left: 22px;
+    z-index: 1;
+    pointer-events: unset;
+}
+
+.searchToken input {
+    border-radius: 14px;
+    background: #000 !important;
+    backdrop-filter: blur(15px);
+    padding: 0 60px 0 52px;
+    height: 70px;
+    color: #fff !important;
+    font-size: 18px;
+    font-weight: 400;
+    line-height: 1.4444;
+    letter-spacing: 0.311px;
+    border: 0 !important;
+}
+
+.searchToken input::placeholder {
+    color: #545459;
+}
+
+.searchToken input:focus {
+    box-shadow: unset;
+}
+
+.searchToken button {
+    border: 0 !important;
+    background: transparent !important;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%); 
+    right: 22px;
+    pointer-events: unset;
+    font-size: 0;
+    z-index: 1;
+}
+
+.searchToken button img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.commonToken {
+    margin-bottom: 25px;
+}
+
+.commonToken h6 {
+    color: #A8ACAF;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.625;
+    text-align: left;
+    margin-bottom: 6px;
+}
+
+.commonTokenList {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    height: 80px;
+    overflow-y: auto;
+}
+
+.commonTokenList::-webkit-scrollbar-track {
+	border-radius: 10px;
+}
+
+.commonTokenList::-webkit-scrollbar {
+	width: 15px;
+}
+
+.commonTokenList::-webkit-scrollbar-thumb {
+	border-radius: 10px;
+	background-color: #545459;
+}
+
+
+.commonTokenList .formGroup {
+    margin: 0;
+    position: relative;
+}
+
+.commonTokenList .formGroup input {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.commonTokenList .formGroup input:checked ~ label {
+    background: #5AF660;
+    color: #242526;
+}
+
+.commonTokenList .formGroup label {
+    gap: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 14px 2px 2px;
+    background: #545459;
+    border-radius: 30px;
+    color:  #FFF;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 26px;
+    margin: 0;
+    transition: 0.4s all ease;
+}
+
+.commonTokenList .formGroup label img {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+}
+
+.tokens {
+    position: relative;
+    margin-bottom: 16px;
+}
+
+.tokens li {
+    margin-bottom: 14px;
+}
+
+.tokens li:last-child {
+    margin-bottom: 0;
+}
+
+.tokens li button {
+    padding: 8px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: 0.4s all ease;
+    background: transparent !important;
+    border: 0 !important;
+    outline: unset !important;
+    box-shadow: unset !important;
+    width: 100%;
+}
+
+.tokens li button:hover {
+    border-radius: 14px;
+    background: #000 !important;
+    padding: 8px 16px 8px 8px;
+}
+
+.tokens li button p {
+    color: #FFF;
+    font-size: 18px;
+    font-weight: 500;
+    line-height: 1.44445;
+    letter-spacing: 0.311px;
+}
+
+.tokens li button p img {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    margin-right: 18px;
+}
+
+.tokens li button span {
+    color: #A8ACAF;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 26px;
+}
+
+.tokens li button span svg {
+    font-size: 22px;
+    margin-left: 10px;
+}
+
+.tokens li button span svg path {
+    color: #545459;
+}
+
+.selectCardInner .learnMoreBtn {
+    color: #545459;
+    font-size: 18px;
+    font-weight: 500;
+    line-height: 1.44445;
+    letter-spacing: 0.311px;
+    display: inline-flex;
+}
+
+.selectCardInner .learnMoreBtn svg {
+    font-size: 22px;
+    margin-left: 8px;
+    margin-top: 1px;
+}
+
+.selectCardInner .learnMoreBtn svg path {
+    color: #545459;
+}
+
+@media (max-width: 1199px) {
+    .selectCard {
+        max-width: 580px;
+        margin: 48px auto 0;
+    }
+    
+    .selectCardInner {
+        padding: 30px;
+    }
+    
+    .selectCardHeading {
+        margin-bottom: 22px;
+    }
+    
+    .selectCardHeading h6 {
+        font-size: 21px;
+    }
+    
+    .selectCardHeading .closeBtn svg {
+        font-size: 24px;
+    }
+    
+    .searchTokenWrap {
+        margin-bottom: 22px;
+    }
+
+    .searchToken svg {
+        font-size: 20px;
+    }
+    
+    .searchToken input {
+        height: 62px;
+        font-size: 17px;
+    }
+    
+    .commonToken {
+        margin-bottom: 22px;
+    }
+    
+    .commonTokenList {
+        gap: 8px;
+        height: 80px;
+    }
+    
+    .commonTokenList .formGroup label img {
+        width: 30px;
+        height: 30px;
+    }
+    
+    .tokens li button {
+        padding: 8px 0;
+    }
+    
+    .tokens li button:hover {
+        padding: 8px 16px 8px 8px;
+    }
+    
+    .tokens li button p {
+        font-size: 17px;
+    }
+    
+    .tokens li button p img {
+        width: 44px;
+        height: 44px;
+        margin-right: 16px;
+    }
+    
+    .tokens li button span {
+        line-height: 25px;
+    }
+    
+    .tokens li button span svg {
+        font-size: 22px;
+        margin-left: 10px;
+    }
+    
+    .selectCardInner .learnMoreBtn {
+        font-size: 17px;
+    }
+    
+    .selectCardInner .learnMoreBtn svg {
+        font-size: 21px;
+        margin-top: 1px;
+    }
+}
+
+@media (max-width: 991px) {
+    .selectCardInner {
+        padding: 25px;
+    }
+
+    .selectCard {
+        margin: 40px auto 0;
+    }
+    
+    .selectCardHeading {
+        margin-bottom: 20px;
+    }
+    
+    .selectCardHeading h6 {
+        font-size: 20px;
+    }
+    
+    .selectCardHeading .closeBtn svg {
+        font-size: 23px;
+    }
+    
+    .searchTokenWrap {
+        margin-bottom: 20px;
+    }
+
+    .searchToken svg {
+        font-size: 20px;
+    }
+    
+    .searchToken input {
+        height: 58px;
+        font-size: 16px;
+    }
+    
+    .commonToken {
+        margin-bottom: 20px;
+    }
+    
+    .commonTokenList {
+        gap: 8px;
+        height: 76px;
+    }
+
+    .commonTokenList .formGroup label {
+        font-size: 15px;
+    }
+    
+    .commonTokenList .formGroup label img {
+        width: 28px;
+        height: 28px;
+    }
+
+    .tokens li {
+        margin-bottom: 12px;
+    }
+    
+    .tokens li button {
+        padding: 6px 0;
+    }
+    
+    .tokens li button:hover {
+        padding: 6px 14px 6px 6px;
+    }
+    
+    .tokens li button p {
+        font-size: 16px;
+    }
+    
+    .tokens li button p img {
+        width: 40px;
+        height: 40px;
+        margin-right: 14px;
+    }
+    
+    .tokens li button span {
+        font-size: 15px;
+        line-height: 24px;
+    }
+    
+    .tokens li button span svg {
+        font-size: 21px;
+        margin-left: 8px;
+    }
+    
+    .selectCardInner .learnMoreBtn {
+        font-size: 16px;
+    }
+    
+    .selectCardInner .learnMoreBtn svg {
+        font-size: 20px;
+        margin-top: 1px;
+    }
+}
+
+@media (max-width: 767px) {
+    .selectCardInner {
+        padding: 20px 18px;
+    }
+    
+    .selectCard {
+        margin: 30px auto 0;
+    }
+    
+    .selectCardHeading {
+        margin-bottom: 18px;
+    }
+    
+    .selectCardHeading h6 {
+        font-size: 18px;
+    }
+    
+    .selectCardHeading .closeBtn svg {
+        font-size: 22px;
+    }
+    
+    .searchTokenWrap {
+        margin-bottom: 20px;
+    }
+
+    .searchToken {
+        border-radius: 10px;
+    }
+
+    .searchToken::before {
+        border-radius: 10px;
+    }
+
+    .searchToken svg {
+        left: 18px;
+    }
+    
+    .searchToken input {
+        height: 52px;
+        font-size: 16px;
+        padding: 0 55px 0 50px;
+        border-radius: 10px;
+    }
+
+    .searchToken button {
+        right: 16px;
+    }
+    
+    .commonToken {
+        margin-bottom: 18px;
+    }
+    
+    .commonTokenList {
+        gap: 7px;
+        height: 67px;
+    }
+
+    .commonTokenList .formGroup label {
+        font-size: 14px;
+    }
+    
+    .commonTokenList .formGroup label img {
+        width: 26px;
+        height: 26px;
+    }
+
+    .tokens li {
+        margin-bottom: 10px;
+    }
+    
+    .tokens li button {
+        padding: 5px 0;
+    }
+    
+    .tokens li button:hover {
+        padding: 5px 13px 5px 5px;
+    }
+    
+    .tokens li button p {
+        font-size: 15px;
+    }
+    
+    .tokens li button p img {
+        width: 36px;
+        height: 36px;
+        margin-right: 10px;
+    }
+    
+    .tokens li button span {
+        font-size: 14px;
+        line-height: 24px;
+    }
+    
+    .tokens li button span svg {
+        font-size: 20px;
+        margin-left: 6px;
+    }
+    
+    .selectCardInner .learnMoreBtn {
+        font-size: 16px;
+    }
+    
+    .selectCardInner .learnMoreBtn svg {
+        font-size: 19px;
+        margin-top: 1.5px;
+    }
+
+    .commonTokenList::-webkit-scrollbar {
+        width: 10px;
+    }
+}
+
+@media (max-width: 375px) {
+    .selectCardInner {
+        padding: 20px 16px;
+    }
+}
