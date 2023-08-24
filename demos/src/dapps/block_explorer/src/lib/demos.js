@@ -311,9 +311,9 @@ let demos = {
     },
 
     getAddressInfo: async function (address) {
-        return await demos.nodeCall("getAddressInfo", {
+        return JSON.parse(await demos.nodeCall("getAddressInfo", {
             address: address,
-        })
+        }))
     },
     // !SECTION Predefined calls
 
