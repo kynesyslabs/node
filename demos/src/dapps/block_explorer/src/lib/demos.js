@@ -34,6 +34,7 @@ let demos = {
     // ANCHOR Properties
     socket: null,
     connected: false,
+    identity: null,
     registry: {},
 
     // SECTION Registry
@@ -130,6 +131,31 @@ let demos = {
         console.log("[DEMOS] Authenticated with private key!")
         console.log(id)
         return true
+    },
+
+    // INFO Account creation and management
+    wallet: {
+        new: function (seed = undefined) {
+            identity = forge.pki.ed25519.generateKeyPair(
+                {
+                    seed: seed
+                }
+            )
+        },
+        // NOTE Loading must be done with an hex string of the pk
+        load: function (pk_hex) {
+            let buffered_pk = Buffer.from(pk_hex, "hex")
+            try {
+                let public_key = forge.pki.ed25519.publicKeyFromPrivateKey(buffered_pk)
+            } catch (error) {
+                console.log(error)
+                return false
+            }
+            identity = {
+                privateKey: buffered_pk,
+                publicKey: public_key,
+            }
+        }
     },
 
     // INFO MUID generator

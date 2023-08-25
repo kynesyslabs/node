@@ -25,7 +25,7 @@ import sharedState from "src/utilities/sharedState"
 export default class ServerHandlers {
     static async handleTransaction(content: any): Promise<any> {
         let require_reply = true // REVIEW Sure?
-        let extra, response
+        let extra: string, response: boolean
 
         // Verify and execute the transaction
         let validatedTx = await validateTransaction(
@@ -49,7 +49,7 @@ export default class ServerHandlers {
     }
 
     static async handleXMChainOperation(content: any): Promise<any> {
-        let extra
+        let extra: any
         let require_reply = false
         // NOTE Remember that crosschain operations are in chainscript syntax (see chainscript_example.ts)
         let response = await multichainDispatcher(content.data)
@@ -58,7 +58,7 @@ export default class ServerHandlers {
     }
 
     static async handleXMChainStatus(): Promise<any> {
-        let extra
+        let extra: any
         let require_reply = false
         // NOTE Remember that crosschain operations are in chainscript syntax (see chainscript_example.ts)
         const response = await multichainCapabilities()
@@ -67,7 +67,7 @@ export default class ServerHandlers {
     }
 
     static async handleValidateWeb2(content: any): Promise<any> {
-        let extra,
+        let extra: any,
             require_reply = false
         const response = await validateWeb2(content.data)
 
@@ -78,9 +78,9 @@ export default class ServerHandlers {
         console.log("[SERVER] Received web2Request")
         console.log(JSON.stringify(request))
 
-        let extra,
+        let extra: any,
             require_reply = false
-        let response
+        let response: unknown
         const currentPeerString = Identity.getInstance().getConnectionString()
 
         switch (content.message.action) {
@@ -125,9 +125,9 @@ export default class ServerHandlers {
     }
 
     static async handleConsensusRequest(content: any): Promise<any> {
-        let extra,
+        let extra: string,
             require_reply = false
-        let response
+        let response: any
 
         if (content.type == "tx") {
             require_reply = true // REVIEW Sure?
@@ -219,7 +219,7 @@ export default class ServerHandlers {
     static async handleMessage(content: any): Promise<any> {
         // Basic message handling logic
         // ...
-        let extra
+        let extra: any
         let require_reply = false
         const response = await InstantMessaging.parseMessage(content)
         return { extra, require_reply, response }
@@ -237,7 +237,7 @@ export default class ServerHandlers {
     static async handleMempool(content: any): Promise<any> {
         // Basic message handling logic
         // ...
-        let extra
+        let extra: any
         let require_reply = false
         const response = await Mempool.receive(content.message)
         return { extra, require_reply, response }
@@ -250,9 +250,9 @@ export default class ServerHandlers {
     ): Promise<any> {
         // Basic Node API handling logic
         // ...
-        let extra
+        let extra: any
         let require_reply = false
-        let response
+        let response: string | Peer[]
         let socketized_response: Peer[]
         let data = content.data
         console.log(typeof data)
