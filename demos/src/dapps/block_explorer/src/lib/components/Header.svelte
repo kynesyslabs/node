@@ -15,6 +15,10 @@
         {
             label:"Web2",
             href:"/web2/server"
+        },
+        {
+            label:"Tx test",
+            href:"/txtest"
         }
     ]
     let location;

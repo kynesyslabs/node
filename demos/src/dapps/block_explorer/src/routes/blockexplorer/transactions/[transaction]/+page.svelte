@@ -1,26 +1,8 @@
 <script>
     import '$lib/global.css';
     export let data;
-    let copied = false;
     import transIcon from '$lib/assets/icons/agreement-icon.png';
-	import CopyButton from '../../../../lib/components/CopyButton.svelte';
-
-    function copy(value)
-    {
-        var aux = document.createElement("input");
-        aux.setAttribute("value", value);
-        document.body.appendChild(aux);
-        aux.select();
-        document.execCommand("copy");
-        document.body.removeChild(aux);
-        copied = true;
-    }
-
-    function mouseenterHandler()
-    {
-        copied = false;
-    }
-    console.log(data);
+	import CopyButton from '$lib/components/CopyButton.svelte';
 </script>
 
 <style>
