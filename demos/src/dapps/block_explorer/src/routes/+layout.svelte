@@ -1,6 +1,8 @@
 <script>
     import Header from "$lib/components/Header.svelte";
     import Footer from "$lib/components/Footer.svelte";
+	import { fly, scale, slide } from "svelte/transition";
+    export let data;
 </script>
 
 <style>
@@ -12,6 +14,7 @@
     main{
         margin: 64px 0;
         flex: 1;
+        overflow: hidden;
     }
     @media screen and (max-width: 600px)
     {
@@ -25,7 +28,11 @@
 <Header />
 <div class="wrapper">
     <main>
-        <slot/>
+        {#key data.url}
+        <div in:fly={{ x: 200, duration: 300, delay: 300 }} out:fly={{ x: -200, duration: 300 }}>
+            <slot/>
+        </div>
+        {/key}
     </main>
     <Footer/>
 </div>

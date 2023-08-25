@@ -3,6 +3,7 @@
     export let data;
     import transIcon from '$lib/assets/icons/agreement-icon.png';
 	import CopyButton from '$lib/components/CopyButton.svelte';
+    console.log(data.transaction);
 </script>
 
 <style>

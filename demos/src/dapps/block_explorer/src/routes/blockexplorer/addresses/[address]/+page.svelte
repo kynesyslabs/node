@@ -7,7 +7,6 @@
 	import TransactionGrid from "$lib/components/blockexplorer/TransactionGrid.svelte";
 
     export let data;
-    console.log(data.address)
 
     let qropen=false;
 
@@ -76,5 +75,5 @@
         <CopyButton text={data.address.native.address}></CopyButton>
         <button on:click={()=>{qropen=true;}} class="small-button color-transition tooltip"><span class="tooltiptext">Show QR code</span><Fa icon={faQrcode}></Fa></button>
     </div>
-    <!--<TransactionGrid></TransactionGrid>-->
+    <TransactionGrid transactions={data.transactions}></TransactionGrid>
 </div>

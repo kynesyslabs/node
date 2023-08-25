@@ -10,6 +10,16 @@
     import video from "$lib/assets/videos/morph-bg.mp4";
     import { goto } from '$app/navigation';
 
+    import TimeAgo from 'javascript-time-ago'
+
+    // English.
+    import en from 'javascript-time-ago/locale/en'
+
+    TimeAgo.addDefaultLocale(en);
+
+    // Create formatter (English).
+    const timeAgo = new TimeAgo('en-US')
+
     console.log(data);
 
     function onSearch(hash)
@@ -158,9 +168,9 @@
 </style>
 
 <div>
-    <video class="video" autoplay muted loop>
+    <!--<video class="video" autoplay muted loop>
         <source src={video} type="video/mp4"/>
-    </video>
+    </video>-->
     <div class="header-body">
         <h1>Demos</h1>
         <h2 class="subtitle">Block explorer</h2>
@@ -185,7 +195,7 @@
                     </div>
                     <div style="width: 100px;">
                         <a class="accessible" href={`/blockexplorer/blocks/${block.number}`}><p style="margin-top:0;margin-bottom:8px;">{block.number}</p></a>
-                        <p style="margin: 0; opacity:.5; font-size:.9rem;">{block.timestamp}</p>
+                        <p style="margin: 0; opacity:.5; font-size:.9rem;">{timeAgo.format(block.timestamp*1000)}</p>
                     </div>
                 </div>
                 <div>
@@ -213,7 +223,7 @@
                 </div>
                 <div style="width: 200px;">
                     <a href={`/blockexplorer/transactions/${transaction.hash}`} class="accessible"><p class="block-cell" style="margin-top:0;margin-bottom:8px;">{transaction.hash}</p></a>
-                    <p style="margin: 0; opacity:.5; font-size:.9rem;">{transaction.age}</p>
+                    <p style="margin: 0; opacity:.5; font-size:.9rem;">{timeAgo.format(transaction.content.timestamp*1000)}</p>
                 </div>
             </div>
             <div>

@@ -121,6 +121,7 @@ button{
     border-radius: 14px;
     background: rgba(255, 255, 255, 0.08);
     backdrop-filter: blur(15px);
+    -webkit-backdrop-filter: blur(15px);
     border: .5px solid rgba(255, 255, 255, 0.08);
     padding: 28px;
     max-width: 1250px;
@@ -131,6 +132,7 @@ button{
     border-radius: 14px;
     background: rgba(255, 255, 255, 0.08);
     backdrop-filter: blur(15px);
+    -webkit-backdrop-filter: blur(15px);
     border: .5px solid rgba(255, 255, 255, 0.08);
     max-width: 1250px;
     margin: auto;

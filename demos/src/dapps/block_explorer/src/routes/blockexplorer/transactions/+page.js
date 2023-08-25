@@ -5,6 +5,6 @@ export async function load ({params})
     demos.connect(rpc);
     let transaction = await demos.getTxByHash("dd3fc542784875538efef89815672c693f8175f1007450b8e890c618650dd03e");
     return {
-        transaction: transaction,
+        transactions: [transaction],
     }
 }

@@ -72,6 +72,7 @@
         border-radius: 14px;
         background: rgba(255, 255, 255, 0.08);
         backdrop-filter: blur(15px);
+        -webkit-backdrop-filter: blur(15px);
         padding: 6px;
         border: var(--border);
     }
