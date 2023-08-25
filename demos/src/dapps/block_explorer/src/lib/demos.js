@@ -292,12 +292,14 @@ let demos = {
     // INFO Web2 Endpoints
     getWeb2Data: async function (url = "https://apple.com/robots.txt") {
         console.log("[DEMOS] Requesting url: " + url)
-        return await demos.call("web2Request", {
+        let web2 = await demos.call("web2Request", {
             action: "getUrl",
             httpVerb: "GET",
             url: url,
             headers: "",
         })
+        web2 = JSON.parse(web2);
+        return web2;
     },
 
     getPeerlist: async function () {

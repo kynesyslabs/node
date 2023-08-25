@@ -9,12 +9,22 @@
         display: flex;
         flex-direction: column;
     }
+    main{
+        margin: 64px 0;
+        flex: 1;
+    }
+    @media screen and (max-width: 600px)
+    {
+        main{
+            margin: 16px 0;
+        }
+    }
 </style>
 
 
 <Header />
 <div class="wrapper">
-    <main style="margin:128px 0;flex:1;">
+    <main>
         <slot/>
     </main>
     <Footer/>

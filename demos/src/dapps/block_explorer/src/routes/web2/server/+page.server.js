@@ -5,7 +5,7 @@ export async function load ({params})
 
     demos.connect(rpc);
 
-    let data = demos.getWeb2Data();
+    let data = await demos.getWeb2Data();
     return {
         data: data
     }
