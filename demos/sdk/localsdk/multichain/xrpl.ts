@@ -25,6 +25,7 @@ export default class XRPL  extends DefaultChain {
 
     constructor(rpc_url: string) {
         super(rpc_url)
+        this.name = "xrpl"
     }
 
 

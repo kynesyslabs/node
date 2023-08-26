@@ -22,6 +22,7 @@ export default class SOLANA  extends DefaultChain  {
 
     constructor(rpc_url: string) {
         super(rpc_url)
+        this.name = "solana"
     }
 
     connect(rpc_url: string): boolean {

@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 /* eslint-disable no-mixed-spaces-and-tabs */
 export interface IDefaultChain {
 	provider: any
@@ -19,6 +20,7 @@ export interface IDefaultChain {
 
 export default abstract class DefaultChain implements IDefaultChain {
     provider: any
+    name: string
     signer: any
     wallet: any
     rpc_url: string

@@ -30,6 +30,7 @@ export default class EVM  extends DefaultChain {
 
     private constructor(chain_id: number, rpc_url: string) {
         super(rpc_url)
+        this.name = "evm"
     }
 
     connect(rpc_url: string): boolean{
