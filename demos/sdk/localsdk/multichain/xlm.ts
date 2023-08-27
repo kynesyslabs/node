@@ -9,8 +9,14 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import DefaultChain from "./types/defaultChain"
+// LINK https://github.com/stellar/js-stellar-sdk/tree/master/docs/reference
 
+import required from "src/utilities/required"
+import DefaultChain from "./types/defaultChain"
+import * as StellarSdk from "stellar-sdk"
+
+// TODO Find a way to make things in the next link much more unified
+// LINK https://github.com/stellar/js-stellar-base/blob/master/docs/reference/building-transactions.md
 export default class XLM extends DefaultChain {
     constructor(rpcURL: string) {
         super(rpcURL) 
@@ -18,15 +24,17 @@ export default class XLM extends DefaultChain {
     }
 
     public connect(rpcURL: string): boolean {
-        // TODO
+        this.provider = new StellarSdk.Server(rpcURL) // 'https://horizon-testnet.stellar.org'
         return true
     }
 
     disconnect(): void {
         throw new Error("Method not implemented.")
     }
+
+    // INFO Loading a keypair from a private key string
     connectWallet(privateKey: string) {
-        throw new Error("Method not implemented.")
+        this.wallet =  StellarSdk.Keypair.fromSecret(privateKey)
     }
     getBalance(address: string): Promise<string> {
         throw new Error("Method not implemented.")
@@ -38,10 +46,13 @@ export default class XLM extends DefaultChain {
         throw new Error("Method not implemented.")
     }
 
+    // REVIEW Signing a pre built transaction
     async signTransaction(raw_transaction: any): Promise<any> {
-        // TODO
+        required(this.wallet, "Wallet not connected")
+        let signed_tx = await raw_transaction.sign(this.wallet)
+        return signed_tx
     }
-	
+
     sendTransaction(transactions: any) {
         throw new Error("Method not implemented.")
     }

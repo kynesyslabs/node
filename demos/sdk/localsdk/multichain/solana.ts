@@ -1,5 +1,7 @@
 import * as solanaWeb3 from "@solana/web3.js"
 import DefaultChain from "./types/defaultChain"
+import required from "src/utilities/required"
+
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
@@ -47,6 +49,7 @@ export default class SOLANA  extends DefaultChain  {
     }
 
     async pay(to: string, amount: string): Promise<any> {
+        required(this.wallet, "Wallet not connected")
         // TODO
         return null
     }
@@ -57,12 +60,23 @@ export default class SOLANA  extends DefaultChain  {
         return info
     }
 
+    // INFO Returning an empty raw transaction skeleton
+    async createRawTransaction(): Promise<solanaWeb3.Transaction> {
+        let empty_tx = new solanaWeb3.Transaction()
+        return empty_tx
+    }
+
+    // INFO Placeholder compatibility function that is here only for the interface
     async signTransaction(raw_transaction: any): Promise<any> {
-        // TODO
+        required(this.wallet, "Wallet not connected")
+        // LINK https://docs.shyft.to/tutorials/how-to-sign-transactions-on-solana
+        // NOTE Due to the above, the transaction is signed and sent at the same time.
+        return raw_transaction
     }
 
     // INFO Sending a transfer transaction on Solana network
     sendTransaction({to, amount}) {
+        required(this.wallet, "Wallet not connected")
         let tx = new solanaWeb3.Transaction()
         tx.add(
             solanaWeb3.SystemProgram.transfer({
