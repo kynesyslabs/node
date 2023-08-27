@@ -16,7 +16,7 @@ export interface requiredOutcome {
 export default function required(value: any, 
     msg: string = "Missing required element", fatal: boolean = true): requiredOutcome {
     if (!value) {
-        if (fatal) throw new Error(msg)
+        if (fatal) throw new Error("[REQUIRED] " + msg)
         return {success: false, message: msg}
     }
     return {success: true, message: ""}
