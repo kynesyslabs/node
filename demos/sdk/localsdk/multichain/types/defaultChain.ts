@@ -13,9 +13,17 @@ export interface IDefaultChain {
 	getBalance: (address: string) => Promise<string>
 	pay: (receiver: string, amount: string) => Promise<any>
 	info: ()=> Promise<string>
+	signTransaction: (raw_transaction: any) => Promise<any>
 	sendTransaction: (transactions: any) => any;
 
 	
+}
+
+// INFO This interface is exclusive for the EVM networks
+export interface IEVM {
+	createRawTransaction: (tx_data: any) => Promise<any>
+	readFromContract: (contract: any, method: string, args: any) => Promise<any>
+	writeToContract: (contract: any, method: string, args: any) => Promise<any>
 }
 
 export default abstract class DefaultChain implements IDefaultChain {
@@ -26,13 +34,17 @@ export default abstract class DefaultChain implements IDefaultChain {
     rpc_url: string
     connected: boolean
 
+	// ANCHOR Base methods
 	abstract connect(rpc_url: string): boolean;
 	abstract disconnect(): void;
-	abstract connectWallet(privateKey: string): any;
+	// ANCHOR Read methods
 	abstract getBalance(address: string): Promise<string>;
 	abstract pay(receiver: string, amount: string): Promise<any>;
 	abstract info(): Promise<string>;
-	abstract sendTransaction(transactions: any): any;
+	// ANCHOR Write methods
+	abstract connectWallet(privateKey: string): any;
+	abstract signTransaction(raw_transaction: any): Promise<any>
+	abstract sendTransaction(signed_transaction: any): any;
 
 
 	constructor(rpcURL: string) {

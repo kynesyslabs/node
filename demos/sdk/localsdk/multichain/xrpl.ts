@@ -115,13 +115,17 @@ export default class XRPL  extends DefaultChain {
         return info
     }
 
-
-    // INFO Generic sign, send and await (if not specified) a tx
-    async sendTransaction(prepared: any, wait:boolean=true): Promise<xrpl.TxResponse> {
+    async signTransaction(raw_transaction: any): Promise<any> {
         // Signing the tx
-        let signed = this.wallet.sign(prepared)
+        let signed = this.wallet.sign(raw_transaction)
         console.log("Hash: " + signed.hash)
         console.log("Blob: " + signed.tx_blob)
+        return signed
+    }
+
+
+    // INFO Generic sign, send and await (if not specified) a tx
+    async sendTransaction(signed: any, wait:boolean=true): Promise<xrpl.TxResponse> {
         // Sending the tx
         let tx_promise = this.provider.submitAndWait(signed.tx_blob)
         if (wait) {

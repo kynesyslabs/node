@@ -8,20 +8,26 @@ Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
 KyneSys Labs: https://www.kynesys.xyz/
 
 */
-import { ethers } from "ethers"
+import * as ethers from "ethers"
 import { JsonRpcProvider } from "@ethersproject/providers"
 import { JsonRpcSigner } from "@ethersproject/providers"
 import { Wallet } from "@ethersproject/wallet"
 import { TransactionRequest } from "@ethersproject/providers"
+import { Contract } from "ethers"
 import DefaultChain from "./types/defaultChain"
+import { IEVM } from "./types/defaultChain"
+import required from "src/utilities/required"
+import { runInThisContext } from "vm"
+import { Hash } from "crypto"
 
 
-export default class EVM  extends DefaultChain {
+export default class EVM  extends DefaultChain implements IEVM {
     // A singleton for each chain_id
     private static instances: Map<number, EVM> = new Map<number, EVM>()
     // Chain properties
     provider: JsonRpcProvider = null
     wallet: Wallet = null
+    empty_transaction: TransactionRequest
 
     /**
      * The Singleton's constructor should always be private to prevent direct
@@ -56,8 +62,14 @@ export default class EVM  extends DefaultChain {
         const balance = await this.provider.getBalance(address)
         return balance.toString()
     }
+
+    // INFO Simply sending an amount to an address
     async pay(address: string, amount: string): Promise<any> {
-        // TODO
+        required(this.wallet)
+        let tx = { to: address, value: ethers.parseEther(amount) }
+        let tx_hashed = await this.sendTransaction(tx)
+        console.log(tx_hashed)
+        return tx_hashed
     }
 
     async info(): Promise<string> {
@@ -66,13 +78,36 @@ export default class EVM  extends DefaultChain {
         return info
     }
 
+    // INFO Here we simply return the correct skeleton for a normal transaction
+    async createRawTransaction(): Promise<TransactionRequest> {
+        return this.empty_transaction
+    }
+
+    async signTransaction(raw_transaction: TransactionRequest): Promise<any> {
+        required(this.wallet)
+        let signed_tx = await this.wallet.signTransaction(raw_transaction)
+        return signed_tx
+    }
+
     // INFO If the wallet is connected, send a transaction
     async sendTransaction (transaction: TransactionRequest): Promise<string> {
         if (!this.wallet) { throw new Error("Wallet not connected") }
-        const txResponse = await this.wallet.sendTransaction(transaction)
+        const txResponse = await this.wallet.sendTransaction(transaction) // NOTE It will be signed automatically
         return txResponse.hash
     }
 
+    // REVIEW Reader for contracts
+    async readFromContract(contract_instance: Contract, function_name: string, args: any): Promise<any> {
+        let response = await contract_instance[function_name](...args)
+        return response
+    }
+
+    // REVIEW Writer for contracts
+    async writeToContract(contract_instance: Contract, function_name: string, args: any): Promise<any> {
+        required(this.wallet)
+        let response = await contract_instance[function_name](...args) // NOTE Ensure it is writeable i guess
+        return response
+    }
 
     /**
      * The static method that controls the access to the singleton instance.

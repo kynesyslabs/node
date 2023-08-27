@@ -36,6 +36,11 @@ export default class MULTIVERSX extends DefaultChain {
     info(): Promise<string> {
         throw new Error("Method not implemented.")
     }
+
+    async signTransaction(raw_transaction: any): Promise<any> {
+        // TODO
+    }
+	
     sendTransaction(transactions: any) {
         throw new Error("Method not implemented.")
     }

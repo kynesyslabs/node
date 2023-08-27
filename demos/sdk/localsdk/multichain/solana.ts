@@ -57,6 +57,10 @@ export default class SOLANA  extends DefaultChain  {
         return info
     }
 
+    async signTransaction(raw_transaction: any): Promise<any> {
+        // TODO
+    }
+
     // INFO Sending a transfer transaction on Solana network
     sendTransaction({to, amount}) {
         let tx = new solanaWeb3.Transaction()
