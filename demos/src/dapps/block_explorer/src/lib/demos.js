@@ -28,8 +28,10 @@ import forge from "node-forge"
 const md = forge.md
 import { sha256 } from "js-sha256"
 import SharedState from "./demos_libs/shared"
+import XMTransactions from "./demos_libs/XMTransactions"
+// TODO Use XMTransactions for the crosschain transactions
 
-// TODO Absolutely modularize this behemoth
+// REVIEW Maybe modularize this behemoth
 let demos = {
     // ANCHOR Properties
     socket: null,
@@ -349,6 +351,7 @@ let demos = {
 
     // SECTION Crosschain support endpoints
     crosschain: {
+        transactions: XMTransactions,
         // INFO Executing a precompiled multichain operation
         execute: async function (multichain_operation) {
             let response = await demos.nodeCall("crosschain_operation", {multichain_operation})

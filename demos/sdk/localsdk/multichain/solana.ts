@@ -38,6 +38,10 @@ export default class SOLANA  extends DefaultChain  {
         // TODO If something is to do, do it here
     }
 
+    createWallet(): any {
+        
+    }
+
     // ANCHOR Public methods
     connectWallet(privateKey: string) {
         this.wallet = solanaWeb3.Keypair.fromSecretKey(Buffer.from(privateKey, "hex")) // REVIEW is this ok?

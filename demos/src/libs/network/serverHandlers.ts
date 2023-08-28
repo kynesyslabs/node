@@ -51,7 +51,8 @@ export default class ServerHandlers {
     static async handleXMChainOperation(content: any): Promise<any> {
         let extra: any
         let require_reply = false
-        // NOTE Remember that crosschain operations are in chainscript syntax (see chainscript_example.ts)
+        // REVIEW Remember that crosschain operations can be in chainscript syntax
+        // INFO Use the src/features/multichain/chainscript/chainscript.chs for the specs
         let response = await multichainDispatcher(content.data)
         // TODO
         return { extra, require_reply, response }

@@ -32,6 +32,10 @@ export default class XLM extends DefaultChain {
         throw new Error("Method not implemented.")
     }
 
+    createWallet(): any {
+        
+    }
+
     // INFO Loading a keypair from a private key string
     connectWallet(privateKey: string) {
         this.wallet =  StellarSdk.Keypair.fromSecret(privateKey)

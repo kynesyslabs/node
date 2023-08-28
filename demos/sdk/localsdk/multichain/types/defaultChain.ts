@@ -9,6 +9,7 @@ export interface IDefaultChain {
 
 	connect: (url: string) => boolean;
 	disconnect: () => void;
+	createWallet: () => any;
 	connectWallet: (privateKey: string)=> any;
 	getBalance: (address: string) => Promise<string>
 	pay: (receiver: string, amount: string) => Promise<any>
@@ -40,8 +41,9 @@ export default abstract class DefaultChain implements IDefaultChain {
 	// ANCHOR Read methods
 	abstract getBalance(address: string): Promise<string>;
 	abstract pay(receiver: string, amount: string): Promise<any>;
-	abstract info(): Promise<string>;
+	abstract info(...args: any): Promise<string>;
 	// ANCHOR Write methods
+	abstract createWallet(): any;
 	abstract connectWallet(privateKey: string): any;
 	abstract signTransaction(raw_transaction: any): Promise<any>
 	abstract sendTransaction(signed_transaction: any): any;

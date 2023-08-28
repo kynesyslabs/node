@@ -1,57 +1,27 @@
-/* LICENSE
-
-© 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
-
-Full license text: https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode
-Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
-
-KyneSys Labs: https://www.kynesys.xyz/
-
-*/
-
-import { sha256 } from "node-forge"
-import fetch from "node-fetch"
-import { Psbt, networks } from "bitcoinjs-lib"
-import fromWIF from "bip32"
-import axios from "axios"
-import { TransactionRequest } from "@ethersproject/providers"
-import { JsonRpcProvider } from "@ethersproject/providers"
-import { Wallet } from "@ethersproject/wallet"
+import * as bitcoin from "bitcoinjs-lib"
 import DefaultChain from "./types/defaultChain"
-import { TransactionContent } from "../../../src/libs/blockchain/types/transactions"
+import BIP32Factory, { BIP32Interface } from "bip32"
+import * as ecc from "tiny-secp256k1"
+import * as bip39 from "bip39"
 
+const bip32 = BIP32Factory(ecc)
 
-interface TransactionParams {
-    from: string
-    to: string
-    value: number
-    privateKey: string
-}
+// NOTE BIP32 implementation follows:
+// LINK https://github.com/bitcoinjs/bitcoinjs-lib/blob/master/test/integration/bip32.spec.ts
 
-
-export default class BTC  extends DefaultChain {
-    private static instance: BTC
-    provider: JsonRpcProvider = null
-    wallet: Wallet = null
+export default class BTC extends DefaultChain {
 
     constructor(rpc_url: string) {
         super(rpc_url)
+        this.name = "BTC"
     }
-
-    connect(url: string): boolean {
-        this.provider = new JsonRpcProvider(url)
-        return true
+	
+    connect(rpc_url: string): boolean {
+        throw new Error("Method not implemented.")
     }
-
-    disconnect() {
-        this.provider = null
-        // TODO If anything else is todo lets do it here
+    disconnect(): void {
+        throw new Error("Method not implemented.")
     }
-
-    async connectWallet(private_key: string): Promise<void> {
-        this.wallet = new Wallet(private_key, this.provider)
-    }
-
     async getBalance(address: string): Promise<string> {
         const response = await fetch(
             `https://blockchain.info/q/addressbalance/${address}`,
@@ -60,85 +30,42 @@ export default class BTC  extends DefaultChain {
         return balance
     }
 
-    async pay(address: string, amount: string): Promise<any> {
-        // TODO: implement
+    pay(receiver: string, amount: string): Promise<any> {
+        throw new Error("Method not implemented.")
+    }
+    async info(account: BIP32Interface): Promise<string> {
+        let address = bitcoin.payments.p2pkh({ pubkey: account.publicKey }).address!
+        return JSON.stringify(address)
     }
 
-    async sendTransaction(
-        { from, to, value }: TransactionParams,
-    ) {
-        if (!this.wallet) { throw new Error("Wallet not connected") }
-		
-        const keyPair = fromWIF(this.wallet.privateKey, networks.bitcoin) // FIXME
-        const psbt = new Psbt({ network: networks.bitcoin })
-
-        const txData = await axios.get(
-            `https://blockchain.info/unspent?active=${from}`,
-        )
-        const inputs = txData.data.unspent_outputs
-
-        let totalValue = 0
-        for (let input of inputs) {
-            psbt.addInput({
-                hash: input.tx_hash_big_endian,
-                index: input.tx_output_n,
-            })
-            totalValue += input.value
-            if (totalValue >= value) break
-        }
-
-        if (totalValue < value) throw new Error("Insufficient funds")
-
-        const fee = 10000 // Set transaction fee here (in Satoshis)
-        const sendValue = totalValue - fee
-
-        psbt.addOutput({
-            address: to,
-            value: sendValue,
-        })
-        if (totalValue > sendValue) {
-            // Create change output
-            psbt.addOutput({
-                address: from,
-                value: totalValue - sendValue - fee,
-            })
-        }
-
-        for (let i = 0; i < inputs.length; i++) {
-            psbt.signInput(i, keyPair) // FIXME Here
-        }
-
-        psbt.finalizeAllInputs()
-
-        const rawTransaction = psbt.extractTransaction().toHex()
-
-        const response = await axios.post(
-            "https://api.blockcypher.com/v1/btc/main/txs/push",
-            {
-                tx: rawTransaction,
-            },
-        )
-        return response.data.hash
+    createWallet(): any {
+        // TODO Generate mnemonic
+        let mnemonic
+        let path = "m/0'/0/0"
+        let seed = bip39.mnemonicToSeedSync(mnemonic)
+        let root = bip32.fromSeed(seed)
+        this.wallet = root.derivePath(path) // REVIEW is this right?
     }
 
-    async info(): Promise<string> {
-        let info = ""
-        // TODO
-        return info
-    }
-
-    // Static singleton puller
-    public static getInstance(): BTC|boolean {
-        if (!BTC.instance) {
-            return false
+    // INFO Accepting base58 encoded private keys like:
+    // tprv8ZgxMBicQKsPd7Uf69XL1XwhmjHopUGep8GuEiJDZmbQz6o58LninorQAfcKZWARbtRtfnLcJ5MQ2AtHcQJCCRUcMRvmDUjyEmNUWwx8UbK
+    // NOTE Alternatively you can pass in a mnemonic phrase to generate the private key.
+    connectWallet(privateKey: string, mnemonic: boolean = false) {
+        if (!mnemonic) {
+            this.wallet = bip32.fromBase58(privateKey)
+        } else {
+            // Generating the seed and the private key from the mnemonic
+            let seed = bip39.mnemonicToSeedSync(privateKey)
+            let node = bip32.fromSeed(seed)
+            let strng = node.toBase58()
+            this.wallet = bip32.fromBase58(strng)
         }
-        return BTC.instance
     }
-
-    public static createInstance(rpc_url: string): BTC {
-        if (!BTC.instance) {
-            BTC.instance = new BTC(rpc_url)
-        }
-        return BTC.instance
+    signTransaction(raw_transaction: any): Promise<any> {
+        throw new Error("Method not implemented.")
     }
+    sendTransaction(signed_transaction: any) {
+        throw new Error("Method not implemented.")
+    }
+	
 }

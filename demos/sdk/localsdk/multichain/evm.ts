@@ -50,6 +50,10 @@ export default class EVM  extends DefaultChain implements IEVM {
         // TODO
     }
 
+    createWallet(): any {
+        
+    }
+
     // INFO Connect a wallet to the EVM provider using a private key
     connectWallet(privateKey: string): Wallet {
         this.wallet = new Wallet(privateKey, this.provider)

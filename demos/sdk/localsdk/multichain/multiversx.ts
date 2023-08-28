@@ -24,6 +24,11 @@ export default class MULTIVERSX extends DefaultChain {
     disconnect(): void {
         throw new Error("Method not implemented.")
     }
+
+    createWallet(): any {
+        
+    }
+    
     connectWallet(privateKey: string) {
         throw new Error("Method not implemented.")
     }
