@@ -367,7 +367,7 @@ let demos = {
         // NOTE Building a transaction without signing or hashing it
         prepare: async function (data) {
             let thisTx = demos.skeletons.transaction
-            if (!data.timestamp) data.timestamp = Date.now()
+            //if (!data.timestamp) data.timestamp = Date.now()
             // Assigning the transaction data to our object
             //thisTx.content = data
             return thisTx
