@@ -36,6 +36,7 @@
         justify-content: space-between;
         cursor: pointer;
         position: relative;
+        z-index: 100;
     }
     .combobox-dialog{
         position: absolute;
@@ -54,6 +55,7 @@
         background-color: #505050;
         display: grid;
         grid-template-columns: 25px 1fr;
+        position: relative;
     }
     .combobox-option:hover{
         background-color: var(--accent);
@@ -62,9 +64,9 @@
 </style>
 <div use:clickOutside role={`Select element`} on:click={()=>{open=!open}} on:click_outside={()=>{open=false}} style={style} class="combobox">
     {#if options.find(o=>o.id===value)}
-        {options.find((o)=>o.id===value).label}<Fa icon={faChevronDown}></Fa>
+        <p style="margin:0" >{options.find((o)=>o.id===value).label}</p><Fa icon={faChevronDown}></Fa>
     {:else}
-        <p style="margin:0;opacity:.5">Select option</p><Fa icon={faChevronDown}></Fa>
+        <p class="ellipsis" style="margin:0;opacity:.5">Select option</p><Fa icon={faChevronDown}></Fa>
     {/if}
     {#if open}
     <div transition:customAnimation={{duration:200, easing:cubicInOut}} class="combobox-dialog">

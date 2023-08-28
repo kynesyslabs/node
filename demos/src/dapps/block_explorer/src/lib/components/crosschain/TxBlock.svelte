@@ -119,6 +119,7 @@
         padding-bottom: 28px;
         margin-bottom: 14px;
         border-bottom: var(--border);
+        flex-wrap: wrap-reverse;
     }
 
     .txblock-body{
@@ -162,14 +163,18 @@
         background-color: var(--accent);
         color: black;
     }
+
+    .txblock{
+        margin: 16px auto 32px;
+    }
 </style>
 
-<div class="card">
+<div class="card txblock">
     <div class="txblock-header">
         <div class="txblock-header-header">
             <div class="txblock-header-blockchain">
                 <p class="txblock-header-label">Blockchain:</p>
-                <Combobox style="padding:8px; width:250px; margin:0;" onChange={onBlockchainSelect} options={blockchainOptions} value={txblock.blockchain}/>
+                <Combobox onChange={onBlockchainSelect} options={blockchainOptions} value={txblock.blockchain}/>
                 <div class="card-ellipsis-container">
                     <button on:click={()=>{codemode=!codemode}} class={`card-ellipsis color-transition ${codemode?"selected":""}`}>
                         <Fa icon={faCode}></Fa>
