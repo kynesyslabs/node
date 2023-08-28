@@ -7,19 +7,23 @@
     const pages = [
         {
             label:"Block Explorer",
-            href:"/"
+            href:"/blockexplorer",
+            test:"blockexplorer"
         },
         {
             label:"Crosschain",
-            href:"/crosschain"
+            href:"/crosschain",
+            test:"crosschain"
         },
         {
             label:"Web2",
-            href:"/web2/server"
+            href:"/web2/server",
+            test:"web2"
         },
         {
             label:"Tx test",
-            href:"/txtest"
+            href:"/txtest",
+            test:"txtest"
         }
     ]
     let mobileMenuOpen = false;
@@ -138,7 +142,7 @@
             display: block;
         }
     }
-</style>
+    </style>
 
 <div class="header">
     <a href="/">
@@ -150,11 +154,11 @@
     {#if mobileMenuOpen}
     <div transition:slide={{axis:"x", inverse:1}} role={"mobile menu"} on:click={()=>{mobileMenuOpen = false}} class="mobile-menu">
         {#each pages as page}
-            <a on:click={(e)=>{e.stopPropagation();mobileMenuOpen = false}} href={page.href}><div class={`${location == page.href?"mobile-link-selected":"mobile-link"} color-transition`}>{page.label}</div></a>
+            <a on:click={(e)=>{e.stopPropagation();mobileMenuOpen = false}} href={page.href}><div class={`${location.split("/").includes(page.test)?"mobile-link-selected":"mobile-link"} color-transition`}>{page.label}</div></a>
         {/each}
     </div>
     {/if}
     {#each pages as page}
-        <a class="link-link" href={page.href}><div class={`${location == page.href?"page-link-selected":"page-link"} color-transition`}>{page.label}</div></a>
+        <a class="link-link" href={page.href}><div class={`${location.split("/").includes(page.test)?"page-link-selected":"page-link"} color-transition`}>{page.label}</div></a>
     {/each}
 </div>

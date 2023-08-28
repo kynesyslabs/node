@@ -2,6 +2,7 @@
 import demos from '$lib/demos.js';
 import * as forge from "node-forge"
 import { sha256 } from "js-sha256"
+import { goto } from '$app/navigation';
 
 
 export async function load ({params})
