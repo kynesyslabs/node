@@ -193,6 +193,7 @@ export default class ComLink {
         }
         console.log("[!] Checking chain.comlinkCurrentHash")
         let bufferedHash
+        console.log(typeof(this.chain.comlinkCurrentHash))
         if (typeof(this.chain.comlinkCurrentHash) == "string" ) {
             bufferedHash = Buffer.from(this.chain.comlinkCurrentHash)
         } else {
