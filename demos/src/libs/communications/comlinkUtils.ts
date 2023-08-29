@@ -49,7 +49,7 @@ export default class ComLinkUtils {
             try {
                 valid = await _comlink_request.validateComlink()
             } catch (e) {
-                valid = [false, e]
+                valid = [false, e.toString()]
             }
             if (!valid[0]) {
                 term.red("[COMLINK VALIDATION ERROR] " + valid[1] + "\n")
