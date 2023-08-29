@@ -183,6 +183,7 @@ export default class ComLink {
             return [false, "current hash mismatch: " + _derivedCurrentHash]
         // Check if the comlink signature matches the comlink sender
         let _publicKey = Buffer.from(_currentMessage.bundle.content.sender) // REVIEW Isnt this useless now?
+        console.log("Checkking chain.comlinkCurrentHash")
         console.log(typeof(this.chain.comlinkCurrentHash))
         let _signatureValidity = await Cryptography.verify(
             this.chain.comlinkCurrentHash,
@@ -195,6 +196,7 @@ export default class ComLink {
         _currentMessage.bundle.signature = Buffer.from(
             _currentMessage.bundle.signature,
         ) // REVIEW Isnt this useless now?
+        console.log("[!] Checking bundle.hash")
         console.log(typeof(_currentMessage.bundle.hash))
         let _messageSignatureValidity = await Cryptography.verify(
             _currentMessage.bundle.hash,
