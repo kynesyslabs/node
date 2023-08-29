@@ -272,7 +272,7 @@ let demos = {
         comlink.chain.comlinkCurrentHashSignature = signature 
 
         // Stringifying currentMessage
-        comlink.chain.current.currentMessage = JSON.stringify(comlink.chain.current.currentMessage)
+        //comlink.chain.current.currentMessage = JSON.stringify(comlink.chain.current.currentMessage)
 
         console.log("Sending message ")
         console.log(message)
