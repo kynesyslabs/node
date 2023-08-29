@@ -70,12 +70,12 @@ export default class Cryptography {
         publicKey: pki.ed25519.BinaryBuffer,
     ) {
         console.log(signed + " is a " + typeof(signed))
-        console.log(signature + " is a " + typeof(signature))
-        console.log(publicKey + " is a " + typeof(publicKey))
+        console.log(signature.toString("hex") + " is a " + typeof(signature))
+        console.log(publicKey.toString("hex") + " is a " + typeof(publicKey))
         // Converting to a byte buffer
         let encoder = new TextEncoder()
         let message = encoder.encode(signed)
-        console.log(message + " is a " + typeof(message))
+        console.log(message.toString() + " is a " + typeof(message))
         const verified = ed25519.verify({
             message: message,
             //encoding: "binary",
