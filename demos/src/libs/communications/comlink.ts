@@ -177,6 +177,7 @@ export default class ComLink {
         let _derivedMessageHash = Hashing.sha256(stringifiedMessage)
         if (!(_derivedMessageHash === _currentMessage.bundle.hash)) {
             console.log(_currentMessage)
+            console.log(stringifiedMessage)
             return [false, "comlink message hash mismatch: " + _derivedMessageHash]
         }
         // Check if current hash matches the current field
