@@ -168,6 +168,11 @@ export default class ComLink {
 
     // INFO Generic comlink validation function
     async validateComlink() {
+        try {
+            _currentMessage.bundle.content.sender = Buffer.from(_currentMessage.bundle.content.sender)
+        } catch (err) {
+            console.log("Sender is not bufferable")
+        }
         var _currentMessage = this.chain.current.currentMessage
         // Check if the current message hash matches the message
         let stringifiedMessage = JSON.stringify(_currentMessage.bundle.content)
