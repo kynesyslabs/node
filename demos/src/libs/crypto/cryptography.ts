@@ -72,9 +72,12 @@ export default class Cryptography {
         console.log(signed + " is a " + typeof(signed))
         console.log(signature + " is a " + typeof(signature))
         console.log(publicKey + " is a " + typeof(publicKey))
+        // Converting to a byte buffer
+        let encoder = new TextEncoder()
+        let message = encoder.encode(signed)
         const verified = ed25519.verify({
-            message: signed,
-            encoding: "utf8",
+            message: message,
+            encoding: "binary",
             publicKey: publicKey,
             signature: signature,
         })
