@@ -146,7 +146,7 @@ export default class ServerListeners {
             )
             // Sending back the response
             console.log("[SERVER] Sending back comlink")
-            //console.log(JSON.stringify(_comlink_request))
+            console.log(JSON.stringify(_comlink_request))
             receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
         })
         // TODO See in communications.js and find the best way to validate, check and digest the request
