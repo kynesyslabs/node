@@ -44,6 +44,7 @@ export async function load ({params})
     demos.connect(rpc);
     if(demos.connected){
         let blockNumber = JSON.parse(await demos.getLastBlockNumber());
+        console.log(blockNumber)
         block = await demos.getBlockByNumber(blockNumber.number);
     }
     return {
