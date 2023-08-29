@@ -192,10 +192,15 @@ export default class ComLink {
             console.log(typeof(_currentMessage.bundle.content.sender))
         }
         console.log("[!] Checking chain.comlinkCurrentHash")
-        console.log(typeof(this.chain.comlinkCurrentHash))
+        let bufferedHash
+        if (typeof(this.chain.comlinkCurrentHash) == "string" ) {
+            bufferedHash = Buffer.from(this.chain.comlinkCurrentHash)
+        } else {
+            bufferedHash = this.chain.comlinkCurrentHash
+        }
         console.log(this.chain.comlinkCurrentHash)
         let _signatureValidity = await Cryptography.verify(
-            this.chain.comlinkCurrentHash,
+            bufferedHash,
             this.chain.comlinkCurrentHashSignature,
             _publicKey,
         )
