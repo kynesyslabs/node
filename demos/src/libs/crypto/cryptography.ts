@@ -77,15 +77,8 @@ export default class Cryptography {
             signature = Buffer.from(signature, "hex")
             console.log("[*] String signature detected: buffering it")
         }
-        let buffered: Buffer
-        if (typeof(signed) === "string") {
-            buffered = Buffer.from(signed, "utf8")
-            console.log("[*] String signed message detected: buffering it")
-        } else buffered = signed
         console.log("\n\nSigned: \n")
         console.log(signed + " is a " + typeof(signed))
-        console.log("\n\nBuffered: \n")
-        console.log(buffered.buffer + " is a " + typeof(buffered.buffer))
         console.log("\n\nSignature: \n")
         console.log(signature)
         console.log(" is a " + typeof(signature))
@@ -93,9 +86,10 @@ export default class Cryptography {
         console.log(publicKey)
         console.log(" is a " + typeof(publicKey))
         console.log("\n")
+        console.log("[*] Verifying the signature...")
         const verified = ed25519.verify({
-            message: buffered,
-            //encoding: "utf8",
+            message: signed,
+            encoding: "utf8",
             publicKey: publicKey,
             signature: signature,
         })
