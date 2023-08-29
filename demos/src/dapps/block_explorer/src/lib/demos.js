@@ -234,7 +234,7 @@ let demos = {
         
         // TODO Eliminate this: generating a random identity for the signature
         let seed =forge.random.getBytesSync(32)
-        let keys = forge.pki.ed25519.generateKeyPair(seed)
+        let keys = forge.pki.ed25519.generateKeyPair({seed})
         let privkey = keys.privateKey
         let pubKey = keys.publicKey
         console.log(keys)

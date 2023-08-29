@@ -191,7 +191,7 @@ export default class ComLink {
         let _signatureValidity = Cryptography.verify(
             this.chain.comlinkCurrentHash,
             this.chain.comlinkCurrentHashSignature,
-            _publicKey,
+            _currentMessage.bundle.content.sender,
         )
         if (!_signatureValidity)
             return [false, "invalid comlink current hash signature"]
