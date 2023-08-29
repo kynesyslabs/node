@@ -19,6 +19,7 @@ import Peer from "../peer/Peer"
 import type { Current, Properties } from "./types/comlink"
 import getRemoteIP from "../network/routines/getRemoteIP"
 import sharedState from "src/utilities/sharedState"
+import { type } from "os"
 
 
 export default class ComLink {
@@ -168,11 +169,7 @@ export default class ComLink {
 
     // INFO Generic comlink validation function
     async validateComlink() {
-        try {
-            _currentMessage.bundle.content.sender = Buffer.from(_currentMessage.bundle.content.sender)
-        } catch (err) {
-            console.log("Sender is not bufferable")
-        }
+
         var _currentMessage = this.chain.current.currentMessage
         // Check if the current message hash matches the message
         let stringifiedMessage = JSON.stringify(_currentMessage.bundle.content)
@@ -186,6 +183,7 @@ export default class ComLink {
             return [false, "current hash mismatch: " + _derivedCurrentHash]
         // Check if the comlink signature matches the comlink sender
         let _publicKey = Buffer.from(_currentMessage.bundle.content.sender) // REVIEW Isnt this useless now?
+        console.log(typeof(this.chain.comlinkCurrentHash))
         let _signatureValidity = await Cryptography.verify(
             this.chain.comlinkCurrentHash,
             this.chain.comlinkCurrentHashSignature,
@@ -197,6 +195,7 @@ export default class ComLink {
         _currentMessage.bundle.signature = Buffer.from(
             _currentMessage.bundle.signature,
         ) // REVIEW Isnt this useless now?
+        console.log(typeof(_currentMessage.bundle.hash))
         let _messageSignatureValidity = await Cryptography.verify(
             _currentMessage.bundle.hash,
             _currentMessage.bundle.signature,
