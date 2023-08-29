@@ -26,10 +26,19 @@ This library contains all the functions that are used to interact with the demos
 import io from "socket.io-client"
 import forge from "node-forge"
 const md = forge.md
-import { sha256 } from "js-sha256"
 import SharedState from "./demos_libs/shared"
 import XMTransactions from "./demos_libs/XMTransactions"
 // TODO Use XMTransactions for the crosschain transactions
+
+async function sha256(string) {
+    const utf8 = new TextEncoder().encode(string);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', utf8);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray
+      .map((bytes) => bytes.toString(16).padStart(2, '0'))
+      .join('');
+    return hashHex;
+  }
 
 // REVIEW Maybe modularize this behemoth
 let demos = {
@@ -231,10 +240,8 @@ let demos = {
         // Signaling our identity
         comlink.chain.current.currentMessage.bundle.content.sender = keys.publicKey
         // NOTE Doing the cryptography for the transmission object
-        let stringifiedTransmission = JSON.stringify(comlink.chain.current.currentMessage.bundle.content)
-        let t_digestor = sha256.create()
-        t_digestor.update(stringifiedTransmission)
-        let t_hashed =  t_digestor.hex()
+        let stringifiedTransmissionContent = JSON.stringify(comlink.chain.current.currentMessage.bundle.content)
+        let t_hashed = await sha256(stringifiedTransmissionContent)
         console.log(t_hashed + " is the hashed version of comlink.chain.current.currentMessage.bundle.content")
         comlink.chain.current.currentMessage.bundle.hash = t_hashed
         comlink.chain.current.currentMessageHash = t_hashed
@@ -248,10 +255,8 @@ let demos = {
         comlink.chain.current.currentMessage.bundle.signature = t_signature
         
         // NOTE Also hashing the comlink current property
-        let stringifiedMessage = JSON.stringify(comlink.chain.current)
-        let digestor = sha256.create()
-        digestor.update(stringifiedMessage)
-        let hashed =  digestor.hex()
+        let stringifiedMessage = JSON.stringify(comlink.chain.current, )
+        let hashed =  await sha256(stringifiedMessage)
         console.log(hashed + " is the hashed version of comlink.chain.current")
         comlink.chain.comlinkCurrentHash = hashed
         // Signing the hash
@@ -265,12 +270,14 @@ let demos = {
         console.log(signature.toString("hex") + " is the signature of the hashed version of comlink.chain.current")
         comlink.chain.comlinkCurrentHashSignature = signature // FIXME TypeError in comlink.ts
 
+        console.log("Sending message ")
+        console.log(message)
         console.log(
-            "Sending message " +
-                message +
                 " to server with muid: " +
                 comlink.muid,
         )
+        console.log("Using the following comlink:")
+        console.log(comlink)
         // Registering the reply request
         demos.replies.waitReply(_muid)
         console.log(comlink)

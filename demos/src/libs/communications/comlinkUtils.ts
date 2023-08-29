@@ -26,7 +26,8 @@ export default class ComLinkUtils {
         _comlink_request.chain = request.chain
         _comlink_request.muid = request.muid
         _comlink_request.properties = request.properties
-
+        console.log(request)
+        console.log("\n" + _comlink_request + "\n")
         // Checking validity of the comlink for non nodeCall transactions
         // NOTE nodeCall transactions are read only and can be called by any client even without authentication
         if (!(_comlink_request.chain.current.currentMessage.bundle.content.type === "nodeCall")) {
