@@ -188,6 +188,7 @@ export default class ComLink {
         try {
             _publicKey = Buffer.from(_currentMessage.bundle.content.sender) // REVIEW Isnt this useless now?
         } catch (error) {
+            console.log(error)
             console.log("[!] Error extracting publicKey, assuming is a buffer already")
             console.log(typeof(_currentMessage.bundle.content.sender))
         }
