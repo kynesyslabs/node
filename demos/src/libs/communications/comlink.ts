@@ -12,6 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import Hashing from "../crypto/hashing"
 import Cryptography from "../crypto/cryptography"
 import { pki } from "node-forge"
+import * as forge from "node-forge"
 import { Socket } from "socket.io-client"
 import Transmission from "./transmission"
 import Peer from "../peer/Peer"
@@ -187,7 +188,8 @@ export default class ComLink {
         let _publicKey = _currentMessage.bundle.content.sender
         try {
             // As the public key is sent as an hex string, we need to convert it to a buffer
-            _publicKey = Buffer.from(_currentMessage.bundle.content.sender, "hex") // REVIEW Isnt this useless now?
+            let _node_publicKey = Buffer.from(_currentMessage.bundle.content.sender, "hex") // REVIEW Isnt this useless now?
+            _publicKey = forge.util.createBuffer(_node_publicKey.toString("binary"))
             console.log("[+] Serialized public key successfully")
         } catch (error) {
             console.log(error)
