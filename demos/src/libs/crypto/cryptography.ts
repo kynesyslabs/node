@@ -77,7 +77,7 @@ export default class Cryptography {
             signature = Buffer.from(signature, "hex")
             console.log("[*] String signature detected: buffering it")
         }
-        let buffered
+        let buffered: Buffer
         if (typeof(signed) === "string") {
             buffered = Buffer.from(signed, "utf8")
             console.log("[*] String signed message detected: buffering it")
@@ -85,7 +85,7 @@ export default class Cryptography {
         console.log("\n\nSigned: \n")
         console.log(signed + " is a " + typeof(signed))
         console.log("\n\nBuffered: \n")
-        console.log(buffered + " is a " + typeof(buffered))
+        console.log(buffered.buffer + " is a " + typeof(buffered.buffer))
         console.log("\n\nSignature: \n")
         console.log(signature)
         console.log(" is a " + typeof(signature))
