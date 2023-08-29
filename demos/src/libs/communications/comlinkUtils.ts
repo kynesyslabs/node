@@ -45,7 +45,12 @@ export default class ComLinkUtils {
         // NOTE nodeCall transactions are read only and can be called by any client even without authentication
         if (!(_comlink_request.chain.current.currentMessage.bundle.content.type === "nodeCall")) {
             
-            let valid = await _comlink_request.validateComlink()
+            let valid: any[]
+            try {
+                valid = await _comlink_request.validateComlink()
+            } catch (e) {
+                valid = [false, e]
+            }
             if (!valid[0]) {
                 term.red("[COMLINK VALIDATION ERROR] " + valid[1] + "\n")
                 peerSocket.emit("comlink", {
