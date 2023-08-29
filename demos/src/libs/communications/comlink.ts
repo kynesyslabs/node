@@ -200,6 +200,8 @@ export default class ComLink {
             bufferedHash = this.chain.comlinkCurrentHash
         }
         console.log(bufferedHash)*/
+        console.log(this.chain.comlinkCurrentHash)
+        console.log(typeof(this.chain.comlinkCurrentHash))
         let _signatureValidity = await Cryptography.verify(
             this.chain.comlinkCurrentHash,
             this.chain.comlinkCurrentHashSignature,
