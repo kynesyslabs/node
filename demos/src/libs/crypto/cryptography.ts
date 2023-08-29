@@ -79,7 +79,7 @@ export default class Cryptography {
         }
         let buffered
         if (typeof(signed) === "string") {
-            buffered = Buffer.from(signed, "hex")
+            buffered = Buffer.from(signed, "utf8")
             console.log("[*] String signed message detected: buffering it")
         } else buffered = signed
         console.log("\n\nSigned: \n")
