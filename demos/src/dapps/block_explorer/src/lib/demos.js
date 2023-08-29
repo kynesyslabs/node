@@ -397,9 +397,7 @@ let demos = {
         // NOTE Sending a transaction after signing it
         broadcast: async function (signed_tx) {
         // TODO: Implement and for god sake do some error handling
-            return await demos.nodeCall("tx", {
-                tx: signed_tx,
-            }) // REVIEW It should returns either false + error or true + hash
+            return await demos.call("tx", {tx:signed_tx}) // REVIEW It should returns either false + error or true + hash
         },
     },
     // !SECTION Supporting txs
