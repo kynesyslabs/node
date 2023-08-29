@@ -31,8 +31,13 @@ export default class ComLinkUtils {
         let string_currentMessage = request.chain.current.currentMessage
         try {
             request.chain.current.currentMessage = JSON.parse(request.chain.current.currentMessage)
+            console.log("Serialized current message")
+            request.chain.current.currentMessage.content = JSON.parse(request.chain.current.currentMessage.content)
+            console.log("Serialized current message content")
+            request.chain.current.currentMessage.content.message = JSON.parse(request.chain.current.currentMessage.content.message)
+            console.log("Serialized current message content message")
         } catch (e) {
-            console.log(e)
+            console.log("Cannot further serialize the current message")
             console.log("Assuming it's not to serialize")
         }
         console.log("\n" + request.chain.current.currentMessage + "\n")
