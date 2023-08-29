@@ -9,8 +9,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import forge, { jsbn, pki, random, util } from "node-forge"
+import { pki, random } from "node-forge"
+import * as forge from "node-forge"
 import { promises as fs } from "fs"
+const ed25519 = forge.pki.ed25519
 
 export default class Cryptography {
     // TODO Generates a new RSA keypair from a given ecdsa private key
@@ -63,18 +65,18 @@ export default class Cryptography {
     }
 
     static verify( 
-        message: string,
+        signed: string,
         signature: pki.ed25519.BinaryBuffer,
         publicKey: pki.ed25519.BinaryBuffer,
     ) {
-        console.log(message + " is a " + typeof(message))
+        console.log(signed + " is a " + typeof(signed))
         console.log(signature + " is a " + typeof(signature))
         console.log(publicKey + " is a " + typeof(publicKey))
-        const verified = pki.ed25519.verify({
-            message: message,
+        const verified = ed25519.verify({
+            message: signed,
             encoding: "utf8",
-            signature: signature,
             publicKey: publicKey,
+            signature: signature,
         })
         return verified
     }
