@@ -66,11 +66,16 @@ export default class Cryptography {
 
     static verify( 
         signed: string,
-        signature: pki.ed25519.BinaryBuffer,
+        signature: string | pki.ed25519.BinaryBuffer,
         publicKey: string | pki.ed25519.BinaryBuffer,
     ) {
         if (typeof(publicKey)==="string") {
-            publicKey = Buffer.from(publicKey)
+            publicKey = Buffer.from(publicKey, "hex")
+            console.log("[*] String public key detected: buffering it")
+        }
+        if (typeof(signature)==="string") {
+            signature = Buffer.from(signature, "hex")
+            console.log("[*] String signature detected: buffering it")
         }
         console.log("\n\nSigned: \n")
         console.log(signed + " is a " + typeof(signed))
