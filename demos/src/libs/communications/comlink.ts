@@ -192,16 +192,7 @@ export default class ComLink {
             console.log(typeof(_currentMessage.bundle.content.sender))
         }
         console.log("[!] Checking chain.comlinkCurrentHash")
-        /*let bufferedHash
-        console.log(typeof(this.chain.comlinkCurrentHash))
-        if (typeof(this.chain.comlinkCurrentHash) == "string" ) {
-            bufferedHash = Buffer.from(this.chain.comlinkCurrentHash)
-        } else {
-            bufferedHash = this.chain.comlinkCurrentHash
-        }
-        console.log(bufferedHash)*/
-        console.log(this.chain.comlinkCurrentHash)
-        console.log(typeof(this.chain.comlinkCurrentHash))
+        // FIXME For unknown reasons, "tx" fails here
         let _signatureValidity = Cryptography.verify(
             this.chain.comlinkCurrentHash,
             this.chain.comlinkCurrentHashSignature,

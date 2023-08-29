@@ -1,13 +1,38 @@
-// First, we transfer an amount on Goerli just to reward our loyal customer
-"transfer_money": {
+// We have to connect to the two blockchains in order to start
+"connect": {
 	"chain": "ethereum",
 	"subchain": "goerli",
 	"is_evm": true,
 	"rpc": "https://rpc.ankr.com/eth_goerli",
 	"task": {
+		"type": "connection",
+		"params": {
+			"privateKey": "0x123321123321",
+		}
+	}
+}
+"connect": {
+	"chain": "xrpl",
+	"subchain": "testnet",
+	"is_evm": false,
+	"rpc": "https://s.altnet.rippletest.net",
+	"task": {
+		"type": "connection",
+		"params": {
+			"privateKey": "abcdefghijklmnopqrstuvwxyz",
+		}
+	}
+}
+
+// First, we transfer an amount on Goerli just to reward our loyal customer
+"transfer_money": {
+	"chain": "ethereum",
+	"subchain": "goerli",
+	"is_evm": true,
+	"task": {
 		"type": "pay",
         "params": {
-			"to": "0x000000000000",
+			"to": "0x000000000000",	
 			"amount": "10000000000000"
 		}
 	}
@@ -18,7 +43,6 @@
 	"chain": "ethereum",
     "subchain": "goerli",
     "is_evm": true,
-    "rpc": "https://rpc.ankr.com/eth_goerli",
     "task": {
 		"type": "contract_read",
         "params": {
@@ -36,7 +60,6 @@ if "check_a_contract_state" == 0 then
 		"chain": "ethereum",
         "subchain": "goerli",
 		"is_evm": true,
-		"rpc": "https://rpc.ankr.com/eth_goerli",
 		"task": {
             "type": "contract_write",
 			"params": {
@@ -54,7 +77,6 @@ else
         "chain": "xrpl",
 		"subchain": "testnet",
 		"is_evm": false,
-		"rpc": "s.altnet.rippletest.net",
 		"task": {
             "type": "pay",
 			"params": {

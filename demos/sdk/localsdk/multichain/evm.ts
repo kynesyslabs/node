@@ -28,6 +28,8 @@ export default class EVM  extends DefaultChain implements IEVM {
     provider: JsonRpcProvider = null
     wallet: Wallet = null
     empty_transaction: TransactionRequest
+    // Specific EVM properties
+    contracts: Map<string, ethers.Contract> // Will store all the contracts instances as address: ethers.Contract}
 
     /**
      * The Singleton's constructor should always be private to prevent direct

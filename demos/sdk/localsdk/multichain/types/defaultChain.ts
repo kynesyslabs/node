@@ -1,5 +1,6 @@
 /* eslint-disable no-unused-vars */
 /* eslint-disable no-mixed-spaces-and-tabs */
+import * as ethers from "ethers"
 export interface IDefaultChain {
 	provider: any
 	signer: any
@@ -21,7 +22,9 @@ export interface IDefaultChain {
 }
 
 // INFO This interface is exclusive for the EVM networks
+// TODO Fill it more
 export interface IEVM {
+	contracts: Map<string, ethers.Contract>
 	createRawTransaction: (tx_data: any) => Promise<any>
 	readFromContract: (contract: any, method: string, args: any) => Promise<any>
 	writeToContract: (contract: any, method: string, args: any) => Promise<any>
