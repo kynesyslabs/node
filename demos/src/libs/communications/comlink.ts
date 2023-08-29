@@ -186,16 +186,15 @@ export default class ComLink {
         console.log("[!] Extracting publicKey")
         console.log(_currentMessage.bundle.content.sender)
         let _publicKey = _currentMessage.bundle.content.sender
-        try {
+        /*try {
             // As the public key is sent as an hex string, we need to convert it to a buffer
-            let _node_publicKey = Buffer.from(_currentMessage.bundle.content.sender, "hex") // REVIEW Isnt this useless now?
-            _publicKey = forge.util.createBuffer(_node_publicKey.toString("binary"))
+            _publicKey = Buffer.from(_currentMessage.bundle.content.sender, "hex") // REVIEW Isnt this useless now?
             console.log("[+] Serialized public key successfully")
         } catch (error) {
             console.log(error)
             console.log("[!] Error extracting publicKey, assuming is a buffer already")
             console.log(typeof(_currentMessage.bundle.content.sender))
-        }
+        }*/
         console.log("[!] Checking chain.comlinkCurrentHash")
         // FIXME For unknown reasons, "tx" fails here
         let _signatureValidity = Cryptography.verify(
