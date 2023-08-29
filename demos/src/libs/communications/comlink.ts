@@ -184,7 +184,13 @@ export default class ComLink {
         // Check if the comlink signature matches the comlink sender
         console.log("[!] Extracting publicKey")
         console.log(_currentMessage.bundle.content.sender)
-        let _publicKey = Buffer.from(_currentMessage.bundle.content.sender) // REVIEW Isnt this useless now?
+        let _publicKey = _currentMessage.bundle.content.sender
+        try {
+            _publicKey = Buffer.from(_currentMessage.bundle.content.sender) // REVIEW Isnt this useless now?
+        } catch (error) {
+            console.log("[!] Error extracting publicKey, assuming is a buffer already")
+            console.log(typeof(_currentMessage.bundle.content.sender))
+        }
         console.log("[!] Checking chain.comlinkCurrentHash")
         console.log(typeof(this.chain.comlinkCurrentHash))
         let _signatureValidity = await Cryptography.verify(
