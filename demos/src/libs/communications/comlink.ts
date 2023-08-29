@@ -175,13 +175,16 @@ export default class ComLink {
         // Check if the current message hash matches the message
         let stringifiedMessage = JSON.stringify(_currentMessage.bundle.content)
         let _derivedMessageHash = Hashing.sha256(stringifiedMessage)
-        if (!(_derivedMessageHash === _currentMessage.bundle.hash))
+        if (!(_derivedMessageHash === _currentMessage.bundle.hash)) {
+            console.log(_currentMessage)
             return [false, "comlink message hash mismatch: " + _derivedMessageHash]
+        }
         // Check if current hash matches the current field
         let stringifiedCurrent = JSON.stringify(this.chain.current)
         let _derivedCurrentHash = Hashing.sha256(stringifiedCurrent)
-        if (!(_derivedCurrentHash === this.chain.comlinkCurrentHash))
+        if (!(_derivedCurrentHash === this.chain.comlinkCurrentHash)) {
             return [false, "current hash mismatch: " + _derivedCurrentHash]
+        }
         // Check if the comlink signature matches the comlink sender
         console.log("[!] Extracting publicKey")
         console.log(_currentMessage.bundle.content.sender)

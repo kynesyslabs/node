@@ -64,7 +64,7 @@ export default class Cryptography {
         return signature
     }
 
-    // FIXME Is not working at the moment (at least in web2 and in tx from the websdk)
+    // FIXME Is not working at the moment (in tx from the websdk gives a mismatch?)
     static verify( 
         signed: string,
         signature: string | pki.ed25519.BinaryBuffer,
