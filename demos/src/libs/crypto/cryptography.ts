@@ -67,6 +67,8 @@ export default class Cryptography {
         signature: pki.ed25519.BinaryBuffer,
         publicKey: pki.ed25519.BinaryBuffer,
     ) {
+        console.log(message)
+        console.log(typeof(message))
         const verified = pki.ed25519.verify({
             message: message,
             encoding: "utf8",
