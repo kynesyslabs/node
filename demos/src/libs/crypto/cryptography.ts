@@ -68,10 +68,10 @@ export default class Cryptography {
         publicKey: pki.ed25519.BinaryBuffer,
     ) {
         const verified = pki.ed25519.verify({
-            message,
+            message: message,
             encoding: "utf8",
-            signature,
-            publicKey,
+            signature: signature,
+            publicKey: publicKey,
         })
         return verified
     }
