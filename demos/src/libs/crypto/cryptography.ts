@@ -64,6 +64,7 @@ export default class Cryptography {
         return signature
     }
 
+    // FIXME Is not working at the moment (at least in web2 and in tx from the websdk)
     static verify( 
         signed: string,
         signature: string | pki.ed25519.BinaryBuffer,
@@ -87,9 +88,10 @@ export default class Cryptography {
         console.log(" is a " + typeof(publicKey))
         console.log("\n")
         console.log("[*] Verifying the signature...")
+        let buffered = new Buffer(signed, "hex")
         const verified = ed25519.verify({
-            message: signed,
-            encoding: "utf8",
+            message: buffered,
+            //encoding: "utf8",
             publicKey: publicKey,
             signature: signature,
         })
