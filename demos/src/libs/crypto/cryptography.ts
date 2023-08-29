@@ -71,7 +71,7 @@ export default class Cryptography {
         console.log(typeof(message))
         const verified = pki.ed25519.verify({
             message: message,
-            encoding: "binary",
+            encoding: "utf8",
             signature: signature,
             publicKey: publicKey,
         })
