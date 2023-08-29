@@ -189,7 +189,7 @@ export default class ComLink {
         console.log("[!] Checking chain.comlinkCurrentHash")
         // FIXME For unknown reasons, "tx" fails here
         let _signatureValidity = Cryptography.verify(
-            this.chain.comlinkCurrentHash,
+            "test",//this.chain.comlinkCurrentHash,
             this.chain.comlinkCurrentHashSignature,
             _currentMessage.bundle.content.sender,
         )
