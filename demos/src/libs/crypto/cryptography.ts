@@ -78,7 +78,7 @@ export default class Cryptography {
         console.log(message + " is a " + typeof(message))
         const verified = ed25519.verify({
             message: message,
-            encoding: "binary",
+            //encoding: "binary",
             publicKey: publicKey,
             signature: signature,
         })
