@@ -27,12 +27,19 @@ export default class ComLinkUtils {
         _comlink_request.muid = request.muid
         _comlink_request.properties = request.properties
         console.log(request)
+        // If it happens to be a json, we serialize it
+        let string_currentMessage = request.chain.current.currentMessage
+        try {
+            request.chain.current.currentMessage = JSON.parse(request.chain.current.currentMessage)
+        } catch (e) {
+            console.log(e)
+            console.log("Assuming it's not to serialize")
+        }
         console.log("\n" + request.chain.current.currentMessage + "\n")
         // Checking validity of the comlink for non nodeCall transactions
         // NOTE nodeCall transactions are read only and can be called by any client even without authentication
         if (!(_comlink_request.chain.current.currentMessage.bundle.content.type === "nodeCall")) {
-            let string_currentMessage = request.chain.current.currentMessage
-            request.chain.current.currentMessage = JSON.parse(request.chain.current.currentMessage)
+            
             let valid = await _comlink_request.validateComlink()
             if (!valid[0]) {
                 term.red("[COMLINK VALIDATION ERROR] " + valid[1] + "\n")
