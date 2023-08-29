@@ -88,7 +88,7 @@ export default class Cryptography {
         console.log(" is a " + typeof(publicKey))
         console.log("\n")
         console.log("[*] Verifying the signature...")
-        let buffered = Buffer.from(signed, "hex")
+        let buffered = Buffer.from(signed, "utf8")
         console.log("\n\nBuffered: \n")
         console.log(buffered)
         const verified = ed25519.verify({
