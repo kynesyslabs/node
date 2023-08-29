@@ -236,9 +236,10 @@ let demos = {
         let seed =forge.random.getBytesSync(32)
         let keys = forge.pki.ed25519.generateKeyPair(seed)
         let privkey = keys.privateKey
+        let pubKey = keys.publicKey
         console.log(keys)
         // Signaling our identity
-        comlink.chain.current.currentMessage.bundle.content.sender = keys.publicKey
+        comlink.chain.current.currentMessage.bundle.content.sender = pubKey.toString("hex")
         // NOTE Doing the cryptography for the transmission object
         let stringifiedTransmissionContent = JSON.stringify(comlink.chain.current.currentMessage.bundle.content)
         let t_hashed = await sha256(stringifiedTransmissionContent)

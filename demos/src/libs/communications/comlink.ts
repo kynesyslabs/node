@@ -186,7 +186,9 @@ export default class ComLink {
         console.log(_currentMessage.bundle.content.sender)
         let _publicKey = _currentMessage.bundle.content.sender
         try {
-            _publicKey = Buffer.from(_currentMessage.bundle.content.sender) // REVIEW Isnt this useless now?
+            // As the public key is sent as an hex string, we need to convert it to a buffer
+            _publicKey = Buffer.from(_currentMessage.bundle.content.sender, "hex") // REVIEW Isnt this useless now?
+            console.log("[+] Serialized public key successfully")
         } catch (error) {
             console.log(error)
             console.log("[!] Error extracting publicKey, assuming is a buffer already")
