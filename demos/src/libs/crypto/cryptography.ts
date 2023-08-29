@@ -75,6 +75,7 @@ export default class Cryptography {
         // Converting to a byte buffer
         let encoder = new TextEncoder()
         let message = encoder.encode(signed)
+        console.log(message + " is a " + typeof(message))
         const verified = ed25519.verify({
             message: message,
             encoding: "binary",
