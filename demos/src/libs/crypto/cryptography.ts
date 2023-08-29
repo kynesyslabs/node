@@ -87,7 +87,7 @@ export default class Cryptography {
         console.log(" is a " + typeof(publicKey))
         console.log("\n")
         const verified = ed25519.verify({
-            message: signed,
+            message: Buffer.from(signed, "utf8"),
             encoding: "utf8",
             publicKey: publicKey,
             signature: signature,

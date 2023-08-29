@@ -239,7 +239,7 @@ let demos = {
         let pubKey = keys.publicKey
         console.log(keys)
         // Signaling our identity
-        comlink.chain.current.currentMessage.bundle.content.sender = pubKey.toString("hex")
+        comlink.chain.current.currentMessage.bundle.content.sender = pubKey//.toString("hex")
         // NOTE Doing the cryptography for the transmission object
         let stringifiedTransmissionContent = JSON.stringify(comlink.chain.current.currentMessage.bundle.content)
         let t_hashed = await sha256(stringifiedTransmissionContent)
