@@ -43,6 +43,7 @@ export default class ComLinkUtils {
         console.log("\n" + request.chain.current.currentMessage + "\n")
         // Checking validity of the comlink for non nodeCall transactions
         // NOTE nodeCall transactions are read only and can be called by any client even without authentication
+        console.log("The request has a current message that is a: " + typeof(_comlink_request.chain.current.currentMessage))
         if (!(_comlink_request.chain.current.currentMessage.bundle.content.type === "nodeCall")) {
             
             let valid: any[]
