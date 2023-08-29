@@ -202,7 +202,7 @@ export default class ComLink {
         console.log(bufferedHash)*/
         console.log(this.chain.comlinkCurrentHash)
         console.log(typeof(this.chain.comlinkCurrentHash))
-        let _signatureValidity = await Cryptography.verify(
+        let _signatureValidity = Cryptography.verify(
             this.chain.comlinkCurrentHash,
             this.chain.comlinkCurrentHashSignature,
             _publicKey,
@@ -215,7 +215,7 @@ export default class ComLink {
         ) // REVIEW Isnt this useless now?
         console.log("[!] Checking bundle.hash")
         console.log(typeof(_currentMessage.bundle.hash))
-        let _messageSignatureValidity = await Cryptography.verify(
+        let _messageSignatureValidity = Cryptography.verify(
             _currentMessage.bundle.hash,
             _currentMessage.bundle.signature,
             _publicKey,
