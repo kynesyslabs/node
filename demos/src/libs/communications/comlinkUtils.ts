@@ -21,8 +21,6 @@ export default class ComLinkUtils {
     ): Promise<[ComLink, any] | boolean> {
         // We need to check if the message request is valid (is a ComLink object)
         term.yellow("[COMLINKUTILS] Received comlink\n")
-        let string_currentMessage = request.chain.current.currentMessage
-        request.chain.current.currentMessage = JSON.parse(request.chain.current.currentMessage)
         // GIving the request the comlink methods
         let _comlink_request = new ComLink()
         _comlink_request.chain = request.chain
@@ -33,6 +31,8 @@ export default class ComLinkUtils {
         // Checking validity of the comlink for non nodeCall transactions
         // NOTE nodeCall transactions are read only and can be called by any client even without authentication
         if (!(_comlink_request.chain.current.currentMessage.bundle.content.type === "nodeCall")) {
+            let string_currentMessage = request.chain.current.currentMessage
+            request.chain.current.currentMessage = JSON.parse(request.chain.current.currentMessage)
             let valid = await _comlink_request.validateComlink()
             if (!valid[0]) {
                 term.red("[COMLINK VALIDATION ERROR] " + valid[1] + "\n")
