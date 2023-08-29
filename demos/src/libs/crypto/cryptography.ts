@@ -68,8 +68,8 @@ export default class Cryptography {
         publicKey: pki.ed25519.BinaryBuffer,
     ) {
         let buffered = Buffer.from(message)
-        console.log(message)
-        console.log(typeof(message))
+        console.log(buffered)
+        console.log(typeof(buffered))
         const verified = pki.ed25519.verify({
             message: buffered,
             //encoding: "utf8",
