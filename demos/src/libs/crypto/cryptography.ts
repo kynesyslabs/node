@@ -70,8 +70,12 @@ export default class Cryptography {
         publicKey: pki.ed25519.BinaryBuffer,
     ) {
         console.log(signed + " is a " + typeof(signed))
+        console.log("\n")
         console.log(signature.toString("hex") + " is a " + typeof(signature))
-        console.log(publicKey.toString("hex") + " is a " + typeof(publicKey))
+        console.log("\n")
+        console.log(publicKey)
+        console.log(" is a " + typeof(publicKey))
+        console.log("\n")
         // Converting to a byte buffer
         let encoder = new TextEncoder()
         let message = encoder.encode(signed)
