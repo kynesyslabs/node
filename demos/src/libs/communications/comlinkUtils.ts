@@ -21,6 +21,8 @@ export default class ComLinkUtils {
     ): Promise<[ComLink, any] | boolean> {
         // We need to check if the message request is valid (is a ComLink object)
         term.yellow("[COMLINKUTILS] Received comlink\n")
+        let string_currentMessage = request.chain.current.currentMessage
+        request.chain.current.currentMessage = JSON.parse(request.chain.current.currentMessage)
         // GIving the request the comlink methods
         let _comlink_request = new ComLink()
         _comlink_request.chain = request.chain

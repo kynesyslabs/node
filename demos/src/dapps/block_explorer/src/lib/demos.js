@@ -270,6 +270,9 @@ let demos = {
         console.log(signature.toString("hex") + " is the signature of the hashed version of comlink.chain.current")
         comlink.chain.comlinkCurrentHashSignature = signature // FIXME TypeError in comlink.ts
 
+        // Stringifying currentMessage
+        comlink.chain.current.currentMessage = JSON.stringify(comlink.chain.current.currentMessage)
+
         console.log("Sending message ")
         console.log(message)
         console.log(
