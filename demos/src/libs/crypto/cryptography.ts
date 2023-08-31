@@ -92,8 +92,8 @@ export default class Cryptography {
         console.log("\n\nBuffered: \n")
         console.log(buffered)
         const verified = ed25519.verify({
-            message: signed,
-            encoding: "utf8",
+            message: forge.util.createBuffer(signed),
+            //encoding: "utf8",
             publicKey: publicKey,
             signature: signature,
         })
