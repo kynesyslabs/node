@@ -88,11 +88,11 @@ export default class Cryptography {
         console.log(" is a " + typeof(publicKey))
         console.log("\n")
         console.log("[*] Verifying the signature...")
-        let buffered = Buffer.from(signed, "utf8")
+        let buffered = forge.util.createBuffer(signed)
         console.log("\n\nBuffered: \n")
         console.log(buffered)
         const verified = ed25519.verify({
-            message: forge.util.createBuffer(signed),
+            message: buffered,
             //encoding: "utf8",
             publicKey: publicKey,
             signature: signature,
