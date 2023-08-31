@@ -136,7 +136,7 @@ export default class GLS {
         try {
             return response[0].balance
         } catch (e) {
-            term.yellow("[GET BALANCE] No balance for: " + address)
+            term.yellow("[GET BALANCE] No balance for: " + address + "\n")
             return 0
         }
     }
