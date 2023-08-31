@@ -67,8 +67,8 @@ export default class Cryptography {
     // FIXME Is not working at the moment (in tx from the websdk gives a mismatch?)
     static verify( 
         signed: string,
-        signature: string | pki.ed25519.BinaryBuffer,
-        publicKey: string | pki.ed25519.BinaryBuffer,
+        signature: pki.ed25519.BinaryBuffer,
+        publicKey: pki.ed25519.BinaryBuffer,
     ) {
         
         console.log("\n\nSigned: \n")
@@ -82,7 +82,7 @@ export default class Cryptography {
         console.log("\n")
         console.log("[*] Verifying the signature...")
         const verified = ed25519.verify({
-            message: signed,
+            message: "signed",
             encoding: "utf8",
             publicKey: publicKey,
             signature: signature,
