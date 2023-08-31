@@ -21,6 +21,8 @@ import validateTransaction from "../blockchain/routines/validateTransaction"
 import multichainDispatcher from "src/features/multichain/multichainDispatcher"
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 import sharedState from "src/utilities/sharedState"
+var term = require("terminal-kit").terminal
+
 
 export default class ServerHandlers {
     static async handleTransaction(content: any): Promise<any> {
@@ -35,6 +37,7 @@ export default class ServerHandlers {
                 content.message,
             )
         } catch (e) {
+            term.red("[TX VALIDATION ERROR]: " + e.message)
             validatedTx = [false, e.message]
         }
         // Returning an appropriate response
