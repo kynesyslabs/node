@@ -65,19 +65,25 @@ export default class Cryptography {
     }
 
     // FIXME Is not working at the moment (in tx from the websdk gives a mismatch?)
+    /*
+ONLY if sent by web tho (prolly a matter of buffers of course)
+[COMLINK VALIDATION ERROR] (on validateComlink) TypeError: "options.message" must be a node.js Buffer, a Uint8Array, a forge ByteBuffer, or a string with "options.encoding" specifying its encoding.
+    */
     static verify( 
         signed: string,
-        signature: string | pki.ed25519.BinaryBuffer,
-        publicKey: string | pki.ed25519.BinaryBuffer,
+        signature: any | pki.ed25519.BinaryBuffer,
+        publicKey: any | pki.ed25519.BinaryBuffer,
     ) {
-        if (typeof(publicKey)==="string") {
-            publicKey = Buffer.from(publicKey, "hex")
-            console.log("[*] String public key detected: buffering it")
+        // REVIEW
+        if(signature.type=="Buffer") {
+            console.log("Normalizing signature...")
+            signature = Buffer.from(signature)
         }
-        if (typeof(signature)==="string") {
-            signature = Buffer.from(signature, "hex")
-            console.log("[*] String signature detected: buffering it")
+        if(publicKey.type=="Buffer") {
+            console.log("Normalizing publicKey...")
+            publicKey = Buffer.from(publicKey)
         }
+
         console.log("\n\nSigned: \n")
         console.log(signed + " is a " + typeof(signed))
         console.log("\n\nSignature: \n")
@@ -88,14 +94,12 @@ export default class Cryptography {
         console.log(" is a " + typeof(publicKey))
         console.log("\n")
         console.log("[*] Verifying the signature...")
-        let buffered = Buffer.from(signed, "utf8")
-        console.log("\n\nBuffered: \n")
-        console.log(buffered)
         const verified = ed25519.verify({
-            message: buffered,
-            //encoding: "utf8",
-            publicKey: publicKey,
+            message: signed,
+            encoding: "utf8",
             signature: signature,
+            // eslint-disable-next-line comma-dangle
+            publicKey: publicKey
         })
         return verified
     }

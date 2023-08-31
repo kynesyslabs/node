@@ -15,6 +15,8 @@ import executeTransaction from "./executeTransaction"
 import GLS from "../gls/gls"
 import { Operation } from "../gls/gls"
 import calculateCurrentGas from "./calculateCurrentGas"
+var term = require("terminal-kit").terminal
+ 
 
 // INFO Cryptographically validate a transaction, calculate gas and see if the execution is valid
 // REVIEW is it overkill to write an interface for the return value?
@@ -22,6 +24,8 @@ export default async function validateTransaction(
     type: string,
     request: any, // Must contain a tx property being a Transaction object
 ): Promise<[boolean, any]> {
+    term.yellow("Validating transaction...\n")
+
     // Loading identity
     const id_ed25519 = await cryptography.load("./.demos_identity")
     let publicKey = Buffer.from(id_ed25519.publicKey.toString("hex"))
@@ -30,12 +34,20 @@ export default async function validateTransaction(
     let tx = new Transaction()
     tx.content = request.tx.content
     tx.signature = request.tx.signature
+    // As usual converting buffers to nodejs buffers
+    if (typeof(tx.signature) === "object" && request.tx.signature.type === "Buffer") {
+        tx.signature = Buffer.from(request.tx.signature)
+        console.log("Normalized signature")
+    }
+    console.log("Signature: ")
+    console.log(tx.signature)
     tx.hash = request.tx.hash
     tx.confirmations = request.tx.confirmations
     tx.state_changes = request.tx.state_changes
     tx.content.transaction_fee = request.tx.content.transaction_fee
+
     // NOTE Charge the gas for the transaction
-    let from = request.tx.from.toString("hex")
+    let from = tx.content.from.toString("hex")
     let fromBalance = await GLS.getGLSNativeBalance(from)
     let gasAmount = await calculateCurrentGas(tx)
     if (fromBalance < gasAmount) {

@@ -17,6 +17,7 @@ import { TxFee } from "../types/transactions"
 import executeOperations from "../routines/executeOperations"
 import { Actor } from "../routines/executeOperations"
 import * as fs from "fs"
+var term = require("terminal-kit").terminal
 
 export interface OperationResult {
     success: boolean;
@@ -132,7 +133,12 @@ export default class GLS {
         let response = await Chain.read(
             "SELECT balance FROM status_native WHERE address='" + address + "'",
         )
-        return response[0].balance
+        try {
+            return response[0].balance
+        } catch (e) {
+            term.yellow("[GET BALANCE] No balance for: " + address)
+            return 0
+        }
     }
 
     static async getGLSTokenBalance(address: string, token_address: string) {

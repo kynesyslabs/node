@@ -22,7 +22,6 @@ import getRemoteIP from "../network/routines/getRemoteIP"
 import sharedState from "src/utilities/sharedState"
 import { type } from "os"
 
-
 export default class ComLink {
     private static instances: Map<string, ComLink> = new Map()
 
@@ -191,7 +190,6 @@ export default class ComLink {
         console.log(_currentMessage.bundle.content.sender)
         let _publicKey = _currentMessage.bundle.content.sender
         console.log("[!] Checking chain.comlinkCurrentHash")
-        // FIXME For unknown reasons, "tx" fails here
         let _signatureValidity = Cryptography.verify(
             this.chain.comlinkCurrentHash,
             this.chain.comlinkCurrentHashSignature,
