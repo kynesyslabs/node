@@ -18,6 +18,7 @@ export default class ComLinkUtils {
     static async parseComlink(
         request,
         peerSocket,
+        
     ): Promise<[ComLink, any] | boolean> {
         // We need to check if the message request is valid (is a ComLink object)
         term.yellow("[COMLINKUTILS] Received comlink\n")
@@ -48,7 +49,7 @@ export default class ComLinkUtils {
         try {
             type_of_call = _comlink_request.chain.current.currentMessage.bundle.content.type 
         } catch(e) {
-            term.red("[COMLINK VALIDATION ERROR] (On looking at type) " + e + "\n")
+            term.red("[COMLINK VALIDATION ERROR] " + e + "\n")
             peerSocket.emit("comlink", {
                 status: "error",
                 message: e,
@@ -64,7 +65,7 @@ export default class ComLinkUtils {
                 valid = [false, e.toString()]
             }
             if (!valid[0]) {
-                term.red("[COMLINK VALIDATION ERROR] (on validateComlink) " + valid[1] + "\n")
+                term.red("[COMLINK VALIDATION ERROR] " + valid[1] + "\n")
                 peerSocket.emit("comlink", {
                     status: "error",
                     message: valid[1],

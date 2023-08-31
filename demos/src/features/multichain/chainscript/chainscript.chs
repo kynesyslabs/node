@@ -98,8 +98,14 @@ else
         "params": {
 			"from": "ethereum",
 			"to": "xrpl",
-			"in": {
+<<<<<<< Updated upstream
+			"in": {g
+			
 				"type": "token", // This allows DEMOS to automatically convert the token to native currency (e.g. ETH)
+=======
+			"in": {
+				"type":pu "token", // This allows DEMOS to automatically convert the token to native currency (e.g. ETH)
+>>>>>>> Stashed changes
 				"address": "0x0000000000000",
 				"amount": "10000000000000",
 			},
