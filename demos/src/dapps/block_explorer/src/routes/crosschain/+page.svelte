@@ -1,56 +1,29 @@
 <script>
 	import { faLongArrowRight, faPlus } from "@fortawesome/free-solid-svg-icons";
 	import Fa from "svelte-fa";
-	import TxBlock from "$lib/components/crosschain/TxBlock.svelte";
     import { v4 as uuidv4 } from "uuid";
     import { cubicInOut } from 'svelte/easing';
+	import OperationEditor from "$lib/components/crosschain/OperationEditor.svelte";
 
-
-    let txblocks = [
-        {
-            id:uuidv4(),
-            blockchain:"ETH",
-            operation:"Transfer",
-            receivingAddress:"0x1234567890123456789012345678901234567890",
-            amount:"0.0001",
-            code:`import demos from "demos";
-
-export default function main(){
-    
-}`
-        },
-        {
-            id:uuidv4(),
-            blockchain:"SOL",
-            operation:"Transfer",
-            receivingAddress:"0x1234567890123456789012345678901234567890",
-            amount:"0.0001",
-            code:`import demos from "demos";
-
-export default function main(){
-    
-}`
+    class Operation{
+        constructor(){
+            this.chain = null;
+            this.subchain = null;
+            this.is_evm = false;
+            this.rpc = null;
+            this.task = {
+                type: null,
+                params: {}
+            }
         }
-    ]
-
-
-    function addOperation(){
-        txblocks.push({
-            id:uuidv4(),
-            blockchain:undefined,
-            operation:undefined,
-            receivingAddress:"",
-            amount:"",
-            code:`import demos from "demos";
-
-export default function main(){
-    
-}`
-        })
-        txblocks = txblocks;
     }
 
+    let operations = [];
 
+    function addOperation(){
+        operations.push({id: uuidv4(), data: new Operation()})
+        operations = operations;
+    }
 
     function customAnimation(node, {duration, easing}) {
         return {
@@ -87,13 +60,13 @@ export default function main(){
 </style>
 
 <main>
-        {#each txblocks as txblock, i (txblock.id)}
-            <div transition:customAnimation={{duration:350, easing:cubicInOut}}>
-                <TxBlock onBlockchainSelect={(v)=>{txblocks[i].blockchain = v}} txblock={txblock} onOperationSelect={(v)=>{txblocks[i].operation = v}} index={i} onRemove={()=>{txblocks.splice(i, 1); txblocks=txblocks}}/>
-            </div>
-        {/each}
-        <div class="action-buttons">
-            <button class="secondary color-transition" on:click={()=>{addOperation()}}><Fa icon={faPlus} style="margin-right:8px;"></Fa>Add operation</button>
-            <button class="primary color-transition">Execute<Fa style="margin-left:8px;" icon={faLongArrowRight}></Fa></button>
+    {#each operations as txblock, i (txblock.id)}
+        <div transition:customAnimation={{duration:350, easing:cubicInOut}}>
+            <OperationEditor txblock={txblock.data} index={i} onRemove={()=>{operations.splice(i, 1); operations=operations}}/>
         </div>
+    {/each}
+    <div class="action-buttons">
+        <button class="secondary color-transition" on:click={()=>{addOperation()}}><Fa icon={faPlus} style="margin-right:8px;"></Fa>Add operation</button>
+        <button class="primary color-transition">Execute<Fa style="margin-left:8px;" icon={faLongArrowRight}></Fa></button>
+    </div>
 </main>

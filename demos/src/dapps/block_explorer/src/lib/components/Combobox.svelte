@@ -28,6 +28,7 @@
         value=newvalue;
         onChange(newvalue);
     }
+    $:if(!options){options = []}
 </script>
 <style>
     .combobox{
@@ -36,16 +37,16 @@
         justify-content: space-between;
         cursor: pointer;
         position: relative;
-        z-index: 100;
+        z-index: 200;
     }
     .combobox-dialog{
         position: absolute;
         top: 50%;
         left: 0;
         width: 100%;
-        border-radius: var(--border-radius);
+        border-radius: 8px;
         box-shadow: var(--box-shadow);
-        z-index: 200;
+        z-index: 300;
         transform: translateY(-50%);
         background-color: #505050;
     }
@@ -56,22 +57,26 @@
         display: grid;
         grid-template-columns: 25px 1fr;
         position: relative;
+        z-index: 500;
     }
     .combobox-option:hover{
         background-color: var(--accent);
         color: black;
     }
 </style>
-<div use:clickOutside role={`Select element`} on:click={()=>{open=!open}} on:click_outside={()=>{open=false}} style={style} class="combobox">
-    {#if options.find(o=>o.id===value)}
-        <p style="margin:0" >{options.find((o)=>o.id===value).label}</p><Fa icon={faChevronDown}></Fa>
-    {:else}
-        <p class="ellipsis" style="margin:0;opacity:.5">Select option</p><Fa icon={faChevronDown}></Fa>
-    {/if}
+
+<div style="position: relative; max-width:100%">
+    <div use:clickOutside role={`Select element`} on:click={()=>{open=!open}} on:click_outside={()=>{open=false}} style={style} class="combobox">
+        {#if options.find(o=>o.id===value)}
+            <p style="margin:0" >{options.find((o)=>o.id===value).label}</p><Fa icon={faChevronDown}></Fa>
+        {:else}
+            <p class="ellipsis" style="margin:0;opacity:.5">Select option</p><Fa icon={faChevronDown}></Fa>
+        {/if}
+    </div>
     {#if open}
     <div transition:customAnimation={{duration:200, easing:cubicInOut}} class="combobox-dialog">
         {#each options as option, i}
-            <div role={`Element`} class="combobox-option" style={`border-radius:${i==options.length-1?"0 0 var(--border-radius) var(--border-radius)":i==0?"var(--border-radius) var(--border-radius) 0 0":"0"}`} on:click={()=>{handleChange(option.id)}}>
+            <div role={`Element`} class="combobox-option" style={`border-radius:${options.length==1?"var(--border-radius-alt)":i==options.length-1?"0 0 var(--border-radius-alt) var(--border-radius-alt)":i==0?"var(--border-radius-alt) var(--border-radius-alt) 0 0":"0"}`} on:click={()=>{handleChange(option.id)}}>
                 {#if option.id===value}
                 <Fa icon={faCheck}></Fa>
                 {:else}

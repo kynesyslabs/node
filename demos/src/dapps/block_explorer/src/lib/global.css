@@ -4,6 +4,7 @@
     --border-color: none;
     --header-color: rgba(255, 255, 255, 0.08);
     --border-radius: 14px;
+    --border-radius-alt: 8px;
     --border: .5px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -58,12 +59,12 @@ input, .combobox{
     max-width: 100%;
     padding: 0.7rem;
     font-size: 1rem;
-    border-radius: 14px;
+    border-radius: 8px;
     background: rgba(255, 255, 255, 0.08);
     backdrop-filter: blur(15px);
 }
 input::placeholder{
-    opacity: .3;
+    opacity: 1;
 }
 
 button{
@@ -83,8 +84,8 @@ button{
 }
 
 @font-face {
-    font-family: 'HelveticaN';
-    src: url('/helveticaNBold.otf');
+    font-family: 'Helvetica Neue Light';
+    src: url('/fonts/HelveticaNeue Bold.ttf');
     font-weight: bold;
 }
 
@@ -137,6 +138,11 @@ button{
     border: .5px solid rgba(255, 255, 255, 0.08);
     max-width: 1250px;
     margin: auto;
+}
+
+.label{
+    margin: 8px 0;
+    opacity: .75;
 }
 
 .card-header{

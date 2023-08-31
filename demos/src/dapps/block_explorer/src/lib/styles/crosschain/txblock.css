@@ -1,0 +1,95 @@
+.txblock-header{
+    border-radius: var(--border-radius) var(--border-radius) 0 0;
+    border-bottom: 1px solid var(--border-color);
+}
+.txblock-header-header{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    gap: 16px;
+}
+.card-ellipsis-container{
+    margin-left: auto;
+    margin-right: 0;
+    position: relative;
+    display: flex;
+    gap: 8px;
+}
+.card-ellipsis
+{
+    padding: 8px;
+    border-radius: 10px;
+    background-color: #404040;
+    color: white;
+    font-size: 1rem;
+    min-width: 40px;
+
+}
+.card-ellipsis:hover, .selected
+{
+    background-color: var(--accent);
+    color: black;
+}
+.txblock-header-label{
+    margin:0 0 16px;
+    align-self: center;
+}
+
+.txblock-header-blockchain{
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    max-width: 100%;
+    width: 100%;
+    padding-bottom: 28px;
+    margin-bottom: 14px;
+    border-bottom: var(--border);
+    flex-wrap: wrap-reverse;
+}
+
+.txblock-body{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+}
+.label{
+    margin: 8px 0;
+    opacity: .75;
+}
+
+.txblock-input{
+    max-width: 100%;
+}
+
+.options{
+    position: absolute;
+    top: 100%;
+    right: 0;
+    width: 200px;
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    z-index: 100;
+    background-color: #505050;
+    max-width: 100dvw;
+}
+
+.option{
+    padding: 0.7rem;
+    cursor: pointer;
+    background-color: #505050;
+    display: grid;
+    grid-template-columns: 25px 1fr;
+    margin: 0;
+    border-radius: var(--border-radius);
+}
+
+.option:hover{
+    background-color: var(--accent);
+    color: black;
+}
+
+.txblock{
+    margin: 16px auto 32px;
+}
