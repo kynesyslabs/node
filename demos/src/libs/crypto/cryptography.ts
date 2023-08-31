@@ -65,12 +65,21 @@ export default class Cryptography {
     }
 
     // FIXME Is not working at the moment (in tx from the websdk gives a mismatch?)
+    /*
+ONLY if sent by web tho (prolly a matter of buffers of course)
+[COMLINK VALIDATION ERROR] (on validateComlink) TypeError: "options.message" must be a node.js Buffer, a Uint8Array, a forge ByteBuffer, or a string with "options.encoding" specifying its encoding.
+    */
     static verify( 
         signed: string,
-        signature: pki.ed25519.BinaryBuffer,
-        publicKey: pki.ed25519.BinaryBuffer,
+        signature: any | pki.ed25519.BinaryBuffer,
+        publicKey: any | pki.ed25519.BinaryBuffer,
     ) {
-        
+        // REVIEW
+        if(signature.type=="Buffer") {
+            console.log("Normalizing...")
+            signature = Buffer.from(signature)
+        }
+
         console.log("\n\nSigned: \n")
         console.log(signed + " is a " + typeof(signed))
         console.log("\n\nSignature: \n")
