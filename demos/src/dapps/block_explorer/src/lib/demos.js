@@ -28,12 +28,15 @@ import forge from "node-forge"
 const md = forge.md
 import SharedState from "./demos_libs/shared"
 import XMTransactions from "./demos_libs/XMTransactions"
+var Buffer = require("buffer/").Buffer  // TODO Use Buffer.from and https://github.com/feross/buffer to solve the buffers problem
+
+
 // TODO Use XMTransactions for the crosschain transactions
 
 async function sha256(string) {
     const utf8 = new TextEncoder().encode(string);
     const hashBuffer = await crypto.subtle.digest('SHA-256', utf8);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashArray = Array.from(new Uint8Array(hashBuffer)); // FIXME Review if it's to change to buffer here
     const hashHex = hashArray
       .map((bytes) => bytes.toString(16).padStart(2, '0'))
       .join('');
@@ -239,9 +242,22 @@ let demos = {
         let pubKey = keys.publicKey
         console.log(keys)
         // Signaling our identity
-        comlink.chain.current.currentMessage.bundle.content.sender = pubKey//.toString("hex")
+        // FIXME As here in tx all buffers uses uint8Array instead of {type: "buffer", "data": []}
+        // FIXME we need to find a way to figure it out server side
+        // FIXME Theoretically "[" + stringified array utf8 + "]" should be ok as Uint8Array(JSON.parse(that one)))
+        // FIXME works, but it breaks web2 so is better server side
+        // FIXME Explanation: same content, different hash string ^
+        // LINK https://stackoverflow.com/questions/8609289/convert-a-binary-nodejs-buffer-to-javascript-arraybuffer
+        // FIXME Possible solution https://github.com/feross/buffer
+        // NOTE Look at the FIXME tags with buffer around
+        console.log("Parameters:")
+        comlink.chain.current.currentMessage.bundle.content.sender = Buffer.from(pubKey) // FIXME Changed to Buffer
+        console.log(comlink.chain.current.currentMessage.bundle.content.sender)
         // NOTE Doing the cryptography for the transmission object
+        // REVIEW (see Buffer.from fixmes) Here in tx it looks different from the received one (the buffers)
         let stringifiedTransmissionContent = JSON.stringify(comlink.chain.current.currentMessage.bundle.content)
+        console.log(comlink.chain.current.currentMessage.bundle.content)
+        console.log(stringifiedTransmissionContent)
         let t_hashed = await sha256(stringifiedTransmissionContent)
         console.log(t_hashed + " is the hashed version of comlink.chain.current.currentMessage.bundle.content")
         comlink.chain.current.currentMessage.bundle.hash = t_hashed
@@ -252,8 +268,8 @@ let demos = {
             encoding: "utf8",
             privateKey: privkey,
         })
-        console.log(t_signature.toString("hex") + " is the signature of the hashed version of comlink.chain.current.currentMessage.bundle.content")
-        comlink.chain.current.currentMessage.bundle.signature = t_signature
+        console.log(t_signature.toString("utf8") + " is the signature of the hashed version of comlink.chain.current.currentMessage.bundle.content")
+        comlink.chain.current.currentMessage.bundle.signature = Buffer.from(t_signature) // FIXME Changed to Buffer
         
         // NOTE Also hashing the comlink current property
         let stringifiedMessage = JSON.stringify(comlink.chain.current, )
@@ -268,8 +284,8 @@ let demos = {
             encoding: "utf8",
             privateKey: privkey,
         })
-        console.log(signature.toString("hex") + " is the signature of the hashed version of comlink.chain.current")
-        comlink.chain.comlinkCurrentHashSignature = signature 
+        console.log(signature.toString("utf8") + " is the signature of the hashed version of comlink.chain.current")
+        comlink.chain.comlinkCurrentHashSignature = Buffer.from(signature) // FIXME Changed to Buffer
 
         // Stringifying currentMessage
         //comlink.chain.current.currentMessage = JSON.stringify(comlink.chain.current.currentMessage)
@@ -398,9 +414,9 @@ let demos = {
             }
             console.log(private_key)
             // Hashing the content of the transaction
-            let md = forge.md.sha256.create()
-            md.update(JSON.stringify(raw_tx.content))
-            raw_tx.hash = md.digest().toHex();
+            //let md = forge.md.sha256.create()
+            //md.update(JSON.stringify(raw_tx.content))
+            raw_tx.hash = await sha256(raw_tx.content)
             // Signing the hash of the content
             raw_tx.signature = forge.pki.ed25519.sign({message: raw_tx.hash, encoding:"utf8", privateKey: private_key}) // REVIEW if it is working right
             return raw_tx // Hashed and signed
