@@ -28,10 +28,17 @@ import forge from "node-forge"
 const md = forge.md
 import SharedState from "./demos_libs/shared"
 import XMTransactions from "./demos_libs/XMTransactions"
-var Buffer = require("buffer/").Buffer  // TODO Use Buffer.from and https://github.com/feross/buffer to solve the buffers problem
-
+import { Buffer } from "buffer/" // TODO Use Buffer.from and https://github.com/feross/buffer to solve the buffers problem
 
 // TODO Use XMTransactions for the crosschain transactions
+
+function bufferize(uint8array) {
+    let buffer = {type: "Buffer", data: []}
+    for (let i = 0; i < uint8array.length; i++) {
+        buffer.data.push(uint8array[i])
+    }
+    return buffer
+}
 
 async function sha256(string) {
     const utf8 = new TextEncoder().encode(string);
@@ -43,11 +50,12 @@ async function sha256(string) {
     return hashHex;
   }
 
+
 // REVIEW Maybe modularize this behemoth
 let demos = {
     // ANCHOR Properties
     socket: null,
-    connected: false,
+    connected: false, 
     identity: null,
     registry: {},
 
@@ -252,11 +260,23 @@ let demos = {
         // NOTE Look at the FIXME tags with buffer around
         console.log("Parameters:")
         comlink.chain.current.currentMessage.bundle.content.sender = Buffer.from(pubKey) // FIXME Changed to Buffer
+        
+        // REVIEW Testing a manual conversion
+        console.log("Buffered key (uint8array):")
+        console.log(Buffer.from(pubKey))
+        let pubKeyBuffer = bufferize(pubKey)
+        console.log("Manual buffering:")
+        console.log(pubKeyBuffer)
+        comlink.chain.current.currentMessage.bundle.content.sender = pubKeyBuffer
+        
+        console.log("Actual sender:")
         console.log(comlink.chain.current.currentMessage.bundle.content.sender)
         // NOTE Doing the cryptography for the transmission object
         // REVIEW (see Buffer.from fixmes) Here in tx it looks different from the received one (the buffers)
         let stringifiedTransmissionContent = JSON.stringify(comlink.chain.current.currentMessage.bundle.content)
+        console.log("Transmission Content:")
         console.log(comlink.chain.current.currentMessage.bundle.content)
+        console.log("Stringified Transmission Content:")
         console.log(stringifiedTransmissionContent)
         let t_hashed = await sha256(stringifiedTransmissionContent)
         console.log(t_hashed + " is the hashed version of comlink.chain.current.currentMessage.bundle.content")
@@ -269,7 +289,7 @@ let demos = {
             privateKey: privkey,
         })
         console.log(t_signature.toString("utf8") + " is the signature of the hashed version of comlink.chain.current.currentMessage.bundle.content")
-        comlink.chain.current.currentMessage.bundle.signature = Buffer.from(t_signature) // FIXME Changed to Buffer
+        comlink.chain.current.currentMessage.bundle.signature = bufferize( Buffer.from(t_signature) )// FIXME Changed to Buffer
         
         // NOTE Also hashing the comlink current property
         let stringifiedMessage = JSON.stringify(comlink.chain.current, )
@@ -285,7 +305,7 @@ let demos = {
             privateKey: privkey,
         })
         console.log(signature.toString("utf8") + " is the signature of the hashed version of comlink.chain.current")
-        comlink.chain.comlinkCurrentHashSignature = Buffer.from(signature) // FIXME Changed to Buffer
+        comlink.chain.comlinkCurrentHashSignature = bufferize(Buffer.from(signature)) // FIXME Changed to Buffer
 
         // Stringifying currentMessage
         //comlink.chain.current.currentMessage = JSON.stringify(comlink.chain.current.currentMessage)
@@ -419,6 +439,7 @@ let demos = {
             raw_tx.hash = await sha256(raw_tx.content)
             // Signing the hash of the content
             raw_tx.signature = forge.pki.ed25519.sign({message: raw_tx.hash, encoding:"utf8", privateKey: private_key}) // REVIEW if it is working right
+            raw_tx.signature = bufferize( Buffer.from(raw_tx.signature) ) // FIXME Changed to Buffer
             return raw_tx // Hashed and signed
         },
         // NOTE Sending a transaction after signing it
