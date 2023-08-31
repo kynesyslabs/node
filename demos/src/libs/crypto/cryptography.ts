@@ -72,6 +72,7 @@ export default class Cryptography {
     ) {
         
         console.log("\n\nSigned: \n")
+        signed = "test"
         console.log(signed + " is a " + typeof(signed))
         console.log("\n\nSignature: \n")
         console.log(signature)
@@ -82,7 +83,7 @@ export default class Cryptography {
         console.log("\n")
         console.log("[*] Verifying the signature...")
         const verified = ed25519.verify({
-            message: "signed",
+            message: signed,
             encoding: "utf8",
             publicKey: publicKey,
             signature: signature,
