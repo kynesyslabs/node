@@ -70,14 +70,7 @@ export default class Cryptography {
         signature: string | pki.ed25519.BinaryBuffer,
         publicKey: string | pki.ed25519.BinaryBuffer,
     ) {
-        if (typeof(publicKey)==="string") {
-            publicKey = Buffer.from(publicKey, "hex")
-            console.log("[*] String public key detected: buffering it")
-        }
-        if (typeof(signature)==="string") {
-            signature = Buffer.from(signature, "hex")
-            console.log("[*] String signature detected: buffering it")
-        }
+        
         console.log("\n\nSigned: \n")
         console.log(signed + " is a " + typeof(signed))
         console.log("\n\nSignature: \n")
@@ -88,15 +81,11 @@ export default class Cryptography {
         console.log(" is a " + typeof(publicKey))
         console.log("\n")
         console.log("[*] Verifying the signature...")
-        let buffered = forge.util.createBuffer(signed)
-        console.log("\n\nBuffered: \n")
-        console.log(buffered)
-        console.log(" is a " + typeof(buffered))
         const verified = ed25519.verify({
-            message: buffered,
-            //encoding: "utf8",
-            publicKey,
-            signature,
+            message: signed,
+            encoding: "utf8",
+            publicKey: publicKey,
+            signature: signature,
         })
         return verified
     }
