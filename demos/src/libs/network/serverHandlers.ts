@@ -28,10 +28,15 @@ export default class ServerHandlers {
         let extra: string, response: boolean
 
         // Verify and execute the transaction
-        let validatedTx = await validateTransaction(
-            content.type,
-            content.message,
-        )
+        let validatedTx: any[]
+        try {
+            validatedTx = await validateTransaction(
+                content.type,
+                content.message,
+            )
+        } catch (e) {
+            validatedTx = [false, e.message]
+        }
         // Returning an appropriate response
         if (!validatedTx[0]) {
             extra = "InvalidTransaction: " + validatedTx[1]
