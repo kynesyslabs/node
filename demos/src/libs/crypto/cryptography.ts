@@ -95,8 +95,8 @@ export default class Cryptography {
         const verified = ed25519.verify({
             message: buffered,
             //encoding: "utf8",
-            publicKey: publicKey,
-            signature: signature,
+            publicKey,
+            signature,
         })
         return verified
     }
