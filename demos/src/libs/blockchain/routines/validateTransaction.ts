@@ -25,7 +25,7 @@ export default async function validateTransaction(
     request: any, // Must contain a tx property being a Transaction object
 ): Promise<[boolean, any]> {
     term.yellow("Validating transaction...\n")
-    console.log(request)
+    console.log(request.tx )
     console.log(typeof(request))
     // Loading identity
     const id_ed25519 = await cryptography.load("./.demos_identity")
@@ -42,7 +42,7 @@ export default async function validateTransaction(
 
     console.log(tx)
     console.log(typeof(tx))
-    
+
     // NOTE Charge the gas for the transaction
     let from = request.tx.from.toString("hex")
     let fromBalance = await GLS.getGLSNativeBalance(from)
