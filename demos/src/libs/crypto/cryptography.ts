@@ -72,7 +72,6 @@ export default class Cryptography {
     ) {
         
         console.log("\n\nSigned: \n")
-        signed = "test"
         console.log(signed + " is a " + typeof(signed))
         console.log("\n\nSignature: \n")
         console.log(signature)
