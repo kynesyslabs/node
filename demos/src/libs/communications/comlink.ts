@@ -189,12 +189,7 @@ export default class ComLink {
         console.log("[!] Extracting publicKey")
         console.log(_currentMessage.bundle.content.sender)
         let _publicKey = _currentMessage.bundle.content.sender
-<<<<<<< Updated upstream
         console.log("[!] Checking chain.comlinkCurrentHash")
-=======
-        console.log("[!] Checking chain.comlinkCutit srrentHash")
-        // FIXME For unknown reasons, "tx" fails here
->>>>>>> Stashed changes
         let _signatureValidity = Cryptography.verify(
             this.chain.comlinkCurrentHash,
             this.chain.comlinkCurrentHashSignature,
