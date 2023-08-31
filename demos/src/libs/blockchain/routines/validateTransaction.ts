@@ -15,6 +15,8 @@ import executeTransaction from "./executeTransaction"
 import GLS from "../gls/gls"
 import { Operation } from "../gls/gls"
 import calculateCurrentGas from "./calculateCurrentGas"
+var term = require("terminal-kit").terminal
+ 
 
 // INFO Cryptographically validate a transaction, calculate gas and see if the execution is valid
 // REVIEW is it overkill to write an interface for the return value?
@@ -22,6 +24,8 @@ export default async function validateTransaction(
     type: string,
     request: any, // Must contain a tx property being a Transaction object
 ): Promise<[boolean, any]> {
+    term.yellow("Validating transaction...\n")
+    term.yellow(request)
     // Loading identity
     const id_ed25519 = await cryptography.load("./.demos_identity")
     let publicKey = Buffer.from(id_ed25519.publicKey.toString("hex"))
