@@ -44,7 +44,7 @@ export default async function validateTransaction(
     console.log(typeof(tx))
 
     // NOTE Charge the gas for the transaction
-    let from = request.tx.from.toString("hex")
+    let from = tx.content.from.toString("hex")
     let fromBalance = await GLS.getGLSNativeBalance(from)
     let gasAmount = await calculateCurrentGas(tx)
     if (fromBalance < gasAmount) {
