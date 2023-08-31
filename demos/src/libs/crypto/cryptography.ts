@@ -86,7 +86,8 @@ export default class Cryptography {
             message: signed,
             encoding: "utf8",
             signature: signature,
-            publicKey: publicKey,
+            // eslint-disable-next-line comma-dangle
+            publicKey: publicKey
         })
         return verified
     }
