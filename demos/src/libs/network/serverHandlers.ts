@@ -34,7 +34,7 @@ export default class ServerHandlers {
         try {
             validatedTx = await validateTransaction(
                 content.type,
-                content.message,
+                content.data,
             )
         } catch (e) {
             term.red("[TX VALIDATION ERROR]: " + e)
