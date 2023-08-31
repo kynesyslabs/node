@@ -40,9 +40,6 @@ export default async function validateTransaction(
     tx.state_changes = request.tx.state_changes
     tx.content.transaction_fee = request.tx.content.transaction_fee
 
-    console.log(tx)
-    console.log(typeof(tx))
-
     // NOTE Charge the gas for the transaction
     let from = tx.content.from.toString("hex")
     let fromBalance = await GLS.getGLSNativeBalance(from)
