@@ -25,8 +25,7 @@ export default async function validateTransaction(
     request: any, // Must contain a tx property being a Transaction object
 ): Promise<[boolean, any]> {
     term.yellow("Validating transaction...\n")
-    console.log(request.tx )
-    console.log(typeof(request))
+
     // Loading identity
     const id_ed25519 = await cryptography.load("./.demos_identity")
     let publicKey = Buffer.from(id_ed25519.publicKey.toString("hex"))
@@ -35,6 +34,10 @@ export default async function validateTransaction(
     let tx = new Transaction()
     tx.content = request.tx.content
     tx.signature = request.tx.signature
+    // As usual converting buffers to nodejs buffers
+    if (typeof(tx.signature) === "object" && request.tx.signature === "Buffer") {
+        tx.signature = Buffer.from(request.tx.signature)
+    }
     tx.hash = request.tx.hash
     tx.confirmations = request.tx.confirmations
     tx.state_changes = request.tx.state_changes
