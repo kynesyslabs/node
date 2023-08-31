@@ -37,7 +37,7 @@ export default class ServerHandlers {
                 content.message,
             )
         } catch (e) {
-            term.red("[TX VALIDATION ERROR]: " + e.message)
+            term.red("[TX VALIDATION ERROR]: " + e)
             validatedTx = [false, e.message]
         }
         // Returning an appropriate response
