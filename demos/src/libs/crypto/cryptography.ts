@@ -91,6 +91,7 @@ export default class Cryptography {
         let buffered = forge.util.createBuffer(signed)
         console.log("\n\nBuffered: \n")
         console.log(buffered)
+        console.log(" is a " + typeof(buffered))
         const verified = ed25519.verify({
             message: buffered,
             //encoding: "utf8",
