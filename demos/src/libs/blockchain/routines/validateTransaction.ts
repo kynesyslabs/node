@@ -37,7 +37,10 @@ export default async function validateTransaction(
     // As usual converting buffers to nodejs buffers
     if (typeof(tx.signature) === "object" && request.tx.signature === "Buffer") {
         tx.signature = Buffer.from(request.tx.signature)
+        console.log("Normalized signature")
     }
+    console.log("Signature: ")
+    console.log(tx.signature)
     tx.hash = request.tx.hash
     tx.confirmations = request.tx.confirmations
     tx.state_changes = request.tx.state_changes
