@@ -76,8 +76,12 @@ ONLY if sent by web tho (prolly a matter of buffers of course)
     ) {
         // REVIEW
         if(signature.type=="Buffer") {
-            console.log("Normalizing...")
+            console.log("Normalizing signature...")
             signature = Buffer.from(signature)
+        }
+        if(publicKey.type=="Buffer") {
+            console.log("Normalizing publicKey...")
+            publicKey = Buffer.from(publicKey)
         }
 
         console.log("\n\nSigned: \n")
