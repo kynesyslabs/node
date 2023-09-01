@@ -23,6 +23,7 @@
         "client": "node --loader ts-node/esm -r tsconfig-paths/register src/tests/terminal.ts",
         "server": "node --loader ts-node/esm -r tsconfig-paths/register src/index.ts",
         "start": "node --loader ts-node/esm -r tsconfig-paths/register src/index.ts",
+        "start:forever": "node --loader ts-node/esm -r tsconfig-paths/register src/start.ts",
         "start:advanced": "node --loader ts-node/esm -r tsconfig-paths/register src/index.ts {$0}",
         "start:dev": "npx nodemon --exec ts-node -r tsconfig-paths/register src/index.ts"
     },

@@ -36,14 +36,18 @@ export default class ServerListeners {
             logger.log("[SERVER] Received comlink")
             const id_ed25519 = await cryptography.load("./.demos_identity")
             const receiver = this.peer.socket
-
-            // Parsing comlink
-            const parsed_comlink = await comlinkUtils.parseComlink(
-                request,
-                this.peer.socket,
-            )
-            if (!parsed_comlink) return // TODO Better error handling
-
+            var parsed_comlink
+            try {
+                // Parsing comlink
+                parsed_comlink = await comlinkUtils.parseComlink(
+                    request,
+                    this.peer.socket,
+                )
+                if (!parsed_comlink) return // TODO Better error handling
+            } catch (error) {
+                logger.error(error)
+                return // TODO Better error handling
+            }
             let _comlink_request = parsed_comlink[0]
             let content = parsed_comlink[1]
 

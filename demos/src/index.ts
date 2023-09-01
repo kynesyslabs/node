@@ -9,7 +9,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 var term = require( "terminal-kit" ).terminal
-
+import process from "node:process"
 import * as fs from "fs"
 import * as express from "express"
 const http = require("http")
@@ -31,6 +31,7 @@ import commandLine from "./utilities/commandLine"
 
 import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
+import * as bitcoin from "bitcoinjs-lib"
 
 let enough_peers = true
 // INFO Loading the known peers
@@ -166,5 +167,23 @@ async function main() {
     }
 }
 
+// First things first: global error management to avoid total crashes
+// TODO See the link below for a better solution
+// LINK https://github.com/foreversd/forever
+// TODO EVEN BETTER
+// LINK https://github.com/foreversd/forever-monitor
+process.on("uncaughtException", (err, origin) => {
+    term.red.bold("[FATAL] Uncaught exception: " + err.message + "\n")
+    console.log(err)
+    console.log("Origin: ")
+    console.log(origin)
+    term.red("[WARNING] The node will continue to run but unpredictable behavior could occur\n")
+})
+process.on("unhandledRejection", (reason, promise) => {
+    term.red.bold("[FATAL] Unhandled Rejection. Details:")
+    console.log("Unhandled Rejection at:", promise, "reason:", reason)
+    term.red("[WARNING] The node will continue to run but unpredictable behavior could occur\n")
+})
+  
 digestArguments()
 main()
