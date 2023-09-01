@@ -4,6 +4,8 @@
     import { v4 as uuidv4 } from "uuid";
     import { cubicInOut } from 'svelte/easing';
 	import OperationEditor from "$lib/components/crosschain/OperationEditor.svelte";
+    import { SortableList } from '@jhubbardsf/svelte-sortablejs';
+    import {chains} from "$lib/nocode.js";
 
     class Operation{
         constructor(){
@@ -19,6 +21,8 @@
     }
 
     let operations = [];
+
+    let editing = false;
 
     function addOperation(){
         operations.push({id: uuidv4(), data: new Operation()})
@@ -37,6 +41,15 @@
             }
         };
     }
+
+    function onSave(data){
+        if(editing == "add")
+        {
+            operations.push({id: uuidv4(), data: data});
+            operations = operations;
+        }
+        editing = false;
+    }
 </script>
 
 <style>
@@ -54,19 +67,26 @@
         gap: 16px;
         flex-wrap: wrap;
         max-width: 1250px;
-        margin: 0 auto;
+        margin: 16px auto 0;
     }
-    
+    .operationcard-label{
+        margin: 0;
+    }
 </style>
 
 <main>
-    {#each operations as txblock, i (txblock.id)}
-        <div transition:customAnimation={{duration:350, easing:cubicInOut}}>
-            <OperationEditor txblock={txblock.data} index={i} onRemove={()=>{operations.splice(i, 1); operations=operations}}/>
-        </div>
-    {/each}
+    {#if editing}
+        <OperationEditor onSave={onSave} txblock={editing == "add"?new Operation():editing} onClose={()=>{editing = false}}/>
+    {/if}
+    <SortableList>
+        {#each operations as operation, i (operation.id)}
+            <div class="card" style="padding: 14px; margin-bottom:14px;" transition:customAnimation={{duration:350, easing:cubicInOut}}>
+               <p class="operationcard-label">{operation.data.task.type} on {chains.find(c=>c.id === operation.data.chain).label}</p>
+            </div>
+        {/each}
+    </SortableList>
     <div class="action-buttons">
-        <button class="secondary color-transition" on:click={()=>{addOperation()}}><Fa icon={faPlus} style="margin-right:8px;"></Fa>Add operation</button>
+        <button class="secondary color-transition" on:click={()=>{editing = "add";}}><Fa icon={faPlus} style="margin-right:8px;"></Fa>Add operation</button>
         <button class="primary color-transition">Execute<Fa style="margin-left:8px;" icon={faLongArrowRight}></Fa></button>
     </div>
 </main>

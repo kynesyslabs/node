@@ -90,6 +90,25 @@
     color: black;
 }
 
+.modal-txblock{
+    background-color: rgb(20, 20, 20);
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100dvh;
+    z-index: 1000;
+    padding: 32px;
+}
+
 .txblock{
-    margin: 16px auto 32px;
+    max-width: 1250px;
+    margin: auto;
+}
+
+.tx-buttons{
+    display: flex;
+    gap: 16px;
+    margin-top: 16px;
+    justify-content: flex-end;
 }

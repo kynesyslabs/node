@@ -1,5 +1,6 @@
 <script>
     import '$lib/global.css';
+    import '$lib/styles/buttons.css';
     import {page} from '$app/stores'
 	import Fa from 'svelte-fa';
 	import { faBars } from '@fortawesome/free-solid-svg-icons';

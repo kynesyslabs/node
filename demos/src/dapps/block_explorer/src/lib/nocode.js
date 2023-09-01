@@ -29,6 +29,93 @@ const chains = [
     }
 ]
 
+const tasks = [
+    //pay
+    {
+        id:"pay",
+        label:"Pay",
+        constraints:[],
+        params:[
+            {
+                id:"to",
+                label:"To",
+                type:"address",
+                required:true
+            },
+            {
+                id:"amount",
+                label:"Amount",
+                type:"number",
+                required:true
+            }
+        ]
+    },
+    //read contract
+    {
+        id:"contract_read",
+        label:"Read Contract",
+        constraints:["evm"],
+        params:[
+            {
+                id:"address",
+                label:"Address",
+                type:"address",
+                required:true
+            },
+            {
+                id:"abi",
+                label:"ABI",
+                type:"json",
+                required:false
+            },
+            {
+                id:"method",
+                label:"Method",
+                type:"string",
+                required:true
+            },
+            {
+                id:"params",
+                label:"Params",
+                type:"json",
+                required:true
+            }
+        ]
+    },
+    //write contract
+    {
+        id:"contract_write",
+        label:"Write Contract",
+        constraints:["evm"],
+        params:[
+            {
+                id:"address",
+                label:"Address",
+                type:"address",
+                required:true
+            },
+            {
+                id:"abi",
+                label:"ABI",
+                type:"json",
+                required:false
+            },
+            {
+                id:"method",
+                label:"Method",
+                type:"string",
+                required:true
+            },
+            {
+                id:"params",
+                label:"Params",
+                type:"json",
+                required:true
+            }
+        ]
+    }
+]
+
 //!!tasks for single chain operations
     //tasks for all single chains
 const universalTasks = [

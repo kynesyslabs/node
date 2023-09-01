@@ -31,6 +31,7 @@
 	"dependencies": {
 		"@fortawesome/free-brands-svg-icons": "^6.4.2",
 		"@fortawesome/free-solid-svg-icons": "^6.4.2",
+		"@jhubbardsf/svelte-sortablejs": "^1.1.0",
 		"brace": "^0.11.1",
 		"buffer": "^6.0.3",
 		"javascript-time-ago": "^2.5.9",

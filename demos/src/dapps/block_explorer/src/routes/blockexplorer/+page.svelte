@@ -14,6 +14,8 @@
 
     // English.
     import en from 'javascript-time-ago/locale/en'
+	import Searchbar from '$lib/components/inputs/Searchbar.svelte';
+	import Card from '$lib/components/surfaces/Card.svelte';
 
     TimeAgo.addLocale(en);
 
@@ -174,18 +176,19 @@
     <div class="header-body">
         <h1>Demos</h1>
         <h2 class="subtitle">Block explorer</h2>
-        <div class="inputComponent">
+        <!--<div class="inputComponent">
             <p class="label">Search by hash</p>
             <form on:submit={(e)=>{e.preventDefault();onSearch(e.target.elements.hash.value)}} class="inputContainer">
                 <input class="inputElement" name="hash" placeholder=""/>
                 <button type="submit" class="inputButton"><Fa style="cursor:pointer;" icon={faMagnifyingGlass}></Fa></button>
             </form>
-        </div>
+        </div>-->
+        <Searchbar/>
     </div>
 </div>
 
 <div class="main-grid">
-    <div style="width: 100%;" class="card">
+    <Card>
         <h3 class="card-header">Latest blocks</h3>
         {#each latestBlocks as block}
             <div class="block-card">
@@ -212,8 +215,8 @@
                 View all blocks<Fa style="position:relative;top:2px;margin-left:8px" icon={faArrowRightLong}></Fa>
             </div>
         </a>
-    </div>
-    <div style="width: 100%;" class="card">
+    </Card>
+    <Card>
         <h3 class="card-header">Latest transactions</h3>
         {#each data.block.content.ordered_transactions as transaction}
         <div class="block-card">
@@ -240,5 +243,5 @@
                 View all transactions<Fa style="position:relative;top:2px;margin-left:8px" icon={faArrowRightLong}></Fa>
             </div>
         </a>
-    </div>
+    </Card>
 </div>

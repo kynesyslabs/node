@@ -3,19 +3,19 @@
     export let value;
     export let onChange;
     export let style;
-	import { faCheck, faChevronDown, faPray } from "@fortawesome/free-solid-svg-icons";
+	import { faCheck, faChevronDown } from "@fortawesome/free-solid-svg-icons";
     import Fa from "svelte-fa";
     let open = false;
     import { cubicInOut } from 'svelte/easing';
     import {clickOutside} from '$lib/eventhandlers/clickOutside.js'
 
-    function customAnimation(node, {duration, easing}) {
+    function comoboxAnimation(node, {duration, easing}) {
         return {
             duration,
             css: t => {
                 const eased = easing(t);
                 return `
-                    transform: scaleY(${0.8 + eased/5}) translateY(-50%);
+                    transform: scaleY(${0.8 + eased/5});
                     opacity: ${eased};
                     transform-origin:top center;
                 );`;
@@ -23,11 +23,13 @@
         };
     }
 
+
     function handleChange(newvalue)
     {
         value=newvalue;
         onChange(newvalue);
     }
+
     $:if(!options){options = []}
 </script>
 <style>
@@ -41,17 +43,16 @@
     }
     .combobox-dialog{
         position: absolute;
-        top: 50%;
         left: 0;
         width: 100%;
         border-radius: 8px;
         box-shadow: var(--box-shadow);
         z-index: 300;
-        transform: translateY(-50%);
         background-color: #505050;
+        top: 0;
     }
     .combobox-option{
-        padding: 0.7rem;
+        padding: 8px;
         cursor: pointer;
         background-color: #505050;
         display: grid;
@@ -74,7 +75,7 @@
         {/if}
     </div>
     {#if open}
-    <div transition:customAnimation={{duration:200, easing:cubicInOut}} class="combobox-dialog">
+    <div transition:comoboxAnimation={{duration:200, easing:cubicInOut}} id="dialog" class="combobox-dialog">
         {#each options as option, i}
             <div role={`Element`} class="combobox-option" style={`border-radius:${options.length==1?"var(--border-radius-alt)":i==options.length-1?"0 0 var(--border-radius-alt) var(--border-radius-alt)":i==0?"var(--border-radius-alt) var(--border-radius-alt) 0 0":"0"}`} on:click={()=>{handleChange(option.id)}}>
                 {#if option.id===value}

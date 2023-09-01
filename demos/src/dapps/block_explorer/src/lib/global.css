@@ -57,7 +57,7 @@ input, .combobox{
     border: none;
     width: 500px;
     max-width: 100%;
-    padding: 0.7rem;
+    padding: 8px;
     font-size: 1rem;
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.08);
@@ -193,28 +193,6 @@ button{
     border-style: solid;
     border-color: black transparent transparent transparent;
   }
-
-button.primary{
-    width: 250px;
-    max-width: 100%;
-    font-size: 1rem;
-    background-color: var(--accent);
-    border-radius: 8px;
-    height: 50px;
-    font-family: "Helvetica Neue Light", sans-serif;
-}
-
-button.secondary{
-    width: 250px;
-    max-width: 100%;
-    font-size: 1rem;
-    background-color: rgb(20, 20, 20);
-    border-radius: 8px;
-    height: 50px;
-    font-family: "Helvetica Neue Light", sans-serif;
-    color: white;
-    border: var(--border);
-}
 
 .small-button{
     background-color: #404040;
