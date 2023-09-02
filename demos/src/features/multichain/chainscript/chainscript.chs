@@ -35,7 +35,7 @@
 			"to": "0x000000000000",	
 			"amount": "10000000000000"
 		}
-	}
+	}gi
 }
 
 // Now we can check if our customer still hold our token
