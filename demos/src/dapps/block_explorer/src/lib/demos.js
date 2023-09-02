@@ -450,6 +450,23 @@ let demos = {
     },
     // !SECTION Supporting txs
 
+    // SECTION WebAuthentication with DEMOS
+    webauth: {
+        login: async function (privKey) {
+            // TODO Implement
+        },
+        logout: async function () {
+            // TODO Implement
+        },
+        sign: async function (privKey) {
+            // TODO Implement
+        },
+        verify: async function (pubKey) {
+            // TODO Implement
+        },
+    }
+    // !SECTION WebAuthentication with DEMOS
+
     // INFO Calling demos.skeletons.NAME provides an empty skeleton that can be used for reference while calling other demos functions
     // SECTION Objects skeletons
     skeletons: {

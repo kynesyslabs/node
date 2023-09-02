@@ -167,6 +167,7 @@ async function main() {
     }
 }
 
+/* NOTE Uncomment this to enable never-fail stupid option
 // First things first: global error management to avoid total crashes
 // TODO See the link below for a better solution
 // LINK https://github.com/foreversd/forever
@@ -184,6 +185,7 @@ process.on("unhandledRejection", (reason, promise) => {
     console.log("Unhandled Rejection at:", promise, "reason:", reason)
     term.red("[WARNING] The node will continue to run but unpredictable behavior could occur\n")
 })
+*/
   
 digestArguments()
 main()
