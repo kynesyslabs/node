@@ -21,15 +21,15 @@ This library contains all the functions that are used to interact with the demos
 
 /* eslint-disable no-unused-vars */
 /* eslint-disable no-undef */
-
-// NOTE Including all in a class
 import io from "socket.io-client"
 import forge from "node-forge"
 const md = forge.md
-import SharedState from "./demos_libs/shared"
-import XMTransactions from "./demos_libs/XMTransactions"
-import DemosWebAuth from "./demos_libs/DemosWebAuthenticator"
 import { Buffer } from "buffer/" 
+
+// NOTE Including custom libraries from Demos
+import SharedState from "./demos_libs/shared"
+import DemosWebAuth from "./demos_libs/DemosWebAuthenticator"
+import XMTransactions from "./demos_libs/XMTransactions"
 
 // TODO Use XMTransactions for the crosschain transactions
 // TODO Typize with jsdoc
@@ -160,44 +160,6 @@ let demos = {
         })
     },
     // !SECTION Connection and listeners
-
-    // INFO Authenticating with a private key on demos
-    authenticate: async function (private_key) {
-        await SharedState.getInstance().setIdentity(private_key)
-        let id = SharedState.getInstance().getIdentity()
-        if (id === null) {
-            console.log("[ERROR] Could not authenticate with private key!")
-            return false
-        }
-        console.log("[DEMOS] Authenticated with private key!")
-        console.log(id)
-        return true
-    },
-
-    // INFO Account creation and management
-    wallet: {
-        new: function (seed = undefined) {
-            identity = forge.pki.ed25519.generateKeyPair(
-                {
-                    seed: seed
-                }
-            )
-        },
-        // NOTE Loading must be done with an hex string of the pk
-        load: function (pk_hex) {
-            let buffered_pk = Buffer.from(pk_hex, "hex")
-            try {
-                let public_key = forge.pki.ed25519.publicKeyFromPrivateKey(buffered_pk)
-            } catch (error) {
-                console.log(error)
-                return false
-            }
-            identity = {
-                privateKey: buffered_pk,
-                publicKey: public_key,
-            }
-        }
-    },
 
     // INFO MUID generator
     generateMuid: function () {
