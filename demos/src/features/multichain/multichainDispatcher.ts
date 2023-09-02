@@ -1,114 +1,24 @@
-/* LICENSE
+// INFO Entry point for multichain requests
+import XMParser from "./XMParser"
+import { XMScript } from "./XMParser"
 
-© 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
 
-Full license text: https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode
-Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
+export default class multichainDispatcher {
 
-KyneSys Labs: https://www.kynesys.xyz/
-
-*/
-
-/* TODO
-
-- Signature su entrambe le chain se richiedono sender
-- Signature per conto di se possibile
-- No signature per pubblici e from
-
-*/
-
-import Hashing from "src/libs/crypto/hashing"
-import Cryptography from "src/libs/crypto/cryptography"
-import forge from "node-forge"
-import * as localsdk from "sdk/localsdk"
-
-export interface IParams {
-    key: string;
-    value: string;
-}
-
-// INFO Interface for a raw chain operation
-export interface IRawChainOperation {
-    type: "read" | "write"
-    chain: string // REVIEW Force check on the chain availability?
-    operation: string // TODO This will be called by the multichain object based on its keys
-    parameters: IParams[]
-}
-
-// INFO Interface for a single chain operation signed and hashed
-export interface IChainOperation {
-    content: IRawChainOperation
-    hash: string
-    signature: forge.pki.ed25519.BinaryBuffer
-    // TODO Expand it
-}
-
-// INFO Interface for the multichain request content, aka the group of chain operations
-export interface IMultichainOperations {
-    type: "read"|"write"
-    operations: IChainOperation[]
-}
-
-// INFO Interface for the multichain object (serializable)
-export interface IMultichainRequest {
-    content: IMultichainOperations[]
-    hash: string // Hashing this.content
-    signature: forge.pki.ed25519.BinaryBuffer // Signing content's hash
-}
-
-// INFO Multichain object with methods and singleton / multiton support (non serializable)
-export class MultichainRequest {
-    data: IMultichainRequest
-
-    private static instance: MultichainRequest
-    private static instances: Map<string, MultichainRequest>
-
-    constructor() {
-        this.data = {
-            content: [],
-            hash: "",
-            signature: "",
-        }
+    // INFO Digesting the request from the server
+    static async digest(data: XMScript): Promise<any> {
+		
     }
 
-    // INFO Treating the class as a singleton
-    public static getInstance(): MultichainRequest {
-        if (!MultichainRequest.instance) {
-            MultichainRequest.instance = new MultichainRequest()
-        }
-        return MultichainRequest.instance
+    // INFO Check syntax of xM Script
+    static async load(script: string): Promise<any> {
+        // TODO String to XMScript
+        return await XMParser.load(script)
     }
 
-    // INFO Supporting a multi-singleton logic with names
-    public static getNamedInstance(name: string): MultichainRequest {
-        // Supporting multiple instances if not yet declared
-        if (!MultichainRequest.instances) {
-            MultichainRequest.instances = new Map<string, MultichainRequest>()
-        }
-        // Looking for an existing instance with the given name or creating a new one if not found
-        if (!MultichainRequest.instances.has(name)) {
-            MultichainRequest.instances.set(name, new MultichainRequest())
-        }
-        return MultichainRequest.instances.get(name)
+    // INFO Executes a xM Script
+    static async execute(script: XMScript): Promise<any> {
+        return await XMParser.execute(script)
     }
-
-    // ANCHOR Methods
-
-    // INFO Hashing and signing the multichain request content
-    public sign(privateKey: forge.pki.ed25519.BinaryBuffer) {
-        const hash = Hashing.sha256(JSON.stringify(this.data.content))
-        const signature = Cryptography.sign(hash, privateKey)
-        this.data.signature = signature
-    }
-}
-
-// INFO Entry point for the multichain endpoint
-export default async function multichainDispatcher(request: IMultichainRequest) {
-    let response: any
-    // TODO Sanity check using the above interfaces
-    // Building the request based on the multichain request content
-    let requestClass = new MultichainRequest()
-    requestClass.data = request
-    // TODO Check and eventually execute or do whatever with the request
-    return response
+	
 }

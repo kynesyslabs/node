@@ -1,7 +1,6 @@
 // INFO Use the src/features/multichain/chainscript/chainscript.chs for the specs
 // NOTE This module is meant to be used with the demos websdk
 
-// TODO An exportable object with a bunch of methods to create chainscript-like comlinks and send them
 
 // INFO Using the methods below to create, manage and send chainscript-like scripts
 let XMTransactions = {

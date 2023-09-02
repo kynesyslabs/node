@@ -62,7 +62,7 @@ export default class ServerHandlers {
         let require_reply = false
         // REVIEW Remember that crosschain operations can be in chainscript syntax
         // INFO Use the src/features/multichain/chainscript/chainscript.chs for the specs
-        let response = await multichainDispatcher(content.data)
+        let response = await multichainDispatcher.digest(content.data)
         // TODO
         return { extra, require_reply, response }
     }

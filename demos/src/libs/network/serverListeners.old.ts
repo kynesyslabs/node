@@ -21,7 +21,7 @@ import chain from "src/libs/blockchain/chain"
 import { handlers as web2handlers } from "src/features/web2"
 import validateWeb2 from "../blockchain/routines/validateWeb2"
 import validateTransaction from "../blockchain/routines/validateTransaction"
-import multichainDispatcher from "src/features/multichain/multichainDispatcher"
+import multichainDispatcher from "src/features/multichain/multichainDispatcher.old"
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 import sharedState from "src/utilities/sharedState"
 

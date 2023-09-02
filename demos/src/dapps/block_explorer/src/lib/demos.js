@@ -230,18 +230,10 @@ let demos = {
         let pubKey = keys.publicKey
         console.log(keys)
         // Signaling our identity
-        // FIXME As here in tx all buffers uses uint8Array instead of {type: "buffer", "data": []}
-        // FIXME we need to find a way to figure it out server side
-        // FIXME Theoretically "[" + stringified array utf8 + "]" should be ok as Uint8Array(JSON.parse(that one)))
-        // FIXME works, but it breaks web2 so is better server side
-        // FIXME Explanation: same content, different hash string ^
-        // LINK https://stackoverflow.com/questions/8609289/convert-a-binary-nodejs-buffer-to-javascript-arraybuffer
-        // FIXME Possible solution https://github.com/feross/buffer
-        // NOTE Look at the FIXME tags with buffer around
         console.log("Parameters:")
-        comlink.chain.current.currentMessage.bundle.content.sender = Buffer.from(pubKey) // FIXME Changed to Buffer
+        comlink.chain.current.currentMessage.bundle.content.sender = Buffer.from(pubKey) 
         
-        // REVIEW Testing a manual conversion
+        // NOTE Manual converting the Uint8Array to a Buffer supported by node.js and forge
         console.log("Buffered key (uint8array):")
         console.log(Buffer.from(pubKey))
         let pubKeyBuffer = bufferize(pubKey)
@@ -252,7 +244,6 @@ let demos = {
         console.log("Actual sender:")
         console.log(comlink.chain.current.currentMessage.bundle.content.sender)
         // NOTE Doing the cryptography for the transmission object
-        // REVIEW (see Buffer.from fixmes) Here in tx it looks different from the received one (the buffers)
         let stringifiedTransmissionContent = JSON.stringify(comlink.chain.current.currentMessage.bundle.content)
         console.log("Transmission Content:")
         console.log(comlink.chain.current.currentMessage.bundle.content)
