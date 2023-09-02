@@ -18,7 +18,6 @@ class DemosWebAuth {
         return this._instance
     }
 
-
 	/**
 	 * @description Creates a new wallet
 	 * @param {?string} seed
