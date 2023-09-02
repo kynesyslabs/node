@@ -28,10 +28,20 @@ import forge from "node-forge"
 const md = forge.md
 import SharedState from "./demos_libs/shared"
 import XMTransactions from "./demos_libs/XMTransactions"
-import { Buffer } from "buffer/" // TODO Use Buffer.from and https://github.com/feross/buffer to solve the buffers problem
+import DemosWebAuth from "./demos_libs/DemosWebAuthenticator"
+import { Buffer } from "buffer/" 
 
 // TODO Use XMTransactions for the crosschain transactions
+// TODO Typize with jsdoc
 
+
+/**
+ * Converting uint8arrays into node.js-like objects representing a Buffer
+ * @date 2/9/2023 - 04:47:48
+ *
+ * @param {*} uint8array
+ * @returns {{ type: string; data: {}; }}
+ */
 function bufferize(uint8array) {
     let buffer = {type: "Buffer", data: []}
     for (let i = 0; i < uint8array.length; i++) {
@@ -40,6 +50,15 @@ function bufferize(uint8array) {
     return buffer
 }
 
+
+/**
+ * Hashes any string using crypto subtle
+ * @date 2/9/2023 - 04:48:06
+ *
+ * @async
+ * @param {*} string
+ * @returns {string}
+ */
 async function sha256(string) {
     const utf8 = new TextEncoder().encode(string);
     const hashBuffer = await crypto.subtle.digest('SHA-256', utf8);
@@ -450,22 +469,9 @@ let demos = {
     },
     // !SECTION Supporting txs
 
-    // SECTION WebAuthentication with DEMOS
-    webauth: {
-        login: async function (privKey) {
-            // TODO Implement
-        },
-        logout: async function () {
-            // TODO Implement
-        },
-        sign: async function (privKey) {
-            // TODO Implement
-        },
-        verify: async function (pubKey) {
-            // TODO Implement
-        },
-    }
-    // !SECTION WebAuthentication with DEMOS
+    // SECTION DemosWebAuthenticator
+    DemosWebAuth: DemosWebAuth, // NOTE Modularized to be more elegant
+    // !SECTION DemosWebAuthenticator
 
     // INFO Calling demos.skeletons.NAME provides an empty skeleton that can be used for reference while calling other demos functions
     // SECTION Objects skeletons
