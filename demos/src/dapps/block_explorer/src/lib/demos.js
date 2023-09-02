@@ -27,7 +27,6 @@ const md = forge.md
 import { Buffer } from "buffer/" 
 
 // NOTE Including custom libraries from Demos
-import SharedState from "./demos_libs/shared"
 import DemosWebAuth from "./demos_libs/DemosWebAuthenticator"
 import XMTransactions from "./demos_libs/XMTransactions"
 
