@@ -24,6 +24,7 @@
     color: white;
     font-size: 1rem;
     min-width: 40px;
+    text-align: center;
 
 }
 .card-ellipsis:hover, .selected
@@ -99,6 +100,7 @@
     height: 100dvh;
     z-index: 1000;
     padding: 32px;
+    overflow: auto;
 }
 
 .txblock{

@@ -1,0 +1,92 @@
+input, .combobox, .input-container {
+    max-width: 500px;
+    position: relative;
+}
+
+input, .combobox, .input-container {
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(15px);
+    padding: 0 calc(var(--border-radius) / 2 * 3);
+    height: 70px;
+    color: #fff;
+    font-size: 1.125rem;
+    font-weight: 400;
+    line-height: 1.4444;
+    letter-spacing: 0.311px;
+    border: 0;
+}
+
+.input-container{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--border-radius);
+    width: 100%;
+    max-width: 500px;
+}
+
+input::placeholder {
+    color: #545459;
+}
+
+input:focus {
+    box-shadow: unset;
+}
+
+
+@media (max-width: 1399px){
+    input, .combobox, .input-container {
+        max-width: 480px;
+    }
+    
+    input, .combobox, .input-container {
+        height: 65px;
+    }
+}
+@media (max-width:1199px)
+{
+    input, .combobox, .input-container {
+        max-width: 460px;
+    }
+
+    input, .combobox, .input-container {
+        height: 62px;
+        font-size: 1.0625rem;
+    }
+}
+@media (max-width: 991px)
+{
+    input, .combobox, .input-container {
+        max-width: 460px;
+    }
+    
+    input, .combobox, .input-container {
+        height: 58px;
+        font-size: 1rem;
+    }
+}
+@media (max-width: 767px)
+{
+    input, .combobox, .input-container {
+        max-width: 420px;
+    }
+    
+    input, .combobox, .input-container {
+        height: 52px;
+        font-size: 1rem;
+        border-radius: 10px;
+    }
+}
+
+.embedded-input{
+    background: none;
+    backdrop-filter: none;
+    padding: 0;
+    width: 100%;
+}
+
+.embedded-input:focus{
+    box-shadow: none;
+    outline: none;
+}

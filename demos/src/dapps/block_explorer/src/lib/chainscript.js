@@ -3,30 +3,40 @@
 //!!chains
 const chains = [
     {
-        id:"ethereum",
+        id:"btc",
+        label:"Bitcoin",
+        is_evm:false,
+        token:"BTC",
+        icon:"/crypto-icons/btc.svg",
+    },
+    {
+        id:"eth",
         label:"Ethereum",
-        is_evm:true
+        is_evm:true,
+        token:"ETH",
+        icon:"/crypto-icons/eth.svg",
     },
     {
         id:"xrpl",
         label:"XRP Ledger",
-        is_evm:false
+        is_evm:false,
+        token:"XRP",
+        icon:"/crypto-icons/xrp.svg"
     },
     {
-        id:"SOL",
-        label:"Solana",
-        is_evm:false
+        id:"xlm",
+        label:"Stellar Lumens",
+        is_evm:false,
+        token:"XLM",
+        icon:"/crypto-icons/xlm.svg"
     },
     {
-        id:"DOT",
-        label:"Polkadot",
-        is_evm:false
+        id:"egld",
+        label:"MultiversX",
+        is_evm:false,
+        token:"EGLD",
+        icon:"/crypto-icons/egld.svg"
     },
-    {
-        id:"ADA",
-        label:"Cardano",
-        is_evm:false
-    }
 ]
 
 const tasks = [

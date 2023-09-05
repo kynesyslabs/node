@@ -5,15 +5,15 @@
 	import Fa from "svelte-fa";
     import { cubicInOut } from 'svelte/easing';
     import {clickOutside} from '$lib/eventhandlers/clickOutside.js'
-    import {chains, universalTasks, evmTasks, mUniversalTasks, mEvmTasks} from '$lib/nocode.js';
+    import {chains, universalTasks, evmTasks, mUniversalTasks, mEvmTasks} from '$lib/chainscript.js';
     import "$lib/styles/crosschain/txblock.css";
 	import TaskParam from "$lib/components/crosschain/TaskParam.svelte";
 	import CodeEditor from "$lib/components/CodeEditor.svelte";
     import CopyButton from "$lib/components/CopyButton.svelte";
+	import ChainSelection from "$lib/components/inputs/ChainSelection.svelte";
 
     export let onClose;
     export let onSave;
-    export let onRemove;
     export let txblock;
     export let index;
 
@@ -165,32 +165,16 @@
             <div class="txblock-header-header">
                 <div class="txblock-header-blockchain">
                     {#if multichain}
-                        <Combobox onChange={(newValue)=>{editorchains[0] = newValue;}} options={chains} value={editorchains[0]}/>
-                        <Combobox onChange={(newValue)=>{editorchains[1] = newValue}} options={chains} value={editorchains[1]}/>
+                        <ChainSelection onChange={(newValue)=>{editorchains[0] = newValue;}} value={editorchains[0]}/>
+                        <ChainSelection onChange={(newValue)=>{editorchains[1] = newValue;}} value={editorchains[1]}/>
                     {:else}
-                        <Combobox onChange={(newValue)=>{editorchains[0] = newValue;}} options={chains} value={editorchains[0]}/>
+                        <ChainSelection onChange={(newValue)=>{editorchains[0] = newValue;}} value={editorchains[0]}/>
                     {/if}
                     <div class="card-ellipsis-container">
                         <button on:click={()=>{multichain=!multichain}} class={`card-ellipsis color-transition tooltip ${multichain?"selected":""}`}>
                             <span class="tooltiptext">Multichain</span>
                             <Fa icon={faPlus}></Fa>
                         </button>
-                        <!--<button on:click={()=>{codemode=!codemode}} class={`card-ellipsis color-transition tooltip ${codemode?"selected":""}`}>
-                            <span class="tooltiptext">Code</span>
-                            <Fa icon={faCode}></Fa>
-                        </button>
-                        <button on:click={()=>{if(!options)options=true}} class="card-ellipsis color-transition tooltip">
-                            <span class="tooltiptext">More options</span>
-                            <Fa icon={faEllipsisVertical}></Fa>
-                        </button>
-                        {#if options}
-                            <div use:clickOutside on:click_outside={()=>{options=false}} transition:customAnimation={{duration:100, easing:cubicInOut}} class="options generic-shadow">
-                                <div role={`remove operation`} on:click={()=>{options=false;onRemove();}} class="option">
-                                    <Fa icon={faTrash}></Fa>
-                                    Remove
-                                </div>
-                            </div>
-                        {/if}-->
                     </div>
                 </div>
             </div>

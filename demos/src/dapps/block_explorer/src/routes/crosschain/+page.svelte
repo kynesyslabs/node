@@ -5,7 +5,7 @@
     import { cubicInOut } from 'svelte/easing';
 	import OperationEditor from "$lib/components/crosschain/OperationEditor.svelte";
     import { SortableList } from '@jhubbardsf/svelte-sortablejs';
-    import {chains} from "$lib/nocode.js";
+    import {chains} from "$lib/chainscript.js";
 
     class Operation{
         constructor(){

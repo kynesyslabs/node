@@ -1,3 +1,7 @@
+<script>
+    export let transition;
+</script>
+
 <style>
     .cardWrap {
         padding: 1px 0 0 1px;

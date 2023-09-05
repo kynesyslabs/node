@@ -1,0 +1,78 @@
+h1{
+    font-family: 'Neue Machina', sans-serif;
+    font-size: 3.75rem;
+    text-align: center;
+    font-weight: 300;
+    margin-bottom: 0;
+}
+h2{
+    font-family: 'Neue Machina', sans-serif;
+    font-size: 2.25rem;
+}
+h3{
+    font-family: 'Neue Machina', sans-serif;
+    font-size: 1.375rem;
+    margin-top: 0;
+}
+h4{
+    font-size: 1.1rem;
+    margin: 0 0 8px;
+}
+
+@media (max-width: 1399px) {
+    h1 {
+        font-size: 3.4375rem;
+    }
+    
+    h2 {
+        font-size: 2rem;
+    }
+}
+
+@media (max-width: 1199px) {
+    h1 {
+        font-size: 3.125rem;
+    }
+    
+    h2 {
+        font-size: 1.875rem;
+    }
+
+    h3{
+        font-size: 1.3125rem;
+    }
+}
+
+@media (max-width: 991px) {
+    h1{
+        font-size: 2.8125rem;
+    }
+    
+    h2 {
+        font-size: 1.75rem;
+    }
+    h3{
+        font-size: 1.25rem;
+    }
+}
+
+@media (max-width: 767px) {
+    h1 {
+        font-size: 2.375rem;
+    }
+    
+    h2 {
+        font-size: 1.625rem;
+    }
+    
+    h3{
+        font-size: 1.125rem;
+        margin-top: 0.2em;
+    }
+}
+
+@media (max-width: 575px) {
+    h1 {
+        font-size: 2.125rem;
+    }
+}

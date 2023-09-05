@@ -1,4 +1,8 @@
 <script>
+    import '$lib/global.css';
+    import '$lib/styles/typography.css';
+    import '$lib/styles/input.css';
+    import '$lib/styles/buttons.css';
     import Header from "$lib/components/Header.svelte";
     import Footer from "$lib/components/Footer.svelte";
 	import { fly } from "svelte/transition";

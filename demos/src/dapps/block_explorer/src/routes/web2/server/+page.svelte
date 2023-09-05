@@ -4,6 +4,8 @@
 	import Fa from "svelte-fa";
 
     export let data;
+    let output = data.data;
+
     const rpc = "http://85.208.48.187:53550";
 
     demos.connect(rpc);
@@ -12,7 +14,7 @@
         ev.preventDefault();
         let url = ev.target[0].value;
         let data = await demos.getWeb2Data(url);
-        console.log(data);
+        output = data.data;
     }
 </script>
 
@@ -78,13 +80,13 @@
     </form>
     <div class="card">
 
-        {#each Object.keys(data.data) as key}
+        {#each Object.keys(output) as key}
             <div class="info-grid">
                 <p style="margin:0;">{key}</p>
-                {#if typeof data.data[key] === "object"}
-                    <p class="wrapword" style="margin:0;">{JSON.stringify(data.data[key])}</p>
+                {#if typeof output[key] === "object"}
+                    <p class="wrapword" style="margin:0;">{JSON.stringify(output[key])}</p>
                 {:else}
-                    <p class="wrapword" style="margin:0;">{data.data[key]}</p>
+                    <p class="wrapword" style="margin:0;">{output[key]}</p>
                 {/if}
             </div>
         {/each}

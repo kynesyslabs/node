@@ -1,3 +1,11 @@
+button{
+    background: none;
+    color: white;
+    font-size: 1rem;
+    display: block;
+    text-align: left;
+}
+
 button.primary {
     font-size: 1.125rem;
     font-weight: 500;

@@ -1,20 +1,18 @@
 <script>
     import Fa from 'svelte-fa'
     import { faArrowRightLong } from '@fortawesome/free-solid-svg-icons'
-    import { faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons';
     import '$lib/global.css'
     export let data;
     const latestBlocks = [data.block];
     import blockIcon from '$lib/assets/icons/cube-icon.png';
     import transIcon from '$lib/assets/icons/agreement-icon.png';
-    import video from "$lib/assets/videos/morph-bg.mp4";
     import { goto } from '$app/navigation';
 
     import TimeAgo from 'javascript-time-ago'
 
     // English.
     import en from 'javascript-time-ago/locale/en'
-	import Searchbar from '$lib/components/inputs/Searchbar.svelte';
+	import Searchbar from '$lib/components/blockexplorer/HomeSearchbar.svelte';
 	import Card from '$lib/components/surfaces/Card.svelte';
 
     TimeAgo.addLocale(en);
@@ -34,56 +32,10 @@
     .header-body{
         position: relative;
     }
-
-    .label{
-        margin-bottom: 8px;
-        opacity: .75;
-        text-align: center;
-        font-size: 1rem;
-
-    }
-    .inputComponent{
-        position: relative;
-        top: 20px;
-        margin: 32px 0;
-    }
-    .inputContainer{
-        width: 500px;
-        max-width: calc(100% - 32px);
-        margin: 0 auto 32px;
-        background-color: #404040;
-        display: flex;
-        border-radius: var(--border-radius);
-    }
-    .inputElement{
-        width: calc(100% - 50px);
-        border-radius: var(--border-radius) 0 0 var(--border-radius);
-        font-size: 1.4rem;
-        margin: auto;
-    }
-    .inputButton{
-        background-color: var(--accent);
-        border: none;
-        color: black;
-        border-radius: 0 var(--border-radius) var(--border-radius) 0;
-        width: 50px;
-        font-size: 20px;
-        cursor: pointer;
-    }
     .subtitle{
         text-align: center;
-        margin-top: 0;
+        margin-top: 16px;
         font-family: 'Neue Machina', sans-serif;
-    }
-    .video{
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 50dvh;
-        object-fit: cover;
-        z-index: -1;
-        aspect-ratio: 16 / 9;
     }
     .card-header{
         display: flex;
@@ -170,20 +122,10 @@
 </style>
 
 <div>
-    <!--<video class="video" autoplay muted loop>
-        <source src={video} type="video/mp4"/>
-    </video>-->
     <div class="header-body">
-        <h1>Demos</h1>
+        <h1>DEMOS</h1>
         <h2 class="subtitle">Block explorer</h2>
-        <!--<div class="inputComponent">
-            <p class="label">Search by hash</p>
-            <form on:submit={(e)=>{e.preventDefault();onSearch(e.target.elements.hash.value)}} class="inputContainer">
-                <input class="inputElement" name="hash" placeholder=""/>
-                <button type="submit" class="inputButton"><Fa style="cursor:pointer;" icon={faMagnifyingGlass}></Fa></button>
-            </form>
-        </div>-->
-        <Searchbar/>
+        <Searchbar prompt="Search for an hash"/>
     </div>
 </div>
 
