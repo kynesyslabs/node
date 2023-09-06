@@ -25,7 +25,7 @@ class DemosWebAuth {
 	/**
 	 * @description Creates a new wallet
 	 * @param {?string} seed
-	 * @returns {Promise<[boolean, string]>}
+	 * @returns {Promise<[boolean, any]>}
 	 */
 	async create (seed=null) {
 		if (!seed) seed = forge.random.getBytesSync(32)
