@@ -1,5 +1,5 @@
 <script>
-    export let transition;
+    export let style;
 </script>
 
 <style>
@@ -79,7 +79,7 @@
 </style>
 
 <div class="cardWrap">
-    <div class="cardInnerWrap">
+    <div style={style} class="cardInnerWrap">
         <slot/>
     </div>
 </div>

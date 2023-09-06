@@ -89,7 +89,7 @@
 
 
 
-    //EFFECT FOR CHANGING CHAINS
+    //EFFECT FOR CHANGING CHAINS –––– SET AVAILABLE TASKS
         //single chain
     $:if(!multichain)
     {

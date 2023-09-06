@@ -45,6 +45,7 @@ const tasks = [
         id:"pay",
         label:"Pay",
         constraints:[],
+        icon:"fa-paper-plane",
         params:[
             {
                 id:"to",
@@ -65,6 +66,7 @@ const tasks = [
         id:"contract_read",
         label:"Read Contract",
         constraints:["evm"],
+        icon:"fa-glasses",
         params:[
             {
                 id:"address",
@@ -97,6 +99,7 @@ const tasks = [
         id:"contract_write",
         label:"Write Contract",
         constraints:["evm"],
+        icon:"fa-feather",
         params:[
             {
                 id:"address",

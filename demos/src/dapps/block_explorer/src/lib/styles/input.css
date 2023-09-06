@@ -1,9 +1,9 @@
-input, .combobox, .input-container {
+.combobox, .input-container {
     max-width: 500px;
     position: relative;
 }
 
-input, .combobox, .input-container {
+.combobox, .input-container {
     border-radius: 14px;
     background: rgba(255, 255, 255, 0.08);
     backdrop-filter: blur(15px);
@@ -89,4 +89,11 @@ input:focus {
 .embedded-input:focus{
     box-shadow: none;
     outline: none;
+}
+
+.smallcombobox, input {
+    height: 52px;
+    font-size: 1rem;
+    border-radius: 10px;
+    padding: 0 var(--input-padding);
 }

@@ -6,6 +6,7 @@
 	import OperationEditor from "$lib/components/crosschain/OperationEditor.svelte";
     import { SortableList } from '@jhubbardsf/svelte-sortablejs';
     import {chains} from "$lib/chainscript.js";
+    import Card from "$lib/components/surfaces/Card.svelte";
 
     class Operation{
         constructor(){
@@ -78,13 +79,15 @@
     {#if editing}
         <OperationEditor onSave={onSave} txblock={editing == "add"?new Operation():editing} onClose={()=>{editing = false}}/>
     {/if}
-    <SortableList>
-        {#each operations as operation, i (operation.id)}
-            <div class="card" style="padding: 14px; margin-bottom:14px;" transition:customAnimation={{duration:350, easing:cubicInOut}}>
-               <p class="operationcard-label">{operation.data.task.type} on {chains.find(c=>c.id === operation.data.chain).label}</p>
-            </div>
-        {/each}
-    </SortableList>
+    <Card style="width:fit-content;">
+        <SortableList>
+            {#each operations as operation, i (operation.id)}
+                <div class="card" style="padding: 14px; margin-bottom:14px;" transition:customAnimation={{duration:350, easing:cubicInOut}}>
+                <p class="operationcard-label">{operation.data.task.type} on {chains.find(c=>c.id === operation.data.chain).label}</p>
+                </div>
+            {/each}
+        </SortableList>
+    </Card>
     <div class="action-buttons">
         <button class="secondary color-transition" on:click={()=>{editing = "add";}}><Fa icon={faPlus} style="margin-right:8px;"></Fa>Add operation</button>
         <button class="primary color-transition">Execute<Fa style="margin-left:8px;" icon={faLongArrowRight}></Fa></button>

@@ -5,9 +5,10 @@
     export let style;
 	import { faCheck, faChevronDown } from "@fortawesome/free-solid-svg-icons";
     import Fa from "svelte-fa";
-    let open = false;
     import { cubicInOut } from 'svelte/easing';
-    import {clickOutside} from '$lib/eventhandlers/clickOutside.js'
+    import {clickOutside} from '$lib/eventhandlers/clickOutside.js';
+    let open = false;
+    let disabled = false;
 
     function comoboxAnimation(node, {duration, easing}) {
         return {
@@ -30,7 +31,18 @@
         onChange(newvalue);
     }
 
-    $:if(!options){options = []}
+    $:if(!options)
+    {options = []}
+    $:if(options.length < 2)
+    {
+        value = options[0].id;
+        handleChange(options[0].id);
+        disabled = true;
+    }
+    else
+    {
+        disabled = false;
+    }
 </script>
 <style>
     .combobox{
@@ -45,20 +57,23 @@
         position: absolute;
         left: 0;
         width: 100%;
-        border-radius: 8px;
+        border-radius: 10px;
         box-shadow: var(--box-shadow);
         z-index: 300;
         background-color: #505050;
         top: 0;
     }
     .combobox-option{
-        padding: 8px;
+        padding: 0 var(--input-padding);
+        height: 52px;
         cursor: pointer;
         background-color: #505050;
         display: grid;
         grid-template-columns: 25px 1fr;
         position: relative;
         z-index: 500;
+        font-size: 1rem;
+        align-items: center;
     }
     .combobox-option:hover{
         background-color: var(--accent);
@@ -67,8 +82,12 @@
 </style>
 
 <div style="position: relative; max-width:100%">
-    <div use:clickOutside role={`Select element`} on:click={()=>{open=!open}} on:click_outside={()=>{open=false}} style={style} class="combobox">
-        {#if options.find(o=>o.id===value)}
+    <div use:clickOutside role={`Select element`} on:click={()=>{if(!disabled)open=!open}} on:click_outside={()=>{open=false}} style={style} class="combobox smallcombobox">
+        {#if options.length < 2}
+            <div>
+                <p>{options[0].label}</p>
+            </div>
+        {:else if options.find(o=>o.id===value)}
             <p style="margin:0" >{options.find((o)=>o.id===value).label}</p><Fa icon={faChevronDown}></Fa>
         {:else}
             <p class="ellipsis" style="margin:0;opacity:.5">Select option</p><Fa icon={faChevronDown}></Fa>

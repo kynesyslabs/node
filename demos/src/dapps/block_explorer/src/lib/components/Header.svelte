@@ -23,6 +23,11 @@
             label:"Tx test",
             href:"/txtest",
             test:"txtest"
+        },
+        {
+            label:"Auth test",
+            href:"/authtest",
+            test:"authtest"
         }
     ]
     let mobileMenuOpen = false;
