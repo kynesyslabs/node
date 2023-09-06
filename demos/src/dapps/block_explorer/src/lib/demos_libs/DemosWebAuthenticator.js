@@ -37,6 +37,7 @@ class DemosWebAuth {
 			return [false, "[CREATE WALLET ERROR] " + e.message]
         }
 		console.log("[CREATE WALLET] Keypair created!")
+		console.log(this.keypair.privateKey)
 		return [true, result]
 	}
 
@@ -49,6 +50,8 @@ class DemosWebAuth {
 		if (!required(privKey, false)) return [false, "You need to provide a private key!"]
 		// Logging in avoiding crashes on wrong private keys
 		try {
+			console.log(privKey)
+			console.log(typeof(privKey))
 			this.keypair = {
 				privateKey: privKey,
         	    publicKey: forge.pki.ed25519.publicKeyFromPrivateKey({privKey}),
