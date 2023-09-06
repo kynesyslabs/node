@@ -3,6 +3,7 @@ import forge from "node-forge"
 import { Buffer } from "buffer/"
 import required from "./utils/required"
 import bufferize from "./utils/bufferizer"
+import * as forge_converter from "./utils/forge_converter"
 
 // TODO Could this be an universan "Sign in with DEMOS" ? Maybe
 
@@ -31,11 +32,15 @@ class DemosWebAuth {
 		console.log("[CREATE WALLET] Seed: " + seed)
 		let result = [true, ""]
 		try {
-			let create_result = this.keypair = forge.pki.ed25519.generateKeyPair({seed: seed})
-			result = [true, create_result]
+		    this.keypair = {
+				privateKey: null,
+				publicKey: null,
+			}
+			this.keypair =  forge.pki.ed25519.generateKeyPair({seed: seed})
+			console.log(this.keypair)
 			this.loggedIn = true
+			result = [true, this.keypair]
 			console.log("[CREATE WALLET] Keypair created!")
-			console.log(this.keypair.privateKey)
 		} catch (e) {
 			result = [false, "[CREATE WALLET ERROR] " + e.message]
         }
@@ -48,21 +53,24 @@ class DemosWebAuth {
 	 * @returns {Promise<[boolean, string]>}
 	 **/
 	async login (privKey) {
+		console.log("[LOGIN WALLET] Logging in...")
 		if (!required(privKey, false)) return [false, "You need to provide a private key!"]
 		// Logging in avoiding crashes on wrong private keys
 		try {
 			//privKey = bufferize(privKey)
-			privKey = forge.pki.privateKeyToPem(privKey)
 			console.log(privKey)
 			console.log(typeof(privKey))
+			console.log("[LOGIN WALLET] Deriving public key from private key...")
 			this.keypair = {
 				privateKey: privKey,
-        	    publicKey: forge.pki.ed25519.publicKeyFromPrivateKey({privKey}), // FIXME Buffer ???
+				// NOTE in general avoid not named arguments, always use {arg: value} syntax
+        	    publicKey: forge.pki.ed25519.publicKeyFromPrivateKey({privateKey: privKey}),
 			}
 			this.loggedIn = true
 			return [true, "Successfully logged in!"]
 		} catch (e) {
-			return [false, "[LOGIN ERROR] " + e.message]
+			console.log(e)
+			return [false, "[LOGIN ERROR] Cannot derive publicKey!"]
         }
 	}
 
