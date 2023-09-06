@@ -3,6 +3,7 @@ import forge from "node-forge"
 import { Buffer } from "buffer/"
 import required from "./utils/required"
 import catcher from "./utils/catcher"
+import bufferize from "./utils/bufferizer"
 
 // TODO Could this be an universan "Sign in with DEMOS" ? Maybe
 
@@ -50,11 +51,12 @@ class DemosWebAuth {
 		if (!required(privKey, false)) return [false, "You need to provide a private key!"]
 		// Logging in avoiding crashes on wrong private keys
 		try {
+			privKey = bufferize(privKey)
 			console.log(privKey)
 			console.log(typeof(privKey))
 			this.keypair = {
 				privateKey: privKey,
-        	    publicKey: forge.pki.ed25519.publicKeyFromPrivateKey({privKey}),
+        	    publicKey: forge.pki.ed25519.publicKeyFromPrivateKey({privKey}), // FIXME Buffer ???
 			}
 			this.loggedIn = true
 			return [true, "Successfully logged in!"]
