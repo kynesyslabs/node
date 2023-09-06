@@ -13,6 +13,7 @@ class DemosWebAuth {
 	static _instance = null
 	loggedIn = false
 	keypair = null
+	stringified_keypair = null
 
 	constructor() {}
 
@@ -39,8 +40,15 @@ class DemosWebAuth {
 			this.keypair =  forge.pki.ed25519.generateKeyPair({seed: seed})
 			console.log(this.keypair)
 			this.loggedIn = true
-			result = [true, this.keypair]
 			console.log("[CREATE WALLET] Keypair created!")
+			// Stringify the keypair
+			console.log("[CREATE WALLET] Stringifying keypair...")
+			this.stringified_keypair = {
+				privateKey: forge_converter.forgeToString(this.keypair.privateKey),
+				publicKey: forge_converter.forgeToString(this.keypair.publicKey),
+			}
+			result = [true, this.stringified_keypair]
+			console.log(this.stringified_keypair)
 		} catch (e) {
 			result = [false, "[CREATE WALLET ERROR] " + e.message]
         }
@@ -49,22 +57,23 @@ class DemosWebAuth {
 
 	/**
 	 * @description Connects a wallet to the Demos chain by generating its keypair
-	 * @param {forge.pki.ed25519.BinaryBuffer} privKey
+	 * @param {string} privKey
 	 * @returns {Promise<[boolean, string]>}
 	 **/
 	async login (privKey) {
 		console.log("[LOGIN WALLET] Logging in...")
 		if (!required(privKey, false)) return [false, "You need to provide a private key!"]
+		// Serializing the private key as a string
+		console.log("[LOGIN WALLET] Serializing private key...")
+		this.keypair.privateKey = forge_converter.stringToForge(this.stringified_keypair.privateKey)
+		console.log(this.keypair.privateKey)
 		// Logging in avoiding crashes on wrong private keys
 		try {
-			//privKey = bufferize(privKey)
-			console.log(privKey)
-			console.log(typeof(privKey))
 			console.log("[LOGIN WALLET] Deriving public key from private key...")
-			this.keypair = {
-				privateKey: privKey,
-				// NOTE in general avoid not named arguments, always use {arg: value} syntax
-        	    publicKey: forge.pki.ed25519.publicKeyFromPrivateKey({privateKey: privKey}),
+			this.keypair.publicKey = forge.pki.ed25519.publicKeyFromPrivateKey({privateKey: privKey})
+			this.stringified_keypair = {
+				privateKey: forge_converter.forgeToString(this.keypair.privateKey),
+				publicKey: forge_converter.forgeToString(this.keypair.publicKey),
 			}
 			this.loggedIn = true
 			return [true, "Successfully logged in!"]

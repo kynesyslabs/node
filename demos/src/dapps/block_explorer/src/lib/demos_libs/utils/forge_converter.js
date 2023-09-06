@@ -10,8 +10,9 @@ import { Buffer } from "buffer/"
  */
 function forgeToString(forgeBuffer) {
 	console.log("[forge to string]")
-	console.log(forgeBuffer)
-	return forgeBuffer.toString("hex")
+	let derived = JSON.stringify(forgeBuffer)
+	console.log(derived)
+	return derived
 }
 
 
@@ -23,8 +24,9 @@ function forgeToString(forgeBuffer) {
  */
 function stringToForge(forgeString) {
 	console.log("[string to forge]")
-    console.log(forgeString)
-	return Buffer.from(forgeString, "hex")
+	let derived = JSON.parse(forgeString)
+	console.log(derived)
+	return derived
 }
 
 export { forgeToString, stringToForge }
