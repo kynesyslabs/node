@@ -2,11 +2,12 @@
     import demos from '$lib/demos.js';
 	import { faGlobe } from "@fortawesome/free-solid-svg-icons";
 	import Fa from "svelte-fa";
+    import { rpcaddress } from '$lib/env.js';
 
     export let data;
     let output = data.data;
 
-    const rpc = "http://85.208.48.187:53550";
+    const rpc = rpcaddress;
 
     demos.connect(rpc);
     async function makeRequest(ev)

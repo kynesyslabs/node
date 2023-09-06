@@ -3,6 +3,7 @@ import demos from '$lib/demos.js';
 import * as forge from "node-forge"
 import { sha256 } from "js-sha256"
 import { goto } from '$app/navigation';
+import { rpcaddress } from '$lib/env.js';
 
 
 export async function load ({params})
@@ -39,7 +40,7 @@ export async function load ({params})
     console.log(md.hex());
     console.log("[crypto capabilities ready]")
     // INFO Testing the rpc connection
-    const rpc = "http://85.208.48.187:53550";
+    const rpc = rpcaddress;
     let block;
     demos.connect(rpc);
     if(demos.connected){

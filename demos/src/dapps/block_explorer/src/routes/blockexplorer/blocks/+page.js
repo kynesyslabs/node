@@ -1,7 +1,9 @@
 import demos from '$lib/demos.js';
+import { rpcaddress } from '$lib/env.js';
+
 export async function load ({params})
 {
-    const rpc = "http://85.208.48.187:53550";
+    const rpc = rpcaddress;
     demos.connect(rpc);
     //quello vero
     //let block = await demos.getBlockByNumber(params.block);
