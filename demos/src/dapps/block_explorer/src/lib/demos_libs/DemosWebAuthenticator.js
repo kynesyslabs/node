@@ -29,12 +29,15 @@ class DemosWebAuth {
 		if (!seed) seed = forge.random.getBytesSync(32)
 		console.log("[CREATE WALLET] Creating wallet...")
 		console.log("[CREATE WALLET] Seed: " + seed)
-		let result = catcher(
-			this.keypair = forge.pki.ed25519.generateKeyPair({seed: seed})
-		)
+		let result
+		try {
+			result = this.keypair = forge.pki.ed25519.generateKeyPair({seed: seed})
+			this.loggedIn = true
+		} catch (e) {
+			return [false, "[CREATE WALLET ERROR] " + e.message]
+        }
 		console.log("[CREATE WALLET] Keypair created!")
-		if (result[0]) this.loggedIn = true
-		return result
+		return [true, result]
 	}
 
 	/**
