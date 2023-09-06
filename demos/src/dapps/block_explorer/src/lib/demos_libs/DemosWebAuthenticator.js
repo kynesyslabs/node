@@ -2,7 +2,6 @@
 import forge from "node-forge"
 import { Buffer } from "buffer/"
 import required from "./utils/required"
-import catcher from "./utils/catcher"
 import bufferize from "./utils/bufferizer"
 
 // TODO Could this be an universan "Sign in with DEMOS" ? Maybe
@@ -30,16 +29,17 @@ class DemosWebAuth {
 		if (!seed) seed = forge.random.getBytesSync(32)
 		console.log("[CREATE WALLET] Creating wallet...")
 		console.log("[CREATE WALLET] Seed: " + seed)
-		let result
+		let result = [true, ""]
 		try {
-			result = this.keypair = forge.pki.ed25519.generateKeyPair({seed: seed})
+			let create_result = this.keypair = forge.pki.ed25519.generateKeyPair({seed: seed})
+			result = [true, create_result]
 			this.loggedIn = true
+			console.log("[CREATE WALLET] Keypair created!")
+			console.log(this.keypair.privateKey)
 		} catch (e) {
-			return [false, "[CREATE WALLET ERROR] " + e.message]
+			result = [false, "[CREATE WALLET ERROR] " + e.message]
         }
-		console.log("[CREATE WALLET] Keypair created!")
-		console.log(this.keypair.privateKey)
-		return [true, result]
+		return result
 	}
 
 	/**
@@ -51,7 +51,8 @@ class DemosWebAuth {
 		if (!required(privKey, false)) return [false, "You need to provide a private key!"]
 		// Logging in avoiding crashes on wrong private keys
 		try {
-			privKey = bufferize(privKey)
+			//privKey = bufferize(privKey)
+			privKey = forge.pki.privateKeyToPem(privKey)
 			console.log(privKey)
 			console.log(typeof(privKey))
 			this.keypair = {
@@ -83,9 +84,13 @@ class DemosWebAuth {
      **/
 	async sign (message) {
 		if (!required(this.keypair, false)) return [false, "You need to login first!"]
-		let result = catcher(
-			forge.pki.ed25519.sign(message, this.keypair.privateKey)
-		)
+		let result = [true, ""]
+		try {
+			let sign_result = forge.pki.ed25519.sign(message, this.keypair.privateKey)
+			result = [true, sign_result]
+		} catch (e) {
+			result = [false, "[SIGN ERROR] " + e.message]
+		}
 		return result // Is already a [boolean, string]
 	}
 
@@ -97,9 +102,13 @@ class DemosWebAuth {
      * @returns {Promise<[boolean, string]>}
      **/
 	async verify (message, signature, publicKey) {
-		let result = catcher(
-			forge.pki.ed25519.verify(message, signature, publicKey)
-		)
+		let result = [true, ""]
+		try {
+			let verify_result = forge.pki.ed25519.verify(message, signature, publicKey)
+			result = [true, verify_result]
+		} catch (e) {
+			result = [false, "[VERIFY ERROR] " + e.message]
+		}
 		return result // Is already a [boolean, string]
 	}
 }
