@@ -4,6 +4,8 @@ import { Buffer } from "buffer/"
 import required from "./utils/required"
 import catcher from "./utils/catcher"
 
+// TODO Could this be an universan "Sign in with DEMOS" ? Maybe
+
 // INFO Enabling DEMOS wallet connections in the browser exposing a singleton
 // NOTE All the methods below return an array of [boolean, string | any] where any can be the result of the method
 class DemosWebAuth {
