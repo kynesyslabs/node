@@ -27,9 +27,12 @@ class DemosWebAuth {
 	 */
 	async create (seed=null) {
 		if (!seed) seed = forge.random.getBytesSync(32)
+		console.log("[CREATE WALLET] Creating wallet...")
+		console.log("[CREATE WALLET] Seed: " + seed)
 		let result = catcher(
 			this.keypair = forge.pki.ed25519.generateKeyPair({seed: seed})
 		)
+		console.log("[CREATE WALLET] Keypair created!")
 		if (result[0]) this.loggedIn = true
 		return result
 	}
@@ -50,7 +53,7 @@ class DemosWebAuth {
 			this.loggedIn = true
 			return [true, "Successfully logged in!"]
 		} catch (e) {
-			return [false, e.message]
+			return [false, "[LOGIN ERROR] " + e.message]
         }
 	}
 
