@@ -10,14 +10,15 @@
  */
 
 function catcher(statement, callback=null) {
-	let result
+	let result = [true, "success"]
 	if (typeof statement != 'function') {
 		return [false, "statement is not a function"]
 	} else {
 		// Executing the statement with a try catch to avoid exceptions that causes crashes
 		try {
-			result = statement()
-			return [true, result]
+			let stat_result = statement()
+			result[1] = stat_result
+			return result
 		} catch (e) {
 			// Supporting a callback function too
 			if (callback) {
