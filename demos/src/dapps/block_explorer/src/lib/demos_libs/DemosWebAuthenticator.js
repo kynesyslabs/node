@@ -51,7 +51,7 @@ class DemosWebAuth {
 		try {
 			this.keypair = {
 				privateKey: privKey,
-        	    publicKey: forge.pki.ed25519.publicKeyFromPrivateKey(privKey),
+        	    publicKey: forge.pki.ed25519.publicKeyFromPrivateKey({privKey}),
 			}
 			this.loggedIn = true
 			return [true, "Successfully logged in!"]
