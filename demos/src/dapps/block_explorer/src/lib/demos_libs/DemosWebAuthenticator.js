@@ -15,7 +15,7 @@ class DemosWebAuth {
 
 	constructor() {}
 
-	static get instance() {
+	static getInstance() {
         if (!this._instance) this._instance = new this()
         return this._instance
     }
