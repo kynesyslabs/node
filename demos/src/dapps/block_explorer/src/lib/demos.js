@@ -25,6 +25,8 @@ import io from "socket.io-client"
 import forge from "node-forge"
 const md = forge.md
 import { Buffer } from "buffer/" 
+import bufferize from "./demos_libs/utils/bufferizer"
+import sha256 from "./demos_libs/utils/sha256"
 
 // NOTE Including custom libraries from Demos
 import DemosWebAuth from "./demos_libs/DemosWebAuthenticator"
@@ -33,40 +35,6 @@ import XMTransactions from "./demos_libs/XMTransactions"
 // TODO Use XMTransactions for the crosschain transactions
 // TODO Typize with jsdoc
 
-
-/**
- * Converting uint8arrays into node.js-like objects representing a Buffer
- * @date 2/9/2023 - 04:47:48
- *
- * @param {*} uint8array
- * @returns {{ type: string; data: {}; }}
- */
-function bufferize(uint8array) {
-    let buffer = {type: "Buffer", data: []}
-    for (let i = 0; i < uint8array.length; i++) {
-        buffer.data.push(uint8array[i])
-    }
-    return buffer
-}
-
-
-/**
- * Hashes any string using crypto subtle
- * @date 2/9/2023 - 04:48:06
- *
- * @async
- * @param {*} string
- * @returns {string}
- */
-async function sha256(string) {
-    const utf8 = new TextEncoder().encode(string);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', utf8);
-    const hashArray = Array.from(new Uint8Array(hashBuffer)); // FIXME Review if it's to change to buffer here
-    const hashHex = hashArray
-      .map((bytes) => bytes.toString(16).padStart(2, '0'))
-      .join('');
-    return hashHex;
-  }
 
 
 // REVIEW Maybe modularize this behemoth
