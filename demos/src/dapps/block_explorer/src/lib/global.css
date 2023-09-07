@@ -1,14 +1,18 @@
 :root{
-    --accent:#5AF660;
-    --accent-accessible:#B5FFB7;
+    --accent:white;
+    --accent-accessible:white;
     --border-color: none;
     --header-color: rgba(255, 255, 255, 0.08);
     --border-radius-alt: 8px;
-    --border: .5px solid rgba(255, 255, 255, 0.08);
+    --border: 1px solid var(--background2-min);
 
     --container-padding: 40px;
     --input-padding: 16.2px;
     --border-radius: 14px;
+
+    --background-min:rgb(25, 25, 25);
+    --background2-min:rgb(45, 45, 45);
+    --border-min: 2px solid black;
 }
 
 @media (max-width: 1399px) {
@@ -44,6 +48,8 @@
 
 a{
     color: var(--accent);
+}
+a.nounderline{
     text-decoration: none;
 }
 a.accessible{
@@ -60,14 +66,18 @@ html {
 body{
     background-color: black;
     color: white;
-    font-family: 'Helvetica Neue Light', sans-serif;
+    font-family: "Neue Machina", sans-serif;
     margin: 0;
-    font-size: 1rem;
     height: 100%;
 }
 
+*{
+    /*font-size: 1.125rem;*/
+    font-size: 1rem;
+}
 
-input, .combobox{
+
+.combobox{
     color: white;
     font-family: 'Helvetica Neue Light', 'sans-serif';
     display: block;
@@ -79,9 +89,6 @@ input, .combobox{
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.08);
     backdrop-filter: blur(15px);
-}
-input::placeholder{
-    opacity: 1;
 }
 
 button{
@@ -110,6 +117,7 @@ button{
 /* ATTRIBUTES*/
 .fake-link{
     color: var(--accent-accessible);
+    text-decoration: underline;
 }
 
 .generic-shadow{
@@ -142,7 +150,7 @@ button{
     backdrop-filter: blur(15px);
     -webkit-backdrop-filter: blur(15px);
     border: .5px solid rgba(255, 255, 255, 0.08);
-    padding: 28px;
+    padding: 32px;
     max-width: 1250px;
 }
 
@@ -181,11 +189,10 @@ button{
     opacity: 0;
     transition: opacity .2s ease-in-out;
     width: 120px;
-    background-color: black;
+    background-color: var(--background2-min);
     color: #fff;
     text-align: center;
     padding: 5px 0;
-    border-radius: 6px;
 
     position: absolute;
     z-index: 1;
@@ -208,19 +215,5 @@ button{
     margin-left: -5px;
     border-width: 5px;
     border-style: solid;
-    border-color: black transparent transparent transparent;
+    border-color: var(--background2-min) transparent transparent transparent;
   }
-
-.small-button{
-    background-color: #404040;
-    color: white;
-    padding: 4px 8px;
-    border-radius: 8px;
-    box-shadow: rgba(17, 17, 26, 0.05) 0px 4px 16px, rgba(17, 17, 26, 0.05) 0px 8px 32px;
-    cursor: pointer;
-}
-
-.small-button:hover{
-    background-color: var(--accent);
-    color: black;
-}

@@ -36,6 +36,16 @@
         font-size: 1.2rem;
         font-family: 'HelveticaN';
     }
+    .background-blur{
+        position: fixed;
+        /*background-color: rgba(20, 20, 20, 0.5);*/
+        background-color: black;
+        backdrop-filter: blur(40px);
+        height: 100dvh;
+        width: 100%;
+        z-index: -1;
+        bottom: 0;
+    }
     .background{
         position: fixed;
         background: url("/backgrounds/bubblesbg.jpg") no-repeat center center;
@@ -46,6 +56,9 @@
         bottom: 0;
     }
 </style>
+<div class="background-blur">
+</div>
+
 <div class="background">
 </div>
 <div class="footer">

@@ -3,6 +3,7 @@
     import '$lib/styles/typography.css';
     import '$lib/styles/input.css';
     import '$lib/styles/buttons.css';
+    import '$lib/styles/surfaces.css';
     import Header from "$lib/components/Header.svelte";
     import Footer from "$lib/components/Footer.svelte";
 	import { fly } from "svelte/transition";
@@ -20,6 +21,12 @@
         flex: 1;
         overflow: hidden;
     }
+
+    .content-container{
+        max-width: 1250px;
+        margin: auto;
+        width: calc(100% - 32px);
+    }
     @media screen and (max-width: 600px)
     {
         main{
@@ -33,7 +40,7 @@
 <div class="wrapper">
     <main>
         {#key data.url}
-        <div in:fly={{ x: 200, duration: 300, delay: 300 }} out:fly={{ x: -200, duration: 300 }}>
+        <div class="content-container" in:fly={{ x: 200, duration: 300, delay: 300 }} out:fly={{ x: -200, duration: 300 }}>
             <slot/>
         </div>
         {/key}

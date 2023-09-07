@@ -3,6 +3,9 @@
 	import Fa from 'svelte-fa';
 	import { faBars } from '@fortawesome/free-solid-svg-icons';
 	import { slide } from 'svelte/transition';
+    import {wallet} from '$lib/env.js';
+    import demos from '$lib/demos.js';
+    import { goto } from '$app/navigation';
     const pages = [
         {
             label:"Block Explorer",
@@ -24,12 +27,12 @@
             href:"/txtest",
             test:"txtest"
         },
-        {
-            label:"Auth test",
-            href:"/authtest",
-            test:"authtest"
-        }
     ]
+    async function logOut()
+    {
+        await demos.DemosWebAuth.getInstance().logout();
+        goto("/login");
+    }
     let mobileMenuOpen = false;
     let location;
     $:location = $page.url.pathname;
@@ -41,17 +44,15 @@
         margin: 24px 32px;
     }
     .header{
-        background: rgba(255, 255, 255, 0.02);
-        backdrop-filter: blur(15px);
-        -webkit-backdrop-filter: blur(15px);
         width: 100%;
         display: flex;
         gap: 0 32px;
         height: 100%;
         position: relative;
         z-index: 500;
+        border-bottom: var(--border);
     }
-    .link-link{
+    .onlydesktop{
         display: flex;
         align-items: center;
     }
@@ -138,8 +139,13 @@
         display: flex;
         align-items: center;
     }
+    .login-button{
+        margin-left: auto;
+        align-self: center;
+        margin-right: 16px;
+    }
     @media (max-width: 768px){
-        .link-link{
+        .onlydesktop{
             display: none;
         }
         .menu-button{
@@ -158,11 +164,17 @@
     {#if mobileMenuOpen}
     <div transition:slide={{axis:"x", inverse:1}} role={"mobile menu"} on:click={()=>{mobileMenuOpen = false}} class="mobile-menu">
         {#each pages as page}
-            <a on:click={(e)=>{e.stopPropagation();mobileMenuOpen = false}} href={page.href}><div class={`${location.split("/").includes(page.test)?"mobile-link-selected":"mobile-link"} color-transition`}>{page.label}</div></a>
+            <a class="nounderline" on:click={(e)=>{e.stopPropagation();mobileMenuOpen = false}} href={page.href}><div class={`${location.split("/").includes(page.test)?"mobile-link-selected":"mobile-link"} color-transition`}>{page.label}</div></a>
         {/each}
+        <a href="/login"><button class="primary mobile-link">Connect wallet</button></a>
     </div>
     {/if}
     {#each pages as page}
-        <a class="link-link" href={page.href}><div class={`${location.split("/").includes(page.test)?"page-link-selected":"page-link"} color-transition`}>{page.label}</div></a>
+        <a class="onlydesktop nounderline" href={page.href}><div class={`${location.split("/").includes(page.test)?"page-link-selected":"page-link"} color-transition`}>{page.label}</div></a>
     {/each}
+    {#if $wallet.loggedIn}
+        <button class="login-button secondary" on:click={logOut}>Log out</button>
+    {:else if location != "/login"}
+        <a href="/login" class="login-button"><button class="primary onlydesktop">Connect wallet</button></a>
+    {/if}
 </div>
