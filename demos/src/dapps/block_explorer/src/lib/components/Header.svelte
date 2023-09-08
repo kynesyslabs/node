@@ -173,8 +173,8 @@
         <a class="onlydesktop nounderline" href={page.href}><div class={`${location.split("/").includes(page.test)?"page-link-selected":"page-link"} color-transition`}>{page.label}</div></a>
     {/each}
     {#if $wallet.loggedIn}
-        <button class="login-button secondary" on:click={logOut}>Log out</button>
+        <button class="login-button secondary onlydesktop" on:click={logOut}>Log out</button>
     {:else if location != "/login"}
-        <a href="/login" class="login-button"><button class="primary onlydesktop">Connect wallet</button></a>
+        <a href="/login" class="login-button onlydesktop"><button class="primary">Connect wallet</button></a>
     {/if}
 </div>

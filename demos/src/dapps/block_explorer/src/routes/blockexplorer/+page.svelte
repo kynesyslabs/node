@@ -70,7 +70,6 @@
         display: grid;
         grid-template-columns: 1fr 1fr;
         grid-gap: 16px;
-        padding: 16px;
         align-items: start;
         max-width: 1440px;
         margin: auto;

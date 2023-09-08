@@ -7,11 +7,12 @@
     import {updateWallet} from '$lib/env.js';
     let logged = demos.DemosWebAuth.getInstance().loggedIn;
     let created = false;
-    createWallet();
+    if(!logged)
+        createWallet();
     async function createWallet()
     {
         created = await demos.DemosWebAuth.getInstance().create();
-        updateWallet();
+        updateWallet(); 
         logged = true;
     }
 
@@ -48,4 +49,6 @@
 <div class="card2" style="padding:32px">
     <p class="privateout">{created[1].privateKey}</p>
 </div>
+{:else if logged}
+<h2>You are already logged in!</h2>
 {/if}
