@@ -7,6 +7,7 @@ import { Buffer } from "buffer/"
  * @date 6/9/2023 - 19:38:01
  *
  * @param {forge.pki.ed25519.BinaryBuffer} forgeBuffer
+ * @returns {Buffer}
  */
 function forgeToString(forgeBuffer) {
 	console.log("[forge to string]")
@@ -21,6 +22,7 @@ function forgeToString(forgeBuffer) {
  * @date 6/9/2023 - 19:38:29
  *
  * @param {string} forgeString
+ * @returns {Buffer}
  */
 function stringToForge(forgeString) {
 	console.log("[string to forge]")

@@ -21,10 +21,42 @@ import validateTransaction from "../blockchain/routines/validateTransaction"
 import multichainDispatcher from "src/features/multichain/multichainDispatcher"
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 import sharedState from "src/utilities/sharedState"
+import { BrowserRequest } from "./serverListeners"
+import { normalizeWebBuffers } from "./routines/normalizeWebBuffers"
+import Sessions from "./routines/sessionManager"
 var term = require("terminal-kit").terminal
 
 
 export default class ServerHandlers {
+    // ANCHOR BrowserRequest
+
+    // SECTION Login On Chain
+    static async handleLoginRequest(content: BrowserRequest) {
+        // A browser login request is the first step for a user to confirm their identity
+        // The user will be prompted for a message to sign and their session is either created or updated
+        let address_requested = content.data.publicKey // Must be a JSON string of a publicKey
+        let requested_session = Sessions.getInstance().newSession(address_requested)
+        return requested_session
+    }
+
+    static async handleLoginResponse(content: BrowserRequest) {
+        let result = [true, ""]
+        let bounded_message = "" // TODO Read from sessions
+        let s_signature = content.data.signature // Must be a JSON or a string of a signature (as Uint8Array or {type: "Buffer", data: []})
+        let signature_conversion = normalizeWebBuffers(s_signature)
+        let signature = signature_conversion[0]
+        if (!signature) return [false, "Invalid signature: " + signature_conversion[1]]
+        // TODO Check session validity
+        // INFO When a user logs in, the server will store and send a token valid for X time
+        // the user possessing that token will be able to demonstrate that the user is still logged in
+        // even in 3rd party applications.
+        // In any case, by calling loginRequest any application is able to enforce the user to log in
+        // and verify themselves again.
+        return result
+    }
+    // !SECTION Login On Chain
+
+    // ANCHOR Comlinks
     static async handleTransaction(content: any): Promise<any> {
         let require_reply = true // REVIEW Sure?
         let extra: string, response: boolean

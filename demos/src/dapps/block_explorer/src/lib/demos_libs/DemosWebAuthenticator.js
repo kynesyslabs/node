@@ -17,7 +17,7 @@ class DemosWebAuth {
 
 	constructor() {}
 
-	static getInstance() {
+	static get instance() {
         if (!this._instance) this._instance = new this()
         return this._instance
     }
@@ -99,6 +99,7 @@ class DemosWebAuth {
 		if (!required(this.keypair, false)) return [true, "You are already logged out!"]
 		this.loggedIn = false
 		this.keypair = null
+		this.stringified_keypair = null
 		return [true, "Successfully logged out!"]
 	}
 
@@ -108,7 +109,15 @@ class DemosWebAuth {
      * @returns {Promise<[boolean, string | forge.pki.ed25519.BinaryBuffer]>}
      **/
 	async sign (message) {
-		if (!required(this.keypair, false)) return [false, "You need to login first!"]
+		if (!required((this.keypair || this.stringified_keypair), false)) return [false, "You need to login first!"]
+		// If needed, we derive the keys from the strings
+		if (!this.keypair) {
+			console.log("[SIGN WALLET] Deriving buffer keys from strings...")
+			this.keypair = {
+                privateKey: forge_converter.stringToForge(this.stringified_keypair.privateKey),
+                publicKey: forge_converter.stringToForge(this.stringified_keypair.publicKey),
+            }
+		}
 		let result = [true, ""]
 		try {
 			let sign_result = forge.pki.ed25519.sign(message, this.keypair.privateKey)
@@ -122,12 +131,15 @@ class DemosWebAuth {
 	/**
 	 * @description Verifies a signature cryptographically
 	 * @param {string} message
-	 * @param {forge.pki.ed25519.BinaryBuffer} signature
-	 * @param {forge.pki.ed25519.BinaryBuffer} publicKey
+	 * @param {string} signature
+	 * @param {string} publicKey
      * @returns {Promise<[boolean, string]>}
      **/
-	async verify (message, signature, publicKey) {
+	async verify (message, s_signature, s_publicKey) {
 		let result = [true, ""]
+		// Deriving the buffers from the strings
+		let publicKey = forge_converter.stringToForge(publicKey)
+		let signature = forge_converter.stringToForge(signature)
 		try {
 			let verify_result = forge.pki.ed25519.verify(message, signature, publicKey)
 			result = [true, verify_result]

@@ -35,7 +35,7 @@
 			"to": "0x000000000000",	
 			"amount": "10000000000000"
 		}
-	}gi
+	}
 }
 
 // Now we can check if our customer still hold our token
@@ -99,9 +99,19 @@ else
 			"from": "ethereum",
 			"to": "xrpl",
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
 			"in": {g
 			
 				"type": "token", // This allows DEMOS to automatically convert the token to native currency (e.g. ETH)
+=======
+			"in": {
+				"type":pu "token", // This allows DEMOS to automatically convert the token to native currency (e.g. ETH)
+>>>>>>> Stashed changes
+=======
+			"in": {
+				"type":pu "token", // This allows DEMOS to automatically convert the token to native currency (e.g. ETH)
+>>>>>>> Stashed changes
 =======
 			"in": {
 				"type":pu "token", // This allows DEMOS to automatically convert the token to native currency (e.g. ETH)

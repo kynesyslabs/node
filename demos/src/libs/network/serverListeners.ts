@@ -17,6 +17,12 @@ import { comlinkUtils } from "src/libs/communications"
 import { logger } from "src/libs/utils"
 import { Identity } from "src/libs/identity"
 import Transmission from "src/libs/communications/transmission"
+var term = require( "terminal-kit" ).terminal
+
+export interface BrowserRequest  {
+    message: string,
+    data: any,
+}
 
 export default class ServerListeners {
     peer: Peer
@@ -28,12 +34,42 @@ export default class ServerListeners {
     async runListeners() {
         // await this.authReplyListener()
         // await this.authAskEmit()
+
         await this.comlinkListener()
+        await this.browserRequestListener()
+    }
+
+    // INFO this set of listeners does not require authentication and
+    // are not comlink as well, so they need to have their own listeners
+    async browserRequestListener() {
+        this.peer.socket.on("browser_request", async request => {
+            term.yellow("[SERVER] Received browser request\n")
+            // NOTE request MUST be a string conforming to BrowserRequest interface
+            let req: BrowserRequest = JSON.parse(request)
+            let browserResponse: [boolean, any]
+            var res
+            switch (req.message) {
+                case "login_request":
+                    res = await ServerHandlers.handleLoginRequest(req)
+                    browserResponse = [true, res]
+                    break
+                case "login_response":
+                    res = await ServerHandlers.handleLoginResponse(req)
+                    browserResponse = [true, res]
+                    break
+                case "logout_request":
+                    break
+                default:
+                    browserResponse = [false, "Invalid request"]
+                    break
+            }
+            this.peer.socket.emit("browser_response", JSON.stringify(browserResponse))
+        })
     }
 
     async comlinkListener() {
         this.peer.socket.on("comlink", async request => {
-            logger.log("[SERVER] Received comlink")
+            term.yellow("[SERVER] Received comlink\n")
             const id_ed25519 = await cryptography.load("./.demos_identity")
             const receiver = this.peer.socket
             var parsed_comlink
