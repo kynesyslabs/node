@@ -49,7 +49,7 @@ let COMMANDLINE_MODE = null
 
 let RPC_FEE: number =  5 // parseInt(process.env.RPC_FEE) || 10
 
-let SERVER_PORT: number = parseInt(process.env.SERVER_PORT, 10) || 53550
+let SERVER_PORT: number = 53550 // parseInt(process.env.SERVER_PORT, 10) || 53550
 let PEER_LIST_FILE = "./demos_peers"
 
 let PEER_LIST: any
