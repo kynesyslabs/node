@@ -64,9 +64,16 @@ class DemosWebAuth {
 		console.log("[LOGIN WALLET] Logging in...")
 		if (!required(privKey, false)) return [false, "You need to provide a private key!"]
 		// Serializing the private key as a string
-		console.log("[LOGIN WALLET] Serializing private key...")
-		this.keypair.privateKey = forge_converter.stringToForge(this.stringified_keypair.privateKey)
-		console.log(this.keypair.privateKey)
+
+		//console.log("[LOGIN WALLET] Serializing private key...")
+		//this.keypair.privateKey = forge_converter.stringToForge(this.stringified_keypair.privateKey)
+		//console.log(this.keypair.privateKey)
+
+		this.keypair = {
+			privateKey: privKey,
+			publicKey: null,
+		}
+
 		// Logging in avoiding crashes on wrong private keys
 		try {
 			console.log("[LOGIN WALLET] Deriving public key from private key...")
@@ -76,6 +83,7 @@ class DemosWebAuth {
 				publicKey: forge_converter.forgeToString(this.keypair.publicKey),
 			}
 			this.loggedIn = true
+
 			return [true, "Successfully logged in!"]
 		} catch (e) {
 			console.log(e)
