@@ -30,29 +30,50 @@
 </script>
 
 <style>
+    .container{
+        max-width: 532px;
+        margin: auto;
+    }
     .card{
-        max-width: 500px;
         display: grid;
         grid-template-columns: 1fr;
         gap: 32px;
-        padding: 32px;
+        padding: 64px;
+        margin: 32px 0 64px;
     }
     .or{
         margin: 0;
-        opacity: .6;
+        opacity: .2;
         text-align: center;
+    }
+    .nowallet
+    {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    @media screen and (max-width: 600px)
+    {
+        .card{
+            padding: 32px;
+            gap: 32px;
+        }
     }
 </style>
 
-<h2 style="text-align: center;">Log in</h2>
-<div class="card">
-    {#if logged}
-        <p style="margin:0">Succesful login!</p>
-    {:else}
-        <!--<p style="margin:0"><span class="status-label">status:</span> not logged in</p>-->
-        <input on:change={upload} type="file" class="custom-file-input"/>
-        <p class="or">– or –</p>
-        <input on:input={paste} placeholder="Paste your key here"/>
-        <div style="display: flex; align-items:center;"><span style="opacity: .6;">No wallet yet?</span>&nbsp;<a href="/createwallet">Create one</a></div>
+<div class="container">
+    <h2 style="text-align: center;">Connect wallet</h2>
+    <div class="card">
+        {#if logged}
+            <p style="margin:0">Succesful login!</p>
+        {:else}
+            <!--<p style="margin:0"><span class="status-label">status:</span> not logged in</p>-->
+            <input on:change={upload} type="file" class="custom-file-input"/>
+            <p class="or">– or –</p>
+            <input on:input={paste} placeholder="Paste your key here"/>
+        {/if}
+    </div>
+    {#if !logged}
+        <div class="nowallet"><span style="opacity: .6;">No wallet yet?</span>&nbsp;<a href="/createwallet">Create one</a></div>
     {/if}
 </div>

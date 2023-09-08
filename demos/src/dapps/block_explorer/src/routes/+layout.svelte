@@ -25,7 +25,7 @@
     .content-container{
         max-width: 1250px;
         margin: auto;
-        width: calc(100% - 32px);
+        width: calc(100% - 48px);
     }
     @media screen and (max-width: 600px)
     {

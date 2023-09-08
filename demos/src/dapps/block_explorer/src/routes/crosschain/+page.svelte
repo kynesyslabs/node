@@ -79,7 +79,7 @@
     {#if editing}
         <OperationEditor onSave={onSave} txblock={editing == "add"?new Operation():editing} onClose={()=>{editing = false}}/>
     {/if}
-    <Card style="width:fit-content;">
+    <div class="card">
         <SortableList>
             {#each operations as operation, i (operation.id)}
                 <div class="card" style="padding: 14px; margin-bottom:14px;" transition:customAnimation={{duration:350, easing:cubicInOut}}>
@@ -87,7 +87,7 @@
                 </div>
             {/each}
         </SortableList>
-    </Card>
+    </div>
     <div class="action-buttons">
         <button class="secondary color-transition" on:click={()=>{editing = "add";}}><Fa icon={faPlus} style="margin-right:8px;"></Fa>Add operation</button>
         <button class="primary color-transition">Execute<Fa style="margin-left:8px;" icon={faLongArrowRight}></Fa></button>
