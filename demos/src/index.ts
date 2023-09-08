@@ -47,7 +47,7 @@ let OVERRIDE_PEER_LIST_FILE = null
 let OVERRIDE_IS_TESTER = null
 let COMMANDLINE_MODE = null
 
-let RPC_FEE: number = parseInt(process.env.RPC_FEE) || 10
+let RPC_FEE: number =  5 // parseInt(process.env.RPC_FEE) || 10
 
 let SERVER_PORT: number = parseInt(process.env.SERVER_PORT, 10) || 53550
 let PEER_LIST_FILE = "./demos_peers"
