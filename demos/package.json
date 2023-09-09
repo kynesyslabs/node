@@ -21,7 +21,7 @@
     "test:multichain_write": "npx nodemon --exec ts-node -r tsconfig-paths/register src/tests/multichain_test_tx.ts",
     "test:xrpl": "npx nodemon --exec ts-node -r tsconfig-paths/register src/tests/xrpl.ts",
     "client": "node --loader tsx -r tsconfig-paths/register src/tests/terminal.ts",
-    "server": "node --loader tsx -r tsconfig-paths/register src/index.ts",    
+    "server": "node --loader tsx -r tsconfig-paths/register src/index.ts",
     "start": "node --loader tsx -r tsconfig-paths/register src/index.ts",
     "start:ts-node": "node --loader ts-node/esm -r tsconfig-paths/register src/index.ts",
     "start:bun": "bun src/index.ts",
