@@ -11,7 +11,9 @@ KyneSys Labs: https://www.kynesys.xyz/
 var term = require( "terminal-kit" ).terminal
 //import process from "node:process"
 import * as fs from "fs"
-import * as express from "express"
+//import * as express from "express" // NOTE ts-node compatibility
+const express = require( "express" ) // NOTE tsx & ts-node compatibility
+// import express from "express"// NOTE tsx compatibility
 const http = require("http")
 import { Server } from "socket.io"
 
@@ -47,7 +49,7 @@ let OVERRIDE_PEER_LIST_FILE = null
 let OVERRIDE_IS_TESTER = null
 let COMMANDLINE_MODE = null
 
-let RPC_FEE: number =  5 // parseInt(process.env.RPC_FEE) || 10
+let RPC_FEE: number = 10 // parseInt(process.env.RPC_FEE) || 10
 
 let SERVER_PORT: number = 53550 // parseInt(process.env.SERVER_PORT, 10) || 53550
 let PEER_LIST_FILE = "./demos_peers"
