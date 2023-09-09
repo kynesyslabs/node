@@ -11,7 +11,9 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import * as xrpl from "xrpl"
 import xrplWSListeners from "./types/xrpl_ws_listeners"
-import * as WebSocket from "ws"
+// import * as WebSocket from "ws" // NOTE ts-node compatibility
+const WebSocket = require("ws") // NOTE tsx & ts-node compatibility
+// import WebSocket from "ws" // NOTE tsx compatibility
 import DefaultChain from "./types/defaultChain"
 
 // LINK https://js.xrpl.org/

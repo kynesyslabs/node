@@ -11,7 +11,9 @@ KyneSys Labs: https://www.kynesys.xyz/
 var term = require( "terminal-kit" ).terminal
 //import process from "node:process"
 import * as fs from "fs"
-import * as express from "express"
+//import * as express from "express" // NOTE ts-node compatibility
+const express = require( "express" ) // NOTE tsx & ts-node compatibility
+// import express from "express"// NOTE tsx compatibility
 const http = require("http")
 import { Server } from "socket.io"
 

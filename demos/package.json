@@ -20,10 +20,12 @@
     "test:multichain_read": "npx nodemon --exec ts-node -r tsconfig-paths/register src/tests/multichain_test.ts",
     "test:multichain_write": "npx nodemon --exec ts-node -r tsconfig-paths/register src/tests/multichain_test_tx.ts",
     "test:xrpl": "npx nodemon --exec ts-node -r tsconfig-paths/register src/tests/xrpl.ts",
-    "client": "node --loader ts-node/esm -r tsconfig-paths/register src/tests/terminal.ts",
-    "server": "node --loader ts-node/esm -r tsconfig-paths/register src/index.ts",
-    "start": "node --loader ts-node/esm -r tsconfig-paths/register src/index.ts",
+    "client": "node --loader tsx -r tsconfig-paths/register src/tests/terminal.ts",
+    "server": "node --loader tsx -r tsconfig-paths/register src/index.ts",    
+    "start": "node --loader tsx -r tsconfig-paths/register src/index.ts",
+    "start:ts-node": "node --loader ts-node/esm -r tsconfig-paths/register src/index.ts",
     "start:bun": "bun src/index.ts",
+    "start:tsx": "node --loader tsx -r tsconfig-paths/register src/index.ts",
     "start:forever": "node --loader ts-node/esm -r tsconfig-paths/register src/start.ts",
     "start:advanced": "node --loader ts-node/esm -r tsconfig-paths/register src/index.ts {$0}",
     "start:dev": "npx nodemon --exec ts-node -r tsconfig-paths/register src/index.ts"
@@ -69,6 +71,7 @@
     "socket.io-client": "^4.7.1",
     "sqlite3": "^5.1.6",
     "terminal-kit": "^3.0.0",
+    "tsx": "^3.12.8",
     "typeorm": "^0.3.17",
     "ws": "^8.13.0",
     "xrpl": "^2.9.0"
