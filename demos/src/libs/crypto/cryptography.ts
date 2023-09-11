@@ -13,6 +13,7 @@ import { pki, random } from "node-forge"
 import * as forge from "node-forge"
 import { promises as fs } from "fs"
 import { Identity } from "../identity"
+const term = require("terminal-kit")
 const ed25519 = forge.pki.ed25519
 
 export default class Cryptography {
@@ -116,24 +117,44 @@ ONLY if sent by web tho (prolly a matter of buffers of course)
         },
 
         // INFO Encryption method using the public key
-        encrypt: (message: string, publicKey: pki.rsa.PublicKey): string => {
+        encrypt: (message: string, publicKey: any | pki.rsa.PublicKey): [boolean, any] => {
+            // NOTE Supporting "fake buffers" from web browsers
+            if(publicKey.type=="Buffer") {
+                console.log("[ENCRYPTION] Normalizing publicKey...")
+                publicKey = Buffer.from(publicKey)
+            }
+            // Converting the message and decrypting it
             let based = forge.util.encode64(message)
             const encrypted = publicKey.encrypt(based)
-            return encrypted
+            return [true, encrypted]
         },
 
         // INFO Decryption method using the private key
-        decrypt: (message: string, privateKey: pki.rsa.PrivateKey = null) => {
+        decrypt: (message: string, privateKey: any | pki.rsa.PrivateKey = null): [boolean, any] => {
+            // NOTE Supporting "fake buffers" from web browsers
+            try {
+                if(privateKey.type=="Buffer") {
+                    term.yellow("[DECRYPTION] Normalizing privateKey...\n")
+                    privateKey = Buffer.from(privateKey)
+                }
+            }
+            catch (e) {
+                term.yellow("[DECRYPTION] Looks like there is nothing to normalize here, let's proceed\n")
+                console.log(e)
+            }
+            // Converting back the message and decrypting it
             // NOTE If no private key is provided, we try to use our one
             if (!privateKey) {
+                term.yellow("[DECRYPTION] No private key provided, using our one...\n")
                 privateKey = Identity.getInstance().rsa.privateKey
                 if (!privateKey) {
+                    term.red("[DECRYPTION] No private key found\n")
                     return [false, "No private key found"]
                 }
             }
             let debased = forge.util.decode64(message)
             const decrypted = privateKey.decrypt(debased)
-            return decrypted
+            return [true, decrypted.toString()]
         },
     }
 
