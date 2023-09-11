@@ -12,6 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { pki, random } from "node-forge"
 import * as forge from "node-forge"
 import { promises as fs } from "fs"
+import { Identity } from "../identity"
 const ed25519 = forge.pki.ed25519
 
 export default class Cryptography {
@@ -29,11 +30,6 @@ export default class Cryptography {
         return keys
     }
 
-    static async saveRSA(keypair: pki.KeyPair, path: string) {
-        console.log(keypair.privateKey)
-        const pem = pki.privateKeyToPem(keypair.privateKey)
-        await fs.writeFile(path, pem)
-    }
 
     static async save(keypair: pki.KeyPair, path: string) {
         console.log(keypair.privateKey)
@@ -105,12 +101,40 @@ ONLY if sent by web tho (prolly a matter of buffers of course)
     }
 
     // ANCHOR Encryption part
+    static rsa = {
 
-    static async encrypt(message: any, rsa_public_key: pki.rsa.PublicKey): Promise<any> {
-        // TODO
+        // INFO Generating a new RSA keypair from our ecdsa private key
+        derive: (): forge.pki.rsa.KeyPair => {
+            let md = forge.md.sha256.create()
+            md.update(JSON.stringify(Identity.getInstance().ed25519.privateKey))
+            let seed = md.digest().toHex()
+            let pnrg = forge.random.createInstance()
+            pnrg.seedFileSync = () => seed
+            let keys = forge.pki.rsa.generateKeyPair({ bits: 4096, prng: pnrg })
+            Identity.getInstance().rsa = keys
+            return keys
+        },
+
+        // INFO Encryption method using the public key
+        encrypt: (message: string, publicKey: pki.rsa.PublicKey): string => {
+            let based = forge.util.encode64(message)
+            const encrypted = publicKey.encrypt(based)
+            return encrypted
+        },
+
+        // INFO Decryption method using the private key
+        decrypt: (message: string, privateKey: pki.rsa.PrivateKey = null) => {
+            // NOTE If no private key is provided, we try to use our one
+            if (!privateKey) {
+                privateKey = Identity.getInstance().rsa.privateKey
+                if (!privateKey) {
+                    return [false, "No private key found"]
+                }
+            }
+            let debased = forge.util.decode64(message)
+            const decrypted = privateKey.decrypt(debased)
+            return decrypted
+        },
     }
 
-    static async decrypt(message: any, rsa_private_key: pki.rsa.PrivateKey): Promise<any> {
-        // TODO
-    }
 }

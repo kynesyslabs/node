@@ -18,6 +18,7 @@ import getRemoteIP from "../network/routines/getRemoteIP"
 export default class Identity {
     private static instance: Identity
     public ed25519: pki.KeyPair
+    public rsa: pki.rsa.KeyPair
     public publicIP: string
     public publicPort: string
 
