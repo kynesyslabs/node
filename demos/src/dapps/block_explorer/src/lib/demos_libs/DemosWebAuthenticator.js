@@ -4,6 +4,7 @@ import { Buffer } from "buffer/"
 import required from "./utils/required"
 import bufferize from "./utils/bufferizer"
 import * as forge_converter from "./utils/forge_converter"
+import RSA from "./rsa"
 
 // TODO Could this be an universan "Sign in with DEMOS" ? Maybe
 
@@ -147,6 +148,10 @@ class DemosWebAuth {
 			result = [false, "[VERIFY ERROR] " + e.message]
 		}
 		return result // Is already a [boolean, string]
+	}
+
+	rsa() {
+		return RSA.getInstance()
 	}
 }
 
