@@ -8,6 +8,20 @@
     import Footer from "$lib/components/Footer.svelte";
 	import { fly } from "svelte/transition";
     export let data;
+    import "nprogress/nprogress.css";
+    import NProgress from "nprogress";
+      import { navigating } from "$app/stores";
+
+    NProgress.configure({
+        // Full list: https://github.com/rstacruz/nprogress#configuration
+        minimum: 0.16,
+    });
+
+    $: {
+        if ($navigating) {
+            NProgress.start();
+        } else NProgress.done();
+    }
 </script>
 
 <style>

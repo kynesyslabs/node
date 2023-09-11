@@ -1,11 +1,7 @@
 input:not([type='file'])
 {
     background-color: transparent;
-    width: 100%;
-    border-top: 1px solid var(--background2-min);
-    border-bottom: 1px solid var(--background2-min);
-    border-left: 0;
-    border-right: 0;
+    border: 1px solid var(--background2-min);
     font-family: "Neue Machina", sans-serif;
     height: 70px;
     color: #fff;
@@ -13,6 +9,8 @@ input:not([type='file'])
     font-weight: 400;
     line-height: 1.4444;
     letter-spacing: 0.311px;
+    padding: 24px;
+    max-width: 100%;
 }
 
 input:focus{
@@ -23,14 +21,17 @@ input:focus{
     border: 0;
     border-top: 1px solid var(--background2-min);
     border-bottom: 1px solid var(--background2-min);
-    padding: 0 calc(var(--border-radius) / 2 * 3);
+    border-right: 1px solid var(--background2-min);
+    border-left: 1px solid var(--background2-min);
+    padding: 0 24px;
     height: 70px;
     color: #fff;
     font-size: 1.125rem;
     font-weight: 400;
     line-height: 1.4444;
     letter-spacing: 0.311px;
-
+    width: 500px;
+    max-width: 100%;
 }
 
 .input-container{
@@ -113,10 +114,10 @@ input:focus {
 }
 
 .embedded-input{
-    background: none;
-    backdrop-filter: none;
-    padding: 0;
-    width: 100%;
+    padding: 0!important;
+    width: 100%!important;
+    max-width: 100%!important;
+    border: 0!important;
 }
 
 .embedded-input:focus{
@@ -128,4 +129,10 @@ input:focus {
     height: 52px;
     font-size: 1rem;
     padding: 0 var(--input-padding);
+}
+
+.smallinput{
+    height: 52px!important;
+    font-size: 1rem!important;
+    padding: 0 var(--input-padding)!important;
 }

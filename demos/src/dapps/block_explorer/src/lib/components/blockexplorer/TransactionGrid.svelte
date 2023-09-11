@@ -73,7 +73,7 @@
     }
 </style>
 
-<div class="grid-card">
+<div class="card">
     <div class="card-header">   
         <p class="card-header-label">Total of 1 transactions</p>
     </div>
@@ -98,9 +98,9 @@
         <div class="card-footer">
             <div class="page-controller">
                 <button class="page-controller-button">First</button>
-                <button class="page-controller-button"><Fa icon={faChevronLeft}/></button>
+                <button class="page-controller-button"><Fa style="font-size:.8rem" icon={faChevronLeft}/></button>
                     <p class="page-controller-label">Page 1 of 1</p>
-                <button class="page-controller-button"><Fa icon={faChevronRight}/></button>
+                <button class="page-controller-button"><Fa style="font-size:.8rem" icon={faChevronRight}/></button>
                 <button class="page-controller-button">Last</button>
             </div>
         </div>

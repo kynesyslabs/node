@@ -33,21 +33,18 @@
 </script>
 
 <style>
-    .container{
-        padding: 16px;
-    }
     .label{
         margin: 8px 0;
         opacity: .75;
     }
-    .txtest-input{
+    .smallinput{
         width: 100%;
     }
     .txtest-body{
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 16px;
+        gap: 32px;
         width: 100%;
         max-width: 500px;
     }
@@ -59,33 +56,41 @@
     .input-block{
         width: 100%;
     }
+    .card{
+        padding: 32px;
+        margin-bottom: 64px;
+    }
+    @media screen and (max-width: 600px)
+    {
+        .card{
+            padding: 24px;
+        }
+    }
 </style>
 
-<div class="container">
-    <form on:submit={sendTransaction} class="card txtest-body">
-        <div class="input-block">
-            <p class="label">Type</p>
-            <input class="txtest-input"/>
+<form on:submit={sendTransaction} class="card txtest-body">
+    <div class="input-block">
+        <p class="label">Type</p>
+        <input class="smallinput"/>
+    </div>
+    <div class="input-block">
+        <p class="label">From</p>
+        <input class="smallinput"/>
+    </div>
+    <div class="input-block">
+        <p class="label">To</p>
+        <input class="smallinput"/>
+    </div>
+    <div class="input-block">
+        <p class="label">Amount</p>
+        <input class="smallinput"/>
+    </div>
+    <div class="input-block">
+        <p class="label">Data</p>
+        <div class="multiple-input">
+            <input class="smallinput"/>
+            <input class="smallinput"/>
         </div>
-        <div class="input-block">
-            <p class="label">From</p>
-            <input class="txtest-input"/>
-        </div>
-        <div class="input-block">
-            <p class="label">To</p>
-            <input class="txtest-input"/>
-        </div>
-        <div class="input-block">
-            <p class="label">Amount</p>
-            <input class="txtest-input"/>
-        </div>
-        <div class="input-block">
-            <p class="label">Data</p>
-            <div class="multiple-input">
-                <input class="txtest-input"/>
-                <input class="txtest-input"/>
-            </div>
-        </div>
-        <button class="primary" type="submit">Send</button>
-    </form>
-</div>
+    </div>
+    <button class="primary" type="submit" style="width: 100%;">Send</button>
+</form>

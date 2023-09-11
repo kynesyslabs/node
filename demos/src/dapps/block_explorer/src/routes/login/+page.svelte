@@ -59,6 +59,11 @@
             gap: 32px;
         }
     }
+    .custom-file-input
+    {
+        max-width: 100%;
+        overflow: hidden;
+    }
 </style>
 
 <div class="container">

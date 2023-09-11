@@ -17,17 +17,12 @@
 </script>
 
 <style>
-    .block-icon-container{
-        width:55px;
-        height: 45px;
-        border-radius: var(--border-radius);
-        display: flex;
-        justify-content: center;
-        align-items: center;
-    }
     .block-icon{
         filter: invert();
-        width: 75px;
+        width: 55px;
+    }
+    .card{
+        margin-bottom: 64px;
     }
 
 
@@ -36,19 +31,17 @@
         align-items: center;
         gap: 32px;
         justify-content: center;
-        margin: 0 0 32px;
+        margin: 0 0 64px;
     }
 
     .block-header{
         display: flex;
         align-items: center;
-        gap: 32px;
+        gap: 16px;
     }
 
     .adjacent-button{
         padding: 8px;
-        background-color: var(--accent);
-        color: black;
         cursor: pointer;
         width: 37px;
         height: 37px;
@@ -61,10 +54,8 @@
     .card-footer{
         padding: 16px;
         text-align: center;
-        background-color: var(--header-color);
+        background-color: var(--background2-min);
         font-weight: bold;
-        color: white;
-        border-radius: 0 0 var(--border-radius) var(--border-radius);
     }
 
     .page-controller{
@@ -78,7 +69,6 @@
         background-color: #404040;
         color: white;
         padding: 4px 8px;
-        border-radius: var(--border-radius);
         box-shadow: rgba(17, 17, 26, 0.05) 0px 4px 16px, rgba(17, 17, 26, 0.05) 0px 8px 32px;
     }
     .page-controller-label{
@@ -154,18 +144,18 @@
 </style>
 
 <div class="card-header">
-    <div class="adjacent-button">
+    <button class="secondary adjacent-button">
         <Fa style="position:relative;top:1px;" icon={faArrowLeftLong}></Fa>
-    </div>
+    </button>
     <div class="block-header">
         <div class="block-icon-container generic-shadow">
             <img class="block-icon" alt="Block icon" src={blockIcon}/>
         </div>
-        <h2>Block #{data.block.number}</h2>
+        <h3 style="margin:0">Block #{data.block.number}</h3>
     </div>
-    <div class="adjacent-button">
+    <button class="secondary adjacent-button">
         <Fa style="position:relative;top:1px;" icon={faArrowRightLong}></Fa>
-    </div>        
+    </button>        
 </div>
 
 <div class="card">
@@ -201,9 +191,9 @@
     <div class="card-footer">
         <div class="page-controller">
             <button class="page-controller-button">First</button>
-            <button class="page-controller-button"><Fa icon={faChevronLeft}/></button>
+            <button class="page-controller-button"><Fa style="font-size:.8rem;" icon={faChevronLeft}/></button>
                 <p class="page-controller-label">Page 1 of 1</p>
-            <button class="page-controller-button"><Fa icon={faChevronRight}/></button>
+            <button class="page-controller-button"><Fa style="font-size:.8rem;" icon={faChevronRight}/></button>
             <button class="page-controller-button">Last</button>
         </div>
     </div>

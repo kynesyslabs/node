@@ -74,6 +74,9 @@
         max-width: 1440px;
         margin: auto;
     }
+    .section-container{
+        margin-bottom: 64px;
+    }
     @media only screen and (max-width: 1250px) {
         .main-grid{
             grid-template-columns: 1fr;
@@ -84,7 +87,7 @@
         grid-template-columns: auto 1fr 100px;
         border-bottom: 1px solid var(--border-color);
         gap: 16px;
-        padding: 32px 16px;
+        padding: 24px;
         border-bottom: 2px solid black;
     }
     .block-cell{
@@ -140,7 +143,7 @@
     </div>
 
     <div class="main-grid">
-        <div>
+        <div class="section-container">
         <h4 class="card-header">Latest blocks</h4>
             <div class="card">
                 {#each latestBlocks as block}
@@ -170,7 +173,7 @@
                 </div>
             </a>
         </div>
-        <div>
+        <div class="section-container">
             <h3 class="card-header">Latest transactions</h3>
             <div class="card">
                 {#each data.block.content.ordered_transactions as transaction}

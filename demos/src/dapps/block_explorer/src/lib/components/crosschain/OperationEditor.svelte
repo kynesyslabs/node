@@ -161,7 +161,7 @@
 }} class="modal-txblock">
     <div class="txblock">
         <div class="txblock-header">
-            <p class="txblock-header-label"><span style="font-weight:bold;">{multichain?"Multichain":"Single chain"} operation</span> <span style="opacity: .5;">on DEMOS network</span></p>
+            <h3 class="txblock-header-label"><span style="font-weight:bold;">{multichain?"Multichain":"Single chain"} operation</span> <span style="opacity: .5;">on DEMOS network</span></h3>
             <div class="txblock-header-header">
                 <div class="txblock-header-blockchain">
                     {#if multichain}
@@ -171,7 +171,7 @@
                         <ChainSelection onChange={(newValue)=>{editorchains[0] = newValue;}} value={editorchains[0]}/>
                     {/if}
                     <div class="card-ellipsis-container">
-                        <button on:click={()=>{multichain=!multichain}} class={`card-ellipsis color-transition tooltip ${multichain?"selected":""}`}>
+                        <button on:click={()=>{multichain=!multichain}} class={`secondary card-ellipsis color-transition tooltip ${multichain?"selected":""}`}>
                             <span class="tooltiptext">Multichain</span>
                             <Fa icon={faPlus}></Fa>
                         </button>

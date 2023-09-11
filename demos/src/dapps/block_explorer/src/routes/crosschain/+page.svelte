@@ -54,10 +54,6 @@
 </script>
 
 <style>
-    main{
-        padding: 16px;
-    }
-    
     .action-buttons{
         display: flex;
         justify-content: right;
@@ -75,21 +71,19 @@
     }
 </style>
 
-<main>
-    {#if editing}
-        <OperationEditor onSave={onSave} txblock={editing == "add"?new Operation():editing} onClose={()=>{editing = false}}/>
-    {/if}
-    <div class="card">
-        <SortableList>
-            {#each operations as operation, i (operation.id)}
-                <div class="card" style="padding: 14px; margin-bottom:14px;" transition:customAnimation={{duration:350, easing:cubicInOut}}>
-                <p class="operationcard-label">{operation.data.task.type} on {chains.find(c=>c.id === operation.data.chain).label}</p>
-                </div>
-            {/each}
-        </SortableList>
-    </div>
-    <div class="action-buttons">
-        <button class="secondary color-transition" on:click={()=>{editing = "add";}}><Fa icon={faPlus} style="margin-right:8px;"></Fa>Add operation</button>
-        <button class="primary color-transition">Execute<Fa style="margin-left:8px;" icon={faLongArrowRight}></Fa></button>
-    </div>
-</main>
+{#if editing}
+    <OperationEditor onSave={onSave} txblock={editing == "add"?new Operation():editing} onClose={()=>{editing = false}}/>
+{/if}
+<div class="card">
+    <SortableList>
+        {#each operations as operation, i (operation.id)}
+            <div class="card" style="padding: 14px; margin-bottom:14px;" transition:customAnimation={{duration:350, easing:cubicInOut}}>
+            <p class="operationcard-label">{operation.data.task.type} on {chains.find(c=>c.id === operation.data.chain).label}</p>
+            </div>
+        {/each}
+    </SortableList>
+</div>
+<div class="action-buttons">
+    <button class="secondary color-transition" on:click={()=>{editing = "add";}}><Fa icon={faPlus} style="margin-right:8px;"></Fa>Add operation</button>
+    <button class="primary color-transition">Execute<Fa style="margin-left:8px;" icon={faLongArrowRight}></Fa></button>
+</div>

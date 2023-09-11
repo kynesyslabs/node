@@ -20,15 +20,28 @@
 </script>
 
 <style>
-    .container{
-        padding: 16px;
-    }
     .info-grid{
         display: grid;
         grid-template-columns: 150px 1fr;
         width: 100%;
-        gap: 16px;
-        padding: 16px;
+        gap: 8px;
+    }
+
+    .info-grid:not(:last-child){
+        margin-bottom: 32px;
+
+    }
+
+    @media screen and (max-width: 600px)
+    {
+        .info-grid{
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .info-title{
+        font-weight: bold;
+        margin: 0;
     }
 
     .block-icon-container{
@@ -50,7 +63,7 @@
         display: flex;
         align-items: center;
         width: 100%;
-        margin-bottom: 28px;
+        margin-bottom: 64px;
         justify-content: center;
     }
     .url-input{
@@ -62,34 +75,42 @@
         width: 100%;
         max-width: 500px;
     }
+    .card{
+        margin-bottom: 64px;
+        padding: 32px;
+    }
+    @media screen and (max-width: 600px)
+    {
+        .card{
+            padding: 24px;
+        }
+    }
 </style>
 
-<div class="container">
-    <div class="card-header">
-        <div class="block-header">
-            <div class="block-icon-container generic-shadow">
-                <Fa style="font-size:2rem" icon={faGlobe}></Fa>
-            </div>
-            <h3 class="ellipsis" style="margin: 0;">Web2 request</h3>
-        </div>      
-    </div>
-
-    <form on:submit={makeRequest} style="width: 100%; max-width:500px" class="card">    
-        <p class="label">URL</p>
-        <input placeholder="https://apple.com/robots.txt" class="url-input"/>
-        <button class="primary request-button">Make request</button>
-    </form>
-    <div class="card">
-
-        {#each Object.keys(output) as key}
-            <div class="info-grid">
-                <p style="margin:0;">{key}</p>
-                {#if typeof output[key] === "object"}
-                    <p class="wrapword" style="margin:0;">{JSON.stringify(output[key])}</p>
-                {:else}
-                    <p class="wrapword" style="margin:0;">{output[key]}</p>
-                {/if}
-            </div>
-        {/each}
-    </div>    
+<div class="card-header">
+    <div class="block-header">
+        <div class="block-icon-container generic-shadow">
+            <Fa style="font-size:2rem" icon={faGlobe}></Fa>
+        </div>
+        <h3 class="ellipsis" style="margin: 0;">Web2 request</h3>
+    </div>      
 </div>
+
+<form on:submit={makeRequest} style="width: 100%; max-width:500px" class="card">    
+    <p class="label">URL</p>
+    <input placeholder="https://apple.com/robots.txt" class="url-input"/>
+    <button class="primary request-button">Make request</button>
+</form>
+
+<div class="card">
+    {#each Object.keys(output) as key}
+        <div class="info-grid">
+            <p class="info-title">{key}:</p>
+            {#if typeof output[key] === "object"}
+                <p class="wrapword" style="margin:0;">{JSON.stringify(output[key])}</p>
+            {:else}
+                <p class="wrapword" style="margin:0;">{output[key]}</p>
+            {/if}
+        </div>
+    {/each}
+</div>    

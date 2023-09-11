@@ -6,8 +6,9 @@
 </script>
 
 <style>
-    main{
-        padding: 16px;
+    .title{
+        text-align: center;
+        margin-bottom: 64px;
     }
     .card-header{
         display: flex;
@@ -78,33 +79,32 @@
     }
 </style>
 
-<main>
-    <div class="grid-card">
-        <div class="card-header">   
-            <p class="card-header-label">Total of 1 blocks</p>
-        </div>
-            <div class="transactions-grid grid-header-row">
-                <p class="grid-header-label">Number</p>
-                <p class="grid-header-label">Timestamp</p>
-                <p class="grid-header-label">Tx</p>
-                <p class="grid-header-label">Proposer</p>
-            </div>
-            <div class="transactions-grid">
-                <!--{#each data.block.content.transactions as transaction}-->
-                    <a class="accessible grid-cell" href={`/blocks/${data.block.number}`}><p class="grid-cell">{data.block.number}</p></a>
-                    <p class="grid-cell">{data.block.timestamp}</p>
-                    <p class="grid-cell">{data.block.content.ordered_transactions.length}</p>
-                    <p class="grid-cell">{data.block.proposer}</p>
-                <!--{/each}-->
-            </div>
-            <div class="card-footer">
-                <div class="page-controller">
-                    <button class="page-controller-button">First</button>
-                    <button class="page-controller-button"><Fa icon={faChevronLeft}/></button>
-                        <p class="page-controller-label">Page 1 of 1</p>
-                    <button class="page-controller-button"><Fa icon={faChevronRight}/></button>
-                    <button class="page-controller-button">Last</button>
-                </div>
-            </div>
+<h2 class="title">DEMOS Blocks</h2>
+<div class="card">
+    <div class="card-header">   
+        <p class="card-header-label">Total of 1 blocks</p>
     </div>
-    </main>
+        <div class="transactions-grid grid-header-row">
+            <p class="grid-header-label">Number</p>
+            <p class="grid-header-label">Timestamp</p>
+            <p class="grid-header-label">Tx</p>
+            <p class="grid-header-label">Proposer</p>
+        </div>
+        <div class="transactions-grid">
+            <!--{#each data.block.content.transactions as transaction}-->
+                <a class="accessible grid-cell" href={`/blocks/${data.block.number}`}><p class="grid-cell">{data.block.number}</p></a>
+                <p class="grid-cell">{data.block.timestamp}</p>
+                <p class="grid-cell">{data.block.content.ordered_transactions.length}</p>
+                <p class="grid-cell">{data.block.proposer}</p>
+            <!--{/each}-->
+        </div>
+        <div class="card-footer">
+            <div class="page-controller">
+                <button class="page-controller-button">First</button>
+                <button class="page-controller-button"><Fa style="font-size:.8rem" icon={faChevronLeft}/></button>
+                    <p class="page-controller-label">Page 1 of 1</p>
+                <button class="page-controller-button"><Fa style="font-size:.8rem" icon={faChevronRight}/></button>
+                <button class="page-controller-button">Last</button>
+            </div>
+        </div>
+</div>

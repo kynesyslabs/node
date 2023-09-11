@@ -18,19 +18,18 @@
 }
 .card-ellipsis
 {
-    padding: 8px;
-    border-radius: 10px;
-    background-color: #404040;
-    color: white;
+    padding: 8px!important;
     font-size: 1rem;
     min-width: 40px;
-    text-align: center;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 
 }
-.card-ellipsis:hover, .selected
+.card-ellipsis.selected
 {
-    background-color: var(--accent);
-    color: black;
+    background-color: var(--accent)!important;
+    color: black!important;
 }
 .txblock-header-label{
     margin:0 0 16px;
@@ -50,6 +49,7 @@
 }
 
 .txblock-body{
+    width: 100%;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -83,7 +83,6 @@
     display: grid;
     grid-template-columns: 25px 1fr;
     margin: 0;
-    border-radius: var(--border-radius);
 }
 
 .option:hover{
@@ -92,14 +91,14 @@
 }
 
 .modal-txblock{
-    background-color: rgb(20, 20, 20);
+    background-color: var(--background-min);
     position: fixed;
     top: 0;
     left: 0;
     width: 100vw;
     height: 100dvh;
     z-index: 1000;
-    padding: 32px;
+    padding: 24px;
     overflow: auto;
 }
 

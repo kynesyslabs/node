@@ -8,7 +8,7 @@
     import { goto } from '$app/navigation';
     const pages = [
         {
-            label:"Block Explorer",
+            label:"Explorer",
             href:"/blockexplorer",
             test:"blockexplorer"
         },
@@ -40,36 +40,55 @@
 
 <style>
     .logo{
-        width: 150px;
-        margin: 24px 32px;
+        width: 120px;
+        margin: 24px 0px;
     }
     .header{
-        width: 100%;
+        max-width: 1250px;
+        margin: 16px auto;
+        width: calc(100% - 48px);
         display: flex;
         gap: 0 32px;
         height: 100%;
         position: relative;
         z-index: 500;
-        border-bottom: var(--border);
+        align-items: center;
+        justify-content: space-between;
     }
     .onlydesktop{
         display: flex;
         align-items: center;
     }
+    .desktoplinks{
+        display: grid;
+        grid-auto-columns: 1fr;
+        grid-auto-flow: column;
+    }
+    .desktoplink{
+        width: fit-content;
+        margin: auto;
+    }
+    .desktoplinkcontainer{
+        padding: 0 32px;
+    }
+    .desktoplinkcontainer:not(:last-child){
+        border-right: 1px solid var(--background2-min);
+    }
     .page-link{
         color: #fff;
         text-decoration: none;
-        font-size: 1.1rem;
+        font-size: 1rem;
         font-weight: 600;
         cursor: pointer;
         height: 100%;
         display: flex;
         align-items: center;
+        position: relative;
     }
     .page-link-selected{
         color: var(--accent);
         text-decoration: none;
-        font-size: 1.1rem;
+        font-size: 1rem;
         font-weight: 600;
         cursor: pointer;
         position: relative;
@@ -87,11 +106,25 @@
         height: 1px;
         background: var(--accent);
     }
+    .page-link::after{
+        content: "";
+        display: block;
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 1px;
+        background: var(--accent);
+        transform: scaleX(0);
+        transition: transform .3s ease;
+        transform-origin: left;
+    }
+    .page-link:hover::after{
+        transform: scaleX(1);
+    }
     .menu-button{
         margin-right: 0;
         margin-left: auto;
-        font-size: 1.5rem;
-        padding: 0 30px;
         background: none;
         color: white;
         display: none;
@@ -140,9 +173,8 @@
         align-items: center;
     }
     .login-button{
-        margin-left: auto;
         align-self: center;
-        margin-right: 16px;
+        padding: 8px 16px;
     }
     @media (max-width: 768px){
         .onlydesktop{
@@ -155,12 +187,12 @@
     </style>
 
 <div class="header">
-    <a href="/">
+    <a href="/blockexplorer">
         <div>
             <img alt="logo" class="logo" src="/LOGOMorph.svg"/>
         </div>
     </a>
-    <button on:click={()=>{mobileMenuOpen=true}} class="menu-button"><Fa icon={faBars}></Fa></button>
+    <button on:click={()=>{mobileMenuOpen=true}} class="menu-button"><Fa icon={faBars} style="font-size:1.5rem"></Fa></button>
     {#if mobileMenuOpen}
     <div transition:slide={{axis:"x", inverse:1}} role={"mobile menu"} on:click={()=>{mobileMenuOpen = false}} class="mobile-menu">
         {#each pages as page}
@@ -169,12 +201,18 @@
         <a href="/login"><button class="primary mobile-link">Connect wallet</button></a>
     </div>
     {/if}
+    <div class="desktoplinks onlydesktop">
     {#each pages as page}
-        <a class="onlydesktop nounderline" href={page.href}><div class={`${location.split("/").includes(page.test)?"page-link-selected":"page-link"} color-transition`}>{page.label}</div></a>
+        <div class="desktoplinkcontainer">
+            <div class="desktoplink">
+                <a class="nounderline " href={page.href}><div class={`${location.split("/").includes(page.test)?"page-link-selected":"page-link"} color-transition`}>{page.label}</div></a>
+            </div>
+        </div>
     {/each}
+    </div>
     {#if $wallet.loggedIn}
         <button class="login-button secondary onlydesktop" on:click={logOut}>Log out</button>
     {:else if location != "/login"}
-        <a href="/login" class="login-button onlydesktop"><button class="primary">Connect wallet</button></a>
+        <a href="/login" class="onlydesktop"><button class="primary login-button">Connect wallet</button></a>
     {/if}
 </div>

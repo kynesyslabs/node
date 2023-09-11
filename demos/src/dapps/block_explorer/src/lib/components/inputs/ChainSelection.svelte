@@ -137,7 +137,6 @@
         align-items: center;
         gap: 8px;
         cursor: pointer;
-        border-radius: 8px;
         padding: var(--input-padding) 0;
         width: 100%;
         transition: padding .2s ease-in-out, background-color .2s ease-in-out, color .2s ease-in-out;
@@ -188,7 +187,7 @@
     {:else}
     <div class="selected-chain">
         <img class="chain-icon-mini" src={chains.find(c=>c.id === value).icon} alt={chains.find(c=>c.id === value).label}/>
-        <p class="ellipsis" style="margin:0;">{chains.find(c=>c.id === value).label}</p>
+        <p class="ellipsis" style="margin:0; margin-top:2px;">{chains.find(c=>c.id === value).label}</p>
     </div>
     {/if}
     <Fa icon={faChevronDown}></Fa>

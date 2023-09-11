@@ -7,11 +7,11 @@
 </script>
 
 <style>
-    .container{
-        padding: 16px;
+    .title{
+        text-align: center;
+        margin-bottom: 64px;
     }
 </style>
 
-<div class="container">
-    <TransactionGrid transactions={data.transactions}/>
-</div>
+<h2 class="title">Transactions</h2>
+<TransactionGrid transactions={data.transactions}/>

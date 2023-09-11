@@ -76,21 +76,6 @@ body{
     font-size: 1rem;
 }
 
-
-.combobox{
-    color: white;
-    font-family: 'Helvetica Neue Light', 'sans-serif';
-    display: block;
-    border: none;
-    width: 500px;
-    max-width: 100%;
-    padding: 8px;
-    font-size: 1rem;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(15px);
-}
-
 button{
     border: none;
     cursor: pointer;

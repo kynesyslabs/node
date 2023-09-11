@@ -33,7 +33,7 @@
 
     $:if(!options)
     {options = []}
-    $:if(options.length < 2)
+    $:if(options.length == 1)
     {
         value = options[0].id;
         handleChange(options[0].id);
@@ -83,7 +83,7 @@
 
 <div style="position: relative; max-width:100%">
     <div use:clickOutside role={`Select element`} on:click={()=>{if(!disabled)open=!open}} on:click_outside={()=>{open=false}} style={style} class="combobox smallcombobox">
-        {#if options.length < 2}
+        {#if options.length == 1}
             <div>
                 <p>{options[0].label}</p>
             </div>
@@ -96,7 +96,7 @@
     {#if open}
     <div transition:comoboxAnimation={{duration:200, easing:cubicInOut}} id="dialog" class="combobox-dialog">
         {#each options as option, i}
-            <div role={`Element`} class="combobox-option" style={`border-radius:${options.length==1?"var(--border-radius-alt)":i==options.length-1?"0 0 var(--border-radius-alt) var(--border-radius-alt)":i==0?"var(--border-radius-alt) var(--border-radius-alt) 0 0":"0"}`} on:click={()=>{handleChange(option.id)}}>
+            <div role={`Element`} class="combobox-option" on:click={()=>{handleChange(option.id)}}>
                 {#if option.id===value}
                 <Fa icon={faCheck}></Fa>
                 {:else}
