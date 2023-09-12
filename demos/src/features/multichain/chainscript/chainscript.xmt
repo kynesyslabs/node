@@ -1,3 +1,4 @@
+[
 // We have to connect to the two blockchains in order to start
 "connect": {
 	"chain": "ethereum",
@@ -15,6 +16,7 @@
 	"chain": "xrpl",
 	"subchain": "testnet",
 	"is_evm": false,
+	"conditional": false,
 	"rpc": "https://s.altnet.rippletest.net",
 	"task": {
 		"type": "connection",
@@ -29,6 +31,7 @@
 	"chain": "ethereum",
 	"subchain": "goerli",
 	"is_evm": true,
+	"conditional": false,
 	"task": {
 		"type": "pay",
         "params": {
@@ -43,6 +46,7 @@
 	"chain": "ethereum",
     "subchain": "goerli",
     "is_evm": true,
+	"conditional": false,
     "task": {
 		"type": "contract_read",
         "params": {
@@ -51,24 +55,29 @@
             "params": [ "0x000000000000" ]
 		}
 	}	
-}
+},
 
 // If they don't hold the token, we will send the token to them
-if "check_a_contract_state" == 0 then
+"conditional": {
+	"operator": "if",
+	"statement": '("check_a_contract_state"==0),
+	"callback": "transfer_token", // Must be an operation defined below or above
+}
 
-    "transfer_token": {
-		"chain": "ethereum",
-        "subchain": "goerli",
-		"is_evm": true,
-		"task": {
-            "type": "contract_write",
-			"params": {
-				"address": "0x0000000000001",
-                "method": "transfer",
-				"params": [ "0x00000000000", "10000000000000" ]
-			}
+"transfer_token": {
+	"chain": "ethereum",
+	"subchain": "goerli",
+	"is_evm": true,
+	"conditional": true,
+	"task": {
+		"type": "contract_write",
+		"params": {
+			"address": "0x0000000000001",
+			"method": "transfer",
+			"params": [ "0x00000000000", "10000000000000" ]
 		}
 	}
+}
 
 // If they do, we will send some Ripple to them to thanks them even more
 else
@@ -77,6 +86,7 @@ else
         "chain": "xrpl",
 		"subchain": "testnet",
 		"is_evm": false,
+		"conditional": false,
 		"task": {
             "type": "pay",
 			"params": {
@@ -127,3 +137,4 @@ else
 		}
 	}
 }
+]
