@@ -15,13 +15,15 @@
 <style>
 
     .footer{
-        padding: 16px 32px;
+        max-width: 1250px;
+        margin: 16px auto;
+        width: calc(100% - 48px);
         display: flex;
         justify-content: space-between;
         align-items: center;
         flex-wrap: wrap;
-        background-color: rgb(20, 20, 20);
         margin-top: auto;
+        gap: 0 32px;
     }
     .footer-links{
         display: flex;
@@ -34,7 +36,7 @@
     .companyname{
         font-weight: bold;
         font-size: 1.2rem;
-        font-family: 'HelveticaN';
+        font-family: 'Helvetica Neue';
     }
     .background-blur{
         position: fixed;

@@ -7,10 +7,38 @@
     import Header from "$lib/components/Header.svelte";
     import Footer from "$lib/components/Footer.svelte";
 	import { fly } from "svelte/transition";
+    import demos from "$lib/demos.js"
+    import {updateWallet} from "$lib/env.js";
+    let logcheck = false;
+
+    async function login(prvkey)
+    {
+        const parsed = JSON.parse(prvkey);
+        const arrayed = Object.values(parsed);
+        const key = new Uint8Array(arrayed);
+        const log = await demos.DemosWebAuth.getInstance().login(key);
+        updateWallet();
+        return log;
+    }
+
+    const getCookieValue = (name) => (
+        document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)')?.pop() || ''
+    );
+    
+    onMount(()=>{
+        const storedkey = getCookieValue("prvkey");
+        if(storedkey)
+        {
+            login(storedkey);
+        }
+        logcheck = true;
+    })
+
     export let data;
     import "nprogress/nprogress.css";
     import NProgress from "nprogress";
       import { navigating } from "$app/stores";
+	import { onMount } from 'svelte';
 
     NProgress.configure({
         // Full list: https://github.com/rstacruz/nprogress#configuration
@@ -47,18 +75,76 @@
             margin: 16px 0;
         }
     }
+    .loading{
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+    }
+    .lds-ripple {
+        display: inline-block;
+        position: relative;
+        width: 80px;
+        height: 80px;
+    }
+    .lds-ripple div {
+        position: absolute;
+        border: 4px solid #fff;
+        opacity: 1;
+        border-radius: 50%;
+        animation: lds-ripple 1s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+    }
+    .lds-ripple div:nth-child(2) {
+        animation-delay: -0.5s;
+    }
+    @keyframes lds-ripple {
+        0% {
+            top: 36px;
+            left: 36px;
+            width: 0;
+            height: 0;
+            opacity: 0;
+        }
+        4.9% {
+            top: 36px;
+            left: 36px;
+            width: 0;
+            height: 0;
+            opacity: 0;
+        }
+        5% {
+            top: 36px;
+            left: 36px;
+            width: 0;
+            height: 0;
+            opacity: 1;
+        }
+        100% {
+            top: 0px;
+            left: 0px;
+            width: 72px;
+            height: 72px;
+            opacity: 0;
+        }
+    }
 </style>
 
-
+{#if logcheck}
 <Header />
 <div class="wrapper">
     <main>
         {#key data.url}
-        <div class="content-container" in:fly={{ x: 200, duration: 300, delay: 300 }} out:fly={{ x: -200, duration: 300 }}>
-            <slot/>
-        </div>
+                <div class="content-container" in:fly={{ x: 200, duration: 300, delay: 300 }} out:fly={{ x: -200, duration: 300 }}>
+                    <slot/>
+                </div>
         {/key}
     </main>
     <Footer/>
 </div>
+{:else}
+<div class="loading">
+    <div class="lds-ripple"><div></div><div></div></div> 
+</div>
+{/if}
+
 

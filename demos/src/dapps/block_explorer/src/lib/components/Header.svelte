@@ -6,6 +6,7 @@
     import {wallet} from '$lib/env.js';
     import demos from '$lib/demos.js';
     import { goto } from '$app/navigation';
+    import { updateWallet } from '$lib/env.js';
     const pages = [
         {
             label:"Explorer",
@@ -30,7 +31,9 @@
     ]
     async function logOut()
     {
+        document.cookie="prvkey=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;"
         await demos.DemosWebAuth.getInstance().logout();
+        updateWallet();
         goto("/login");
     }
     let mobileMenuOpen = false;

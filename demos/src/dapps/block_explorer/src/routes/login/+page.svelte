@@ -1,6 +1,6 @@
 <script>
     import demos from '$lib/demos.js';
-    let logged = demos.DemosWebAuth.getInstance().loggedIn;
+    import { wallet, updateWallet } from '$lib/env.js';
     function upload(e)
     {
         const file = e.target.files[0];
@@ -9,23 +9,27 @@
         const reader = new FileReader();
         reader.onload = async function(e)
         {
-            const parsed = JSON.parse(e.target.result);
-            const arrayed = Object.values(parsed);
-            const key = new Uint8Array(arrayed);
-            const log = await demos.DemosWebAuth.getInstance().login(key);
-            logged = log[0];
+            await login(e.target.result);
         }
         reader.readAsText(file);
     }
 
     async function paste(e)
     {
-        console.log(e)
-        const parsed = JSON.parse(e.target.value);
+        await login(e.target.value);
+    }
+
+    async function login(prvkey)
+    {
+        const parsed = JSON.parse(prvkey);
         const arrayed = Object.values(parsed);
         const key = new Uint8Array(arrayed);
         const log = await demos.DemosWebAuth.getInstance().login(key);
-        logged = log[0];
+        if(log[0])
+        {
+            updateWallet();
+            document.cookie=`prvkey=${prvkey}`;
+        }
     }
 </script>
 
@@ -69,7 +73,7 @@
 <div class="container">
     <h2 style="text-align: center;">Connect wallet</h2>
     <div class="card">
-        {#if logged}
+        {#if $wallet.loggedIn}
             <p style="margin:0">Succesful login!</p>
         {:else}
             <!--<p style="margin:0"><span class="status-label">status:</span> not logged in</p>-->
@@ -78,7 +82,7 @@
             <input on:input={paste} placeholder="Paste your key here"/>
         {/if}
     </div>
-    {#if !logged}
+    {#if !$wallet.loggedIn}
         <div class="nowallet"><span style="opacity: .6;">No wallet yet?</span>&nbsp;<a href="/createwallet">Create one</a></div>
     {/if}
 </div>
