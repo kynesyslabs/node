@@ -18,16 +18,6 @@
             href:"/crosschain",
             test:"crosschain"
         },
-        {
-            label:"Web2",
-            href:"/web2/server",
-            test:"web2"
-        },
-        {
-            label:"Tx test",
-            href:"/txtest",
-            test:"txtest"
-        },
     ]
     async function logOut()
     {
@@ -178,6 +168,7 @@
     .login-button{
         align-self: center;
         padding: 8px 16px;
+        margin-left: auto;
     }
     @media (max-width: 768px){
         .onlydesktop{
@@ -190,7 +181,7 @@
     </style>
 
 <div class="header">
-    <a href="/blockexplorer">
+    <a href="/blockexplorer" style="flex-basis:100%;">
         <div>
             <img alt="logo" class="logo" src="/LOGOMorph.svg"/>
         </div>
@@ -204,7 +195,7 @@
         <a href="/login"><button class="primary mobile-link">Connect wallet</button></a>
     </div>
     {/if}
-    <div class="desktoplinks onlydesktop">
+    <div class="desktoplinks onlydesktop" style="flex-basis:100%;">
     {#each pages as page}
         <div class="desktoplinkcontainer">
             <div class="desktoplink">
@@ -214,8 +205,12 @@
     {/each}
     </div>
     {#if $wallet.loggedIn}
-        <button class="login-button secondary onlydesktop" on:click={logOut}>Log out</button>
+        <div class="onlydesktop" style="flex-basis:100%;">
+            <button class="login-button secondary " on:click={logOut}>Log out</button>
+        </div>
     {:else if location != "/login"}
-        <a href="/login" class="onlydesktop"><button class="primary login-button">Connect wallet</button></a>
+        <a href="/login" class="onlydesktop" style="flex-basis:100%;"><button class="primary login-button">Connect wallet</button></a>
+    {:else}
+        <div class="onlydesktop" style="flex-basis: 100%;"> </div>
     {/if}
 </div>

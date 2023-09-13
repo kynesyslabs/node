@@ -2,7 +2,6 @@
     import Fa from 'svelte-fa'
     import { faArrowRightLong, faPray } from '@fortawesome/free-solid-svg-icons'
     import '$lib/global.css'
-    import transIcon from '$lib/assets/icons/agreement-icon.png';
     import { goto } from '$app/navigation';
 	import Searchbar from '$lib/components/blockexplorer/HomeSearchbar.svelte';
     import demos from '$lib/demos.js';

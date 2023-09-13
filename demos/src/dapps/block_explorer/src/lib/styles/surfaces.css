@@ -4,6 +4,7 @@
     background-color: var(--background-min);
     padding: 0;
     margin: 0 auto;
+    border: 1px solid var(--background2-min);
 }
 
 .card2{

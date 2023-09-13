@@ -45,7 +45,7 @@ const tasks = [
         id:"pay",
         label:"Pay",
         constraints:[],
-        icon:"fa-paper-plane",
+        icon:"/task-icons/wallet.svg",
         params:[
             {
                 id:"to",
@@ -66,7 +66,7 @@ const tasks = [
         id:"contract_read",
         label:"Read Contract",
         constraints:["evm"],
-        icon:"fa-glasses",
+        icon:"/task-icons/contract.svg",
         params:[
             {
                 id:"address",
@@ -190,4 +190,4 @@ const evmTasks = [
 const mUniversalTasks = [];
 const mEvmTasks = [];
 
-export {chains, universalTasks, evmTasks, mUniversalTasks, mEvmTasks};
+export {chains, tasks, universalTasks, evmTasks, mUniversalTasks, mEvmTasks};

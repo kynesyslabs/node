@@ -4,16 +4,18 @@
     import Fa from 'svelte-fa'
     import { faArrowLeftLong, faArrowRightLong, faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
     import blockIcon from '$lib/assets/icons/cube-icon.png';
-    import infoIcon from '$lib/assets/icons/Circle_Info.svg';
-    import transIcon from '$lib/assets/icons/Arrow_Down_Up.svg';
-    let selectedTab = 0;
-    function changeTab(index){
-        selectedTab = index;
+    import demos from "$lib/demos.js";
+    import {rpcaddress} from "$lib/env.js";
+	import CubeSpinning from '$lib/components/blockexplorer/CubeSpinning.svelte';
+
+    demos.connect(rpcaddress);
+    async function getBlock()
+    {
+        if(!demos.connected)
+        return;
+        let block = await demos.getBlockByNumber(data.blocknumber);
+        return block;
     }
-
-    console.log(data.block)
-
-    //console.log(data.pblock);
 </script>
 
 <style>
@@ -143,58 +145,60 @@
     }
 </style>
 
-<div class="card-header">
-    <button class="secondary adjacent-button">
-        <Fa style="position:relative;top:1px;" icon={faArrowLeftLong}></Fa>
-    </button>
-    <div class="block-header">
-        <div class="block-icon-container generic-shadow">
+{#await getBlock()}
+    <CubeSpinning/>
+{:then block} 
+    <div class="card-header">
+        <button class="secondary adjacent-button">
+            <Fa style="position:relative;top:1px;" icon={faArrowLeftLong}></Fa>
+        </button>
+        <div class="block-header">
             <img class="block-icon" alt="Block icon" src={blockIcon}/>
+            <h3 style="margin:0">Block #{block.number}</h3>
         </div>
-        <h3 style="margin:0">Block #{data.block.number}</h3>
+        <button class="secondary adjacent-button">
+            <Fa style="position:relative;top:1px;" icon={faArrowRightLong}></Fa>
+        </button>        
     </div>
-    <button class="secondary adjacent-button">
-        <Fa style="position:relative;top:1px;" icon={faArrowRightLong}></Fa>
-    </button>        
-</div>
 
-<div class="card">
-    <div class="info-grid">
-        <p class="info-title">Status:</p>
-        <p class="info-text">{data.block.status}</p>
-        <p class="info-title">Timestamp:</p>
-        <p class="info-text">{data.block.timestamp}</p>
-        <p class="info-title">Proposer:</p>
-        <p class="info-text">{data.block.proposer}</p>
-        <p class="info-title">Transactions:</p>
-        <p class="info-text">{data.block.content.ordered_transactions.length} transactions in this block</p>
-    </div>
-</div>
-<div class="card">
-    <div class="transactions-info">
-        <p class="transaction-number-label">A total of {data.block.content.ordered_transactions.length} transactions found</p>
-    </div>
-    <div class="transactions-grid grid-header-row">
-        <p class="grid-header-label">Hash</p>
-        <p class="grid-header-label">From</p>
-        <p class="grid-header-label">To</p>
-        <p class="grid-header-label">Amount</p>
-    </div>
-    <div class="transactions-grid">
-        {#each data.block.content.ordered_transactions as transaction}
-            <a class="accessible grid-cell" href={`/blockexplorer/transactions/${transaction.hash}`}><p class="grid-cell">{transaction.hash}</p></a>
-            <p class="grid-cell">{transaction.content.from}</p>
-            <p class="grid-cell">{transaction.content.to}</p>
-            <p class="grid-cell">{transaction.content.amount}</p>
-        {/each}
-    </div>
-    <div class="card-footer">
-        <div class="page-controller">
-            <button class="page-controller-button">First</button>
-            <button class="page-controller-button"><Fa style="font-size:.8rem;" icon={faChevronLeft}/></button>
-                <p class="page-controller-label">Page 1 of 1</p>
-            <button class="page-controller-button"><Fa style="font-size:.8rem;" icon={faChevronRight}/></button>
-            <button class="page-controller-button">Last</button>
+    <div class="card">
+        <div class="info-grid">
+            <p class="info-title">Status:</p>
+            <p class="info-text">{block.status}</p>
+            <p class="info-title">Timestamp:</p>
+            <p class="info-text">{block.timestamp}</p>
+            <p class="info-title">Proposer:</p>
+            <p class="info-text">{block.proposer}</p>
+            <p class="info-title">Transactions:</p>
+            <p class="info-text">{block.content.ordered_transactions.length} transactions in this block</p>
         </div>
     </div>
-</div>
+    <div class="card">
+        <div class="transactions-info">
+            <p class="transaction-number-label">A total of {block.content.ordered_transactions.length} transactions found</p>
+        </div>
+        <div class="transactions-grid grid-header-row">
+            <p class="grid-header-label">Hash</p>
+            <p class="grid-header-label">From</p>
+            <p class="grid-header-label">To</p>
+            <p class="grid-header-label">Amount</p>
+        </div>
+        <div class="transactions-grid">
+            {#each block.content.ordered_transactions as transaction}
+                <a class="accessible grid-cell" href={`/blockexplorer/transactions/${transaction.hash}`}><p class="grid-cell">{transaction.hash}</p></a>
+                <p class="grid-cell">{transaction.content.from}</p>
+                <p class="grid-cell">{transaction.content.to}</p>
+                <p class="grid-cell">{transaction.content.amount}</p>
+            {/each}
+        </div>
+        <div class="card-footer">
+            <div class="page-controller">
+                <button class="page-controller-button">First</button>
+                <button class="page-controller-button"><Fa style="font-size:.8rem;" icon={faChevronLeft}/></button>
+                    <p class="page-controller-label">Page 1 of 1</p>
+                <button class="page-controller-button"><Fa style="font-size:.8rem;" icon={faChevronRight}/></button>
+                <button class="page-controller-button">Last</button>
+            </div>
+        </div>
+    </div>
+{/await}

@@ -26,11 +26,11 @@ button.secondary {
     font-weight: 500;
     line-height: 1.4444;
     letter-spacing: 0.311px;
-    border: 1px solid #FFF !important;
+    border: 1px solid var(--accent) !important;
     background: transparent !important;
     padding: 16.2px 47px;
     text-align: center;
-    color: #FFF !important; 
+    color: var(--accent) !important; 
     text-decoration: unset;
     text-align: center;
 }
