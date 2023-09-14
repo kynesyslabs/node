@@ -4,35 +4,36 @@
 	import { faCode, faEllipsisVertical, faPlus, faTrash } from "@fortawesome/free-solid-svg-icons";
 	import Fa from "svelte-fa";
     import { cubicInOut } from 'svelte/easing';
-    import {clickOutside} from '$lib/eventhandlers/clickOutside.js'
     import {chains, universalTasks, evmTasks, mUniversalTasks, mEvmTasks} from '$lib/chainscript.js';
     import "$lib/styles/crosschain/txblock.css";
 	import TaskParam from "$lib/components/crosschain/TaskParam.svelte";
 	import CodeEditor from "$lib/components/CodeEditor.svelte";
     import CopyButton from "$lib/components/CopyButton.svelte";
 	import ChainSelection from "$lib/components/inputs/ChainSelection.svelte";
+	import { onMount } from "svelte";
+
 
     export let onClose;
     export let onSave;
     export let txblock;
     export let index;
-
+    $:console.log(txblock)
     //flags to check if all the fields are filled: [chain, task, params]
     let complete = [false, false, false];
 
     //editor (props independent) variables
     //chains
-    let editorchains = [null, null];
+    let editorchains = txblock.chain=="crosschain"?txblock.subchain:[txblock.chain, null];
     //mutlichain bool
-    let multichain;
+    let multichain = txblock.chain=="crosschain";
     //code mode bool
     let codemode = false;
     //options bool
     let options = false;
     //selected task
-    let selectedTask;
+    let selectedTask = txblock.task.type;
     //params values
-    let params = {};
+    let params = txblock.task.params;
     //parsedJSON
     let parsedJSON = "";
 

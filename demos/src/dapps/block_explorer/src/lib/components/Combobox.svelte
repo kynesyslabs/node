@@ -6,7 +6,7 @@
 	import { faCheck, faChevronDown } from "@fortawesome/free-solid-svg-icons";
     import Fa from "svelte-fa";
     import { cubicInOut } from 'svelte/easing';
-    import {clickOutside} from '$lib/eventhandlers/clickOutside.js';
+    import {clickOutside} from '$lib/eventhandlers.js';
     let open = false;
     let disabled = false;
 

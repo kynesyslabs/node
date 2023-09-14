@@ -1,5 +1,5 @@
 <script>
-	import { faLongArrowRight, faPlus } from "@fortawesome/free-solid-svg-icons";
+	import { faEllipsisV, faLongArrowRight, faPlus } from "@fortawesome/free-solid-svg-icons";
 	import Fa from "svelte-fa";
     import { v4 as uuidv4 } from "uuid";
     import { cubicInOut } from 'svelte/easing';
@@ -7,8 +7,7 @@
     //import { SortableList } from '@jhubbardsf/svelte-sortablejs';
     //import DragDropList from "svelte-dragdroplist";
     import {dndzone} from "svelte-dnd-action";
-    import {chains, tasks} from "$lib/chainscript.js";
-
+	import OperationCard from "$lib/components/crosschain/OperationCard.svelte";
     class Operation{
         constructor(){
             this.chain = null;
@@ -34,6 +33,17 @@
         }
         editing = false;
     }
+    
+    function onUpdate(index, data)
+    {
+        operations[index] = {id:operations[index].id, data:data};
+    }
+
+    function deleteOperation(index)
+    {
+        operations.splice(index, 1);
+        operations = operations;
+    }
 
     function handleDndConsider(e) {
         operations = e.detail.items;
@@ -42,10 +52,7 @@
         operations = e.detail.items;
     }
 
-    function getTaskInfo(id)
-    {
-        return tasks.find(t=>t.id === id);
-    }
+
 
     $:localStorage.setItem("operations", JSON.stringify(operations));
 </script>
@@ -105,14 +112,6 @@
         margin: 0;
         opacity: .4;
     }
-    .operation{
-        padding: 24px;
-        position: relative;
-        width: 100%;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
     @media only screen and (max-width: 600px) {
         .action-buttons{
             flex-wrap: wrap;
@@ -122,9 +121,7 @@
         flex-basis: 100%;
         max-width: 300px;
     }
-    .operationcard-label{
-        margin: 0;
-    }
+
     .dnd{
         display: grid;
         grid-template-columns: 1fr;
@@ -154,11 +151,7 @@
         </div>
         <div class="dnd" use:dndzone={{items:operations}} on:consider={handleDndConsider} on:finalize={handleDndFinalize}>
             {#each operations as operation, i (operation.id)}
-                <div class="card operation">
-                    <img style="opacity: .3;" alt="task icon" src={getTaskInfo(operation.data.task.type).icon}/>
-                    <p class="operationcard-label">{getTaskInfo(operation.data.task.type).label} on {chains.find(c=>c.id === operation.data.chain).label}</p>
-                    <img width=24px alt="blockchain icon" style="margin-left: auto;" src={chains.find(c=>c.id === operation.data.chain).icon}/>
-                </div>
+                <OperationCard deleteOperation={deleteOperation} onUpdate={onUpdate} index={i} operation={operation}/>
             {/each}
         </div>
     </div>
