@@ -19,8 +19,6 @@ import Block from "./blocks"
 import Chain from "./chain"
 import Hashing from "../crypto/hashing"
 import Cryptography from "../crypto/cryptography"
-import { sha256 } from "node-forge"
-import { ConsensusRequest } from "src/libs/consensus/Consensus"
 
 export interface MempoolData {
     number: number

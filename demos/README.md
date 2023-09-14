@@ -1,15 +1,28 @@
-# morph
+# Morph
 
-To install dependencies:
+## By KyneSys Labs
 
-```bash
-bun install
-```
+### Run DEMOS
 
-To run:
+    cd demos
+    yarn install
+    yarn server
 
-```bash
-bun run src/index.ts
-```
+or
 
-This project was created using `bun init` in bun v1.0.0. [Bun](https://bun.sh) is a fast all-in-one JavaScript runtime.
+    cd demos
+    bun install
+    bun server
+
+NOTE: The bun implementation is still in progress and, at the moment, leverage just a few of bun capabilities. In the future, the bun implementation will be improved. Excluding performances, anyways, the two options are the very same.
+
+### License
+
+LICENSE
+
+© 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
+
+Full license text: <https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode>
+Human readable license: <https://creativecommons.org/licenses/by-nc-nd/4.0/>
+
+KyneSys Labs: <https://www.kynesys.xyz/>
