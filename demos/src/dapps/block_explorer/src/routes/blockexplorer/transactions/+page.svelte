@@ -1,9 +1,20 @@
 <script>
     import '$lib/global.css';
-    export let data;
-    import Fa from 'svelte-fa';
-    import {faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
 	import TransactionGrid from '../../../lib/components/blockexplorer/TransactionGrid.svelte';
+    import demos from '$lib/demos.js';
+    import {rpcaddress} from '$lib/env.js';
+    import CubeSpinning from '$lib/components/blockexplorer/CubeSpinning.svelte';
+
+    demos.connect(rpcaddress);
+
+    async function getTransactions()
+    {
+        if(!demos.connected)
+        return;
+        let transaction = await demos.getTxByHash("dd3fc542784875538efef89815672c693f8175f1007450b8e890c618650dd03e");
+        let transactions = [transaction];
+        return transactions;
+    }
 </script>
 
 <style>
@@ -13,5 +24,9 @@
     }
 </style>
 
-<h2 class="title">Transactions</h2>
-<TransactionGrid transactions={data.transactions}/>
+{#await getTransactions()}
+    <CubeSpinning/>
+{:then transactions}
+    <h2 class="title">Transactions</h2>
+    <TransactionGrid transactions={transactions}/>
+{/await}

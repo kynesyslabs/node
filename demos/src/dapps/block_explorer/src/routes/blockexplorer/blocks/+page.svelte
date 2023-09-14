@@ -1,8 +1,19 @@
 <script>
     import '$lib/global.css';
-    export let data;
     import Fa from 'svelte-fa';
     import {faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
+    import demos from '$lib/demos.js';
+    import {rpcaddress} from '$lib/env.js';
+    import CubeSpinning from '$lib/components/blockexplorer/CubeSpinning.svelte';
+
+    demos.connect(rpcaddress);
+
+    async function getBlocks()
+    {
+        let block = await demos.getBlockByNumber(0);
+        let blocks = [block];
+        return blocks;
+    }
 </script>
 
 <style>
@@ -79,32 +90,36 @@
     }
 </style>
 
-<h2 class="title">DEMOS Blocks</h2>
-<div class="card">
-    <div class="card-header">   
-        <p class="card-header-label">Total of 1 blocks</p>
-    </div>
-        <div class="transactions-grid grid-header-row">
-            <p class="grid-header-label">Number</p>
-            <p class="grid-header-label">Timestamp</p>
-            <p class="grid-header-label">Tx</p>
-            <p class="grid-header-label">Proposer</p>
+{#await getBlocks()}
+    <CubeSpinning/>
+{:then blocks} 
+    <h2 class="title">DEMOS Blocks</h2>
+    <div class="card">
+        <div class="card-header">   
+            <p class="card-header-label">Total of 1 blocks</p>
         </div>
-        <div class="transactions-grid">
-            <!--{#each data.block.content.transactions as transaction}-->
-                <a class="accessible grid-cell" href={`/blocks/${data.block.number}`}><p class="grid-cell">{data.block.number}</p></a>
-                <p class="grid-cell">{data.block.timestamp}</p>
-                <p class="grid-cell">{data.block.content.ordered_transactions.length}</p>
-                <p class="grid-cell">{data.block.proposer}</p>
-            <!--{/each}-->
-        </div>
-        <div class="card-footer">
-            <div class="page-controller">
-                <button class="page-controller-button">First</button>
-                <button class="page-controller-button"><Fa style="font-size:.8rem" icon={faChevronLeft}/></button>
-                    <p class="page-controller-label">Page 1 of 1</p>
-                <button class="page-controller-button"><Fa style="font-size:.8rem" icon={faChevronRight}/></button>
-                <button class="page-controller-button">Last</button>
+            <div class="transactions-grid grid-header-row">
+                <p class="grid-header-label">Number</p>
+                <p class="grid-header-label">Timestamp</p>
+                <p class="grid-header-label">Tx</p>
+                <p class="grid-header-label">Proposer</p>
             </div>
-        </div>
-</div>
+            <div class="transactions-grid">
+                {#each blocks as block}
+                    <a class="accessible grid-cell" href={`/blocks/${block.number}`}><p class="grid-cell">{block.number}</p></a>
+                    <p class="grid-cell">{block.timestamp}</p>
+                    <p class="grid-cell">{block.content.ordered_transactions.length}</p>
+                    <p class="grid-cell">{block.proposer}</p>
+                {/each}
+            </div>
+            <div class="card-footer">
+                <div class="page-controller">
+                    <button class="page-controller-button">First</button>
+                    <button class="page-controller-button"><Fa style="font-size:.8rem" icon={faChevronLeft}/></button>
+                        <p class="page-controller-label">Page 1 of 1</p>
+                    <button class="page-controller-button"><Fa style="font-size:.8rem" icon={faChevronRight}/></button>
+                    <button class="page-controller-button">Last</button>
+                </div>
+            </div>
+    </div>
+{/await}

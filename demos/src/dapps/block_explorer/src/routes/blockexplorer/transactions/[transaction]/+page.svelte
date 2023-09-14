@@ -3,7 +3,19 @@
     export let data;
     import transIcon from '$lib/assets/icons/agreement-icon.png';
 	import CopyButton from '$lib/components/CopyButton.svelte';
-    console.log(data.transaction);
+    import demos from "$lib/demos.js";
+    import {rpcaddress} from "$lib/env.js";
+    import CubeSpinning from '$lib/components/blockexplorer/CubeSpinning.svelte';
+
+    demos.connect(rpcaddress);
+
+    async function getTransaction()
+    {
+        if(!demos.connected)
+        return;
+        let transaction = await demos.getTxByHash(data.transaction);
+        return transaction;
+    }
 </script>
 
 <style>
@@ -70,37 +82,42 @@
         }
     }
 </style>
-<div class="card-header">
-    <div class="block-header">
-        <div class="block-icon-container generic-shadow">
-            <img class="block-icon" alt="Block icon" src={transIcon}/>
+
+{#await getTransaction()}
+    <CubeSpinning/>
+{:then transaction}
+    <div class="card-header">
+        <div class="block-header">
+            <div class="block-icon-container generic-shadow">
+                <img class="block-icon" alt="Block icon" src={transIcon}/>
+            </div>
+            <h3 class="ellipsis" style="margin: 0;">Transaction details</h3>
+        </div>      
+    </div>
+    <div class="card">
+        <div class="info-grid">
+            <p class="info-title">Hash:</p>
+            <div class="info"><p class="info-text">{transaction.hash}</p><CopyButton text={transaction.hash}/></div>
         </div>
-        <h3 class="ellipsis" style="margin: 0;">Transaction details</h3>
-    </div>      
-</div>
-<div class="card">
-    <div class="info-grid">
-        <p class="info-title">Hash:</p>
-        <div class="info"><p class="info-text">{data.transaction.hash}</p><CopyButton text={data.transaction.hash}/></div>
+        <div class="info-grid">
+            <p class="info-title">Type:</p>
+            <div class="info"><p class="info-text">{transaction.content.type}</p></div>
+        </div>
+        <div class="info-grid">
+            <p class="info-title">Currency:</p>
+            <div class="info"><p class="info-text">{transaction.content.data.properties.name} ({transaction.content.data.properties.currency})</p></div>
+        </div>
+        <div class="info-grid">
+            <p class="info-title">From:</p>
+            <div class="info"><p class="info-text">{transaction.content.from}</p><CopyButton text={transaction.content.from}></CopyButton></div>
+        </div>
+        <div class="info-grid">
+            <p class="info-title">To:</p>
+            <div class="info"><p class="info-text">{transaction.content.to}</p><CopyButton text={transaction.content.to}></CopyButton></div>
+        </div>
+        <div class="info-grid">
+            <p class="info-title">Amount:</p>
+            <div class="info"><p class="info-text">{transaction.content.amount}</p></div>
+        </div>
     </div>
-    <div class="info-grid">
-        <p class="info-title">Type:</p>
-        <div class="info"><p class="info-text">{data.transaction.content.type}</p></div>
-    </div>
-    <div class="info-grid">
-        <p class="info-title">Currency:</p>
-        <div class="info"><p class="info-text">{data.transaction.content.data.properties.name} ({data.transaction.content.data.properties.currency})</p></div>
-    </div>
-    <div class="info-grid">
-        <p class="info-title">From:</p>
-        <div class="info"><p class="info-text">{data.transaction.content.from}</p><CopyButton text={data.transaction.content.from}></CopyButton></div>
-    </div>
-    <div class="info-grid">
-        <p class="info-title">To:</p>
-        <div class="info"><p class="info-text">{data.transaction.content.to}</p><CopyButton text={data.transaction.content.to}></CopyButton></div>
-    </div>
-    <div class="info-grid">
-        <p class="info-title">Amount:</p>
-        <div class="info"><p class="info-text">{data.transaction.content.amount}</p></div>
-    </div>
-</div>
+{/await}
