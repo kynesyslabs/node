@@ -16,10 +16,22 @@ class DemosWebAuth {
 	keypair = null
 	stringified_keypair = null
 
-	constructor() {}
+	constructor() {
+		this.loggedIn = false
+        this.keypair = null
+        this.stringified_keypair = null
+	}
 
+	
+	/**
+	 * Description placeholder
+	 * @date 14/9/2023 - 13:52:34
+	 *
+	 * @static
+	 * @returns {DemosWebAuth}
+	 */
 	static getInstance() {
-        if (!this._instance) this._instance = new this()
+        if (!this._instance) this._instance = new DemosWebAuth()
         return this._instance
     }
 

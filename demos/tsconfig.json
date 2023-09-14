@@ -12,6 +12,7 @@
         "inlineSources": true,
         "outDir": "./dist",
         "baseUrl": "./",
+        "types": ["node"],
         "incremental": true,
         "skipLibCheck": true,
         "strictNullChecks": false,

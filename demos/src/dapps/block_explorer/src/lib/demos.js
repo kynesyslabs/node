@@ -188,12 +188,19 @@ let demos = {
         transmission.bundle.content.message = message
         transmission.bundle.content.data = args
         comlink.chain.current.currentMessage = transmission
-
-        // REVIEW Prior to sending the message, we hash and sign the comlink and the transmission objects
         
-        // TODO Eliminate this: generating a random identity for the signature
-        let seed =forge.random.getBytesSync(32)
-        let keys = forge.pki.ed25519.generateKeyPair({seed})
+        // REVIEW Getting our shared identity
+        try {
+            let id = DemosWebAuth.getInstance()
+            let keys = id.keypair
+        } catch (e) {
+            console.log("[ERROR LOADING IDENTITY]")
+            console.log(e)
+            // FIXME and // TODO Eliminate this: generating a random identity for the signature
+            let seed =forge.random.getBytesSync(32)
+            keys = forge.pki.ed25519.generateKeyPair({seed})
+        }
+
         let privkey = keys.privateKey
         let pubKey = keys.publicKey
         console.log(keys)

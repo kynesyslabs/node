@@ -18,6 +18,7 @@ import executeOperations from "../routines/executeOperations"
 import { Actor } from "../routines/executeOperations"
 import * as fs from "fs"
 var term = require("terminal-kit").terminal
+import Hashing from "src/libs/crypto/hashing"
 
 export interface OperationResult {
     success: boolean;
@@ -162,6 +163,33 @@ export default class GLS {
             "SELECT gas_multiplier FROM status_properties", // TODO Implement and make it dynamic
         )
         return response[0].gas_multiplier
+    }
+
+    // INFO The following getter is used to retrieve the hashed form of the sum of all the stakes at block N
+    static async getGLSHashedStakes(n: number = null) {
+        if (!n) {
+            n = await Chain.getLastBlockNumber()
+        }
+        let stakes = await Chain.read( // TODO Implement this in the schema directly (in the db)
+            "SELECT * FROM status_stakes WHERE first_seen <= " + n + " ORDER BY first_seen DESC",
+        )
+        // Hashing
+        let total = 0
+        for (let i = 0; i < stakes.length; i++) {
+            total += stakes[i].stake // TODO Probably won't work but is a poc rn
+        }
+        let hashed_stakes = Hashing.sha256(total.toString())
+        return hashed_stakes
+    }
+
+    static async getGLSBlockNodes(n: number = null) {
+        if (!n) {
+            n = await Chain.getLastBlockNumber()
+        }
+        let block_nodes = await Chain.read( // TODO Implement this in the schema directly (in the db)
+            "SELECT * FROM status_nodes_at_block WHERE block=" + n,
+        )
+        return block_nodes
     }
     // !SECTION Getters
 

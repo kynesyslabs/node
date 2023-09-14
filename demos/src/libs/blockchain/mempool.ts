@@ -55,6 +55,13 @@ export default class Mempool {
         await Chain.write("UPDATE mempool SET transactions ='" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")
     }
 
+    // INFO Writing the headers of the PoR to the mempool
+    public static async addHeaders(headers: any): Promise<void> { // TODO Add types
+        let mempool = await Mempool.getMempool()
+        // FIXME Ensure the schema of the headers is correctly inserted into the db
+        await Chain.write("UPDATE mempool SET headers ='" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")
+    }
+
     // INFO Removing a transaction from the mempool
     public static async removeTransaction(transaction: Transaction): Promise<void> {
         let mempool = await Mempool.getMempool()

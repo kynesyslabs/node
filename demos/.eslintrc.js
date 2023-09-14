@@ -4,13 +4,16 @@ module.exports = {
         es6: true,
         node: true,
     },
+    globals: {
+        NodeJS: "readonly",
+    },
     extends: "eslint:recommended",
     parserOptions: {
-        ecmaVersion: 2018,
-        "sourceType": "module",
+        ecmaVersion: 2020,
+        sourceType: "module",
     },
-    "parser": "@typescript-eslint/parser",
-    "plugins": ["@typescript-eslint"],
+    parser: "@typescript-eslint/parser",
+    plugins: ["@typescript-eslint"],
     rules: {
         indent: ["error", 4, { SwitchCase: 1 }],
         "linebreak-style": ["error", "unix"],
