@@ -190,15 +190,18 @@ let demos = {
         comlink.chain.current.currentMessage = transmission
         
         // REVIEW Getting our shared identity
+        let keys;
         try {
-            let id = DemosWebAuth.getInstance()
-            let keys = id.keypair
+            let id = DemosWebAuth.getInstance();
+            if(id.keypair === null) throw new Error("No keypair found");
+            keys = id.keypair;
         } catch (e) {
             console.log("[ERROR LOADING IDENTITY]")
             console.log(e)
             // FIXME and // TODO Eliminate this: generating a random identity for the signature
             let seed =forge.random.getBytesSync(32)
             keys = forge.pki.ed25519.generateKeyPair({seed})
+            //megabudino was here
         }
 
         let privkey = keys.privateKey
