@@ -72,7 +72,7 @@ export default class Transaction {
     }
 
     // INFO Given a transaction, sign it with the private key of the sender
-    public static sign(tx: Transaction, privateKey: pki.ed25519.BinaryBuffer) {
+    public static sign(tx: Transaction, privateKey: pki.ed25519.BinaryBuffer): any[] {
         // Check sanity of the structure of the tx object
         if (!tx.content) {
             return [false, "Missing tx.content"]
@@ -108,7 +108,7 @@ export default class Transaction {
     }
 
     // INFO Hashing the content of a transaction
-    static hash(tx: Transaction) {
+    static hash(tx: Transaction): any {
         let _hash = Hashing.sha256(JSON.stringify(tx.content))
         if (!_hash) {
             return false
