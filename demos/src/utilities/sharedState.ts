@@ -1,12 +1,16 @@
 // INFO This singleton is used to store the state of the application through different parts of the application.
 
 import * as forge from "node-forge"
+require("dotenv").config({path: "../../.commons" })
+import Cryptography from "src/libs/crypto/cryptography"
+import { Identity } from "src/libs/identity"
 
 export default class sharedState {
     private static instance: sharedState
 
     currentTimestamp: number = 0
     lastTimestamp: number = 0
+    identity: Identity
 
     // SECTION shared state variables
     runMainLoop: boolean = true
@@ -22,7 +26,6 @@ export default class sharedState {
     // !SECTION shared state variables
 
     constructor() {
-		
     }
 
     public static getInstance(): sharedState {
@@ -48,6 +51,13 @@ export default class sharedState {
         let delta = this.currentTimestamp - this.lastTimestamp + genesisTimestamp // Take into account the genesis timestamp
         this.setLastTimestamp()
         return delta
+    }
+
+    // ANCHOR Dynamic configurations (customizable in .commons)
+
+    // INFO How many ms for each check of the consensus loop
+    public getConsensusCheckStep(): number {
+        return Number(process.env.CONSENSUS_CHECK_INTERVAL)
     }
 
 }

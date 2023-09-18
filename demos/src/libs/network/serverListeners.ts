@@ -117,6 +117,7 @@ export default class ServerListeners {
                         await ServerHandlers.handleWeb2Request(
                             request,
                             content,
+                            this.peer.socket,
                         ))
                     break
 

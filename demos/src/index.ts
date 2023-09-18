@@ -121,6 +121,8 @@ async function main() {
 
     // NOTE The whole first part of main ensures the environment is ready to run
     await id.ensureIdentity()
+    // Setting the shared state
+    sharedState.getInstance().identity = id
     // Log identity
     term.green("[MAIN] WE ARE " + id.ed25519.publicKey.toString("hex") + "\n")
 

@@ -23,9 +23,9 @@ KyneSys Labs: https://www.kynesys.xyz/
  */
 
 // INFO This module contains all the methods needed to interact with web2 on DEMOS chain
-import { Web2Data } from "src/features/web2"
+import { Web2Data } from "src/features/web2/old"
 import { sha256 } from "node-forge"
-import web2registry from "src/features/web2/web2registry"
+import web2registry from "src/features/web2/old/web2registry"
 import axios from "axios"
 import axiosRetry from "axios-retry"
 import { sendMessageToPeers } from "./peerMessaging"

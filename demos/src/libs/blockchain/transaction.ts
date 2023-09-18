@@ -64,12 +64,6 @@ export default class Transaction {
         this.state_changes = []
     }
 
-    // INFO Populate self with transaction data, if is valid
-    ingest(tx: Transaction) {
-        let result: TransactionResponse
-        // TODO
-        return result
-    }
 
     // INFO Given a transaction, sign it with the private key of the sender
     public static sign(tx: Transaction, privateKey: pki.ed25519.BinaryBuffer): any[] {

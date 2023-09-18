@@ -27,7 +27,6 @@ import Sessions from "./routines/sessionManager"
 import { rBFT } from "../consensus/rBFT"
 import BFT from "../consensus/types/BFT"
 import RepresentativeShard from "../consensus/types/PoR"
-import { IWeb2Request } from "../../features/web2/types/Web2Request"
 
 var term = require("terminal-kit").terminal
 
@@ -121,25 +120,52 @@ export default class ServerHandlers {
         return { extra, require_reply, response }
     }
 
-    // NOTE Theoretically, content should be IWeb2Request compliant
-    // LINK "../../features/web2/types/Web2Request";
-    static async handleWeb2Request(request: any, content: any, senderSocket: any): Promise<any> {
+    static async handleWeb2Request(request: any, content: any): Promise<any> {
         console.log("[SERVER] Received web2Request")
         console.log(JSON.stringify(request))
 
         let extra: any,
             require_reply = false
         let response: unknown
-        // We get our connection string
-        // const currentPeerString = Identity.getInstance().getConnectionString()
-        // NOTE Switched to the new class
-        let fullResponse = await handleWeb2(content, senderSocket)
-        // Managing the results
-        if (fullResponse[0]) {
-            response = fullResponse[1]
-        } else {
-            response = "error"
-            extra = fullResponse[1]
+        const currentPeerString = Identity.getInstance().getConnectionString()
+        // FIXME Switch to the new class
+        switch (content.message.action) {
+            case "getUrl":
+                console.log("[SERVER] Received getUrl")
+                response = await web2handlers.http_request(
+                    content.message.httpVerb,
+                    content.message.url,
+                    content.message.headers,
+                    currentPeerString,
+                    PeerManager.getInstance().getPeers().length,
+                )
+                break
+            case "attestGetUrl":
+                console.log("[SERVER] Received attestation request for getUrl")
+                response = await web2handlers.http_attest(
+                    content.message.httpVerb,
+                    content.message.url,
+                    content.message.headers,
+                    currentPeerString,
+                    content.message.web2Data,
+                )
+                break
+            case "process_attestGetUrl":
+                console.log("[SERVER] Received process_attestGetUrl request")
+                response = await web2handlers.http_process_attestation(
+                    content.message.httpVerb,
+                    content.message.url,
+                    content.message.headers,
+                    currentPeerString,
+                    content.message.web2Data,
+                )
+                console.log(
+                    "[SERVER] Response from http process attestation is: " +
+                        JSON.stringify(response),
+                )
+                break
+            default:
+                break
         }
         return { extra, require_reply, response }
     }
