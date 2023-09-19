@@ -71,6 +71,7 @@ const s_server = https.createServer(ssl_options, app) // REVIEW Use tHIS instead
 
 const server = http.createServer(app)
 const io_server = new Server(server, {
+    wsEngine: require("eiows").Server, // TODO REVIEW Comment this line to use the standard ws engine
     cors: {
         origin: "*",
         methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
