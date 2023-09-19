@@ -11,6 +11,6 @@
     border-radius: 0;
     border: none;
     background-color: var(--background2-min);
-    padding: 32px;
     margin: 0 auto;
+    border: 1px solid var(--background3);
 }

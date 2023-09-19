@@ -8,7 +8,9 @@
     import Fuse from 'fuse.js'
     export let value;
     export let onChange;
-    let open = false;
+    export let open;
+    export let onOpen;
+
     let searchMode = false;
     let searchResults;
 
@@ -71,29 +73,6 @@
         position: relative;
         z-index: 200;
     }
-    .modal-background{
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        z-index:300;
-        background-color: rgba(0,0,0,.5);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 16px;
-
-    }
-    .modal-dialog{
-        background: rgb(20, 20, 20);
-        border: var(--border);
-        border-radius: var(--border-radius);
-        padding: var(--container-padding);
-        width: 100%;
-        max-width: 500px;
-        cursor: default;
-    }
     .chain-icon{
         width: 40px;
         height: 40px;
@@ -122,7 +101,8 @@
         }
     }
     .chain-label{
-        margin: 0;
+        margin: 0 0 4px;
+        font-size: 1rem;
     }
     .token-label{
         margin: 0;
@@ -151,44 +131,41 @@
         align-items: center;
         gap: 2px;
     }
+    .chain-selection{
+        width: 100%;
+    }
 </style>
 
-{#if open}
-<button on:click={()=>{open=false}} transition:modalAnimation={{
-    duration: 350,
-    easing: cubicInOut
-}} class="modal-background">
-    <button transition:dialogAnimation={{
-        duration: 350,
-        easing: cubicInOut
-    }} class="modal-dialog" on:click={(ev)=>{ev.stopPropagation();}}>
-        <h3>Select a blockchain</h3>
-        <Searchbar {setSearchMode} onChange={search} hidesubmit={true} style="margin:0;" prompt="Search for a blockchain"/>
-        {#if searchMode}
-            <p style="margin-bottom:0">{searchResults.length} results</p>
-        {/if}
-        <div class="chain-options">
-            {#each options as chain}
-                <button on:click={()=>{onChange(chain.id); open=false;}} class="chain-option">
-                    <img class="chain-icon" src={chain.icon} alt={chain.label}/>
-                    <div>
-                        <p class="chain-label">{chain.label}</p>
-                        <p class="token-label">{chain.token}</p>
-                    </div>
-                </button>
-            {/each}
-        </div>
-    </button>
-</button>
-{/if}
-<button class="combobox" on:click={()=>{open = true}}>
-    {#if !value}
-    <p class="ellipsis" style="margin:0;opacity:.5">Select option</p>
+<div class="chain-selection">
+    {#if open}
+        <button class="chain-selection" on:click={(ev)=>{ev.stopPropagation();}}>
+            <Searchbar {setSearchMode} onChange={search} hidesubmit={true} style="margin:0;" prompt="Search for a blockchain"/>
+            {#if searchMode}
+                <p style="margin-bottom:0">{searchResults.length} results</p>
+            {/if}
+            <div class="chain-options">
+                {#each options as chain}
+                    <button on:click={()=>{onChange(chain.id); open=false;}} class="chain-option">
+                        <img class="chain-icon" src={chain.icon} alt={chain.label}/>
+                        <div>
+                            <p class="chain-label">{chain.label}</p>
+                            <p class="token-label">{chain.token}</p>
+                        </div>
+                    </button>
+                {/each}
+            </div>
+        </button>
     {:else}
-    <div class="selected-chain">
-        <img class="chain-icon-mini" src={chains.find(c=>c.id === value).icon} alt={chains.find(c=>c.id === value).label}/>
-        <p class="ellipsis" style="margin:0; margin-top:2px;">{chains.find(c=>c.id === value).label}</p>
-    </div>
+        <button class="combobox" on:click={onOpen}>
+            {#if !value}
+            <p class="ellipsis" style="margin:0;opacity:.5">Select option</p>
+            {:else}
+            <div class="selected-chain">
+                <img class="chain-icon-mini" src={chains.find(c=>c.id === value).icon} alt={chains.find(c=>c.id === value).label}/>
+                <p class="ellipsis" style="margin:0; margin-top:2px;">{chains.find(c=>c.id === value).label}</p>
+            </div>
+            {/if}
+            <Fa icon={faChevronDown}></Fa>
+        </button>
     {/if}
-    <Fa icon={faChevronDown}></Fa>
-</button>
+</div>

@@ -29,4 +29,6 @@
 {:then transactions}
     <h2 class="title">Transactions</h2>
     <TransactionGrid transactions={transactions}/>
+{:catch}
+    <p style="text-align: center;">Something went wrong</p>
 {/await}

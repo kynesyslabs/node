@@ -1,37 +1,22 @@
 <script>
-	import CodePreview from "$lib/components/CodePreview.svelte";
-	import Combobox from "$lib/components/Combobox.svelte";
-	import { faCode, faEllipsisVertical, faPlus, faTrash } from "@fortawesome/free-solid-svg-icons";
-	import Fa from "svelte-fa";
     import { cubicInOut } from 'svelte/easing';
-    import {chains, universalTasks, evmTasks, mUniversalTasks, mEvmTasks} from '$lib/chainscript.js';
-    import "$lib/styles/crosschain/txblock.css";
+    import {chains, universalTasks, evmTasks, mUniversalTasks, mEvmTasks, tasks} from '$lib/chainscript.js';
 	import TaskParam from "$lib/components/crosschain/TaskParam.svelte";
-	import CodeEditor from "$lib/components/CodeEditor.svelte";
-    import CopyButton from "$lib/components/CopyButton.svelte";
 	import ChainSelection from "$lib/components/inputs/ChainSelection.svelte";
-	import { onMount } from "svelte";
-
+    import {budinofade} from '$lib/transitions.js';
 
     export let onClose;
     export let onSave;
     export let txblock;
-    export let index;
-    $:console.log(txblock)
+
     //flags to check if all the fields are filled: [chain, task, params]
-    let complete = [false, false, false];
+    let complete = [false, true, false];
 
     //editor (props independent) variables
     //chains
     let editorchains = txblock.chain=="crosschain"?txblock.subchain:[txblock.chain, null];
     //mutlichain bool
     let multichain = txblock.chain=="crosschain";
-    //code mode bool
-    let codemode = false;
-    //options bool
-    let options = false;
-    //selected task
-    let selectedTask = txblock.task.type;
     //params values
     let params = txblock.task.params;
     //parsedJSON
@@ -40,7 +25,16 @@
     //available tasks for selected chain
     let availableTasks = [];
     //current params for selected task
-    let currentParams = [];
+    let currentParams = tasks.find(t=>t.id === txblock.task.type).params;
+
+    //utils
+    let taskinfo;
+    $:if(txblock.task.type)
+    {
+        taskinfo = tasks.find(t=>t.id === txblock.task.type);
+    }
+    let chainflag;
+    $: chainflag = (editorchains[0] !== null && !multichain) || (editorchains[0] !== null && editorchains[1] !== null && multichain)
 
     function dialogAnimation(node, {duration, easing}) {
         return {
@@ -48,23 +42,8 @@
             css: t => {
                 const eased = easing(t);
                 return `
-                    transform: scale(${0.9 + eased/10});
-                    opacity: ${eased};
+                    transform: translate(-50%, -50%) scale(${0.9 + eased/10});
                     transform-origin:center;
-                );`;
-            }
-        };
-    }
-
-    function customAnimation(node, {duration, easing}) {
-        return {
-            duration,
-            css: t => {
-                const eased = easing(t);
-                return `
-                    transform: scale(${0.9 + eased/10});
-                    opacity: ${eased};
-                    transform-origin:top right;
                 );`;
             }
         };
@@ -76,19 +55,6 @@
         if(!id)return false;
         return chains.find((chain)=>{if(chain.id==id)return chain}).is_evm;
     }
-
-
-
-
-    //GET params FOR SELECTED task
-    function getCurrentParams(taskid)
-    {
-        const currentTask = availableTasks.find((task)=>{if(task.id==taskid)return task});
-        if (!currentTask) return [];
-        return availableTasks.find((task)=>{if(task.id==taskid)return task}).params;
-    }
-
-
 
     //EFFECT FOR CHANGING CHAINS –––– SET AVAILABLE TASKS
         //single chain
@@ -124,29 +90,6 @@
             availableTasks = mUniversalTasks;
     }
 
-    //EFFECT FOR CHANGING TASK
-    $: if(selectedTask)
-    {
-        //update current params
-        currentParams = getCurrentParams(selectedTask);
-        let newParams = {};
-        currentParams.forEach((param)=>{
-            if(!params[param.id])
-            newParams[param.id] = "";
-            else
-            newParams[param.id] = params[param.id];
-        });
-        params = newParams;
-        //update props
-        txblock.task.type = selectedTask;
-        //flag filled
-        complete[1] = selectedTask !== null;
-    }
-    else
-    {
-        currentParams = [];
-    }
-
     $:txblock.task.params = params;
 
     //EFFECT FOR CHANGING PARAMS
@@ -155,61 +98,115 @@
     $:parsedJSON = JSON.stringify(txblock, null, 4);
 </script>
 
-<!-- IL MODO PER SMISTARE MULTICHAIN E SINGLECHAIN È operation.chain == "crosschain" => se falso rappresenta la chain selezionata invece -->
-<div transition:dialogAnimation={{
-    duration: 350,
-    easing: cubicInOut
-}} class="modal-txblock">
-    <div class="txblock">
-        <div class="txblock-header">
-            <h3 class="txblock-header-label"><span style="font-weight:bold;">{multichain?"Multichain":"Single chain"} operation</span> <span style="opacity: .5;">on DEMOS network</span></h3>
-            <div class="txblock-header-header">
-                <div class="txblock-header-blockchain">
-                    {#if multichain}
-                        <ChainSelection onChange={(newValue)=>{editorchains[0] = newValue;}} value={editorchains[0]}/>
-                        <ChainSelection onChange={(newValue)=>{editorchains[1] = newValue;}} value={editorchains[1]}/>
-                    {:else}
-                        <ChainSelection onChange={(newValue)=>{editorchains[0] = newValue;}} value={editorchains[0]}/>
-                    {/if}
-                    <div class="card-ellipsis-container">
-                        <button on:click={()=>{multichain=!multichain}} class={`secondary card-ellipsis color-transition tooltip ${multichain?"selected":""}`}>
-                            <span class="tooltiptext">Multichain</span>
-                            <Fa icon={faPlus}></Fa>
-                        </button>
-                    </div>
+<style>
+    .opeditor-title{
+        display: flex;
+        align-items: center;
+        margin-bottom: 24px;
+        gap: 16px;
+    }
+
+    .opeditor-title h3{
+        margin: 0;
+    }
+
+    .opeditor-chain-selection{
+        margin-bottom: 24px;
+        width: 500px;
+        max-width: 100%;
+    }
+
+    .opeditor-params{
+        width: 100%;
+        display: grid;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 16px;
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .modal-txblock{
+        background-color: var(--background-min);
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        width: fit-content;
+        max-width: calc(100% - 32px);
+        max-height: calc(100dvh - 48px);
+        z-index: 1000;
+        padding: 64px;
+        overflow: auto;
+        transform: translate(-50%, -50%) scale(1);
+    }
+
+    @media (max-width: 768px){
+        .modal-txblock{
+            padding: 32px;
+        }
+    }
+
+    .modal-background{
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100dvw;
+        height: 100dvh;
+        background-color: rgba(0,0,0,.5);
+        z-index: 999;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .txblock{
+        max-width: 1250px;
+        margin: auto;
+    }
+
+    .tx-buttons{
+        display: flex;
+        gap: 16px;
+        margin-top: 16px;
+        justify-content: flex-end;
+    }
+</style>
+
+<div class="modal-background" transition:budinofade>
+    <!-- IL MODO PER SMISTARE MULTICHAIN E SINGLECHAIN È operation.chain == "crosschain" => se falso rappresenta la chain selezionata invece -->
+    <div transition:dialogAnimation={{
+        duration: 350,
+        easing: cubicInOut
+    }} class="modal-txblock">
+        <div class="txblock">
+            <div class="opeditor-title">
+                <img style="opacity: .3;" alt="task icon" src={taskinfo.icon}/>
+                <div>
+                    <h3 class="operationcard-label">{taskinfo.label} task <span style="opacity: .6;">on DEMOS network</span></h3>
                 </div>
             </div>
-        </div>
-        {#if (editorchains[0] !== null && !multichain) || (editorchains[0] !== null && editorchains[1] !== null && multichain)}
-            <div class="txblock-body generic-shadow">
-                {#if !codemode}
-                    <div class="txblock-input">
-                        <p class="label">Select task</p>
-                        <Combobox onChange={(taskid)=>{selectedTask = taskid}} options={availableTasks} value={selectedTask}/>
-                    </div>
+            <div class="opeditor-chain-selection">
+                {#if multichain}
+                    <ChainSelection open={!chainflag} onOpen = {()=>{chainflag = false}} onChange={(newValue)=>{editorchains[0] = newValue;}} value={editorchains[0]}/>
+                    <ChainSelection open={!chainflag} onOpen = {()=>{chainflag = false}} onChange={(newValue)=>{editorchains[1] = newValue;}} value={editorchains[1]}/>
+                {:else}
+                    <ChainSelection open={!chainflag} onOpen = {()=>{chainflag = false}} onChange={(newValue)=>{editorchains[0] = newValue;}} value={editorchains[0]}/>
+                {/if}
+            </div>
+            {#if chainflag}
+                <div class="opeditor-params generic-shadow">
                     {#each currentParams as param}
                         <TaskParam label={param.label} value={params[param.id]} onChange={(newValue)=>{params[param.id]=newValue;}}></TaskParam>
                     {/each}
-                    <div style="width: 100%;">
-
-                    </div>
-                {:else}
-                    <CodeEditor text={parsedJSON} id={`code-editor${index}`}></CodeEditor>
-                {/if}
+                </div>
+            {/if}
+            <div class="tx-buttons">
+                <button class="secondary" on:click={onClose}>Cancel</button>
+                <button disabled={!(complete[0]&&complete[1]&&complete[2])} on:click={onSave(txblock)} class="primary tooltip">
+                    {#if !(complete[0]&&complete[1]&&complete[2])}
+                    <span class="tooltiptext">Fill all fields</span>
+                    {/if}
+                Save</button>
             </div>
-        {/if}
-        <div style="display: flex; gap:8px; align-items:center;position:relative;">
-            <p class="label">Output</p>
-            <CopyButton text={parsedJSON}></CopyButton>
-        </div>
-        <CodePreview text={parsedJSON} id={`code-editor${index}`}></CodePreview>
-        <div class="tx-buttons">
-            <button class="secondary" on:click={onClose}>Cancel</button>
-            <button disabled={!(complete[0]&&complete[1]&&complete[2])} on:click={onSave(txblock)} class="primary tooltip">
-                {#if !(complete[0]&&complete[1]&&complete[2])}
-                <span class="tooltiptext">Fill all fields</span>
-                {/if}
-            Save</button>
         </div>
     </div>
 </div>

@@ -122,4 +122,6 @@
                 </div>
             </div>
     </div>
+{:catch}
+    <p style="text-align: center;">Something went wrong</p>
 {/await}

@@ -37,12 +37,11 @@
         margin: 24px 0px;
     }
     .header{
-        max-width: 1250px;
+        max-width: 1440px;
         margin: 16px auto;
         width: calc(100% - 48px);
         display: flex;
         gap: 0 32px;
-        height: 100%;
         position: relative;
         z-index: 500;
         align-items: center;

@@ -1,5 +1,45 @@
 //THIS FILE CONTAINS NOCODE DATA FOR CROSSCHAIN TRANSACTION
 
+class Operation{
+    constructor({chain = null, subchain = null, is_evm = false, rpc = null, tasktype = null, taskparams = {}}){
+        this.chain = chain;
+        this.subchain = subchain;
+        this.is_evm = is_evm;
+        this.rpc = rpc;
+        if(tasktype)
+        {
+            let emptyParams = {}
+            tasks.find(task => task.id == tasktype).params.forEach(param => {
+                emptyParams[param.id] = null;
+            });
+            this.task = {
+                type: tasktype,
+                params: emptyParams
+            }
+        }
+        else this.task = {
+            type: tasktype,
+            params: taskparams
+        }
+    }
+}
+
+class Conditional{
+    constructor(){
+        this.operator = null;
+        this.statement = "";
+        this.callback = null;
+    }
+}
+
+const blockIcons = [
+    {id:"pay", icon:"/task-icons/wallet.svg"},
+    {id:"contract_read", icon:"/task-icons/contract.svg"},
+    {id:"contract_write", icon:"/task-icons/write.svg"},
+    {id:"multiexample", icon:"/task-icons/browser-hash.svg"},
+    {id:"conditional", icon:"/task-icons/curly-brackets.svg"},
+]
+
 //!!chains
 const chains = [
     {
@@ -99,7 +139,7 @@ const tasks = [
         id:"contract_write",
         label:"Write Contract",
         constraints:["evm"],
-        icon:"fa-feather",
+        icon:"/task-icons/write.svg",
         params:[
             {
                 id:"address",
@@ -190,4 +230,4 @@ const evmTasks = [
 const mUniversalTasks = [];
 const mEvmTasks = [];
 
-export {chains, tasks, universalTasks, evmTasks, mUniversalTasks, mEvmTasks};
+export {chains, tasks, universalTasks, evmTasks, mUniversalTasks, mEvmTasks, Operation, Conditional, blockIcons};

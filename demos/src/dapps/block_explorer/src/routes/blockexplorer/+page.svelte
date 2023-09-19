@@ -1,6 +1,6 @@
 <script>
     import Fa from 'svelte-fa'
-    import { faArrowRightLong } from '@fortawesome/free-solid-svg-icons'
+    import { faArrowRightLong, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
     import '$lib/global.css'
     import { goto } from '$app/navigation';
 	import Searchbar from '$lib/components/blockexplorer/HomeSearchbar.svelte';
@@ -86,6 +86,14 @@
             grid-template-columns: 1fr;
         }
     }
+
+    .error-card{
+        padding: 24px;
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 16px;
+        opacity: .5;
+    }
 </style>
 
 <div class="container">
@@ -105,6 +113,11 @@
                     <BlockRow/>
                 {:then block}
                     <BlockRow block={block}/>
+                {:catch error}
+                    <div class="error-card">
+                        <Fa icon={faTriangleExclamation} size="2.5x"></Fa>
+                        <p>Something went wrong</p>
+                    </div>
                 {/await}
             </div>
             <a href="/blockexplorer/blocks">
@@ -122,6 +135,11 @@
                     {#each block.content.ordered_transactions as transaction}
                         <TransactionRow transaction={transaction}/>
                     {/each}
+                {:catch error}
+                    <div class="error-card">
+                        <Fa icon={faTriangleExclamation} size="2.5x"></Fa>
+                        <p>Something went wrong</p>
+                    </div>
                 {/await}
             </div>
             <a href="/blockexplorer/transactions">

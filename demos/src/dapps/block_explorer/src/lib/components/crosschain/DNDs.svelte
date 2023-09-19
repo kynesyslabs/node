@@ -1,0 +1,77 @@
+<script>
+    import {dndzone, TRIGGERS, SHADOW_ITEM_MARKER_PROPERTY_NAME} from "svelte-dnd-action";
+    import {Operation, blockIcons} from '$lib/chainscript.js';
+    import { v4 as uuidv4 } from 'uuid';
+    import cloneDeep from 'lodash/cloneDeep';
+    export let blocks;
+    let availableBlocks = [...blocks];
+
+    let shouldIgnoreDndEvents = false;
+    function considerAvailable(e)
+    {
+        //console.warn(`got consider ${JSON.stringify(e.detail, null, 2)}`);
+        const {trigger, id} = e.detail.info;
+        if (trigger === TRIGGERS.DRAG_STARTED) {
+            console.warn(`copying ${id}`);
+            const idx = availableBlocks.findIndex(item => item.id === id);
+            const newId = uuidv4();
+			e.detail.items = e.detail.items.filter(item => !item[SHADOW_ITEM_MARKER_PROPERTY_NAME]);
+            e.detail.items.splice(idx, 0, {...availableBlocks[idx], id: newId});
+            console.log(e.detail.items);
+            availableBlocks = cloneDeep(e.detail.items);
+            shouldIgnoreDndEvents = true;
+        }
+        else if (!shouldIgnoreDndEvents) {
+            availableBlocks = e.detail.items;
+        }
+        else {
+            availableBlocks = [...availableBlocks];
+        }
+    }
+
+    function finalizeAvailable(e)
+    {
+        if (!shouldIgnoreDndEvents) {
+            availableBlocks = e.detail.items;
+        }
+        else {
+            availableBlocks = [...availableBlocks];
+            shouldIgnoreDndEvents = false;
+        }
+    }
+</script>
+
+<style>
+    .operation{
+        padding: 24px;
+        position: relative;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background-color: var(--background2-min);
+        border: 1px solid var(--background3);
+    }
+    .dnd{
+        display: grid;
+        grid-template-columns: 1fr;
+        grid-auto-rows: 1fr;
+        gap: 16px;
+    }
+</style>
+
+<div class="dnd" use:dndzone={{items:availableBlocks, dropFromOthersDisabled:true}} on:consider={considerAvailable} on:finalize={finalizeAvailable}>
+    {#each availableBlocks as block(block.id)}
+        {#if block.data.constructor == Operation}
+            <div class="card operation">
+                <img style="opacity: .3;" alt="task icon" src={blockIcons.find(item => item.id == block.data.task.type).icon}/>
+                {block.label}
+            </div>
+        {:else}
+            <div class="card operation">
+                <img style="opacity: .3;" alt="task icon" src={blockIcons.find(item => item.id == "conditional").icon}/>
+                {block.label}
+            </div>
+        {/if}
+    {/each}
+</div>
