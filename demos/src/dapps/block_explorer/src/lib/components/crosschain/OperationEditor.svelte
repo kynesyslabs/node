@@ -6,6 +6,7 @@
     import {budinofade} from '$lib/transitions.js';
 
     export let onClose;
+    export let onDelete;
     export let onSave;
     export let txblock;
 
@@ -54,6 +55,11 @@
     {
         if(!id)return false;
         return chains.find((chain)=>{if(chain.id==id)return chain}).is_evm;
+    }
+
+    function hasEVMconstraint(task)
+    {
+        return tasks.find(t=>t.id === task).constraints.includes("evm");
     }
 
     //EFFECT FOR CHANGING CHAINS –––– SET AVAILABLE TASKS
@@ -186,10 +192,10 @@
             </div>
             <div class="opeditor-chain-selection">
                 {#if multichain}
-                    <ChainSelection open={!chainflag} onOpen = {()=>{chainflag = false}} onChange={(newValue)=>{editorchains[0] = newValue;}} value={editorchains[0]}/>
-                    <ChainSelection open={!chainflag} onOpen = {()=>{chainflag = false}} onChange={(newValue)=>{editorchains[1] = newValue;}} value={editorchains[1]}/>
+                    <ChainSelection evmTask={hasEVMconstraint(taskinfo.id)} open={!chainflag} onOpen = {()=>{chainflag = false}} onChange={(newValue)=>{editorchains[0] = newValue;}} value={editorchains[0]}/>
+                    <ChainSelection evmTask={hasEVMconstraint(taskinfo.id)} open={!chainflag} onOpen = {()=>{chainflag = false}} onChange={(newValue)=>{editorchains[1] = newValue;}} value={editorchains[1]}/>
                 {:else}
-                    <ChainSelection open={!chainflag} onOpen = {()=>{chainflag = false}} onChange={(newValue)=>{editorchains[0] = newValue;}} value={editorchains[0]}/>
+                    <ChainSelection evmTask={hasEVMconstraint(taskinfo.id)} open={!chainflag} onOpen = {()=>{chainflag = false}} onChange={(newValue)=>{editorchains[0] = newValue;}} value={editorchains[0]}/>
                 {/if}
             </div>
             {#if chainflag}
@@ -200,7 +206,7 @@
                 </div>
             {/if}
             <div class="tx-buttons">
-                <button class="secondary" on:click={onClose}>Cancel</button>
+                <button class="secondary" on:click={()=>{complete[0]&&complete[2]?onClose():onDelete()}}>Cancel</button>
                 <button disabled={!(complete[0]&&complete[1]&&complete[2])} on:click={onSave(txblock)} class="primary tooltip">
                     {#if !(complete[0]&&complete[1]&&complete[2])}
                     <span class="tooltiptext">Fill all fields</span>

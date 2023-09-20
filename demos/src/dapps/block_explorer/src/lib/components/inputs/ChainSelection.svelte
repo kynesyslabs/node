@@ -10,11 +10,14 @@
     export let onChange;
     export let open;
     export let onOpen;
+    export let evmTask;
+
+    console.log(evmTask);
 
     let searchMode = false;
     let searchResults;
 
-    const fuse = new Fuse(chains, {keys: ["label", "token", "id"]});
+    const fuse = new Fuse(evmTask?chains.filter(c=>c.is_evm):chains, {keys: ["label", "token", "id"]});
 
     function search(pattern){
         searchResults = fuse.search(pattern);
@@ -28,7 +31,7 @@
     let options;
     $: if (!searchMode)
     {
-        options = chains;
+        options = evmTask?chains.filter(c=>c.is_evm):chains;
     }
     else
     {

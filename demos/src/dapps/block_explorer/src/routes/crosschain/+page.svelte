@@ -1,11 +1,9 @@
 <script>
-	import { faLongArrowRight, faPlus } from "@fortawesome/free-solid-svg-icons";
-	import Fa from "svelte-fa";
     import { v4 as uuidv4 } from "uuid";
 	import OperationEditor from "$lib/components/crosschain/OperationEditor.svelte";
     import {dndzone} from "svelte-dnd-action";
 	import OperationCard from "$lib/components/crosschain/OperationCard.svelte";
-    import {Operation} from "$lib/chainscript.js";
+    import {tasks} from "$lib/chainscript.js";
     import {flip} from "svelte/animate";
 
     localStorage.clear("operations");
@@ -42,7 +40,6 @@
         let newItemIndex = operations.findIndex(op=>op.id == e.detail.info.id);
         let operation = operations[newItemIndex];
         let chainflag = (operation.data.chain == "crosschain" && operation.data.subchain) || (operation.data.chain !== "crosschain" && operation.data.chain);
-        console.log(operation.data.task.params);
         let taskflag = true;
         for(let i = 0; i < Object.values(operation.data.task.params).length; i++)
         {
@@ -52,12 +49,9 @@
                 break;
             }
         }
-        console.log(chainflag, taskflag);
         if(!chainflag || !taskflag)
             editIndex = operations.findIndex(op=>op.id == e.detail.info.id);
     }
-
-
     $:localStorage.setItem("operations", JSON.stringify(operations));
 </script>
 
@@ -71,16 +65,6 @@
     }
     .title{
         margin: 0;
-    }
-    .action-buttons{
-        display: flex;
-        justify-content: center;
-        text-align: center;
-        font-weight: bold;
-        color: white;
-        border-radius: 0 0 var(--border-radius) var(--border-radius);
-        gap: 16px;
-        margin: 32px auto 0;
     }
     .no-operations{
         text-align: center;
@@ -97,16 +81,6 @@
         margin: 0;
         opacity: .4;
     }
-    @media only screen and (max-width: 600px) {
-        .action-buttons{
-            flex-wrap: wrap;
-        }
-    }
-    .action-button{
-        flex-basis: 100%;
-        max-width: 300px;
-    }
-
     .dnd{
         display: grid;
         grid-template-columns: 1fr;
@@ -117,7 +91,7 @@
 </style>
 
 {#if editIndex !== null}
-    <OperationEditor onSave={(data)=>{onUpdate(editIndex, data); editIndex = null;}} txblock={operations[editIndex].data} onClose={()=>{editIndex = null}}/>
+    <OperationEditor onSave={(data)=>{onUpdate(editIndex, data); editIndex = null;}} txblock={operations[editIndex].data} onClose={()=>{editIndex = null}} onDelete={()=>{deleteOperation(editIndex); editIndex=null}}/>
 {/if}
     <div>
         <div class="title-container">
@@ -140,9 +114,5 @@
                     {/each}
                 {/if}
             </div>
-            <!--<div class="action-buttons">
-                <button class="secondary color-transition action-button" on:click={()=>{editing = "add";}}><Fa icon={faPlus} style="margin-right:8px;"></Fa>Add operation</button>
-                <button class="primary color-transition action-button">Execute<Fa style="margin-left:8px;" icon={faLongArrowRight}></Fa></button>
-            </div>-->
         </div>
     </div>

@@ -77,24 +77,6 @@ button{
     cursor: pointer;
 }
 
-@font-face {
-    font-family: 'Neue Machina';
-    src: url('/nm/NeueMachina-Light.otf');
-}
-
-@font-face {
-    font-family: 'Helvetica Neue Light';
-    src: url('/fonts/HelveticaNeue Light.ttf');
-    font-weight: normal;
-}
-
-@font-face {
-    font-family: 'Helvetica Neue Light';
-    src: url('/fonts/HelveticaNeue Bold.ttf');
-    font-weight: bold;
-}
-
-
 /* ATTRIBUTES*/
 .fake-link{
     color: var(--accent-accessible);

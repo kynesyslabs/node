@@ -42,7 +42,7 @@
         width: 100%;
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 16px;
         background-color: var(--background2-min);
         border: 1px solid var(--background3);
     }
@@ -77,17 +77,36 @@
     .dialog-option:hover svg path{
         fill: black;
     }
+    .params-preview{
+        display: flex;
+        gap: 16px;
+    }
+    .params-preview p{
+        margin: 8px 0 0;
+        opacity: .6;
+        font-size: .8rem;
+        font-weight: bold;
+    }
 </style>
 
+
 <div class="card operation">
-    {#if taskinfo && chaininfo}
-        <img style="opacity: .3;" alt="task icon" src={taskinfo.icon}/>
+    <img style="opacity: .3;" alt="task icon" src={taskinfo.icon}/>
+    {#if chaininfo}
         <div>
             <p class="operationcard-label">{taskinfo.label} on {chaininfo.label}</p>
+            <div class="params-preview">
+                {#each taskinfo.params as param}
+                    <p>{param.label}: <span style="font-weight: normal;">{operation.data.task.params[param.id]}</span></p>
+                {/each}
+            </div>
         </div>
         <img width=24px alt="blockchain icon" style="margin-left: auto;" src={chaininfo.icon}/>
     {:else}
-        <p class="operationcard-label">Single chain operation</p>
+        <div>
+            <p class="operationcard-label">{taskinfo.label} task <span style="opacity: .6;">– please select a chain</span></p>
+        </div>
+        <div style="margin-left: auto"></div>
     {/if}
     <button on:click={()=>{menuopen = true;}} class="shallow color-transition"><Fa icon={faEllipsisV}></Fa></button>
     {#if menuopen}

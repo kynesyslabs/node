@@ -76,3 +76,28 @@ h4{
         font-size: 2.125rem;
     }
 }
+
+
+@font-face {
+    font-family: 'Neue Machina';
+    src: url('/fonts/NeueMachina-Light.otf');
+    font-weight: normal;
+}
+
+@font-face {
+    font-family: 'Neue Machina';
+    src: url('/fonts/NeueMachina-Ultrabold.otf');
+    font-weight: bold;
+}
+
+@font-face {
+    font-family: 'Helvetica Neue Light';
+    src: url('/fonts/HelveticaNeue Light.ttf');
+    font-weight: normal;
+}
+
+@font-face {
+    font-family: 'Helvetica Neue Light';
+    src: url('/fonts/HelveticaNeue Bold.ttf');
+    font-weight: bold;
+}

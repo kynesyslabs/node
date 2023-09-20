@@ -17,7 +17,6 @@
             const newId = uuidv4();
 			e.detail.items = e.detail.items.filter(item => !item[SHADOW_ITEM_MARKER_PROPERTY_NAME]);
             e.detail.items.splice(idx, 0, {...availableBlocks[idx], id: newId});
-            console.log(e.detail.items);
             availableBlocks = cloneDeep(e.detail.items);
             shouldIgnoreDndEvents = true;
         }
