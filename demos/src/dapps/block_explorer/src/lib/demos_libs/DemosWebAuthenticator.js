@@ -57,8 +57,8 @@ class DemosWebAuth {
 			// Stringify the keypair
 			console.log("[CREATE WALLET] Stringifying keypair...")
 			this.stringified_keypair = {
-				privateKey: forge_converter.forgeToString(this.keypair.privateKey),
-				publicKey: forge_converter.forgeToString(this.keypair.publicKey),
+				privateKey: forge_converter.forgeToHexString(this.keypair.privateKey),
+				publicKey: forge_converter.forgeToHexString(this.keypair.publicKey),
 			}
 			result = [true, this.stringified_keypair]
 			console.log(this.stringified_keypair)
@@ -151,8 +151,8 @@ class DemosWebAuth {
 	async verify (message, s_signature, s_publicKey) {
 		let result = [true, ""]
 		// Deriving the buffers from the strings
-		let publicKey = forge_converter.stringToForge(publicKey)
-		let signature = forge_converter.stringToForge(signature)
+		let publicKey = forge_converter.hexStringToForge(s_publicKey)
+		let signature = forge_converter.hexStringToForge(s_signature)
 		try {
 			let verify_result = forge.pki.ed25519.verify(message, signature, publicKey)
 			result = [true, verify_result]

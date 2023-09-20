@@ -35,21 +35,10 @@ export default class sharedState {
         return sharedState.instance
     }
 
-    // INFO Set the current timestamp as the last
-    public setLastTimestamp() {
-        this.lastTimestamp = this.currentTimestamp
-    }
-
-    // INFO Get the timestamp now
-    public getTimestamp(): number {
-        this.currentTimestamp = Date.now()
-        return this.currentTimestamp
-    }
-
     public getTimePassed(genesisTimestamp: number): number {
-        this.getTimestamp()
-        let delta = this.currentTimestamp - this.lastTimestamp + genesisTimestamp // Take into account the genesis timestamp
-        this.setLastTimestamp()
+        this.currentTimestamp = Date.now()
+        let delta = this.currentTimestamp - this.lastTimestamp
+        this.lastTimestamp = this.currentTimestamp // FIXME This must be the last block timestamp
         return delta
     }
 
@@ -58,6 +47,10 @@ export default class sharedState {
     // INFO How many ms for each check of the consensus loop
     public getConsensusCheckStep(): number {
         return Number(process.env.CONSENSUS_CHECK_INTERVAL)
+    }
+
+    public getConsensusTime(): number {
+        return Number(process.env.CONSENSUS_TIME)
     }
 
 }
