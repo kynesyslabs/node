@@ -42,6 +42,11 @@ export default class sharedState {
         return delta
     }
 
+    public getTimestamp(): number {
+        this.currentTimestamp = Date.now() // REVIEW Maybe
+        return this.currentTimestamp
+    }
+
     // ANCHOR Dynamic configurations (customizable in .commons)
 
     // INFO How many ms for each check of the consensus loop

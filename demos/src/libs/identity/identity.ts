@@ -43,7 +43,7 @@ export default class Identity {
             this.ed25519 = await cryptography.load("./.demos_identity") // TODO Add load with cryptography
             Logger.log("Loaded ecdsa identity")
         } else {
-            this.ed25519 = await cryptography.new()
+            this.ed25519 = cryptography.new()
             // Writing the identity to disk in binary format
             await cryptography.save(this.ed25519, "./.demos_identity")
             Logger.log("Generated new identity")

@@ -31,21 +31,65 @@ export default class Cryptography {
         return keys
     }
 
-
-    static async save(keypair: pki.KeyPair, path: string) {
+    // TODO Eliminate the old legacy compatibility
+    static async save(keypair: pki.KeyPair, path: string, mode="hex") {
         console.log(keypair.privateKey)
-        await fs.writeFile(path, JSON.stringify(keypair.privateKey))
-
+        if (mode === "hex") {
+            let hexPrivKey = Cryptography.saveToHex(keypair.privateKey)
+            await fs.writeFile(path, hexPrivKey)
+        } else {
+            await fs.writeFile(path, JSON.stringify(keypair.privateKey))
+        }
     }
 
+    static saveToHex(forgeBuffer: pki.PrivateKey): string {
+        console.log("[forge to string encoded]")
+        console.log(forgeBuffer) // REVIEW if it is like this
+        let stringBuffer = forgeBuffer.toString("hex")
+        console.log("DECODED INTO:")
+        console.log("0x" + stringBuffer)
+        return "0x" + stringBuffer
+    }
+
+
+    // TODO Eliminate the old legacy compatibility
     static async load(path) {
         let keypair: pki.KeyPair = {
             privateKey: null,
             publicKey: null,
         }
 
-        const pem = await fs.readFile(path, "utf8")
-        keypair.privateKey = Buffer.from(JSON.parse(pem))
+        const contentOfFile = await fs.readFile(path, "utf8")
+        if (contentOfFile.includes("{")) {
+            keypair = Cryptography.loadFromBufferString (contentOfFile)
+        } else {
+            keypair = Cryptography.loadFromHex(contentOfFile)
+        }
+        return keypair
+    }
+
+    static loadFromHex(content: string): pki.KeyPair {
+        let keypair = { publicKey: null, privateKey: null }
+        content = content.slice(2)
+        let finalArray = new Uint8Array(64)
+        console.log("[string to forge encoded]")
+        console.log(content)
+        for (let i = 0; i < content.length; i += 2) {
+            const hexValue = content.substr(i, 2)
+            const decimalValue = parseInt(hexValue, 16)
+            finalArray[i / 2] = decimalValue
+        }
+        console.log("ENCODED INTO:")
+        console.log(finalArray)
+        // Condensing
+        keypair.privateKey = finalArray
+        keypair.publicKey = ed25519.publicKeyFromPrivateKey(keypair.privateKey)
+        return keypair
+    }
+
+    static loadFromBufferString(content: string): pki.KeyPair {
+        let keypair = { publicKey: null, privateKey: null }
+        keypair.privateKey = Buffer.from(JSON.parse(content))
         keypair.publicKey = pki.ed25519.publicKeyFromPrivateKey({
             privateKey: keypair.privateKey,
         })

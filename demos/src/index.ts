@@ -62,9 +62,9 @@ const app = express()
 // SECTION REVIEW ZONE
 var https = require("https") // REVEIEW SSL COMPATIBILITY
 var ssl_options = {
-    key: fs.readFileSync("./ssl/server.key"),
-    cert: fs.readFileSync("./ssl/server.crt"),
-    ca: fs.readFileSync("./ssl/ca.crt"),
+    key: fs.readFileSync("src/ssl/server.key"),
+    cert: fs.readFileSync("src/ssl/server.crt"),
+    ca: fs.readFileSync("src/ssl/ca.crt"),
 } // TODO Fill the right values
 const s_server = https.createServer(ssl_options, app) // REVIEW Use tHIS instead of http.createServer
 // !SECTION REVIEW ZONE
