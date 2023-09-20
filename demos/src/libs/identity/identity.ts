@@ -18,7 +18,15 @@ import getRemoteIP from "../network/routines/getRemoteIP"
 export default class Identity {
     private static instance: Identity
     public ed25519: pki.KeyPair
+    public ed25519_hex: {
+        privateKey: string,
+        publicKey: string
+    }
     public rsa: pki.rsa.KeyPair
+    public rsa_hex: {
+        privateKey: string,
+        publicKey: string
+    }
     public publicIP: string
     public publicPort: string
 
@@ -48,6 +56,11 @@ export default class Identity {
             await cryptography.save(this.ed25519, "./.demos_identity")
             Logger.log("Generated new identity")
         }
+        // Stringifying to hex
+        this.ed25519_hex = {
+            privateKey: "0x" + this.ed25519.privateKey.toString("hex"),
+            publicKey: "0x" + this.ed25519.publicKey.toString("hex"),
+        }
     }
 
     async getPublicIP(): Promise<string> {
@@ -56,7 +69,7 @@ export default class Identity {
     }
 
     getPublicKeyHex(): string | undefined {
-        return this.ed25519?.publicKey?.toString("hex")
+        return "0x" + this.ed25519?.publicKey?.toString("hex")
     }
 
     setPublicPort(port: string): void {

@@ -22,7 +22,7 @@
     "test:xrpl": "npx nodemon --exec ts-node -r tsconfig-paths/register src/tests/xrpl.ts",
     "client": "node --loader tsx -r tsconfig-paths/register src/tests/terminal.ts",
     "server": "node --loader tsx -r tsconfig-paths/register src/index.ts",
-    "start": "node --loader tsx -r tsconfig-paths/register src/index.ts",
+    "start": "nodemon",
     "start:ts-node": "node --loader ts-node/esm -r tsconfig-paths/register src/index.ts",
     "start:bun": "bun src/index.ts",
     "start:tsx": "node --loader tsx -r tsconfig-paths/register src/index.ts",

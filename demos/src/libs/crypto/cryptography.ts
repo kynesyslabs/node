@@ -82,8 +82,12 @@ export default class Cryptography {
         console.log("ENCODED INTO:")
         console.log(finalArray)
         // Condensing
-        keypair.privateKey = finalArray
-        keypair.publicKey = ed25519.publicKeyFromPrivateKey(keypair.privateKey)
+        console.log("That means:")
+        keypair.privateKey = Buffer.from(finalArray)
+        console.log(keypair.privateKey)
+        console.log("And the public key is:")
+        keypair.publicKey = ed25519.publicKeyFromPrivateKey({privateKey: keypair.privateKey})
+        console.log(keypair.publicKey)
         return keypair
     }
 
