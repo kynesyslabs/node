@@ -20,13 +20,15 @@ function forgeToHexString(forgeBuffer) {
 	console.log("[forge to hex string]")
     let derived = JSON.stringify(forgeBuffer)
 	derived = Buffer.from(forgeBuffer).toString("hex")
+	derived = "0x" + derived
     console.log(derived)
     return derived
 }
 
 function hexStringToForge(forgeString) {
 	console.log("[hex string to forge]")
-	let derived = Buffer.from(forgeString).toString("utf8") // REVIEW
+	let derived = derived.slice(2)
+	derived = Buffer.from(forgeString).toString("utf8") // REVIEW
 	derived = JSON.parse(forgeString)
     console.log(derived)
     return derived

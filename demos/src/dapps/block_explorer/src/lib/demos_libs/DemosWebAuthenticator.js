@@ -127,8 +127,8 @@ class DemosWebAuth {
 		if (!this.keypair) {
 			console.log("[SIGN WALLET] Deriving buffer keys from strings...")
 			this.keypair = {
-                privateKey: forge_converter.stringToForge(this.stringified_keypair.privateKey),
-                publicKey: forge_converter.stringToForge(this.stringified_keypair.publicKey),
+                privateKey: forge_converter.hexStringToForge(this.stringified_keypair.privateKey),
+                publicKey: forge_converter.hexStringToForge(this.stringified_keypair.publicKey),
             }
 		}
 		let result = [true, ""]
