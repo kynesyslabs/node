@@ -12,6 +12,17 @@
 
     //flags to check if all the fields are filled: [chain, task, params]
     let complete = [false, true, false];
+    //flags to check if card existed [chain, params] 
+    let propscomplete = [false, false];
+    propscomplete[0] = txblock.chain !== null;
+    for(let i = 0; i < Object.values(txblock.task.params).length; i++)
+    {
+        if(Object.values(txblock.task.params)[i] !== "" && Object.values(txblock.task.params)[i])
+        {
+            propscomplete[1] = true;
+            break;
+        }
+    }
 
     //editor (props independent) variables
     //chains
@@ -22,6 +33,8 @@
     let params = txblock.task.params;
     //parsedJSON
     let parsedJSON = "";
+    //txblock clone
+    let txblockClone = JSON.parse(JSON.stringify(txblock));
 
     //available tasks for selected chain
     let availableTasks = [];
@@ -67,10 +80,10 @@
     $:if(!multichain)
     {
         //update props
-        txblock.chain = editorchains[0];
-        txblock.subchain = "dunno";
+        txblockClone.chain = editorchains[0];
+        txblockClone.subchain = "dunno";
         let e = isEvmFromID(editorchains[0]);
-        txblock.is_evm = e;
+        txblockClone.is_evm = e;
         //flag filled
         complete[0] = editorchains[0] !== null;
         //set availableTasks based on is_evm
@@ -83,10 +96,10 @@
     else
     {
         //update props
-        txblock.chain = "crosschain";
-        txblock.subchain = editorchains;
-        let e = [isEvmFromID(txblock.subchain[0]), isEvmFromID(txblock.subchain[1])];
-        txblock.is_evm = e;
+        txblockClone.chain = "crosschain";
+        txblockClone.subchain = editorchains;
+        let e = [isEvmFromID(editorchains[0]), isEvmFromID(editorchains[1])];
+        txblockClone.is_evm = e;
         //flag filled
         complete[0] = editorchains[0] !== null && editorchains[1] !== null;
         //set availableTasks based on is_evm
@@ -96,12 +109,12 @@
             availableTasks = mUniversalTasks;
     }
 
-    $:txblock.task.params = params;
+    $:txblockClone.task.params = params;
 
     //EFFECT FOR CHANGING PARAMS
     $:complete[2] = currentParams.every((param)=>{return params[param.id] !== undefined && params[param.id] !== null && params[param.id] !== ""});
 
-    $:parsedJSON = JSON.stringify(txblock, null, 4);
+    $:parsedJSON = JSON.stringify(txblockClone, null, 4);
 </script>
 
 <style>
@@ -206,8 +219,8 @@
                 </div>
             {/if}
             <div class="tx-buttons">
-                <button class="secondary" on:click={()=>{complete[0]&&complete[2]?onClose():onDelete()}}>Cancel</button>
-                <button disabled={!(complete[0]&&complete[1]&&complete[2])} on:click={onSave(txblock)} class="primary tooltip">
+                <button class="secondary" on:click={()=>{propscomplete[0]&&propscomplete[1]?onClose():onDelete()}}>Cancel</button>
+                <button disabled={!(complete[0]&&complete[1]&&complete[2])} on:click={onSave(txblockClone)} class="primary tooltip">
                     {#if !(complete[0]&&complete[1]&&complete[2])}
                     <span class="tooltiptext">Fill all fields</span>
                     {/if}

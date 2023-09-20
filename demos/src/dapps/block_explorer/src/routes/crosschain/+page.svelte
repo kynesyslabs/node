@@ -3,7 +3,6 @@
 	import OperationEditor from "$lib/components/crosschain/OperationEditor.svelte";
     import {dndzone} from "svelte-dnd-action";
 	import OperationCard from "$lib/components/crosschain/OperationCard.svelte";
-    import {tasks} from "$lib/chainscript.js";
     import {flip} from "svelte/animate";
 
     localStorage.clear("operations");
@@ -11,15 +10,6 @@
     let operations = localStorage.getItem("operations")?JSON.parse(localStorage.getItem("operations")):[];
 
     let editIndex = null;
-
-    function onSave(data){
-        if(editing == "add")
-        {
-            operations.push({id: uuidv4(), data: data});
-            operations = operations;
-        }
-        editing = false;
-    }
     
     function onUpdate(index, data)
     {
