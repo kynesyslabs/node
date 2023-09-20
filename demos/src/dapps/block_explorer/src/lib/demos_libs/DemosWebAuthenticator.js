@@ -57,8 +57,8 @@ class DemosWebAuth {
 			// Stringify the keypair
 			console.log("[CREATE WALLET] Stringifying keypair...")
 			this.stringified_keypair = {
-				privateKey: forge_converter.forgeToHexString(this.keypair.privateKey),
-				publicKey: forge_converter.forgeToHexString(this.keypair.publicKey),
+				privateKey: forge_converter.forgeToString(this.keypair.privateKey),
+				publicKey: forge_converter.forgeToString(this.keypair.publicKey),
 			}
 			result = [true, this.stringified_keypair]
 			console.log(this.stringified_keypair)
@@ -74,6 +74,12 @@ class DemosWebAuth {
 	 * @returns {Promise<[boolean, string]>}
 	 **/
 	async login (privKey) {
+		if (typeof(privKey)=== "string") {
+			console.log("[LOGIN] Converting private key from string...")
+			privKey = forge_converter.stringToForge(privKey)
+			console.log(privKey)
+			console.log("[LOGIN] Private key converted!")
+		}
 		console.log("[LOGIN WALLET] Logging in...")
 		if (!required(privKey, false)) return [false, "You need to provide a private key!"]
 		// Serializing the private key as a string
@@ -127,8 +133,8 @@ class DemosWebAuth {
 		if (!this.keypair) {
 			console.log("[SIGN WALLET] Deriving buffer keys from strings...")
 			this.keypair = {
-                privateKey: forge_converter.hexStringToForge(this.stringified_keypair.privateKey),
-                publicKey: forge_converter.hexStringToForge(this.stringified_keypair.publicKey),
+                privateKey: forge_converter.stringToForge(this.stringified_keypair.privateKey),
+                publicKey: forge_converter.stringToForge(this.stringified_keypair.publicKey),
             }
 		}
 		let result = [true, ""]
@@ -151,8 +157,8 @@ class DemosWebAuth {
 	async verify (message, s_signature, s_publicKey) {
 		let result = [true, ""]
 		// Deriving the buffers from the strings
-		let publicKey = forge_converter.hexStringToForge(s_publicKey)
-		let signature = forge_converter.hexStringToForge(s_signature)
+		let publicKey = forge_converter.stringToForge(publicKey)
+		let signature = forge_converter.stringToForge(signature)
 		try {
 			let verify_result = forge.pki.ed25519.verify(message, signature, publicKey)
 			result = [true, verify_result]
