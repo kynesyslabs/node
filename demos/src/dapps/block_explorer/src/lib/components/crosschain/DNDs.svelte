@@ -59,18 +59,11 @@
     }
 </style>
 
-<div class="dnd" use:dndzone={{items:availableBlocks, dropFromOthersDisabled:true}} on:consider={considerAvailable} on:finalize={finalizeAvailable}>
+<div class="dnd" use:dndzone={{items:availableBlocks, dropFromOthersDisabled:true, morphDisabled:true}} on:consider={considerAvailable} on:finalize={finalizeAvailable}>
     {#each availableBlocks as block(block.id)}
-        {#if block.data.constructor == Operation}
-            <div class="card operation">
-                <img style="opacity: .3;" alt="task icon" src={blockIcons.find(item => item.id == block.data.task.type).icon}/>
-                {block.label}
-            </div>
-        {:else}
-            <div class="card operation">
-                <img style="opacity: .3;" alt="task icon" src={blockIcons.find(item => item.id == "conditional").icon}/>
-                {block.label}
-            </div>
-        {/if}
+        <div class="card operation">
+            <img style="opacity: .3;" alt="task icon" src={blockIcons.find(item => item.id == block.type).icon}/>
+            {block.label}
+        </div>
     {/each}
 </div>

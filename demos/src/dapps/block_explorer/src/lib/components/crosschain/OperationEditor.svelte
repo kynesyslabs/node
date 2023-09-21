@@ -4,16 +4,24 @@
 	import TaskParam from "$lib/components/crosschain/TaskParam.svelte";
 	import ChainSelection from "$lib/components/inputs/ChainSelection.svelte";
     import {budinofade} from '$lib/transitions.js';
+    import {cloneDeep} from 'lodash';
+    import {Operation} from '$lib/chainscript.js';
 
     export let onClose;
     export let onDelete;
     export let onSave;
-    export let txblock;
+    export let operation;
+    export let operationdata;
+
+    let txblock = operationdata?operationdata:new Operation({tasktype: operation.type});
 
     //flags to check if all the fields are filled: [chain, task, params]
     let complete = [false, true, false];
-    //flags to check if card existed [chain, params] 
-    let propscomplete = [false, false];
+
+
+
+    //flags to check if card existed [chain, params] –– VERIFICARE L'UTILITà PER VIA DELLA NUOVA STRUTTURA DATI
+    /*let propscomplete = [false, false];
     propscomplete[0] = txblock.chain !== null;
     for(let i = 0; i < Object.values(txblock.task.params).length; i++)
     {
@@ -22,7 +30,7 @@
             propscomplete[1] = true;
             break;
         }
-    }
+    }*/
 
     //editor (props independent) variables
     //chains
@@ -34,7 +42,7 @@
     //parsedJSON
     let parsedJSON = "";
     //txblock clone
-    let txblockClone = JSON.parse(JSON.stringify(txblock));
+    let txblockClone = cloneDeep(txblock);
 
     //available tasks for selected chain
     let availableTasks = [];
@@ -219,7 +227,7 @@
                 </div>
             {/if}
             <div class="tx-buttons">
-                <button class="secondary" on:click={()=>{propscomplete[0]&&propscomplete[1]?onClose():onDelete()}}>Cancel</button>
+                <button class="secondary" on:click={()=>{operationdata?onClose():onDelete()}}>Cancel</button>
                 <button disabled={!(complete[0]&&complete[1]&&complete[2])} on:click={onSave(txblockClone)} class="primary tooltip">
                     {#if !(complete[0]&&complete[1]&&complete[2])}
                     <span class="tooltiptext">Fill all fields</span>

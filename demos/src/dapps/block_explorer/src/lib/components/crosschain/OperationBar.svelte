@@ -4,25 +4,26 @@
     import DNDs from '$lib/components/crosschain/DNDs.svelte';
 
     const universal = [
-        {id:uuidv4(), label:"Pay", data: new Operation({tasktype:"pay"})}, 
+        {id:uuidv4(), label:"Pay", type:"pay"}, 
     ];
 
     const evm = [
-        {id:uuidv4(), label:"Read contract", data: new Operation({tasktype:"contract_read"})}, 
-        {id:uuidv4(), label:"Write contract", data: new Operation({tasktype:"contract_write"})}
+        {id:uuidv4(), label:"Read contract", type:"contract_read"}, 
+        {id:uuidv4(), label:"Write contract", type:"contract_write"}
     ]
 
     /*const multichain = [
         {id:uuidv4(), label:"Multiexample", data: new Operation({tasktype:"multiexample"})},
-    ]
+    ]*/
 
     const logic = [
-        {id:uuidv4(), label:"Conditional statement", data: new Conditional()},
-    ]*/
+        {id:uuidv4(), label:"Conditional statement", type:"conditional"},
+    ]
 
     const availableBlocks = [
         {label:"Universal tasks", blocks:universal},
         {label:"EVM tasks", blocks:evm},
+        //{label:"Logic", blocks:logic},
     ]
 </script>
 

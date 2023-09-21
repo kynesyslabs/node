@@ -4,33 +4,23 @@
     import {chains, tasks} from '$lib/chainscript.js';
     import {toprightbudino} from '$lib/transitions.js';
     import {clickOutside} from '$lib/eventhandlers.js';
-    import OperationEditor from '$lib/components/crosschain/OperationEditor.svelte';
 
     export let deleteOperation;
-    export let operation;
-    export let index;
-    export let onUpdate;
+    export let operationdata;
     export let onEdit;
     
     let taskinfo;
     let chaininfo;
 
-    $:if(operation.data.task.type)
+    $:if(operationdata.task.type)
     {
-        taskinfo = tasks.find(t=>t.id === operation.data.task.type);
+        taskinfo = tasks.find(t=>t.id === operationdata.task.type);
     }
-    $:if(operation.data.chain)
+    $:if(operationdata.chain)
     {
-        chaininfo = chains.find(c=>c.id === operation.data.chain);
+        chaininfo = chains.find(c=>c.id === operationdata.chain);
     }
     let menuopen = false;
-    let editing = false;
-
-    function onSave(data)
-    {
-        onUpdate(index, data);
-        editing = false;
-    }
 </script>
 <style>
     .operationcard-label{
@@ -97,7 +87,7 @@
             <p class="operationcard-label">{taskinfo.label} on {chaininfo.label}</p>
             <div class="params-preview">
                 {#each taskinfo.params as param}
-                    <p>{param.label}: <span style="font-weight: normal;">{operation.data.task.params[param.id]}</span></p>
+                    <p>{param.label}: <span style="font-weight: normal;">{operationdata.task.params[param.id]}</span></p>
                 {/each}
             </div>
         </div>
@@ -115,7 +105,7 @@
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="pen-1--content-creation-edit-pen-write"><path id="Union" fill="#ffffff" fill-rule="evenodd" d="M20.5 9 15 3.5 17.5 1 23 6.5 20.5 9ZM11 1.586l0.707 0.707 2.25 2.25L14 4.5l5.5 5.5 -9.5 9.5L4.5 14l8.043 -8.043L11 4.414 5.707 9.707 4.293 8.293l6 -6L11 1.586Zm-8 18V15.5l0.5 -0.5L9 20.5l-0.5 0.5H4.414l-1.707 1.707 -1.414 -1.414L3 19.586Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
                 Edit
             </button>
-            <button on:click={()=>{deleteOperation(index)}} class="dialog-option color-transition">
+            <button on:click={deleteOperation} class="dialog-option color-transition">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="recycle-bin-2--remove-delete-empty-bin-trash-garbage"><path class="color-transition" id="Subtract" fill="#ffffff" fill-rule="evenodd" d="M9.17 5a3.001 3.001 0 0 1 5.66 0H9.17ZM7.1 5a5.002 5.002 0 0 1 9.8 0H23v2h-2v16H3V7H1V5h6.1Zm0.4 13.5v-8h2v8h-2Zm7 -8v8h2v-8h-2Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
                 Delete
             </button>
