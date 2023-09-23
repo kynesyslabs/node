@@ -9,6 +9,7 @@ import required from "src/utilities/required"
 import * as seedrandom from "seedrandom"
 
 import Mempool from "../../blockchain/mempool"
+import Cryptography from "src/libs/crypto/cryptography"
 
 /* INFO
 	This class is very strict about what you can and what you cannot do with it. This is by design to avoid
@@ -82,12 +83,13 @@ class ProofOfRepresentation {
         this.peers = await GLS.getGLSBlockNodes() // REVIEW Getting all the possible peers
         if (this.immutable) return this.common_seed // NOTE Already initialized? We got the seed!
         this.onBlock = on_block
-        // Getting the immutable factors
+        // ANCHOR Getting the immutable factors
         let lastBlockHash = await Chain.getLastBlockHash()
         let nextBlockNumber = on_block + 1
         let hashedStakes = await GLS.getGLSHashedStakes()
+        let hashedPeers = Hashing.sha256(JSON.stringify(this.peers))
         // Combining the two immutable factors to improve unpredictability towards malicious validators
-        let combined = lastBlockHash.concat(hashedStakes).concat(nextBlockNumber.toString())
+        let combined = lastBlockHash.concat(hashedStakes).concat(nextBlockNumber.toString()).concat(hashedPeers)
         let seed = Hashing.sha256(combined)
         this.common_seed = seed
         this.validators["header"] = {

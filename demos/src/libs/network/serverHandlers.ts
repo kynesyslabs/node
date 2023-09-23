@@ -11,7 +11,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { Peer, PeerManager } from "src/libs/peer"
 import InstantMessaging from "src/features/messaging/instantMessaging"
-import { Identity } from "src/libs/identity"
 import Mempool from "src/libs/blockchain/mempool"
 import chain from "src/libs/blockchain/chain"
 import handleWeb2 from "src/features/web2/web2endpoints"
@@ -23,11 +22,6 @@ import sharedState from "src/utilities/sharedState"
 import { BrowserRequest } from "./serverListeners"
 import { normalizeWebBuffers } from "./routines/normalizeWebBuffers"
 import Sessions from "./routines/sessionManager"
-// Consensus imports
-import { rBFT } from "../consensus/rBFT"
-import BFT from "../consensus/types/BFT"
-import RepresentativeShard from "../consensus/types/PoR"
-import { IWeb2Request } from "../../features/web2/types/Web2Request"
 
 var term = require("terminal-kit").terminal
 
@@ -46,7 +40,6 @@ export default class ServerHandlers {
 
     static async handleLoginResponse(content: BrowserRequest) {
         let result = [true, ""]
-        let bounded_message = "" // TODO Read from sessions
         let s_signature = content.data.signature // Must be a JSON or a string of a signature (as Uint8Array or {type: "Buffer", data: []})
         let signature_conversion = normalizeWebBuffers(s_signature)
         let signature = signature_conversion[0]
@@ -145,7 +138,7 @@ export default class ServerHandlers {
     }
 
     // FIXME Use the new consensus classes
-    static async handleConsensusRequest(content: any): Promise<any> {
+    static async handleConsensusRequest(): Promise<any> {
         let extra: string,
             require_reply = false
         let response: any
@@ -184,7 +177,7 @@ export default class ServerHandlers {
         return { extra, require_reply, response }
     }
 
-    static async handleStorage(content: any): Promise<any> {
+    static async handleStorage(): Promise<any> {
         // Basic storage handling logic
         // ...
         let extra = { storageState: "mocked" }

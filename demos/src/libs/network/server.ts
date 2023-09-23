@@ -14,7 +14,6 @@ import { logger } from "../utils"
 import { Peer } from "../peer"
 // import { Identity } from "../identity"
 import ServerListeners from "./serverListeners"
-
 // const identity = Identity.getInstance()
 
 export default class Server {

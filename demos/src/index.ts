@@ -183,6 +183,27 @@ async function main() {
     }
 }
 
+// INFO Container method to be able to redirect clients to other nodes if needed
+async function redundance() {
+    try {
+        await main()
+    } catch (e) {
+        server.close() // REVIEW Is this ok?
+        // Listening to the same port as the normal process
+        await server.listen(SERVER_PORT)
+        let peerList = PeerManager.getInstance().getPeers()
+        let courtesyMessage = "[WARN] {OFFLINE} " + JSON.stringify(e) + "\n"
+        let showMessage = courtesyMessage + "\nYou can try at: " + JSON.stringify(peerList, null, 4)
+        // Courtesy listener
+        server.on("connection", (socket) => {
+            socket.emit("error", showMessage)
+            socket.on("data", () => { // REVIEW Should this be a catch all?
+                socket.emit("error", showMessage)
+            })
+        })
+    }
+}
+
 /* NOTE Uncomment this to enable never-fail stupid option
 // First things first: global error management to avoid total crashes
 // TODO See the link below for a better solution
@@ -204,4 +225,4 @@ process.on("unhandledRejection", (reason, promise) => {
 */
   
 digestArguments()
-main()
+redundance()

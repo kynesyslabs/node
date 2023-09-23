@@ -20,9 +20,8 @@ NOTE: The fee is locked by the node and released when the block itself is confir
 
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
-import forge, { pki } from "node-forge"
+import { pki } from "node-forge"
 import { TransactionContent } from "./types/transactions"
-import { sha256 } from "node-forge"
 import StateChange from "./gls/types/StateChange"
 import Confirmation from "./types/confirmation"
 

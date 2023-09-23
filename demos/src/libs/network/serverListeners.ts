@@ -123,7 +123,7 @@ export default class ServerListeners {
 
                 case "consensus":
                     ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleConsensusRequest(content))
+                        await ServerHandlers.handleConsensusRequest())
                     break
 
                 case "messages":
@@ -133,7 +133,7 @@ export default class ServerListeners {
 
                 case "storage":
                     ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleStorage(content))
+                        await ServerHandlers.handleStorage())
                     break
 
                 case "mempool":

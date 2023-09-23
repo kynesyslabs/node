@@ -4,10 +4,8 @@ const term = require("terminal-kit").terminal
 export async function checkConsensusTime(): Promise<boolean> {
     let isConsensusTime = false
     let consensusIntervalTime = sharedState.getInstance().getConsensusTime()
-    // TODO Retrieve the genesis timestamp from the database
-    let genesisTimestamp = 0
     // Calculate the delta between the current timestamp and the genesis timestamp
-    let delta = sharedState.getInstance().getTimePassed(genesisTimestamp)
+    let delta = sharedState.getInstance().getTimePassed()
     // If the delta is greater than the consensus interval time, then the consensus time has passed
     if (delta > consensusIntervalTime) {
         isConsensusTime = true

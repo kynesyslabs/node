@@ -2,7 +2,6 @@
 
 import * as forge from "node-forge"
 require("dotenv").config({path: "../../.commons" })
-import Cryptography from "src/libs/crypto/cryptography"
 import { Identity } from "src/libs/identity"
 
 export default class sharedState {
@@ -35,7 +34,7 @@ export default class sharedState {
         return sharedState.instance
     }
 
-    public getTimePassed(genesisTimestamp: number): number {
+    public getTimePassed(): number {
         this.currentTimestamp = Date.now()
         let delta = this.currentTimestamp - this.lastTimestamp
         this.lastTimestamp = this.currentTimestamp // FIXME This must be the last block timestamp
