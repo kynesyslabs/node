@@ -97,6 +97,11 @@ export default class ServerHandlers {
         return { extra, require_reply, response }
     }
 
+    // INFO This method is used to allow signed data exchanges between peers and clients
+    static async handleXMChainSignedPayload(content: any): Promise<any> {
+        // TODO
+    }
+
     static async handleXMChainStatus(): Promise<any> {
         let extra: any
         let require_reply = false

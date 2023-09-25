@@ -1,6 +1,27 @@
 // INFO In this module is offloaded the parsing of XM requests
+import multichain from "sdk/localsdk"
 
-// TODO Define XMScript (chs) class
+// SECTION Payloads signing
+/* NOTE To better explain:
+ * Once a request is received from the node, it sometimes needs data to be authenticated.
+ * For example, any transaction changing status (transfers, things requiring gas, etc.) needs
+ * to be properly signed. To avoid storing the private keys on the node, the node will ask
+ * the client to sign locally the produced transactions. DEMOS will then be able to relay the
+ * said transactions without security implications.
+*/
+export interface IXMPayload {
+    toSign: string,
+    signature: any, // REVIEW Use another type?
+    publicKey: string, // REVIEW Use another type?
+}
+
+export interface IXMPayloadRequest {
+    operationIdentifier: string, // Identifies the XMChain operation we are referring to
+    payloads: IXMPayload[], // Array of payloads to be signed for the operation
+} 
+// !SECTION Payloads signing
+
+// REVIEW Define XMScript (chs) class?
 
 export interface ITask {
     type: string;
@@ -40,6 +61,14 @@ class XMParser {
             console.log(operation)
             let current_result: any // TODO Execute the operation
             // (see FIXME above above) result.set(operation_name, current_result)
+            /* NOTE && TODO 
+             * For reasons linked to the NOTE at the beginning of this file,
+             * The reply could contain instances of the IXMPayloadRequest class.
+             * These payloads need to be acknowledged by the client (so in the client code).
+             * Please see the client implementation for more details on how this is done.
+             * Anyway, the client should be able to reply something that is in line with the
+             * IXMPayloadRequest class as described in the documentation.
+            */
             array_result.push(current_result)
         }
         // TODO Implement

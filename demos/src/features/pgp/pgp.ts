@@ -21,7 +21,9 @@ class PGPClass {
     }
 
     // INFO Assigning a new PGP key pair to a user represented by their address
-    async generateNewPGPKeyPair(address: string, privKey: forge.pki.ed25519.BinaryBuffer) {
+    async generateNewPGPKeyPair(address: string,
+        privKey: forge.pki.ed25519.BinaryBuffer,
+        signedAddress: forge.pki.ed25519.BinaryBuffer) { // TODO Improve security of verification
         // Convert the private key to a hex string
         let privKeyHex = privKey.toString("hex")
         this.keyPair = await openpgp.generateKey({
@@ -32,7 +34,7 @@ class PGPClass {
         })
     }
 
-    // TODO Add import/export of the key and verification of email
+    // TODO Add import/export of the key and verification of address
     // TODO Add encryption/decryption of messages
 
 

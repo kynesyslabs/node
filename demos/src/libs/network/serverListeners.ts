@@ -100,6 +100,13 @@ export default class ServerListeners {
                     ;({ extra, require_reply, response } =
                         await ServerHandlers.handleXMChainOperation(content))
                     break
+                case "crosschain_signed_payload":
+                case "multichain_signed_payload":
+                    ;({ extra, require_reply, response } =
+                        await ServerHandlers.handleXMChainSignedPayload(
+                            content,
+                        ))
+                    break
 
                 case "crosschain_status":
                 case "multichain_status":

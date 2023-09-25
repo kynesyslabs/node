@@ -1,6 +1,7 @@
 // INFO Entry point for multichain requests
 import XMParser from "./XMParser"
 import { XMScript } from "./XMParser"
+import multichain from "sdk/localsdk"
 
 
 export default class multichainDispatcher {

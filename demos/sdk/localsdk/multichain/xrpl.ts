@@ -10,9 +10,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import * as xrpl from "xrpl"
-import xrplWSListeners from "./types/xrpl_ws_listeners"
 // import * as WebSocket from "ws" // NOTE ts-node compatibility
-const WebSocket = require("ws") // NOTE tsx & ts-node compatibility
+import WebSocket from "ws" // NOTE tsx & ts-node compatibility
 // import WebSocket from "ws" // NOTE tsx compatibility
 import DefaultChain from "./types/defaultChain"
 
@@ -23,8 +22,7 @@ import DefaultChain from "./types/defaultChain"
 export default class XRPL  extends DefaultChain {
     provider: xrpl.Client = null
     wallet: xrpl.Wallet = null
-    socket: WebSocket = null
-
+    
     constructor(rpc_url: string) {
         super(rpc_url)
         this.name = "xrpl"
@@ -45,8 +43,6 @@ export default class XRPL  extends DefaultChain {
     private async _connect(rpc: string) {
         this.provider = new xrpl.Client(rpc)
         await this.provider.connect()
-        this.socket = new WebSocket(rpc)
-        await xrplWSListeners(this.socket)
         return this.provider
     }
 

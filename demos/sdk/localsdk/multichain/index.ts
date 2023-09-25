@@ -1,4 +1,3 @@
-import MULTIVERSX from "./multiversx"
 //export {default as BTC} from './btc';
 export {default as EVM} from "./evm"
 export {default as SOLANA} from "./solana"
