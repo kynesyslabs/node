@@ -80,7 +80,7 @@ class ProofOfRepresentation {
 
     // INFO Creating the immutable common seed for this specific proof of representation session
     private async createSeed(on_block: number): Promise<string> {
-        this.peers = await GLS.getGLSBlockNodes() // REVIEW Getting all the possible peers
+        this.peers = await GLS.getGLSValidatorsAtBlock() // REVIEW Getting all the possible peers
         if (this.immutable) return this.common_seed // NOTE Already initialized? We got the seed!
         this.onBlock = on_block
         // ANCHOR Getting the immutable factors

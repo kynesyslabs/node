@@ -165,32 +165,37 @@ export default class GLS {
         return response[0].gas_multiplier
     }
 
+    // SECTION Validators management
+
     // INFO The following getter is used to retrieve the hashed form of the sum of all the stakes at block N
     static async getGLSHashedStakes(n: number = null) {
         if (!n) {
             n = await Chain.getLastBlockNumber()
         }
-        let stakes = await Chain.read( // TODO Implement this in the schema directly (in the db)
-            "SELECT * FROM status_stakes WHERE first_seen <= " + n + " ORDER BY first_seen DESC",
+        let stakes = await Chain.read(
+            "SELECT * FROM validators WHERE first_seen <= " + n + " ORDER BY first_seen DESC",
         )
         // Hashing
         let total = 0
         for (let i = 0; i < stakes.length; i++) {
             total += stakes[i].stake // TODO Probably won't work but is a poc rn
         }
-        let hashed_stakes = Hashing.sha256(total.toString())
-        return hashed_stakes
+        return Hashing.sha256(total.toString())
     }
 
-    static async getGLSBlockNodes(n: number = null) {
+    // INFO The following getter is used to retrieve the list of all validators at a given block
+    static async getGLSValidatorsAtBlock(n: number = null) {
         if (!n) {
             n = await Chain.getLastBlockNumber()
         }
-        let block_nodes = await Chain.read( // TODO Implement this in the schema directly (in the db)
-            "SELECT * FROM status_nodes_at_block WHERE block=" + n,
+        let block_nodes = await Chain.read(
+            "SELECT * FROM validators WHERE valid_at<=" + n + " AND status=2 ORDER BY valid_at DESC",
         )
+        if (!block_nodes) { return [] }
         return block_nodes
     }
+    // !SECTION Validators management
+
     // !SECTION Getters
 
     // SECTION Setters
