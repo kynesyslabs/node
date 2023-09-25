@@ -11,9 +11,9 @@
     export let onDelete;
     export let onSave;
     export let operation;
-    export let operationdata;
 
-    let txblock = operationdata?operationdata:new Operation({tasktype: operation.type});
+    let txblock = operation.data?operation.data:new Operation({tasktype: operation.type});
+    console.log(txblock);
 
     //flags to check if all the fields are filled: [chain, task, params]
     let complete = [false, true, false];
@@ -41,7 +41,7 @@
     let params = txblock.task.params;
     //parsedJSON
     let parsedJSON = "";
-    //txblock clone
+    //txblock clone for editing
     let txblockClone = cloneDeep(txblock);
 
     //available tasks for selected chain
@@ -227,7 +227,7 @@
                 </div>
             {/if}
             <div class="tx-buttons">
-                <button class="secondary" on:click={()=>{operationdata?onClose():onDelete()}}>Cancel</button>
+                <button class="secondary" on:click={()=>{operation.data?onClose():onDelete()}}>Cancel</button>
                 <button disabled={!(complete[0]&&complete[1]&&complete[2])} on:click={onSave(txblockClone)} class="primary tooltip">
                     {#if !(complete[0]&&complete[1]&&complete[2])}
                     <span class="tooltiptext">Fill all fields</span>

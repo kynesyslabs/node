@@ -12,7 +12,7 @@
         //console.warn(`got consider ${JSON.stringify(e.detail, null, 2)}`);
         const {trigger, id} = e.detail.info;
         if (trigger === TRIGGERS.DRAG_STARTED) {
-            console.warn(`copying ${id}`);
+            //console.warn(`copying ${id}`);
             const idx = availableBlocks.findIndex(item => item.id === id);
             const newId = uuidv4();
 			e.detail.items = e.detail.items.filter(item => !item[SHADOW_ITEM_MARKER_PROPERTY_NAME]);
@@ -59,7 +59,7 @@
     }
 </style>
 
-<div class="dnd" use:dndzone={{items:availableBlocks, dropFromOthersDisabled:true, morphDisabled:true}} on:consider={considerAvailable} on:finalize={finalizeAvailable}>
+<div class="dnd" use:dndzone={{items:availableBlocks, dropFromOthersDisabled:true, morphDisabled:true, centreDraggedOnCursor:true}} on:consider={considerAvailable} on:finalize={finalizeAvailable}>
     {#each availableBlocks as block(block.id)}
         <div class="card operation">
             <img style="opacity: .3;" alt="task icon" src={blockIcons.find(item => item.id == block.type).icon}/>

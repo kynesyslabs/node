@@ -12,7 +12,7 @@
     }
 </script>
 <style>
-    .card{
+    .conditional{
         padding: 24px;
         position: relative;
         width: 100%;
@@ -25,12 +25,7 @@
     .card p{
         margin: 0;
     }
-    .dnd{
-        gap: 16px;
-        height: 50px;
-        width: 100%;
-        background-color: var(--background3);
-    }
+
 </style>
 <div class="card" use:dndzone={{items:conditions, dropFromOthersDisabled:conditions.length>0?true:false}} on:consider={handleDndConsider} on:finalize={handleDndFinalize}>
     <img style="opacity: .3;" alt="conditional operation icon" src="/task-icons/curly-brackets.svg"/>

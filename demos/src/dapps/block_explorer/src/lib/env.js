@@ -12,6 +12,9 @@ export const updateWallet = () => {
     wallet.set(demos.DemosWebAuth.getInstance());
 };
 
+//crosschain data
+export const operationsdata = writable({});
+
 //helpers
 TimeAgo.addLocale(en);
 export const timeAgo = new TimeAgo('en-US');
