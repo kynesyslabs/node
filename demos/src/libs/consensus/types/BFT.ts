@@ -29,6 +29,8 @@ export default class QBFT {
         let merged_mempool = our_mempool
         let pro = 0
         let con = 0
+        // TODO Test staker list for online status
+        // TODO Share the list and consensus that list too
         // Iterating over all the validators peers
         for (let i = 0; i < peersNumber; i++) {
             let peer = peers[i]
