@@ -17,7 +17,7 @@
     ]*/
 
     const logic = [
-        {id:uuidv4(), label:"Conditional statement", type:"conditional", condition:[], then:[], else:[], data:null},
+        {id:uuidv4(), label:"Conditional statement", type:"conditional", condition:[], symbol:"equals", input:"",  then:[], else:[], data:null},
     ]
 
     const availableBlocks = [

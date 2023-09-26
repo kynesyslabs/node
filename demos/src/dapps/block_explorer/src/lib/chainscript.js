@@ -1,3 +1,5 @@
+import { v4 as uuidv4 } from 'uuid';
+import {getAllChains} from "evm-chains";
 //THIS FILE CONTAINS NOCODE DATA FOR CROSSCHAIN TRANSACTION
 
 class Operation{
@@ -41,7 +43,7 @@ const blockIcons = [
 ]
 
 //!!chains
-const chains = [
+const mychains = [
     {
         id:"btc",
         label:"Bitcoin",
@@ -78,6 +80,16 @@ const chains = [
         icon:"/crypto-icons/egld.svg"
     },
 ]
+
+const chains = mychains.concat(getAllChains().filter(c=>c.chainId!==1).map(c=>{
+    return {
+        id: uuidv4(),
+        label: c.name,
+        token: c.nativeCurrency.symbol,
+        icon: null,
+        is_evm: true
+    }
+}));
 
 const tasks = [
     //pay

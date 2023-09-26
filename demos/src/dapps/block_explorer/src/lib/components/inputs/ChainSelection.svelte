@@ -3,9 +3,9 @@
     import {faChevronDown} from "@fortawesome/free-solid-svg-icons";
     import { cubicInOut } from 'svelte/easing';
 	import Searchbar from "$lib/components/inputs/Searchbar.svelte";
-    import {getAllChains} from "evm-chains";
     import {chains} from "$lib/chainscript.js";
     import Fuse from 'fuse.js'
+
     export let value;
     export let onChange;
     export let open;
@@ -31,7 +31,7 @@
     let options;
     $: if (!searchMode)
     {
-        options = evmTask?chains.filter(c=>c.is_evm):chains;
+        options = evmTask?chains.filter(c=>c.is_evm).slice(0,5):chains.slice(0,5);
     }
     else
     {
@@ -39,32 +39,6 @@
             return sr.item;
         })
     }
-
-    function dialogAnimation(node, {duration, easing}) {
-        return {
-            duration,
-            css: t => {
-                const eased = easing(t);
-                return `
-                    transform: scale(${0.9 + eased/10});
-                    transform-origin:center;
-                );`;
-            }
-        };
-    }
-    function modalAnimation(node, {duration = 350, easing = cubicInOut}) {
-        return {
-            duration,
-            css: t => {
-                const eased = easing(t);
-                return `
-                    opacity: ${eased};
-                    transform-origin:center;
-                );`;
-            }
-        };
-    }
-    //console.log(getAllChains());
 </script>
 
 <style>
@@ -141,30 +115,34 @@
 
 <div class="chain-selection">
     {#if open}
-        <button class="chain-selection" on:click={(ev)=>{ev.stopPropagation();}}>
+        <div class="chain-selection" on:click={(ev)=>{ev.stopPropagation();}}>
             <Searchbar {setSearchMode} onChange={search} hidesubmit={true} style="margin:0;" prompt="Search for a blockchain"/>
             {#if searchMode}
                 <p style="margin-bottom:0">{searchResults.length} results</p>
             {/if}
             <div class="chain-options">
                 {#each options as chain}
-                    <button on:click={()=>{onChange(chain.id); open=false;}} class="chain-option">
-                        <img class="chain-icon" src={chain.icon} alt={chain.label}/>
+                    <div on:click={()=>{onChange(chain.id); open=false;}} class="chain-option">
+                        {#if chain.icon}
+                            <img class="chain-icon" src={chain.icon} alt={chain.label}/>
+                        {/if}
                         <div>
                             <p class="chain-label">{chain.label}</p>
                             <p class="token-label">{chain.token}</p>
                         </div>
-                    </button>
+                    </div>
                 {/each}
             </div>
-        </button>
+        </div>
     {:else}
         <button class="combobox" on:click={onOpen}>
             {#if !value}
             <p class="ellipsis" style="margin:0;opacity:.5">Select option</p>
             {:else}
             <div class="selected-chain">
-                <img class="chain-icon-mini" src={chains.find(c=>c.id === value).icon} alt={chains.find(c=>c.id === value).label}/>
+                {#if chains.find(c=>c.id === value).icon}
+                    <img class="chain-icon-mini" src={chains.find(c=>c.id === value).icon} alt={chains.find(c=>c.id === value).label}/>
+                {/if}
                 <p class="ellipsis" style="margin:0; margin-top:2px;">{chains.find(c=>c.id === value).label}</p>
             </div>
             {/if}

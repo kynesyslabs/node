@@ -27,8 +27,11 @@
     //cerca le info per la grafica se è il caso
     $:if(operation.type!=="conditional" && operation.data)
     {
-        taskinfo = tasks.find(t=>t.id === operation.data.task.type);
         chaininfo = chains.find(c=>c.id === operation.data.chain);
+    }
+    $:if(operation.type!=="conditional"&&operation.type!=="root")
+    {
+        taskinfo = tasks.find(t=>t.id === operation.type);
     }
     let menuopen = false;
 
@@ -73,12 +76,13 @@
         position: absolute;
         top: 0;
         right: 0;
-        background: var(--background2-min);
+        background: var(--background3);
         z-index: 100;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
+        border: 1px solid var(--background4);
     }
     .dialog-option{
         padding: 16px;
@@ -135,10 +139,15 @@
     .card{
         border: 1px solid var(--background3);
     }
+    .root{
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
 </style>
 
 {#if operation.type == "root"}
-    <div class="dnd" use:dndzone={{items:operation.items, morphDisabled:true, flipDurationMs:250, centreDraggedOnCursor:true}} on:consider={(e)=>{consider(e, "items")}} on:finalize={(e)=>{finalize(e, "items")}}>
+    <div class="root dnd" use:dndzone={{items:operation.items, morphDisabled:true, flipDurationMs:250, centreDraggedOnCursor:true}} on:consider={(e)=>{consider(e, "items")}} on:finalize={(e)=>{finalize(e, "items")}}>
         {#each operation.items as op, i (op.id)}
             <!--ALWAYS WRAP CUSTOM COMPONENT IN HTML WHEN USING DNDZONE-->
             <div animate:flip={{duration: 250}}>
@@ -158,24 +167,30 @@
                     {/each}
                 </div>
             </div>
-            <img width=24px alt="blockchain icon" style="margin-left: auto;" src={chaininfo.icon}/>
-        {:else}
+            {#if chaininfo.icon}
+                <img width=24px alt="blockchain icon" style="margin-left: auto;" src={chaininfo.icon}/>
+            {/if}
+        {:else if taskinfo}
+            <img style="opacity: .3;" alt="task icon" src={taskinfo.icon}/>
             <div>
+                <p class="operationcard-label">{taskinfo.label}</p>
             </div>
         {/if}
-        <button on:click={()=>{menuopen = true;}} class="shallow color-transition"><Fa icon={faEllipsisV}></Fa></button>
-        {#if menuopen}
-            <div use:clickOutside on:click_outside={()=>{menuopen = false}} transition:toprightbudino={{duration:200}} class="dialog">
-                <button on:click={()=>{onEdit(operation, parent)}} class="dialog-option color-transition">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="pen-1--content-creation-edit-pen-write"><path id="Union" fill="#ffffff" fill-rule="evenodd" d="M20.5 9 15 3.5 17.5 1 23 6.5 20.5 9ZM11 1.586l0.707 0.707 2.25 2.25L14 4.5l5.5 5.5 -9.5 9.5L4.5 14l8.043 -8.043L11 4.414 5.707 9.707 4.293 8.293l6 -6L11 1.586Zm-8 18V15.5l0.5 -0.5L9 20.5l-0.5 0.5H4.414l-1.707 1.707 -1.414 -1.414L3 19.586Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
-                    Edit
-                </button>
-                <button on:click={(parent)=>{deleteOperation(parent)}} class="dialog-option color-transition">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="recycle-bin-2--remove-delete-empty-bin-trash-garbage"><path class="color-transition" id="Subtract" fill="#ffffff" fill-rule="evenodd" d="M9.17 5a3.001 3.001 0 0 1 5.66 0H9.17ZM7.1 5a5.002 5.002 0 0 1 9.8 0H23v2h-2v16H3V7H1V5h6.1Zm0.4 13.5v-8h2v8h-2Zm7 -8v8h2v-8h-2Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
-                    Delete
-                </button>
-            </div>
-        {/if}
+        <div style={`position: relative; margin-left:${!chaininfo?.icon?"auto":"0"};`}>
+            <button on:click={()=>{menuopen = true;}} class="shallow color-transition"><Fa icon={faEllipsisV}></Fa></button>
+            {#if menuopen}
+                <div use:clickOutside on:click_outside={()=>{menuopen = false}} transition:toprightbudino={{duration:200}} class="dialog">
+                    <button on:click={()=>{onEdit(operation, parent)}} class="dialog-option color-transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="pen-1--content-creation-edit-pen-write"><path id="Union" fill="#ffffff" fill-rule="evenodd" d="M20.5 9 15 3.5 17.5 1 23 6.5 20.5 9ZM11 1.586l0.707 0.707 2.25 2.25L14 4.5l5.5 5.5 -9.5 9.5L4.5 14l8.043 -8.043L11 4.414 5.707 9.707 4.293 8.293l6 -6L11 1.586Zm-8 18V15.5l0.5 -0.5L9 20.5l-0.5 0.5H4.414l-1.707 1.707 -1.414 -1.414L3 19.586Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
+                        Edit
+                    </button>
+                    <button on:click={(parent)=>{deleteOperation(parent)}} class="dialog-option color-transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="recycle-bin-2--remove-delete-empty-bin-trash-garbage"><path class="color-transition" id="Subtract" fill="#ffffff" fill-rule="evenodd" d="M9.17 5a3.001 3.001 0 0 1 5.66 0H9.17ZM7.1 5a5.002 5.002 0 0 1 9.8 0H23v2h-2v16H3V7H1V5h6.1Zm0.4 13.5v-8h2v8h-2Zm7 -8v8h2v-8h-2Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
+                        Delete
+                    </button>
+                </div>
+            {/if}
+        </div>
     </div>
 {:else if operation.type == "conditional"}
     <div class="card">
@@ -189,17 +204,19 @@
                     </div>
                 {/each}
             </div>
-            <Combobox options={conditionOptions} style="width:150px; background-color:var(--background3)"></Combobox>
-            <input placeholder="Input condition here" style="background-color:var(--background3); font-size:1rem; height:52px;"/>
-            <button on:click={()=>{menuopen = true;}} style="margin-left:auto;" class="shallow color-transition"><Fa icon={faEllipsisV}></Fa></button>
-            {#if menuopen}
-                <div use:clickOutside on:click_outside={()=>{menuopen = false}} transition:toprightbudino={{duration:200}} class="dialog">
-                    <button on:click={(parent)=>{deleteOperation(parent)}} class="dialog-option color-transition">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="recycle-bin-2--remove-delete-empty-bin-trash-garbage"><path class="color-transition" id="Subtract" fill="#ffffff" fill-rule="evenodd" d="M9.17 5a3.001 3.001 0 0 1 5.66 0H9.17ZM7.1 5a5.002 5.002 0 0 1 9.8 0H23v2h-2v16H3V7H1V5h6.1Zm0.4 13.5v-8h2v8h-2Zm7 -8v8h2v-8h-2Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
-                        Delete
-                    </button>
-                </div>
-            {/if}
+            <Combobox value={operation.symbol} options={conditionOptions} onChange={(newValue)=>{operation.symbol = newValue}} style="width:150px; background-color:var(--background3)"></Combobox>
+            <input placeholder="Input condition here" value={operation.input} on:change={(e)=>{operation.input = e.target.value}} style="background-color:var(--background3); font-size:1rem; height:52px;"/>
+            <div style="position: relative;margin-left:auto">
+                <button on:click={()=>{menuopen = true;}} class="shallow color-transition"><Fa icon={faEllipsisV}></Fa></button>
+                {#if menuopen}
+                    <div use:clickOutside on:click_outside={()=>{menuopen = false}} transition:toprightbudino={{duration:200}} class="dialog">
+                        <button on:click={(parent)=>{deleteOperation(parent)}} class="dialog-option color-transition">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="recycle-bin-2--remove-delete-empty-bin-trash-garbage"><path class="color-transition" id="Subtract" fill="#ffffff" fill-rule="evenodd" d="M9.17 5a3.001 3.001 0 0 1 5.66 0H9.17ZM7.1 5a5.002 5.002 0 0 1 9.8 0H23v2h-2v16H3V7H1V5h6.1Zm0.4 13.5v-8h2v8h-2Zm7 -8v8h2v-8h-2Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
+                            Delete
+                        </button>
+                    </div>
+                {/if}
+            </div>
         </div>
         <div class="conditional">
             <p>then</p>
