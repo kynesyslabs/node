@@ -4,18 +4,17 @@
     import {chains, tasks} from '$lib/chainscript.js';
     import {toprightbudino} from '$lib/transitions.js';
     import {clickOutside} from '$lib/eventhandlers.js';
-    import {dndzone, DRAGGED_ELEMENT_ID, SHADOW_ITEM_MARKER_PROPERTY_NAME, TRIGGERS} from "svelte-dnd-action";
+    import {dndzone} from "svelte-dnd-action";
 	import { flip } from "svelte/animate";
     import Combobox from '$lib/components/Combobox.svelte';
 
     export let operation;
     export let deleteOperation;
     export let onEdit;
+    export let parent;
     
     let taskinfo;
     let chaininfo;
-
-    let using = false;
 
     let conditionOptions = [
         {id:"equals", label:"=="},
@@ -33,32 +32,15 @@
     }
     let menuopen = false;
 
-    function considerCondition(e) {
-        console.log(operation.id)
-        if(e.detail.info.id == operation.id)
-            using = true;
-        operation.condition = e.detail.items;
+    function consider(e, key) {
+        operation[key] = e.detail.items;
     }
-    function finalizeCondition(e) {
-        operation.condition = e.detail.items;
-        createTask(e);
+    function finalize(e, key) {
+        operation[key] = e.detail.items;
+        createTask(e, key);
     }
 
-    function handleDndConsider(e) {
-        console.log(e.detail.info.id, operation.id)
-        if(e.detail.info.id == operation.id)
-            using = true;
-        //e.detail.items = e.detail.items.filter(item => !item[SHADOW_ITEM_MARKER_PROPERTY_NAME]);
-        operation.items = e.detail.items;
-    }
-    function handleDndFinalize(e) {
-        operation.items = e.detail.items;
-        createTask(e);
-    }
-
-    $:console.log(using);
-
-    function createTask(e){
+    function createTask(e, key){
         //purtroppo sembra non funzionare se l'evento è droppedintoanother...... ma forse non serve?? perché lo faccio scattare da un'altra parte... mmmm devo pensarci
         if(e.detail.info.trigger === "droppedIntoAnother" || !e.detail.info.id)
         {
@@ -70,11 +52,7 @@
         //apri l'editor se operation data non esiste e se non è un conditional
         if(thisop.data || thisop.type == "conditional")
             return;
-        onEdit(thisop);
-    }
-    function transformDraggedElement(draggedEl, data, index)
-    {
-        draggedEl.innerHTML = data.label;
+        onEdit(thisop, operation[key]);
     }
 </script>
 <style>
@@ -133,10 +111,6 @@
         font-weight: bold;
     }
     .conditionaldnd{
-        gap: 16px;
-        display: flex;
-        flex-shrink: 0;
-        align-items: center;
         min-height: 50px;
         width: fit-content;
         min-width: 200px;
@@ -144,30 +118,31 @@
     }
     .conditional{
         padding: 24px;
-        padding-right: 0;
         position: relative;
         width: 100%;
         display: flex;
         align-items: center;
         gap: 16px;
         background-color: var(--background2-min);
-        border: 1px solid var(--background3);
     }
     .conditional p {
         margin:0;
     }
     .dnd{
         width: 100%;
-        height: 500px;
+        min-height: 500px;
+    }
+    .card{
+        border: 1px solid var(--background3);
     }
 </style>
 
 {#if operation.type == "root"}
-    <div class="dnd" use:dndzone={{items:operation.items, morphDisabled:true, flipDurationMs:250, centreDraggedOnCursor:true}} on:consider={handleDndConsider} on:finalize={handleDndFinalize}>
-        {#each operation.items as operation, i (operation.id)}
+    <div class="dnd" use:dndzone={{items:operation.items, morphDisabled:true, flipDurationMs:250, centreDraggedOnCursor:true}} on:consider={(e)=>{consider(e, "items")}} on:finalize={(e)=>{finalize(e, "items")}}>
+        {#each operation.items as op, i (op.id)}
             <!--ALWAYS WRAP CUSTOM COMPONENT IN HTML WHEN USING DNDZONE-->
             <div animate:flip={{duration: 250}}>
-                <svelte:self createTask={createTask} onEdit={onEdit} operation={operation}/>
+                <svelte:self createTask={createTask} onEdit={onEdit} operation={op} parent={operation.items} deleteOperation={()=>{deleteOperation(operation.items, operation)}}/>
             </div>
         {/each}
     </div>
@@ -191,11 +166,11 @@
         <button on:click={()=>{menuopen = true;}} class="shallow color-transition"><Fa icon={faEllipsisV}></Fa></button>
         {#if menuopen}
             <div use:clickOutside on:click_outside={()=>{menuopen = false}} transition:toprightbudino={{duration:200}} class="dialog">
-                <button on:click={onEdit} class="dialog-option color-transition">
+                <button on:click={()=>{onEdit(operation, parent)}} class="dialog-option color-transition">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="pen-1--content-creation-edit-pen-write"><path id="Union" fill="#ffffff" fill-rule="evenodd" d="M20.5 9 15 3.5 17.5 1 23 6.5 20.5 9ZM11 1.586l0.707 0.707 2.25 2.25L14 4.5l5.5 5.5 -9.5 9.5L4.5 14l8.043 -8.043L11 4.414 5.707 9.707 4.293 8.293l6 -6L11 1.586Zm-8 18V15.5l0.5 -0.5L9 20.5l-0.5 0.5H4.414l-1.707 1.707 -1.414 -1.414L3 19.586Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
                     Edit
                 </button>
-                <button on:click={deleteOperation} class="dialog-option color-transition">
+                <button on:click={(parent)=>{deleteOperation(parent)}} class="dialog-option color-transition">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="recycle-bin-2--remove-delete-empty-bin-trash-garbage"><path class="color-transition" id="Subtract" fill="#ffffff" fill-rule="evenodd" d="M9.17 5a3.001 3.001 0 0 1 5.66 0H9.17ZM7.1 5a5.002 5.002 0 0 1 9.8 0H23v2h-2v16H3V7H1V5h6.1Zm0.4 13.5v-8h2v8h-2Zm7 -8v8h2v-8h-2Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
                     Delete
                 </button>
@@ -203,17 +178,48 @@
         {/if}
     </div>
 {:else if operation.type == "conditional"}
-    <div class="card conditional">
-        <img style="opacity: .3;" alt="conditional operation icon" src="/task-icons/curly-brackets.svg"/>
-        <p>if</p>
-        <div use:dndzone={{items:operation.condition, dropFromOthersDisabled:operation.condition.length>0||operation.id=="id:dnd-shadow-placeholder-0000"?true:false, morphDisabled:true}} on:consider={considerCondition} on:finalize={finalizeCondition} class="conditionaldnd">
-            {#each operation.condition as condition(condition.id)}
-                <div animate:flip={{duration: 250}}>
-                    <svelte:self createTask={createTask} operation={condition} onEdit={onEdit}></svelte:self>
+    <div class="card">
+        <div class="conditional">
+            <img style="opacity: .3;" alt="conditional operation icon" src="/task-icons/curly-brackets.svg"/>
+            <p>if</p>
+            <div use:dndzone={{items:operation.condition, dropFromOthersDisabled:operation.condition.length>0||operation.id=="id:dnd-shadow-placeholder-0000"?true:false, morphDisabled:true}} on:consider={(e)=>{consider(e, "condition")}} on:finalize={(e)=>{finalize(e, "condition")}} class="conditionaldnd">
+                {#each operation.condition as condition(condition.id)}
+                    <div animate:flip={{duration: 250}}>
+                        <svelte:self createTask={createTask} operation={condition} onEdit={onEdit} parent={operation.condition}  deleteOperation={()=>{deleteOperation(operation.condition, operation)}}></svelte:self>
+                    </div>
+                {/each}
+            </div>
+            <Combobox options={conditionOptions} style="width:150px; background-color:var(--background3)"></Combobox>
+            <input placeholder="Input condition here" style="background-color:var(--background3); font-size:1rem; height:52px;"/>
+            <button on:click={()=>{menuopen = true;}} style="margin-left:auto;" class="shallow color-transition"><Fa icon={faEllipsisV}></Fa></button>
+            {#if menuopen}
+                <div use:clickOutside on:click_outside={()=>{menuopen = false}} transition:toprightbudino={{duration:200}} class="dialog">
+                    <button on:click={(parent)=>{deleteOperation(parent)}} class="dialog-option color-transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="recycle-bin-2--remove-delete-empty-bin-trash-garbage"><path class="color-transition" id="Subtract" fill="#ffffff" fill-rule="evenodd" d="M9.17 5a3.001 3.001 0 0 1 5.66 0H9.17ZM7.1 5a5.002 5.002 0 0 1 9.8 0H23v2h-2v16H3V7H1V5h6.1Zm0.4 13.5v-8h2v8h-2Zm7 -8v8h2v-8h-2Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
+                        Delete
+                    </button>
                 </div>
-            {/each}
+            {/if}
         </div>
-        <Combobox options={conditionOptions} style="width:150px; background-color:var(--background3)"></Combobox>
-        <input placeholder="Input condition here" style="background-color:var(--background3); font-size:1rem; height:52px;"/>
+        <div class="conditional">
+            <p>then</p>
+            <div use:dndzone={{items:operation.then, dropFromOthersDisabled:operation.id=="id:dnd-shadow-placeholder-0000"?true:false, morphDisabled:true}} on:consider={(e)=>{consider(e, "then")}} on:finalize={(e)=>{finalize(e, "then")}} class="conditionaldnd">
+                {#each operation.then as instruction(instruction.id)}
+                    <div animate:flip={{duration: 250}}>
+                        <svelte:self createTask={createTask} operation={instruction} onEdit={onEdit} parent={operation.then}  deleteOperation={()=>{deleteOperation(operation.then, operation)}}></svelte:self>
+                    </div>
+                {/each}
+            </div>
+        </div>
+        <div class="conditional">
+            <p>else</p>
+            <div use:dndzone={{items:operation.else, dropFromOthersDisabled:operation.id=="id:dnd-shadow-placeholder-0000"?true:false, morphDisabled:true}} on:consider={(e)=>{consider(e, "else")}} on:finalize={(e)=>{finalize(e, "else")}} class="conditionaldnd">
+                {#each operation.else as instruction(instruction.id)}
+                    <div animate:flip={{duration: 250}}>
+                        <svelte:self createTask={createTask} operation={instruction} onEdit={onEdit} parent={operation.else} deleteOperation={()=>{deleteOperation(operation.else, operation)}}></svelte:self>
+                    </div>
+                {/each}
+            </div>
+        </div>
     </div>
 {/if}

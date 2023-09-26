@@ -1,9 +1,6 @@
 <script>
 	import OperationEditor from "$lib/components/crosschain/OperationEditor.svelte";
-    import {dndzone, SHADOW_ITEM_MARKER_PROPERTY_NAME} from "svelte-dnd-action";
 	import OperationCard from "$lib/components/crosschain/OperationCard.svelte";
-    import {flip} from "svelte/animate";
-    import {operationsdata} from "$lib/env.js";
 
     localStorage.clear("operations");
 
@@ -14,6 +11,7 @@
 
     //prima abbiamo usato l'index, poi abbiamo usato l'id... adesso passiamo direttamente la reference
     let edit = null;
+    let editparent = null;
     
     function onUpdate(operation, data)
     {
@@ -25,16 +23,9 @@
     {
         let index = parentArray.findIndex(op=>op.id == operation.id);
         parentArray.splice(index, 1);
-        parentArray = parentArray;
+        root = root;
     }
 
-    
-    //$:console.log(operations);
-    //$:localStorage.setItem("operations", JSON.stringify(operations));
-    function transformDraggedElement(draggedEl, data, index)
-    {
-        draggedEl.innerHTML = data.label;
-    }
 </script>
 
 <style>
@@ -48,21 +39,6 @@
     .title{
         margin: 0;
     }
-    .no-operations{
-        text-align: center;
-        margin: 0 auto;
-    }
-    .no-operations{
-        padding: 32px;
-    }
-    .no-operations svg{
-        opacity: .4;
-        margin: 0 0 32px;
-    }
-    .no-operations p{
-        margin: 0;
-        opacity: .4;
-    }
     .dnd{
         display: grid;
         grid-template-columns: 1fr;
@@ -73,7 +49,7 @@
 </style>
 
 {#if edit !== null}
-    <OperationEditor onSave={(data)=>{onUpdate(edit, data); edit = null;}} operation={edit} onClose={()=>{edit = null}} onDelete={(parentArray)=>{deleteOperation(parentArray, edit); edit=null}}/>
+    <OperationEditor onSave={(data)=>{onUpdate(edit, data); edit = null; editparent=null;}} operation={edit} onClose={()=>{edit = null; editparent = null;}} onDelete={()=>{deleteOperation(editparent, edit); edit=null; editparent=null;}}/>
 {/if}
 <div>
     <div class="title-container">
@@ -82,7 +58,7 @@
     </div>
     <div>
         <div class="card dnd">
-            <OperationCard onEdit={(op)=>{edit = op}} operation={root}/>
+            <OperationCard onEdit={(op, parent)=>{edit = op; editparent=parent;}} operation={root} deleteOperation={deleteOperation}/>
         </div>
     </div>
 </div>
