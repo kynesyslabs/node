@@ -1,4 +1,5 @@
 import * as xrpl from "xrpl"
+import required from "../../utils/required"
 
 export default class XRPL {
 
@@ -49,4 +50,25 @@ export default class XRPL {
 		// Finally, we can sign the transaction
         return this.wallet.sign(transaction)
 	}
+
+	// SECTION Specific methods
+
+	// INFO transfer and pay are the same 
+	async prepareTransfer() {
+		await this.pay()
+	}
+	async preparePay(address, amount) {
+		required(this.wallet, "Wallet is not connected!")
+		// Signing a valid transfer
+		let tx = await this.provider.autofill({
+            "TransactionType": "Payment",
+            "Account": this.wallet.address,
+            "Amount": xrpl.xrpToDrops(amount),
+            "Destination": address,
+        })
+		let signedTx = await this.wallet.sign(prepared) // REVIEW Is this all?
+		console.log(signedTx)
+		return signedTx
+	}
+	// !SECTION Specific methods
 }

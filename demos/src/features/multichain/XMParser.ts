@@ -1,5 +1,6 @@
 // INFO In this module is offloaded the parsing of XM requests
 import multichain from "sdk/localsdk"
+import sendSigned from "./routines/writes/sendSigned"
 
 // SECTION Payloads signing
 /* NOTE To better explain:
@@ -26,6 +27,10 @@ export interface IXMPayloadRequest {
 export interface ITask {
     type: string;
     params: {};
+    // TODO AND NOTE
+    // Here the client should send 
+    // the signed transactions that it requires
+    signedPayloads: any[]; 
 }
 
 export interface IOperation {
@@ -33,7 +38,7 @@ export interface IOperation {
     subchain: string;
     is_evm: boolean;
     rpc: string;
-    task: ITask
+    task: ITask;
 }
 
 export interface XMScript {
@@ -59,7 +64,18 @@ class XMParser {
             let operation = script.operations[i] // FIXME Here and hopefully jus here we got to get the name of the task to store results
             // INFO Executing the operation
             console.log(operation)
-            let current_result: any // TODO Execute the operation
+            let {task} = operation
+            let current_result: [boolean, any]
+            // TODO Execute the operation
+            switch (task.type) {
+                // REVIEW A shy approach to make it work for writes
+                case "signedPayload":
+                    // FIXME Check connection to the chain and sned it too
+                    current_result = await sendSigned(operation)
+                    break
+                default:
+                    current_result = [false, "The operation requested is unknown"]
+            }
             // (see FIXME above above) result.set(operation_name, current_result)
             /* NOTE && TODO 
              * For reasons linked to the NOTE at the beginning of this file,

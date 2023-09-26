@@ -69,7 +69,7 @@ interface IValidator {
 }
 class ProofOfRepresentation {
     private common_seed: string = null
-    private peers: Peer[]
+    private peers: Peer[] // Populated by createSeed
     private validators: { [key: string]: IValidator | {} } = {}
     private onBlock: number = 0
     // Immutable flag to indicate that the PoR instance has been already initialized and cannot be changed anymore
@@ -81,7 +81,9 @@ class ProofOfRepresentation {
     // INFO Creating the immutable common seed for this specific proof of representation session
     private async createSeed(on_block: number): Promise<string> {
         this.peers = await GLS.getGLSValidatorsAtBlock() // REVIEW Getting all the possible peers
-        if (this.immutable) return this.common_seed // NOTE Already initialized? We got the seed!
+        if (this.immutable) {
+            return this.common_seed // NOTE Already initialized? We got the seed!
+        }
         this.onBlock = on_block
         // ANCHOR Getting the immutable factors
         let lastBlockHash = await Chain.getLastBlockHash()

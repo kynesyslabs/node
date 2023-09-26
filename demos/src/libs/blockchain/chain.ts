@@ -183,7 +183,9 @@ export default class Chain {
         genesis_tx.hash = Hashing.sha256(JSON.stringify(genesis_tx.content))
         if (!genesis_json.timestamp) {
             genesis_tx.content.timestamp = Date.now()
-        } else genesis_tx.content.timestamp = genesis_json.timestamp
+        } else {
+            genesis_tx.content.timestamp = genesis_json.timestamp
+        }
         console.log(genesis_tx)
         // Build a block containing the genesis tx
         genesis_block.timestamp = genesis_tx.content.timestamp

@@ -1,6 +1,7 @@
 // NOTE We use ethers 5.7 because 6> are too weird for now to use
 // LINK https://docs.ethers.org/v5/
 import { ethers } from "ethers"
+import required from "../../utils/required"
 
 export default class EVM {
 
@@ -46,4 +47,20 @@ export default class EVM {
         // Finally, we can sign the transaction
         return this.wallet.sign(transaction)
 	}
+
+	// SECTION Specific methods
+
+	// INFO transfer and pay are the same 
+	async prepareTransfer() {
+		await this.pay()
+	}
+	async preparePay(address, amount) {
+		required(this.wallet, "Wallet is not connected!")
+		// Signing a valid transfer
+        let tx = { to: address, value: ethers.parseEther(amount) }
+		let signedTx = await this.wallet.sign(tx)
+        console.log(signedTx)
+        return signedTx
+	}
+	// !SECTION Specific methods
 }

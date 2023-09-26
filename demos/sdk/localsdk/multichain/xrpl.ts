@@ -10,8 +10,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import * as xrpl from "xrpl"
-// import * as WebSocket from "ws" // NOTE ts-node compatibility
-import WebSocket from "ws" // NOTE tsx & ts-node compatibility
 // import WebSocket from "ws" // NOTE tsx compatibility
 import DefaultChain from "./types/defaultChain"
 
@@ -20,6 +18,7 @@ import DefaultChain from "./types/defaultChain"
 // TODO https://xrpl.org/monitor-incoming-payments-with-websocket.html
 
 export default class XRPL  extends DefaultChain {
+    
     provider: xrpl.Client = null
     wallet: xrpl.Wallet = null
     

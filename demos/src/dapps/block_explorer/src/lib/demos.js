@@ -193,7 +193,9 @@ let demos = {
         let keys;
         try {
             let id = DemosWebAuth.getInstance();
-            if(id.keypair === null) throw new Error("No keypair found");
+            if (id.keypair === null) {
+              throw new Error("No keypair found");
+            }
             keys = id.keypair;
         } catch (e) {
             console.log("[ERROR LOADING IDENTITY]")
@@ -429,7 +431,16 @@ let demos = {
         },
         // INFO An empty crosschain operation object
         crosschain_operation: {
-            // TODO Implement as specified in multichainDispatcher.js if any
+            chain: null,
+            subchain: null,
+            is_evm: null,
+            rpc: null,
+            task: {
+                type: null,
+                params: {},
+                signedPayloads: [],
+            },
+            signedPayloads: []
         },
     },
     // !SECTION Objects skeletons

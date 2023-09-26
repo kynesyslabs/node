@@ -9,6 +9,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+// TODO genesis.json: see how it is stored on chain and make a method to
+// TODO insert it in the gls automatically so that the parameters of the
+// TODO chain are both immutable and editable at the same time
+
 import Chain from "../chain"
 import Token from "./types/Token"
 import NFT from "./types/NFT"
@@ -184,15 +188,39 @@ export default class GLS {
     }
 
     // INFO The following getter is used to retrieve the list of all validators at a given block
-    static async getGLSValidatorsAtBlock(n: number = null) {
-        if (!n) {
-            n = await Chain.getLastBlockNumber()
+    static async getGLSValidatorsAtBlock(blockNumber: number = null) {
+        if (!blockNumber) {
+            blockNumber = await Chain.getLastBlockNumber()
         }
         let block_nodes = await Chain.read(
-            "SELECT * FROM validators WHERE valid_at<=" + n + " AND status=2 ORDER BY valid_at DESC",
+            "SELECT * FROM validators WHERE valid_at<=" + blockNumber + " AND status=2 ORDER BY valid_at DESC",
         )
         if (!block_nodes) { return [] }
         return block_nodes
+    }
+
+    // INFO Get a validator (or a public key anyway) status in the staking
+    // NOTE While accepting a blockNumber, it defaults to the last one
+    static async getGLSValidatorStatus(
+        // NOTE We want the hexed string as it is stored like that on chain
+        publicKeyHex: string, 
+        blockNumber: number = null,
+    ) {
+        if (!blockNumber) {
+            blockNumber = await Chain.getLastBlockNumber()
+        }
+        // Let's see if the validator is contained within the block
+        let info = await Chain.read(
+            "SELECT * FROM validators" +
+            " WHERE first_seen<=" + blockNumber +
+            " AND address=" + publicKeyHex,
+        )
+        // REVIEW Better handling of errors?
+        try {
+            return info[0]
+        } catch (e) {
+            return null
+        }
     }
     // !SECTION Validators management
 

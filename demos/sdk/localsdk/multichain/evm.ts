@@ -21,7 +21,7 @@ import { runInThisContext } from "vm"
 import { Hash } from "crypto"
 
 
-export default class EVM  extends DefaultChain implements IEVM {
+export default class EVM extends DefaultChain implements IEVM {
     // A singleton for each chain_id
     private static instances: Map<number, EVM> = new Map<number, EVM>()
     // Chain properties
@@ -123,9 +123,9 @@ export default class EVM  extends DefaultChain implements IEVM {
      */
 
     // INFO Getting an instance (if it exists) or false so that we can call createInstance
-    public static getInstance(chain_id: number): boolean|EVM {
+    public static getInstance(chain_id: number): EVM {
         if (!EVM.instances[chain_id]) {
-            return false
+            return null
         }
         return EVM.instances[chain_id]
     }
