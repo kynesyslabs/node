@@ -1,6 +1,7 @@
 <script>
     import EVM from "$lib/demos_libs/xmlibs/chains/evm.js"
     import demos from "$lib/demos.js"
+    import { rpcaddress }  from '$lib/env.js';
     // This is a XM transaction ready to be sent
     let xmtx = {
                 chain: "ethereum",
@@ -17,8 +18,12 @@
                 },
     }
 
+    demos.connect(rpcaddress);
+    
     async function prepare()
     {
+        if(!demos.connected)
+            return;
         let eth_chain = await EVM.create("https://eth.llamarpc.com");
         eth_chain.connectWallet("54c42954e6d2e4b5d3bb487c4f34aeffa26b9eccce5dba87dcf50a67c69f512c");
         // Let's obtain a signed payload
@@ -33,5 +38,4 @@
     }
 
     prepare();
-    console.log(xmtx);
 </script>
