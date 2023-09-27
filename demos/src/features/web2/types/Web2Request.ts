@@ -49,6 +49,7 @@ export interface IWeb2Attestation {
 	timestamp: number,
 	identity: forge.pki.PublicKey,
 	signature: forge.pki.ed25519.BinaryBuffer,
+    valid: boolean,
 }
 
 // INFO Simply handles the singleton stuff
@@ -88,8 +89,9 @@ export  class Web2APIClass {
         if (!req) {
             this.request.content.minAttestations = 10
             this.request.content.stage.hop_number = 0
+        } else {
+            this.request = req
         }
-        else this.request = req
         // REVIEW Should be ok anyway
         // NOTE Not awaiting cause we need to let devs decide when to await with awaitQuorum
         this.digest()
@@ -98,7 +100,7 @@ export  class Web2APIClass {
     // INFO Getting the digest of the request
     private async digest(): Promise<IWeb2Request> {
         required(this.request, "Missing request")
-        let action = this.request.content.action
+        let {action} = this.request.content
         let params = this.request.content.parameters
         // NOTE Dispatching the request to the appropriate handler
         switch (action) {
@@ -147,6 +149,7 @@ export  class Web2APIClass {
             timestamp: Date.now(),
             identity: sharedState.getInstance().identity.ed25519.publicKey,
             signature: signature,
+            valid: null,
         }
         // Adding the attestation to the request
         let hex_key = sharedState.getInstance().identity.ed25519.publicKey.toString("hex") // REVIEW Is this ok?
@@ -160,8 +163,23 @@ export  class Web2APIClass {
     async verify(): Promise<boolean> {
         required(this.request, "Missing request")
         let valid = true
-        // TODO Checking the hash validity for all the attestations
-        // TODO Checking the signature validity for all the attestations
+        // Cycling through all the attestations
+        for (let [key, attestation] of this.request.attestations) {
+            // REVIEW Checking the hash validity for all the attestations
+            let stringifiedContent = JSON.stringify(this.request.content)
+            let hash = Hashing.sha256(stringifiedContent)
+            let hash_valid = hash===attestation.hash
+            // REVIEW Checking the signature validity for all the attestations
+            let signature_valid = Cryptography.verify(
+                attestation.signature.toString("hex"),
+                attestation.hash,
+                attestation.identity)
+            // Noting the result of the verification in the attestation array
+            let isValid = hash_valid && signature_valid
+            // sourcery skip: dont-self-assign-variables
+            attestation.valid = isValid
+            this.request.attestations.set(key, attestation)
+        }
         return valid
     }
 

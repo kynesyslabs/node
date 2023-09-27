@@ -14,6 +14,7 @@ import required from "src/utilities/required"
 // transaction that will be granted as web2 result
 export default async function handleWeb2(request: IWeb2Request, senderSocket: any): Promise<[boolean, any]> {
     // Creating the workable interface
+    // TODO Remember that web2 could need to be signed and could need a fee
     // NOTE From now on, Web2API will reply to instanceName with the same instance
     // NOTE Also note that Web2API automatically starts the request validation
     let web2request = Web2API(senderSocket, request)
