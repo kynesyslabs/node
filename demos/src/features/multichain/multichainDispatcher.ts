@@ -1,7 +1,7 @@
 // INFO Entry point for multichain requests
 import XMParser from "./XMParser"
 import { XMScript } from "./XMParser"
-import multichain from "sdk/localsdk"
+import multichain from "sdk/localsdk/multichain"
 import Transaction from "src/libs/blockchain/transaction"
 import { Operation } from "src/libs/blockchain/routines/executeOperations"
 import Mempool from "src/libs/blockchain/mempool"

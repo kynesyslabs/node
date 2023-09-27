@@ -1,5 +1,5 @@
 // INFO In this module is offloaded the parsing of XM requests
-import multichain from "sdk/localsdk"
+import * as multichain from "sdk/localsdk/multichain"
 import sendSigned from "./routines/writes/sendSigned"
 
 // SECTION Payloads signing
