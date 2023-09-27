@@ -50,6 +50,9 @@ export default class EVM {
 
 	// SECTION Specific methods
 
+	// REVIEW Should prepare methods be like:
+	// prepare = { pay(), send(), ...}
+
 	// INFO transfer and pay are the same 
 	async prepareTransfer() {
 		await this.pay()
