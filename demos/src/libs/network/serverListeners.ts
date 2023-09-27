@@ -17,11 +17,11 @@ import { comlinkUtils } from "src/libs/communications"
 import { logger } from "src/libs/utils"
 import { Identity } from "src/libs/identity"
 import Transmission from "src/libs/communications/transmission"
-var term = require( "terminal-kit" ).terminal
+var term = require("terminal-kit").terminal
 
-export interface BrowserRequest  {
-    message: string,
-    data: any,
+export interface BrowserRequest {
+    message: string
+    data: any
 }
 
 export default class ServerListeners {
@@ -63,7 +63,10 @@ export default class ServerListeners {
                     browserResponse = [false, "Invalid request"]
                     break
             }
-            this.peer.socket.emit("browser_response", JSON.stringify(browserResponse))
+            this.peer.socket.emit(
+                "browser_response",
+                JSON.stringify(browserResponse),
+            )
         })
     }
 

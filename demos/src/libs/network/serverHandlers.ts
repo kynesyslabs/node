@@ -25,7 +25,6 @@ import Sessions from "./routines/sessionManager"
 
 var term = require("terminal-kit").terminal
 
-
 export default class ServerHandlers {
     // ANCHOR BrowserRequest
 
@@ -34,7 +33,8 @@ export default class ServerHandlers {
         // A browser login request is the first step for a user to confirm their identity
         // The user will be prompted for a message to sign and their session is either created or updated
         let address_requested = content.data.publicKey // Must be a JSON string of a publicKey
-        let requested_session = Sessions.getInstance().newSession(address_requested)
+        let requested_session =
+            Sessions.getInstance().newSession(address_requested)
         return requested_session
     }
 
@@ -43,7 +43,8 @@ export default class ServerHandlers {
         let s_signature = content.data.signature // Must be a JSON or a string of a signature (as Uint8Array or {type: "Buffer", data: []})
         let signature_conversion = normalizeWebBuffers(s_signature)
         let signature = signature_conversion[0]
-        if (!signature) return [false, "Invalid signature: " + signature_conversion[1]]
+        if (!signature)
+            return [false, "Invalid signature: " + signature_conversion[1]]
         // TODO Check session validity
         // INFO When a user logs in, the server will store and send a token valid for X time
         // the user possessing that token will be able to demonstrate that the user is still logged in
@@ -121,7 +122,11 @@ export default class ServerHandlers {
 
     // NOTE Theoretically, content should be IWeb2Request compliant
     // LINK "../../features/web2/types/Web2Request";
-    static async handleWeb2Request(request: any, content: any, senderSocket: any): Promise<any> {
+    static async handleWeb2Request(
+        request: any,
+        content: any,
+        senderSocket: any,
+    ): Promise<any> {
         console.log("[SERVER] Received web2Request")
         console.log(JSON.stringify(request))
 
@@ -209,7 +214,7 @@ export default class ServerHandlers {
         // ...
         let extra: any
         let require_reply = false
-        let response: string | Peer[]
+        let response: string | Peer[] | number
         let socketized_response: Peer[]
         let data = content.data
         console.log(typeof data)
@@ -288,6 +293,9 @@ export default class ServerHandlers {
                     })
                 }
                 response = await chain.getAddressInfo(data.address)
+                break
+            case "getPeerTime":
+                response = new Date().getTime()
                 break
         }
         return { extra, require_reply, response }
