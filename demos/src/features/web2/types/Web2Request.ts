@@ -4,6 +4,7 @@ import fetch from "node-fetch"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import sharedState from "src/utilities/sharedState"
+import { PeerManager } from "src/libs/peer"
 import required from "src/utilities/required"
 
 AbortSignal.timeout ??= function timemout(ms) {
@@ -109,6 +110,20 @@ export  class Web2APIClass {
                 break
             default: break
         }
+        // Building our own attestation
+        let hashedResult = Hashing.sha256(JSON.stringify(this.request.result))
+        let ourIdentity = sharedState.getInstance().identity.ed25519.publicKey
+        let signatureResult = Cryptography.sign(hashedResult, ourIdentity)
+        let attestation: IWeb2Attestation = {
+            hash: hashedResult,
+            timestamp: Date.now(),
+            identity: ourIdentity,
+            signature: signatureResult,
+            valid: true,
+        }
+        // Adding the attestation to the request
+        // NOTE This does not overwrite the original properties of the request
+        this.request.attestations.set(ourIdentity.toString("hex"), attestation)
         return this.request
     }
 
@@ -176,7 +191,6 @@ export  class Web2APIClass {
                 attestation.identity)
             // Noting the result of the verification in the attestation array
             let isValid = hash_valid && signature_valid
-            // sourcery skip: dont-self-assign-variables
             attestation.valid = isValid
             this.request.attestations.set(key, attestation)
         }
@@ -186,6 +200,11 @@ export  class Web2APIClass {
     // INFO Broadcasting this.request to another peer
     async next(): Promise<void> {
         required(this.request, "Missing request")
+        // Selecting a random peer (just one)
+        let peerlist = PeerManager.getInstance().getPeers()
+        let peer = peerlist[Math.floor(Math.random() * peerlist.length)]
+        // Forwarding the request to the selected peer
+
         // TODO Send the request to the next peer
     }
 
@@ -202,6 +221,17 @@ export  class Web2APIClass {
     }
 
     // INFO Easy awaiter with timeout
+    /* NOTE 
+     * The role of this method is to help the original rpc receiving the web2 request to
+     * wait (with a customizable timeout) for the attestations to arrive.
+     * The whole web2 on chain structure is designed to be as much asynchronous as possible,
+     * so the receiving rpc needs to be able to wait without blocking all its services.
+     * 
+     * This method is based on the idea that the original rpc should be agnostic to the
+     * actual position of the request in the attestation process, and should only wait for
+     * the attestations to arrive.
+     * 
+    */
     async awaitQuorum(quorum: number = 10, timeout: number = 9000): Promise<boolean> {
         let reachedQuorum: boolean = false
         let timer: number = 0

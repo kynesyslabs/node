@@ -6,6 +6,10 @@ import Transaction from "src/libs/blockchain/transaction"
 import { Operation } from "src/libs/blockchain/routines/executeOperations"
 import Mempool from "src/libs/blockchain/mempool"
 import required from "src/utilities/required"
+import Cryptography from "src/libs/crypto/cryptography"
+import sharedState from "src/utilities/sharedState"
+import Hashing from "src/libs/crypto/hashing"
+import { createOperation, createTransaction } from "src/libs/utils/demos_std"
 
 // INFO Upon receiving a request from a socket, we
 // need to attest and handle the other attestations (if we 
@@ -18,61 +22,64 @@ export default async function handleWeb2(request: IWeb2Request, senderSocket: an
     // NOTE From now on, Web2API will reply to instanceName with the same instance
     // NOTE Also note that Web2API automatically starts the request validation
     let web2request = Web2API(senderSocket, request)
-    let instanceName = web2request.name
-    // And getting a response from it
-    try {
-        // Ensuring we reach the quorum
-        required(await Web2API(instanceName).awaitQuorum(), "Not enough attestations to reach quorum")
-    } catch (error) {
-        return [false, error]
+    let instanceName = web2request.name // Numeric and progressive
+    // Checking if we are the original rpc that received the request
+    let nOfAttestations = request.attestations.size
+    let originalFlag = (nOfAttestations === 1) // Remember: we attested during the initialization
+    // ANCHOR Original RPC logic
+    // NOTE If we are the original rpc and this is the original request, we need to validate the request
+    // and wait for the attestations to arrive
+    if (originalFlag) {
+        try {
+            // Ensuring we reach the quorum if we are the original rpc that received the request
+            required(await Web2API(instanceName).awaitQuorum(), "Not enough attestations to reach quorum")
+            // Hashing and signing the request
+            let hashedAttestations = Hashing.sha256(JSON.stringify(web2request.request.attestations))
+            let ourPk = sharedState.getInstance().identity.ed25519.privateKey
+            let signedAttestations = Cryptography.sign(hashedAttestations, ourPk)
+            // Compiling and certifying the result
+            web2request.request.hash = hashedAttestations
+            web2request.request.signature = signedAttestations
+            // REVIEW And then we can send the response back to the client
+            return [true, web2request.request]
+        } catch (error) {
+            return [false, error]
+        }
     }
-    // At this point we have a valid, attested request: lets handle it
-    let derivedTx: Transaction
-    let derivedOperation: Operation
-    // NOTE If all the attestations are valid we can create the transaction, insert it and gibe back the result
-    // Creating a tx from the completed request if is possible
-    derivedTx = await createTransactionFromCompletedRequest(Web2API(instanceName).request)
-    // Deriving an operation from the tx
-    derivedOperation = await createOperationFromValidTransaction(derivedTx)
-    // Inserting the operation in the next mempool session with the proper data
-    Mempool.addTransaction(derivedTx)
-    // And we do the same for the derived operation in the GLS
-    GLS.getInstance().operations.push(derivedOperation)
+    // ANCHOR Subsequent handling of the attestations
+    // NOTE If we are not the original rpc that received the request, or if the request's attestations are
+    // coming back from the various peers, then we need to handle the attestations
+    else {
+        // First, we have to validate the attestations
+        web2request.verify()
+        // Now that our web2request.request object is updated,
+        // TODO we have to merge the attestations' arrays with valid values
+    }
+    let derivedTx = await deriveMempoolOperation(instanceName)
     // Sending back the result
     // REVIEW Maybe is more efficient somewhere else
     return [true, derivedTx]
 }
 
-// INFO A request has been validated on our side, we need to create a transaction
-async function createTransactionFromCompletedRequest(request: IWeb2Request): Promise<Transaction> {
-    let tx: Transaction = {
-        content: null,
-        signature: null,
-        hash: null,
-        confirmations: null,
-        state_changes: null,
+// INFO Derive a valid DEMOS tx and GLS operation from a web2 request
+async function deriveMempoolOperation(
+    instanceName: string,
+    insert: boolean = true,
+) {
+    // We should have a valid, attested request: lets handle it
+    let derivedTx: Transaction
+    let derivedOperation: Operation
+    // NOTE If all the attestations are valid we can create the transaction, insert it and gibe back the result
+    // Creating a tx from the completed request if is possible
+    derivedTx = await createTransaction(Web2API(instanceName).request)
+    // Deriving an operation from the tx
+    derivedOperation = await createOperation(derivedTx)
+    if (insert) {
+        // Inserting the operation in the next mempool session with the proper data
+        Mempool.addTransaction(derivedTx)
+        // And we do the same for the derived operation in the GLS
+        GLS.getInstance().operations.push(derivedOperation)
     }
-    // TODO Do it
-    return tx
-}
-
-// INFO Given a transaction, we need to create an operation from it to insert it in the next mempool session
-async function createOperationFromValidTransaction(tx: Transaction): Promise<Operation> {
-    // Preparing a base Operation
-    let op: Operation = {
-        operator: null,
-        actor: null,
-        params: [],
-        hash: null,
-        nonce: null,
-        timestamp: null,
-        status: "pending",
-        fees: {
-            network_fee: 0,
-            rpc_fee: 0,
-            additional_fee: 0,
-        },
-    }
-    // TODO Do the thing
-    return op
+    
+    return derivedTx
 }

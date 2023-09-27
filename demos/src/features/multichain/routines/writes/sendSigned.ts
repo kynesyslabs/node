@@ -1,7 +1,6 @@
 // INFO pay module for the supported chains
 import { IOperation } from "../../XMParser"
-import * as mc from "sdk/localsdk"
-const multichain = mc.multichain
+import * as multichain from "sdk/localsdk/multichain"
 import required from "src/utilities/required"
 import DefaultChain from "sdk/localsdk/multichain/types/defaultChain"
 
@@ -12,7 +11,7 @@ export default async function sendSigned(
     // Basic check: do we have a payload?
     let signedPayload: any
     try {
-        signedPayload = operation.signedPayloads[0]
+        signedPayload = operation.task.signedPayloads[0]
     } catch (e) {
         return [false, e]
     }

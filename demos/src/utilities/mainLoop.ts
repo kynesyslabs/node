@@ -1,6 +1,6 @@
 // INFO The main loop executed in background by index.ts
 import sharedState from "./sharedState"
-import * as consensusTime from "../libs/consensus/routines/consensusTime.old"
+import * as consensusTime from "../libs/consensus/routines/consensusTime"
 import Sync from "src/libs/blockchain/routines/Sync"
 import { Identity } from "src/libs/identity"
 

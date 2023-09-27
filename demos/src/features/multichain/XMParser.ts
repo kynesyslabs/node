@@ -1,5 +1,5 @@
 // INFO In this module is offloaded the parsing of XM requests
-import multichain from "sdk/localsdk"
+import * as multichain from "sdk/localsdk/multichain"
 import sendSigned from "./routines/writes/sendSigned"
 
 // SECTION Payloads signing
@@ -53,7 +53,8 @@ class XMParser {
         return xmscript
     }
 
-    
+
+    // INFO This returns the results of the execution of the XMScript
     static async execute(script: XMScript): Promise<any> {
         // Preparing the result
         // let result: Map<string, any> = new Map<string, any>()
@@ -87,7 +88,7 @@ class XMParser {
             */
             array_result.push(current_result)
         }
-        // TODO Implement
+        return array_result
     }
 
 

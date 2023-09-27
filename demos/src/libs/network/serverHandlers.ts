@@ -14,7 +14,6 @@ import InstantMessaging from "src/features/messaging/instantMessaging"
 import Mempool from "src/libs/blockchain/mempool"
 import chain from "src/libs/blockchain/chain"
 import handleWeb2 from "src/features/web2/web2endpoints"
-import validateWeb2 from "../blockchain/routines/validateWeb2"
 import validateTransaction from "../blockchain/routines/validateTransaction"
 import multichainDispatcher from "src/features/multichain/multichainDispatcher"
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
@@ -109,14 +108,6 @@ export default class ServerHandlers {
         // NOTE Remember that crosschain operations are in chainscript syntax (see chainscript_example.ts)
         const response = await multichainCapabilities()
         // TODO
-        return { extra, require_reply, response }
-    }
-
-    static async handleValidateWeb2(content: any): Promise<any> {
-        let extra: any,
-            require_reply = false
-        const response = await validateWeb2(content.data)
-
         return { extra, require_reply, response }
     }
 
