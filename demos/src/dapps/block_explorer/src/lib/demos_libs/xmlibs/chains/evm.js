@@ -6,11 +6,11 @@ import required from "../../utils/required"
 export default class EVM {
 
 	constructor(rpc_url=null) {
+		this.provider = null
+		this.wallet = null
 		if (rpc_url) {
 			this.setRPC(rpc_url)
 		}
-		this.wallet = null
-		this.provider = null
     }
 
 	// INFO Set of methods for connecting to an RPC while
@@ -19,11 +19,12 @@ export default class EVM {
 		this.provider = new ethers.providers.JsonRpcProvider(rpc_url)
 	}
 	async connect() {
+		console.log(this.provider)
         await this.provider.connect()
     }
 	static async create(rpc_url=null) {
 		let instance = new EVM(rpc_url)
-		if (rpc_url) { await instance.connect() }
+		//if (rpc_url) { await instance.connect() }
 		return instance
     }
 
@@ -45,7 +46,7 @@ export default class EVM {
         //    throw new Error("Wallet not connected")
         //}
         // Finally, we can sign the transaction
-        return this.wallet.sign(transaction)
+        return this.wallet.signTransaction(transaction)
 	}
 
 	// SECTION Specific methods
@@ -60,8 +61,8 @@ export default class EVM {
 	async preparePay(address, amount) {
 		required(this.wallet, "Wallet is not connected!")
 		// Signing a valid transfer
-        let tx = { to: address, value: ethers.parseEther(amount) }
-		let signedTx = await this.wallet.sign(tx)
+        let tx = { to: address, value: ethers.utils.parseEther(amount) }
+		let signedTx = await this.wallet.signTransaction(tx)
         console.log(signedTx)
         return signedTx
 	}
