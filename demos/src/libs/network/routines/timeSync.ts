@@ -1,6 +1,5 @@
 /* eslint-disable indent */
 import * as stat from "./timeSyncUtils"
-import { logger } from "src/libs/utils"
 import { promisify } from "util"
 import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
@@ -92,13 +91,13 @@ export const calculatePeerTimeOffset =
         const roundtrips = results.map(result => result.roundtrip)
         const limit = stat.median(roundtrips) + stat.std(roundtrips)
 
-        logger.log(`[PEER TIMESYNC] latency median: ${stat.median(roundtrips)}`)
-        logger.log(
+        console.log(`[PEER TIMESYNC] latency median: ${stat.median(roundtrips)}`)
+        console.log(
             `[PEER TIMESYNC] latency standard deviation: ${stat.std(
                 roundtrips,
             )}`,
         )
-        logger.log(`[PEER TIMESYNC] latency limit: ${limit}`)
+        console.log(`[PEER TIMESYNC] latency limit: ${limit}`)
         // filter all results which have a roundtrip smaller than the mean+std
         const filtered = results.filter(result => result.roundtrip < limit)
         const processedOffsets = filtered.map(result => result.offset)

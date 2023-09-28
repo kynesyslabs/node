@@ -1,12 +1,12 @@
 // INFO Entry file for handling web2 requests
-import { IWeb2Request } from "./routine/Web2Request"
-import Web2API from "./routine/Web2Request"
+import { IWeb2Request } from "./routine/Web2Parser"
+import Web2API from "./routine/Web2Parser"
 import { Operation } from "src/libs/blockchain/routines/executeOperations"
 import required from "src/utilities/required"
 import Cryptography from "src/libs/crypto/cryptography"
 import sharedState from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
-import { deriveMempoolOperation } from "src/libs/utils/demos_std"
+import { deriveMempoolOperation } from "src/libs/utils/demos_stdlib"
 
 // INFO Upon receiving a request from a socket, we
 // need to attest and handle the other attestations (if we 

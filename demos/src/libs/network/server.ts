@@ -10,16 +10,14 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { Server as ServerType } from "socket.io"
-import { logger } from "../utils"
 import { Peer } from "../peer"
-// import { Identity } from "../identity"
 import ServerListeners from "./serverListeners"
-// const identity = Identity.getInstance()
+var term = require("terminal-kit").terminal
 
 export default class Server {
     static setupListeners = async function (server: ServerType) {
         server.on("connection", async peerSocket => {
-            logger.log("[SERVER] Peer connected")
+            term.green("[SERVER] Peer connected\n")
 
             const newPeer = new Peer()
             newPeer.setSocket(peerSocket)

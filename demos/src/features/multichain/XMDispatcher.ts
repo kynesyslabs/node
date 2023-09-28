@@ -1,7 +1,7 @@
 // INFO Entry point for multichain requests
 import XMParser from "./routines/XMParser"
 import { XMScript } from "./routines/XMParser"
-import { deriveMempoolOperation } from "src/libs/utils/demos_std"
+import { deriveMempoolOperation } from "src/libs/utils/demos_stdlib"
 
 export default class multichainDispatcher {
 

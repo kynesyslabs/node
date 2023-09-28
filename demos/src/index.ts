@@ -25,7 +25,6 @@ import * as dotenv from "dotenv"
 dotenv.config()
 
 import { Identity } from "./libs/identity"
-import { logger } from "./libs/utils"
 import { PeerManager } from "./libs/peer"
 import { server as networkServer } from "./libs/network"
 
@@ -140,7 +139,7 @@ async function main() {
 
     try {
         await Identity.getInstance().getPublicIP()
-        logger.log("IP: " + Identity.getInstance().publicIP)
+        term.green("IP: " + Identity.getInstance().publicIP)
     } catch (e) {
         console.log(e)
         term.orange("[WARN] {OFFLINE?} Failed to get public IP\n")
@@ -163,7 +162,7 @@ async function main() {
         peerManager.addPeer(peer)
     }
 
-    logger.bootstrapSuccess(
+    term.green(
         "[BOOTSTRAP] Peers loaded (" + peerManager.getPeers().length + ")\n",
     )
     // Checking for listening mode
@@ -178,7 +177,7 @@ async function main() {
         // INFO Starting the sync loop
         if (OVERRIDE_IS_TESTER) return await commandLine() // Testing mode is just for debugging or showcase purposes
         if (COMMANDLINE_MODE) commandLine() // While doing the rest of the stuff needed, a comand line interface is available
-        logger.log("[MAIN] Starting the background loop\n")
+        term.yellow("[MAIN] Starting the background loop\n")
         mainLoop(id) // Is an async function so running without waiting send that to the background
     }
 }

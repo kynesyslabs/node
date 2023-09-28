@@ -10,7 +10,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { PeerManager } from "../peer"
-import { logger } from "../utils"
+var term = require("terminal-kit").terminal
 
 export default class ClientListeners {
     private peer: any
@@ -25,7 +25,7 @@ export default class ClientListeners {
 
     private connectListener = async () => {
         this.peer.socket.on("connect", async (connected_socket) => {
-            logger.log("[CLIENT] Connected to peer")
+            term.green("[CLIENT] Connected to peer\n")
             PeerManager.getInstance().addPeer(this.peer)
         })
     }
