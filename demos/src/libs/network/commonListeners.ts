@@ -11,14 +11,12 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { PeerManager } from "../peer"
 import { Identity } from "../identity"
-import { responseRegistry } from "../communications"
-import { comlinkUtils } from "../communications"
-import { logger } from "../utils"
 import { cryptography } from "../crypto"
-import chain from "src/libs/blockchain/chain"
+import ComLinkUtils from "../communications/comlinkUtils"
 import ResponseRegistry from "../communications/responseRegistry"
 import getRemoteIP from "../network/routines/getRemoteIP"
 import sharedState from "src/utilities/sharedState"
+var term = require("terminal-kit").terminal
 
 export default class CommonListeners {
     private peer: any
@@ -37,9 +35,8 @@ export default class CommonListeners {
 
     private disconnectListener = async () => {
         this.peer.socket.on("disconnect", async () => {
-            logger.log("user disconnected")
             // Removing the peer from the list if it was in
-            logger.log("[COMMON] Peer disconnected")
+            term.yellow("[COMMON] Peer disconnected")
             PeerManager.getInstance().removePeer(this.peer)
         })
     }
@@ -103,7 +100,7 @@ export default class CommonListeners {
             }
             //console.log(request)
             // Parsing the comlink
-            let parsed_comlink = await comlinkUtils.parseComlink(
+            let parsed_comlink = await ComLinkUtils.parseComlink(
                 request,
                 this.peer.socket,
             ) 
