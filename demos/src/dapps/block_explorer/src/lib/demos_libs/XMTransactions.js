@@ -12,7 +12,8 @@ let XMTransactions = {
             rpc: "",
 			task: {
 				type: "",
-				params: {}
+				params: {},
+				signedPayloads: [],
 			}
 		}
 	},

@@ -32,7 +32,7 @@ const crosschain_operation = {
 		params: {},
 		signedPayloads: []
 	},
-	signedPayloads: []
+	//signedPayloads: []
 }
 
 // INFO An empty web2 request object
