@@ -11,14 +11,6 @@
     import en from 'javascript-time-ago/locale/en'
 	import TransactionRow from '$lib/components/blockexplorer/TransactionRow.svelte';
 
-<<<<<<< Updated upstream
-=======
-    import demos from '$lib/demos.js'
-    import { rpcaddress } from '../../lib/env.js';
-
-
-    TimeAgo.addLocale(en);
->>>>>>> Stashed changes
 
     demos.connect(rpcaddress);
     async function getBlock() 
