@@ -31,8 +31,7 @@ export default class Mempool {
 
     // INFO Reading the whole current mempool
     public static async getMempool(): Promise<MempoolData> {
-        let mempool = await Chain.read("SELECT * from mempool WHERE current = 1")
-        return mempool
+        return await Chain.read("SELECT * from mempool WHERE current = 1")
     }
 
 
@@ -57,7 +56,7 @@ export default class Mempool {
     public static async addHeaders(headers: any): Promise<void> { // TODO Add types
         let mempool = await Mempool.getMempool()
         // FIXME Ensure the schema of the headers is correctly inserted into the db
-        await Chain.write("UPDATE mempool SET headers ='" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")
+        await Chain.write("UPDATE mempool SET headers ='" + JSON.stringify(headers) + "' WHERE current = 1")
     }
 
     // INFO Removing a transaction from the mempool
@@ -150,7 +149,7 @@ export default class Mempool {
             }
         }
         // Merge the mempool with our one
-        mempool.transactions.concat(received_mempool.transactions) // REVIEW is this the best way to merge?
+        mempool.transactions = mempool.transactions.concat(received_mempool.transactions) // REVIEW is this the best way to merge?
         await Chain.write("UPDATE mempool SET transactions = '" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")
         return true
     }
@@ -159,8 +158,8 @@ export default class Mempool {
     public static async sort(mempool: MempoolData): Promise<MempoolData> {
 
         mempool.transactions.sort((tx1, tx2) => {
-            let comparison = tx1.content.transaction_fee.rpc_fee >= tx2.content.transaction_fee.rpc_fee
-            if (comparison) { 
+            let comparison = tx1.content.transaction_fee.rpc_fee > tx2.content.transaction_fee.rpc_fee ? -1 : tx1.content.transaction_fee.rpc_fee < tx2.content.transaction_fee.rpc_fee ? 1 : 0
+            if (comparison) {
                 return -1
             } else {
                 return 1
@@ -175,10 +174,10 @@ export default class Mempool {
         let local_mempool = await Mempool.getMempool()
         for (let i = 0; i < local_mempool.transactions.length; i++) {
             let pooled_tx = local_mempool.transactions[i]
-            if ((pooled_tx.content.from == pooled_tx.content.from) &&
-                (tx.content.nonce == tx.content.nonce) &&
+            if ((pooled_tx.content.from == tx.content.from) &&
+                (pooled_tx.content.nonce == tx.content.nonce) &&
                 (replace)) {
-                local_mempool.transactions[i] = null
+                local_mempool.transactions.splice(i, 1)
                 await Chain.write("UPDATE mempool SET transactions = '" + JSON.stringify(local_mempool.transactions) + "' WHERE current = 1")
 
             }

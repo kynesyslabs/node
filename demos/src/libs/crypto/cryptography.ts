@@ -168,14 +168,13 @@ export default class Cryptography {
         console.log(" is a " + typeof(publicKey))
         console.log("\n")
         console.log("[*] Verifying the signature...")
-        const verified = ed25519.verify({
+        return ed25519.verify({
             message: signed,
             encoding: "utf8",
             signature: signature,
             // eslint-disable-next-line comma-dangle
             publicKey: publicKey
         })
-        return verified
     }
 
     // ANCHOR Encryption part
