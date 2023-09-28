@@ -117,11 +117,6 @@ export default class ServerListeners {
                         await ServerHandlers.handleXMChainStatus())
                     break
 
-                case "validate_web2":
-                    ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleValidateWeb2(content))
-                    break
-
                 case "web2Request":
                     ;({ extra, require_reply, response } =
                         await ServerHandlers.handleWeb2Request(
