@@ -40,6 +40,7 @@ const web2_request = {
 	content: {
 		action: null,
 		parameters: [],
+		requestedParameters: null, // Means all
 		method: null,
 		url: null,
 		headers: null,

@@ -5,8 +5,9 @@ import * as skeletons from "./utils/skeletons.js"
 // INFO Web2 Endpoints
 export default async function Web2Transactions(
 		action = "GET",
-		url = "https://apple.com/robots.txt",
+		url = "https://icanhazip.com",
 		parameters = [],
+		requestedParameters = null,
 		headers = null,
 		minAttestations = 2,
 	) {

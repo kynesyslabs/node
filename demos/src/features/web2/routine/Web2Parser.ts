@@ -24,6 +24,7 @@ export interface IWeb2Request {
 	content: {
 		action: string,
         parameters: IParam[],
+        requestedParameters: [] | null,
         method: "POST" | "GET" | "PUT" | "DELETE" | "PATCH",
 		url: string,
 		headers: any,
