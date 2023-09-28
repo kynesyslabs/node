@@ -31,7 +31,9 @@ class DemosWebAuth {
 	 * @returns {DemosWebAuth}
 	 */
 	static getInstance() {
-        if (!this._instance) this._instance = new DemosWebAuth()
+        if (!this._instance) {
+          this._instance = new DemosWebAuth()
+        }
         return this._instance
     }
 
@@ -41,7 +43,9 @@ class DemosWebAuth {
 	 * @returns {Promise<[boolean, any]>}
 	 */
 	async create (seed=null) {
-		if (!seed) seed = forge.random.getBytesSync(32)
+		if (!seed) {
+    		seed = forge.random.getBytesSync(32)
+  		}
 		console.log("[CREATE WALLET] Creating wallet...")
 		console.log("[CREATE WALLET] Seed: " + seed)
 		let result = [true, ""]

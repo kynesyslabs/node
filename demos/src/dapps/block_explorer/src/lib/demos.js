@@ -32,6 +32,7 @@ import * as skeletons from './demos_libs/utils/skeletons';
 import DemosWebAuth from './demos_libs/DemosWebAuthenticator';
 import XMTransactions from './demos_libs/XMTransactions';
 import Web2Transactions from './demos_libs/Web2Transactions';
+import { DemosTransactions } from './demos_libs/DemosTransactions';
 
 // TODO Use XMTransactions for the crosschain transactions
 // TODO Typize with jsdoc
@@ -341,12 +342,13 @@ let demos = {
 	},
 	// !SECTION Predefined calls
 
-	// SECTION Web2 Endpoints
+    // SECTION Operation types
+    
+	// ANCHOR Web2 Endpoints
 	Web2Transactions: Web2Transactions,
 	getWeb2Data: Web2Transactions,
-    // !SECTION Web2 Endpoints
-    
-	// SECTION Crosschain support endpoints
+
+	// ANCHOR Crosschain support endpoints
 	crosschain: {
 		transactions: XMTransactions,
 		// INFO Executing a precompiled multichain operation
@@ -356,56 +358,14 @@ let demos = {
 			return response;
 		}
 	},
-	// !SECTION Crosschain support endpoints
 
-	// SECTION Supporting txs
-	transactions: {
-		// REVIEW All this part
-		// NOTE A courtesy to get a skeleton of transactions
-		empty: function () {
-			return demos.skeletons.transaction;
-		},
-		// NOTE Building a transaction without signing or hashing it
-		prepare: async function (data) {
-			let thisTx = demos.skeletons.transaction;
-			//if (!data.timestamp) data.timestamp = Date.now()
-			// Assigning the transaction data to our object
-			//thisTx.content = data
-			return thisTx;
-		},
-		// NOTE Signing a transaction after hashing it
-		sign: async function (raw_tx, private_key = null) {
-			// If necessary, the private key is loaded from the state
-			if (!private_key) {
-				let id = await SharedState.getInstance().getIdentity();
-				private_key = id.privateKey;
-				console.log('Private key loaded from state');
-			} else {
-				console.log('Private key provided');
-			}
-			console.log(private_key);
-			// Hashing the content of the transaction
-			//let md = forge.md.sha256.create()
-			//md.update(JSON.stringify(raw_tx.content))
-			raw_tx.hash = await sha256(raw_tx.content);
-			// Signing the hash of the content
-			raw_tx.signature = forge.pki.ed25519.sign({
-				message: raw_tx.hash,
-				encoding: 'utf8',
-				privateKey: private_key
-			}); // REVIEW if it is working right
-			raw_tx.signature = bufferize(Buffer.from(raw_tx.signature)); // FIXME Changed to Buffer
-			return raw_tx; // Hashed and signed
-		},
-		// NOTE Sending a transaction after signing it
-		broadcast: async function (signed_tx) {
-			// TODO: Implement and for god sake do some error handling
-			return await demos.call('tx', { tx: signed_tx }); // REVIEW It should returns either false + error or true + hash
-		}
-	},
-	// !SECTION Supporting txs
-
-	// INFO DemosWebAuthenticator
+	// ANCHOR Supporting txs
+    DemosTransactions: DemosTransactions,
+	transactions: DemosTransactions,
+	
+    // SECTION Operation types
+	
+    // INFO DemosWebAuthenticator
 	DemosWebAuth: DemosWebAuth, // NOTE Modularized to be more elegant
 
 	// INFO Calling demos.skeletons.NAME provides an empty skeleton that can be used for reference while calling other demos functions
