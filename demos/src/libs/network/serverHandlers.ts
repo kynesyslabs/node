@@ -272,7 +272,7 @@ export default class ServerHandlers {
             // INFO Authentication listener
             case "getPeerIdentity":
                 // NOTE We don't need to sign anything as the comlink is signed already
-                response = "I am " + id_ed25519.publicKey.toString("hex")
+                response = "I am " + id_ed25519.publicKey//.toString("hex")
                 console.log(response)
                 break
 
