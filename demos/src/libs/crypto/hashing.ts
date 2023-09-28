@@ -17,4 +17,6 @@ export default class Hashing {
         md.update(message)
         return md.digest().toHex()
     }
+
+        
 }

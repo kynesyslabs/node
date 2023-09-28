@@ -48,7 +48,8 @@ export default class Identity {
     async ensureIdentity(): Promise<void> {
         if (fs.existsSync("./.demos_identity")) {
             // Loading the identity
-            this.ed25519 = await cryptography.load("./.demos_identity") // TODO Add load with cryptography
+            // TODO Add load with cryptography
+            this.ed25519 = await cryptography.load("./.demos_identity") 
             term.yellow("Loaded ecdsa identity")
         } else {
             this.ed25519 = cryptography.new()

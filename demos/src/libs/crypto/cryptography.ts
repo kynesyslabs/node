@@ -14,10 +14,12 @@ import * as forge from "node-forge"
 import { promises as fs } from "fs"
 import { Identity } from "../identity"
 const term = require("terminal-kit")
-const ed25519 = forge.pki.ed25519
+const {ed25519} = forge.pki
+const crypto = require("crypto")
+const algorithm = "aes-256-cbc"
 
 export default class Cryptography {
-    // TODO Generates a new RSA keypair from a given ecdsa private key
+    
     static new() {
         const seed = random.getBytesSync(32)
         const keys = pki.ed25519.generateKeyPair({ seed })
@@ -27,8 +29,7 @@ export default class Cryptography {
 
     // INFO Method to generate a new key pair from a seed
     static newFromSeed(stringSeed: string) {
-        const keys = pki.ed25519.generateKeyPair({ seed: stringSeed })
-        return keys
+        return pki.ed25519.generateKeyPair({ seed: stringSeed })
     }
 
     // TODO Eliminate the old legacy compatibility
@@ -51,8 +52,42 @@ export default class Cryptography {
         return "0x" + stringBuffer
     }
 
+    // SECTION Encrypted save and load
+    static async saveEncrypted(
+        keypair: pki.KeyPair,
+        path: string,
+        password: string) {
+        const key = crypto.createCipher(algorithm, password)
+        // Getting the private key in hex form
+        const hex_key = keypair.privateKey.toString("hex")
+        // Encrypting and saving
+        const encryptedMessage = key.update(hex_key, "utf8", "hex")
+        await fs.writeFile(path, encryptedMessage)
+    }
 
-    // TODO Eliminate the old legacy compatibility
+    static async loadEncrypted(
+        path: string,
+        password: string) {
+        let keypair: pki.KeyPair = {
+            privateKey: null,
+            publicKey: null,
+        }
+        // Preparing the environment
+        const decipher = crypto.createDecipher(algorithm, password)
+        const contentOfFile = await fs.readFile(path, "utf8")
+        // Decrypting
+        const decryptedKey = decipher.update(contentOfFile, "hex", "utf8")
+        // Loading
+        if (decryptedKey.includes("{")) {
+            keypair = Cryptography.loadFromBufferString (contentOfFile)
+        } else {
+            keypair = Cryptography.loadFromHex(contentOfFile)
+        }
+        return keypair
+    }
+    // !SECTION Encrypted save and load
+
+
     static async load(path) {
         let keypair: pki.KeyPair = {
             privateKey: null,
@@ -101,19 +136,13 @@ export default class Cryptography {
     }
 
     static sign(message: string, privateKey: pki.ed25519.BinaryBuffer | any) {
-        const signature = pki.ed25519.sign({
+        return pki.ed25519.sign({
             message,
             encoding: "utf8",
             privateKey,
         })
-        return signature
     }
 
-    // FIXME Is not working at the moment (in tx from the websdk gives a mismatch?)
-    /*
-ONLY if sent by web tho (prolly a matter of buffers of course)
-[COMLINK VALIDATION ERROR] (on validateComlink) TypeError: "options.message" must be a node.js Buffer, a Uint8Array, a forge ByteBuffer, or a string with "options.encoding" specifying its encoding.
-    */
     static verify( 
         signed: string,
         signature: any | pki.ed25519.BinaryBuffer,

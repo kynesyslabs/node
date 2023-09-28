@@ -29,11 +29,7 @@ export default class Chain {
     static async read(sql_query: string): Promise<any> {
         try {
             const db = await Datasource.getInstance()
-            const result = await db.getDataSource().query(sql_query)
-
-            //console.log("[ChainDB] [ READ ]: ")
-            //console.log(result)
-            return result
+            return await db.getDataSource().query(sql_query)
         } catch (err) {
             console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
             throw err
@@ -43,9 +39,7 @@ export default class Chain {
     static async write(sql_query: string) {
         try {
             const db = await Datasource.getInstance()
-            const result = await db.getDataSource().query(sql_query)
-            //console.log("[ChainDB] [ WRITE ]: " + result)
-            return result
+            return await db.getDataSource().query(sql_query)
         } catch (err) {
             console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
             throw err
@@ -103,8 +97,7 @@ export default class Chain {
 
     static async getGenesisBlock() {
         // Playground for async testing
-        let _res = await this.read("SELECT * FROM blocks WHERE number=0")
-        return _res
+        return await this.read("SELECT * FROM blocks WHERE number=0")
     }
 
     // INFO Get the current pending transactions pool
@@ -124,9 +117,9 @@ export default class Chain {
     // REVIEW Giving back all the properties of an address
     static async getAddressInfo(address: string): Promise<any> {
         let native_state = await Chain.read("SELECT * FROM status_native WHERE address = '" + address + "'")
-        native_state = native_state[0]? native_state[0] : null
+        native_state = native_state[0] || null
         let properties_state = await Chain.read("SELECT * FROM status_properties WHERE address = '" + address + "'")
-        properties_state = properties_state[0]? properties_state[0] : null
+        properties_state = properties_state[0] || null
         return {
             native: native_state,
             properties: properties_state,

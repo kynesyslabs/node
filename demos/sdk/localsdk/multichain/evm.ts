@@ -10,15 +10,12 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 import * as ethers from "ethers"
 import { JsonRpcProvider } from "@ethersproject/providers"
-import { JsonRpcSigner } from "@ethersproject/providers"
 import { Wallet } from "@ethersproject/wallet"
 import { TransactionRequest } from "@ethersproject/providers"
 import { Contract } from "ethers"
 import DefaultChain from "./types/defaultChain"
 import { IEVM } from "./types/defaultChain"
 import required from "src/utilities/required"
-import { runInThisContext } from "vm"
-import { Hash } from "crypto"
 
 
 export default class EVM extends DefaultChain implements IEVM {
@@ -91,8 +88,7 @@ export default class EVM extends DefaultChain implements IEVM {
 
     async signTransaction(raw_transaction: TransactionRequest): Promise<any> {
         required(this.wallet)
-        let signed_tx = await this.wallet.signTransaction(raw_transaction)
-        return signed_tx
+        return await this.wallet.signTransaction(raw_transaction)
     }
 
     // INFO If the wallet is connected, send a transaction
@@ -104,15 +100,13 @@ export default class EVM extends DefaultChain implements IEVM {
 
     // REVIEW Reader for contracts
     async readFromContract(contract_instance: Contract, function_name: string, args: any): Promise<any> {
-        let response = await contract_instance[function_name](...args)
-        return response
+        return await contract_instance[function_name](...args)
     }
 
     // REVIEW Writer for contracts
     async writeToContract(contract_instance: Contract, function_name: string, args: any): Promise<any> {
         required(this.wallet)
-        let response = await contract_instance[function_name](...args) // NOTE Ensure it is writeable i guess
-        return response
+        return await contract_instance[function_name](...args) // NOTE Ensure it is writeable i guess
     }
 
     /**
