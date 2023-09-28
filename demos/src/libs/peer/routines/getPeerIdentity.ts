@@ -67,6 +67,12 @@ export default async function getPeerIdentity(
             console.log(
                 "[PEER AUTHENTICATION] Identity is not the expected one",
             )
+            console.log("Expected: ")
+            console.log(expectedKey)
+            console.log("Received: ")
+            console.log(response[1].identity.toString("hex"))
+            console.log("Non hex:")
+            console.log(response[1].identity)
             return null
         }
         // Adding the property to the peer

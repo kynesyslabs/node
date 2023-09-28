@@ -1,8 +1,37 @@
+/* eslint-disable no-unused-vars */
 import Transaction from "../blockchain/transaction"
 import { Operation } from "../blockchain/routines/executeOperations"
-import { TxFee } from "../blockchain/types/transactions"
-import { TransactionContent } from "../blockchain/types/transactions"
-import * as forge from "node-forge"
+import Mempool from "../blockchain/mempool"
+import GLS from "../blockchain/gls/gls"
+
+export async function deriveMempoolOperation(
+    data: any,
+    insert: boolean = true,
+): Promise<any> {
+    // Sanity check
+    if (typeof(data) !== "string") {
+        try {
+            data = JSON.stringify(data)
+        } catch (e) {
+            console.log(e)
+            return false
+        }
+    }
+    // We should have a valid, attested request: lets handle it
+    let derivedTx: Transaction
+    let derivedOperation: Operation
+    // Deriving a transaction
+    derivedTx = await createTransaction(data)
+    // Deriving an operation from the tx
+    derivedOperation = await createOperation(derivedTx)
+    if (insert) {
+        // Inserting the operation in the next mempool session with the proper data
+        Mempool.addTransaction(derivedTx)
+        // And we do the same for the derived operation in the GLS
+        GLS.getInstance().operations.push(derivedOperation)
+    }
+    return derivedOperation
+}
 
 export async function createOperation(transaction: Transaction): Promise<Operation> {
     let operation: Operation = {

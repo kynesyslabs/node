@@ -11,9 +11,9 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import * as fs from "fs"
 import { cryptography } from "../crypto"
-import Logger from "../utils/logger"
 import { pki } from "node-forge"
 import getRemoteIP from "../network/routines/getRemoteIP"
+var term = require( "terminal-kit" ).terminal
 
 export default class Identity {
     private static instance: Identity
@@ -49,12 +49,12 @@ export default class Identity {
         if (fs.existsSync("./.demos_identity")) {
             // Loading the identity
             this.ed25519 = await cryptography.load("./.demos_identity") // TODO Add load with cryptography
-            Logger.log("Loaded ecdsa identity")
+            term.yellow("Loaded ecdsa identity")
         } else {
             this.ed25519 = cryptography.new()
             // Writing the identity to disk in binary format
             await cryptography.save(this.ed25519, "./.demos_identity")
-            Logger.log("Generated new identity")
+            term.yellow("Generated new identity")
         }
         // Stringifying to hex
         this.ed25519_hex = {

@@ -14,7 +14,6 @@ import ServerHandlers from "src/libs/network/serverHandlers"
 import { cryptography } from "src/libs/crypto"
 import { Peer } from "src/libs/peer"
 import { comlinkUtils } from "src/libs/communications"
-import { logger } from "src/libs/utils"
 import { Identity } from "src/libs/identity"
 import Transmission from "src/libs/communications/transmission"
 var term = require("terminal-kit").terminal
@@ -82,9 +81,12 @@ export default class ServerListeners {
                     request,
                     this.peer.socket,
                 )
-                if (!parsed_comlink) return // TODO Better error handling
+                if (!parsed_comlink) {
+                    return // TODO Better error handling
+                }
             } catch (error) {
-                logger.error(error)
+                term.red(error)
+                console.log("Returning")
                 return // TODO Better error handling
             }
             let _comlink_request = parsed_comlink[0]
@@ -115,11 +117,6 @@ export default class ServerListeners {
                 case "multichain_status":
                     ;({ extra, require_reply, response } =
                         await ServerHandlers.handleXMChainStatus())
-                    break
-
-                case "validate_web2":
-                    ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleValidateWeb2(content))
                     break
 
                 case "web2Request":
@@ -161,15 +158,15 @@ export default class ServerListeners {
                     break
 
                 default:
-                    logger.log(
-                        `[COMLINK INVALID] No known type: ${content.type}`,
+                    term.red(
+                        `[COMLINK INVALID] No known type: ${content.type}\n`,
                     )
                     break
             }
 
-            logger.log("content.type: " + content.type)
-            logger.log("content.message: " + content.message)
-            logger.log("content.message.action: " + content.message.action)
+            console.log("content.type: " + content.type)
+            console.log("content.message: " + content.message)
+            console.log("content.message.action: " + content.message.action)
 
             // ANCHOR Reply logic
             // REVIEW unless specified, we now send back the updated comlink as a response
@@ -208,9 +205,8 @@ export default class ServerListeners {
         // FIXME Auth reply listener should not add a client to the peerlist if is read only
         this.peer.socket.on("auth_reply", async data => {
             let identity = await cryptography.load("./.demos_identity")
-            logger.log("[SERVER] Received auth reply")
+            term.yellow("[SERVER] Received auth reply")
             if (!(data === "readonly")) {
-                // REVIEW Verify the signature with the public key on the message
                 let _verification = await cryptography.verify(
                     data[0],
                     data[1],
@@ -221,10 +217,11 @@ export default class ServerListeners {
                     this.peer.socket.emit("auth_fail")
                     this.peer.socket.disconnect()
                 }
-            } else
-                logger.log(
+            } else {
+                term.yellow(
                     "[SERVER] Client is read only: not asking for authentication",
                 )
+            }
             // And we reply ok with our signature too
             let _signature = cryptography.sign("auth_ok", identity.privateKey)
             let _reply = {

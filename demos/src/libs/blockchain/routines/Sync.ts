@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
@@ -55,9 +56,6 @@ export default async function Sync(id: any) {
         let _comlink = new ComLink()
         let _currentPeer = peerlist[i]
         // Generate the message to ask for the last block
-        // logger.warn("id.ed25519.privateKey")
-        // logger.warn(typeof id.ed25519.privateKey)
-        // logger.warn(JSON.stringify(id.ed25519.privateKey))
         let _blockAskMessage = new Transmission(id.ed25519.privateKey)
         _blockAskMessage.initialize(
             "nodeCall",
@@ -161,7 +159,7 @@ export default async function Sync(id: any) {
             console.log("[SYNC] Asking " + name + " for the last block")
             let node = unsyncedNodes[name]
             console.log("[SYNC] Retrieving info...")
-            let connection_string = node.connection_string
+            let {connection_string} = node
             console.log("[SYNC] Connection string: " + connection_string)
             // TODO Check if the block is forward or backward
             // TODO If forward, ask for the block

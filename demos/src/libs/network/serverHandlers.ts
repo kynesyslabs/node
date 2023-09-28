@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
@@ -13,9 +14,9 @@ import { Peer, PeerManager } from "src/libs/peer"
 import InstantMessaging from "src/features/messaging/instantMessaging"
 import Mempool from "src/libs/blockchain/mempool"
 import chain from "src/libs/blockchain/chain"
-import handleWeb2 from "src/features/web2/web2endpoints"
+import handleWeb2 from "src/features/web2/Web2Dispatcher"
 import validateTransaction from "../blockchain/routines/validateTransaction"
-import multichainDispatcher from "src/features/multichain/multichainDispatcher"
+import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 import sharedState from "src/utilities/sharedState"
 import { BrowserRequest } from "./serverListeners"
@@ -32,9 +33,7 @@ export default class ServerHandlers {
         // A browser login request is the first step for a user to confirm their identity
         // The user will be prompted for a message to sign and their session is either created or updated
         let address_requested = content.data.publicKey // Must be a JSON string of a publicKey
-        let requested_session =
-            Sessions.getInstance().newSession(address_requested)
-        return requested_session
+        return Sessions.getInstance().newSession(address_requested)
     }
 
     static async handleLoginResponse(content: BrowserRequest) {
@@ -42,8 +41,9 @@ export default class ServerHandlers {
         let s_signature = content.data.signature // Must be a JSON or a string of a signature (as Uint8Array or {type: "Buffer", data: []})
         let signature_conversion = normalizeWebBuffers(s_signature)
         let signature = signature_conversion[0]
-        if (!signature)
+        if (!signature) {
             return [false, "Invalid signature: " + signature_conversion[1]]
+        }
         // TODO Check session validity
         // INFO When a user logs in, the server will store and send a token valid for X time
         // the user possessing that token will be able to demonstrate that the user is still logged in
@@ -207,7 +207,7 @@ export default class ServerHandlers {
         let require_reply = false
         let response: string | Peer[] | number
         let socketized_response: Peer[]
-        let data = content.data
+        let {data} = content
         console.log(typeof data)
         console.log(JSON.stringify(content))
         switch (content.message) {

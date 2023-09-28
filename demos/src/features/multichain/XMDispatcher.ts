@@ -1,12 +1,8 @@
+/* eslint-disable no-unused-vars */
 // INFO Entry point for multichain requests
-import XMParser from "./XMParser"
-import { XMScript } from "./XMParser"
-import * as multichain from "sdk/localsdk/multichain"
-import Transaction from "src/libs/blockchain/transaction"
-import { Operation } from "src/libs/blockchain/routines/executeOperations"
-import Mempool from "src/libs/blockchain/mempool"
-import GLS from "src/libs/blockchain/gls/gls"
-import { createOperation, createTransaction } from "src/libs/utils/demos_std"
+import XMParser from "./routines/XMParser"
+import { XMScript } from "./routines/XMParser"
+import { deriveMempoolOperation } from "src/libs/utils/demos_stdlib"
 
 export default class multichainDispatcher {
 
@@ -39,19 +35,12 @@ export default class multichainDispatcher {
         insert: boolean = true,
     ): Promise<any> {
         // We should have a valid, attested request: lets handle it
-        let derivedTx: Transaction
-        let derivedOperation: Operation
         // NOTE If all the attestations are valid we can create the transaction, insert it and gibe back the result
         // Creating a tx from the completed request if is possible
-        derivedTx = await createTransaction(script)
-        // Deriving an operation from the tx
-        derivedOperation = await createOperation(derivedTx)
-        if (insert) {
-            // Inserting the operation in the next mempool session with the proper data
-            Mempool.addTransaction(derivedTx)
-            // And we do the same for the derived operation in the GLS
-            GLS.getInstance().operations.push(derivedOperation)
+        let jsonNote = {
+            script: script,
+            results: results,
         }
-        return derivedTx
+        return await deriveMempoolOperation(jsonNote, insert)
     }
 }

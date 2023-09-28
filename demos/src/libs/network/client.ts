@@ -10,10 +10,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { io } from "socket.io-client"
-import { logger } from "../utils"
 import Peer from "../peer/Peer"
 import CommonListeners from "./commonListeners"
 import ClientListeners from "./clientListeners"
+var term = require("terminal-kit").terminal
 
 // NOTE Sleep function
 async function sleep(ms) {
@@ -28,14 +28,14 @@ export default class Client {
         port: number = 53550,
     ) {
         address = this.addHttpToUrl(address)
-        logger.log("[CLIENT] Connecting to peer at " + address + ":" + port)
+        console.log("[CLIENT] Connecting to peer at " + address + ":" + port)
 
         let connected = false
         let _peerForged = new Peer()
 
         const connectionSocket = io(address + ":" + port)
         connectionSocket.on("connect", async () => {
-            logger.log("[CLIENT] Connected to peer at " + address + ":" + port)
+            term.green("[CLIENT] Connected to peer at " + address + ":" + port + "\n")
             _peerForged.identity = "placeholder" // TODO Add identity filling and verification
             _peerForged.socket = connectionSocket
             _peerForged.connectionString = address + ">" + port

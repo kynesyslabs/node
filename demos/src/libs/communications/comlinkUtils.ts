@@ -10,7 +10,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import ComLink from "./comlink"
-import { Bundle } from "./types/transmit"
 var term = require("terminal-kit").terminal
 
 export default class ComLinkUtils {
@@ -44,7 +43,6 @@ export default class ComLinkUtils {
             return false
         }
         if (!(type_of_call=== "nodeCall")) {
-            
             let valid: any[]
             try {
                 valid = await _comlink_request.validateComlink()
@@ -59,7 +57,9 @@ export default class ComLinkUtils {
                 })
                 return false
             }
-        } else term.green("[COMLINK] nodeCall received (no auth required)\n")
+        } else {
+            term.green("[COMLINK] nodeCall received (no auth required)\n")
+        }
 
         console.log("[COMLINK PARSING] Parsing comlink message...")
         // Sanitizing the request

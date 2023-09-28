@@ -1,5 +1,5 @@
 // INFO pay module for the supported chains
-import { IOperation } from "../../XMParser"
+import { IOperation } from "../XMParser"
 import * as multichain from "sdk/localsdk/multichain"
 import required from "src/utilities/required"
 import DefaultChain from "sdk/localsdk/multichain/types/defaultChain"

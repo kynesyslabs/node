@@ -1,15 +1,12 @@
 // INFO Entry file for handling web2 requests
-import GLS from "src/libs/blockchain/gls/gls"
-import { IWeb2Request } from "./types/Web2Request"
-import Web2API from "./types/Web2Request"
-import Transaction from "src/libs/blockchain/transaction"
+import { IWeb2Request } from "./routine/Web2Parser"
+import Web2API from "./routine/Web2Parser"
 import { Operation } from "src/libs/blockchain/routines/executeOperations"
-import Mempool from "src/libs/blockchain/mempool"
 import required from "src/utilities/required"
 import Cryptography from "src/libs/crypto/cryptography"
 import sharedState from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
-import { createOperation, createTransaction } from "src/libs/utils/demos_std"
+import { deriveMempoolOperation } from "src/libs/utils/demos_stdlib"
 
 // INFO Upon receiving a request from a socket, we
 // need to attest and handle the other attestations (if we 
@@ -55,31 +52,23 @@ export default async function handleWeb2(request: IWeb2Request, senderSocket: an
         // Now that our web2request.request object is updated,
         // TODO we have to merge the attestations' arrays with valid values
     }
-    let derivedTx = await deriveMempoolOperation(instanceName)
+    let derivedTx = await toMempool(instanceName)
     // Sending back the result
     // REVIEW Maybe is more efficient somewhere else
     return [true, derivedTx]
 }
 
 // INFO Derive a valid DEMOS tx and GLS operation from a web2 request
-async function deriveMempoolOperation(
+async function toMempool(
     instanceName: string,
     insert: boolean = true,
 ) {
     // We should have a valid, attested request: lets handle it
-    let derivedTx: Transaction
     let derivedOperation: Operation
     // NOTE If all the attestations are valid we can create the transaction, insert it and gibe back the result
-    // Creating a tx from the completed request if is possible
-    derivedTx = await createTransaction(Web2API(instanceName).request)
-    // Deriving an operation from the tx
-    derivedOperation = await createOperation(derivedTx)
-    if (insert) {
-        // Inserting the operation in the next mempool session with the proper data
-        Mempool.addTransaction(derivedTx)
-        // And we do the same for the derived operation in the GLS
-        GLS.getInstance().operations.push(derivedOperation)
-    }
-    
-    return derivedTx
+    // Deriving an operation and a tx from the web2 request
+    derivedOperation = await deriveMempoolOperation(
+        Web2API(instanceName).request,
+        insert)
+    return derivedOperation
 }

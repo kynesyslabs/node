@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
@@ -25,7 +26,6 @@ import * as dotenv from "dotenv"
 dotenv.config()
 
 import { Identity } from "./libs/identity"
-import { logger } from "./libs/utils"
 import { PeerManager } from "./libs/peer"
 import { server as networkServer } from "./libs/network"
 
@@ -125,10 +125,14 @@ async function digestArguments() {
 // ANCHOR Entry point
 async function main() {
     // NOTE Overriding if necessary
-    if (OVERRIDE_PORT) SERVER_PORT = OVERRIDE_PORT
+    if (OVERRIDE_PORT) {
+        SERVER_PORT = OVERRIDE_PORT
+    }
     sharedState.getInstance().serverPort = SERVER_PORT // Sharing this with any module that needs it
     sharedState.getInstance().rpcFee = RPC_FEE
-    if (OVERRIDE_PEER_LIST_FILE) PEER_LIST_FILE = OVERRIDE_PEER_LIST_FILE
+    if (OVERRIDE_PEER_LIST_FILE) {
+        PEER_LIST_FILE = OVERRIDE_PEER_LIST_FILE
+    }
     PEER_LIST = JSON.parse(fs.readFileSync(PEER_LIST_FILE, "utf8"))
 
     // NOTE The whole first part of main ensures the environment is ready to run
@@ -140,7 +144,7 @@ async function main() {
 
     try {
         await Identity.getInstance().getPublicIP()
-        logger.log("IP: " + Identity.getInstance().publicIP)
+        term.green("IP: " + Identity.getInstance().publicIP)
     } catch (e) {
         console.log(e)
         term.orange("[WARN] {OFFLINE?} Failed to get public IP\n")
@@ -163,7 +167,7 @@ async function main() {
         peerManager.addPeer(peer)
     }
 
-    logger.bootstrapSuccess(
+    term.green(
         "[BOOTSTRAP] Peers loaded (" + peerManager.getPeers().length + ")\n",
     )
     // Checking for listening mode
@@ -176,9 +180,13 @@ async function main() {
         // INFO Testing the messaging endpoint
         // await message_test()
         // INFO Starting the sync loop
-        if (OVERRIDE_IS_TESTER) return await commandLine() // Testing mode is just for debugging or showcase purposes
-        if (COMMANDLINE_MODE) commandLine() // While doing the rest of the stuff needed, a comand line interface is available
-        logger.log("[MAIN] Starting the background loop\n")
+        if (OVERRIDE_IS_TESTER) {
+            return await commandLine() // Testing mode is just for debugging or showcase purposes
+        }
+        if (COMMANDLINE_MODE) {
+            commandLine() // While doing the rest of the stuff needed, a comand line interface is available
+        }
+        term.yellow("[MAIN] Starting the background loop\n")
         mainLoop(id) // Is an async function so running without waiting send that to the background
     }
 }
