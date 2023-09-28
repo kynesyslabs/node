@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
@@ -158,7 +159,7 @@ export default async function Sync(id: any) {
             console.log("[SYNC] Asking " + name + " for the last block")
             let node = unsyncedNodes[name]
             console.log("[SYNC] Retrieving info...")
-            let connection_string = node.connection_string
+            let {connection_string} = node
             console.log("[SYNC] Connection string: " + connection_string)
             // TODO Check if the block is forward or backward
             // TODO If forward, ask for the block

@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 // This class represents a typical web2 data request
 import * as forge from "node-forge"
 import fetch from "node-fetch"

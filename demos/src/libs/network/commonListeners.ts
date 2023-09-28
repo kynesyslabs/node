@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
@@ -104,7 +105,9 @@ export default class CommonListeners {
                 request,
                 this.peer.socket,
             ) 
-            if (!parsed_comlink) return
+            if (!parsed_comlink) {
+                return
+            }
             let _comlink_request = parsed_comlink[0]
             let content = parsed_comlink[1]
             // Registering the response

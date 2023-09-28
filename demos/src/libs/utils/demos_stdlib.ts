@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import Transaction from "../blockchain/transaction"
 import { Operation } from "../blockchain/routines/executeOperations"
 import Mempool from "../blockchain/mempool"

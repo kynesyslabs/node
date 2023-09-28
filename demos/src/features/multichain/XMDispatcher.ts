@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 // INFO Entry point for multichain requests
 import XMParser from "./routines/XMParser"
 import { XMScript } from "./routines/XMParser"
