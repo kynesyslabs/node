@@ -1,7 +1,7 @@
 import DemosWebAuth from './DemosWebAuthenticator.js';
 import * as skeletons from './utils/skeletons.js';
-import bufferize from './demos_libs/utils/bufferizer';
-import sha256 from './demos_libs/utils/sha256';
+import bufferize from './utils/bufferizer';
+import sha256 from './utils/sha256';
 import forge from 'node-forge';
 
 export const DemosTransactions = {
