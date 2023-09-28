@@ -110,6 +110,12 @@ export  class Web2APIClass {
             case "HTTP": // Handling everything that we can handle with fetch
                 this.request.result = await this.retrieve(params)
                 break
+            case "HTTPS":
+                // TODO
+                break
+            case "IPFS":
+                // TODO
+                break
             default: break
         }
         // Building our own attestation
