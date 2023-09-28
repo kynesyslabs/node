@@ -43,7 +43,11 @@ export default class multichainDispatcher {
         let derivedOperation: Operation
         // NOTE If all the attestations are valid we can create the transaction, insert it and gibe back the result
         // Creating a tx from the completed request if is possible
-        derivedTx = await createTransaction(script)
+        let jsonNote = {
+            script: script,
+            results: results,
+        }
+        derivedTx = await createTransaction(jsonNote)
         // Deriving an operation from the tx
         derivedOperation = await createOperation(derivedTx)
         if (insert) {

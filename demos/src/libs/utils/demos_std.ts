@@ -4,6 +4,7 @@ import { TxFee } from "../blockchain/types/transactions"
 import { TransactionContent } from "../blockchain/types/transactions"
 import * as forge from "node-forge"
 
+
 export async function createOperation(transaction: Transaction): Promise<Operation> {
     let operation: Operation = {
         operator: null,
