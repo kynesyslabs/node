@@ -12,18 +12,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 import Chain from "src/libs/blockchain/chain"
 import * as fs from "fs"
 
-// NOTE Sleep function
-async function sleep(ms) {
-    return new Promise(resolve => {
-        setTimeout(resolve, ms)
-    })
-}
-
 export default async function findGenesisBlock() {
     let genesis_block = await Chain.getGenesisBlock()
     console.log(genesis_block)
     if (genesis_block.length == 0) {
-        // We need to initialize the genesis block
         console.log("[BOOTSTRAP] Initializing the genesis block\n")
         if (!fs.existsSync("data/genesis.json")) {
             // Exit if there are no genesis block
@@ -39,7 +31,9 @@ export default async function findGenesisBlock() {
         let genesis_hash = await Chain.generateGenesisBlock(genesis_json)
         console.log("Genesis block created: " + genesis_hash + "\n")
         genesis_block = await Chain.getGenesisBlock()
-    } else console.log("Genesis block found: ")
+    } else {
+        console.log("Genesis block found: ")
+    }
     console.log(genesis_block)
     console.log(genesis_block[0].hash)
 }

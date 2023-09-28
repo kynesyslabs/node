@@ -31,8 +31,11 @@ export default class PeerManager {
         const peerList: Peer[] = []
         for (const peer in this.peerList) {
             let _peer = this.peerList[peer]
-            if (_peer.identity != undefined) peerList.push(this.peerList[peer])
-            else console.log("[PEERMANAGER] This peer has no identity: treating it as a read only peer")
+            if (_peer.identity != undefined) {
+                peerList.push(this.peerList[peer])
+            } else {
+                console.log("[PEERMANAGER] This peer has no identity: treating it as a read only peer")
+            }
         }
         console.warn("[PEERMANAGER] Peerlist length: " + peerList.length)
         return peerList
@@ -54,7 +57,9 @@ export default class PeerManager {
         console.log("[PEERMANAGER] Peer added")
         console.log("Identity: "  + peer.identity.toString("hex"))
         console.log("Connection string: " + peer.connectionString)
-        if (!peer.connectionString) console.log("[WARN] No connection string detected")
+        if (!peer.connectionString) {
+            console.log("[WARN] No connection string detected")
+        }
         // FIXME Run the routine in peers to get it
         return true
     }

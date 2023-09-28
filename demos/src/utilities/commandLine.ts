@@ -1,4 +1,3 @@
-import * as fs from "fs"
 import Wallet from "./cli_libraries/wallet"
 import Cryptography from "./cli_libraries/cryptography"
 const readline = require("readline")

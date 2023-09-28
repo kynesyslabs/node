@@ -1,22 +1,6 @@
+
 /* INFO
-
 This library contains all the functions that are used to interact with the demos blockchain.
-
- * IMPORTANT: This library is incomplete and is not meant to be used in production.
-
- * NOTE: for convenience, you are strongly encouraged to use function_name instead of calling the
- *    corresponding function directly, but you are allowed to do both.
-
- * To initialize a connection to the demos blockchain, you will need to call connect(rpc_url) first.
-
- * Besides that, nodeCall is the primary function that you will want to use. 
- *    It manages a secure communication with the node and wait for a response or a timeout. It returns a promise.
-
-*/
-
-/* NOTE Libraries Required
- - https://cdn.jsdelivr.net/npm/node-forge@1.3.1/lib/index.min.js
- - https://cdn.socket.io/4.6.0/socket.io.min.js
 */
 
 /* eslint-disable no-unused-vars */
@@ -47,6 +31,7 @@ let demos = {
 
 	// SECTION Registry
 	replies: {
+		
 		// INFO Insert a muid in the reply registry
 		waitReply: function (muid) {
 			if (!demos.registry[muid]) {
@@ -128,12 +113,17 @@ let demos = {
 	// !SECTION Connection and listeners
 
 	// INFO MUID generator
-	generateMuid: function () {
-		let number_1 =
-			Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-		let number_2 =
-			Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-		return number_1 + number_2;
+    generateMuid: function () {
+        let array = new Uint32Array(2)
+        window.crypto.getRandomValues(array)
+    
+        let number_1 = array[0].toString(36).substring(2, 15)
+        let number_2 = array[1].toString(36).substring(2, 15)
+    
+        let combined = number_1 + number_2
+    
+        // Use a hash function to generate a unique number from the combined string
+        return sha256(combined)
 	},
 
 	// SECTION NodeCall prototype

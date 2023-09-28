@@ -21,30 +21,28 @@ This library contains all the functions that are used to interact with the demos
 
 /* eslint-disable no-unused-vars */
 /* eslint-disable no-undef */
+import io from "socket.io-client"
+import forge from "node-forge"
+import { Buffer } from "buffer/"
+import bufferize from "./demos_libs/utils/bufferizer"
+import sha256 from "./demos_libs/utils/sha256"
 
-/* NOTE Important!
-    Due to the modular nature of this library, objects such as connections.replies MUST be
-    used JUST as instances of the parent class. If you import replies by its own, you will
-    generate two separate objects with all the problems of the case.
-*/
+// NOTE Including custom libraries from Demos
+import * as skeletons from "./demos_libs/utils/skeletons"
+import DemosWebAuth from "./demos_libs/DemosWebAuthenticator"
+import XMTransactions from "./demos_libs/XMTransactions"
+import Web2Transactions from "./demos_libs/Web2Transactions"
+import { DemosTransactions } from "./demos_libs/DemosTransactions"
 
-// NOTE Including all in a class
-import { calls } from "./helpers/calls.js"
-import { basic } from "./helpers/basic.js"
-import { skeletons } from "./helpers/skeletons.js"
+// TODO Use XMTransactions for the crosschain transactions
+// TODO Typize with jsdoc
 
+// REVIEW Maybe modularize this behemoth
 let demos = {
-<<<<<<< Updated upstream
-    skeletons: skeletons,
-    call: calls.call, // Contains call.connections and call.replies too
-    nodeCall: calls.nodeCall,
-    basic: basic,
-    crosschain: crosschain,
-    transactions: transactions,
-=======
     // ANCHOR Properties
     socket: null,
     connected: false,
+    identity: null,
     registry: {},
 
     // SECTION Registry
@@ -77,7 +75,7 @@ let demos = {
             let timeout = 5000 // 5 seconds
             let reply = demos.replies.getReply(muid)
             while (reply === null && timeout > 0) {
-                await new Promise(resolve => setTimeout(resolve, 100))
+                await new Promise((resolve) => setTimeout(resolve, 100))
                 reply = demos.replies.getReply(muid)
                 timeout -= 100
             }
@@ -106,12 +104,15 @@ let demos = {
         })
         // NOTE Reply to comlink messages
         demos.socket.on("comlink_reply", function (reply) {
+            if (!reply.chain.current.currentMessage.bundle.content.message) {
+                console.log("[!] [DEMOS] Received a comlink_reply without a message!")
+                return
+            }
             let _muid = reply.muid
             console.log("[DEMOS] Received comlink_reply: " + _muid)
             if (demos.replies.needReply(_muid)) {
                 console.log("[DEMOS] Received an expected reply!")
-                demos.registry[_muid] =
-                    reply.chain.current.currentMessage.bundle.content.message
+                demos.registry[_muid] = reply.chain.current.currentMessage.bundle.content.message
                 //console.log(reply.chain.current.currentMessage.bundle.content.message)
             } else {
                 console.log("[DEMOS] Received an unexpected reply!")
@@ -128,71 +129,23 @@ let demos = {
 
     // INFO MUID generator
     generateMuid: function () {
-        let number_1 =
-            Math.random().toString(36).substring(2, 15) +
-            Math.random().toString(36).substring(2, 15)
-        let number_2 =
-            Math.random().toString(36).substring(2, 15) +
-            Math.random().toString(36).substring(2, 15)
-        let muid = number_1 + number_2
-        return muid
+
+        let array = new Uint32Array(2)
+        window.crypto.getRandomValues(array)
+    
+        let number_1 = array[0].toString(36).substring(2, 15)
+        let number_2 = array[1].toString(36).substring(2, 15)
+    
+        let combined = number_1 + number_2
+    
+        // Use a hash function to generate a unique number from the combined string
+        return sha256(combined)
     },
 
     // SECTION NodeCall prototype
     // INFO NodeCalls use the same structure
     nodeCall: async function (message, args = {}) {
-        /*if (!demos.socket.connected) {
-            console.log("[ERROR] We are disconnected")
-            return
-        }*/
-        let _muid = demos.generateMuid()
-        let comlink = {
-            muid: _muid,
-            properties: {
-                connection_string: null, // NOTE We don't have a connection_string as we are clients
-                require_reply: true,
-                is_reply: false,
-            },
-            chain: {
-                current: {
-                    currentMessage: null,
-                    currentMessageHash: null,
-                    previousHashes: [], // Keep track of the previous hashes to have full integrity
-                },
-                comlinkCurrentHash: null, // is the hashed version of .current
-                comlinkCurrentHashSignature: null, // is the signature of the hashed version of.current
-            },
-        }
-        let transmission = {
-            bundle: {
-                content: {
-                    type: null,
-                    message: null,
-                    sender: null,
-                    receiver: null,
-                    timestamp: null,
-                    data: null,
-                    extra: null,
-                },
-            },
-            hash: null,
-            signature: null,
-        }
-        transmission.bundle.content.type = "nodeCall"
-        transmission.bundle.content.message = message
-        transmission.bundle.content.data = args
-        comlink.chain.current.currentMessage = transmission
-        console.log(
-            "Sending message " +
-                message +
-                " to server with muid: " +
-                comlink.muid,
-        )
-        // Registering the reply request
-        demos.replies.waitReply(_muid)
-        demos.socket.emit("comlink", comlink)
-        // Waiting for a reply
-        return await demos.replies.checkReply(_muid)
+        return await demos.call("nodeCall", message, args)
     },
     // INFO NodeCalls use the same structure
     call: async function (type, message, args = {}) {
@@ -238,21 +191,52 @@ let demos = {
         transmission.bundle.content.data = args
         comlink.chain.current.currentMessage = transmission
 
-        // REVIEW Prior to sending the message, we hash and sign the comlink and the transmission objects
-        
-        // TODO Eliminate this: generating a random identity for the signature
-        let seed =forge.random.getBytesSync(32)
-        let keys = forge.pki.ed25519.generateKeyPair(seed)
+        // REVIEW Getting our shared identity
+        let keys
+        try {
+            let id = DemosWebAuth.getInstance()
+            if (id.keypair === null) {
+                throw new Error("No keypair found")
+            }
+            keys = id.keypair
+        } catch (e) {
+            console.log("[ERROR LOADING IDENTITY]")
+            console.log(e)
+            // FIXME and // TODO Eliminate this: generating a random identity for the signature
+            let seed = forge.random.getBytesSync(32)
+            keys = forge.pki.ed25519.generateKeyPair({ seed })
+            //megabudino was here
+        }
+
         let privkey = keys.privateKey
+        let pubKey = keys.publicKey
         console.log(keys)
         // Signaling our identity
-        comlink.chain.current.currentMessage.bundle.content.sender = keys.publicKey
+        console.log("Parameters:")
+        comlink.chain.current.currentMessage.bundle.content.sender = Buffer.from(pubKey)
+
+        // NOTE Manual converting the Uint8Array to a Buffer supported by node.js and forge
+        console.log("Buffered key (uint8array):")
+        console.log(Buffer.from(pubKey))
+        let pubKeyBuffer = bufferize(pubKey)
+        console.log("Manual buffering:")
+        console.log(pubKeyBuffer)
+        comlink.chain.current.currentMessage.bundle.content.sender = pubKeyBuffer
+
+        console.log("Actual sender:")
+        console.log(comlink.chain.current.currentMessage.bundle.content.sender)
         // NOTE Doing the cryptography for the transmission object
-        let stringifiedTransmission = JSON.stringify(comlink.chain.current.currentMessage.bundle.content)
-        let t_digestor = md.sha256.create()
-        t_digestor.update(stringifiedTransmission)
-        let t_hashed =  t_digestor.digest().toHex() // FIXME ??? Differs!
-        console.log(t_hashed + " is the hashed version of comlink.chain.current.currentMessage.bundle.content")
+        let stringifiedTransmissionContent = JSON.stringify(
+            comlink.chain.current.currentMessage.bundle.content,
+        )
+        console.log("Transmission Content:")
+        console.log(comlink.chain.current.currentMessage.bundle.content)
+        console.log("Stringified Transmission Content:")
+        console.log(stringifiedTransmissionContent)
+        let t_hashed = await sha256(stringifiedTransmissionContent)
+        console.log(
+            t_hashed + " is the hashed version of comlink.chain.current.currentMessage.bundle.content",
+        )
         comlink.chain.current.currentMessage.bundle.hash = t_hashed
         comlink.chain.current.currentMessageHash = t_hashed
         // And signing it
@@ -261,14 +245,15 @@ let demos = {
             encoding: "utf8",
             privateKey: privkey,
         })
-        console.log(t_signature.toString("hex") + " is the signature of the hashed version of comlink.chain.current.currentMessage.bundle.content")
-        comlink.chain.current.currentMessage.bundle.signature = t_signature
-        
+        console.log(
+            t_signature.toString("utf8") +
+				" is the signature of the hashed version of comlink.chain.current.currentMessage.bundle.content",
+        )
+        comlink.chain.current.currentMessage.bundle.signature = bufferize(Buffer.from(t_signature)) // FIXME Changed to Buffer
+
         // NOTE Also hashing the comlink current property
         let stringifiedMessage = JSON.stringify(comlink.chain.current)
-        let digestor = md.sha256.create()
-        digestor.update(stringifiedMessage)
-        let hashed =  digestor.digest().toHex()
+        let hashed = await sha256(stringifiedMessage)
         console.log(hashed + " is the hashed version of comlink.chain.current")
         comlink.chain.comlinkCurrentHash = hashed
         // Signing the hash
@@ -279,15 +264,20 @@ let demos = {
             encoding: "utf8",
             privateKey: privkey,
         })
-        console.log(signature.toString("hex") + " is the signature of the hashed version of comlink.chain.current")
-        comlink.chain.comlinkCurrentHashSignature = signature // FIXME TypeError in comlink.ts
-
         console.log(
-            "Sending message " +
-                message +
-                " to server with muid: " +
-                comlink.muid,
+            signature.toString("utf8") +
+				" is the signature of the hashed version of comlink.chain.current",
         )
+        comlink.chain.comlinkCurrentHashSignature = bufferize(Buffer.from(signature)) // FIXME Changed to Buffer
+
+        // Stringifying currentMessage
+        //comlink.chain.current.currentMessage = JSON.stringify(comlink.chain.current.currentMessage)
+
+        console.log("Sending message ")
+        console.log(message)
+        console.log(" to server with muid: " + comlink.muid)
+        console.log("Using the following comlink:")
+        console.log(comlink)
         // Registering the reply request
         demos.replies.waitReply(_muid)
         console.log(comlink)
@@ -323,7 +313,9 @@ let demos = {
         return block
     },
 
-    getTxByHash: async function (txHash="e25860ec6a7cccff0371091fed3a4c6839b1231ccec8cf2cb36eca3533af8f11") {
+    getTxByHash: async function (
+        txHash = "e25860ec6a7cccff0371091fed3a4c6839b1231ccec8cf2cb36eca3533af8f11",
+    ) {
         // Defaulting to the genesis tx of course
         let tx = await demos.nodeCall("getTxByHash", {
             hash: txHash,
@@ -334,16 +326,6 @@ let demos = {
         return tx
     },
 
-    // INFO Web2 Endpoints
-    getWeb2Data: async function (url = "https://apple.com/robots.txt") {     // TODO Test it with davide
-        console.log("[DEMOS] Requesting url: " + url)
-        return await demos.call("web2Request", {
-            action: "getUrl",
-            httpVerb: "GET",
-            url: url,
-            headers: "",
-        })
-    },
 
     getPeerlist: async function () {
         return await demos.nodeCall("getPeerlist")
@@ -354,78 +336,50 @@ let demos = {
     getPeerIdentity: async function () {
         return await demos.nodeCall("getPeerIdentity")
     },
+
+    getAddressInfo: async function (address) {
+        let add = JSON.parse(
+            await demos.nodeCall("getAddressInfo", {
+                address: address,
+            }),
+        )
+        add.native.tx_list = JSON.parse(add.native.tx_list)
+        return add
+    },
     // !SECTION Predefined calls
 
-    // SECTION Crosschain support endpoints
+    // SECTION Operation types
+    
+    // ANCHOR Web2 Endpoints
+    Web2Transactions: Web2Transactions,
+    getWeb2Data: Web2Transactions,
+
+    // ANCHOR Crosschain support endpoints
     crosschain: {
+        transactions: XMTransactions,
         // INFO Executing a precompiled multichain operation
         execute: async function (multichain_operation) {
-            let response = await demos.nodeCall("crosschain_operation", {multichain_operation})
-            response = JSON.parse(response)
-            return response
-        },
-        status: async function () {
-            let response = await demos.nodeCall("crosschain_status")
+            let response = await demos.nodeCall("crosschain_operation", { multichain_operation })
             response = JSON.parse(response)
             return response
         },
     },
-    // !SECTION Crosschain support endpoints
 
-    // SECTION Supporting txs
-    transactions: {
-        prepare: async function (data) {
-            let thisTx = demos.skeletons.transaction
-            // TODO: Implement
-            thisTx.content = data
-            return thisTx
-        },
-        sign: async function (raw_tx, private_key) {
-        // TODO: Implement
-            raw_tx.signature = forge.pki.ed25519.sign(raw_tx.content, private_key) // REVIEW if it is working right
-            return raw_tx
-        },
-        broadcast: async function (signed_tx) {
-        // TODO: Implement
-            return await demos.nodeCall("tx", {
-                tx: signed_tx,
-            }) // And review
-        },
-    },
-    // !SECTION Supporting txs
+    // ANCHOR Supporting txs
+    DemosTransactions: DemosTransactions,
+    transactions: DemosTransactions,
+	
+    // SECTION Operation types
+	
+    // INFO DemosWebAuthenticator
+    DemosWebAuth: DemosWebAuth, // NOTE Modularized to be more elegant
 
     // INFO Calling demos.skeletons.NAME provides an empty skeleton that can be used for reference while calling other demos functions
-    // SECTION Objects skeletons
-    skeletons: {
-        // INFO An empty transaction
-        transaction: {
-            content: {
-                type: "", // string
-                from: null, // forge.pki.ed25519.BinaryBuffer
-                to: null, // forge.pki.ed25519.BinaryBuffer
-                amount: 0, // number
-                data: ["", ""], // [string, string] // type as string and content in hex string
-                nonce: 0, // number // Increments every time a transaction is sent from the same account
-                timestamp: 0, // number // Is the registered unix timestamp when the transaction was sent the first time
-                lock_fee: 0, // LockFee // Is the signed message where the sender locks X tokens until the tx is confirmed}, // TransactionContent
-            },
-            signature: null, // pki.ed25519.BinaryBuffer
-            hash: null, // string
-            confirmations: [], // Confirmation[]
-            state_changes: [], // StateChange[] 
-        },
-        // INFO An empty crosschain operation object
-        crosschain_operation: {
-            // TODO Implement as specified in multichainDispatcher.js if any
-        },
-    },
-    // !SECTION Objects skeletons
-
->>>>>>> Stashed changes
+    skeletons: skeletons,
 }
 
 async function sleep(time) {
-    return new Promise(resolve => setTimeout(resolve, time))
+    return new Promise((resolve) => setTimeout(resolve, time))
 }
 
 // Creating a demos class
