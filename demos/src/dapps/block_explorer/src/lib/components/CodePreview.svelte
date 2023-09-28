@@ -16,7 +16,6 @@
         editor.setReadOnly(true);
         editor.setHighlightActiveLine(false);
         editor.renderer.$cursorLayer.element.style.display = "none"
-        editor.renderer.setShowGutter(false);
         editor.setShowPrintMargin(false);
         editor.container.style.background="transparent";
 
@@ -31,10 +30,7 @@
 
 <style>
     .text-editor-container{
-        padding: 14px;
-        border: var(--border);
         border-radius: var(--border-radius);
-        background: rgba(255, 255, 255, 0.08);
         backdrop-filter: 14px;
     }
     .text-editor{

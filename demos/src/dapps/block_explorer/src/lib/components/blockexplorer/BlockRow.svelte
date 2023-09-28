@@ -37,7 +37,7 @@
     </div>
     <div class="reward-container generic-shadow">
         {#if block}
-            <p class="reward" style="font-size:.8rem">{block.reward} DEM</p>
+            <p class="reward" style="font-size:.8rem">{block.status}</p>
         {:else}
             <div class="skeletonplaceholder" style="height:12.8px;"></div>
         {/if}

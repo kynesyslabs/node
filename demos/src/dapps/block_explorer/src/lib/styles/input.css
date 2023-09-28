@@ -1,7 +1,7 @@
 input:not([type='file'])
 {
     background-color: transparent;
-    border: 1px solid var(--background2-min);
+    border: 1px solid var(--background3);
     font-family: "Neue Machina", sans-serif;
     height: 70px;
     color: #fff;
@@ -19,10 +19,7 @@ input:focus{
 
 .combobox, .input-container {
     border: 0;
-    border-top: 1px solid var(--background2-min);
-    border-bottom: 1px solid var(--background2-min);
-    border-right: 1px solid var(--background2-min);
-    border-left: 1px solid var(--background2-min);
+    border: 1px solid var(--background3);
     padding: 0 24px;
     height: 70px;
     color: #fff;
@@ -135,4 +132,5 @@ input:focus {
     height: 52px!important;
     font-size: 1rem!important;
     padding: 0 var(--input-padding)!important;
+    width: 100%;
 }

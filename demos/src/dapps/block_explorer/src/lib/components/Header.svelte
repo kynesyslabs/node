@@ -18,6 +18,11 @@
             href:"/crosschain",
             test:"crosschain"
         },
+        {
+            label:"Web2",
+            href:"/web2gui",
+            test:"web2gui"
+        }
     ]
     async function logOut()
     {

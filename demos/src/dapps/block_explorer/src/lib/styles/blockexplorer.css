@@ -37,11 +37,12 @@
 }
 .reward-container{
     display:flex;
-    justify-content: center;
+    /*justify-content: center;*/
     align-items: center;
     align-self: center;
 }
 .reward{
     font-size: .8rem;
-    margin: 8px;
+    /*margin: 8px;*/
+    margin: 0;
 }

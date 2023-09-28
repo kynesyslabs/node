@@ -4,6 +4,7 @@ button{
     display: block;
     text-align: left;
     font-family: "Neue Machina", sans-serif;
+    font-weight: bold;
 }
 
 button.primary {
@@ -16,7 +17,7 @@ button.primary {
     background: var(--accent);
     padding: 16.2px 47px;
     text-align: center;
-    color: #141414 !important; 
+    color: #141414; 
     text-decoration: unset;
     text-align: center;
 }
@@ -26,13 +27,14 @@ button.secondary {
     font-weight: 500;
     line-height: 1.4444;
     letter-spacing: 0.311px;
-    border: 1px solid var(--accent) !important;
-    background: transparent !important;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    background: transparent;
     padding: 16.2px 47px;
     text-align: center;
-    color: var(--accent) !important; 
+    color: var(--accent); 
     text-decoration: unset;
     text-align: center;
+    font-weight: bold;
 }
 
 .small-button{
