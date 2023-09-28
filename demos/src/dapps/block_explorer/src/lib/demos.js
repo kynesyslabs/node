@@ -28,7 +28,7 @@ import bufferize from './demos_libs/utils/bufferizer';
 import sha256 from './demos_libs/utils/sha256';
 
 // NOTE Including custom libraries from Demos
-import skeletons from './demos_libs/utils/skeletons';
+import * as skeletons from './demos_libs/utils/skeletons';
 import DemosWebAuth from './demos_libs/DemosWebAuthenticator';
 import XMTransactions from './demos_libs/XMTransactions';
 import Web2Transactions from './demos_libs/Web2Transactions';
@@ -132,8 +132,7 @@ let demos = {
 			Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 		let number_2 =
 			Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-		let muid = number_1 + number_2;
-		return muid;
+		return number_1 + number_2;
 	},
 
 	// SECTION NodeCall prototype
@@ -320,9 +319,6 @@ let demos = {
 		return tx;
 	},
 
-	// ANCHOR Web2 Endpoints
-	Web2Transactions: Web2Transactions,
-	getWeb2Data: Web2Transactions,
 
 	getPeerlist: async function () {
 		return await demos.nodeCall('getPeerlist');
@@ -345,6 +341,11 @@ let demos = {
 	},
 	// !SECTION Predefined calls
 
+	// SECTION Web2 Endpoints
+	Web2Transactions: Web2Transactions,
+	getWeb2Data: Web2Transactions,
+    // !SECTION Web2 Endpoints
+    
 	// SECTION Crosschain support endpoints
 	crosschain: {
 		transactions: XMTransactions,

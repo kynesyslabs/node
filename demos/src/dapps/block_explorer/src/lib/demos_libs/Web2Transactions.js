@@ -1,14 +1,24 @@
+// INFO This module exposes methods to quickly send Web2 requests to the network
+
+import * as skeletons from "./utils/skeletons.js"
+
 // INFO Web2 Endpoints
 export default async function Web2Transactions(
-	url = "https://apple.com/robots.txt"
+		action = "GET",
+		url = "https://apple.com/robots.txt",
+		parameters = [],
+		headers = null,
+		minAttestations = 2,
 	) {
-	console.log("[DEMOS] Requesting url: " + url)
-	let web2 = await demos.call("web2Request", {
-		action: "getUrl",
-		httpVerb: "GET",
-		url: url,
-		headers: "",
-	})
+	// Generating an empty one and filling it
+	let request = skeletons.web2_request;
+	request.content.action = action
+	request.content.url = url
+	request.content.parameters = parameters
+	request.content.headers = headers
+	request.content.minAttestations = minAttestations
+
+	let web2 = await demos.call("web2Request", request)
 	web2 = JSON.parse(web2);
 	return web2;
 }
