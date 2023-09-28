@@ -72,7 +72,7 @@ export default class EVM extends DefaultChain implements IEVM {
     // INFO Simply sending an amount to an address
     async pay(address: string, amount: string): Promise<any> {
         required(this.wallet)
-        let tx = { to: address, value: ethers.parseEther(amount) }
+        let tx = { to: address, value: ethers.utils.parseEther(amount) }
         let tx_hashed = await this.sendTransaction(tx)
         console.log(tx_hashed)
         return tx_hashed
