@@ -100,6 +100,11 @@ export default class Chain {
         return await this.read("SELECT * FROM blocks WHERE number=0")
     }
 
+    // REVIEW Experimental: support for incremental genesis
+    static async getGenesisBlocks() {
+        return await this.read("SELECT * FROM blocks WHERE signature='genesis'")
+    }
+
     // INFO Get the current pending transactions pool
     static async getPendingPool() {
         return await this.read(
@@ -205,6 +210,18 @@ export default class Chain {
         // Insert the genesis block into the database
         console.log(genesis_block)
         return await this.insertBlock(genesis_block, [genesis_op])
+    }
+
+    // INFO Generates multiple genesis blocks from an array of genesis configurations and inserts them into the chain
+    static async generateGenesisBlocks(genesis_jsons: any[]): Promise<string> {
+        let compiledBlock = ""
+        // TODO
+        return compiledBlock
+    }
+
+    // INFO Searches all the genesis blocks and returns an artifact representing the current chain genesis
+    static async getGenesisUniqueBlock() {
+        // TODO
     }
     // !SECTION Setters
 

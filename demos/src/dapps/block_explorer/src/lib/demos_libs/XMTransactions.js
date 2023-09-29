@@ -31,7 +31,8 @@ let XMTransactions = {
 
 		// NOTE Creating and adding a new operation to the current session list
 		create: function(name, chain, subchain, is_evm, rpc, task) {
-			let operation = XMTransactions.schemas.base_operation;
+			// TODO Bugfix: implement a name
+			let operation ={...XMTransactions.schemas.base_operation}
 			operation.chain = chain;
 			operation.subchain = subchain;
 			operation.is_evm = is_evm;
@@ -46,11 +47,12 @@ let XMTransactions = {
 		delete: function(name) {
             delete XMTransactions.data.loaded_operations[name];
 			let index = XMTransactions.data.operations_index.indexOf(name);
-			XMTransactions.data.operations_index.splice(index)
+			XMTransactions.data.operations_index.splice(index, 1)
         },
 
 		// NOTE Changing operation order for an operation from the current session list
 		reorder: function(name, index) {
+			// FIXME Security: check boundaries to avoid circling
             let operation_current = XMTransactions.data.operations_index.indexOf(name);
 			// Deleting and...
 			XMTransactions.data.operations_index.splice(operation_current, 1);
@@ -60,7 +62,7 @@ let XMTransactions = {
 
 		// NOTE Updating an operation from the current session list
 		update: function(name, chain, subchain, is_evm, rpc, task) {
-            let operation = XMTransactions.schemas.base_operation;
+            let operation = {...XMTransactions.schemas.base_operation}
             operation.chain = chain;
             operation.subchain = subchain;
             operation.is_evm = is_evm;
