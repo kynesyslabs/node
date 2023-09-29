@@ -1,4 +1,5 @@
 import { cubicInOut } from "svelte/easing";
+import { slide } from "svelte/transition";
 
 function toprightbudino (node, {duration = 350, easing = cubicInOut}) {
     return {
@@ -41,4 +42,17 @@ function budinofade (node, {duration = 350, easing = cubicInOut}) {
     };
 }
 
-export {megabudino, budinofade, toprightbudino};
+function budinoslide(node, {duration = 350, easing = cubicInOut}) {
+    const slideTrans = slide(node, duration, easing)
+    return {
+        duration: duration,
+        css: t =>{
+            const eased = easing(t);
+            return `${slideTrans.css(eased)}
+            opacity: ${eased};
+            transform: scale(${0.9 + eased/10});
+        `}
+    };
+}
+
+export {megabudino, budinofade, toprightbudino, budinoslide};
