@@ -67,4 +67,9 @@ export default class EVM {
         return signedTx
 	}
 	// !SECTION Specific methods
+
+	// INFO Generic empty tx skeleton for this chain
+	async getEmptyTransaction() {
+		// TODO
+	}
 }

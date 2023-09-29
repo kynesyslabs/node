@@ -131,4 +131,5 @@ export default class EVM extends DefaultChain implements IEVM {
         }
         return EVM.instances[chain_id]
     }
+
 }

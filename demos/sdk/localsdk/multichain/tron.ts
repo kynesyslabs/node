@@ -9,12 +9,14 @@ import * as TronWeb from "tronweb"
 export default class TRON extends DefaultChain {
     // LINK https://github.com/tronprotocol/tronweb
     // NOTE As Tron supports solidity contracts, we need to study for it quite a lot
+    // TODO See TVM and EVM
 
     constructor() {
         super("https://api.shasta.trongrid.io")
         this.name = "TRON"
     }
-	
+
+    // INFO Connecting to a provider
     connect(rpc_url: string): boolean {
         this.provider = new TronWeb({
             fullHost: rpc_url,
@@ -33,12 +35,21 @@ export default class TRON extends DefaultChain {
     info(): Promise<string> {
         throw new Error("Method not implemented.")
     }
-    connectWallet(privateKey: string) {
+
+    // INFO Adding a wallet to the Tron network provider
+    connectWallet(privateKey: string, api_key?: string) {
+        required(this.provider, "Provider is not initialized")
         this.wallet = new TronWeb({
             fullHost: "https://api.shasta.trongrid.io",
             privateKey: privateKey,
+            headers: { "TRON-PRO-API-KEY": api_key },
         })
     }
+
+    createWallet() {
+
+    }
+
     signTransaction(raw_transaction: any): Promise<any> {
         throw new Error("Method not implemented.")
     }

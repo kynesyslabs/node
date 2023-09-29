@@ -1,9 +1,9 @@
-import * as xrpl from "xrpl"
+const TronWeb = require('tronweb');
 import required from "../../utils/required"
 
-export default class XRPL {
+export default class TRON {
 
-	// NOTE We init XRPL with await XRPL.create(rpc_url)
+	// NOTE We init TRON with await TRON.create(rpc_url)
 	// This is necessary to ensure that the provider is connected
 	// if the user specifies the rpc_url in the constructor,
 	// as we cannot use await in the constructor
@@ -18,37 +18,34 @@ export default class XRPL {
 	// INFO Set of methods for connecting to an RPC while
 	// retaining a granular control over the instance status
 	async setRPC(rpc_url) {
-		this.provider = new xrpl.Client(rpc_url)
+		this.rpc_url = rpc_url
+		this.provider = new TronWeb({
+			fullHost: this.rpc_url
+		  });
 	}
 	async connect() {
-        await this.provider.connect()
+        return this.provider
     }
 	static async create(rpc_url=null) {
-		let instance = new XRPL(rpc_url)
+		let instance = new TRON(rpc_url)
 		if (rpc_url) { await instance.connect() }
 		return instance
     }
 
 	// INFO Connecting a wallet through a private key (string)
-	async connectWallet(privateKey) {
-		this.wallet = xrpl.Wallet.fromSeed(privateKey)
+	async connectWallet(privateKey, api_key="") {
+        required(this.provider, "Provider is not initialized")
+        this.wallet = new TronWeb({
+            fullHost: "https://api.shasta.trongrid.io",
+            privateKey: privateKey,
+            headers: { "TRON-PRO-API-KEY": api_key },
+		});
 	}
 
 	// INFO Signing a transaction 
 	// with a private key or by using our stored wallet
 	async signTransaction(transaction, privateKey=null) {
-		// If provided, we can use the user's private key
-		if (privateKey) {
-			this.wallet = xrpl.Wallet.fromSeed(privateKey)
-		}
-		// REVIEW Experimental type checking
-		assert(this.wallet instanceof xrpl.Wallet, "Wallet not connected")
-		// And anyway, we need a wallet after all
-		//if (!this.wallet) {
-        //    throw new Error("Wallet not connected")
-        //}
-		// Finally, we can sign the transaction
-        return this.wallet.sign(transaction)
+		// TODO
 	}
 
 	// SECTION Specific methods
@@ -59,16 +56,7 @@ export default class XRPL {
 	}
 	async preparePay(address, amount) {
 		required(this.wallet, "Wallet is not connected!")
-		// Signing a valid transfer
-		let tx = await this.provider.autofill({
-            "TransactionType": "Payment",
-            "Account": this.wallet.address,
-            "Amount": xrpl.xrpToDrops(amount),
-            "Destination": address,
-        })
-		let signedTx = await this.wallet.sign(prepared) // REVIEW Is this all?
-		console.log(signedTx)
-		return signedTx
+		// TODO
 	}
 	// !SECTION Specific methods
 
