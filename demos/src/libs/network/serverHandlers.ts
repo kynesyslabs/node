@@ -62,6 +62,11 @@ export default class ServerHandlers {
         // Verify and execute the transaction
         let validatedTx: any[]
         try {
+            /* NOTE This workflow goeas as:
+             * The tx is validated, an operation is created and pushed in the GLS
+             * An operation for the gas is also pushed in the GLS
+             * The tx is pushed in the mempool if applicable
+            */
             validatedTx = await validateTransaction(
                 content.type,
                 content.message,

@@ -2,7 +2,9 @@
 	"properties": {
 		"id": 1,
 		"name": "DEMOS",
-		"currency": "DEM",
+		"currency": "DEM"
+	},
+	"mutables": {
 		"minBlocksForValidationOnlineStatus": 4
 	},
 	"balances": [
