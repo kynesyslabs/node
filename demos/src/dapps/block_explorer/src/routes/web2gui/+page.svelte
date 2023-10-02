@@ -43,8 +43,15 @@
                 let currentparams = [];
                 let parampairs = url.split("?")[1].split("&")
                 parampairs.forEach((pair)=>{
-                    currentparams.push(pair.split("="))
+                    if(pair.includes("="))
+                        currentparams.push(pair.split("="))
+                    else
+                        currentparams.push([pair, ""])
                 })
+                if(currentparams[currentparams.length-1][0] != "" || currentparams[currentparams.length-1][1] != "")
+                {
+                    currentparams.push(["", ""]);
+                }
                 params = currentparams;
             }
         }
@@ -62,8 +69,10 @@
         {
             newurl+="?"
             params.forEach((param)=>{
+                if(param[0] !== "" || param[1] !== "")
                 newurl+=`${param[0]}=${param[1]}&`
             })
+            newurl = newurl.slice(0, -1);
         }
         url = newurl;
     }
