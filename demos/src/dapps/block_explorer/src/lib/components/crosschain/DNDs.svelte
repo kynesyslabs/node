@@ -4,11 +4,13 @@
     import { v4 as uuidv4 } from 'uuid';
     import cloneDeep from 'lodash/cloneDeep';
     export let blocks;
+    export let closeBar;
     let availableBlocks = [...blocks];
 
     let shouldIgnoreDndEvents = false;
     function considerAvailable(e)
     {
+        closeBar();
         //console.warn(`got consider ${JSON.stringify(e.detail, null, 2)}`);
         const {trigger, id} = e.detail.info;
         if (trigger === TRIGGERS.DRAG_STARTED) {

@@ -174,7 +174,7 @@
         padding: 8px 16px;
         margin-left: auto;
     }
-    @media (max-width: 768px){
+    @media (max-width: 800px){
         .onlydesktop{
             display: none;
         }

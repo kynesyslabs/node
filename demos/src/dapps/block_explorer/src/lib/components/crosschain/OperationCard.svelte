@@ -106,10 +106,12 @@
     }
     .params-preview{
         display: flex;
-        gap: 16px;
+        gap: 4px 16px;
+        flex-wrap: wrap;
+        margin-top: 12px;
     }
     .params-preview p{
-        margin: 8px 0 0;
+        margin: 0;
         opacity: .6;
         font-size: .8rem;
         font-weight: bold;
@@ -128,6 +130,7 @@
         align-items: center;
         gap: 16px;
         background-color: var(--background2-min);
+        flex-wrap: wrap;
     }
     .conditional p {
         margin:0;

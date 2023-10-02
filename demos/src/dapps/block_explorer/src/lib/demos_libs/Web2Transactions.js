@@ -1,6 +1,7 @@
 // INFO This module exposes methods to quickly send Web2 requests to the network
 
 import * as skeletons from "./utils/skeletons.js"
+import demos from "../demos.js";
 
 // INFO Web2 Endpoints
 export default async function Web2Transactions(

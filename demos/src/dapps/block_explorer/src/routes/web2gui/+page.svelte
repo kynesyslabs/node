@@ -2,6 +2,11 @@
     import CodePreview from '$lib/components/CodePreview.svelte';
     import Combobox from '$lib/components/Combobox.svelte';
     import {budinoslide} from '$lib/transitions.js';
+    import demos from '$lib/demos.js';
+    import {rpcaddress} from '$lib/env.js';
+
+    demos.connect(rpcaddress);
+
     const code=`{
     "type": "page",
     "title": "Page",
@@ -75,6 +80,12 @@
             newurl = newurl.slice(0, -1);
         }
         url = newurl;
+    }
+
+    async function sendRequest()
+    {
+        let response = await demos.Web2Transactions("GET", url, params, null, 5);
+        console.log(response);
     }
 
     let url="";
@@ -151,7 +162,7 @@
         <div class="inputcontainer">
             <Combobox value="GET" options={requestType} style="border-right:none!important;height:100%;width:150px;font-weight:bold;"/>
             <input bind:value={url} on:input={handleChangeUrl} class="input" placeholder="Insert the URL here"/>
-            <button class="secondary sendbutton">
+            <button class="secondary sendbutton" on:click={sendRequest}>
                 Send
                 <span class="sendicon">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="18" width="18"><g id="mail-send-email-message--send-email-paper-airplane-deliver"><path id="Subtract" fill="#fefefe" fill-rule="evenodd" d="m22.928 1.14 -8.24 21.726 -4.024 -8.047 5.277 -5.277 -1.415 -1.414 -5.276 5.277L1.203 9.38l21.725 -8.24Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
