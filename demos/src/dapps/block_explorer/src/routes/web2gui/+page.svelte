@@ -50,8 +50,13 @@
         }
     }
 
-    function handleChangeParams()
+    function handleChangeParams(ev, paramindex, keyindex)
     {
+        params[paramindex][keyindex] = ev.target.value;
+        if(paramindex==params.length-1)
+        {
+            params.push(["",""])
+        }
         let newurl = url.split("?")[0];
         if(params.length>0)
         {
@@ -67,6 +72,11 @@
     let params = [
         ["", ""]
     ];
+
+    $:if(params[params.length-1][0] == "" && params[params.length-1][1] == "" && params.length>1 && params[params.length-2][0] == "" && params[params.length-2][1] == "")
+    {
+        params.pop();
+    }
 </script>
 <style>
     .title{
@@ -151,10 +161,10 @@
                     <div class="fakeinput">Key</div>
                     <div class="fakeinput">Value</div>
                 </div>
-                {#each params as param}
+                {#each params as param, index}
                     <div class="inputcontainer">
-                        <input class="smallinput" on:input={handleChangeParams} bind:value={param[0]} placeholder="Insert param key"/>
-                        <input class="smallinput" on:input={handleChangeParams} bind:value={param[1]} placeholder="Insert param value"/>
+                        <input class="smallinput" on:input={(ev)=>{handleChangeParams(ev, index, 0)}} value={param[0]} placeholder="Insert param key"/>
+                        <input class="smallinput" on:input={(ev)=>{handleChangeParams(ev, index, 1)}} value={param[1]} placeholder="Insert param value"/>
                     </div>
                 {/each}
             </div>
