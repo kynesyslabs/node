@@ -92,8 +92,6 @@ export  class Web2APIClass {
             console.log("Using the following parameters:")
             console.log("\n{Name}")
             console.log(named)
-            console.log("\n{Socket}")
-            console.log(sendSock)
             console.log("\n{Request}")
             console.log(req)
             term.yellow("Proceeding\n")
@@ -119,8 +117,7 @@ export  class Web2APIClass {
             this.request.content.minAttestations = 10
             this.request.content.stage.hop_number = 0
         } else {
-            console.log("[Web2API] Request:")
-            console.log(req)
+
             this.request = req
         }
         // REVIEW Should be ok anyway
