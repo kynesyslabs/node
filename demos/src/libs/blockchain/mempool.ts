@@ -30,10 +30,15 @@ export interface MempoolData {
 export default class Mempool {
 
     // INFO Reading the whole current mempool
-    // FIXME & REVIEW What if the mempool is empty?
+    // REVIEW What if the mempool is empty?
     public static async getMempool(): Promise<MempoolData> {
         let result = await Chain.read("SELECT * from mempool WHERE current = 1")
         console.log(result)
+        // In case there is no current mempool, lets create it
+        if (!result) {
+            await Chain.write("INSERT INTO mempool VALUES(0, 1, '[]', '{}')")
+            result = await Chain.read("SELECT * from mempool WHERE current = 1")
+        }
         return JSON.parse(result)
     }
 
