@@ -39,7 +39,7 @@ export interface IWeb2Payload {
 export interface IWeb2Request {
 	raw: IRawWeb2Request,
     result: any,
-	attestations: Map<string, IWeb2Attestation>,
+	attestations: {}
 	hash: string,
 	signature?: forge.pki.ed25519.BinaryBuffer,
 }
@@ -164,7 +164,6 @@ export  class Web2APIClass {
         }
         // Adding the attestation to the request
         // NOTE This does not overwrite the original properties of the request
-        // FIXME See why there is no this stuff below
         console.log(this.request)
         this.request.attestations[ourIdentity.toString("hex")] = attestation
         return this.request
@@ -211,7 +210,7 @@ export  class Web2APIClass {
         }
         // Adding the attestation to the request
         let hex_key = sharedState.getInstance().identity.ed25519.publicKey.toString("hex") // REVIEW Is this ok?
-        this.request.attestations.set(hex_key, attestation)
+        this.request.attestations[hex_key] = attestation
         // And the content too
         this.request.result = content
     }
@@ -222,7 +221,8 @@ export  class Web2APIClass {
         required(this.request, "Missing request")
         let valid = true
         // Cycling through all the attestations
-        for (let [key, attestation] of this.request.attestations) {
+        for (let key of Object.keys(this.request.attestations)) {
+            let attestation = this.request.attestations[key]
             // REVIEW Checking the hash validity for all the attestations
             let stringifiedContent = JSON.stringify(this.request.raw)
             let hash = Hashing.sha256(stringifiedContent)
@@ -235,7 +235,7 @@ export  class Web2APIClass {
             // Noting the result of the verification in the attestation array
             let isValid = hash_valid && signature_valid
             attestation.valid = isValid
-            this.request.attestations.set(key, attestation)
+            this.request.attestations[key] = attestation
         }
         return valid
     }
@@ -260,7 +260,7 @@ export  class Web2APIClass {
     // SECTION Status controls
     // INFO Easy handler for this info
     getAttestationsNumber(): number {
-        return this.request.attestations.size
+        return Object.keys(this.request.attestations).length
     }
 
     // INFO Easy awaiter with timeout
@@ -281,7 +281,7 @@ export  class Web2APIClass {
         // NOTE We wait for timeout seconds before surrendering
         while (timer < timeout) {
             await new Promise((resolve) => setTimeout(resolve, 100)) // Each 100 ms we can check for updates
-            if (this.request.attestations.size >= quorum) {
+            if (this.getAttestationsNumber() >= quorum) {
                 reachedQuorum = true
                 break
             }
