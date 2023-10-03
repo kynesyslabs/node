@@ -86,8 +86,11 @@ export  class Web2APIClass {
         if (!Web2APIClass.requests.has(named)) {
             term.yellow("Creating new Web2API instance\n")
             console.log("Using the following parameters:")
+            console.log("\n{Name}")
             console.log(named)
+            console.log("\n{Socket}")
             console.log(sendSock)
+            console.log("\n{Request}")
             console.log(req)
             term.yellow("Proceeding\n")
             required(sendSock, "Missing sender socket")
