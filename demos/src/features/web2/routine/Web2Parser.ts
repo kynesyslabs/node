@@ -195,6 +195,7 @@ export  class Web2APIClass {
         // TODO Scope with special params
         // TODO Implement body params on POST
         // TODO Implement headers
+        // FIXME Fix the mempool.ts related error
         let fetched: any
         let timeout = 5000 // REVIEW Make it customizable
         //  REVIEW fetch the url better with more customization if possible
@@ -206,9 +207,10 @@ export  class Web2APIClass {
                 signal: AbortSignal.timeout(timeout), 
             },
         )
+        return "Not implemented yet"
         // REVIEW How to handle timeouts?
         // Stamping the result
-        await this.validate(JSON.stringify(fetched.json))
+        //await this.validate(JSON.stringify(fetched.json))
     }
 
     // INFO This method inserts validation data into the request

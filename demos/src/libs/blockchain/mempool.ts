@@ -30,8 +30,11 @@ export interface MempoolData {
 export default class Mempool {
 
     // INFO Reading the whole current mempool
+    // FIXME & REVIEW What if the mempool is empty?
     public static async getMempool(): Promise<MempoolData> {
-        return await Chain.read("SELECT * from mempool WHERE current = 1")
+        let result = await Chain.read("SELECT * from mempool WHERE current = 1")
+        console.log(result)
+        return JSON.parse(result)
     }
 
 
@@ -48,6 +51,11 @@ export default class Mempool {
     // INFO Writing a transaction to the mempool
     public static async addTransaction(transaction: Transaction): Promise<void> { 
         let mempool = await Mempool.getMempool()
+        /* FIXME:
+            content.message.action: undefined
+            /root/morph/demos/src/libs/blockchain/mempool.ts:51
+                    mempool.transactions.push(transaction) 
+        */
         mempool.transactions.push(transaction) // REVIEW What if it is empty?
         await Chain.write("UPDATE mempool SET transactions ='" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")
     }
