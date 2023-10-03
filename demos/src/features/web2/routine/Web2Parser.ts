@@ -7,6 +7,7 @@ import Hashing from "src/libs/crypto/hashing"
 import sharedState from "src/utilities/sharedState"
 import { PeerManager } from "src/libs/peer"
 import required from "src/utilities/required"
+import pay from "src/features/multichain/routines/writes/pay"
 const term = require("terminal-kit").terminal
 
 AbortSignal.timeout ??= function timemout(ms) {
@@ -21,6 +22,8 @@ export interface IParam {
 }
 
 // INFO Properties of a typical request as the client would send it
+// NOTE This should be the thing we receive from the handler as a request
+// NOTE Basically is the comlink message
 export interface IWeb2Payload {
         type: "web2Request",
         message: {
@@ -31,6 +34,16 @@ export interface IWeb2Payload {
             data: any,
             extra: any
       }
+}
+
+
+// INFO A complete web2 request
+export interface IWeb2Request {
+	raw: IRawWeb2Request,
+    result: any,
+	attestations: Map<string, IWeb2Attestation>,
+	hash: string,
+	signature?: forge.pki.ed25519.BinaryBuffer,
 }
 
 // INFO A request without any attestations or identity data
@@ -54,14 +67,6 @@ export interface IRawWeb2Request {
     }    
 }
 
-// INFO A complete web2 request
-export interface IWeb2Request {
-	raw: IRawWeb2Request,
-    result: any,
-	attestations: Map<string, IWeb2Attestation>,
-	hash: string,
-	signature?: forge.pki.ed25519.BinaryBuffer,
-}
 
 // ANCHOR Useful interfaces
 export interface IWeb2Attestation {
@@ -103,22 +108,23 @@ export  class Web2APIClass {
     }
 
     // NOTE Storing the request here
-    request: IWeb2Payload = null
+    payload: IWeb2Payload = null
+    request: IWeb2Request = null
     // NOTE Storing the sender's socket here
     senderSocket: null
     // NOTE Index of the request
     name = null
 
     // INFO Creating a named instance and bootstrapping it
-    constructor(name: string, sendSock: any, req: IWeb2Payload = null) {
+    constructor(name: string, sendSock: any, payload: IWeb2Payload = null) {
         this.name = name
         this.senderSocket = sendSock
-        if (!req) {
-            this.request.message.content.raw.minAttestations = 10
-            this.request.message.content.raw.stage.hop_number = 0
+        if (!payload.message.content) {
+            this.request.raw.minAttestations = 10
+            this.request.raw.stage.hop_number = 0
         } else {
-
-            this.request = req
+            this.payload = payload
+            this.request = payload.message.content
         }
         // REVIEW Should be ok anyway
         // NOTE Not awaiting cause we need to let devs decide when to await with awaitQuorum
@@ -126,16 +132,17 @@ export  class Web2APIClass {
     }
 
     // INFO Getting the digest of the request
-    private async digest(): Promise<IWeb2Payload> {
+    private async digest(): Promise<IWeb2Request> {
         required(this.request, "Missing request")
         console.log("[ACTUAL REQUEST]")
         console.log(this.request)
-        let {action} = this.request.message.content.raw
-        let params = this.request.message.content.raw.parameters
+        // FIXME See how it arrives from the client (without .content but right)
+        let {action} = this.request.raw 
+        let params = this.request.raw.parameters
         // NOTE Dispatching the request to the appropriate handler
         switch (action) {
             case "HTTP": // Handling everything that we can handle with fetch
-                this.request.message.content.result = await this.retrieve(params)
+                this.request.result = await this.retrieve(params)
                 break
             case "HTTPS":
                 // TODO
@@ -146,7 +153,7 @@ export  class Web2APIClass {
             default: break
         }
         // Building our own attestation
-        let hashedResult = Hashing.sha256(JSON.stringify(this.request.message.content.result))
+        let hashedResult = Hashing.sha256(JSON.stringify(this.request.result))
         let ourIdentity = sharedState.getInstance().identity.ed25519.publicKey
         let signatureResult = Cryptography.sign(hashedResult, ourIdentity)
         let attestation: IWeb2Attestation = {
@@ -158,7 +165,7 @@ export  class Web2APIClass {
         }
         // Adding the attestation to the request
         // NOTE This does not overwrite the original properties of the request
-        this.request.message.content.attestations.set(ourIdentity.toString("hex"), attestation)
+        this.request.attestations.set(ourIdentity.toString("hex"), attestation)
         return this.request
     }
 
@@ -172,8 +179,8 @@ export  class Web2APIClass {
         let timeout = 5000 // REVIEW Make it customizable
         //  REVIEW fetch the url better with more customization if possible
         fetched = await fetch(
-            this.request.message.content.raw.url, { 
-                method: this.request.message.content.raw.method,
+            this.request.raw.url, { 
+                method: this.request.raw.method,
                 body: null, // For POST stuff
                 headers: {}, // like { 'Content-Type': 'application/json' }
                 signal: AbortSignal.timeout(timeout), 
@@ -188,11 +195,11 @@ export  class Web2APIClass {
     async validate(content: string): Promise<void> {
         // Hashing and signing the result
         let hashed_result = Hashing.sha256(content)
-        this.request.message.content.hash = hashed_result
+        this.request.hash = hashed_result
         let signature = Cryptography.sign(
             hashed_result, 
             sharedState.getInstance().identity.ed25519.privateKey)
-        this.request.message.content.signature = signature
+        this.request.signature = signature
         // Composing our attestation
         let attestation: IWeb2Attestation = {
             hash: hashed_result,
@@ -203,9 +210,9 @@ export  class Web2APIClass {
         }
         // Adding the attestation to the request
         let hex_key = sharedState.getInstance().identity.ed25519.publicKey.toString("hex") // REVIEW Is this ok?
-        this.request.message.content.attestations.set(hex_key, attestation)
+        this.request.attestations.set(hex_key, attestation)
         // And the content too
-        this.request.message.content.result = content
+        this.request.result = content
     }
 
 
@@ -214,9 +221,9 @@ export  class Web2APIClass {
         required(this.request, "Missing request")
         let valid = true
         // Cycling through all the attestations
-        for (let [key, attestation] of this.request.message.content.attestations) {
+        for (let [key, attestation] of this.request.attestations) {
             // REVIEW Checking the hash validity for all the attestations
-            let stringifiedContent = JSON.stringify(this.request.message.content.raw)
+            let stringifiedContent = JSON.stringify(this.request.raw)
             let hash = Hashing.sha256(stringifiedContent)
             let hash_valid = hash===attestation.hash
             // REVIEW Checking the signature validity for all the attestations
@@ -227,7 +234,7 @@ export  class Web2APIClass {
             // Noting the result of the verification in the attestation array
             let isValid = hash_valid && signature_valid
             attestation.valid = isValid
-            this.request.message.content.attestations.set(key, attestation)
+            this.request.attestations.set(key, attestation)
         }
         return valid
     }
@@ -252,7 +259,7 @@ export  class Web2APIClass {
     // SECTION Status controls
     // INFO Easy handler for this info
     getAttestationsNumber(): number {
-        return this.request.message.content.attestations.size
+        return this.request.attestations.size
     }
 
     // INFO Easy awaiter with timeout
@@ -273,7 +280,7 @@ export  class Web2APIClass {
         // NOTE We wait for timeout seconds before surrendering
         while (timer < timeout) {
             await new Promise((resolve) => setTimeout(resolve, 100)) // Each 100 ms we can check for updates
-            if (this.request.message.content.attestations.size >= quorum) {
+            if (this.request.attestations.size >= quorum) {
                 reachedQuorum = true
                 break
             }

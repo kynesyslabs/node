@@ -37,7 +37,7 @@ const crosschain_operation = {
 
 // INFO An empty web2 request object
 const web2_request = {
-	content: {
+	raw: {
 		action: null,
 		parameters: [],
 		requestedParameters: null, // Means all

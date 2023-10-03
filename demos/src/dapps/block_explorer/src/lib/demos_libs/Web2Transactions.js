@@ -14,11 +14,11 @@ export default async function Web2Transactions(
 	) {
 	// Generating an empty one and filling it
 	let request = skeletons.web2_request;
-	request.content.action = action
-	request.content.url = url
-	request.content.parameters = parameters
-	request.content.headers = headers
-	request.content.minAttestations = minAttestations
+	request.raw.action = action
+	request.raw.url = url
+	request.raw.parameters = parameters
+	request.raw.headers = headers
+	request.raw.minAttestations = minAttestations
 	// Ensuring content is a known property
 	request.attestations = new Map();
 	request.hash = ""
