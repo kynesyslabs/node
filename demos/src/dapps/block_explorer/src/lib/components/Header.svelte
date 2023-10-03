@@ -127,7 +127,7 @@
         display: none;
     }
     .mobile-menu{
-        position: absolute;
+        position: fixed;
         top: 0;
         left: 0;
         width: 100%;
@@ -196,7 +196,11 @@
         {#each pages as page}
             <a class="nounderline" on:click={(e)=>{e.stopPropagation();mobileMenuOpen = false}} href={page.href}><div class={`${location.split("/").includes(page.test)?"mobile-link-selected":"mobile-link"} color-transition`}>{page.label}</div></a>
         {/each}
-        <a href="/login"><button class="primary mobile-link">Connect wallet</button></a>
+        {#if $wallet.loggedIn}
+        <a href="/login" style="text-decoration: none;"><button class="secondary mobile-link">Log out</button></a>
+        {:else}
+        <a href="/login"><button class="mobile-link primary" style="color:black;">Connect wallet</button></a>
+        {/if}
     </div>
     {/if}
     <div class="desktoplinks onlydesktop" style="flex-basis:100%;">
