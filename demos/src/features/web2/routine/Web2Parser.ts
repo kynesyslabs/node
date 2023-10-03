@@ -136,7 +136,6 @@ export  class Web2APIClass {
         required(this.request, "Missing request")
         console.log("[ACTUAL REQUEST]")
         console.log(this.request)
-        // FIXME See how it arrives from the client (without .content but right)
         let {action} = this.request.raw 
         let params = this.request.raw.parameters
         // NOTE Dispatching the request to the appropriate handler
@@ -165,6 +164,8 @@ export  class Web2APIClass {
         }
         // Adding the attestation to the request
         // NOTE This does not overwrite the original properties of the request
+        // FIXME See why there is no this stuff below
+        console.log(this.request)
         this.request.attestations.set(ourIdentity.toString("hex"), attestation)
         return this.request
     }
