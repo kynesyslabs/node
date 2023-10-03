@@ -166,7 +166,7 @@ export  class Web2APIClass {
         // NOTE This does not overwrite the original properties of the request
         // FIXME See why there is no this stuff below
         console.log(this.request)
-        this.request.attestations.set(ourIdentity.toString("hex"), attestation)
+        this.request.attestations[ourIdentity.toString("hex")] = attestation
         return this.request
     }
 
