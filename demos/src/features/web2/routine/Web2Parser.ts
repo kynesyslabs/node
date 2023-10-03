@@ -139,8 +139,10 @@ export  class Web2APIClass {
         let {action} = this.request.raw 
         let params = this.request.raw.parameters
         // NOTE Dispatching the request to the appropriate handler
+        term.yellow("Action: " + action + "\n")
         switch (action) {
             case "HTTP": // Handling everything that we can handle with fetch
+                console.log("HTTP ACTION")
                 this.request.result = await this.retrieve(params)
                 break
             case "HTTPS":
@@ -149,7 +151,9 @@ export  class Web2APIClass {
             case "IPFS":
                 // TODO
                 break
-            default: break
+            default: 
+                term.red("[ERROR] Invalid action: " + action + "\n")
+                break
         }
         // Building our own attestation
         let hashedResult = Hashing.sha256(JSON.stringify(this.request.result))
