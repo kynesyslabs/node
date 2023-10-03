@@ -92,7 +92,16 @@ export default class ServerHandlers {
         return { extra, require_reply, response }
     }
 
+    // INFO Handling XM Transaction
     static async handleXMChainOperation(content: any): Promise<any> {
+        /* NOTE This workflow goeas as:
+             * The XM Operation is validated, executed and verified
+             * when applicable. 
+             * A transaction is derived from the executed operation.
+             * An operation is then created and pushed in the GLS.
+             * An operation for the gas is also pushed in the GLS.
+             * The tx is pushed in the mempool if applicable.
+        */
         let extra: any
         let require_reply = false
         // REVIEW Remember that crosschain operations can be in chainscript syntax
@@ -104,7 +113,7 @@ export default class ServerHandlers {
 
     // INFO This method is used to allow signed data exchanges between peers and clients
     static async handleXMChainSignedPayload(content: any): Promise<any> {
-        // TODO
+        // TODO Probably to take it out
     }
 
     static async handleXMChainStatus(): Promise<any> {
@@ -116,6 +125,7 @@ export default class ServerHandlers {
         return { extra, require_reply, response }
     }
 
+    // INFO Handling Web2 Transaction
     // NOTE Theoretically, content should be IWeb2Request compliant
     // LINK "../../features/web2/types/Web2Request";
     static async handleWeb2Request(
@@ -123,6 +133,14 @@ export default class ServerHandlers {
         content: any,
         senderSocket: any,
     ): Promise<any> {
+        /* NOTE This workflow goeas as:
+             * The Web2 Operation is validated, executed and verified
+             * when applicable. Is then sent back once attested.
+             * A transaction is derived from the executed web2 operation.
+             * An operation is then created and pushed in the GLS.
+             * An operation for the gas is also pushed in the GLS.
+             * The tx is pushed in the mempool if applicable.
+        */
         console.log("[SERVER] Received web2Request")
         console.log(JSON.stringify(request))
 

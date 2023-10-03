@@ -18,6 +18,8 @@ export default async function handleWeb2(request: IWeb2Request, senderSocket: an
     // TODO Remember that web2 could need to be signed and could need a fee
     // NOTE From now on, Web2API will reply to instanceName with the same instance
     // NOTE Also note that Web2API automatically starts the request validation
+    console.log("[REQUEST FOR WEB2] ")
+    console.log(request)
     let web2request = Web2API(senderSocket, request)
     let instanceName = web2request.name // Numeric and progressive
     // Checking if we are the original rpc that received the request
