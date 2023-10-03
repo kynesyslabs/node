@@ -21,7 +21,7 @@ export default async function handleWeb2(payload: IWeb2Payload, senderSocket: an
 
     console.log("[PAYLOAD FOR WEB2] ")
     console.log(payload)
-    let request: IWeb2Request = payload.message.content
+    let request: IWeb2Request = payload.message
     console.log("[REQUEST FOR WEB2] ")
     console.log(request)
     //process.exit(0)
