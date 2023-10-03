@@ -26,14 +26,12 @@ export interface IParam {
 // NOTE Basically is the comlink message
 export interface IWeb2Payload {
         type: "web2Request",
-        message: {
-            content: IWeb2Request,
-            sender: any,
-            receiver: any,
-            timestamp: any,
-            data: any,
-            extra: any
-      }
+        message: IWeb2Request,
+      sender: any,
+      receiver: any,
+      timestamp: any,
+      data: any,
+      extra: any
 }
 
 
@@ -119,14 +117,14 @@ export  class Web2APIClass {
     constructor(name: string, sendSock: any, payload: IWeb2Payload = null) {
         this.name = name
         this.senderSocket = sendSock
-        if (!payload.message.content) {
+        if (!payload.message) {
             console.log("[Web2API] No request attached. Is this right?")
             console.log(payload)
             this.request.raw.minAttestations = 10
             this.request.raw.stage.hop_number = 0
         } else {
             this.payload = payload
-            this.request = payload.message.content
+            this.request = payload.message
         }
         // REVIEW Should be ok anyway
         // NOTE Not awaiting cause we need to let devs decide when to await with awaitQuorum
