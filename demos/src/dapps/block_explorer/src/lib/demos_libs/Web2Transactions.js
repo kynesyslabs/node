@@ -19,6 +19,11 @@ export default async function Web2Transactions(
 	request.content.parameters = parameters
 	request.content.headers = headers
 	request.content.minAttestations = minAttestations
+	// Ensuring content is a known property
+	request.attestations = new Map();
+	request.hash = undefined
+	request.signature = undefined
+	request.result = undefined
 
 	let web2 = await demos.call("web2Request", request)
 	web2 = JSON.parse(web2);
