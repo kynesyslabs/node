@@ -1,5 +1,5 @@
 // INFO Entry file for handling web2 requests
-import { IWeb2Request } from "./routine/Web2Parser"
+import { IWeb2Request, IWeb2Payload } from "./routine/Web2Parser"
 import Web2API from "./routine/Web2Parser"
 import { Operation } from "src/libs/blockchain/routines/executeOperations"
 import required from "src/utilities/required"
@@ -13,13 +13,18 @@ import { deriveMempoolOperation } from "src/libs/utils/demos_stdlib"
 // are either first or not last of the chain), and then
 // send back to the client or to the origin rpc the
 // transaction that will be granted as web2 result
-export default async function handleWeb2(request: IWeb2Request, senderSocket: any): Promise<[boolean, any]> {
+export default async function handleWeb2(payload: IWeb2Payload, senderSocket: any): Promise<[boolean, any]> {
     // Creating the workable interface
     // TODO Remember that web2 could need to be signed and could need a fee
     // NOTE From now on, Web2API will reply to instanceName with the same instance
     // NOTE Also note that Web2API automatically starts the request validation
+    
+    console.log("[PAYLOAD FOR WEB2] ")
+    console.log(payload)
+    let request: IWeb2Request = payload.message.content
     console.log("[REQUEST FOR WEB2] ")
     console.log(request)
+
     let web2request = Web2API(senderSocket, request)
     let instanceName = web2request.name // Numeric and progressive
     // Checking if we are the original rpc that received the request

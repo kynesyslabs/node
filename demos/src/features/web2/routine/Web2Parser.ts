@@ -20,6 +20,18 @@ export interface IParam {
 }
 
 // INFO Properties of a typical request as the client would send it
+export interface IWeb2Payload {
+        type: "web2Request",
+        message: {
+          content: IWeb2Request,
+        sender: any,
+        receiver: any,
+        timestamp: any,
+        data: any,
+        extra: any
+      }
+}
+
 export interface IWeb2Request {
 	content: {
 		action: string,
