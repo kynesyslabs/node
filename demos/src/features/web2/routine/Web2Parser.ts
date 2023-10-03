@@ -73,7 +73,7 @@ export interface IWeb2Attestation {
 }
 
 // INFO Simply handles the singleton stuff
-export default function Web2API (named: string = null, sendSock: any = null, req: IWeb2Request = null): Web2APIClass {
+export default function Web2API (named: string = null, sendSock: any = null, req: IWeb2Payload = null): Web2APIClass {
     let apiInstance: Web2APIClass = Web2APIClass.getInstance(named, sendSock, req)
     return apiInstance
 }
@@ -84,7 +84,7 @@ export  class Web2APIClass {
     static progressive: 0
 
     // INFO Named singleton (multiton?)
-    static getInstance(named: string = null, sendSock: any = null, req: IWeb2Request = null): Web2APIClass {
+    static getInstance(named: string = null, sendSock: any = null, req: IWeb2Payload = null): Web2APIClass {
         if (!named) { named = String(Web2APIClass.progressive); Web2APIClass.progressive += 1 }
         // Setting the name
         if (!Web2APIClass.requests.has(named)) {
@@ -103,19 +103,19 @@ export  class Web2APIClass {
     }
 
     // NOTE Storing the request here
-    request: IWeb2Request = null
+    request: IWeb2Payload = null
     // NOTE Storing the sender's socket here
     senderSocket: null
     // NOTE Index of the request
     name = null
 
     // INFO Creating a named instance and bootstrapping it
-    constructor(name: string, sendSock: any, req: IWeb2Request = null) {
+    constructor(name: string, sendSock: any, req: IWeb2Payload = null) {
         this.name = name
         this.senderSocket = sendSock
         if (!req) {
-            this.request.content.minAttestations = 10
-            this.request.content.stage.hop_number = 0
+            this.request.message.content.content.minAttestations = 10
+            this.request.message.content.content.stage.hop_number = 0
         } else {
 
             this.request = req
@@ -126,16 +126,16 @@ export  class Web2APIClass {
     }
 
     // INFO Getting the digest of the request
-    private async digest(): Promise<IWeb2Request> {
+    private async digest(): Promise<IWeb2Payload> {
         required(this.request, "Missing request")
         console.log("[ACTUAL REQUEST]")
         console.log(this.request)
-        let {action} = this.request.content
-        let params = this.request.content.parameters
+        let {action} = this.request.message.content.content
+        let params = this.request.message.content.content.parameters
         // NOTE Dispatching the request to the appropriate handler
         switch (action) {
             case "HTTP": // Handling everything that we can handle with fetch
-                this.request.result = await this.retrieve(params)
+                this.request.message.content.result = await this.retrieve(params)
                 break
             case "HTTPS":
                 // TODO
@@ -146,7 +146,7 @@ export  class Web2APIClass {
             default: break
         }
         // Building our own attestation
-        let hashedResult = Hashing.sha256(JSON.stringify(this.request.result))
+        let hashedResult = Hashing.sha256(JSON.stringify(this.request.message.content.result))
         let ourIdentity = sharedState.getInstance().identity.ed25519.publicKey
         let signatureResult = Cryptography.sign(hashedResult, ourIdentity)
         let attestation: IWeb2Attestation = {
@@ -158,7 +158,7 @@ export  class Web2APIClass {
         }
         // Adding the attestation to the request
         // NOTE This does not overwrite the original properties of the request
-        this.request.attestations.set(ourIdentity.toString("hex"), attestation)
+        this.request.message.content.attestations.set(ourIdentity.toString("hex"), attestation)
         return this.request
     }
 
@@ -172,8 +172,8 @@ export  class Web2APIClass {
         let timeout = 5000 // REVIEW Make it customizable
         //  REVIEW fetch the url better with more customization if possible
         fetched = await fetch(
-            this.request.content.url, { 
-                method: this.request.content.method,
+            this.request.message.content.content.url, { 
+                method: this.request.message.content.content.method,
                 body: null, // For POST stuff
                 headers: {}, // like { 'Content-Type': 'application/json' }
                 signal: AbortSignal.timeout(timeout), 
@@ -188,11 +188,11 @@ export  class Web2APIClass {
     async validate(content: string): Promise<void> {
         // Hashing and signing the result
         let hashed_result = Hashing.sha256(content)
-        this.request.hash = hashed_result
+        this.request.message.content.hash = hashed_result
         let signature = Cryptography.sign(
             hashed_result, 
             sharedState.getInstance().identity.ed25519.privateKey)
-        this.request.signature = signature
+        this.request.message.content.signature = signature
         // Composing our attestation
         let attestation: IWeb2Attestation = {
             hash: hashed_result,
@@ -203,9 +203,9 @@ export  class Web2APIClass {
         }
         // Adding the attestation to the request
         let hex_key = sharedState.getInstance().identity.ed25519.publicKey.toString("hex") // REVIEW Is this ok?
-        this.request.attestations.set(hex_key, attestation)
+        this.request.message.content.attestations.set(hex_key, attestation)
         // And the content too
-        this.request.result = content
+        this.request.message.content.result = content
     }
 
 
@@ -214,9 +214,9 @@ export  class Web2APIClass {
         required(this.request, "Missing request")
         let valid = true
         // Cycling through all the attestations
-        for (let [key, attestation] of this.request.attestations) {
+        for (let [key, attestation] of this.request.message.content.attestations) {
             // REVIEW Checking the hash validity for all the attestations
-            let stringifiedContent = JSON.stringify(this.request.content)
+            let stringifiedContent = JSON.stringify(this.request.message.content.content)
             let hash = Hashing.sha256(stringifiedContent)
             let hash_valid = hash===attestation.hash
             // REVIEW Checking the signature validity for all the attestations
@@ -227,7 +227,7 @@ export  class Web2APIClass {
             // Noting the result of the verification in the attestation array
             let isValid = hash_valid && signature_valid
             attestation.valid = isValid
-            this.request.attestations.set(key, attestation)
+            this.request.message.content.attestations.set(key, attestation)
         }
         return valid
     }
@@ -252,7 +252,7 @@ export  class Web2APIClass {
     // SECTION Status controls
     // INFO Easy handler for this info
     getAttestationsNumber(): number {
-        return this.request.attestations.size
+        return this.request.message.content.attestations.size
     }
 
     // INFO Easy awaiter with timeout
@@ -273,7 +273,7 @@ export  class Web2APIClass {
         // NOTE We wait for timeout seconds before surrendering
         while (timer < timeout) {
             await new Promise((resolve) => setTimeout(resolve, 100)) // Each 100 ms we can check for updates
-            if (this.request.attestations.size >= quorum) {
+            if (this.request.message.content.attestations.size >= quorum) {
                 reachedQuorum = true
                 break
             }

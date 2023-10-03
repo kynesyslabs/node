@@ -26,7 +26,7 @@ export default async function handleWeb2(payload: IWeb2Payload, senderSocket: an
     console.log(request)
     //process.exit(0)
 
-    let web2request = Web2API(null, senderSocket, request) // NOTE null is important here
+    let web2request = Web2API(null, senderSocket, payload) // NOTE null is important here
     let instanceName = web2request.name // Numeric and progressive
     // Checking if we are the original rpc that received the request
     let nOfAttestations = request.attestations.size
@@ -39,12 +39,12 @@ export default async function handleWeb2(payload: IWeb2Payload, senderSocket: an
             // Ensuring we reach the quorum if we are the original rpc that received the request
             required(await Web2API(instanceName).awaitQuorum(), "Not enough attestations to reach quorum")
             // Hashing and signing the request
-            let hashedAttestations = Hashing.sha256(JSON.stringify(web2request.request.attestations))
+            let hashedAttestations = Hashing.sha256(JSON.stringify(web2request.request.message.content.attestations))
             let ourPk = sharedState.getInstance().identity.ed25519.privateKey
             let signedAttestations = Cryptography.sign(hashedAttestations, ourPk)
             // Compiling and certifying the result
-            web2request.request.hash = hashedAttestations
-            web2request.request.signature = signedAttestations
+            web2request.request.message.content.hash = hashedAttestations
+            web2request.request.message.content.signature = signedAttestations
             // REVIEW And then we can send the response back to the client
             return [true, web2request.request]
         } catch (error) {
