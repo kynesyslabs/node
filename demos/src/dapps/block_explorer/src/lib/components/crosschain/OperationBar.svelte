@@ -82,7 +82,7 @@
     {
         .available-blocks{
             position: fixed;
-            z-index: 1000;
+            z-index: 500;
             left: calc(-100% + 80px);
         }
         .open{
