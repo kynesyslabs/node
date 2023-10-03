@@ -24,12 +24,12 @@ export interface IParam {
 export interface IWeb2Payload {
         type: "web2Request",
         message: {
-        content: IWeb2Request,
-        sender: any,
-        receiver: any,
-        timestamp: any,
-        data: any,
-        extra: any
+            content: IWeb2Request,
+            sender: any,
+            receiver: any,
+            timestamp: any,
+            data: any,
+            extra: any
       }
 }
 
