@@ -56,7 +56,7 @@ export interface IRawWeb2Request {
 
 // INFO A complete web2 request
 export interface IWeb2Request {
-	content: IRawWeb2Request,
+	raw: IRawWeb2Request,
     result: any,
 	attestations: Map<string, IWeb2Attestation>,
 	hash: string,
@@ -114,8 +114,8 @@ export  class Web2APIClass {
         this.name = name
         this.senderSocket = sendSock
         if (!req) {
-            this.request.message.content.content.minAttestations = 10
-            this.request.message.content.content.stage.hop_number = 0
+            this.request.message.content.raw.minAttestations = 10
+            this.request.message.content.raw.stage.hop_number = 0
         } else {
 
             this.request = req
@@ -130,8 +130,8 @@ export  class Web2APIClass {
         required(this.request, "Missing request")
         console.log("[ACTUAL REQUEST]")
         console.log(this.request)
-        let {action} = this.request.message.content.content
-        let params = this.request.message.content.content.parameters
+        let {action} = this.request.message.content.raw
+        let params = this.request.message.content.raw.parameters
         // NOTE Dispatching the request to the appropriate handler
         switch (action) {
             case "HTTP": // Handling everything that we can handle with fetch
@@ -172,8 +172,8 @@ export  class Web2APIClass {
         let timeout = 5000 // REVIEW Make it customizable
         //  REVIEW fetch the url better with more customization if possible
         fetched = await fetch(
-            this.request.message.content.content.url, { 
-                method: this.request.message.content.content.method,
+            this.request.message.content.raw.url, { 
+                method: this.request.message.content.raw.method,
                 body: null, // For POST stuff
                 headers: {}, // like { 'Content-Type': 'application/json' }
                 signal: AbortSignal.timeout(timeout), 
@@ -216,7 +216,7 @@ export  class Web2APIClass {
         // Cycling through all the attestations
         for (let [key, attestation] of this.request.message.content.attestations) {
             // REVIEW Checking the hash validity for all the attestations
-            let stringifiedContent = JSON.stringify(this.request.message.content.content)
+            let stringifiedContent = JSON.stringify(this.request.message.content.raw)
             let hash = Hashing.sha256(stringifiedContent)
             let hash_valid = hash===attestation.hash
             // REVIEW Checking the signature validity for all the attestations
