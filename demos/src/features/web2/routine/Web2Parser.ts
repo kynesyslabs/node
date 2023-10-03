@@ -141,18 +141,34 @@ export  class Web2APIClass {
         // NOTE Dispatching the request to the appropriate handler
         term.yellow("Action: " + action + "\n")
         switch (action) {
-            case "HTTP": // Handling everything that we can handle with fetch
-                console.log("HTTP ACTION")
+            case "GET": // Handling everything that we can handle with fetch
+                console.log("HTTP(S) ACTION")
                 this.request.result = await this.retrieve(params)
                 break
-            case "HTTPS":
-                // TODO
+            case "POST":
+                term.red("[ERROR] Not implemented yet")
+                this.request.result = "Not implemented yet"
+                break
+            case "PUT":
+                term.red("[ERROR] Not implemented yet")
+                this.request.result = "Not implemented yet"
+                break
+            case "DELETE":
+                term.red("[ERROR] Not implemented yet")
+                this.request.result = "Not implemented yet"
+                break
+            case "PATCH":
+                term.red("[ERROR] Not implemented yet")
+                this.request.result = "Not implemented yet"
                 break
             case "IPFS":
+                term.red("[ERROR] Not implemented yet")
+                this.request.result = "Not implemented yet"
                 // TODO
                 break
             default: 
                 term.red("[ERROR] Invalid action: " + action + "\n")
+                this.request.result = "Invalid action: " + action
                 break
         }
         // Building our own attestation
