@@ -24,7 +24,7 @@ export interface IParam {
 export interface IWeb2Payload {
         type: "web2Request",
         message: {
-          content: IWeb2Request,
+        content: IWeb2Request,
         sender: any,
         receiver: any,
         timestamp: any,
@@ -33,26 +33,30 @@ export interface IWeb2Payload {
       }
 }
 
+// INFO A request without any attestations or identity data
+export interface IRawWeb2Request {
+    action: string,
+    parameters: IParam[],
+    requestedParameters: [] | null,
+    method: "POST" | "GET" | "PUT" | "DELETE" | "PATCH",
+    url: string,
+    headers: any,
+    minAttestations: number,
+    // Handling the various stages of an IWeb2Request
+    stage: {
+        // The one that will handle the response too
+        origin: {
+            identity: forge.pki.ed25519.BinaryBuffer,
+            connection_url: string,
+        },
+        // Starting from 0, each attestation it is increased
+        hop_number: number,
+    }    
+}
+
+// INFO A complete web2 request
 export interface IWeb2Request {
-	content: {
-		action: string,
-        parameters: IParam[],
-        requestedParameters: [] | null,
-        method: "POST" | "GET" | "PUT" | "DELETE" | "PATCH",
-		url: string,
-		headers: any,
-		minAttestations: number,
-		// Handling the various stages of an IWeb2Request
-		stage: {
-			// The one that will handle the response too
-			origin: {
-				identity: forge.pki.ed25519.BinaryBuffer,
-				connection_url: string,
-			},
-			// Starting from 0, each attestation it is increased
-			hop_number: number,
-		}
-	},
+	content: IRawWeb2Request,
     result: any,
 	attestations: Map<string, IWeb2Attestation>,
 	hash: string,
@@ -115,6 +119,8 @@ export  class Web2APIClass {
             this.request.content.minAttestations = 10
             this.request.content.stage.hop_number = 0
         } else {
+            console.log("[Web2API] Request:")
+            console.log(req)
             this.request = req
         }
         // REVIEW Should be ok anyway
