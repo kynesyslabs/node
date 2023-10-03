@@ -7,6 +7,7 @@ import Hashing from "src/libs/crypto/hashing"
 import sharedState from "src/utilities/sharedState"
 import { PeerManager } from "src/libs/peer"
 import required from "src/utilities/required"
+const term = require("terminal-kit").terminal
 
 AbortSignal.timeout ??= function timemout(ms) {
     const ctrl = new AbortController()
@@ -83,6 +84,12 @@ export  class Web2APIClass {
         if (!named) { named = String(Web2APIClass.progressive); Web2APIClass.progressive += 1 }
         // Setting the name
         if (!Web2APIClass.requests.has(named)) {
+            term.yellow("Creating new Web2API instance\n")
+            console.log("Using the following parameters:")
+            console.log(named)
+            console.log(sendSock)
+            console.log(req)
+            term.yellow("Proceeding\n")
             required(sendSock, "Missing sender socket")
             required(req, "Missing request")
             Web2APIClass.requests.set(named, new Web2APIClass(named, sendSock, req))
