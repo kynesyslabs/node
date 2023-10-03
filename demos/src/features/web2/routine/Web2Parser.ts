@@ -131,6 +131,8 @@ export  class Web2APIClass {
     // INFO Getting the digest of the request
     private async digest(): Promise<IWeb2Request> {
         required(this.request, "Missing request")
+        console.log("[ACTUAL REQUEST]")
+        console.log(this.request)
         let {action} = this.request.content
         let params = this.request.content.parameters
         // NOTE Dispatching the request to the appropriate handler
