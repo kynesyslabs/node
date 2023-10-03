@@ -120,6 +120,8 @@ export  class Web2APIClass {
         this.name = name
         this.senderSocket = sendSock
         if (!payload.message.content) {
+            console.log("[Web2API] No request attached. Is this right?")
+            console.log(payload)
             this.request.raw.minAttestations = 10
             this.request.raw.stage.hop_number = 0
         } else {
