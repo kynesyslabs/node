@@ -36,9 +36,11 @@ export default class Mempool {
         console.log(result)
         // In case there is no current mempool, lets create it
         if (!result) {
+            console.log("[Mempool] No current mempool found, creating one...")
             await Chain.write("INSERT INTO mempool VALUES(0, 1, '[]', '{}')")
             result = await Chain.read("SELECT * from mempool WHERE current = 1")
         }
+        // FIXME This needs to return an array object aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         if (typeof(result) === "string") {
             return JSON.parse(result)
         }
@@ -61,6 +63,7 @@ export default class Mempool {
     // INFO Writing a transaction to the mempool
     public static async addTransaction(transaction: Transaction): Promise<void> { 
         let mempool = await Mempool.getMempool()
+        console.log(typeof(mempool))
         /* FIXME:
             content.message.action: undefined
             /root/morph/demos/src/libs/blockchain/mempool.ts:51
