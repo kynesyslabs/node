@@ -56,12 +56,14 @@ export default class Mempool {
         if (typeof(sql_result) === "string") {
             sql_result = JSON.parse(sql_result)
         }
+        console.log("Mempool query result:")
+        console.log(sql_result)
         // Serializing
         let result: MempoolData = {
-            number: sql_result[0].number,
-            current: sql_result[0].current,
-            transactions: JSON.parse(sql_result[0].transactions),
-            proposedBlock: JSON.parse(sql_result[0].proposedBlock),
+            number: sql_result.number,
+            current: sql_result.current,
+            transactions: JSON.parse(sql_result.transactions),
+            proposedBlock: JSON.parse(sql_result.proposedBlock),
         }
         console.log("Mempool retrieved:")
         console.log(result)
