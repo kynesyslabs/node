@@ -75,6 +75,7 @@ async function toMempool(
     let derivedOperation: Operation
     // NOTE If all the attestations are valid we can create the transaction, insert it and gibe back the result
     // Deriving an operation and a tx from the web2 request
+    // FIXME All null? WTF lol
     derivedOperation = await deriveMempoolOperation(
         Web2API(instanceName).request,
         insert)

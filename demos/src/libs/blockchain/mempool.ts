@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
@@ -86,11 +87,6 @@ export default class Mempool {
     public static async addTransaction(transaction: Transaction): Promise<void> { 
         let mempool = await Mempool.getMempool()
         console.log(mempool)
-        /* FIXME:
-            content.message.action: undefined
-            /root/morph/demos/src/libs/blockchain/mempool.ts:51
-                    mempool.transactions.push(transaction) 
-        */
         mempool.transactions.push(transaction) // REVIEW What if it is empty?
         await Chain.write("UPDATE mempool SET transactions ='" + JSON.stringify(mempool.transactions) + "' WHERE current = 1")
     }
@@ -98,7 +94,7 @@ export default class Mempool {
     // INFO Writing the headers of the PoR to the mempool
     public static async addHeaders(headers: any): Promise<void> { // TODO Add types
         let mempool = await Mempool.getMempool()
-        // FIXME Ensure the schema of the headers is correctly inserted into the db
+        // REVIEW Ensure the schema of the headers is correctly inserted into the db
         await Chain.write("UPDATE mempool SET headers ='" + JSON.stringify(headers) + "' WHERE current = 1")
     }
 
@@ -158,7 +154,7 @@ export default class Mempool {
             console.log("[+] [MEMPOOL VERIFICATION] The hash of the transaction is valid")
             // NOTE Verifying the signature against the verified hash using from as public key
             console.log("[MEMPOOL VERIFICATION] Verifying the signature")
-            let signature = tx.signature
+            let {signature} = tx
             console.log("[MEMPOOL VERIFICATION] Signature: " + signature.toString("hex"))
             let public_key = tx.content.from
             console.log("[MEMPOOL VERIFICATION] Public key: " + public_key.toString("hex"))

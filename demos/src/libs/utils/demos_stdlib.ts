@@ -22,8 +22,12 @@ export async function deriveMempoolOperation(
     let derivedOperation: Operation
     // Deriving a transaction
     derivedTx = await createTransaction(data)
+    console.log("Derived tx:")
+    console.log(derivedTx)
     // Deriving an operation from the tx
     derivedOperation = await createOperation(derivedTx)
+    console.log("Derived operation:")
+    console.log(derivedOperation)
     if (insert) {
         // Inserting the operation in the next mempool session with the proper data
         Mempool.addTransaction(derivedTx)
