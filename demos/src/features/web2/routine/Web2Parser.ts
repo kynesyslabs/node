@@ -195,7 +195,7 @@ export  class Web2APIClass {
         // TODO Scope with special params
         // TODO Implement body params on POST
         // TODO Implement headers
-        // REVIEW Test the fix to the mempool.ts related error
+        // REVIEW Test the fix to the mempool.ts related error (?)
         let fetched: any
         let timeout = 5000 // REVIEW Make it customizable
         //  REVIEW fetch the url better with more customization if possible
