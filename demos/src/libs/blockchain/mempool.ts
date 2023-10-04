@@ -63,6 +63,8 @@ export default class Mempool {
             transactions: JSON.parse(sql_result[0].transactions),
             proposedBlock: JSON.parse(sql_result[0].proposedBlock),
         }
+        console.log("Mempool retrieved:")
+        console.log(result)
         return result
         
     }
