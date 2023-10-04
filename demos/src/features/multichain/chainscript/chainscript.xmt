@@ -1,5 +1,5 @@
-[
-// We have to connect to the two blockchains in order to start
+
+// We have to connect to the two blockchains read only in order to start 
 "connect": {
 	"chain": "ethereum",
 	"subchain": "goerli",
@@ -7,9 +7,8 @@
 	"rpc": "https://rpc.ankr.com/eth_goerli",
 	"task": {
 		"type": "connection",
-		"params": {
-			"privateKey": "0x123321123321",
-		}
+		"params": {},
+		"signedPayloads": [],
 	}
 }
 "connect": {
@@ -20,9 +19,8 @@
 	"rpc": "https://s.altnet.rippletest.net",
 	"task": {
 		"type": "connection",
-		"params": {
-			"privateKey": "abcdefghijklmnopqrstuvwxyz",
-		}
+		"params": {},
+		"signedPayloads": [],
 	}
 }
 
@@ -37,7 +35,8 @@
         "params": {
 			"to": "0x000000000000",	
 			"amount": "10000000000000"
-		}
+		},
+		"signedPayloads": ["signed_transaction_for_the_above_task"],
 	}
 }
 
@@ -53,7 +52,8 @@
 			"address": "0x0000000000001",
 			"method": "balanceOf",
             "params": [ "0x000000000000" ]
-		}
+		},
+		"signedPayloads": [],
 	}	
 },
 
@@ -62,8 +62,10 @@
 	"operator": "if",
 	"statement": '("check_a_contract_state"==0),
 	"callback": "transfer_token", // Must be an operation defined below or above
+	"alternative": "ripple_payment", // Must be an operation defined below or above
 }
 
+// We declare here a conditional task (aka is not executed in order unless the conditions are met)
 "transfer_token": {
 	"chain": "ethereum",
 	"subchain": "goerli",
@@ -75,24 +77,25 @@
 			"address": "0x0000000000001",
 			"method": "transfer",
 			"params": [ "0x00000000000", "10000000000000" ]
-		}
+		},
+		"signedPayloads": ["signed_transaction_for_the_above_task"],
 	}
 }
 
 // If they do, we will send some Ripple to them to thanks them even more
-else
 
     "ripple_payment": {
         "chain": "xrpl",
 		"subchain": "testnet",
 		"is_evm": false,
-		"conditional": false,
+		"conditional": true,
 		"task": {
             "type": "pay",
 			"params": {
 				"to": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
                 "amount": "10000000000000"
-            }
+            },
+			"signedPayloads": ["signed_transaction_for_the_above_task"],
 		}
 	}
 
@@ -108,24 +111,8 @@ else
         "params": {
 			"from": "ethereum",
 			"to": "xrpl",
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-			"in": {g
-			
+			"in": {
 				"type": "token", // This allows DEMOS to automatically convert the token to native currency (e.g. ETH)
-=======
-			"in": {
-				"type":pu "token", // This allows DEMOS to automatically convert the token to native currency (e.g. ETH)
->>>>>>> Stashed changes
-=======
-			"in": {
-				"type":pu "token", // This allows DEMOS to automatically convert the token to native currency (e.g. ETH)
->>>>>>> Stashed changes
-=======
-			"in": {
-				"type":pu "token", // This allows DEMOS to automatically convert the token to native currency (e.g. ETH)
->>>>>>> Stashed changes
 				"address": "0x0000000000000",
 				"amount": "10000000000000",
 			},
@@ -134,7 +121,7 @@ else
 				"address": null, // That has not an address
 				"minAmount": "5000" // We don't accept less than this amount
 			}
-		}
+		},
+		"signedPayloads": ["eth_signed_tx", "xrpl_signed_tx], // Is important to have them in order
 	}
 }
-]
