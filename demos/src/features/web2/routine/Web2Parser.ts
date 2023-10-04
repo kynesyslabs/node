@@ -191,7 +191,7 @@ export  class Web2APIClass {
 
 
     // INFO Fetching (via different methods) an url and attesting it in this.request
-    private async retrieve(params: IParam[] = null) {
+    private async retrieve(params: IParam[] = null, body: any = null, headers: any = null) {
         // TODO Scope with special params
         // TODO Implement body params on POST
         // TODO Implement headers
