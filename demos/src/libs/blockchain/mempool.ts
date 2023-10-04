@@ -31,13 +31,25 @@ export default class Mempool {
 
     // INFO Reading the whole current mempool
     // REVIEW What if the mempool is empty?
+    // FIXME If the mempool is empty we should anyway have a MempoolData object
     public static async getMempool(): Promise<MempoolData> {
         let result = await Chain.read("SELECT * from mempool WHERE current = 1")
         console.log(result)
         // In case there is no current mempool, lets create it
         if (!result || result.length === 0) {
             console.log("[Mempool] No current mempool found, creating one...")
-            await Chain.write("INSERT INTO mempool VALUES(0, 1, '[]', '{}')")
+            let newMempool: MempoolData = {
+                number: 0,
+                current: 1,
+                transactions: [],
+                proposedBlock: null,
+            }
+            // FIXME It won't write
+            await Chain.write("INSERT INTO mempool VALUES(" 
+            + newMempool.number + ", "
+            + newMempool.current + ", "
+            + JSON.stringify(newMempool.transactions) + ", "
+            + null + ")")
             result = await Chain.read("SELECT * from mempool WHERE current = 1")
         }
         // FIXME This needs to return an array object aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -63,7 +75,7 @@ export default class Mempool {
     // INFO Writing a transaction to the mempool
     public static async addTransaction(transaction: Transaction): Promise<void> { 
         let mempool = await Mempool.getMempool()
-        console.log(typeof(mempool))
+        console.log(mempool)
         /* FIXME:
             content.message.action: undefined
             /root/morph/demos/src/libs/blockchain/mempool.ts:51
