@@ -39,7 +39,12 @@ export default class Mempool {
             await Chain.write("INSERT INTO mempool VALUES(0, 1, '[]', '{}')")
             result = await Chain.read("SELECT * from mempool WHERE current = 1")
         }
-        return JSON.parse(result)
+        if (typeof(result) === "string") {
+            return JSON.parse(result)
+        }
+        else {
+            return result
+        }
     }
 
 
