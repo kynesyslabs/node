@@ -54,11 +54,17 @@ export default class Mempool {
         }
         // Normalizing
         if (typeof(sql_result) === "string") {
-            return JSON.parse(sql_result)
+            sql_result = JSON.parse(sql_result)
         }
-        else {
-            return sql_result
+        // Serializing
+        let result: MempoolData = {
+            number: sql_result[0].number,
+            current: sql_result[0].current,
+            transactions: JSON.parse(sql_result[0].transactions),
+            proposedBlock: JSON.parse(sql_result[0].proposedBlock),
         }
+        return result
+        
     }
 
 
