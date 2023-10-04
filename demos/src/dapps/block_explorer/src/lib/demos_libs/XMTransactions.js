@@ -10,12 +10,19 @@ let XMTransactions = {
 			subchain: "",
 			is_evm: false,
             rpc: "",
+			conditional: false,
 			task: {
 				type: "",
 				params: {},
 				signedPayloads: [],
 			}
-		}
+		},
+		condition_operation: {
+			operator:"",
+			statement:"",
+			callback:"",
+			alternative:"",
+		},
 	},
 
 	data: {
@@ -30,17 +37,29 @@ let XMTransactions = {
 		// ANCHOR Setters
 
 		// NOTE Creating and adding a new operation to the current session list
-		create: function(name, chain, subchain, is_evm, rpc, task) {
+		create: function(name, chain, subchain, is_evm, rpc, task, conditional = false) {
 			// TODO Bugfix: implement a name
 			let operation ={...XMTransactions.schemas.base_operation}
 			operation.chain = chain;
 			operation.subchain = subchain;
 			operation.is_evm = is_evm;
 			operation.rpc = rpc;
+			operation.conditional = conditional;
 			operation.task = task;
 			XMTransactions.data.loaded_operations[name] = operation;
 			XMTransactions.data.operations_index.push(name);
 			return operation;
+		},
+
+		create_condition: function(name, operator, statement, callback, alternative){
+			let condition = {...XMTransactions.schemas.condition_operation}
+			condition.operator = operator;
+			condition.statement = statement;
+			condition.callback = callback;
+			condition.alternative = alternative;
+			XMTransactions.data.loaded_operations[name] = condition;
+			XMTransactions.data.operations_index.push(name);
+			return condition;
 		},
 
 		// NOTE Deleting an operation from the current session list
@@ -49,6 +68,11 @@ let XMTransactions = {
 			let index = XMTransactions.data.operations_index.indexOf(name);
 			XMTransactions.data.operations_index.splice(index, 1)
         },
+
+		clear: function() {
+			XMTransactions.data.loaded_operations = {};
+			XMTransactions.data.operations_index = [];
+		},
 
 		// NOTE Changing operation order for an operation from the current session list
 		reorder: function(name, index) {
@@ -61,13 +85,14 @@ let XMTransactions = {
         },
 
 		// NOTE Updating an operation from the current session list
-		update: function(name, chain, subchain, is_evm, rpc, task) {
+		update: function(name, chain, subchain, is_evm, rpc, task, conditional) {
             let operation = {...XMTransactions.schemas.base_operation}
             operation.chain = chain;
             operation.subchain = subchain;
             operation.is_evm = is_evm;
             operation.rpc = rpc;
             operation.task = task;
+			operation.conditional = conditional;
             XMTransactions.data.loaded_operations[name] = operation;
         },
 
