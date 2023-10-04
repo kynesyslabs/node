@@ -33,10 +33,11 @@ export default class Mempool {
     // REVIEW What if the mempool is empty?
     // FIXME If the mempool is empty we should anyway have a MempoolData object
     public static async getMempool(): Promise<MempoolData> {
-        let result = await Chain.read("SELECT * from mempool WHERE current = 1")
-        console.log(result)
+        let sql_results = await Chain.read("SELECT * from mempool WHERE current = 1")
+        let sql_result = sql_results[0]
+        console.log(sql_result)
         // In case there is no current mempool, lets create it
-        if (!result || result.length === 0) {
+        if (!sql_result || sql_result.length === 0) {
             console.log("[Mempool] No current mempool found, creating one...")
             let newMempool: MempoolData = {
                 number: 0,
@@ -44,20 +45,19 @@ export default class Mempool {
                 transactions: [],
                 proposedBlock: null,
             }
-            // FIXME It won't write
             await Chain.write("INSERT INTO mempool VALUES(" 
             + newMempool.number + ", "
             + newMempool.current + ", "
             + JSON.stringify(newMempool.transactions) + ", "
             + null + ")")
-            result = await Chain.read("SELECT * from mempool WHERE current = 1")
+            sql_result = await Chain.read("SELECT * from mempool WHERE current = 1")
         }
-        // FIXME This needs to return an array object aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-        if (typeof(result) === "string") {
-            return JSON.parse(result)
+        // Normalizing
+        if (typeof(sql_result) === "string") {
+            return JSON.parse(sql_result)
         }
         else {
-            return result
+            return sql_result
         }
     }
 
