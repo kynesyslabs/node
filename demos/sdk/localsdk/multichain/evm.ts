@@ -109,6 +109,28 @@ export default class EVM extends DefaultChain implements IEVM {
         return await contract_instance[function_name](...args) // NOTE Ensure it is writeable i guess
     }
 
+    // SECTION Event listener
+    async listenForEvent(event: string, contract: string, abi: any[]): Promise<any> {
+        required(this.provider)
+        let contractInstance = new ethers.Contract(contract, abi, this.provider)
+        // REVIEW THis could work
+        return contractInstance.on(event, (data: any) => {
+            console.log(data)
+            // TODO Do something with the data
+        })
+    }
+
+    async listenForAllEvents(contract: string, abi: any[]): Promise<any> {
+        required(this.provider)
+        let contractInstance = new ethers.Contract(contract, abi, this.provider)
+        // REVIEW 99% Won't work
+        return contractInstance.on("*", (data: any) => {
+            console.log(data)
+            // TODO Do something with the data
+        })
+    }
+    // !SECTION Event Listener
+
     /**
      * The static method that controls the access to the singleton instance.
      *
@@ -131,5 +153,6 @@ export default class EVM extends DefaultChain implements IEVM {
         }
         return EVM.instances[chain_id]
     }
+
 
 }

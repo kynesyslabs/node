@@ -39,7 +39,7 @@ export default async function findGenesisBlock() {
 }
 
 // REVIEW Experimental incremental genesis
-// TODO Too
+// TODO Too and replace the above 
 export async function findGenesis() {
     let blocks: any[] = await Chain.getGenesisBlocks()
     if (blocks.length < 1) {

@@ -28,6 +28,8 @@ export interface IEVM {
 	createRawTransaction: (tx_data: any) => Promise<any>
 	readFromContract: (contract: any, method: string, args: any) => Promise<any>
 	writeToContract: (contract: any, method: string, args: any) => Promise<any>
+	listenForEvent: (event: string, contract: string, abi: any[]) => Promise<any>
+	listenForAllEvents: (contract: string, abi: any[]) => Promise<any>
 }
 
 export default abstract class DefaultChain implements IDefaultChain {
