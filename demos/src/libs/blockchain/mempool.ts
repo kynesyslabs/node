@@ -35,7 +35,7 @@ export default class Mempool {
         let result = await Chain.read("SELECT * from mempool WHERE current = 1")
         console.log(result)
         // In case there is no current mempool, lets create it
-        if (!result) {
+        if (!result || result.length === 0) {
             console.log("[Mempool] No current mempool found, creating one...")
             await Chain.write("INSERT INTO mempool VALUES(0, 1, '[]', '{}')")
             result = await Chain.read("SELECT * from mempool WHERE current = 1")
