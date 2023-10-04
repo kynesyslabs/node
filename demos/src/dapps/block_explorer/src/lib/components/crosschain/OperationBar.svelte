@@ -10,7 +10,7 @@
 
     const evm = [
         {id:uuidv4(), label:"Read contract", type:"contract_read", data:null}, 
-        {id:uuidv4(), label:"Write contract", type:"contract_write", data:null}
+        /*{id:uuidv4(), label:"Write contract", type:"contract_write", data:null}*/
     ]
 
     /*const multichain = [

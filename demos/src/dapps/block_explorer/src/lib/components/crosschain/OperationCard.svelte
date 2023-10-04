@@ -7,6 +7,7 @@
     import {dndzone} from "svelte-dnd-action";
 	import { flip } from "svelte/animate";
     import Combobox from '$lib/components/Combobox.svelte';
+    import {Operation} from '$lib/chainscript.js';
 
     export let operation;
     export let deleteOperation;
@@ -44,7 +45,6 @@
     }
 
     function createTask(e, key){
-        //purtroppo sembra non funzionare se l'evento è droppedintoanother...... ma forse non serve?? perché lo faccio scattare da un'altra parte... mmmm devo pensarci
         if(e.detail.info.trigger === "droppedIntoAnother" || !e.detail.info.id)
         {
             return;
@@ -53,9 +53,25 @@
         if(!thisop)
             return;
         //apri l'editor se operation data non esiste e se non è un conditional
-        if(thisop.data || thisop.type == "conditional")
+        if(thisop.type == "conditional")
             return;
-        onEdit(thisop, operation[key]);
+        //se è figlio di un conditional setta il flag true, altrimenti false
+        if(!thisop.data)
+        {
+            thisop.data = new Operation({tasktype:thisop.type});
+            if(key!=="items")
+                thisop.data.conditional = true
+            else
+                thisop.data.conditional = false
+            onEdit(thisop, operation[key]);
+        }
+        else
+        {
+            if(key!=="items")
+                thisop.data.conditional = true
+            else
+                thisop.data.conditional = false
+        }
     }
 </script>
 <style>

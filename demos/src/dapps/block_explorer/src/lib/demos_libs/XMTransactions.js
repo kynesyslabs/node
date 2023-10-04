@@ -37,6 +37,7 @@ let XMTransactions = {
 		// ANCHOR Setters
 
 		// NOTE Creating and adding a new operation to the current session list
+		//megabudino was here: I added the conditional parameter; changed operation.task = task to not overwrite
 		create: function(name, chain, subchain, is_evm, rpc, task, conditional = false) {
 			// TODO Bugfix: implement a name
 			let operation ={...XMTransactions.schemas.base_operation}
@@ -45,12 +46,14 @@ let XMTransactions = {
 			operation.is_evm = is_evm;
 			operation.rpc = rpc;
 			operation.conditional = conditional;
-			operation.task = task;
+			operation.task.type = task.type;
+			operation.task.params = task.params;
 			XMTransactions.data.loaded_operations[name] = operation;
 			XMTransactions.data.operations_index.push(name);
 			return operation;
 		},
 
+		//megabudino was here: this is the function that creates the condition operation
 		create_condition: function(name, operator, statement, callback, alternative){
 			let condition = {...XMTransactions.schemas.condition_operation}
 			condition.operator = operator;
@@ -60,6 +63,11 @@ let XMTransactions = {
 			XMTransactions.data.loaded_operations[name] = condition;
 			XMTransactions.data.operations_index.push(name);
 			return condition;
+		},
+
+		//megabudino was here: this is the function to push signed payloads to the task
+		push_signed_payload: function(name, signed_payload){
+			XMTransactions.data.loaded_operations[name].task.signedPayloads.push(signed_payload);
 		},
 
 		// NOTE Deleting an operation from the current session list
@@ -85,13 +93,15 @@ let XMTransactions = {
         },
 
 		// NOTE Updating an operation from the current session list
+		//megabudino was here: I added the conditional parameter; changed operation.task = task to not overwrite
 		update: function(name, chain, subchain, is_evm, rpc, task, conditional) {
             let operation = {...XMTransactions.schemas.base_operation}
             operation.chain = chain;
             operation.subchain = subchain;
             operation.is_evm = is_evm;
             operation.rpc = rpc;
-            operation.task = task;
+			operation.task.type = task.type;
+			operation.task.params = task.params;
 			operation.conditional = conditional;
             XMTransactions.data.loaded_operations[name] = operation;
         },

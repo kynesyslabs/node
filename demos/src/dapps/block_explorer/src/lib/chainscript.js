@@ -50,6 +50,7 @@ const mychains = [
         is_evm:false,
         token:"BTC",
         icon:"/crypto-icons/btc.svg",
+        disabled:true,
     },
     {
         id:"eth",
@@ -63,21 +64,25 @@ const mychains = [
         label:"XRP Ledger",
         is_evm:false,
         token:"XRP",
-        icon:"/crypto-icons/xrp.svg"
+        icon:"/crypto-icons/xrp.svg",
+        disabled:true,
+
     },
     {
         id:"xlm",
         label:"Stellar Lumens",
         is_evm:false,
         token:"XLM",
-        icon:"/crypto-icons/xlm.svg"
+        icon:"/crypto-icons/xlm.svg",
+        disabled:true,
     },
     {
         id:"egld",
         label:"MultiversX",
         is_evm:false,
         token:"EGLD",
-        icon:"/crypto-icons/egld.svg"
+        icon:"/crypto-icons/egld.svg",
+        disabled:true,
     },
 ]
 
@@ -87,7 +92,8 @@ const chains = mychains.concat(getAllChains().filter(c=>c.chainId!==1).map(c=>{
         label: c.name,
         token: c.nativeCurrency.symbol,
         icon: null,
-        is_evm: true
+        is_evm: true, 
+        disabled: true,
     }
 }));
 

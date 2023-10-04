@@ -98,7 +98,7 @@
         width: 100%;
         transition: padding .2s ease-in-out, background-color .2s ease-in-out, color .2s ease-in-out;
     }
-    .chain-option:hover{
+    .chain-option:hover:not(:disabled){
         background-color: var(--accent);
         padding: var(--input-padding);
         color: black;
@@ -122,7 +122,7 @@
             {/if}
             <div class="chain-options">
                 {#each options as chain}
-                    <div on:click={()=>{onChange(chain.id); open=false;}} class="chain-option">
+                    <button disabled={chain.disabled} on:click={()=>{onChange(chain.id); open=false;}} class="chain-option" style={`${chain.disabled?"opacity:.2":""}`}>
                         {#if chain.icon}
                             <img class="chain-icon" src={chain.icon} alt={chain.label}/>
                         {/if}
@@ -130,7 +130,7 @@
                             <p class="chain-label">{chain.label}</p>
                             <p class="token-label">{chain.token}</p>
                         </div>
-                    </div>
+                    </button>
                 {/each}
             </div>
         </div>
