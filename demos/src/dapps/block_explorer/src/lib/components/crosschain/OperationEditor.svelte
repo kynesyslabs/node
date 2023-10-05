@@ -1,5 +1,5 @@
 <script>
-    import {chains, universalTasks, evmTasks, mUniversalTasks, mEvmTasks, tasks} from '$lib/chainscript.js';
+    import {chains, tasks, chainobjs} from '$lib/chainscript.js';
 	import TaskParam from "$lib/components/crosschain/TaskParam.svelte";
 	import ChainSelection from "$lib/components/inputs/ChainSelection.svelte";
     import {budinofade} from '$lib/transitions.js';
@@ -34,8 +34,6 @@
     //error variable for display
     let errorDisplay = null;
 
-    //available tasks for selected chain
-    let availableTasks = [];
     //current params for selected task
     let currentParams = tasks.find(t=>t.id === txblock.task.type).params;
 
@@ -71,11 +69,6 @@
         txblockClone.is_evm = e;
         //flag filled
         complete[0] = editorchains[0] !== null;
-        //set availableTasks based on is_evm
-        if(e)
-            availableTasks = universalTasks.concat(evmTasks);
-        else
-            availableTasks = universalTasks;
     }
         //multichain
     else
@@ -87,11 +80,6 @@
         txblockClone.is_evm = e;
         //flag filled
         complete[0] = editorchains[0] !== null && editorchains[1] !== null;
-        //set availableTasks based on is_evm
-        if(e[0] && e[1])
-            availableTasks = mUniversalTasks.concat(mEvmTasks);
-        else
-            availableTasks = mUniversalTasks;
     }
 
     $:txblockClone.task.params = params;
@@ -103,10 +91,19 @@
     //signa transazione prima di salvarla
     async function signaPay(address, amount)
     {
-        let eth_chain = await EVM.create("https://eth.llamarpc.com");
-        eth_chain.connectWallet("54c42954e6d2e4b5d3bb487c4f34aeffa26b9eccce5dba87dcf50a67c69f512c");
+        let chainobj;
+        if(isEvmFromID(editorchains[0]))
+        {
+            chainobj = chainobjs["evm"];
+        }
+        else
+        {
+            chainobj = chainobjs[editorchains[0]];
+        }
+        let connectedchain = await chainobj.create("https://eth.llamarpc.com");
+        connectedchain.connectWallet("54c42954e6d2e4b5d3bb487c4f34aeffa26b9eccce5dba87dcf50a67c69f512c");
         // Let's obtain a signed payload
-        let signedPayload = eth_chain.preparePay(address, amount).then((payload) => {
+        let signedPayload = connectedchain.preparePay(address, amount).then((payload) => {
             return payload;
         }).catch(error=>{
             errorDisplay = error;

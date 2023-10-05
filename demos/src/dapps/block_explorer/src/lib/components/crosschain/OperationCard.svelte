@@ -125,12 +125,14 @@
         gap: 4px 16px;
         flex-wrap: wrap;
         margin-top: 12px;
+        width: 100%;
     }
     .params-preview p{
         margin: 0;
         opacity: .6;
         font-size: .8rem;
         font-weight: bold;
+        max-width: 100%;
     }
     .conditionaldnd{
         min-height: 50px;
@@ -182,7 +184,7 @@
                 <p class="operationcard-label">{taskinfo.label} on {chaininfo.label}</p>
                 <div class="params-preview">
                     {#each taskinfo.params as param}
-                        <p>{param.label}: <span style="font-weight: normal;">{operation.data.task.params[param.id]}</span></p>
+                        <p class="ellipsis">{param.label}: <span style="font-weight: normal;">{operation.data.task.params[param.id]}</span></p>
                     {/each}
                 </div>
             </div>

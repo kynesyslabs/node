@@ -48,6 +48,7 @@
     "socket.io-client": "^4.7.2",
     "svelte-dnd-action": "^0.9.29",
     "svelte-fa": "^3.0.4",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
+    "xrpl": "^2.12.0"
   }
 }

@@ -1,5 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import {getAllChains} from "evm-chains";
+import EVM from '$lib/demos_libs/xmlibs/chains/evm';
+//import XRPL from '$lib/demos_libs/xmlibs/chains/xrpl';
 //THIS FILE CONTAINS NOCODE DATA FOR CROSSCHAIN TRANSACTION
 
 class Operation{
@@ -44,7 +46,7 @@ const blockIcons = [
     {id:"conditional", icon:"/task-icons/curly-brackets.svg"},
 ]
 
-//!!chains
+//non evm chains + eth
 const mychains = [
     {
         id:"btc",
@@ -87,6 +89,11 @@ const mychains = [
         disabled:true,
     },
 ]
+
+const chainobjs = {
+    evm: EVM,
+    //xrpl: XRPL
+}
 
 const chains = mychains.concat(getAllChains().filter(c=>c.chainId!==1).map(c=>{
     return {
@@ -189,65 +196,4 @@ const tasks = [
     }
 ]
 
-//!!tasks for single chain operations
-    //tasks for all single chains
-const universalTasks = [
-    {
-        id:"pay",
-        label:"Pay",
-        params:[
-            {
-                id:"to",
-                label:"To",
-                type:"address",
-                required:true
-            },
-            {
-                id:"amount",
-                label:"Amount",
-                type:"number",
-                required:true
-            }
-        ]
-    }
-]
-
-    //tasks for evm chains
-const evmTasks = [
-    {
-        id:"contract_read",
-        label:"Read Contract",
-        params:[
-            {
-                id:"address",
-                label:"Address",
-                type:"address",
-                required:true
-            },
-            {
-                id:"abi",
-                label:"ABI",
-                type:"json",
-                required:false
-            },
-            {
-                id:"method",
-                label:"Method",
-                type:"string",
-                required:true
-            },
-            {
-                id:"params",
-                label:"Params",
-                type:"json",
-                required:true
-            }
-        ] 
-    },
-];
-
-//!!tasks for multichain operations
-const mUniversalTasks = [];
-const mEvmTasks = [];
-
-export {chains, tasks, universalTasks, evmTasks, mUniversalTasks, mEvmTasks, Operation, Conditional, blockIcons};
+export {chains, chainobjs, tasks, Operation, Conditional, blockIcons};
