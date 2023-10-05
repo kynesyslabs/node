@@ -184,7 +184,7 @@
     }
     </style>
 
-<div class="header">
+<div class="header" style={`z-index:${mobileMenuOpen?"2000":"500"};`}>
     <a href="/blockexplorer" style="flex-basis:100%;">
         <div>
             <img alt="logo" class="logo" src="/LOGOMorph.svg"/>

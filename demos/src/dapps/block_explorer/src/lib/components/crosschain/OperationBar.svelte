@@ -46,6 +46,7 @@
         border-bottom: none;
         border-left: none;
         transition: left .3s ease-in-out;
+        z-index: 1000;
     }
     .available-blocks h4{
         margin: 0 0 8px;
@@ -75,19 +76,20 @@
         justify-content: center;
         align-items: center;
         position: relative;
-        left: -8px;
+        left: 8px;
         transition: border-radius .5s ease-in-out;
     }
     @media screen and (max-width: 1120px)
     {
         .available-blocks{
             position: fixed;
-            z-index: 500;
-            left: calc(-100% + 80px);
+            z-index: 1000;
+            left: calc(-100% + 64px);
         }
         .open{
             left: 0;
             position: fixed;
+            z-index: 1000;
         }
         .minimizedsidebar{
             display: flex;
