@@ -65,6 +65,7 @@
 
     async function execute()
     {
+        demos.connect(rpcaddress);
         createJSON();
         let result = await demos.crosschain.execute(XMTransactions.operation.get())
         console.log(result);
