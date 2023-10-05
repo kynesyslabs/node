@@ -1,0 +1,80 @@
+.opeditor-title{
+    display: flex;
+    align-items: center;
+    margin-bottom: 24px;
+    gap: 16px;
+}
+
+.opeditor-title h3{
+    margin: 0;
+}
+
+.opeditor-chain-selection{
+    margin-bottom: 24px;
+    width: 500px;
+    max-width: 100%;
+}
+
+.opeditor-params{
+    width: 100%;
+    display: grid;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+    grid-template-columns: 1fr 1fr;
+}
+
+.modal-txblock{
+    background-color: var(--background-min);
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    width: fit-content;
+    max-width: calc(100% - 32px);
+    max-height: calc(100dvh - 48px);
+    z-index: 1000;
+    padding: 64px;
+    overflow: auto;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+@media (max-width: 768px){
+    .modal-txblock{
+        padding: 32px;
+    }
+}
+
+.modal-background{
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100dvw;
+    height: 100dvh;
+    background-color: rgba(0,0,0,.5);
+    z-index: 999;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.txblock{
+    max-width: 1250px;
+    margin: auto;
+}
+
+.tx-buttons{
+    display: flex;
+    gap: 16px;
+    margin-top: 16px;
+    justify-content: flex-end;
+}
+
+.error-display{
+    background-color: #640b0b;
+    margin: 16px 0;
+    padding: 16px;
+}
+
+.error-display p{
+    margin: 0;
+}

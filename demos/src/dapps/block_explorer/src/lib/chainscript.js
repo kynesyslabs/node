@@ -16,12 +16,14 @@ class Operation{
             });
             this.task = {
                 type: tasktype,
-                params: emptyParams
+                params: emptyParams,
+                signedPayloads: [],
             }
         }
         else this.task = {
             type: tasktype,
-            params: taskparams
+            params: taskparams,
+            signedPayloads: [],
         }
     }
 }

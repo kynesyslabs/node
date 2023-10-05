@@ -1,11 +1,14 @@
 <script>
-    import { cubicInOut } from 'svelte/easing';
     import {chains, universalTasks, evmTasks, mUniversalTasks, mEvmTasks, tasks} from '$lib/chainscript.js';
 	import TaskParam from "$lib/components/crosschain/TaskParam.svelte";
 	import ChainSelection from "$lib/components/inputs/ChainSelection.svelte";
     import {budinofade} from '$lib/transitions.js';
     import {cloneDeep} from 'lodash';
     import {Operation} from '$lib/chainscript.js';
+    import {budinotraslato} from "$lib/transitions.js"
+    import "$lib/styles/crosschain/operationeditor.css"
+    import EVM from "$lib/demos_libs/xmlibs/chains/evm.js"
+
 
     export let onClose;
     export let onDelete;
@@ -18,20 +21,6 @@
     //flags to check if all the fields are filled: [chain, task, params]
     let complete = [false, true, false];
 
-
-
-    //flags to check if card existed [chain, params] –– VERIFICARE L'UTILITà PER VIA DELLA NUOVA STRUTTURA DATI
-    /*let propscomplete = [false, false];
-    propscomplete[0] = txblock.chain !== null;
-    for(let i = 0; i < Object.values(txblock.task.params).length; i++)
-    {
-        if(Object.values(txblock.task.params)[i] !== "" && Object.values(txblock.task.params)[i])
-        {
-            propscomplete[1] = true;
-            break;
-        }
-    }*/
-
     //editor (props independent) variables
     //chains
     let editorchains = txblock.chain=="crosschain"?txblock.subchain:[txblock.chain, null];
@@ -39,17 +28,18 @@
     let multichain = txblock.chain=="crosschain";
     //params values
     let params = txblock.task.params;
-    //parsedJSON
-    let parsedJSON = "";
     //txblock clone for editing
     let txblockClone = cloneDeep(txblock);
+
+    //error variable for display
+    let errorDisplay = null;
 
     //available tasks for selected chain
     let availableTasks = [];
     //current params for selected task
     let currentParams = tasks.find(t=>t.id === txblock.task.type).params;
 
-    //utils
+    //utils per mostrare graficamente le informazioni
     let taskinfo;
     $:if(txblock.task.type)
     {
@@ -57,19 +47,6 @@
     }
     let chainflag;
     $: chainflag = (editorchains[0] !== null && !multichain) || (editorchains[0] !== null && editorchains[1] !== null && multichain)
-
-    function dialogAnimation(node, {duration, easing}) {
-        return {
-            duration,
-            css: t => {
-                const eased = easing(t);
-                return `
-                    transform: translate(-50%, -50%) scale(${0.9 + eased/10});
-                    transform-origin:center;
-                );`;
-            }
-        };
-    }
 
     //FUNCTION TO SET is_evm IN txblock
     function isEvmFromID(id)
@@ -122,88 +99,26 @@
     //EFFECT FOR CHANGING PARAMS
     $:complete[2] = currentParams.every((param)=>{return params[param.id] !== undefined && params[param.id] !== null && params[param.id] !== ""});
 
-    $:parsedJSON = JSON.stringify(txblockClone, null, 4);
+
+    //signa transazione prima di salvarla
+    async function signaPay(address, amount)
+    {
+        let eth_chain = await EVM.create("https://eth.llamarpc.com");
+        eth_chain.connectWallet("54c42954e6d2e4b5d3bb487c4f34aeffa26b9eccce5dba87dcf50a67c69f512c");
+        // Let's obtain a signed payload
+        let signedPayload = eth_chain.preparePay(address, amount).then((payload) => {
+            return payload;
+        }).catch(error=>{
+            errorDisplay = error;
+            return null;
+        })
+        return signedPayload;
+    }
 </script>
-
-<style>
-    .opeditor-title{
-        display: flex;
-        align-items: center;
-        margin-bottom: 24px;
-        gap: 16px;
-    }
-
-    .opeditor-title h3{
-        margin: 0;
-    }
-
-    .opeditor-chain-selection{
-        margin-bottom: 24px;
-        width: 500px;
-        max-width: 100%;
-    }
-
-    .opeditor-params{
-        width: 100%;
-        display: grid;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 16px;
-        grid-template-columns: 1fr 1fr;
-    }
-
-    .modal-txblock{
-        background-color: var(--background-min);
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        width: fit-content;
-        max-width: calc(100% - 32px);
-        max-height: calc(100dvh - 48px);
-        z-index: 1000;
-        padding: 64px;
-        overflow: auto;
-        transform: translate(-50%, -50%) scale(1);
-    }
-
-    @media (max-width: 768px){
-        .modal-txblock{
-            padding: 32px;
-        }
-    }
-
-    .modal-background{
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100dvw;
-        height: 100dvh;
-        background-color: rgba(0,0,0,.5);
-        z-index: 999;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-    }
-
-    .txblock{
-        max-width: 1250px;
-        margin: auto;
-    }
-
-    .tx-buttons{
-        display: flex;
-        gap: 16px;
-        margin-top: 16px;
-        justify-content: flex-end;
-    }
-</style>
 
 <div class="modal-background" transition:budinofade>
     <!-- IL MODO PER SMISTARE MULTICHAIN E SINGLECHAIN È operation.chain == "crosschain" => se falso rappresenta la chain selezionata invece -->
-    <div transition:dialogAnimation={{
-        duration: 350,
-        easing: cubicInOut
-    }} class="modal-txblock">
+    <div transition:budinotraslato class="modal-txblock">
         <div class="txblock">
             <div class="opeditor-title">
                 <img style="opacity: .3;" alt="task icon" src={taskinfo.icon}/>
@@ -226,9 +141,31 @@
                     {/each}
                 </div>
             {/if}
+            {#if errorDisplay}
+                <div class="error-display">
+                    <p>{errorDisplay}</p>
+                </div>
+            {/if}
             <div class="tx-buttons">
                 <button class="secondary" on:click={()=>{operation.data?onClose():onDelete()}}>Cancel</button>
-                <button disabled={!(complete[0]&&complete[1]&&complete[2])} on:click={onSave(txblockClone)} class="primary tooltip">
+                <button disabled={!(complete[0]&&complete[1]&&complete[2])} on:click={async()=>{
+                    if(txblockClone.task.type == "pay")
+                    {
+                        /*before updating we need to sign*/
+                        let signedPayload = await signaPay(txblockClone.task.params.to, txblockClone.task.params.amount);
+                        console.log(signedPayload);
+                        if(signedPayload)
+                        {
+                            txblockClone.task.signedPayloads.push(signedPayload);
+                            onSave(txblockClone)
+                        }
+                    }
+                    else
+                    {
+                        onSave(txblockClone)
+                    }
+                }}
+                class="primary tooltip">
                     {#if !(complete[0]&&complete[1]&&complete[2])}
                     <span class="tooltiptext">Fill all fields</span>
                     {/if}

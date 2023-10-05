@@ -2,7 +2,6 @@
 	import OperationEditor from "$lib/components/crosschain/OperationEditor.svelte";
 	import OperationCard from "$lib/components/crosschain/OperationCard.svelte";
     import XMTransactions from "$lib/demos_libs/XMTransactions.js";
-    import EVM from "$lib/demos_libs/xmlibs/chains/evm.js"
     import demos from "$lib/demos.js"
     import { rpcaddress }  from '$lib/env.js';
 
@@ -60,25 +59,9 @@
             else
             {
                 pushOp(op);
-                if(op.type=="pay")
-                {
-                    await signaPay(op.id, op.data.task.params.to, op.data.task.params.amount);
-                }
             }
         }
     }
-
-    //signa transazione
-    async function signaPay(operationid, address, amount)
-    {
-        let eth_chain = await EVM.create("https://eth.llamarpc.com");
-        eth_chain.connectWallet("54c42954e6d2e4b5d3bb487c4f34aeffa26b9eccce5dba87dcf50a67c69f512c");
-        // Let's obtain a signed payload
-        let signedPayload = await eth_chain.preparePay(address, amount)
-        console.log(signedPayload);
-        XMTransactions.operation.push_signed_payload(operationid, signedPayload);
-    }
-
 
     async function execute()
     {

@@ -30,6 +30,20 @@ function megabudino (node, {duration = 350, easing = cubicInOut}) {
     };
 }
 
+function budinotraslato (node, {duration = 350, easing = cubicInOut}) {
+    return {
+        duration,
+        css: t => {
+            const eased = easing(t);
+            return `
+                transform: scale(${0.9 + eased/10}) translate(-50%, -50%);
+                opacity: ${eased};
+                transform-origin:center;
+            );`;
+        }
+    };
+}
+
 function budinofade (node, {duration = 350, easing = cubicInOut}) {
     return {
         duration,
@@ -55,4 +69,4 @@ function budinoslide(node, {duration = 350, easing = cubicInOut}) {
     };
 }
 
-export {megabudino, budinofade, toprightbudino, budinoslide};
+export {megabudino, budinofade, toprightbudino, budinoslide, budinotraslato};
