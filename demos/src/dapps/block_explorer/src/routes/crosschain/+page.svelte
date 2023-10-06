@@ -4,6 +4,9 @@
     import XMTransactions from "$lib/demos_libs/XMTransactions.js";
     import demos from "$lib/demos.js"
     import { rpcaddress }  from '$lib/env.js';
+    import { v4 as uuidv4 } from 'uuid'; 
+    import cloneDeep from 'lodash/cloneDeep';
+
 
     localStorage.clear("operations");
 
@@ -20,6 +23,15 @@
     {
         operation.data = data;
         root = root
+    }
+
+    function duplicateOperation(parentArray, operation)
+    {
+        let newOperation = cloneDeep(operation);
+        newOperation.id = uuidv4();
+        let index = parentArray.findIndex(op=>op.id == operation.id);
+        parentArray.splice(index+1, 0, newOperation);
+        root = root;
     }
 
     function deleteOperation(parentArray, operation)
@@ -109,7 +121,7 @@
     </div>
     <div style="max-width: calc(100dvw - 48px);">
         <div class="card dnd">
-            <OperationCard onEdit={(op, parent)=>{edit = op; editparent=parent;}} operation={root} deleteOperation={deleteOperation}/>
+            <OperationCard onEdit={(op, parent)=>{edit = op; editparent=parent;}} operation={root} duplicateOperation={duplicateOperation} deleteOperation={deleteOperation}/>
         </div>
     </div>
     <button on:click={execute} class="executebtn primary">Execute
