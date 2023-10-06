@@ -10,12 +10,22 @@
 
     async function login(prvkey)
     {
-        const parsed = JSON.parse(prvkey);
-        const arrayed = Object.values(parsed);
-        const key = new Uint8Array(arrayed);
+        let key
+        try {
+            const parsed = JSON.parse(prvkey);
+            const arrayed = Object.values(parsed);
+            key = new Uint8Array(arrayed);
+            console.log("Key passed as object")
+        } catch(e) {
+            key = prvkey
+            console.log("Key passed as string")
+        }
         const log = await demos.DemosWebAuth.getInstance().login(key);
-        updateWallet();
-        return log;
+        if(log[0])
+        {
+            updateWallet();
+            document.cookie=`prvkey=${prvkey}`;
+        }
     }
 
     const getCookieValue = (name) => (
