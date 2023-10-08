@@ -124,6 +124,7 @@ async function digestArguments() {
 
 // ANCHOR Entry point
 async function main() {
+
     // NOTE Overriding if necessary
     if (OVERRIDE_PORT) {
         SERVER_PORT = OVERRIDE_PORT

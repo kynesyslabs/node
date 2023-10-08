@@ -8,3 +8,10 @@ var child = forever.start([ "yarn", "server" ], {
     killTree: true, // All the children will be killed (anakin)
     minUptime: 10000, // If running for less than 10 seconds, it will be killed
 })
+
+var mgmt = forever.start([ "yarn", "management" ], {
+    max : 10,
+    silent : false,
+    killTree: true,
+    minUptime: 10000,
+})
