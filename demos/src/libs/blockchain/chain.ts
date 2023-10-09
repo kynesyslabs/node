@@ -15,7 +15,7 @@ import Hashing from "../crypto/hashing"
 import Datasource from "src/model/datasource"
 import { Operation } from "./gls/gls"
 import executeOperations from "./routines/executeOperations"
-import { StandardGenesis } from "./types/genesisTypes"
+import BlockContent from "./types/blocks"
 
 export default class Chain {
     private static instance: Chain
@@ -106,7 +106,7 @@ export default class Chain {
     }
 
     // REVIEW Experimental: support for incremental genesis
-    static async getGenesisBlocks(): Promise<StandardGenesis[]> {
+    static async getGenesisBlocks(): Promise<Block[]> {
         return await this.read("SELECT * FROM blocks WHERE signature='genesis'")
     }
 
@@ -144,7 +144,7 @@ export default class Chain {
 
     static async getOnlinePeersForLastThreeBlocks(): Promise<string[]> {
         const lastBlockNumber = await this.getLastBlockNumber()
-        console.log("Last block number: " + lastBlockNumber)
+
         if (lastBlockNumber < 3) {
             return []
         }
@@ -154,15 +154,14 @@ export default class Chain {
             this.getBlockByNumber(lastBlockNumber - 1),
             this.getBlockByNumber(lastBlockNumber - 2),
         ])
-        try {
+        try {        
             return blocks.reduce((commonPeers, block) => {
                 return commonPeers.filter(peer => block.onlinePeers.includes(peer))
             }, blocks[0].onlinePeers)
-        } catch (err) {
-            console.log("[NO ONLINE PEERS DETECTED IN LAST BLOCK]")
-            console.log(err)
+        } catch(e) {
             return []
         }
+    }
 
     // !SECTION Getters
 
