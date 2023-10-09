@@ -58,7 +58,7 @@ export default class Chain {
     }
 
     // INFO Get the last block number
-    static async getLastBlockNumber(): Promise<number> {
+    static async getLastBlockNumber(): Promise<Block> {
         let response = await this.read(
             "SELECT number FROM blocks ORDER BY number ASC LIMIT 1",
         )
@@ -143,7 +143,7 @@ export default class Chain {
     }
 
     static async getOnlinePeersForLastThreeBlocks(): Promise<string[]> {
-        const lastBlockNumber = await this.getLastBlockNumber()
+        const lastBlockNumber = (await this.getLastBlockNumber()).number
 
         if (lastBlockNumber < 3) {
             return []

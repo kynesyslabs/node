@@ -21,7 +21,7 @@ import { Response } from "../../communications/types/responseregistry"
 import ResponseRegistry from "src/libs/communications/responseRegistry"
 
 async function sleep(time: number) {
-    return new Promise((resolve) => setTimeout(resolve, time))
+    return new Promise(resolve => setTimeout(resolve, time))
 }
 
 // INFO Syncing with the network
@@ -32,8 +32,8 @@ export default async function Sync(id: any) {
 
     // NOTE Reading our data
     console.log("[SYNC] Our data: fetched")
-    let _currentLastBlockNumber = await Chain.getLastBlockNumber()
-    _currentLastBlockNumber = _currentLastBlockNumber.number
+    let _currentLastBlockNumber = (await Chain.getLastBlockNumber()).number
+
     console.log("[SYNC] Our data: last block number: ")
     console.log(_currentLastBlockNumber)
     let _currentLastBlockHash = await Chain.getLastBlockHash()
@@ -69,7 +69,10 @@ export default async function Sync(id: any) {
         await _blockAskMessage.finalize()
         // Putting the message into the comlink
         console.log(
-            "[SYNC] Asking " + _currentPeer.socket.id + " for the last block at " + _currentPeer.connectionString,
+            "[SYNC] Asking " +
+                _currentPeer.socket.id +
+                " for the last block at " +
+                _currentPeer.connectionString,
         )
         // Preparing for a response
         _comlink.properties.require_reply = true
@@ -86,8 +89,9 @@ export default async function Sync(id: any) {
         )
 
         // Add the response promise to the responses array
-        let promise = ResponseRegistry
-            .getInstance().checkResponse(_comlink.muid)
+        let promise = ResponseRegistry.getInstance().checkResponse(
+            _comlink.muid,
+        )
         responses.push(promise)
 
         // LINK https://stackoverflow.com/questions/23893872/how-to-properly-remove-event-listeners-in-node-js-eventemitter
@@ -133,13 +137,21 @@ export default async function Sync(id: any) {
                     _block_numbers[peer_identity.toString("hex")].timestamp,
             )
             // NOTE Checking for synchronization
-            if (_block_numbers[peer_identity.toString("hex")].block_number != _currentLastBlockNumber) {
+            if (
+                _block_numbers[peer_identity.toString("hex")].block_number !=
+                _currentLastBlockNumber
+            ) {
                 // Not in sync peer
                 unsyncedNodes[peer_identity.toString("hex")] = {
-                    block_number: _block_numbers[peer_identity.toString("hex")].block_number,
-                    timestamp: _block_numbers[peer_identity.toString("hex")].timestamp,
+                    block_number:
+                        _block_numbers[peer_identity.toString("hex")]
+                            .block_number,
+                    timestamp:
+                        _block_numbers[peer_identity.toString("hex")].timestamp,
                     full_identity: peer_identity,
-                    connection_string: _block_numbers[peer_identity.toString("hex")].connection_string,
+                    connection_string:
+                        _block_numbers[peer_identity.toString("hex")]
+                            .connection_string,
                 }
             }
         }
@@ -150,7 +162,11 @@ export default async function Sync(id: any) {
         console.log("[SYNC] We are in sync with the network")
         synced = true
     } else {
-        console.log("[SYNC] We are not in sync with the network by: " + Object.keys(unsyncedNodes).length + " peers")
+        console.log(
+            "[SYNC] We are not in sync with the network by: " +
+                Object.keys(unsyncedNodes).length +
+                " peers",
+        )
         synced = false
         // REVIEW Each unsynced node mapped will be queried
         let unsyncedNodesNames = Object.keys(unsyncedNodes)
@@ -159,7 +175,7 @@ export default async function Sync(id: any) {
             console.log("[SYNC] Asking " + name + " for the last block")
             let node = unsyncedNodes[name]
             console.log("[SYNC] Retrieving info...")
-            let {connection_string} = node
+            let { connection_string } = node
             console.log("[SYNC] Connection string: " + connection_string)
             // TODO Check if the block is forward or backward
             // TODO If forward, ask for the block
