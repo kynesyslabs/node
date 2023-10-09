@@ -24,6 +24,7 @@ export default async function peerBootstrap(
 
     // Validity check
     for (let i = 0; i < local_list.length; i++) {
+        console.log("[PEER BOOTSTRAP] Checking peer " + local_list[i])
         let _currentPeerURL = local_list[i] // The url of the peer
         // If there is a : in the url, we assume it's a address + port
         let currentPeerAddress

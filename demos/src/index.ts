@@ -135,6 +135,8 @@ async function main() {
         PEER_LIST_FILE = OVERRIDE_PEER_LIST_FILE
     }
     PEER_LIST = JSON.parse(fs.readFileSync(PEER_LIST_FILE, "utf8"))
+    term.green("[BOOTSTRAP] Loaded a list of peers:\n")
+    console.log(PEER_LIST)
 
     // NOTE The whole first part of main ensures the environment is ready to run
     await id.ensureIdentity()
@@ -163,6 +165,7 @@ async function main() {
     // Loading the peers
 
     // INFO Setting the common variables and propagating them
+    term.yellow("[BOOTSTRAP] Bootstrapping peers...\n")
     const peerList = await peerBootstrap(PEER_LIST)
     for (const peer of peerList) {
         peerManager.addPeer(peer)

@@ -36,7 +36,7 @@ export default async function findGenesisBlock() {
         console.log("Genesis block found: ")
     }
     console.log(genesis_block)
-    console.log(genesis_block[0].hash)
+    console.log(genesis_block.hash)
 }
 
 // REVIEW Experimental incremental genesis

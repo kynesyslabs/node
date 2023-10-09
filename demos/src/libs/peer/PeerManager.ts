@@ -37,7 +37,7 @@ export default class PeerManager {
                 console.log("[PEERMANAGER] This peer has no identity: treating it as a read only peer")
             }
         }
-        console.warn("[PEERMANAGER] Peerlist length: " + peerList.length)
+        console.log("[PEERMANAGER] Peerlist length: " + peerList.length)
         return peerList
     }
 
