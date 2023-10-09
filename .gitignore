@@ -10,6 +10,7 @@ requirements/geth
 demos/node_modules
 demos/libs/node_modules
 common/libs/node_modules
+demos/our_peers
 demos/.demos_identity
 common/.demos_identity
 demos/yarn.lock
