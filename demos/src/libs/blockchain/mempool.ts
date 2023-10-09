@@ -55,7 +55,10 @@ export default class Mempool {
         }
         // Normalizing
         if (typeof(sql_result) === "string") {
-            sql_result = JSON.parse(sql_result)
+            let sql_results = JSON.parse(sql_result)
+            sql_result = sql_results[0]
+        } else {
+            sql_result = sql_result[0]
         }
         console.log("Mempool query result:")
         console.log(sql_result)
