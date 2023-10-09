@@ -3,7 +3,7 @@ import sharedState from "./sharedState"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
 import Sync from "src/libs/blockchain/routines/Sync"
 import { Identity } from "src/libs/identity"
-import PeerManager from "src/libs/peer/peerManager"
+import PeerManager from "src/libs/peer/PeerManager"
 
 async function sleep(time: number) {
     return new Promise((resolve) => setTimeout(resolve, time))
