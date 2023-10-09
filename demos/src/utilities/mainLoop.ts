@@ -3,12 +3,9 @@ import sharedState from "./sharedState"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
 import Sync from "src/libs/blockchain/routines/Sync"
 import { Identity } from "src/libs/identity"
-<<<<<<< HEAD
+
 import { PeerManager } from "src/libs/peer"
 import Chain from "src/libs/blockchain/chain"
-=======
-import PeerManager from "src/libs/peer/PeerManager"
->>>>>>> eeac718f842077cc35af96606198811a7c286d14
 
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
@@ -46,7 +43,7 @@ export default async function mainLoop(id: Identity) {
         // if its the first block ever or we are doing a regenesis, we might want to skip this check, but we still need a list of reliable nodes.
         // In the "3 block online" the history of online peers is validated by the blockchain AND by the consensus so it can be relied on.
 
-        const peersOnlineForLastThreeBlocks = await Chain.getOnlinePeersForLastThreeBlocks();
+        const peersOnlineForLastThreeBlocks = await Chain.getOnlinePeersForLastThreeBlocks()
         if (peersOnlineForLastThreeBlocks.length > 0) {
             // We found peers that have been online for 3 blocks. Use them in the consensus loop
         }
