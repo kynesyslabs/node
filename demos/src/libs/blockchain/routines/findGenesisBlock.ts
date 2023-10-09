@@ -13,9 +13,10 @@ import Chain from "src/libs/blockchain/chain"
 import * as fs from "fs"
 
 export default async function findGenesisBlock() {
-    let genesis_block = await Chain.getGenesisBlock()
+    let genesis_block_q = await Chain.getGenesisBlock()
+    let genesis_block = genesis_block_q[0]
     console.log(genesis_block)
-    if (genesis_block.length == 0) {
+    if (!genesis_block) {
         console.log("[BOOTSTRAP] Initializing the genesis block\n")
         if (!fs.existsSync("data/genesis.json")) {
             // Exit if there are no genesis block
