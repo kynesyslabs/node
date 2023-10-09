@@ -154,11 +154,15 @@ export default class Chain {
             this.getBlockByNumber(lastBlockNumber - 1),
             this.getBlockByNumber(lastBlockNumber - 2),
         ])
-
-        return blocks.reduce((commonPeers, block) => {
-            return commonPeers.filter(peer => block.onlinePeers.includes(peer))
-        }, blocks[0].onlinePeers)
-    }
+        try {
+            return blocks.reduce((commonPeers, block) => {
+                return commonPeers.filter(peer => block.onlinePeers.includes(peer))
+            }, blocks[0].onlinePeers)
+        } catch (err) {
+            console.log("[NO ONLINE PEERS DETECTED IN LAST BLOCK]")
+            console.log(err)
+            return []
+        }
 
     // !SECTION Getters
 
