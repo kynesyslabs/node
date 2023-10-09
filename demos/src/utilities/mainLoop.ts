@@ -39,7 +39,7 @@ export default async function mainLoop(id: Identity) {
         // if its the first block ever or we are doing a regenesis, we might want to skip this check, but we still need a list of reliable nodes.
         // In the "3 block online" the history of online peers is validated by the blockchain AND by the consensus so it can be relied on. 
         // In case of regenesis we can see what information is contained in the comlinks? hmm
-s
+
         // pick online peers that have been online for 3 blocks for consensus
 
         // !SECTION Todo list for a typical consensus operation

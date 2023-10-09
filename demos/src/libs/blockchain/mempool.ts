@@ -48,9 +48,9 @@ export default class Mempool {
             }
             await Chain.write("INSERT INTO mempool VALUES(" 
             + newMempool.number + ", "
-            + newMempool.current + ", "
-            + JSON.stringify(newMempool.transactions) + ", "
-            + null + ")")
+            + newMempool.current + ", '"
+            + JSON.stringify(newMempool.transactions) + "', '"
+            + null + "')")
             sql_result = await Chain.read("SELECT * from mempool WHERE current = 1")
         }
         // Normalizing
