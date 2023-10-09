@@ -15,6 +15,7 @@ import Hashing from "../crypto/hashing"
 import Datasource from "src/model/datasource"
 import { Operation } from "./gls/gls"
 import executeOperations from "./routines/executeOperations"
+import BlockContent from "./types/blocks"
 
 export default class Chain {
     private static instance: Chain
@@ -46,89 +47,117 @@ export default class Chain {
         }
     }
 
-
     // SECTION Getters
 
     // INFO Returns a transaction by its hash
     static async getTxByHash(hash: string): Promise<any> {
-        let sql_query = "SELECT * FROM transactions WHERE hash = '" + hash + "';"
+        let sql_query =
+            "SELECT * FROM transactions WHERE hash = '" + hash + "';"
         let response = await Chain.read(sql_query)
         return response[0]
     }
 
     // INFO Get the last block number
-    static async getLastBlockNumber() {
+    static async getLastBlockNumber(): Promise<number> {
         let response = await this.read(
             "SELECT number FROM blocks ORDER BY number ASC LIMIT 1",
         )
         return response[0]
     }
     // INFO Get the last block hash
-    static async getLastBlockHash() { 
+    static async getLastBlockHash() {
         let response = await this.read(
             "SELECT hash FROM blocks ORDER BY number ASC LIMIT 1",
         )
         return response[0]
     }
     // INFO Get any block by its number
-    static async getBlockByNumber(number: number) {
+    static async getBlockByNumber(number: number): Promise<Block> {
         let response = await this.read(
             "SELECT * FROM blocks WHERE number='" + number + "'",
         )
         return response[0]
     }
     // INFO Get any block by its hash
-    static async getBlockByHash(hash: string) {
-        let response = await this.read("SELECT * FROM blocks WHERE hash='" + hash + "'")
+    static async getBlockByHash(hash: string): Promise<Block> {
+        let response = await this.read(
+            "SELECT * FROM blocks WHERE hash='" + hash + "'",
+        )
         return response[0]
     }
     // INFO Get a group of blocks by their status
-    static async getBlockNumbersByStatus(status: string) {
+    static async getBlockNumbersByStatus(status: string): Promise<number[]> {
         return await this.read(
             "SELECT number FROM blocks WHERE status=" + status,
         )
     }
     // INFO Get a group of blocks by their proposer
-    static async getBlockNumbersByProposer(proposer: string) {
+    static async getBlockNumbersByProposer(
+        proposer: string,
+    ): Promise<number[]> {
         return await this.read(
             "SELECT number FROM blocks WHERE proposer=" + proposer,
         )
     }
 
-    static async getGenesisBlock() {
+    static async getGenesisBlock(): Promise<Block> {
         // Playground for async testing
         return await this.read("SELECT * FROM blocks WHERE number=0")
     }
 
     // REVIEW Experimental: support for incremental genesis
-    static async getGenesisBlocks() {
+    static async getGenesisBlocks(): Promise<Block[]> {
         return await this.read("SELECT * FROM blocks WHERE signature='genesis'")
     }
 
     // INFO Get the current pending transactions pool
-    static async getPendingPool() {
+    static async getPendingPool(): Promise<Transaction[]> {
         return await this.read(
             "SELECT * FROM transactions WHERE status='pending'",
         )
     }
 
     // ANCHOR Transactions
-    static async getTransactionFromHash(hash: string): Promise<any> {
-        let tx = await Chain.read("SELECT * FROM transactions WHERE hash = '" + hash + "'")
+    static async getTransactionFromHash(hash: string): Promise<Transaction> {
+        let tx = await Chain.read(
+            "SELECT * FROM transactions WHERE hash = '" + hash + "'",
+        )
         // TODO Would be nice to fit it into a Transaction object
         return tx
     }
 
     // REVIEW Giving back all the properties of an address
     static async getAddressInfo(address: string): Promise<any> {
-        let native_state = await Chain.read("SELECT * FROM status_native WHERE address = '" + address + "'")
+        let native_state = await Chain.read(
+            "SELECT * FROM status_native WHERE address = '" + address + "'",
+        )
         native_state = native_state[0] || null
-        let properties_state = await Chain.read("SELECT * FROM status_properties WHERE address = '" + address + "'")
+        let properties_state = await Chain.read(
+            "SELECT * FROM status_properties WHERE address = '" + address + "'",
+        )
         properties_state = properties_state[0] || null
         return {
             native: native_state,
             properties: properties_state,
         }
+    }
+
+    static async getOnlinePeersForLastThreeBlocks(): Promise<string[]> {
+        const lastBlockNumber = await this.getLastBlockNumber()
+
+        if (lastBlockNumber < 3) {
+            return []
+        }
+
+        const blocks = await Promise.all([
+            this.getBlockByNumber(lastBlockNumber),
+            this.getBlockByNumber(lastBlockNumber - 1),
+            this.getBlockByNumber(lastBlockNumber - 2),
+        ])
+
+        return blocks.reduce((commonPeers, block) => {
+            return commonPeers.filter(peer => block.onlinePeers.includes(peer))
+        }, blocks[0].onlinePeers)
     }
 
     // !SECTION Getters
@@ -137,7 +166,7 @@ export default class Chain {
     // INFO Insert a block into the database
     // NOTE Inserting a block is done after the consensus, so that together
     // with the block, we can write the GLS status changes to the chain.
-    static async insertBlock(block: Block, operations:Operation[]=[]) {
+    static async insertBlock(block: Block, operations: Operation[] = []) {
         // Returns the hash of the block
         // Block() class
         // REVIEW Build the SQL query
