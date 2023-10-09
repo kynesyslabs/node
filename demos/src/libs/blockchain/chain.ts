@@ -144,7 +144,7 @@ export default class Chain {
 
     static async getOnlinePeersForLastThreeBlocks(): Promise<string[]> {
         const lastBlockNumber = await this.getLastBlockNumber()
-
+        console.log("Last block number: " + lastBlockNumber)
         if (lastBlockNumber < 3) {
             return []
         }
