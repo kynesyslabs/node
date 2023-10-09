@@ -9,7 +9,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import type Peer from "./Peer"
+import Peer from "./Peer"
 
 export default class PeerManager {
     private static instance: PeerManager
@@ -44,6 +44,22 @@ export default class PeerManager {
     getPeer(identity: string): Peer {
         return this.peerList[identity]
     }
+
+    async getOnlinePeers(): Promise<Peer[]> {
+
+        const onlinePeers: Peer[] = []
+        for (const _peer of Object.values(this.peerList)) {
+            const peerInstance = new Peer()
+            peerInstance.identity = _peer.identity
+            const onlinePeerStatus = await peerInstance.checkOnlineStatus()
+            if(onlinePeerStatus.status === "online") {
+                onlinePeers.push(peerInstance)
+            }
+        }
+        return onlinePeers
+        
+    }
+
 
     addPeer(peer: Peer) {
         console.log("[PEERMANAGER] Adding peer")

@@ -10,6 +10,9 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import ComLink from "./comlink"
+import required from "src/utilities/required"
+import sharedState from "src/utilities/sharedState"
+import sizeOf from "src/utilities/sizeOf"
 var term = require("terminal-kit").terminal
 
 export default class ComLinkUtils {
@@ -26,8 +29,18 @@ export default class ComLinkUtils {
         _comlink_request.chain = request.chain
         _comlink_request.muid = request.muid
         _comlink_request.properties = request.properties
-        console.log(request)
-        console.log("\n" + request.chain.current.currentMessage + "\n")
+        console.log(_comlink_request)
+        // REVIEW Refusing to process requests which currentMessage size is over a defined amount
+        let reqSize = sizeOf(_comlink_request)
+        if (reqSize > sharedState.getInstance().maxMessageSize) {
+            term.red("[COMLINK MESSAGE SIZE ERROR] Request size is over the limit: " + reqSize.toString() + " bytes\n")
+            peerSocket.emit("comlink", {
+                status: "error",
+                message: "TOO_BIG",
+            })
+        }
+        // Debug log
+        console.log("\n" + _comlink_request.chain.current.currentMessage + "\n")
         // Checking validity of the comlink for non nodeCall transactions
         // NOTE nodeCall transactions are read only and can be called by any client even without authentication
         console.log("The request has a current message that is a: " + typeof(_comlink_request.chain.current.currentMessage))

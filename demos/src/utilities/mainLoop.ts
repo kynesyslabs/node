@@ -3,6 +3,7 @@ import sharedState from "./sharedState"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
 import Sync from "src/libs/blockchain/routines/Sync"
 import { Identity } from "src/libs/identity"
+import {PeerManager} from "src/libs/peerManager"
 
 async function sleep(time: number) {
     return new Promise((resolve) => setTimeout(resolve, time))
@@ -22,7 +23,27 @@ export default async function mainLoop(id: Identity) {
         // eslint-disable-next-line no-unused-vars
         cycleTimestamp = sharedState.getInstance().getTimestamp() // REVIEW Unused
         // NOTE The following routine is capable of checking if the consensus time has been reached automatically with a 100 ms blocking period
-        let isConsensusTimeReached = await consensusTime.checkConsensusTime()
+
+        // SECTION Todo list for a typical consensus operation
+        
+        // TODO Check if we have to forge the block now        
+        let isConsensusTimeReached = await consensusTime.checkConsensusTime() 
+
+        // every block write online list
+        const peerManager = PeerManager.getInstance()
+        const onlinePeers = peerManager.getOnlinePeers()
+
+        
+        // check if online peers have been online for 3 blocks
+
+        // if its the first block ever or we are doing a regenesis, we might want to skip this check, but we still need a list of reliable nodes.
+        // In the "3 block online" the history of online peers is validated by the blockchain AND by the consensus so it can be relied on. 
+        // In case of regenesis we can see what information is contained in the comlinks? hmm
+s
+        // pick online peers that have been online for 3 blocks for consensus
+
+        // !SECTION Todo list for a typical consensus operation
+
         if (isConsensusTimeReached) {
             console.log("[MAIN LOOP] Consensus time reached")
             sharedState.getInstance().consensusMode = true

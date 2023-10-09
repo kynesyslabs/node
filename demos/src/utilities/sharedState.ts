@@ -16,6 +16,10 @@ export default class sharedState {
     mainLoopPaused: boolean = false
     consensusMode: boolean = false
     serverPort: number = 53550
+    // !SECTION shared state variables
+
+    // TODO The following variables should be in the genesis
+    maxMessageSize = 500000000000 // 5 GB just for debug purpose
 
     // SECTION shared useful variables
     rpcFee: number = 0 // TODO Implement

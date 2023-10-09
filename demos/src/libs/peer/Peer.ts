@@ -42,4 +42,12 @@ export default class Peer {
     getSocket() {
         return this.socket
     }
+
+    // INFO Check online status for a peer
+    async checkOnlineStatus() {
+        return {
+            identity: this.identity,
+            status: "online",
+        }
+    }
 }
