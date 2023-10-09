@@ -154,11 +154,13 @@ export default class Chain {
             this.getBlockByNumber(lastBlockNumber - 1),
             this.getBlockByNumber(lastBlockNumber - 2),
         ])
-        try {        
+        try {
             return blocks.reduce((commonPeers, block) => {
-                return commonPeers.filter(peer => block.onlinePeers.includes(peer))
+                return commonPeers.filter(peer =>
+                    block.onlinePeers.includes(peer),
+                )
             }, blocks[0].onlinePeers)
-        } catch(e) {
+        } catch (e) {
             return []
         }
     }

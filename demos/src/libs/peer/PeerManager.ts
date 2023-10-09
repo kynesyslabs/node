@@ -34,7 +34,9 @@ export default class PeerManager {
             if (_peer.identity != undefined) {
                 peerList.push(this.peerList[peer])
             } else {
-                console.log("[PEERMANAGER] This peer has no identity: treating it as a read only peer")
+                console.log(
+                    "[PEERMANAGER] This peer has no identity: treating it as a read only peer",
+                )
             }
         }
         console.log("[PEERMANAGER] Peerlist length: " + peerList.length)
@@ -46,20 +48,17 @@ export default class PeerManager {
     }
 
     async getOnlinePeers(): Promise<Peer[]> {
-
         const onlinePeers: Peer[] = []
-        for (const _peer of Object.values(this.peerList)) {
+        for await (const _peer of Object.values(this.peerList)) {
             const peerInstance = new Peer()
             peerInstance.identity = _peer.identity
             const onlinePeerStatus = await peerInstance.checkOnlineStatus()
-            if(onlinePeerStatus.status === "online") {
+            if (onlinePeerStatus.status === "online") {
                 onlinePeers.push(peerInstance)
             }
         }
         return onlinePeers
-        
     }
-
 
     addPeer(peer: Peer) {
         console.log("[PEERMANAGER] Adding peer")
@@ -71,7 +70,7 @@ export default class PeerManager {
         const identity = peer.identity.toString("hex")
         this.peerList[identity] = peer
         console.log("[PEERMANAGER] Peer added")
-        console.log("Identity: "  + peer.identity.toString("hex"))
+        console.log("Identity: " + peer.identity.toString("hex"))
         console.log("Connection string: " + peer.connectionString)
         if (!peer.connectionString) {
             console.log("[WARN] No connection string detected")

@@ -15,15 +15,21 @@ import Transaction from "../transaction"
 import sharedState from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import Cryptography from "src/libs/crypto/cryptography"
+import PeerManager from "src/libs/peer/peerManager"
 
 // INFO Using its Mempool, each node can generate the same block having the same content
 // NOTE This is tought to be executed after the mempool syncing between nodes
-export default async function buildProposedBlock(): Promise<Block>{
+export default async function buildProposedBlock(): Promise<Block> {
     let proposedBlock = new Block()
     let mempool = await Mempool.getMempool()
+    const peerManager = PeerManager.getInstance()
+    let onlinePeers = await peerManager.getOnlinePeers()
     let txs = mempool.transactions
     let ordered_txs: Transaction[]
-    let per_user_txs: Map<string, Transaction[]> = new Map<string, Transaction[]>()
+    let per_user_txs: Map<string, Transaction[]> = new Map<
+        string,
+        Transaction[]
+    >()
     // NOTE Order transactions by rpc fee (aka divide gas fee in rpc and network)
     mempool = await Mempool.sort(mempool)
     // Iterating through the transactions in the mempool to sort them and exclude invalid ones
@@ -42,12 +48,20 @@ export default async function buildProposedBlock(): Promise<Block>{
     // We complete the block
     proposedBlock.proposer = sharedState.getInstance().publicKey
     proposedBlock.timestamp = new Date().getTime()
+    proposedBlock.onlinePeers = onlinePeers.map(peer =>
+        peer.identity.toString(),
+    )
     // Cryptography on the block
     proposedBlock.hash = Hashing.sha256(JSON.stringify(proposedBlock.content))
-    if (!proposedBlock.validation_data) { 
+    if (!proposedBlock.validation_data) {
         proposedBlock.validation_data = {}
     }
-    let signed_hash = Cryptography.sign(proposedBlock.hash, sharedState.getInstance().privateKey)
-    proposedBlock.validation_data[sharedState.getInstance().publicKey.toString("hex")] = signed_hash
+    let signed_hash = Cryptography.sign(
+        proposedBlock.hash,
+        sharedState.getInstance().privateKey,
+    )
+    proposedBlock.validation_data[
+        sharedState.getInstance().publicKey.toString("hex")
+    ] = signed_hash
     return proposedBlock
 }
