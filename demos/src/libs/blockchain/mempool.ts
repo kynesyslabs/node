@@ -53,6 +53,8 @@ export default class Mempool {
             + null + "')")
             sql_result = await Chain.read("SELECT * from mempool WHERE current = 1")
         }
+        console.log("[MEMPOOL MANAGER] Mempool query result:")
+        console.log(sql_result)
         // Normalizing
         if (typeof(sql_result) === "string") {
             let sql_results = JSON.parse(sql_result)
@@ -60,7 +62,7 @@ export default class Mempool {
         } else {
             sql_result = sql_result[0]
         }
-        console.log("Mempool query result:")
+        console.log("[MEMPOOL MANAGER] Normalized mempool query result:")
         console.log(sql_result)
         // Serializing
         let result: MempoolData = {
