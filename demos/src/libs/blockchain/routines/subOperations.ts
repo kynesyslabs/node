@@ -13,7 +13,10 @@ export default class subOperations {
     constructor() {}
 
     // INFO Compiling the genesis status if not already done
-    static async genesis(operation: Operation, genesis_block: Block): Promise<OperationResult> {
+    static async genesis(
+        operation: Operation,
+        genesis_block: Block,
+    ): Promise<OperationResult> {
         let result: OperationResult = {
             success: true,
             message: "No error occurred",
@@ -25,25 +28,37 @@ export default class subOperations {
         // Let's extract the genesis transaction from the genesis block
         let genesis_tx = genesis_block.content.ordered_transactions[0]
         // NOTE Writing the tx to the chain tx table as it is the genesis one
-        await Chain.write("INSERT INTO transactions (hash, content, signature, confirmations, state_changes) VALUES ( \
-			'" + genesis_tx.hash + "', \
-			'" + JSON.stringify(genesis_tx.content) + "', \
-			'genesis', '0', '[]')" )
+        await Chain.write(
+            "INSERT INTO transactions (hash, content, signature, confirmations, state_changes) VALUES ( \
+			'" +
+                genesis_tx.hash +
+                "', \
+			'" +
+                JSON.stringify(genesis_tx.content) +
+                "', \
+			'genesis', '0', '[]')",
+        )
         // NOTE Balances
         let balances = genesis_content.balances
         for (let i = 0; i < balances.length; i++) {
             let balance_operation = balances[i]
             let receiver = balance_operation[0]
             let amount = balance_operation[1]
-            await GLS.setGLSNativeBalance(receiver, parseInt(amount), operation.hash)
+            await GLS.setGLSNativeBalance(
+                receiver,
+                parseInt(amount),
+                operation.hash,
+            )
         }
         return result
     }
 
     // INFO Remove & Add transfer operation
-    static async transferNative(operation: Operation): Promise<OperationResult> {
+    static async transferNative(
+        operation: Operation,
+    ): Promise<OperationResult> {
         let from: string = operation.params.from
-        let to: string    = operation.params.to
+        let to: string = operation.params.to
         let amount: string = operation.params.amount
         let balance_from = await GLS.getGLSNativeBalance(from)
         let balance_to = await GLS.getGLSNativeBalance(to)
@@ -73,8 +88,7 @@ export default class subOperations {
     }
 
     // INFO Adding native tokens to the stated address
-    static async addNative(operation: Operation): Promise<OperationResult>
-    {
+    static async addNative(operation: Operation): Promise<OperationResult> {
         let to: string = operation.params.to
         let amount: string = operation.params.amount
         let balance_to = await GLS.getGLSNativeBalance(to)
@@ -93,8 +107,7 @@ export default class subOperations {
     }
 
     // INFO Removing native tokens from the stated address
-    static async removeNative(operation: Operation): Promise<OperationResult>
-    {
+    static async removeNative(operation: Operation): Promise<OperationResult> {
         let to: string = operation.params.to
         let amount: string = operation.params.amount
         let balance_to = await GLS.getGLSNativeBalance(to)
@@ -117,16 +130,13 @@ export default class subOperations {
         return subOperations.result
     }
 
-    static async addAsset(operation: Operation): Promise<OperationResult>
-    {
+    static async addAsset(operation: Operation): Promise<OperationResult> {
         // TODO
         return subOperations.result
     }
 
-    static async removeAsset(operation: Operation): Promise<OperationResult>
-    {
+    static async removeAsset(operation: Operation): Promise<OperationResult> {
         // TODO
         return subOperations.result
     }
-
 }
