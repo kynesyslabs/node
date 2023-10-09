@@ -22,6 +22,8 @@ import sharedState from "src/utilities/sharedState"
 import { BrowserRequest } from "./serverListeners"
 import { normalizeWebBuffers } from "./routines/normalizeWebBuffers"
 import Sessions from "./routines/sessionManager"
+import Block from "src/libs/blockchain/blocks"
+import Transaction from "src/libs/blockchain/transaction"
 
 var term = require("terminal-kit").terminal
 
@@ -66,7 +68,7 @@ export default class ServerHandlers {
              * The tx is validated, an operation is created and pushed in the GLS
              * An operation for the gas is also pushed in the GLS
              * The tx is pushed in the mempool if applicable
-            */
+             */
             validatedTx = await validateTransaction(
                 content.type,
                 content.message,
@@ -95,13 +97,13 @@ export default class ServerHandlers {
     // INFO Handling XM Transaction
     static async handleXMChainOperation(content: any): Promise<any> {
         /* NOTE This workflow goeas as:
-             * The XM Operation is validated, executed and verified
-             * when applicable. 
-             * A transaction is derived from the executed operation.
-             * An operation is then created and pushed in the GLS.
-             * An operation for the gas is also pushed in the GLS.
-             * The tx is pushed in the mempool if applicable.
-        */
+         * The XM Operation is validated, executed and verified
+         * when applicable.
+         * A transaction is derived from the executed operation.
+         * An operation is then created and pushed in the GLS.
+         * An operation for the gas is also pushed in the GLS.
+         * The tx is pushed in the mempool if applicable.
+         */
         let extra: any
         let require_reply = false
         // REVIEW Remember that crosschain operations can be in chainscript syntax
@@ -134,13 +136,13 @@ export default class ServerHandlers {
         senderSocket: any,
     ): Promise<any> {
         /* NOTE This workflow goeas as:
-             * The Web2 Operation is validated, executed and verified
-             * when applicable. Is then sent back once attested.
-             * A transaction is derived from the executed web2 operation.
-             * An operation is then created and pushed in the GLS.
-             * An operation for the gas is also pushed in the GLS.
-             * The tx is pushed in the mempool if applicable.
-        */
+         * The Web2 Operation is validated, executed and verified
+         * when applicable. Is then sent back once attested.
+         * A transaction is derived from the executed web2 operation.
+         * An operation is then created and pushed in the GLS.
+         * An operation for the gas is also pushed in the GLS.
+         * The tx is pushed in the mempool if applicable.
+         */
         console.log("[SERVER] Received web2Request")
         console.log(JSON.stringify(request))
 
@@ -228,9 +230,9 @@ export default class ServerHandlers {
         // ...
         let extra: any
         let require_reply = false
-        let response: string | Peer[] | number
+        let response: string | Peer[] | number | Block | Transaction[]
         let socketized_response: Peer[]
-        let {data} = content
+        let { data } = content
         console.log(typeof data)
         console.log(JSON.stringify(content))
         switch (content.message) {
@@ -238,7 +240,7 @@ export default class ServerHandlers {
                 console.log("[SERVER] Received getPeerlist")
                 // Getting our current peerlist
                 socketized_response = PeerManager.getInstance().getPeers()
-                response = []
+                response = [] as Peer[]
                 // Filling response with peers without socket objects
                 for (let peer of socketized_response) {
                     peer.socket = null

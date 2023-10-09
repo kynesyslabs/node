@@ -36,7 +36,7 @@ export default async function mainLoop(id: Identity) {
         const onlinePeers = peerManager.getOnlinePeers()
 
         const lastBlockNumber = await Chain.getLastBlockNumber()
-        const lastBlock = await Chain.getBlockByNumber(lastBlockNumber.number)
+        const lastBlock = await Chain.getBlockByNumber(lastBlockNumber)
 
         // check if online peers have been online for 3 blocks
 

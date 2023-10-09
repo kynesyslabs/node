@@ -32,7 +32,7 @@ export default async function Sync(id: any) {
 
     // NOTE Reading our data
     console.log("[SYNC] Our data: fetched")
-    let _currentLastBlockNumber = (await Chain.getLastBlockNumber()).number
+    let _currentLastBlockNumber = await Chain.getLastBlockNumber()
 
     console.log("[SYNC] Our data: last block number: ")
     console.log(_currentLastBlockNumber)
