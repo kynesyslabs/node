@@ -3,8 +3,12 @@ import sharedState from "./sharedState"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
 import Sync from "src/libs/blockchain/routines/Sync"
 import { Identity } from "src/libs/identity"
+<<<<<<< HEAD
 import { PeerManager } from "src/libs/peer"
 import Chain from "src/libs/blockchain/chain"
+=======
+import PeerManager from "src/libs/peer/PeerManager"
+>>>>>>> eeac718f842077cc35af96606198811a7c286d14
 
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
@@ -47,8 +51,6 @@ export default async function mainLoop(id: Identity) {
             // We found peers that have been online for 3 blocks. Use them in the consensus loop
         }
     
-
-}
         // In case of it being a new series of blocks with no previously online nodes, we just wait for 3 blocks to pass and populate the list with the peers
 
         // pick online peers that have been online for 3 blocks for consensus
