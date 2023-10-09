@@ -15,7 +15,7 @@ import Hashing from "../crypto/hashing"
 import Datasource from "src/model/datasource"
 import { Operation } from "./gls/gls"
 import executeOperations from "./routines/executeOperations"
-import BlockContent from "./types/blocks"
+import { StandardGenesis } from "./types/genesisTypes"
 
 export default class Chain {
     private static instance: Chain
@@ -106,7 +106,7 @@ export default class Chain {
     }
 
     // REVIEW Experimental: support for incremental genesis
-    static async getGenesisBlocks(): Promise<Block[]> {
+    static async getGenesisBlocks(): Promise<StandardGenesis[]> {
         return await this.read("SELECT * FROM blocks WHERE signature='genesis'")
     }
 

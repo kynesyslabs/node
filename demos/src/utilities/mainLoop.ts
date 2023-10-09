@@ -43,11 +43,12 @@ export default async function mainLoop(id: Identity) {
         // if its the first block ever or we are doing a regenesis, we might want to skip this check, but we still need a list of reliable nodes.
         // In the "3 block online" the history of online peers is validated by the blockchain AND by the consensus so it can be relied on.
 
-        const peersOnlineForLastThreeBlocks = await Chain.getOnlinePeersForLastThreeBlocks()
+        const peersOnlineForLastThreeBlocks =
+            await Chain.getOnlinePeersForLastThreeBlocks()
         if (peersOnlineForLastThreeBlocks.length > 0) {
             // We found peers that have been online for 3 blocks. Use them in the consensus loop
         }
-    
+
         // In case of it being a new series of blocks with no previously online nodes, we just wait for 3 blocks to pass and populate the list with the peers
 
         // pick online peers that have been online for 3 blocks for consensus
