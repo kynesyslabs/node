@@ -106,6 +106,7 @@ export default class ServerHandlers {
          */
         let extra: any
         let require_reply = false
+        console.log("[XMChain] Handling XM Chain Operation...")
         // REVIEW Remember that crosschain operations can be in chainscript syntax
         // INFO Use the src/features/multichain/chainscript/chainscript.chs for the specs
         let response = await multichainDispatcher.digest(content.data)
@@ -238,7 +239,7 @@ export default class ServerHandlers {
         switch (content.message) {
             case "crosschain_operation":
             case "multichain_operation":
-                term.yellow.bold("[SERVER] Received crosschain_operation")
+                term.yellow.bold("[SERVER] Received crosschain_operation\n")
                 response = await ServerHandlers.handleXMChainOperation(content)
                 break // REVIEW Here or in comlinks?
             case "getPeerlist":

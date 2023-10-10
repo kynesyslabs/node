@@ -8,7 +8,8 @@ export default class multichainDispatcher {
 
     // INFO Digesting the request from the server
     static async digest(data: XMScript): Promise<any> {
-		
+        console.log("[XMChain Digestion] Processing:")
+        console.log(data)
     }
 
     // INFO Check syntax of xM Script
