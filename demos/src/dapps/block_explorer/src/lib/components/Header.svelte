@@ -22,6 +22,11 @@
             label:"Web2",
             href:"/web2gui",
             test:"web2gui"
+        },
+        {
+            label:"tx",
+            href:"/txtest",
+            test:"txtest"
         }
     ]
     async function logOut()

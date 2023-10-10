@@ -2,9 +2,8 @@
     import {onMount} from 'svelte';
     import demos from '$lib/demos.js';
     import forge from 'node-forge';
-    export let data;
-    const ed25519 = forge.pki.ed25519;
-    const keypair = ed25519.generateKeyPair();
+    import {transaction} from "$lib/demos_libs/utils/skeletons.js";
+    import {wallet} from '$lib/env.js';
     //console.log(data.skeleton);
     onMount(async()=>{
         /*let txprep = await demos.transactions.prepare(txdata);
@@ -14,7 +13,7 @@
     })
     async function sendTransaction(ev){
         ev.preventDefault();
-        let txdata = data.skeleton;
+        let txdata = transaction;
         txdata.content.type = ev.target[0].value;
         txdata.content.from = ev.target[1].value;
         txdata.content.to = ev.target[2].value;
@@ -25,7 +24,7 @@
         console.log("preparing transaction");
         let txprep = await demos.transactions.prepare();
         console.log("signing transaction");
-        let txsigned = await demos.transactions.sign(txprep, keypair.privateKey);
+        let txsigned = await demos.transactions.sign(txprep, $wallet.keypair.privateKey);
         console.log("broadcasting transaction");
         let txsent = await demos.transactions.broadcast(txsigned);
         console.log(txsent);

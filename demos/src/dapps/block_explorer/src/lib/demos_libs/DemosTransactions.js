@@ -3,6 +3,8 @@ import * as skeletons from './utils/skeletons.js';
 import bufferize from './utils/bufferizer';
 import sha256 from './utils/sha256';
 import forge from 'node-forge';
+import { Buffer } from "buffer";
+import demos from "../demos.js";
 
 export const DemosTransactions = {
 	// REVIEW All this part

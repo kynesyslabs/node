@@ -1,16 +1,17 @@
 .card{
     border-radius: 0;
     border: none;
-    background-color: var(--background-min);
     padding: 0;
     margin: 0 auto;
-    border: 1px solid var(--background2-min);
+    border: 1px solid var(--background3);
+    box-shadow: 2px 2px 0 0 var(--background3);
+    background-color: black;
 }
 
 .card2{
     border-radius: 0;
     border: none;
-    background-color: var(--background2-min);
     margin: 0 auto;
     border: 1px solid var(--background3);
+    box-shadow: 2px 2px 0 0 var(--background3);
 }
