@@ -14,8 +14,11 @@ export default class multichainDispatcher {
         for (let i = 0; i < Object.keys(data.multichain_operation).length; i++) {
             // Named function
             console.log("[XMChain Digestion] Found: " + Object.keys(data.multichain_operation)[i])
-            console.log(data.multichain_operation[i])
         }
+        console.log("\n===== END OF ANALYSIS ===== \n")
+        console.log("[XMChain Digestion] Proceeding: execution phase")
+        // REVIEW Execute
+        return "Not yet implemented" // await multichainDispatcher.execute(data)        
     }
     
 
