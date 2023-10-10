@@ -9,8 +9,15 @@ export default class multichainDispatcher {
     // INFO Digesting the request from the server
     static async digest(data: XMScript): Promise<any> {
         console.log("[XMChain Digestion] Processing:")
-        console.log(data)
+        console.log(data.multichain_operation)
+        console.log("\n===== FUNCTIONS ===== \n")
+        for (let i = 0; i < Object.keys(data.multichain_operation).length; i++) {
+            // Named function
+            console.log("[XMChain Digestion] Found: " + Object.keys(data.multichain_operation)[i])
+            console.log(data.multichain_operation[i])
+        }
     }
+    
 
     // INFO Check syntax of xM Script
     static async load(script: string): Promise<any> {
