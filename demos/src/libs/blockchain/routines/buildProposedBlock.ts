@@ -15,7 +15,7 @@ import Transaction from "../transaction"
 import sharedState from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import Cryptography from "src/libs/crypto/cryptography"
-import PeerManager from "src/libs/peer/peerManager"
+import { PeerManager } from "src/libs/peer"
 
 // INFO Using its Mempool, each node can generate the same block having the same content
 // NOTE This is tought to be executed after the mempool syncing between nodes
