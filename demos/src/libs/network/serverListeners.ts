@@ -101,22 +101,9 @@ export default class ServerListeners {
                     break
 
                 case "crosschain_operation":
-                case "multichain_operation":
+                case "multichain_operation": // TODO Here or as a nodeCall?
                     ;({ extra, require_reply, response } =
                         await ServerHandlers.handleXMChainOperation(content))
-                    break
-                case "crosschain_signed_payload":
-                case "multichain_signed_payload":
-                    ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleXMChainSignedPayload(
-                            content,
-                        ))
-                    break
-
-                case "crosschain_status":
-                case "multichain_status":
-                    ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleXMChainStatus())
                     break
 
                 case "web2Request":

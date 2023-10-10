@@ -236,6 +236,11 @@ export default class ServerHandlers {
         console.log(typeof data)
         console.log(JSON.stringify(content))
         switch (content.message) {
+            case "crosschain_operation":
+            case "multichain_operation":
+                ({ extra, require_reply, response } =
+                    await ServerHandlers.handleXMChainStatus())
+                break // REVIEW Here or in comlinks?
             case "getPeerlist":
                 console.log("[SERVER] Received getPeerlist")
                 // Getting our current peerlist
