@@ -1,21 +1,8 @@
 // INFO Defining the structure of a valid Genesis block
 import Chain from "../chain"
-
+import Block from "../blocks"
 /* INFO
  *
- * Genesis block logic
- *
- * To ensure flexibility and future-proofing, the genesis block is not just an initial hardcoded block, but is
- * also a set of specifications stacking together to create a Genesis status of the chain.
- * This way, is easy for the Blockchain to democratically evolve, and for the community to decide the future of the
- * chain itself by issuing a new Genesis block.
- *
- * Of course, the first Genesis block contains different types of data:
- * - Immutable properties: These are the properties that cannot be changed by the community, and are hardcoded
- *  in the genesis block.
- * - Mutable properties: These are the properties that can be changed by the community, and are specified for
- * every genesis block. They can be changed, overwritten, deleted, ignored or restored.
- * - Balances: These are the minted balances of the Genesis block. They are only specified in the first Genesis
  * block, and are not present in the following ones.
  *
  */
@@ -64,7 +51,7 @@ export interface forkGenesis extends StandardGenesis {
 
 // INFO The Genesis class with its methods
 export default class Genesis {
-    genesisBlocks: StandardGenesis[] // Hashes of the genesis blocks
+    genesisBlock: Block //  The genesis block
     genesisStatus: GenesisArtifact // JSON artifact of the final genesis block
     balances: any
 
@@ -73,8 +60,8 @@ export default class Genesis {
     // TODO Getters and setters
 
     // INFO Get and compile all the genesis blocks
-    async getGenesisBlocks(): Promise<void> {
-        this.genesisBlocks = await Chain.getGenesisBlocks()
+    async getGenesisBlock(): Promise<void> {
+        this.genesisBlock = await Chain.getGenesisBlock()
     }
 
     // TODO Replacement of findGenesisBlock.ts
