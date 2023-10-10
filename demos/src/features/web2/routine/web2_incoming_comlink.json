@@ -1,0 +1,85 @@
+{
+    "muid": "1ftdr8lnghchnth6hxxihjjawucm6v4h3dug9fa8ccnto",
+    "properties": {
+        "connection_string": null,
+        "require_reply": true,
+        "is_reply": false
+    },
+    "chain": {
+        "current": {
+            "currentMessage": {
+                "bundle": {
+                    "content": {
+                        "type": "web2Request",
+                        "message": {
+                            "raw": {
+                                "action": "GET",
+                                "parameters": [
+                                    ["parameter_1", "1"],
+                                    ["parameter_2", "2"],
+                                    ["", ""]
+                                ],
+                                "requestedParameters": null,
+                                "method": null,
+                                "url": "https://icanhazip.com/?parameter_1=1&parameter_2=2",
+                                "headers": 5,
+                                "minAttestations": 2,
+                                "stage": {
+                                    "origin": {
+                                        "identity": null,
+                                        "connection_url": null
+                                    },
+                                    "hop_number": null
+                                }
+                            },
+                            "result": "",
+                            "attestations": {},
+                            "hash": "",
+                            "signature": ""
+                        },
+                        "sender": {
+                            "type": "Buffer",
+                            "data": [
+                                19, 146, 71, 15, 117, 30, 13, 173, 193, 190,
+                                194, 121, 89, 215, 135, 140, 245, 42, 109, 227,
+                                167, 28, 193, 73, 124, 15, 215, 62, 210, 193,
+                                100, 126
+                            ]
+                        },
+                        "receiver": null,
+                        "timestamp": null,
+                        "data": {},
+                        "extra": null
+                    },
+                    "hash": "6b4a3e3bfc5f4ff9c84c8d9af897857183ecb99a3e787411ba6a91807708fd4f",
+                    "signature": {
+                        "type": "Buffer",
+                        "data": [
+                            49, 33, 249, 214, 242, 219, 171, 61, 1, 6, 198, 181,
+                            119, 84, 176, 40, 162, 121, 93, 160, 128, 157, 1,
+                            151, 14, 99, 116, 24, 221, 154, 146, 3, 54, 15, 24,
+                            255, 209, 94, 192, 162, 248, 161, 211, 188, 152, 55,
+                            144, 148, 232, 31, 183, 201, 4, 185, 20, 187, 59,
+                            220, 53, 218, 240, 92, 100, 14
+                        ]
+                    }
+                },
+                "hash": null,
+                "signature": null
+            },
+            "currentMessageHash": "6b4a3e3bfc5f4ff9c84c8d9af897857183ecb99a3e787411ba6a91807708fd4f",
+            "previousHashes": []
+        },
+        "comlinkCurrentHash": "b7f0782a149c261019d0d70e2d93de8221394485cf0a831b8c1ab6b483e432ff",
+        "comlinkCurrentHashSignature": {
+            "type": "Buffer",
+            "data": [
+                124, 89, 253, 248, 149, 38, 139, 98, 218, 140, 178, 58, 172,
+                196, 168, 21, 83, 127, 161, 1, 99, 68, 222, 233, 211, 135, 29,
+                157, 170, 221, 98, 103, 71, 32, 53, 21, 169, 234, 169, 23, 139,
+                50, 236, 119, 166, 15, 92, 91, 151, 205, 234, 104, 81, 196, 169,
+                56, 68, 183, 120, 96, 151, 176, 97, 7
+            ]
+        }
+    }
+}

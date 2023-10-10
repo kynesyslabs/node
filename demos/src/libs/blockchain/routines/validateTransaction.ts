@@ -46,6 +46,9 @@ export default async function validateTransaction(
     tx.state_changes = request.tx.state_changes
     tx.content.transaction_fee = request.tx.content.transaction_fee
 
+    console.log("[TX RECEIVED] Examining:\n")
+    console.log(tx)
+
     // NOTE Charge the gas for the transaction
     let from = tx.content.from.toString("hex")
     let fromBalance = await GLS.getGLSNativeBalance(from)
@@ -64,6 +67,8 @@ export default async function validateTransaction(
         status: "pending",
         fees: tx.content.transaction_fee,
     }
+    console.log("[TX RECEIVED] Operation derived:\n")
+    console.log(operation)
     GLS.getInstance().operations.push(operation)
     // Verify tx validity
     let verified = Transaction.confirmTx(tx, privateKey, publicKey) // REVIEW Are the buffers ok?
