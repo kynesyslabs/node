@@ -55,13 +55,16 @@ export default class Mempool {
         }
         console.log("[MEMPOOL MANAGER] Mempool query result:")
         console.log(sql_result)
-        // Normalizing
+        // Normalizing disguised strings
         if (typeof(sql_result) === "string") {
-            let sql_results = JSON.parse(sql_result)
-            sql_result = sql_results[0]
-        } else {
+            sql_results = JSON.parse(sql_result)
+        }            
+        // If this is an array, we take the first element
+        if (Array.isArray(sql_result)) {
             sql_result = sql_result[0]
         }
+        // Else we take the object itself
+    
         console.log("[MEMPOOL MANAGER] Normalized mempool query result:")
         console.log(sql_result)
         // Serializing
