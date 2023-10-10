@@ -14,6 +14,15 @@ export interface ITask {
     signedPayloads: any[]; 
 }
 
+
+// NOTE: We receive the operations as:
+/*
+multichain_operation: {
+    name: IOperation,
+    name: IOperation,
+    ...
+}
+*/
 export interface IOperation {
     chain: string;
     subchain: string;
@@ -22,8 +31,12 @@ export interface IOperation {
     task: ITask;
 }
 
-export interface XMScript {
+export interface old_XMScript {
     operations: IOperation[];
+}
+
+export interface XMScript {
+    "multichain_operation": { [key: string]: IOperation };
 }
 
 class XMParser {
@@ -58,14 +71,19 @@ class XMParser {
 
 
     // INFO This returns the results of the execution of the XMScript
-    static async execute(script: XMScript): Promise<any> {
+    static async execute(fullscript: XMScript): Promise<any> {
+        let script = fullscript.multichain_operation
         // Preparing the result
         // let result: Map<string, any> = new Map<string, any>()
         let array_result: any[] = [] // REVIEW We can use this not named array as a backup while fixing the fixme
         // Iterating over the operations 
         // TODO Allow for conditionals (store & sort? etc)
-        for (let i = 0; i < script.operations.length; i++) {
-            let operation = script.operations[i] // FIXME Here and hopefully jus here we got to get the name of the task to store results
+
+        for (let i = 0; i < Object.keys(script).length; i++) {
+            // Calling them by name
+            let funcName = Object.keys(script)[i]
+            console.log("[XMDebug] Executing: " + funcName)
+            let operation = script[funcName] // FIXME Here and hopefully jus here we got to get the name of the task to store results
             // INFO Executing the operation
             console.log(operation)
             let {task} = operation
