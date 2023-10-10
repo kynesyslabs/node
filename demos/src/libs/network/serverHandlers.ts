@@ -238,9 +238,8 @@ export default class ServerHandlers {
         switch (content.message) {
             case "crosschain_operation":
             case "multichain_operation":
-                term.yellow.bold("[SERVER] Received crosschain_operation\n")
-                ({ extra, require_reply, response } =
-                    await ServerHandlers.handleXMChainStatus())
+                term.yellow.bold("[SERVER] Received crosschain_operation")
+                response = await ServerHandlers.handleXMChainOperation(content)
                 break // REVIEW Here or in comlinks?
             case "getPeerlist":
                 console.log("[SERVER] Received getPeerlist")
