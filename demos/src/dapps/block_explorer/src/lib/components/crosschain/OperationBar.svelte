@@ -47,6 +47,7 @@
         border-left: none;
         transition: left .3s ease-in-out;
         z-index: 1000;
+        border-right: 1px solid var(--background3);
     }
     .available-blocks h4{
         margin: 0 0 8px;
@@ -97,7 +98,7 @@
     }
 </style>
 
-<div class={`card available-blocks ${mobilesidebaropen?"open":""}`}>
+<div class={`available-blocks ${mobilesidebaropen?"open":""}`}>
     <h4 style="margin-bottom: 32px;">Available blocks</h4>
     {#each availableBlocks as blocks}
         <div class="category">

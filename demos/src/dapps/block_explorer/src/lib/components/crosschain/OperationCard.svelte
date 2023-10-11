@@ -6,7 +6,7 @@
     import {clickOutside} from '$lib/eventhandlers.js';
     import {dndzone} from "svelte-dnd-action";
 	import { flip } from "svelte/animate";
-    import Combobox from '$lib/components/Combobox.svelte';
+    import Combobox from '$lib/components/inputs/Combobox.svelte';
     import {Operation} from '$lib/chainscript.js';
 
     export let operation;
@@ -86,8 +86,6 @@
         display: flex;
         align-items: center;
         gap: 16px;
-        background-color: var(--background2-min);
-        border: 1px solid var(--background3);
     }
     .dialog{
         position: absolute;
@@ -148,8 +146,10 @@
         display: flex;
         align-items: center;
         gap: 16px;
-        background-color: var(--background2-min);
         flex-wrap: wrap;
+    }
+    .conditional div{
+        box-shadow: none;
     }
     .conditional p {
         margin:0;
@@ -157,9 +157,6 @@
     .dnd{
         width: 100%;
         min-height: 500px;
-    }
-    .card{
-        border: 1px solid var(--background3);
     }
     .root{
         display: flex;

@@ -18,7 +18,7 @@
                 },
     }
 
-    demos.connect(rpcaddress);
+    demos.connect($rpcaddress);
     
     async function prepare()
     {

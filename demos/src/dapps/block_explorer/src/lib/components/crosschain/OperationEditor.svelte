@@ -7,7 +7,6 @@
     import {Operation} from '$lib/chainscript.js';
     import {budinotraslato} from "$lib/transitions.js"
     import "$lib/styles/crosschain/operationeditor.css"
-    import EVM from "$lib/demos_libs/xmlibs/chains/evm.js"
 
 
     export let onClose;
@@ -88,6 +87,22 @@
     $:complete[2] = currentParams.every((param)=>{return params[param.id] !== undefined && params[param.id] !== null && params[param.id] !== ""});
 
 
+    //WALLETS LOGIC
+    //chains wallets
+    let wallets = [null, null];
+
+    //connect wallet 
+    /*$:if()
+    {
+        if(editorchains[0] == "eth")
+        {
+            const ethereum = MMSDK.getProvider(); // You can also access via window.ethereum
+            let acc = ethereum.request({method:'eth_requestAccounts'}).then((res)=>{
+                console.log(res);
+            })
+        }
+    }*/
+
     //signa transazione prima di salvarla
     async function signaPay(address, amount)
     {
@@ -116,58 +131,62 @@
 <div class="modal-background" transition:budinofade>
     <!-- IL MODO PER SMISTARE MULTICHAIN E SINGLECHAIN È operation.chain == "crosschain" => se falso rappresenta la chain selezionata invece -->
     <div transition:budinotraslato class="modal-txblock">
-        <div class="txblock">
-            <div class="opeditor-title">
-                <img style="opacity: .3;" alt="task icon" src={taskinfo.icon}/>
-                <div>
-                    <h3 class="operationcard-label">{taskinfo.label} task <span style="opacity: .6;">on DEMOS network</span></h3>
+        <!--{#if editorchains[0] == "eth" && wallets[0] == null}
+            <h3 class="operationcard-label">Connect Ethereum wallet</h3>
+            <button class="primary" style="display: flex; align-items:center; gap:8px;"><p style="margin:4px 0 0;">Connect metamask</p> <img width="32" height="32" src={metamask} alt="metamask icon"/></button>
+        {:else}-->
+            <div class="txblock">
+                <div class="opeditor-title">
+                    <img style="opacity: .3;" alt="task icon" src={taskinfo.icon}/>
+                    <div>
+                        <h3 class="operationcard-label">{taskinfo.label} task <span style="opacity: .6;">on DEMOS network</span></h3>
+                    </div>
                 </div>
-            </div>
-            <div class="opeditor-chain-selection">
-                {#if multichain}
-                    <ChainSelection evmTask={hasEVMconstraint(taskinfo.id)} open={!chainflag} onOpen = {()=>{chainflag = false}} onChange={(newValue)=>{editorchains[0] = newValue;}} value={editorchains[0]}/>
-                    <ChainSelection evmTask={hasEVMconstraint(taskinfo.id)} open={!chainflag} onOpen = {()=>{chainflag = false}} onChange={(newValue)=>{editorchains[1] = newValue;}} value={editorchains[1]}/>
-                {:else}
-                    <ChainSelection evmTask={hasEVMconstraint(taskinfo.id)} open={!chainflag} onOpen = {()=>{chainflag = false}} onChange={(newValue)=>{editorchains[0] = newValue;}} value={editorchains[0]}/>
-                {/if}
-            </div>
-            {#if chainflag}
-                <div class="opeditor-params generic-shadow">
-                    {#each currentParams as param}
-                        <TaskParam label={param.label} value={params[param.id]} onChange={(newValue)=>{params[param.id]=newValue;}}></TaskParam>
-                    {/each}
-                </div>
-            {/if}
-            {#if errorDisplay}
-                <div class="error-display">
-                    <p>{errorDisplay}</p>
-                </div>
-            {/if}
-            <div class="tx-buttons">
-                <button class="secondary" on:click={()=>{operation.data?onClose():onDelete()}}>Cancel</button>
-                <button disabled={!(complete[0]&&complete[1]&&complete[2])} on:click={async()=>{
-                    if(txblockClone.task.type == "pay")
-                    {
-                        /*before updating we need to sign*/
-                        let signedPayload = await signaPay(txblockClone.task.params.to, txblockClone.task.params.amount);
-                        console.log(signedPayload);
-                        if(signedPayload)
-                        {
-                            txblockClone.task.signedPayloads.push(signedPayload);
-                            onSave(txblockClone)
-                        }
-                    }
-                    else
-                    {
-                        onSave(txblockClone)
-                    }
-                }}
-                class="primary tooltip">
-                    {#if !(complete[0]&&complete[1]&&complete[2])}
-                    <span class="tooltiptext">Fill all fields</span>
+                <div class="opeditor-chain-selection">
+                    {#if multichain}
+                        <ChainSelection evmTask={hasEVMconstraint(taskinfo.id)} open={!chainflag} onOpen = {()=>{chainflag = false}} onChange={(newValue)=>{editorchains[0] = newValue;}} value={editorchains[0]}/>
+                        <ChainSelection evmTask={hasEVMconstraint(taskinfo.id)} open={!chainflag} onOpen = {()=>{chainflag = false}} onChange={(newValue)=>{editorchains[1] = newValue;}} value={editorchains[1]}/>
+                    {:else}
+                        <ChainSelection evmTask={hasEVMconstraint(taskinfo.id)} open={!chainflag} onOpen = {()=>{chainflag = false}} onChange={(newValue)=>{editorchains[0] = newValue;}} value={editorchains[0]}/>
                     {/if}
-                Save</button>
+                </div>
+                {#if chainflag}
+                    <div class="opeditor-params generic-shadow">
+                        {#each currentParams as param}
+                            <TaskParam label={param.label} value={params[param.id]} onChange={(newValue)=>{params[param.id]=newValue;}}></TaskParam>
+                        {/each}
+                    </div>
+                {/if}
+                {#if errorDisplay}
+                    <div class="alert-error">
+                        <p>{errorDisplay}</p>
+                    </div>
+                {/if}
+                <div class="tx-buttons">
+                    <button class="secondary" on:click={()=>{operation.data?onClose():onDelete()}}>Cancel</button>
+                    <button disabled={!(complete[0]&&complete[1]&&complete[2])} on:click={async()=>{
+                        /*if(txblockClone.task.type == "pay")
+                        {
+                            let signedPayload = await signaPay(txblockClone.task.params.to, txblockClone.task.params.amount);
+                            console.log(signedPayload);
+                            if(signedPayload)
+                            {
+                                txblockClone.task.signedPayloads.push(signedPayload);
+                                onSave(txblockClone)
+                            }
+                        }
+                        else
+                        {*/
+                            onSave(txblockClone)
+                        //}
+                    }}
+                    class="primary tooltip">
+                        {#if !(complete[0]&&complete[1]&&complete[2])}
+                        <span class="tooltiptext">Fill all fields</span>
+                        {/if}
+                    Save</button>
+                </div>
             </div>
-        </div>
+        <!--{/if}-->
     </div>
 </div>

@@ -50,8 +50,6 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        background-color: var(--background2-min);
-        border: 1px solid var(--background3);
     }
     .dnd{
         display: grid;

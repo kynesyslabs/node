@@ -45,7 +45,7 @@
 {#if $wallet.loggedIn}
 <div class="thegrid">
     <OperationBar/>
-    <div style="padding:0 24px;">
+    <div style="padding:0 24px; max-width:1440px;margin:auto;width:100%;">
         <Header />
         <div class="wrapper">
             <main>

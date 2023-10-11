@@ -12,7 +12,7 @@
 	import TransactionRow from '$lib/components/blockexplorer/TransactionRow.svelte';
 
 
-    demos.connect(rpcaddress);
+    demos.connect($rpcaddress);
     async function getBlock() 
     {
         if(!demos.connected)
@@ -79,6 +79,7 @@
         margin: auto;
     }
     .section-container{
+        margin-top: 64px;
         margin-bottom: 64px;
     }
     @media only screen and (max-width: 1250px) {

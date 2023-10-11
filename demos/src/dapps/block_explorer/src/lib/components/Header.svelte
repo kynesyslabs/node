@@ -20,8 +20,8 @@
         },
         {
             label:"Web2",
-            href:"/web2gui",
-            test:"web2gui"
+            href:"/web2",
+            test:"web2"
         },
         {
             label:"tx",

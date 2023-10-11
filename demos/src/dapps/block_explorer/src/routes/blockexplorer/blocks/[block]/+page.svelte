@@ -8,7 +8,7 @@
     import {rpcaddress} from "$lib/env.js";
 	import CubeSpinning from '$lib/components/blockexplorer/CubeSpinning.svelte';
 
-    demos.connect(rpcaddress);
+    demos.connect($rpcaddress);
     async function getBlock()
     {
         if(!demos.connected)

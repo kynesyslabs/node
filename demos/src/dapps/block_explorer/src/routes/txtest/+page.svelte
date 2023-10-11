@@ -1,7 +1,6 @@
 <script>
     import {onMount} from 'svelte';
     import demos from '$lib/demos.js';
-    import forge from 'node-forge';
     import {transaction} from "$lib/demos_libs/utils/skeletons.js";
     import {wallet} from '$lib/env.js';
     //console.log(data.skeleton);

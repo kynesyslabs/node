@@ -1,4 +1,5 @@
 <script>
+	import RPCselection from "$lib/components/inputs/RPCselection.svelte";
     const links = [
         {
             label: "DOCS",
@@ -70,5 +71,6 @@
             <a class="footer-link" href={link.url}>{link.label}</a>
         {/each}
     </div>
+    <RPCselection/>
     <p>All rights reserved</p>
 </div>

@@ -69,12 +69,12 @@
     justify-content: flex-end;
 }
 
-.error-display{
+.alert-error{
     background-color: #640b0b;
     margin: 16px 0;
     padding: 16px;
 }
 
-.error-display p{
+.alert-error p{
     margin: 0;
 }

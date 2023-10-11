@@ -3,23 +3,51 @@
 	import OperationCard from "$lib/components/crosschain/OperationCard.svelte";
     import XMTransactions from "$lib/demos_libs/XMTransactions.js";
     import demos from "$lib/demos.js"
-    import { rpcaddress }  from '$lib/env.js';
+    import { rpcaddress, wallet }  from '$lib/env.js';
     import { v4 as uuidv4 } from 'uuid'; 
     import cloneDeep from 'lodash/cloneDeep';
+    import { Buffer } from "buffer";
+    import {chains} from "$lib/chainscript.js";
+	import ConnectWalletDialog from "../../lib/components/crosschain/ConnectWalletDialog.svelte";
 
 
-    localStorage.clear("operations");
 
-    //nussun piano di salvataggio
-    //$operationsdata = localStorage.getItem("operationsdata")?JSON.parse(localStorage.getItem("operationsdata")):{};
-    //tutto qui
-    let root = {id:"root", items:[], type:"root"}
+   //localStorage.clear("operations");
+
+    let root = localStorage.getItem("operations")?JSON.parse(localStorage.getItem("operations")):{id:"root", items:[], type:"root"}
+    $: localStorage.setItem("operations", JSON.stringify(root));
+
+    let required_connections = []
+
+    checkRequired(root.items);
+    function checkRequired(parentArray)
+    {
+        for(const operation of parentArray)
+        {
+            if(operation.type=="conditional")
+            {
+                checkRequired(operation.condition);
+                checkRequired(operation.then);
+                checkRequired(operation.else);
+            }
+            else if(operation.type=="pay")
+            {
+                if(required_connections.findIndex(rq=>rq.id==operation.data.chain) == -1)
+                {
+                    required_connections.push({id: operation.data.chain, wallet:null});
+                    required_connections = required_connections;
+                }
+            }
+        }
+    }
 
     //prima abbiamo usato l'index, poi abbiamo usato l'id... adesso passiamo direttamente la reference
     let edit = null;
     let editparent = null;
+
+    let editwallet = null;
     
-    function onUpdate(operation, data)
+    async function onUpdate(operation, data)
     {
         operation.data = data;
         root = root
@@ -50,38 +78,75 @@
         {id:"notequals", label:"!="},
     ]
 
-    //crea JSON da root
-    async function createJSON()
+    function createAll(parentArray)
     {
-        XMTransactions.operation.clear();
-        for(const op of root.items)
+        for(const operation of parentArray)
         {
-            const pushOp = (op)=>{
-                XMTransactions.operation.create(op.id, op.data.chain, op.data.subchain, op.data.is_evm, op.data.rpc, op.data.task, op.data.conditional)
-            }
-            if(op.type=="conditional")
+            if(operation.type=="conditional")
             {
-                XMTransactions.operation.create_condition(op.id, "if", `${op.condition[0].id} ${conditionOptions.find(s=>s.id == op.symbol).label} ${op.input}`, op.then.map(op=>op.id), op.else.map(op=>op.id));
-                if(!op.condition[0])
-                    return;
-                pushOp(op.condition[0]);
-                op.then.forEach(op=>pushOp(op));
-                op.else.forEach(op=>pushOp(op));
+                XMTransactions.operation.create_condition(operation.id, "if", `${operation.condition[0].id} ${conditionOptions.find(s=>s.id == operation.symbol).label} ${operation.input}`, operation.then.map(op=>op.id), operation.else.map(op=>op.id));
+                createAll(operation.condition);
+                createAll(operation.then);
+                createAll(operation.else);
             }
             else
             {
-                pushOp(op);
+                XMTransactions.operation.create(operation.id, operation.data.chain, operation.data.subchain, operation.data.is_evm, operation.data.rpc, operation.data.task, operation.data.conditional);
+            }
+        }
+    }
+
+    let error = "";
+
+    async function signAll(parentArray)
+    {
+        error = "";
+        for(const operation of parentArray)
+        {
+            if(operation.type=="conditional")
+            {
+                signAll(operation.condition);
+                signAll(operation.then);
+                signAll(operation.else);
+            }
+            else if(operation.type=="pay")
+            {
+                try{
+                    let wallet = required_connections.find(rq=>rq.id==operation.data.chain).wallet;
+                    let signedPayload = await wallet.preparePay(operation.data.task.params.to, operation.data.task.params.amount)
+                    operation.data.task.signedPayloads = [signedPayload];
+                    console.log(operation.data.task.signedPayloads);
+                }
+                catch(err){
+                    error = err;
+                }
             }
         }
     }
 
     async function execute()
     {
-        demos.connect(rpcaddress);
-        createJSON();
+        state="connect";
+        demos.connect($rpcaddress);
+        state="sign";
+        signAll(root.items);
+        //convert the tree to a flat array
+        state="create";
+        XMTransactions.operation.clear();
+        createAll(root.items);
+        state="send";
+        console.log(XMTransactions.operation.get());
         let result = await demos.crosschain.execute(XMTransactions.operation.get())
         console.log(result);
     }
+
+    function trim_address(str) {
+        if (str.length <= 20) 
+        return str;
+        return str.substr(0, 10) + '...' + str.substr(str.length-4, str.length);
+    }
+
+    let state="editor";
 </script>
 
 <style>
@@ -95,12 +160,47 @@
     .title{
         margin: 0;
     }
+    .subtitle{
+        text-align: center;
+        margin-bottom: 16px;
+    }
+    .txeditor{
+        border: 1px solid var(--background3);
+        width: 100%;
+        margin-bottom: 64px;
+    }
     .dnd{
         display: grid;
         grid-template-columns: 1fr;
         grid-auto-rows: 1fr;
         gap: 16px;
         padding: 24px;
+    }
+    .connections{
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr 1fr;
+        gap: 24px;
+        margin-bottom: 64px;
+    }
+    .wallet-connection{
+        width: 100%;
+        padding: 24px;
+    }
+    .network-name{
+        font-size: 1.1rem;
+        font-weight: bold;
+        margin: 0 0 16px;
+    }
+    .wallet-info{
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .wallet-address{
+        margin: 2px 0 0;
+    }
+    .wallet-status{
+        margin: 0;
     }
     .executebtn{
         margin-left: auto;
@@ -114,16 +214,49 @@
 {#if edit !== null}
     <OperationEditor onSave={(data)=>{onUpdate(edit, data); edit = null; editparent=null;}} operation={edit} onClose={()=>{edit = null; editparent = null;}} onDelete={()=>{deleteOperation(editparent, edit); edit=null; editparent=null;}}/>
 {/if}
+{#if editwallet}
+    <ConnectWalletDialog connection={editwallet} close={()=>{editwallet = null}}/>
+{/if}
 <div>
     <div class="title-container">
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="35" width="35"><g id="sign-hashtag--mail-sharp-sign-hashtag-tag"><path id="Union" fill="#ffffff" fill-rule="evenodd" d="M8.27 0.776 7.275 6.25H3v2.5h3.82l-1.181 6.5H1v2.5h4.184l-0.914 5.026 2.46 0.448 0.995 -5.474 6.46 0 -0.915 5.026 2.46 0.448 0.995 -5.474H21v-2.5h-3.82l1.181 -6.5H23v-2.5h-4.184l0.914 -5.026 -2.46 -0.448 -0.995 5.474H9.816l0.914 -5.026L8.27 0.776Zm6.37 14.474 1.181 -6.5h-6.46l-1.181 6.5 6.459 0Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
-        <h3 class="title">Crosschain transaction editor</h3>
+        <h3 class="title">Crosschain transaction</h3>
     </div>
-    <div style="max-width: calc(100dvw - 48px);">
-        <div class="card dnd">
+    <h4 class="subtitle">Transaction editor</h4>
+    <div class="txeditor">
+        <div class="dnd">
             <OperationCard onEdit={(op, parent)=>{edit = op; editparent=parent;}} operation={root} duplicateOperation={duplicateOperation} deleteOperation={deleteOperation}/>
         </div>
     </div>
+    <h4 class="subtitle">Required wallets</h4>
+    <div class="connections">
+        <div class="wallet-connection card">
+            <p class="network-name">DEMOS</p>
+            <div class="wallet-info">
+                <p class="wallet-address">{trim_address(Buffer.from($wallet.keypair.publicKey).toString("hex"))}</p>
+                <svg class="wallet-status" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="24" height="24"><g id="check-circle--checkmark-addition-circle-success-check-validation-add-form-tick"><path id="Subtract" fill="green" fill-rule="evenodd" d="M12 23c6.075 0 11-4.925 11-11S18.075 1 12 1 1 5.925 1 12s4.925 11 11 11Zm-.47-6.625 6-7.5-1.56-1.25-5.355 6.693-2.714-2.327-1.302 1.518 3.5 3 .786.674.646-.808Z" clip-rule="evenodd"></path></g></svg>
+            </div>
+        </div>
+        {#each required_connections as required_wallet}
+        <div class="wallet-connection card">
+            <div class="wallet-info">
+                <img style="margin-bottom: 20px;" alt="chain icon" src={chains.find(ch=>ch.id==required_wallet.id).icon} width="24" height="24"/>
+                <p class="network-name">{chains.find(ch=>ch.id==required_wallet.id).label}</p>
+            </div>
+            {#if required_wallet.wallet}
+                <div class="wallet-info">
+                    <p class="wallet-address">{trim_address(required_wallet.wallet.getAddress())}</p>
+                    <svg class="wallet-status" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="24" height="24"><g id="check-circle--checkmark-addition-circle-success-check-validation-add-form-tick"><path id="Subtract" fill="green" fill-rule="evenodd" d="M12 23c6.075 0 11-4.925 11-11S18.075 1 12 1 1 5.925 1 12s4.925 11 11 11Zm-.47-6.625 6-7.5-1.56-1.25-5.355 6.693-2.714-2.327-1.302 1.518 3.5 3 .786.674.646-.808Z" clip-rule="evenodd"></path></g></svg>
+                </div>
+            {:else}
+                <button on:click={()=>{editwallet=required_wallet}} class="secondary" style="width: 100%;">Connect wallet</button>
+            {/if}
+        </div>
+        {/each}
+    </div>
+    {#if error != ""}
+        <div class="alert-error">{error}</div>
+    {/if}
     <button on:click={execute} class="executebtn primary">Execute
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="24" width="24"><g id="end-point-arrow"><path id="Union" fill="#000000" fill-rule="evenodd" d="m14.472 17.92 -1.819 1.212 0.692 -2.073L14.697 13H1v-2h13.698l-1.353 -4.059 -0.692 -2.073 1.82 1.212 7.943 5.296 0.936 0.624 -0.936 0.624 -7.944 5.296Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
     </button>

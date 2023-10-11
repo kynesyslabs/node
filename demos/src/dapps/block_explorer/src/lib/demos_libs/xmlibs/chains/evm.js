@@ -72,4 +72,10 @@ export default class EVM {
 	async getEmptyTransaction() {
 		// TODO
 	}
+
+	//megabudino was here – return the address of the wallet
+	getAddress()
+	{
+		return this.wallet.address;
+	}
 }

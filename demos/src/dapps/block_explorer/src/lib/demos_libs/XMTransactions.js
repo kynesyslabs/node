@@ -46,8 +46,7 @@ let XMTransactions = {
 			operation.is_evm = is_evm;
 			operation.rpc = rpc;
 			operation.conditional = conditional;
-			operation.task.type = task.type;
-			operation.task.params = task.params;
+			operation.task = task;
 			XMTransactions.data.loaded_operations[name] = operation;
 			XMTransactions.data.operations_index.push(name);
 			return operation;
