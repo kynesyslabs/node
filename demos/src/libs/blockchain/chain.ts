@@ -15,7 +15,6 @@ import Hashing from "../crypto/hashing"
 import Datasource from "src/model/datasource"
 import { Operation } from "./gls/gls"
 import executeOperations from "./routines/executeOperations"
-import BlockContent from "./types/blocks"
 
 export default class Chain {
     private static instance: Chain
@@ -142,7 +141,9 @@ export default class Chain {
         }
     }
 
-    static async getOnlinePeersForLastThreeBlocks(): Promise<string[]> {
+    static async getOnlinePeersForLastThreeBlocks(): Promise<
+        [string, string][]
+    > {
         const lastBlockNumber = await this.getLastBlockNumber()
 
         if (lastBlockNumber < 3) {
@@ -154,12 +155,31 @@ export default class Chain {
             this.getBlockByNumber(lastBlockNumber - 1),
             this.getBlockByNumber(lastBlockNumber - 2),
         ])
+
         try {
-            return blocks.reduce((commonPeers, block) => {
-                return commonPeers.filter(peer =>
-                    block.onlinePeers.includes(peer),
-                )
-            }, blocks[0].onlinePeers)
+            return blocks.reduce(
+                (commonPeers, block) => {
+                    // Extract all data from transactions of type "NODE_ONLINE" in the block
+                    const onlinePeersInBlock =
+                        block.content.ordered_transactions
+                            .filter(
+                                transaction =>
+                                    transaction.content.type === "NODE_ONLINE",
+                            )
+                            .map(transaction => transaction.content.data)
+
+                    // Return peers that are present in both commonPeers and onlinePeersInBlock
+                    return commonPeers.filter(peer =>
+                        onlinePeersInBlock.includes(peer),
+                    )
+                },
+                blocks[0].content.ordered_transactions
+                    .filter(
+                        transaction =>
+                            transaction.content.type === "NODE_ONLINE",
+                    )
+                    .map(transaction => transaction.content.data),
+            )
         } catch (e) {
             return []
         }

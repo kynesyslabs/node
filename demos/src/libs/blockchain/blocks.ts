@@ -21,7 +21,6 @@ export default class Block {
     proposer: pki.PublicKey | pki.ed25519.BinaryBuffer
     validation_data: any
     timestamp: number
-    onlinePeers: string[]
 
     constructor() {
         this.number = null
