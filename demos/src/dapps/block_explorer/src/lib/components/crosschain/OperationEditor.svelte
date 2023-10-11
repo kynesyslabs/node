@@ -2,10 +2,9 @@
     import {chains, tasks, chainobjs} from '$lib/chainscript.js';
 	import TaskParam from "$lib/components/crosschain/TaskParam.svelte";
 	import ChainSelection from "$lib/components/inputs/ChainSelection.svelte";
-    import {budinofade} from '$lib/transitions.js';
+    import {budinofade, budinotraslato} from '$lib/transitions.js';
     import {cloneDeep} from 'lodash';
     import {Operation} from '$lib/chainscript.js';
-    import {budinotraslato} from "$lib/transitions.js"
     import "$lib/styles/crosschain/operationeditor.css"
 
 

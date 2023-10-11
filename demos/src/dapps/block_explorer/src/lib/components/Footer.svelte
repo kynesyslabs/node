@@ -1,4 +1,5 @@
 <script>
+    import {rpcaddress} from "$lib/env.js";
 	import RPCselection from "$lib/components/inputs/RPCselection.svelte";
     const links = [
         {
@@ -12,6 +13,8 @@
     ]
 
     import "$lib/assets/backgrounds/bubblesbg.jpeg";
+
+    let selectrpc = false;
 </script>
 <style>
 
@@ -41,17 +44,15 @@
     }
     .background-blur{
         position: fixed;
-        /*background-color: rgba(20, 20, 20, 0.5);*/
-        background-color: black;
-        backdrop-filter: blur(40px);
+        backdrop-filter: blur(100px);
         height: 100dvh;
-        width: 100%;
+        width: 100dvw;
         z-index: -1;
         bottom: 0;
     }
     .background{
-        position: fixed;
-        background: url("/backgrounds/bubblesbg.jpg") no-repeat center center;
+        position: absolute;
+        background: url("/backgrounds/bubblesbg.jpg") center center;
         background-size: cover;
         height: 100dvh;
         width: 100%;
@@ -59,11 +60,13 @@
         bottom: 0;
     }
 </style>
-<div class="background-blur">
+
+
+<!--<div class="background-blur">
 </div>
 
 <div class="background">
-</div>
+</div>-->
 <div class="footer">
     <p class="companyname">//. kynesys</p>
     <div class="footer-links">
@@ -71,6 +74,9 @@
             <a class="footer-link" href={link.url}>{link.label}</a>
         {/each}
     </div>
-    <RPCselection/>
+    <p>Node address: <span on:click={()=>{selectrpc = true}} style="text-decoration: underline; cursor:pointer">{$rpcaddress}</span></p>
+    {#if selectrpc}
+    <RPCselection close={()=>{selectrpc = false}}/>
+    {/if}
     <p>All rights reserved</p>
 </div>
