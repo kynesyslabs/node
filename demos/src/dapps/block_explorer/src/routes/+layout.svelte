@@ -5,7 +5,7 @@
     import '$lib/styles/buttons.css';
     import '$lib/styles/surfaces.css';
     import demos from "$lib/demos.js"
-    import {updateWallet} from "$lib/env.js";
+    import {updateWallet, updateRpcAddress} from "$lib/env.js";
     let logcheck = false;
 
     async function login(prvkey)
@@ -33,6 +33,11 @@
     );
     
     onMount(()=>{
+        const selectedrpc = localStorage.getItem("selectedrpc");
+        if(selectedrpc)
+        {
+            updateRpcAddress(selectedrpc);
+        }
         const storedkey = getCookieValue("prvkey");
         if(storedkey)
         {

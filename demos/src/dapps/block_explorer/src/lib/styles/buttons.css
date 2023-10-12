@@ -27,7 +27,7 @@ button.secondary {
     font-weight: 500;
     line-height: 1.4444;
     letter-spacing: 0.311px;
-    border: 1px solid rgba(255, 255, 255, 0.4);
+    border: 1px solid var(--background3);
     background: transparent;
     padding: 16.2px 47px;
     text-align: center;
