@@ -70,6 +70,7 @@ export default async function mainLoop(id: Identity) {
                 online_presence_message,
                 id.ed25519.privateKey as any,
             )
+            console.log("[MAIN LOOP] KRAAAK KRAAAK")
 
             hasSentNodeOnlineTx = true
         }
