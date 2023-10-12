@@ -87,6 +87,9 @@ export default async function mainLoop(id: Identity) {
 
         const peersOnlineForLastThreeBlocks =
             await Chain.getOnlinePeersForLastThreeBlocks()
+
+        console.log("🐸🐸🐸 Family:")
+        console.log(currentlyOnlinePeers)
         if (peersOnlineForLastThreeBlocks.length > 0) {
             // We found peers that have been online for 3 blocks. Use them in the consensus loop
             currentlyOnlinePeers = peersOnlineForLastThreeBlocks
