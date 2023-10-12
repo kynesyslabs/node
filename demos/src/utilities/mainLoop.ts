@@ -94,7 +94,7 @@ export default async function mainLoop(id: Identity) {
         } else {
             // We didn't find peers that have been online for 3 blocks. Use the online peers list as it is
             // In this case we assume the node is isolated, starting up or that other nodes are not online or still connencting to the network
-            currentlyOnlinePeers = onlinePeers
+            currentlyOnlinePeers = await onlinePeers
         }
 
         console.log("🐸🐸🐸 Family:")
