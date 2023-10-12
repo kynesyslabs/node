@@ -4,12 +4,18 @@ import * as consensusTime from "../libs/consensus/routines/consensusTime"
 import Sync from "src/libs/blockchain/routines/Sync"
 import { Identity } from "src/libs/identity"
 
-import { PeerManager } from "src/libs/peer"
+import { Peer, PeerManager } from "src/libs/peer"
 import Chain from "src/libs/blockchain/chain"
+import Transmission from "src/libs/communications/transmission"
+import ComLink from "src/libs/communications/comlink"
+import { pki } from "node-forge"
 
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
 }
+
+let hasSentNodeOnlineTx = false
+const peerManager = PeerManager.getInstance()
 
 export default async function mainLoop(id: Identity) {
     console.log("[MAIN LOOP] Started")
@@ -31,8 +37,44 @@ export default async function mainLoop(id: Identity) {
         // TODO Check if we have to forge the block now
         let isConsensusTimeReached = await consensusTime.checkConsensusTime()
 
+        if (!hasSentNodeOnlineTx && !isConsensusTimeReached) {
+            var online_presence_message = new Transmission(
+                Identity.getInstance().ed25519.privateKey,
+            )
+            online_presence_message.initialize(
+                // TODO Specify the answer so that it has a type AND a message
+                "NODE_ONLINE",
+                JSON.stringify({}),
+                id.ed25519.publicKey,
+                "placeholder", // TODO Add the receiver, don't we already have it in the receiver object?
+                null,
+                {},
+            )
+            await online_presence_message.finalize()
+            // Populating the comlink
+            const comLink = new ComLink()
+            comLink.properties.require_reply = true
+            comLink.properties.is_reply = false
+
+            let peer = peerManager.getPeer(
+                id.ed25519.publicKey as unknown as string,
+            )
+
+            if (!peer) {
+                peer = new Peer()
+                peer.identity = id.ed25519.publicKey as pki.ed25519.BinaryBuffer
+            }
+
+            await comLink.broadcastMessageToPeer(
+                peer,
+                online_presence_message,
+                id.ed25519.privateKey as any,
+            )
+
+            hasSentNodeOnlineTx = true
+        }
+
         // every block write online list
-        const peerManager = PeerManager.getInstance()
         const onlinePeers = peerManager.getOnlinePeers()
 
         // check if online peers have been online for 3 blocks
@@ -59,6 +101,7 @@ export default async function mainLoop(id: Identity) {
 
         if (isConsensusTimeReached) {
             console.log("[MAIN LOOP] Consensus time reached")
+            hasSentNodeOnlineTx = false // Reset it for the next cycle.
             sharedState.getInstance().consensusMode = true
             // TODO Start consensus methods here
             // At the end of the consensus period, the main loop should start again

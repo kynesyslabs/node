@@ -27,6 +27,12 @@ export default class PeerManager {
         return this.instance
     }
 
+    createNewPeer(identity: string): Peer {
+        const peer = new Peer()
+        peer.identity = identity
+        return peer
+    }
+
     getPeers(): Peer[] {
         const peerList: Peer[] = []
         for (const peer in this.peerList) {
