@@ -160,6 +160,10 @@ button{
   .tooltip:hover .tooltiptext {
     opacity: 1;
 }
+.tooltiptext{
+    font-weight: normal;
+    font-size: .9rem;
+}
 .tooltip .tooltiptext::after {
     content: " ";
     position: absolute;
@@ -169,4 +173,9 @@ button{
     border-width: 5px;
     border-style: solid;
     border-color: var(--background2-min) transparent transparent transparent;
+  }
+
+  .ace_tooltip
+  {
+    display: none!important;
   }

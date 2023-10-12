@@ -182,7 +182,9 @@
                 <p class="operationcard-label">{taskinfo.label} on {chaininfo.label}</p>
                 <div class="params-preview">
                     {#each taskinfo.params as param}
+                        {#if operation.data.task.params[param.id]&&param.type!=="json"}
                         <p class="ellipsis">{param.label}: <span style="font-weight: normal;">{operation.data.task.params[param.id]}</span></p>
+                        {/if}
                     {/each}
                 </div>
             </div>

@@ -145,7 +145,7 @@ const tasks = [
                 id:"abi",
                 label:"ABI",
                 type:"json",
-                required:false
+                required:true
             },
             {
                 id:"method",
@@ -157,7 +157,7 @@ const tasks = [
                 id:"params",
                 label:"Params",
                 type:"json",
-                required:true
+                required:false
             }
         ]
     },

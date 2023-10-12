@@ -17,11 +17,12 @@
 
 .opeditor-params{
     width: 100%;
-    display: grid;
+    display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 16px;
     grid-template-columns: 1fr 1fr;
+    max-width: 500px;
 }
 
 .modal-txblock{

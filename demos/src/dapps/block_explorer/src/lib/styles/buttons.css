@@ -7,6 +7,7 @@ button{
     font-weight: bold;
 }
 
+
 button.primary {
     font-size: 1.125rem;
     font-weight: bold;
@@ -20,6 +21,11 @@ button.primary {
     color: #141414; 
     text-decoration: unset;
     text-align: center;
+}
+
+button.primary:disabled{
+    background-color: rgba(255,255,255,0.2);
+    border-color: rgba(255,255,255,0.2);
 }
 
 button.secondary {

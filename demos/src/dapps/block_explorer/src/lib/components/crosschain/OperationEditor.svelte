@@ -83,7 +83,25 @@
     $:txblockClone.task.params = params;
 
     //EFFECT FOR CHANGING PARAMS
-    $:complete[2] = currentParams.every((param)=>{return params[param.id] !== undefined && params[param.id] !== null && params[param.id] !== ""});
+    $:complete[2] = currentParams.every((param)=>
+    {
+        if(!param.required)
+        {
+            return true;
+        }
+        if(param.type == "json")
+        {
+            try
+            {
+                JSON.parse(params[param.id]);
+            }
+            catch(e)
+            {
+                return false;
+            }
+        }
+        return params[param.id] !== undefined && params[param.id] !== null && params[param.id] !== ""
+    });
 
 
     //WALLETS LOGIC
@@ -152,7 +170,7 @@
                 {#if chainflag}
                     <div class="opeditor-params generic-shadow">
                         {#each currentParams as param}
-                            <TaskParam label={param.label} value={params[param.id]} onChange={(newValue)=>{params[param.id]=newValue;}}></TaskParam>
+                            <TaskParam required={param.required} label={param.label} value={params[param.id]} onChange={(newValue)=>{params[param.id]=newValue;}} type={param.type}></TaskParam>
                         {/each}
                     </div>
                 {/if}
@@ -164,24 +182,11 @@
                 <div class="tx-buttons">
                     <button class="secondary" on:click={()=>{operation.data?onClose():onDelete()}}>Cancel</button>
                     <button disabled={!(complete[0]&&complete[1]&&complete[2])} on:click={async()=>{
-                        /*if(txblockClone.task.type == "pay")
-                        {
-                            let signedPayload = await signaPay(txblockClone.task.params.to, txblockClone.task.params.amount);
-                            console.log(signedPayload);
-                            if(signedPayload)
-                            {
-                                txblockClone.task.signedPayloads.push(signedPayload);
-                                onSave(txblockClone)
-                            }
-                        }
-                        else
-                        {*/
                             onSave(txblockClone)
-                        //}
                     }}
                     class="primary tooltip">
                         {#if !(complete[0]&&complete[1]&&complete[2])}
-                        <span class="tooltiptext">Fill all fields</span>
+                        <span class="tooltiptext">Fill required fields</span>
                         {/if}
                     Save</button>
                 </div>
