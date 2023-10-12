@@ -180,7 +180,7 @@
                     </div>
                 {/if}
                 <div class="tx-buttons">
-                    <button class="secondary" on:click={()=>{operation.data?onClose():onDelete()}}>Cancel</button>
+                    <button class="secondary" on:click={()=>{operation.data.chain?onClose():onDelete()}}>Cancel</button>
                     <button disabled={!(complete[0]&&complete[1]&&complete[2])} on:click={async()=>{
                             onSave(txblockClone)
                     }}
