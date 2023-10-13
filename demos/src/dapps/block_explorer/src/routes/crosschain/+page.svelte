@@ -10,8 +10,6 @@
     import {chains} from "$lib/chainscript.js";
 	import ConnectWalletDialog from "../../lib/components/crosschain/ConnectWalletDialog.svelte";
 
-
-
    //localStorage.clear("operations");
 
     let root = localStorage.getItem("operations")?JSON.parse(localStorage.getItem("operations")):{id:"root", items:[], type:"root"}
@@ -19,7 +17,7 @@
 
     let required_connections = []
 
-    checkRequired(root.items);
+    $:checkRequired(root.items);
     function checkRequired(parentArray)
     {
         for(const operation of parentArray)

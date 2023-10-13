@@ -1,5 +1,5 @@
 <script>
-    import {chains, tasks, chainobjs} from '$lib/chainscript.js';
+    import {chains, tasks} from '$lib/chainscript.js';
 	import TaskParam from "$lib/components/crosschain/TaskParam.svelte";
 	import ChainSelection from "$lib/components/inputs/ChainSelection.svelte";
     import {budinofade, budinotraslato} from '$lib/transitions.js';
@@ -119,30 +119,6 @@
             })
         }
     }*/
-
-    //signa transazione prima di salvarla
-    async function signaPay(address, amount)
-    {
-        let chainobj;
-        if(isEvmFromID(editorchains[0]))
-        {
-            chainobj = chainobjs["evm"];
-        }
-        else
-        {
-            chainobj = chainobjs[editorchains[0]];
-        }
-        let connectedchain = await chainobj.create("https://eth.llamarpc.com");
-        connectedchain.connectWallet("54c42954e6d2e4b5d3bb487c4f34aeffa26b9eccce5dba87dcf50a67c69f512c");
-        // Let's obtain a signed payload
-        let signedPayload = connectedchain.preparePay(address, amount).then((payload) => {
-            return payload;
-        }).catch(error=>{
-            errorDisplay = error;
-            return null;
-        })
-        return signedPayload;
-    }
 </script>
 
 <div class="modal-background" transition:budinofade>

@@ -1,22 +1,34 @@
 <script>
     import {budinofade, budinotraslato} from "$lib/transitions";
-    import EVM from "$lib/demos_libs/xmlibs/chains/evm.js"
+    import EVM from '$lib/demos_libs/xmlibs/chains/evm';
+    import XRPL from '$lib/demos_libs/xmlibs/chains/xrpl';
+
+    let chainobjs={
+        "evm":EVM,
+        "xrpl":XRPL
+    }
+
+    let rpcaddresses = {
+        "evm":"https://eth.llamarpc.com",
+        "xrpl":"wss://xrplcluster.com"
+    }
+    
     export let connection;
     export let close;
     let error="";
     async function connectWallet(prvkey)
     {
         error = "";
-        let eth_chain = await EVM.create("https://eth.llamarpc.com");
+        let mychainwallet = await chainobjs[connection.id].create(rpcaddresses[connection.id]);
         try
         {
-            await eth_chain.connectWallet(prvkey);
+            await mychainwallet.connectWallet(prvkey);
         }
         catch(err){
             error = err;
             return
         }
-        connection.wallet = eth_chain;
+        connection.wallet = mychainwallet;
         close();
     }
 </script>

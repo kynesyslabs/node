@@ -1,8 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
 import {getAllChains} from "evm-chains";
-import EVM from '$lib/demos_libs/xmlibs/chains/evm';
-//import XRPL from '$lib/demos_libs/xmlibs/chains/xrpl';
-//THIS FILE CONTAINS NOCODE DATA FOR CROSSCHAIN TRANSACTION
 
 class Operation{
     constructor({chain = null, subchain = null, is_evm = false, rpc = null, tasktype = null, taskparams = {}}){
@@ -69,7 +66,6 @@ const mychains = [
         is_evm:false,
         token:"XRP",
         icon:"/crypto-icons/xrp.svg",
-        disabled:true,
 
     },
     {
@@ -89,11 +85,6 @@ const mychains = [
         disabled:true,
     },
 ]
-
-const chainobjs = {
-    evm: EVM,
-    //xrpl: XRPL
-}
 
 const chains = mychains.concat(getAllChains().filter(c=>c.chainId!==1).map(c=>{
     return {
@@ -196,4 +187,4 @@ const tasks = [
     }
 ]
 
-export {chains, chainobjs, tasks, Operation, Conditional, blockIcons};
+export {chains, tasks, Operation, Conditional, blockIcons};

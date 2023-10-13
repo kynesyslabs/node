@@ -8,11 +8,11 @@ export default class XRPL {
 	// if the user specifies the rpc_url in the constructor,
 	// as we cannot use await in the constructor
 	constructor(rpc_url=null) {
+		this.wallet = null
+		this.provider = null
 		if (rpc_url) {
 			this.setRPC(rpc_url)
 		}
-		this.wallet = null
-		this.provider = null
     }
 
 	// INFO Set of methods for connecting to an RPC while
@@ -66,7 +66,7 @@ export default class XRPL {
             "Amount": xrpl.xrpToDrops(amount),
             "Destination": address,
         })
-		let signedTx = await this.wallet.sign(prepared) // REVIEW Is this all?
+		let signedTx = await this.wallet.sign(tx) // REVIEW Is this all?
 		console.log(signedTx)
 		return signedTx
 	}
@@ -75,5 +75,11 @@ export default class XRPL {
 	// INFO Generic empty tx skeleton for this chain
 	async getEmptyTransaction() {
 		// TODO
+	}
+
+	//megabudino was here – return the address of the wallet
+	getAddress()
+	{
+		return this.wallet.address;
 	}
 }

@@ -6,8 +6,9 @@
     import '$lib/styles/surfaces.css';
     import demos from "$lib/demos.js"
     import {updateWallet, updateRpcAddress} from "$lib/env.js";
-    let logcheck = false;
 
+    let logcheck = false;
+    
     async function login(prvkey)
     {
         let key
