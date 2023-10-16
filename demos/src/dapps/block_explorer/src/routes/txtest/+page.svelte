@@ -3,13 +3,6 @@
     import demos from '$lib/demos.js';
     import {transaction} from "$lib/demos_libs/utils/skeletons.js";
     import {wallet} from '$lib/env.js';
-    //console.log(data.skeleton);
-    onMount(async()=>{
-        /*let txprep = await demos.transactions.prepare(txdata);
-        let txsigned = await demos.transactions.sign(txprep, keypair.privateKey);
-        let txsent = await demos.transactions.broadcast(txsigned);
-        console.log(txsent);*/
-    })
     async function sendTransaction(ev){
         ev.preventDefault();
         let txdata = transaction;
@@ -31,6 +24,13 @@
 </script>
 
 <style>
+    .title{
+        display: flex;
+        align-items: center;
+        margin-bottom: 64px;
+        justify-content: center;
+        gap: 12px;
+    }
     .label{
         margin: 8px 0;
         opacity: .75;
@@ -66,29 +66,35 @@
     }
 </style>
 
-<form on:submit={sendTransaction} class="card txtest-body">
-    <div class="input-block">
-        <p class="label">Type</p>
-        <input class="smallinput"/>
+<div>
+    <div class="title">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="32" height="32"><g id="send-email--mail-send-email-paper-airplane"><path id="Subtract" fill="#ffffff" fill-rule="evenodd" d="m23.223.777-7.91 22.597-4.813-4.813-4.25 4.25v-7.25l8.719-6.975-.938-1.172-8.154 6.524L.626 8.686 23.223.777Z" clip-rule="evenodd"></path></g></svg>
+        <h2 style="position:relative;top:4px;">Raw transaction</h2>
     </div>
-    <div class="input-block">
-        <p class="label">From</p>
-        <input class="smallinput"/>
-    </div>
-    <div class="input-block">
-        <p class="label">To</p>
-        <input class="smallinput"/>
-    </div>
-    <div class="input-block">
-        <p class="label">Amount</p>
-        <input class="smallinput"/>
-    </div>
-    <div class="input-block">
-        <p class="label">Data</p>
-        <div class="multiple-input">
-            <input class="smallinput"/>
+    <form on:submit={sendTransaction} class="card txtest-body">
+        <div class="input-block">
+            <p class="label">Type</p>
             <input class="smallinput"/>
         </div>
-    </div>
-    <button class="primary" type="submit" style="width: 100%;">Send</button>
-</form>
+        <div class="input-block">
+            <p class="label">From</p>
+            <input class="smallinput"/>
+        </div>
+        <div class="input-block">
+            <p class="label">To</p>
+            <input class="smallinput"/>
+        </div>
+        <div class="input-block">
+            <p class="label">Amount</p>
+            <input class="smallinput"/>
+        </div>
+        <div class="input-block">
+            <p class="label">Data</p>
+            <div class="multiple-input">
+                <input class="smallinput"/>
+                <input class="smallinput"/>
+            </div>
+        </div>
+        <button class="primary" type="submit" style="width: 100%;">Send</button>
+    </form>
+</div>

@@ -5,7 +5,7 @@ import polyfillNode from 'rollup-plugin-polyfill-node'
 import vitePluginRequire from "vite-plugin-require";
 
 export default defineConfig({
-	plugins: [sveltekit(), vitePluginRequire(),],
+	plugins: [sveltekit(), vitePluginRequire.default(),],
 	test: {
 		include: ['src/**/*.{test,spec}.{js,ts}']
 	},
