@@ -58,6 +58,8 @@ export default class PeerManager {
         for await (const _peer of Object.values(this.peerList)) {
             const peerInstance = new Peer()
             peerInstance.identity = _peer.identity
+            peerInstance.connectionString = _peer.connectionString
+            peerInstance.socket = _peer.socket
             const onlinePeerStatus = await peerInstance.checkOnlineStatus()
             if (onlinePeerStatus.status === "online") {
                 onlinePeers.push(peerInstance)

@@ -1,3 +1,4 @@
+import { Entity } from "typeorm"
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
@@ -10,8 +11,20 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { DataSource } from "typeorm"
+
 import BlockSchema from "./schemas/block.schema"
 import TransactionSchema from "./schemas/transaction.schema"
+import MempoolSchema from "./schemas/mempool.schema"
+
+// import { Blocks } from "./entities/Blocks"
+// import { Consensus } from "./entities/Consensus"
+// import { Mempool } from "./entities/Mempool"
+// import { PgpKeyServer } from "./entities/PgpKeyServer"
+// import { ResponseRegistry } from "./entities/ResponseRegistry"
+// import { StatusHashes } from "./entities/StatusHashes"
+// import { StatusProperties } from "./entities/StatusProperties"
+// import { Transactions } from "./entities/Transactions"
+// import { Validators } from "./entities/Validators"
 
 class Datasource {
     private static instance: Datasource
@@ -21,7 +34,20 @@ class Datasource {
         this.dataSource = new DataSource({
             type: "sqlite",
             database: "./data/chain.db",
-            entities: [BlockSchema, TransactionSchema],
+            entities: [
+                BlockSchema,
+                TransactionSchema,
+                // MempoolSchema,
+                // Blocks,
+                // Consensus,
+                // Mempool,
+                // PgpKeyServer,
+                // ResponseRegistry,
+                // StatusHashes,
+                // StatusProperties,
+                // Transactions,
+                // Validators,
+            ],
             synchronize: true, // set this to false in production
             logging: false,
         })

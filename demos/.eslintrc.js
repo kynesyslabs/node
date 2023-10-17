@@ -15,7 +15,7 @@ module.exports = {
     parser: "@typescript-eslint/parser",
     plugins: ["@typescript-eslint"],
     rules: {
-        indent: ["error", 4, { SwitchCase: 1 }],
+        // indent: ["error", 4, { SwitchCase: 1 }],
         "linebreak-style": ["error", "unix"],
         quotes: ["error", "double"],
         semi: ["error", "never"],

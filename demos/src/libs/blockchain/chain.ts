@@ -61,14 +61,15 @@ export default class Chain {
         let response = await this.read(
             "SELECT number FROM blocks ORDER BY number ASC LIMIT 1",
         )
-        return response[0]
+        console.log(response)
+        return response[0].number
     }
     // INFO Get the last block hash
     static async getLastBlockHash() {
         let response = await this.read(
             "SELECT hash FROM blocks ORDER BY number ASC LIMIT 1",
         )
-        return response[0]
+        return response[0].hash
     }
     // INFO Get any block by its number
     static async getBlockByNumber(number: number): Promise<Block> {
@@ -86,17 +87,20 @@ export default class Chain {
     }
     // INFO Get a group of blocks by their status
     static async getBlockNumbersByStatus(status: string): Promise<number[]> {
-        return await this.read(
+        const blocks = await this.read(
             "SELECT number FROM blocks WHERE status=" + status,
         )
+
+        return blocks.map(block => block.number)
     }
     // INFO Get a group of blocks by their proposer
     static async getBlockNumbersByProposer(
         proposer: string,
     ): Promise<number[]> {
-        return await this.read(
+        const blocks = await this.read(
             "SELECT number FROM blocks WHERE proposer=" + proposer,
         )
+        return blocks.map(block => block.number)
     }
 
     static async getGenesisBlock(): Promise<Block> {
@@ -139,6 +143,28 @@ export default class Chain {
             native: native_state,
             properties: properties_state,
         }
+    }
+
+    static isGenesis(block: Block): boolean {
+        // Check if there are any ordered transactions
+        if (
+            block?.content?.ordered_transactions &&
+            block.content.ordered_transactions.length > 0
+        ) {
+            const firstTransaction: Transaction =
+                block.content.ordered_transactions[0]
+
+            // Check if the first transaction's type is "genesis"
+            return firstTransaction.content.type === "genesis"
+        }
+    }
+
+    static async getLastBlock(): Promise<Block> {
+        const lastBlock = await this.read(
+            "SELECT * FROM blocks ORDER BY number DESC LIMIT 1",
+        )
+
+        return lastBlock[0]
     }
 
     static async getOnlinePeersForLastThreeBlocks(): Promise<

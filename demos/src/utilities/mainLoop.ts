@@ -9,6 +9,7 @@ import Chain from "src/libs/blockchain/chain"
 import Transmission from "src/libs/communications/transmission"
 import ComLink from "src/libs/communications/comlink"
 import { pki } from "node-forge"
+import RepresentativeShard from "src/libs/consensus/types/PoR"
 
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
@@ -76,7 +77,7 @@ export default async function mainLoop(id: Identity) {
         }
 
         // every block write online list
-        const onlinePeers = peerManager.getOnlinePeers()
+        const onlinePeers = await peerManager.getOnlinePeers()
 
         // check if online peers have been online for 3 blocks
 
@@ -94,7 +95,7 @@ export default async function mainLoop(id: Identity) {
         } else {
             // We didn't find peers that have been online for 3 blocks. Use the online peers list as it is
             // In this case we assume the node is isolated, starting up or that other nodes are not online or still connencting to the network
-            currentlyOnlinePeers = await onlinePeers
+            currentlyOnlinePeers = onlinePeers
         }
 
         console.log("🐸🐸🐸 Family:")
@@ -106,9 +107,14 @@ export default async function mainLoop(id: Identity) {
 
         if (isConsensusTimeReached) {
             console.log("[MAIN LOOP] Consensus time reached")
+            // sharedState.getInstance().mainLoopPaused = true // Pause the main loop
             hasSentNodeOnlineTx = false // Reset it for the next cycle.
             sharedState.getInstance().consensusMode = true
             // TODO Start consensus methods here
+            // const shard = RepresentativeShard.getInstance().getShard()
+            // console.log("[MAIN LOOP] Shard:")
+            // console.log(shard)
+
             // At the end of the consensus period, the main loop should start again
             sharedState.getInstance().consensusMode = false
         }

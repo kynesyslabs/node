@@ -25,27 +25,27 @@ var term = require("terminal-kit").terminal
 import Hashing from "src/libs/crypto/hashing"
 
 export interface OperationResult {
-    success: boolean;
-    message: string;
+    success: boolean
+    message: string
 }
 
-export interface Operation { 
-    operator: string;
-    actor: string;
-    params: {}; // Documented in the chain itself
-    hash: string;
-    nonce: number;
-    timestamp: number;
-    status: boolean | "pending";
-    fees: TxFee;
+export interface Operation {
+    operator: string
+    actor: string
+    params: {} // Documented in the chain itself
+    hash: string
+    nonce: number
+    timestamp: number
+    status: boolean | "pending"
+    fees: TxFee
 }
 
 // WIP Making 'operations' registry more stable through db writing or file writing
 interface OperationRegistrySlot {
-    operation: Operation;
-    status: boolean | "pending";
-    result: OperationResult;
-    timestamp: number;
+    operation: Operation
+    status: boolean | "pending"
+    result: OperationResult
+    timestamp: number
 }
 
 export class OperationsRegistry {
@@ -76,8 +76,6 @@ export class OperationsRegistry {
     get(): OperationRegistrySlot[] {
         return this.operations
     }
-
-
 }
 
 // INFO Besides the static methods, the GLS store all the operations to be done in the current block so that they can be executed in order
@@ -177,7 +175,9 @@ export default class GLS {
             n = await Chain.getLastBlockNumber()
         }
         let stakes = await Chain.read(
-            "SELECT * FROM validators WHERE first_seen <= " + n + " ORDER BY first_seen DESC",
+            "SELECT * FROM validators WHERE first_seen <= " +
+                n +
+                " ORDER BY first_seen DESC",
         )
         // Hashing
         let total = 0
@@ -190,12 +190,18 @@ export default class GLS {
     // INFO The following getter is used to retrieve the list of all validators at a given block
     static async getGLSValidatorsAtBlock(blockNumber: number = null) {
         if (!blockNumber) {
-            blockNumber = await Chain.getLastBlockNumber()
+            console.log("No block number provided, getting the last one")
+            blockNumber = (await Chain.getLastBlock()).number
         }
+        console.log("blockNumber: " + blockNumber)
         let block_nodes = await Chain.read(
-            "SELECT * FROM validators WHERE valid_at<=" + blockNumber + " AND status=2 ORDER BY valid_at DESC",
+            "SELECT * FROM validators WHERE valid_at<=" +
+                blockNumber +
+                " AND status=2 ORDER BY valid_at DESC",
         )
-        if (!block_nodes) { return [] }
+        if (!block_nodes) {
+            return []
+        }
         return block_nodes
     }
 
@@ -203,7 +209,7 @@ export default class GLS {
     // NOTE While accepting a blockNumber, it defaults to the last one
     static async getGLSValidatorStatus(
         // NOTE We want the hexed string as it is stored like that on chain
-        publicKeyHex: string, 
+        publicKeyHex: string,
         blockNumber: number = null,
     ) {
         if (!blockNumber) {
@@ -212,8 +218,10 @@ export default class GLS {
         // Let's see if the validator is contained within the block
         let info = await Chain.read(
             "SELECT * FROM validators" +
-            " WHERE first_seen<=" + blockNumber +
-            " AND address=" + publicKeyHex,
+                " WHERE first_seen<=" +
+                blockNumber +
+                " AND address=" +
+                publicKeyHex,
         )
         // REVIEW Better handling of errors?
         try {
@@ -227,7 +235,11 @@ export default class GLS {
     // !SECTION Getters
 
     // SECTION Setters
-    static async setGLSNativeBalance(address: string, native: number, tx_hash: string) { 
+    static async setGLSNativeBalance(
+        address: string,
+        native: number,
+        tx_hash: string,
+    ) {
         // Updating tx list
         let tx_list = await Chain.read(
             "SELECT tx_list FROM status_native WHERE address='" + address + "'",
@@ -235,8 +247,12 @@ export default class GLS {
         // Create it if it doesn't exist
         console.log(tx_list)
         if (tx_list.length === 0) {
-            tx_list = [{tx_list: "[]"}]
-            await Chain.write("INSERT INTO status_native(address, balance, nonce, tx_list) VALUES('" + address + "','0','0', '[]')")
+            tx_list = [{ tx_list: "[]" }]
+            await Chain.write(
+                "INSERT INTO status_native(address, balance, nonce, tx_list) VALUES('" +
+                    address +
+                    "','0','0', '[]')",
+            )
         }
         console.log(tx_list)
         tx_list = JSON.parse(tx_list[0].tx_list)
@@ -244,10 +260,18 @@ export default class GLS {
         tx_list = JSON.stringify(tx_list)
         // Updating balance and tx_list on db
         let balance_response = await Chain.write(
-            "UPDATE status_native SET balance=" + native + " WHERE address='" + address + "'",
+            "UPDATE status_native SET balance=" +
+                native +
+                " WHERE address='" +
+                address +
+                "'",
         )
         let tx_list_response = await Chain.write(
-            "UPDATE status_native SET tx_list='" + tx_list + "' WHERE address='" + address + "'",
+            "UPDATE status_native SET tx_list='" +
+                tx_list +
+                "' WHERE address='" +
+                address +
+                "'",
         )
         // TODO Decide if we should use status_hashes too
         return [balance_response, tx_list_response]

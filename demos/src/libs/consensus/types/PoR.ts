@@ -9,7 +9,6 @@ import required from "src/utilities/required"
 import * as seedrandom from "seedrandom"
 
 import Mempool from "../../blockchain/mempool"
-import Cryptography from "src/libs/crypto/cryptography"
 
 /* INFO
 	This class is very strict about what you can and what you cannot do with it. This is by design to avoid
@@ -30,11 +29,10 @@ import Cryptography from "src/libs/crypto/cryptography"
 // INFO This class take ProofOfRepresentation and implements the PoR/QBFT methods needed for it to work correctly
 export default class RepresentativeShard {
     static instance: RepresentativeShard = null
-    
 
     // NOTE This will be filled once PoR is executed
     private shard: ProofOfRepresentation = null
-    
+
     // Singleton getter
     static getInstance(): RepresentativeShard {
         if (RepresentativeShard.instance == null) {
@@ -44,16 +42,18 @@ export default class RepresentativeShard {
     }
 
     // INFO We avoid to expose .shard directly so it can't be edited by mistake
-    getShard(): ProofOfRepresentation {
+    public async getShard(): Promise<ProofOfRepresentation> {
         let shard = this.shard
-        if (!shard) { return this.generateShard() }
+        if (!shard) {
+            return await this.generateShard()
+        }
         return shard
     }
 
     // INFO Generating the shard if needed
-    private generateShard(): ProofOfRepresentation {
+    private async generateShard(): Promise<ProofOfRepresentation> {
         let shard = new ProofOfRepresentation()
-        shard.getSeed()
+        await shard.getSeed()
         shard.selectRepresentativeShard()
         this.shard = shard
         return shard
@@ -63,9 +63,9 @@ export default class RepresentativeShard {
 }
 
 interface IValidator {
-	connectionURL: string;
-	publicKey_string: string;
-	publicKey ?: forge.pki.ed25519.BinaryBuffer
+    connectionURL: string
+    publicKey_string: string
+    publicKey?: forge.pki.ed25519.BinaryBuffer
 }
 class ProofOfRepresentation {
     private common_seed: string = null
@@ -75,8 +75,7 @@ class ProofOfRepresentation {
     // Immutable flag to indicate that the PoR instance has been already initialized and cannot be changed anymore
     private immutable: boolean = false
 
-    constructor() {
-    }
+    constructor() {}
 
     // INFO Creating the immutable common seed for this specific proof of representation session
     private async createSeed(on_block: number): Promise<string> {
@@ -91,7 +90,10 @@ class ProofOfRepresentation {
         let hashedStakes = await GLS.getGLSHashedStakes()
         let hashedPeers = Hashing.sha256(JSON.stringify(this.peers))
         // Combining the two immutable factors to improve unpredictability towards malicious validators
-        let combined = lastBlockHash.concat(hashedStakes).concat(nextBlockNumber.toString()).concat(hashedPeers)
+        let combined = lastBlockHash
+            .concat(hashedStakes)
+            .concat(nextBlockNumber.toString())
+            .concat(hashedPeers)
         let seed = Hashing.sha256(combined)
         this.common_seed = seed
         this.validators["header"] = {
@@ -120,7 +122,9 @@ class ProofOfRepresentation {
     }
 
     // INFO The selection algorithm
-    async selectRepresentativeShard(block_n: number = null): Promise<{ [key: string]: IValidator }> {
+    async selectRepresentativeShard(
+        block_n: number = null,
+    ): Promise<{ [key: string]: IValidator }> {
         required(this.common_seed, "Common seed is not initialized")
         required(this.peers, "Peers are not initialized")
         if (!block_n) {
@@ -164,10 +168,12 @@ class ProofOfRepresentation {
         return generatedList
     }
 
-    async verifyRepresentativeShard(block_n: number, shard: { [key: string]: IValidator }): Promise<boolean> {
+    async verifyRepresentativeShard(
+        block_n: number,
+        shard: { [key: string]: IValidator },
+    ): Promise<boolean> {
         let valid = true
         // TODO Verify that the validator list for a given block is valid
         return valid
     }
-
 }

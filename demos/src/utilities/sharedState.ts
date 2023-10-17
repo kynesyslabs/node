@@ -1,7 +1,8 @@
 // INFO This singleton is used to store the state of the application through different parts of the application.
 
 import * as forge from "node-forge"
-require("dotenv").config({path: "../../.commons" })
+import chain from "src/libs/blockchain/chain"
+require("dotenv").config({ path: "../../.commons" })
 import { Identity } from "src/libs/identity"
 
 export default class sharedState {
@@ -28,8 +29,7 @@ export default class sharedState {
 
     // !SECTION shared state variables
 
-    constructor() {
-    }
+    constructor() {}
 
     public static getInstance(): sharedState {
         if (!sharedState.instance) {
@@ -38,10 +38,24 @@ export default class sharedState {
         return sharedState.instance
     }
 
-    public getTimePassed(): number {
+    public async getTimePassed(): Promise<number> {
         this.currentTimestamp = Date.now()
-        let delta = this.currentTimestamp - this.lastTimestamp
-        this.lastTimestamp = this.currentTimestamp // FIXME This must be the last block timestamp
+
+        const lastBlock = await chain.getLastBlock()
+        chain.isGenesis(lastBlock)
+
+        const lastTimestamp = lastBlock.timestamp
+        let delta = this.currentTimestamp - lastTimestamp
+        // lastTimestamp = this.currentTimestamp // FIXME This must be the last block timestamp
+
+        console.log("this.lastTimestamp")
+        console.log(JSON.stringify(lastBlock))
+        console.log(this.lastTimestamp)
+        console.log("this.currentTimestamp")
+        console.log(this.currentTimestamp)
+        console.log("delta")
+        console.log(delta)
+
         return delta
     }
 
@@ -60,5 +74,4 @@ export default class sharedState {
     public getConsensusTime(): number {
         return Number(process.env.CONSENSUS_TIME)
     }
-
 }
