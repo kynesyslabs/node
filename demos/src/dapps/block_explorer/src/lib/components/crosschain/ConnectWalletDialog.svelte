@@ -2,24 +2,25 @@
     import {budinofade, budinotraslato} from "$lib/transitions";
     import EVM from '$lib/demos_libs/xmlibs/chains/evm';
     import XRPL from '$lib/demos_libs/xmlibs/chains/xrpl';
+    import {chains} from "$lib/chainscript.js";
 
     let chainobjs={
         "evm":EVM,
         "xrpl":XRPL
     }
 
-    let rpcaddresses = {
-        "evm":"https://eth.llamarpc.com",
-        "xrpl":"wss://xrplcluster.com"
-    }
-    
     export let connection;
     export let close;
     let error="";
+
     async function connectWallet(prvkey)
     {
         error = "";
-        let mychainwallet = await chainobjs[connection.id].create(rpcaddresses[connection.id]);
+        let mychainwallet;
+        if(chains.find(c=>connection.id==c.id).is_evm)
+            mychainwallet = await chainobjs["evm"].create(chains.find(c=>connection.id==c.id).rpcaddress);
+        else
+            mychainwallet = await chainobjs[connection.id].create(chains.find(c=>connection.id==c.id).rpcaddress);
         try
         {
             await mychainwallet.connectWallet(prvkey);
@@ -33,12 +34,18 @@
     }
 </script>
 
+<style>
+    .operationcard-label{
+        margin-bottom: 8px;
+    }
+</style>
+
 <div class="modal-background" transition:budinofade>
     <div transition:budinotraslato class="modal-txblock">
-        <h3 class="operationcard-label">Private key</h3>
+        <h4 class="operationcard-label">Private key</h4>
         <input on:input={(ev)=>{
             if(ev.target.value!=""){connectWallet(ev.target.value)}
-        }} placeholder="Paste here your private key"/>
+        }} placeholder="Paste here"/>
         {#if error != ""}
             <div class="alert-error">{error}</div>
         {/if}

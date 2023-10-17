@@ -43,7 +43,6 @@
     .subtitle{
         text-align: center;
         margin-top: 16px;
-        font-family: 'Neue Machina', sans-serif;
     }
 
     .card{
@@ -55,7 +54,7 @@
         gap: 16px;
         border-radius: 0;
         margin: 0 0 16px;
-        font-family: 'Neue Machina', sans-serif;
+        font-family: 'SourceCodePro', sans-serif;
         font-size: 1rem;
     }
     .card-footer{
@@ -63,7 +62,7 @@
         color: white;
         font-size: 1rem;
         margin: 16px 0 0;
-        font-family: 'Neue Machina', sans-serif;
+        font-family: 'SourceCodePro', sans-serif;
     }
     .card-footer:hover{
         color: var(--accent);
@@ -94,14 +93,15 @@
         grid-template-columns: auto 1fr;
         gap: 16px;
         opacity: .5;
+        align-items: center;
     }
 </style>
 
 <div class="container">
     <div>
         <div class="header-body">
-            <h1>DEMOS</h1>
-            <h2 class="subtitle">Block explorer</h2>
+            <!--<img src="/logo/Logo DEMOS White.svg" alt="Logo DEMOS" width="240px" style="display:block; margin:auto;"/>-->
+            <h3 class="subtitle">Discover Blocks and Transactions on the DEMOS Network</h3>
             <Searchbar prompt="Search for an hash"/>
         </div>
     </div>

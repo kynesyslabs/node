@@ -2,7 +2,7 @@ input:not([type='file'])
 {
     background-color: transparent;
     border: 1px solid var(--background3);
-    font-family: "Neue Machina", sans-serif;
+    font-family: 'SourceCodePro', sans-serif;
     height: 70px;
     color: #fff;
     font-size: 18px;
@@ -80,7 +80,7 @@ input:focus {
     text-decoration: unset;
     text-align: center;
     width: 100%;
-    font-family: "Neue Machina", sans-serif;
+    font-family: 'SourceCodePro', sans-serif;
 }
 
 @media (max-width: 1399px){

@@ -59,68 +59,6 @@ a {
     display: inline-block;
 }
 
-@font-face {
-    font-family: 'Neue Machina';
-    src: url('./assets/fonts/NeueMachina-Medium.woff2') format('woff2'),
-        url('./assets/fonts/NeueMachina-Medium.woff') format('woff');
-    font-weight: 500;
-    font-style: normal;
-    font-display: swap;
-}
-
-@font-face {
-    font-family: 'Neue Machina';
-    src: url('./assets/fonts/NeueMachina-Ultrabold.woff2') format('woff2'),
-        url('./assets/fonts/NeueMachina-Ultrabold.woff') format('woff');
-    font-weight: bold;
-    font-style: normal;
-    font-display: swap;
-}
-
-@font-face {
-    font-family: 'Neue Machina';
-    src: url('./assets/fonts/NeueMachina-Regular.woff2') format('woff2'),
-        url('./assets/fonts/NeueMachina-Regular.woff') format('woff');
-    font-weight: normal;
-    font-style: normal;
-    font-display: swap;
-}
-
-@font-face {
-    font-family: 'Neue Machina';
-    src: url('./assets/fonts/NeueMachina-Ultralight.woff2') format('woff2'),
-        url('./assets/fonts/NeueMachina-Ultralight.woff') format('woff');
-    font-weight: 200;
-    font-style: normal;
-    font-display: swap;
-}
-
-@font-face {
-    font-family: 'Neue Machina';
-    src: url('./assets/fonts/NeueMachina-Bold.woff2') format('woff2'),
-        url('./assets/fonts/NeueMachina-Bold.woff') format('woff');
-    font-weight: bold;
-    font-style: normal;
-    font-display: swap;
-}
-
-@font-face {
-    font-family: 'Neue Machina';
-    src: url('./assets/fonts/NeueMachina-Black.woff2') format('woff2'),
-        url('./assets/fonts/NeueMachina-Black.woff') format('woff');
-    font-weight: 900;
-    font-style: normal;
-    font-display: swap;
-}
-
-@font-face {
-    font-family: 'Neue Machina';
-    src: url('./assets/fonts/NeueMachina-Light.woff2') format('woff2'),
-        url('./assets/fonts/NeueMachina-Light.woff') format('woff');
-    font-weight: 300;
-    font-style: normal;
-    font-display: swap;
-}
 
 @media (min-width: 1400px) {
     body .container {
@@ -136,7 +74,6 @@ body h2 {
     line-height: 1.16667;
     letter-spacing: 0.5px;
     margin: 0;
-    font-family: 'Neue Machina';
 }
 
 body h3 {
@@ -146,7 +83,6 @@ body h3 {
     line-height: 1.1818;
     letter-spacing: 0.5px;
     margin: 0;
-    font-family: 'Neue Machina';
 }
 
 body .generalBtn {

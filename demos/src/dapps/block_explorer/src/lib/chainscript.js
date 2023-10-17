@@ -59,6 +59,7 @@ const mychains = [
         is_evm:true,
         token:"ETH",
         icon:"/crypto-icons/eth.svg",
+        rpc:"https://eth.llamarpc.com"
     },
     {
         id:"xrpl",
@@ -66,7 +67,7 @@ const mychains = [
         is_evm:false,
         token:"XRP",
         icon:"/crypto-icons/xrp.svg",
-
+        rpc:"wss://xrplcluster.com"
     },
     {
         id:"xlm",
@@ -86,14 +87,16 @@ const mychains = [
     },
 ]
 
+console.log(getAllChains());
+
 const chains = mychains.concat(getAllChains().filter(c=>c.chainId!==1).map(c=>{
     return {
-        id: uuidv4(),
+        id: c.chain,
         label: c.name,
         token: c.nativeCurrency.symbol,
         icon: null,
         is_evm: true, 
-        disabled: true,
+        rpc: c.rpc[0],
     }
 }));
 

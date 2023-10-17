@@ -1,22 +1,26 @@
 h1{
-    font-family: 'Neue Machina', sans-serif;
-    font-size: 3.75rem;
+    font-family: 'Inter', sans-serif;
+    font-size: 60px;
     text-align: center;
-    font-weight: 300;
+    font-weight: bold;
     margin-bottom: 0;
 }
 h2{
-    font-family: 'Neue Machina', sans-serif;
-    font-size: 2.25rem;
+    font-family: 'Inter', sans-serif;
+    font-size: 40px;
+    font-weight: 600;
 }
 h3{
-    font-family: 'Neue Machina', sans-serif;
-    font-size: 1.375rem;
+    font-family: 'SourceCodePro', sans-serif;
+    font-size: 30px;
     margin-top: 0;
+    font-weight: 600;
 }
 h4{
-    font-size: 1.1rem;
+    font-family: 'SourceCodePro', sans-serif;
+    font-size: 18px;
     margin: 0 0 8px;
+    font-weight: 400;
 }
 
 @media (max-width: 1399px) {
@@ -79,25 +83,13 @@ h4{
 
 
 @font-face {
-    font-family: 'Neue Machina';
-    src: url('/fonts/NeueMachina-Light.otf');
-    font-weight: normal;
+    font-family: 'Inter';
+    src: url('/fonts/Inter/Inter-VariableFont_sInt,wght.tff');
+    font-weight: 100 1000;
 }
 
 @font-face {
-    font-family: 'Neue Machina';
-    src: url('/fonts/NeueMachina-Ultrabold.otf');
-    font-weight: bold;
-}
-
-@font-face {
-    font-family: 'Helvetica Neue Light';
-    src: url('/fonts/HelveticaNeue Light.ttf');
-    font-weight: normal;
-}
-
-@font-face {
-    font-family: 'Helvetica Neue Light';
-    src: url('/fonts/HelveticaNeue Bold.ttf');
-    font-weight: bold;
+    font-family: 'SourceCodePro';
+    src: url('/fonts/Source_Code_Pro/SourceCodePro-VariableFont_wght.ttf');
+    font-weight: 100 1000;
 }

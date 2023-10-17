@@ -185,7 +185,6 @@
         padding: 24px;
     }
     .network-name{
-        font-size: 1.1rem;
         font-weight: bold;
         margin: 0 0 16px;
     }
@@ -229,7 +228,7 @@
     <h4 class="subtitle">Required wallets</h4>
     <div class="connections">
         <div class="wallet-connection card">
-            <p class="network-name">DEMOS</p>
+            <h4 class="network-name">DEMOS</h4>
             <div class="wallet-info">
                 <p class="wallet-address">{trim_address(Buffer.from($wallet.keypair.publicKey).toString("hex"))}</p>
                 <svg class="wallet-status" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="24" height="24"><g id="check-circle--checkmark-addition-circle-success-check-validation-add-form-tick"><path id="Subtract" fill="green" fill-rule="evenodd" d="M12 23c6.075 0 11-4.925 11-11S18.075 1 12 1 1 5.925 1 12s4.925 11 11 11Zm-.47-6.625 6-7.5-1.56-1.25-5.355 6.693-2.714-2.327-1.302 1.518 3.5 3 .786.674.646-.808Z" clip-rule="evenodd"></path></g></svg>
@@ -238,8 +237,10 @@
         {#each required_connections as required_wallet}
         <div class="wallet-connection card">
             <div class="wallet-info">
+                {#if chains.find(ch=>ch.id==required_wallet.id).icon}
                 <img style="margin-bottom: 20px;" alt="chain icon" src={chains.find(ch=>ch.id==required_wallet.id).icon} width="24" height="24"/>
-                <p class="network-name">{chains.find(ch=>ch.id==required_wallet.id).label}</p>
+                {/if}
+                <h4 class="network-name">{chains.find(ch=>ch.id==required_wallet.id).label}</h4>
             </div>
             {#if required_wallet.wallet}
                 <div class="wallet-info">

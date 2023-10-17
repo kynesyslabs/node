@@ -9,22 +9,22 @@
     import { updateWallet } from '$lib/env.js';
     const pages = [
         {
-            label:"Explorer",
+            label:"EXPLORER",
             href:"/blockexplorer",
             test:"blockexplorer"
         },
         {
-            label:"Crosschain",
+            label:"xM",
             href:"/crosschain",
             test:"crosschain"
         },
         {
-            label:"Web2",
+            label:"WEB2",
             href:"/web2",
             test:"web2"
         },
         {
-            label:"tx",
+            label:"TX",
             href:"/txtest",
             test:"txtest"
         }
@@ -80,7 +80,7 @@
         color: #fff;
         text-decoration: none;
         font-size: 1rem;
-        font-weight: 600;
+        font-weight: 100;
         cursor: pointer;
         height: 100%;
         display: flex;
@@ -91,7 +91,7 @@
         color: var(--accent);
         text-decoration: none;
         font-size: 1rem;
-        font-weight: 600;
+        font-weight: 400;
         cursor: pointer;
         position: relative;
         height: 100%;
@@ -192,7 +192,7 @@
 <div class="header" style={`z-index:${mobileMenuOpen?"2000":"500"};`}>
     <a href="/blockexplorer" style="flex-basis:100%;">
         <div>
-            <img alt="logo" class="logo" src="/LOGOMorph.svg"/>
+            <img alt="logo" class="logo" src="/logo/Logo DEMOS White.svg"/>
         </div>
     </a>
     <button on:click={()=>{mobileMenuOpen=true}} class="menu-button"><Fa icon={faBars} style="font-size:1.5rem"></Fa></button>

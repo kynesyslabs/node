@@ -12,7 +12,7 @@
 
     --background-min:rgb(25, 25, 25);
     --background2-min:rgb(45, 45, 45);
-    --background3:rgb(65, 65, 65);
+    --background3:#303030;
     --background4:rgb(85, 85, 85);
     --border-min: 2px solid black;
 }
@@ -68,9 +68,10 @@ html {
 body{
     background-color: black;
     color: white;
-    font-family: "Neue Machina", sans-serif;
+    font-family: 'SourceCodePro', sans-serif;
     margin: 0;
     height: 100%;
+    font-weight: 400;
 }
 
 button{
