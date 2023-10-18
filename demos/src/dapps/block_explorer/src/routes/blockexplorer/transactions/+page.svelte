@@ -1,6 +1,6 @@
 <script>
     import '$lib/global.css';
-	import TransactionGrid from '../../../lib/components/blockexplorer/TransactionGrid.svelte';
+	import TransactionGrid from '../TransactionGrid.svelte';
     import demos from '$lib/demos.js';
     import {rpcaddress} from '$lib/env.js';
     import CubeSpinning from '$lib/components/blockexplorer/CubeSpinning.svelte';

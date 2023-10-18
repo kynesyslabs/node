@@ -16,7 +16,7 @@
         <div class="block-icon-container generic-shadow">
             <img class="block-icon" alt="Block icon" src={blockIcon}/>
         </div>
-        <div style="width: 100px;">
+        <div>
             {#if block}
                 <a class="accessible" href={`/blockexplorer/blocks/${block.number}`}><p style="margin-top:0;margin-bottom:8px;">{block.number}</p></a>
                 <p style="margin: 0; opacity:.5; font-size:.9rem;">{timeAgo.format(block.timestamp*1000)}</p>

@@ -3,13 +3,13 @@
     import { faArrowRightLong, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
     import '$lib/global.css'
     import { goto } from '$app/navigation';
-	import Searchbar from '$lib/components/blockexplorer/HomeSearchbar.svelte';
+	import Searchbar from './HomeSearchbar.svelte';
     import demos from '$lib/demos.js';
     import { rpcaddress }  from '$lib/env.js';
-	import BlockRow from '$lib/components/blockexplorer/BlockRow.svelte';
+	import BlockRow from './BlockRow.svelte';
     import TimeAgo from 'javascript-time-ago';
     import en from 'javascript-time-ago/locale/en'
-	import TransactionRow from '$lib/components/blockexplorer/TransactionRow.svelte';
+	import TransactionRow from './TransactionRow.svelte';
 
 
     demos.connect($rpcaddress);
@@ -18,7 +18,7 @@
         if(!demos.connected)
         return;
         let blockNumber = JSON.parse(await demos.getLastBlockNumber());
-        let block = await demos.getBlockByNumber(blockNumber.number);
+        let block = await demos.getBlockByNumber(blockNumber);
         return block;
     }
 
@@ -40,9 +40,18 @@
     .header-body{
         position: relative;
     }
+    .title-container{
+        display: flex;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--background3);
+        padding-bottom: 16px;
+    }
+    .title{
+        margin: 0;
+        color: #A8ACAF
+    }
     .subtitle{
-        text-align: center;
-        margin-top: 16px;
+        margin-top: 50px;
     }
 
     .card{
@@ -55,12 +64,10 @@
         border-radius: 0;
         margin: 0 0 16px;
         font-family: 'SourceCodePro', sans-serif;
-        font-size: 1rem;
     }
     .card-footer{
         text-align: right;
         color: white;
-        font-size: 1rem;
         margin: 16px 0 0;
         font-family: 'SourceCodePro', sans-serif;
     }
@@ -101,7 +108,13 @@
     <div>
         <div class="header-body">
             <!--<img src="/logo/Logo DEMOS White.svg" alt="Logo DEMOS" width="240px" style="display:block; margin:auto;"/>-->
-            <h3 class="subtitle">Discover Blocks and Transactions on the DEMOS Network</h3>
+            <div class="title-container">
+                <h2 class="title">Block Explorer</h2>
+                <svg width="45" height="45" viewBox="0 0 45 45" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M1.08294 3.61158L7.72346 3.915L6.67399 33.1931L39.7929 0.0741859L44.9254 5.20667L11.8065 38.3256L41.0846 37.2761L41.388 43.9167L0.79083 44.5107L0.488918 44.2088L1.08294 3.61158Z" fill="var(--background3)"/>
+                </svg>
+            </div>
+            <h4 class="subtitle">Discover Blocks and Transactions on the DEMOS Network</h4>
             <Searchbar prompt="Search for an hash"/>
         </div>
     </div>
@@ -128,7 +141,7 @@
             </a>
         </div>
         <div class="section-container">
-            <h3 class="card-header">Latest transactions</h3>
+            <h4 class="card-header">Latest transactions</h4>
             <div class="card">
                 {#await getBlock()}
                     <TransactionRow/>

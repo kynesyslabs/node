@@ -1,7 +1,8 @@
 <style>
     .input-container {
-        margin: 50px auto 80px;
+        margin: 16px auto 64px;
         position: relative;
+        background-color: black;
     }
 </style>
 
