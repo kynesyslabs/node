@@ -1,6 +1,6 @@
 <script>
     import {chains, tasks} from '$lib/chainscript.js';
-	import TaskParam from "$lib/components/crosschain/TaskParam.svelte";
+	import TaskParam from "./TaskParam.svelte";
 	import ChainSelection from "$lib/components/inputs/ChainSelection.svelte";
     import {budinofade, budinotraslato} from '$lib/transitions.js';
     import {cloneDeep} from 'lodash';

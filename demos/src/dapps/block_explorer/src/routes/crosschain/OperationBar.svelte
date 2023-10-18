@@ -1,6 +1,6 @@
 <script>
     import { v4 as uuidv4 } from 'uuid';
-    import DNDs from '$lib/components/crosschain/DNDs.svelte';
+    import DNDs from './DNDs.svelte';
     import Fa from "svelte-fa";
 	import { faChevronRight, faChevronLeft } from "@fortawesome/free-solid-svg-icons";
 
@@ -45,9 +45,10 @@
         border-top: none;
         border-bottom: none;
         border-left: none;
-        transition: left .3s ease-in-out;
+        transition: transform .3s ease-in-out;
         z-index: 1000;
         border-right: 1px solid var(--background3);
+        background-color: black;
     }
     .available-blocks h4{
         margin: 0 0 8px;
@@ -85,12 +86,14 @@
         .available-blocks{
             position: fixed;
             z-index: 1000;
-            left: calc(-100% + 64px);
+            left: 0;
+            transform: translate(-100%);
         }
         .open{
             left: 0;
             position: fixed;
             z-index: 1000;
+            transform: translate(0);
         }
         .minimizedsidebar{
             display: flex;

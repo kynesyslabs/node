@@ -1,5 +1,5 @@
 <script>
-    import CodeEditor from "../CodeEditor.svelte";
+    import CodeEditor from "$lib/components/CodeEditor.svelte";
     export let required
     export let label;
     export let value;

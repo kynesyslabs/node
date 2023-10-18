@@ -1,6 +1,6 @@
 <script>
-	import OperationEditor from "$lib/components/crosschain/OperationEditor.svelte";
-	import OperationCard from "$lib/components/crosschain/OperationCard.svelte";
+	import OperationEditor from "./OperationEditor.svelte";
+	import OperationCard from "./OperationCard.svelte";
     import XMTransactions from "$lib/demos_libs/XMTransactions.js";
     import demos from "$lib/demos.js"
     import { rpcaddress, wallet }  from '$lib/env.js';
@@ -8,7 +8,7 @@
     import cloneDeep from 'lodash/cloneDeep';
     import { Buffer } from "buffer";
     import {chains} from "$lib/chainscript.js";
-	import ConnectWalletDialog from "../../lib/components/crosschain/ConnectWalletDialog.svelte";
+	import ConnectWalletDialog from "./ConnectWalletDialog.svelte";
 
    //localStorage.clear("operations");
 
@@ -176,9 +176,21 @@
     }
     .connections{
         display: grid;
-        grid-template-columns: 1fr 1fr 1fr 1fr;
+        grid-template-columns: 1fr 1fr 1fr;
         gap: 24px;
         margin-bottom: 64px;
+    }
+    @media screen and (max-width: 1250px)
+    {
+        .connections{
+            grid-template-columns: 1fr 1fr;
+        }
+    }
+    @media screen and (max-width: 800px)
+    {
+        .connections{
+            grid-template-columns: 1fr;
+        }
     }
     .wallet-connection{
         width: 100%;

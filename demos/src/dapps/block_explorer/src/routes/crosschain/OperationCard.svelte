@@ -74,6 +74,12 @@
                 thisop.data.conditional = false
         }
     }
+
+    function trim_address(str) {
+        if (str.length <= 20) 
+        return str;
+        return str.substr(0, 10) + '...' + str.substr(str.length-4, str.length);
+    }
 </script>
 <style>
     .operationcard-label{
@@ -183,7 +189,7 @@
                 <div class="params-preview">
                     {#each taskinfo.params as param}
                         {#if operation.data.task.params[param.id]&&param.type!=="json"}
-                        <p class="ellipsis">{param.label}: <span style="font-weight: normal;">{operation.data.task.params[param.id]}</span></p>
+                        <p class="ellipsis">{param.label}: <span style="font-weight: normal;">{param.type=="address"?trim_address(operation.data.task.params[param.id]):operation.data.task.params[param.id]}</span></p>
                         {/if}
                     {/each}
                 </div>

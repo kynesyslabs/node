@@ -1,7 +1,7 @@
 <script>
     import Header from "$lib/components/Header.svelte";
     import Footer from "$lib/components/Footer.svelte"; 
-	import OperationBar from "$lib/components/crosschain/OperationBar.svelte";
+	import OperationBar from "./OperationBar.svelte";
     import {wallet} from '$lib/env.js';
 </script>
 

@@ -17,7 +17,6 @@
     let selectrpc = false;
 </script>
 <style>
-
     .footer{
         max-width: 1440px;
         margin: 16px auto;
@@ -67,6 +66,7 @@
 
 <div class="background">
 </div>-->
+<div class="footer-container">
 <div class="footer">
     <p class="companyname">//. kynesys</p>
     <div class="footer-links">
@@ -79,4 +79,5 @@
     <RPCselection close={()=>{selectrpc = false}}/>
     {/if}
     <p>All rights reserved</p>
+</div>
 </div>
