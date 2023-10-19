@@ -3,7 +3,8 @@
 	import TransactionGrid from '../TransactionGrid.svelte';
     import demos from '$lib/demos.js';
     import {rpcaddress} from '$lib/env.js';
-    import CubeSpinning from '$lib/components/blockexplorer/CubeSpinning.svelte';
+    import CubeSpinning from '../CubeSpinning.svelte';
+	import PageTitle from '../../../lib/components/PageTitle.svelte';
 
     demos.connect($rpcaddress);
 
@@ -27,7 +28,7 @@
 {#await getTransactions()}
     <CubeSpinning/>
 {:then transactions}
-    <h2 class="title">Transactions</h2>
+    <PageTitle>Transactions</PageTitle>
     <TransactionGrid transactions={transactions}/>
 {:catch}
     <p style="text-align: center;">Something went wrong</p>

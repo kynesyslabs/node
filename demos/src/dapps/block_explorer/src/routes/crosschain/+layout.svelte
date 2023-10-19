@@ -10,11 +10,6 @@
         display: grid;
         grid-template-columns: auto 1fr;
     }
-    .wrapper{
-        min-height: 100dvh;
-        display: flex;
-        flex-direction: column;
-    }
     .alert-container{
         display: flex;
         justify-content: center;
@@ -47,12 +42,10 @@
     <OperationBar/>
     <div style="padding:0 24px; max-width:1440px;margin:auto;width:100%;">
         <Header />
-        <div class="wrapper">
-            <main>
-                <slot/>
-            </main>
-            <Footer/>
-        </div>
+        <main>
+            <slot/>
+        </main>
+        <Footer/>
     </div>
 </div>
 {:else}

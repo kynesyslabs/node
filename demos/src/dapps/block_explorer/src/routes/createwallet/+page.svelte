@@ -5,6 +5,7 @@
 	import Fa from 'svelte-fa';
 	import { faDownload } from '@fortawesome/free-solid-svg-icons';
     import {updateWallet} from '$lib/env.js';
+    import PageTitle from '$lib/components/PageTitle.svelte';
     let logged = demos.DemosWebAuth.getInstance().loggedIn;
     let created = false;
     if(!logged)
@@ -39,7 +40,7 @@
 </style>
 
 {#if created}
-<h2>Wallet created!</h2>
+<PageTitle>Wallet created!</PageTitle>
 <div class="private-output-head">
     <p style="margin:0">This is the key for your brand new wallet!</p>
     <CopyButton text={created[1].privateKey}/>

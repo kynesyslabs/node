@@ -6,11 +6,6 @@
 </script>
 
 <style>
-    .wrapper{
-        min-height: 100dvh;
-        display: flex;
-        flex-direction: column;
-    }
     main{
         margin: 64px 0;
         flex: 1;

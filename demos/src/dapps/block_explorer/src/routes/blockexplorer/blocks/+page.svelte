@@ -4,7 +4,8 @@
     import {faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
     import demos from '$lib/demos.js';
     import {rpcaddress} from '$lib/env.js';
-    import CubeSpinning from '$lib/components/blockexplorer/CubeSpinning.svelte';
+    import CubeSpinning from '../CubeSpinning.svelte';
+	import PageTitle from '../../../lib/components/PageTitle.svelte';
 
     demos.connect($rpcaddress);
 
@@ -93,7 +94,7 @@
 {#await getBlocks()}
     <CubeSpinning/>
 {:then blocks} 
-    <h2 class="title">DEMOS Blocks</h2>
+    <PageTitle>DEMOS Blocks</PageTitle>
     <div class="card">
         <div class="card-header">   
             <p class="card-header-label">Total of 1 blocks</p>
@@ -106,7 +107,7 @@
             </div>
             <div class="transactions-grid">
                 {#each blocks as block}
-                    <a class="accessible grid-cell" href={`/blocks/${block.number}`}><p class="grid-cell">{block.number}</p></a>
+                    <a class="accessible grid-cell" href={`/blockexplorer/blocks/${block.number}`}><p class="grid-cell">{block.number}</p></a>
                     <p class="grid-cell">{block.timestamp}</p>
                     <p class="grid-cell">{block.content.ordered_transactions.length}</p>
                     <p class="grid-cell">{block.proposer}</p>

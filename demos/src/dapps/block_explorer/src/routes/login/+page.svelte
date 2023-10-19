@@ -1,6 +1,7 @@
 <script>
     import demos from '$lib/demos.js';
     import { wallet, updateWallet } from '$lib/env.js';
+    import PageTitle from '$lib/components/PageTitle.svelte';
     function upload(e)
     {
         const file = e.target.files[0];
@@ -78,8 +79,8 @@
     }
 </style>
 
+<PageTitle>Connect wallet</PageTitle>
 <div class="container">
-    <h2 style="text-align: center;">Connect wallet</h2>
     <div class="card">
         {#if $wallet.loggedIn}
             <p style="margin:0">Succesful login!</p>

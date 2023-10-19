@@ -6,17 +6,11 @@
 </script>
 
 <style>
-    .wrapper{
-        min-height: 100dvh;
-        display: flex;
-        flex-direction: column;
-    }
     main{
         margin: 64px 0;
         flex: 1;
         overflow: hidden;
     }
-
     .content-container{
         max-width: 1440px;
         margin: auto;
@@ -30,8 +24,8 @@
     }
 </style>
 
+<div class="master-container">
 <Header />
-<div class="wrapper">
     <main>
         {#key data.url}
                 <div class="content-container" in:fly={{ x: 200, duration: 300, delay: 300 }} out:fly={{ x: -200, duration: 300 }}>
@@ -41,5 +35,4 @@
     </main>
     <Footer/>
 </div>
-
 

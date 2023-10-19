@@ -4,6 +4,7 @@
     import {budinoslide} from '$lib/transitions.js';
     import demos from '$lib/demos.js';
     import {rpcaddress} from '$lib/env.js';
+    import PageTitle from '$lib/components/PageTitle.svelte';
 
     demos.connect($rpcaddress);
 
@@ -100,14 +101,9 @@
 </script>
 <style>
     .title{
-        display: flex;
-        align-items: center;
-        margin-bottom: 64px;
-        justify-content: center;
-        gap: 12px;
+        margin: 0;
     }
     .subtitle{
-        text-align: center;
         margin-bottom: 16px;
     }
     .inputcontainer{
@@ -154,10 +150,7 @@
     }
 </style>
 <div>
-    <div class="title">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 32 32" height="32" width="32"><g id="earth-2--planet-earth-globe-world"><path id="Union" fill="#fefefe" fill-rule="evenodd" d="m23.986666666666665 6.6 -9.168 0 0 7.186666666666666 5.538666666666666 4.998666666666667v8.756A12.338666666666665 12.338666666666665 0 0 0 23.986666666666665 6.601333333333333ZM12.559999999999999 27.848v-7.521333333333333l-8.113333333333333 0a12.363999999999999 12.363999999999999 0 0 0 8.111999999999998 7.52ZM16 1C7.715999999999999 1 1 7.715999999999999 1 16S7.715999999999999 31 16 31 31 24.284 31 16 24.284 1 16 1Z" clip-rule="evenodd" stroke-width="1.3333333333333333"></path></g></svg>
-        <h3 style="position:relative;top:4px;margin-bottom:0;">Web2 Request</h3>
-    </div>
+    <PageTitle>Web2 request</PageTitle>
     <div style="margin-bottom: 64px;">
         <div class="inputcontainer">
             <Combobox value="GET" options={requestType} style="border-right:none!important;height:100%;width:150px;font-weight:bold;"/>

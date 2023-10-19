@@ -31,15 +31,12 @@
 </style>
 
 <Header />
-<div class="wrapper">
-    <main>
-        {#key data.url}
-                <div class="content-container" in:fly={{ x: 200, duration: 300, delay: 300 }} out:fly={{ x: -200, duration: 300 }}>
-                    <slot/>
-                </div>
-        {/key}
-    </main>
-    <Footer/>
-</div>
-
+<main>
+    {#key data.url}
+            <div class="content-container" in:fly={{ x: 200, duration: 300, delay: 300 }} out:fly={{ x: -200, duration: 300 }}>
+                <slot/>
+            </div>
+    {/key}
+</main>
+<Footer/>
 

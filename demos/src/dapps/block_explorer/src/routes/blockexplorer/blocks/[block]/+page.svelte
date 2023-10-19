@@ -6,7 +6,8 @@
     import blockIcon from '$lib/assets/icons/cube-icon.png';
     import demos from "$lib/demos.js";
     import {rpcaddress} from "$lib/env.js";
-	import CubeSpinning from '$lib/components/blockexplorer/CubeSpinning.svelte';
+	import CubeSpinning from '../../CubeSpinning.svelte';
+    import PageTitle from '$lib/components/PageTitle.svelte';
 
     demos.connect($rpcaddress);
     async function getBlock()
@@ -148,7 +149,7 @@
 {#await getBlock()}
     <CubeSpinning/>
 {:then block} 
-    <div class="card-header">
+    <!--<div class="card-header">
         <button class="secondary adjacent-button">
             <Fa style="position:relative;top:1px;" icon={faArrowLeftLong}></Fa>
         </button>
@@ -159,8 +160,8 @@
         <button class="secondary adjacent-button">
             <Fa style="position:relative;top:1px;" icon={faArrowRightLong}></Fa>
         </button>        
-    </div>
-
+    </div>-->
+    <PageTitle>Block #{block.number}</PageTitle>
     <div class="card">
         <div class="info-grid">
             <p class="info-title">Status:</p>

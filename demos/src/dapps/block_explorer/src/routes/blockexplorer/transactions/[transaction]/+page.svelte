@@ -5,7 +5,8 @@
 	import CopyButton from '$lib/components/CopyButton.svelte';
     import demos from "$lib/demos.js";
     import {rpcaddress} from "$lib/env.js";
-    import CubeSpinning from '$lib/components/blockexplorer/CubeSpinning.svelte';
+    import CubeSpinning from '../../CubeSpinning.svelte';
+	import PageTitle from '../../../../lib/components/PageTitle.svelte';
 
     demos.connect($rpcaddress);
 
@@ -86,14 +87,7 @@
 {#await getTransaction()}
     <CubeSpinning/>
 {:then transaction}
-    <div class="card-header">
-        <div class="block-header">
-            <div class="block-icon-container generic-shadow">
-                <img class="block-icon" alt="Block icon" src={transIcon}/>
-            </div>
-            <h3 class="ellipsis" style="margin: 0;">Transaction details</h3>
-        </div>      
-    </div>
+    <PageTitle>Transaction details</PageTitle>
     <div class="card">
         <div class="info-grid">
             <p class="info-title">Hash:</p>

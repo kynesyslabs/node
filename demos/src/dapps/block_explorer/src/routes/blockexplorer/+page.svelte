@@ -10,6 +10,7 @@
     import TimeAgo from 'javascript-time-ago';
     import en from 'javascript-time-ago/locale/en'
 	import TransactionRow from './TransactionRow.svelte';
+    import PageTitle from '$lib/components/PageTitle.svelte';
 
 
     demos.connect($rpcaddress);
@@ -39,16 +40,6 @@
     }
     .header-body{
         position: relative;
-    }
-    .title-container{
-        display: flex;
-        justify-content: space-between;
-        border-bottom: 1px solid var(--background3);
-        padding-bottom: 16px;
-    }
-    .title{
-        margin: 0;
-        color: #A8ACAF
     }
     .subtitle{
         margin-top: 50px;
@@ -108,12 +99,7 @@
     <div>
         <div class="header-body">
             <!--<img src="/logo/Logo DEMOS White.svg" alt="Logo DEMOS" width="240px" style="display:block; margin:auto;"/>-->
-            <div class="title-container">
-                <h2 class="title">Block Explorer</h2>
-                <svg width="45" height="45" viewBox="0 0 45 45" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M1.08294 3.61158L7.72346 3.915L6.67399 33.1931L39.7929 0.0741859L44.9254 5.20667L11.8065 38.3256L41.0846 37.2761L41.388 43.9167L0.79083 44.5107L0.488918 44.2088L1.08294 3.61158Z" fill="var(--background3)"/>
-                </svg>
-            </div>
+            <PageTitle>Block Explorer</PageTitle>
             <h4 class="subtitle">Discover Blocks and Transactions on the DEMOS Network</h4>
             <Searchbar prompt="Search for an hash"/>
         </div>

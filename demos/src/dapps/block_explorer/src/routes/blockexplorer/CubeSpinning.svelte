@@ -9,6 +9,7 @@
         left: 50%;
         margin-left: -50px;
         margin-top: 64px;
+        margin-bottom: 128px;
     }
 
     .cube div {

@@ -2,6 +2,7 @@
     import demos from '$lib/demos.js';
     import {transaction} from "$lib/demos_libs/utils/skeletons.js";
     import {wallet} from '$lib/env.js';
+    import PageTitle from '$lib/components/PageTitle.svelte';
     async function sendTransaction(ev){
         ev.preventDefault();
         let txdata = transaction;
@@ -24,11 +25,7 @@
 
 <style>
     .title{
-        display: flex;
-        align-items: center;
-        margin-bottom: 64px;
-        justify-content: center;
-        gap: 12px;
+        margin: 0;
     }
     .label{
         margin: 8px 0;
@@ -71,10 +68,7 @@
 </style>
 
 <div>
-    <div class="title">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="32" height="32"><g id="send-email--mail-send-email-paper-airplane"><path id="Subtract" fill="#ffffff" fill-rule="evenodd" d="m23.223.777-7.91 22.597-4.813-4.813-4.25 4.25v-7.25l8.719-6.975-.938-1.172-8.154 6.524L.626 8.686 23.223.777Z" clip-rule="evenodd"></path></g></svg>
-        <h3 style="position:relative;top:4px;margin-bottom:0;">Raw transaction</h3>
-    </div>
+    <PageTitle>Raw transaction</PageTitle>
     <form on:submit={sendTransaction} class="card">
         <div class="txtest-body">
             <div class="input-block">
