@@ -144,13 +144,15 @@ class ProofOfRepresentation {
             // Updating the seed so that is identical for all but dynamic for the size of the shard
             let seed = baseSeed.concat(i.toString())
             // Seeding Math.random() with the seed value
-            seedrandom(seed, { global: true })
+            seedrandom.xorwow(seed, { global: true })
             // Getting a decimal value between 0 and 1
             let decimalRandom = Math.random()
             // Getting an integer value between 0 and the number of peers
             let integerRandom = Math.floor(decimalRandom * this.peers.length) // REVIEW Does this make sense?
             let selectedPeer = this.peers[integerRandom]
+            console.log(this.peers.length, integerRandom, selectedPeer)
             // Assigning the validator to the list
+            console.log(selectedPeer)
             let validator = {
                 connectionURL: selectedPeer.connectionString,
                 publicKey_string: selectedPeer.identity.toString("hex"), // REVIEW Is this correct?

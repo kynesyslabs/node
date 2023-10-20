@@ -32,6 +32,7 @@ export default class Chain {
             return await db.getDataSource().query(sql_query)
         } catch (err) {
             console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
+            console.error(err)
             throw err
         }
     }
@@ -42,6 +43,7 @@ export default class Chain {
             return await db.getDataSource().query(sql_query)
         } catch (err) {
             console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
+            console.error(err)
             throw err
         }
     }

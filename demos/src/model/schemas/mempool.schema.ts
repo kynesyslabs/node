@@ -20,9 +20,14 @@ const MempoolSchema = new typeorm.EntitySchema({
         },
         current: {
             type: "int",
+            primary: true,
             nullable: true,
         },
         transactions: {
+            type: "text",
+            nullable: true,
+        },
+        headers: {
             type: "text",
             nullable: true,
         },

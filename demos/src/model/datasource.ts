@@ -37,7 +37,7 @@ class Datasource {
             entities: [
                 BlockSchema,
                 TransactionSchema,
-                // MempoolSchema,
+                MempoolSchema,
                 // Blocks,
                 // Consensus,
                 // Mempool,
