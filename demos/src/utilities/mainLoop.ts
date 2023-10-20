@@ -107,13 +107,13 @@ export default async function mainLoop(id: Identity) {
 
         if (isConsensusTimeReached) {
             console.log("[MAIN LOOP] Consensus time reached")
-            // sharedState.getInstance().mainLoopPaused = true // Pause the main loop
+            sharedState.getInstance().mainLoopPaused = true // Pause the main loop
             hasSentNodeOnlineTx = false // Reset it for the next cycle.
             sharedState.getInstance().consensusMode = true
             // TODO Start consensus methods here
-            // const shard = RepresentativeShard.getInstance().getShard()
-            // console.log("[MAIN LOOP] Shard:")
-            // console.log(shard)
+            const shard = RepresentativeShard.getInstance().getShard()
+            console.log("[MAIN LOOP] Shard:")
+            console.log(shard)
 
             // At the end of the consensus period, the main loop should start again
             sharedState.getInstance().consensusMode = false
