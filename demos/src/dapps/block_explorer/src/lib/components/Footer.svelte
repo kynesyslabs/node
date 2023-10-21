@@ -28,6 +28,14 @@
         border-top: 1px solid var(--background3);
         padding: 40px 0;
     }
+    @media screen and (max-width: 768px){
+        .footer{
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 16px;
+        }
+    }
     .footer-links{
         display: flex;
         gap: 16px;
