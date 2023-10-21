@@ -1,6 +1,6 @@
 .block-card{
     display: grid;
-    grid-template-columns: auto 1fr 100px;
+    grid-template-columns: 1fr 1fr 100px;
     gap: 16px;
     padding: 24px;
     align-items: center;
@@ -45,4 +45,5 @@
     font-size: .8rem;
     /*margin: 8px;*/
     margin: 0;
+    width: 100%;
 }

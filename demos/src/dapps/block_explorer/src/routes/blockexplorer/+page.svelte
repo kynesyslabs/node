@@ -115,7 +115,7 @@
                     <BlockRow block={block}/>
                 {:catch error}
                     <div class="error-card">
-                        <Fa icon={faTriangleExclamation} size="2.5x"></Fa>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="40" height="40"><g id="warning-triangle--frame-alert-warning-triangle-exclamation-caution"><path id="Subtract" fill="#ffffff" fill-rule="evenodd" d="m12 1.5-11 21h22l-11-21ZM11 16v-6h2v6h-2Zm0 2v2h2v-2h-2Z" clip-rule="evenodd"></path></g></svg>
                         <p>Something went wrong</p>
                     </div>
                 {/await}
@@ -137,7 +137,7 @@
                     {/each}
                 {:catch error}
                     <div class="error-card">
-                        <Fa icon={faTriangleExclamation} size="2.5x"></Fa>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="40" height="40"><g id="warning-triangle--frame-alert-warning-triangle-exclamation-caution"><path id="Subtract" fill="#ffffff" fill-rule="evenodd" d="m12 1.5-11 21h22l-11-21ZM11 16v-6h2v6h-2Zm0 2v2h2v-2h-2Z" clip-rule="evenodd"></path></g></svg>
                         <p>Something went wrong</p>
                     </div>
                 {/await}
