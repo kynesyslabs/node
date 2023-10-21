@@ -191,3 +191,39 @@ button{
     color: var(--lgray);
     margin-bottom: 50px;
 }
+
+@keyframes loadStarted{
+    0%{
+        width: 0%;
+        left: 0;
+    }
+    100%{
+        width: 100%;
+        left: 0;
+    }
+
+}
+
+@keyframes loadFinished{
+    0%{
+        right: 0;
+        width: 100%;
+    }
+    100%{
+        width: 0%;
+        right: 0;
+    }
+}
+
+.delayed1::after{
+    animation-delay: .1s!important;
+}
+.delayed2::after{
+    animation-delay: .15s!important;
+}
+.delayed3::after{
+    animation-delay: .2s!important;
+}
+.delayed4::after{
+    animation-delay: .25s!important;
+}
