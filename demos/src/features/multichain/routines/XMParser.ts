@@ -2,6 +2,7 @@
 import * as multichain from "sdk/localsdk/multichain"
 import sendSigned from "./writes/sendSigned"
 import * as fs from "fs"
+import required from "src/utilities/required"
 
 // REVIEW Define XMScript (chs) class?
 
@@ -72,38 +73,80 @@ class XMParser {
 
     // INFO This returns the results of the execution of the XMScript
     static async execute(fullscript: XMScript): Promise<any> {
-        let script = fullscript.multichain_operation
-        // Preparing the result
-        // let result: Map<string, any> = new Map<string, any>()
-        let array_result: any[] = [] // REVIEW We can use this not named array as a backup while fixing the fixme
-        // Iterating over the operations 
-        // TODO Allow for conditionals (store & sort? etc)
-
-        for (let i = 0; i < Object.keys(script).length; i++) {
-            // Calling them by name
-            let funcName = Object.keys(script)[i]
-            console.log("[XMDebug] Executing: " + funcName)
-            let operation = script[funcName] // FIXME Here and hopefully jus here we got to get the name of the task to store results
-            // INFO Executing the operation
-            console.log(operation)
-            let {task} = operation
-            let current_result: [boolean, any]
-            // TODO Execute the operation
-            switch (task.type) {
-                // REVIEW A shy approach to make it work for writes
-                case "signedPayload":
-                    // FIXME Check connection to the chain and sned it too
-                    current_result = await sendSigned(operation)
-                    break
-                default:
-                    current_result = [false, "The operation requested is unknown"]
-            }
-            // (see FIXME above above) result.set(operation_name, current_result)
-            array_result.push(current_result)
+        let results = {}
+        let name: string, operation: IOperation
+        // Iterating over the operations
+        for (let id = 0; id < Object.keys(fullscript.multichain_operation).length; id++) {
+            name = Object.keys(fullscript.multichain_operation)[id]
+            operation = fullscript.multichain_operation[name]
+            results[name] = await XMParser.executeOperation(operation)
         }
-        return array_result
     }
 
+    // INFO Only executes one operation
+    static async executeOperation(operation: IOperation): Promise<any> {
+        let result = {}
+
+        // NOTE chainID is 0 except for EVM chains
+        // This snippet is what we need to support all the EVM chains
+        let chainID = 0
+        if (operation.is_evm) {
+            // Choosing the right chain ID
+            if(operation.chain == "ethereum") {
+                if(operation.subchain == "mainnet") {
+                    chainID = 1
+                } else if(operation.subchain == "ropsten") {
+                    chainID = 3
+                } else if(operation.subchain == "rinkeby") {
+                    chainID = 4
+                } else if(operation.subchain == "goerli") {
+                    chainID = 5
+                }
+            } else if(operation.chain == "bsc") {
+                if (operation.subchain == "mainnet") {
+                    chainID = 56
+                } else if (operation.subchain == "testnet") {
+                    chainID = 97
+                }
+            }
+            // Fallback on direct chain id
+            else {
+                // Subchain must be a number
+                chainID = parseInt(operation.subchain)
+                if (isNaN(chainID)) {
+                    console.log("Invalid subchain")
+                    return {result: "error", error: "Invalid subchain"}
+                }
+            }
+        }
+
+        // NOTE Deciding the operations
+        // TODO Checking if we have a conditional operation
+        // Types
+        if (operation.task.type == "pay") {
+            if (operation.is_evm) {
+                console.log("[XMScript Parser] EVM Pay")
+                // NOTE Sanity check on the signedPayloads length
+                let sanityCheck = required(operation.task.signedPayloads.length == 1, "Invalid signedPayloads length")
+                if (!sanityCheck) {
+                    return {result: "error", error: sanityCheck.message}
+                }
+                console.log("[XMScript Parser] Signed payload seems ok. Sending...")
+                // REVIEW Probably here we apply the same logic for every signed payload                 
+                let result = await multichain.EVM.getInstance(chainID).sendSignedTransaction(
+                    operation.task.signedPayloads[0],
+                )
+            } else {
+                console.log("NON EVM PAY")
+                if (operation.chain == "xrpl") {
+                    console.log("XRP PAY") // TODO                
+                }
+            }
+        }        
+        
+        // TODO
+        return result
+    }
 
 }
 

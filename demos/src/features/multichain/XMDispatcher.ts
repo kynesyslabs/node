@@ -18,6 +18,8 @@ export default class multichainDispatcher {
         console.log("\n===== END OF ANALYSIS ===== \n")
         console.log("[XMChain Digestion] Proceeding: execution phase")
         // REVIEW Execute
+        let result = multichainDispatcher.execute(data)
+        // return result
         return "Not yet implemented" // await multichainDispatcher.execute(data)        
     }
     
@@ -32,12 +34,13 @@ export default class multichainDispatcher {
     static async execute(script: XMScript): Promise<any> {
         let results = await XMParser.execute(script)
         // Inserting in mempool the results
-        multichainDispatcher.deriveMempoolOperation(
+        let derivedOperation = multichainDispatcher.deriveMempoolOperation(
             script,
             results,
             true,
         )
-        return results // REVIEW is this ok?
+        let overallResult = { results: results, derivedOperation: derivedOperation }
+        return overallResult // REVIEW is this ok?
     }
 
     static async deriveMempoolOperation(

@@ -16,6 +16,7 @@ import { Contract } from "ethers"
 import DefaultChain from "./types/defaultChain"
 import { IEVM } from "./types/defaultChain"
 import required from "src/utilities/required"
+import { sign } from "crypto"
 
 
 export default class EVM extends DefaultChain implements IEVM {
@@ -96,6 +97,17 @@ export default class EVM extends DefaultChain implements IEVM {
         if (!this.wallet) { throw new Error("Wallet not connected") }
         const txResponse = await this.wallet.sendTransaction(transaction) // NOTE It will be signed automatically
         return txResponse.hash
+    }
+
+    async sendRawTransaction (raw_transaction: string): Promise<string> {
+        // TODO
+        return ""
+    }
+
+    async sendSignedTransaction (signed_transaction: string): Promise<any> {
+        // TODO
+        if (!this.provider) { throw new Error("Provider not connected") }
+        return await this.provider.sendTransaction(signed_transaction)
     }
 
     // REVIEW Reader for contracts
