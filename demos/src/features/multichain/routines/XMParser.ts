@@ -4,6 +4,9 @@ import sendSigned from "./writes/sendSigned"
 import * as fs from "fs"
 import required from "src/utilities/required"
 
+// NOTE We define multichain into global so that we can use it later
+global.multichain = multichain
+
 // REVIEW Define XMScript (chs) class?
 
 export interface ITask {
@@ -120,34 +123,60 @@ class XMParser {
             }
         }
 
+        // REVIEW Would this work?
+        // Read operations
+        // let res = await multichain[operation.chain][operation.task.type](operation.task.params)
+
         // NOTE Deciding the operations
         // TODO Checking if we have a conditional operation
         // Types
         if (operation.task.type == "pay") {
+            // NOTE Generic sanity check on payloads
+            if (!checkSignedPayloads(1, operation.task.signedPayloads)) {
+                return {result: "error", error: "Invalid signedPayloads length"}
+            }
+            // ANCHOR EVM
             if (operation.is_evm) {
                 console.log("[XMScript Parser] EVM Pay")
-                // NOTE Sanity check on the signedPayloads length
-                let sanityCheck = required(operation.task.signedPayloads.length == 1, "Invalid signedPayloads length")
-                if (!sanityCheck) {
-                    return {result: "error", error: sanityCheck.message}
-                }
-                console.log("[XMScript Parser] Signed payload seems ok. Sending...")
-                // REVIEW Probably here we apply the same logic for every signed payload                 
                 let result = await multichain.EVM.getInstance(chainID).sendSignedTransaction(
                     operation.task.signedPayloads[0],
                 )
-            } else {
+            }
+            // Non EVM Section has more complexity 
+            else {
                 console.log("NON EVM PAY")
+                // ANCHOR Ripple
                 if (operation.chain == "xrpl") {
-                    console.log("XRP PAY") // TODO                
+                    // Testnet support
+                    let rpc_url = "https://s1.ripple.com:51234/"
+                    if (operation.subchain == "testnet") {
+                        rpc_url = "https://s.altnet.rippletest.net:51234/"
+                    }
+                    console.log("XRP PAY") // TODO
+                    let xrplInstance = new multichain.XRPL(rpc_url)
+                    let result = await xrplInstance.sendTransaction(
+                        operation.task.signedPayloads[0],
+                    )                
                 }
             }
+
+            // FIXME Find a way to standardize the calls as they have the same name across chains (except for EVM) (e.g. sendSignedTransaction)
         }        
         
         // TODO
         return result
     }
 
+}
+
+function checkSignedPayloads(num: number, signedPayloads: any[]): boolean {
+                // NOTE Sanity check on the signedPayloads length
+                let sanityCheck = required(signedPayloads.length == num, "Invalid signedPayloads length")
+                if (!sanityCheck) {
+                    return false
+                }
+                console.log("[XMScript Parser] Signed payload seems ok.")
+                return true
 }
 
 export default XMParser

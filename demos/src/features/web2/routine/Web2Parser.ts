@@ -143,7 +143,7 @@ export  class Web2APIClass {
         switch (action) {
             case "GET": // Handling everything that we can handle with fetch
                 console.log("HTTP(S) ACTION")
-                this.request.result = await this.retrieve(params)
+                this.request.result = await this.retrieve(this.request.raw)
                 break
             case "POST":
                 term.red("[ERROR] Not implemented yet")
@@ -191,10 +191,11 @@ export  class Web2APIClass {
 
 
     // INFO Fetching (via different methods) an url and attesting it in this.request
-    private async retrieve(params: IParam[] = null, body: any = null, headers: any = null) {
+    private async retrieve(raw_request: IRawWeb2Request, body: any = null, headers: any = {}) {        
         // TODO Scope with special params
         // TODO Implement body params on POST
         // TODO Implement headers
+        let params: IParam[] = raw_request.parameters
         // REVIEW Test the fix to the mempool.ts related error (?)
         let fetched: any
         let timeout = 5000 // REVIEW Make it customizable
@@ -202,12 +203,12 @@ export  class Web2APIClass {
         fetched = await fetch(
             this.request.raw.url, { 
                 method: this.request.raw.method,
-                body: null, // For POST stuff
-                headers: {}, // like { 'Content-Type': 'application/json' }
+                body: body,// For POST stuff
+                headers: headers, // like { 'Content-Type': 'application/json' }
                 signal: AbortSignal.timeout(timeout), 
             },
         )
-        return "Not implemented yet"
+        return fetched // "Not implemented yet"
         // REVIEW How to handle timeouts?
         // Stamping the result
         //await this.validate(JSON.stringify(fetched.json))
