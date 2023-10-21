@@ -1,6 +1,51 @@
 <style>
     .title{
         margin: 0;
+        position: relative;
+        animation: text-appear cubic-bezier(0.075, 0.82, 0.165, 1) .5s;
+    }
+    .title::after{
+        content: "";
+        display: block;
+        position: absolute;
+        top: 0;
+        height: 100%;
+        background: white;
+        opacity: 1;
+        animation: title-appear cubic-bezier(0.075, 0.82, 0.165, 1) .5s;
+        visibility: visible;
+    }
+    @keyframes text-appear{
+        0%{
+            visibility: hidden;
+        }
+        49%{
+            visibility: hidden;
+        }
+        50%{
+            visibility: visible;
+        }
+        100%{
+            visibility: visible;
+        }
+    }
+    @keyframes title-appear{
+        0%{
+            width: 0%;
+            left: 0;
+        }
+        49%{
+            width: 100%;
+            left: 0;
+        }
+        50%{
+            right: 0;
+            width: 100%;
+        }
+        100%{
+            width: 0%;
+            right: 0;
+        }
     }
 </style>
 <div class="title-container">
