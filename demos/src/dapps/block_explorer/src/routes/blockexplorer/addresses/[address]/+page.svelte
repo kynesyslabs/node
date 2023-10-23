@@ -4,7 +4,7 @@
 	import { faQrcode, faTimes } from "@fortawesome/free-solid-svg-icons";
     import { cubicInOut } from 'svelte/easing';
 	import QrCode from "$lib/components/QrCode.svelte";
-	import TransactionGrid from "$lib/components/blockexplorer/TransactionGrid.svelte";
+	import TransactionGrid from "../../TransactionGrid.svelte";
 
     export let data;
 
