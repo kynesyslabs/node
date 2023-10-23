@@ -18,13 +18,6 @@
     }
 </script>
 
-<style>
-    .title{
-        text-align: center;
-        margin-bottom: 64px;
-    }
-</style>
-
 {#await getTransactions()}
     <CubeSpinning/>
 {:then transactions}

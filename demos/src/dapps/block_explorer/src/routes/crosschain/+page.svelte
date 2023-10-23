@@ -18,7 +18,7 @@
 
     let required_connections = []
 
-    $:checkRequired(root.items);
+    checkRequired(root.items)
     function checkRequired(parentArray)
     {
         for(const operation of parentArray)
@@ -49,7 +49,9 @@
     async function onUpdate(operation, data)
     {
         operation.data = data;
-        root = root
+        root = root;
+        required_connections = [];
+        checkRequired(root.items)
     }
 
     function duplicateOperation(parentArray, operation)
@@ -59,6 +61,8 @@
         let index = parentArray.findIndex(op=>op.id == operation.id);
         parentArray.splice(index+1, 0, newOperation);
         root = root;
+        required_connections = [];
+        checkRequired(root.items)
     }
 
     function deleteOperation(parentArray, operation)
@@ -66,6 +70,8 @@
         let index = parentArray.findIndex(op=>op.id == operation.id);
         parentArray.splice(index, 1);
         root = root;
+        required_connections = [];
+        checkRequired(root.items);
     }
 
     const conditionOptions = [
