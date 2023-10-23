@@ -189,9 +189,42 @@ export  class Web2APIClass {
         return this.request
     }
 
+    // INFO Experimental a new approach to requests
+    private async retrieve(raw_request: IRawWeb2Request): Promise<any> {
+        let params: IParam[] = raw_request.parameters
+        let url = raw_request.url
+        // Url normalization
+        if (url.includes("?")) {
+            url = url.split("?")[0]
+        }
+        if (!(url.endsWith("/"))) {
+            url += "/"
+        }
+        // If we have parameters, add them to the request
+        if (params.length > 0) {
+            let param_string = params.map(param => param.name + "=" + param.value).join("&")
+            url += "?" + param_string
+        }
+        // NOTE Now we should have a normalized url, so we can make the request
+        let fetched = await fetch(
+            url,
+            { method: raw_request.method,
+            headers: raw_request.headers,
+            // NOTE The following line selectively sets the body to null if the method is not POST
+            // and look for the "data" parameter in the parameters array if the method is POST
+            // TODO Handle the case where the method is POST but no "data" parameter is present
+            body: raw_request.method === "POST"? JSON.stringify(raw_request.parameters["data"]) : null},
+        )
+        let string_result = JSON.stringify(fetched.json()) // Anyway...
+        // Using the fetched result to build (or to continue) the Web2Request
+        this.validate(string_result)
+        // TODO (Also in validate) manage the case where we are not the first hop
+        return fetched
+    }
+
 
     // INFO Fetching (via different methods) an url and attesting it in this.request
-    private async retrieve(raw_request: IRawWeb2Request, body: any = null, headers: any = {}) {        
+    private async _retrieve(raw_request: IRawWeb2Request, body: any = null, headers: any = {}) {        
         // TODO Scope with special params
         // TODO Implement body params on POST
         // TODO Implement headers
@@ -235,7 +268,20 @@ export  class Web2APIClass {
         let hex_key = sharedState.getInstance().identity.ed25519.publicKey.toString("hex") // REVIEW Is this ok?
         this.request.attestations[hex_key] = attestation
         // And the content too
-        this.request.result = content
+        // REVIEW If we are not the first hop, we should not overwrite the original result
+        /*
+         * The questionable logic is that the .result property should be lazy static, that means
+         * that it should be set only when it is actually needed (aka at the beginning) but
+         * is not really protected as there is no advantage of editing it in the middle of the process.
+         * 
+         * At the end of the process, the result is anyway compared with the various attestations
+         * within the validators array.
+         * 
+        */
+        if (this.request.result === undefined) {
+            this.request.result = content
+        }
+        //this.request.result = content
     }
 
 
