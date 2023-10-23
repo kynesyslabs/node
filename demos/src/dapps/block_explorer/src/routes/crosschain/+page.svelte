@@ -114,7 +114,6 @@
                     let wallet = required_connections.find(rq=>rq.id==operation.data.chain).wallet;
                     let signedPayload = await wallet.preparePay(operation.data.task.params.to, operation.data.task.params.amount)
                     operation.data.task.signedPayloads = [signedPayload];
-                    console.log(operation.data.task.signedPayloads);
                 }
                 catch(err){
                     error = err;
@@ -128,13 +127,12 @@
         state="connect";
         demos.connect($rpcaddress);
         state="sign";
-        signAll(root.items);
+        await signAll(root.items);
         //convert the tree to a flat array
         state="create";
         XMTransactions.operation.clear();
         createAll(root.items);
         state="send";
-        console.log(XMTransactions.operation.get());
         let result = await demos.crosschain.execute(XMTransactions.operation.get())
         console.log(result);
     }

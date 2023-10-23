@@ -17,10 +17,11 @@
     {
         error = "";
         let mychainwallet;
+        const thisrpc = chains.find(c=>connection.id==c.id).rpc;
         if(chains.find(c=>connection.id==c.id).is_evm)
-            mychainwallet = await chainobjs["evm"].create(chains.find(c=>connection.id==c.id).rpcaddress);
+            mychainwallet = await chainobjs["evm"].create(chains.find(c=>connection.id==c.id).rpc);
         else
-            mychainwallet = await chainobjs[connection.id].create(chains.find(c=>connection.id==c.id).rpcaddress);
+            mychainwallet = await chainobjs[connection.id].create(chains.find(c=>connection.id==c.id).rpc);
         try
         {
             await mychainwallet.connectWallet(prvkey);

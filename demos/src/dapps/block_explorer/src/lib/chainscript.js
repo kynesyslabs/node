@@ -1,4 +1,3 @@
-import { v4 as uuidv4 } from 'uuid';
 import {getAllChains} from "evm-chains";
 
 class Operation{
@@ -67,7 +66,7 @@ const mychains = [
         is_evm:false,
         token:"XRP",
         icon:"/crypto-icons/xrp.svg",
-        rpc:"wss://xrplcluster.com"
+        rpc:"wss://s.altnet.rippletest.net:51233/"
     },
     {
         id:"xlm",
