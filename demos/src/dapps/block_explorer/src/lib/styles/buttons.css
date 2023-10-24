@@ -45,6 +45,12 @@ button.secondary {
     font-weight: bold;
 }
 
+button.futuristic{
+    margin-left: auto;
+    font-weight: 100;
+    text-decoration: underline;
+}
+
 .small-button{
     background-color:var(--background-min);
     color: white;

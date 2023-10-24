@@ -225,7 +225,12 @@
 {/if}
 <div>
     <PageTitle>Crosschain transaction</PageTitle>
-    <h4 class="subtitle">Transaction editor</h4>
+    <div style="display: flex; align-items:center">
+        <h4 class="subtitle">Transaction editor</h4>
+        {#if root.items.length > 0}
+        <button on:click={()=>{root.items=[]}} class="futuristic subtitle">[clear]</button>
+        {/if}
+    </div>
     <div class="txeditor">
         <div class="dnd">
             <OperationCard onEdit={(op, parent)=>{edit = op; editparent=parent;}} operation={root} duplicateOperation={duplicateOperation} deleteOperation={deleteOperation}/>
