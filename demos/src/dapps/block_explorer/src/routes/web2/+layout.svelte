@@ -3,6 +3,8 @@
     import Footer from "$lib/components/Footer.svelte"; 
 	import { fly } from "svelte/transition";
     export let data;
+    import {wallet} from '$lib/env.js';
+    import PageTitle from "$lib/components/PageTitle.svelte";
 </script>
 
 <style>
@@ -24,6 +26,7 @@
     }
 </style>
 
+{#if $wallet.loggedIn}
 <div class="master-container">
 <Header />
     <main>
@@ -35,4 +38,17 @@
     </main>
     <Footer/>
 </div>
+{:else}
+<div style="padding:0 24px; max-width:1440px;margin:auto;width:100%;">
+    <Header/>
+    <main>
+        <PageTitle>Web2 request</PageTitle>
+        <div class="login-alert">
+            <img alt="wallet icon" class="login-icon" src="/task-icons/wallet.svg"/>
+            <p>You need to connect your wallet to make a web2 request</p>
+        </div>
+    </main>
+    <Footer/>
+</div>
+{/if}
 

@@ -227,3 +227,19 @@ button{
 .delayed4::after{
     animation-delay: .3s!important;
 }
+
+.login-alert{
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 50dvh;
+    flex-direction: column;
+    gap: 32px;
+}
+
+.login-icon{
+    width: 64px;
+    height: 64px;
+    display: block;
+    opacity: .3;
+}

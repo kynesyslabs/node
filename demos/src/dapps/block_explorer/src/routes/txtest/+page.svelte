@@ -95,7 +95,7 @@
                 </div>
             </div>
         </div>
-        <button class="primary" type="submit" style="width: 100%; max-width:1050px;margin:auto;">
+        <button class="primary" type="submit" style="margin-left:auto;">
             Send
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="16" height="16"><g id="send-email--mail-send-email-paper-airplane"><path id="Subtract" fill="#000000" fill-rule="evenodd" d="m23.223.777-7.91 22.597-4.813-4.813-4.25 4.25v-7.25l8.719-6.975-.938-1.172-8.154 6.524L.626 8.686 23.223.777Z" clip-rule="evenodd"></path></g></svg>
         </button>
