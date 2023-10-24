@@ -40,6 +40,18 @@
         }
     }
 
+    //loading variable
+    let processing = false;
+
+    $:if(processing)
+    {
+        document.documentElement.style.overflow = 'hidden';
+    }
+    else
+    {
+        document.documentElement.style.overflow = 'auto';
+    }
+
     //prima abbiamo usato l'index, poi abbiamo usato l'id... adesso passiamo direttamente la reference
     let edit = null;
     let editparent = null;
@@ -130,6 +142,7 @@
 
     async function execute()
     {
+        processing = true;
         state="connect";
         demos.connect($rpcaddress);
         state="sign";
@@ -141,6 +154,7 @@
         state="send";
         let result = await demos.crosschain.execute(XMTransactions.operation.get())
         console.log(result);
+        processing = false;
     }
 
     function trim_address(str) {
@@ -215,8 +229,71 @@
         align-items: center;
         gap: 8px;
     }
+    .overlay{
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background-color: rgba(0,0,0,0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+    }
+    .lds-ripple {
+        display: inline-block;
+        position: relative;
+        width: 80px;
+        height: 80px;
+    }
+    .lds-ripple div {
+        position: absolute;
+        border: 4px solid #fff;
+        opacity: 1;
+        border-radius: 50%;
+        animation: lds-ripple 1s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+    }
+    .lds-ripple div:nth-child(2) {
+        animation-delay: -0.5s;
+    }
+    @keyframes lds-ripple {
+        0% {
+            top: 36px;
+            left: 36px;
+            width: 0;
+            height: 0;
+            opacity: 0;
+        }
+        4.9% {
+            top: 36px;
+            left: 36px;
+            width: 0;
+            height: 0;
+            opacity: 0;
+        }
+        5% {
+            top: 36px;
+            left: 36px;
+            width: 0;
+            height: 0;
+            opacity: 1;
+        }
+        100% {
+            top: 0px;
+            left: 0px;
+            width: 72px;
+            height: 72px;
+            opacity: 0;
+        }
+    }
 </style>
 
+{#if processing}
+    <div class="overlay">
+        <div class="lds-ripple"><div></div><div></div></div> 
+    </div>
+{/if}
 {#if edit !== null}
     <OperationEditor onSave={(data)=>{onUpdate(edit, data); edit = null; editparent=null;}} operation={edit} onClose={()=>{edit = null; editparent = null;}} onDelete={()=>{deleteOperation(editparent, edit); edit=null; editparent=null;}}/>
 {/if}
