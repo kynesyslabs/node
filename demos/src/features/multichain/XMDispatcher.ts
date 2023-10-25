@@ -19,7 +19,7 @@ export default class multichainDispatcher {
         console.log("[XMChain Digestion] Proceeding: execution phase")
         // REVIEW Execute
         let result = multichainDispatcher.execute(data)
-        // return result
+        // TODO Implement a response schema
         return "Not yet implemented" // await multichainDispatcher.execute(data)        
     }
     

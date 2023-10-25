@@ -143,7 +143,13 @@ export  class Web2APIClass {
         switch (action) {
             case "GET": // Handling everything that we can handle with fetch
                 console.log("HTTP(S) ACTION")
-                this.request.result = await this.retrieve(this.request.raw)
+                // NOTE The following try/catch statement is most likely not needed in production
+                try {
+                    this.request.result = await this.retrieve(this.request.raw)
+                }
+                catch (error) {
+                    this.request.result = "Error: " + JSON.stringify(error)
+                }
                 break
             case "POST":
                 term.red("[ERROR] Not implemented yet")
@@ -192,7 +198,7 @@ export  class Web2APIClass {
     // INFO Experimental a new approach to requests
     private async retrieve(raw_request: IRawWeb2Request): Promise<any> {
         let params: IParam[] = raw_request.parameters
-        let url = raw_request.url
+        let {url} = raw_request
         // Url normalization
         if (url.includes("?")) {
             url = url.split("?")[0]

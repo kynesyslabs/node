@@ -30,7 +30,7 @@ export default async function handleWeb2(payload: IWeb2Payload, senderSocket: an
     let instanceName = web2request.name // Numeric and progressive
     // Checking if we are the original rpc that received the request
     let nOfAttestations = Object.keys(request.attestations).length
-    let originalFlag = (nOfAttestations === 1) // Remember: we attested during the initialization
+    let originalFlag = (nOfAttestations === 1) // REVIEW Remember: we attested during the initialization
     // ANCHOR Original RPC logic
     // NOTE If we are the original rpc and this is the original request, we need to validate the request
     // and wait for the attestations to arrive
