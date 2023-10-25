@@ -28,18 +28,18 @@
 {#if $wallet.loggedIn}
 <div class="thegrid">
     <OperationBar/>
-    <div style="padding:0 24px; max-width:1440px;margin:auto;width:100%;">
+    <div style="max-width:1440px;margin:auto;width:100%;">
         <Header />
-        <main>
+        <main style="padding:0 24px; ">
             <slot/>
         </main>
         <Footer/>
     </div>
 </div>
 {:else}
-<div style="padding:0 24px; max-width:1440px;margin:auto;width:100%;">
+<div style="max-width:1440px;margin:auto;width:100%;">
     <Header/>
-    <main>
+    <main style="padding:0 24px; ">
         <PageTitle>Crosschain transaction</PageTitle>
         <div class="login-alert">
             <img alt="wallet icon" class="login-icon" src="/task-icons/wallet.svg"/>

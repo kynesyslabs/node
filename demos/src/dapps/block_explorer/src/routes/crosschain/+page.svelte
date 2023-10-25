@@ -10,6 +10,7 @@
     import {chains} from "$lib/chainscript.js";
 	import ConnectWalletDialog from "./ConnectWalletDialog.svelte";
     import PageTitle from '$lib/components/PageTitle.svelte';
+    import { fly, slide } from "svelte/transition";
 
    //localStorage.clear("operations");
 
@@ -42,6 +43,15 @@
 
     //loading variable
     let processing = false;
+    let success = false;
+    let result;
+
+    $:if(success)
+    {
+        setTimeout(()=>{
+            success = false;
+        }, 3000)
+    }
 
     $:if(processing)
     {
@@ -152,9 +162,10 @@
         XMTransactions.operation.clear();
         createAll(root.items);
         state="send";
-        let result = await demos.crosschain.execute(XMTransactions.operation.get())
-        console.log(result);
+        let executionresult = await demos.crosschain.execute(XMTransactions.operation.get())
         processing = false;
+        success = true;
+        result = executionresult.response;
     }
 
     function trim_address(str) {
@@ -287,8 +298,21 @@
             opacity: 0;
         }
     }
+    .success-dialog{
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        padding: 16px;
+        background-color: #29b86b;
+        z-index: 10001;
+    }
 </style>
 
+
+<!--success dialog-->
+{#if success}
+    <div transition:fly class="success-dialog">Success!</div>
+{/if}
 {#if processing}
     <div class="overlay">
         <div class="lds-ripple"><div></div><div></div></div> 
@@ -347,4 +371,10 @@
     <button on:click={execute} class="executebtn primary">Execute
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="24" width="24"><g id="end-point-arrow"><path id="Union" fill="#000000" fill-rule="evenodd" d="m14.472 17.92 -1.819 1.212 0.692 -2.073L14.697 13H1v-2h13.698l-1.353 -4.059 -0.692 -2.073 1.82 1.212 7.943 5.296 0.936 0.624 -0.936 0.624 -7.944 5.296Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
     </button>
+    {#if result}
+        <h4 class="subtitle">Result</h4>
+        <div class="card" style="padding: 24px;">
+            {result}
+        </div>
+    {/if}
 </div>
