@@ -40,7 +40,7 @@
 </style>
 
 {#if created}
-<PageTitle>Wallet created!</PageTitle>
+<PageTitle>Wallet Created!</PageTitle>
 <div class="private-output-head">
     <p style="margin:0">This is the key for your brand new wallet!</p>
     <CopyButton text={created[1].privateKey}/>

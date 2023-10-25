@@ -42,7 +42,7 @@
 <div style="padding:0 24px; max-width:1440px;margin:auto;width:100%;">
     <Header/>
     <main>
-        <PageTitle>Web2 request</PageTitle>
+        <PageTitle>Web2 Request</PageTitle>
         <div class="login-alert">
             <img alt="wallet icon" class="login-icon" src="/task-icons/wallet.svg"/>
             <p>You need to connect your wallet to make a web2 request</p>

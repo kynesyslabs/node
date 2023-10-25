@@ -107,7 +107,7 @@
 
     <div class="main-grid">
         <div class="section-container">
-        <h4 class="card-header">Latest blocks</h4>
+        <h4 class="card-header">Latest Blocks</h4>
             <div class="card">
                 {#await getBlock()}
                     <BlockRow/>
@@ -127,7 +127,7 @@
             </a>
         </div>
         <div class="section-container">
-            <h4 class="card-header">Latest transactions</h4>
+            <h4 class="card-header">Latest Transactions</h4>
             <div class="card">
                 {#await getBlock()}
                     <TransactionRow/>

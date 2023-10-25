@@ -68,7 +68,7 @@
 </style>
 
 <div>
-    <PageTitle>Raw transaction</PageTitle>
+    <PageTitle>Raw Transaction</PageTitle>
     <form on:submit={sendTransaction} class="card">
         <div class="txtest-body">
             <div class="input-block">

@@ -79,7 +79,7 @@
     }
 </style>
 
-<PageTitle>Connect wallet</PageTitle>
+<PageTitle>Connect Wallet</PageTitle>
 <div class="container">
     <div class="card">
         {#if $wallet.loggedIn}

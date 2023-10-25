@@ -188,6 +188,7 @@
         border: 1px solid var(--background3);
         width: 100%;
         margin-bottom: 64px;
+        position: relative;
     }
     .dnd{
         display: grid;
@@ -306,6 +307,14 @@
         background-color: #29b86b;
         z-index: 10001;
     }
+    .instructions{
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        opacity: .4;
+        text-align: center;
+    }
 </style>
 
 
@@ -325,19 +334,25 @@
     <ConnectWalletDialog connection={editwallet} close={()=>{editwallet = null}}/>
 {/if}
 <div>
-    <PageTitle>Crosschain transaction</PageTitle>
+    <PageTitle>Crosschain Transaction</PageTitle>
     <div style="display: flex; align-items:center">
-        <h4 class="subtitle">Transaction editor</h4>
+        <h4 class="subtitle">Transaction Editor</h4>
         {#if root.items.length > 0}
         <button on:click={()=>{root.items=[]}} class="futuristic subtitle">[clear]</button>
         {/if}
     </div>
     <div class="txeditor">
+        {#if root.items.length == 0}
+        <div class="instructions">
+            <svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#ffffff" fill-rule="evenodd" d="M1 1h3.17v2H3v1.171H1V1Zm13.58 0v3.17l-2 0V3h-1.172V1h3.171ZM9.236 1H6.342l0 2h2.895V1ZM1 14.58v-3.17h2v1.17h1.171v2H1Zm0-5.343V6.342h2l0 2.895H1Zm11.95 3.712 2.01 9.046 2.26-2.262L20.489 23 23 20.487l-3.266-3.266 2.261-2.262-2.913-.647-6.133-1.363Zm6.132-7.446H5.502v13.58h7.274l-1.802-8.11 8.108 1.802V5.503Z" clip-rule="evenodd"></path></svg>
+            <p style="margin-bottom: 0;">Drop blocks here and start building your transaction</p>
+        </div>
+        {/if}
         <div class="dnd">
             <OperationCard onEdit={(op, parent)=>{edit = op; editparent=parent;}} operation={root} duplicateOperation={duplicateOperation} deleteOperation={deleteOperation}/>
         </div>
     </div>
-    <h4 class="subtitle">Required wallets</h4>
+    <h4 class="subtitle">Required Wallets</h4>
     <div class="connections">
         <div class="wallet-connection card">
             <h4 class="network-name">DEMOS</h4>

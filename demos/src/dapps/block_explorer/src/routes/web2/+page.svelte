@@ -150,7 +150,7 @@
     }
 </style>
 <div>
-    <PageTitle>Web2 request</PageTitle>
+    <PageTitle>Web2 Request</PageTitle>
     <div style="margin-bottom: 64px;">
         <div class="inputcontainer">
             <Combobox value="GET" options={requestType} style="border-right:none!important;height:100%;width:150px;font-weight:bold;"/>

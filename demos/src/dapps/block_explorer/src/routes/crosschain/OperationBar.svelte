@@ -9,7 +9,7 @@
     ];
 
     const evm = [
-        {id:uuidv4(), label:"Read contract", type:"contract_read", data:null}, 
+        {id:uuidv4(), label:"Read Contract", type:"contract_read", data:null}, 
         /*{id:uuidv4(), label:"Write contract", type:"contract_write", data:null}*/
     ]
 
@@ -18,12 +18,12 @@
     ]*/
 
     const logic = [
-        {id:uuidv4(), label:"Conditional statement", type:"conditional", condition:[], symbol:"equals", input:"",  then:[], else:[], data:null},
+        {id:uuidv4(), label:"Conditional Statement", type:"conditional", condition:[], symbol:"equals", input:"",  then:[], else:[], data:null},
     ]
 
     const availableBlocks = [
-        {label:"Universal tasks", blocks:universal},
-        {label:"EVM tasks", blocks:evm},
+        {label:"Universal Tasks", blocks:universal},
+        {label:"EVM Tasks", blocks:evm},
         {label:"Logic", blocks:logic},
     ]
 

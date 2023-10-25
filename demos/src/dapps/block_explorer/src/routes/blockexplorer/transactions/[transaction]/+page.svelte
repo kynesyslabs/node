@@ -87,7 +87,7 @@
 {#await getTransaction()}
     <CubeSpinning/>
 {:then transaction}
-    <PageTitle>Transaction details</PageTitle>
+    <PageTitle>Transaction Details</PageTitle>
     <div class="card">
         <div class="info-grid">
             <p class="info-title">Hash:</p>

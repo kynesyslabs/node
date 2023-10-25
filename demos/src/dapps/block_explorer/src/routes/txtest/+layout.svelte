@@ -42,7 +42,7 @@
 <div style="padding:0 24px; max-width:1440px;margin:auto;width:100%;">
     <Header/>
     <main>
-        <PageTitle>Raw transaction</PageTitle>
+        <PageTitle>Raw Transaction</PageTitle>
         <div class="login-alert">
             <img alt="wallet icon" class="login-icon" src="/task-icons/wallet.svg"/>
             <p>You need to connect your wallet to send a raw transaction</p>
