@@ -1,4 +1,7 @@
 <script>
+    import ace from "ace-builds";
+    import "ace-builds/src-noconflict/mode-json";
+    import "ace-builds/src-noconflict/theme-tomorrow_night_eighties";
 	import { onMount } from "svelte";
     export let text;
     export let id;
@@ -8,25 +11,22 @@
     let errors = [];
 
     onMount(async() => {
-        let ace = await import('brace');
-        await import('brace/mode/json');
-        await import('brace/theme/tomorrow_night_eighties');
         editor = ace.edit(id);
-        editor.getSession().setMode('ace/mode/json');
         editor.setTheme('ace/theme/tomorrow_night_eighties');
+        editor.session.setMode('ace/mode/json');
         editor.setValue(text, -1);
         editor.container.style.background="transparent";
         editor.on("change", ()=>{
             onChange(editor.getValue());
         });
-        editor.getSession().on("changeAnnotation", function () {
+        /*editor.getSession().on("changeAnnotation", function () {
             var annot = editor.getSession().getAnnotations();
             errors = [];
             for (var key in annot) {
                 if (annot.hasOwnProperty(key))
                 errors.push(annot[key].text + " on line " + annot[key].row);
             }
-        });
+        });*/
 
         editor.setOptions({
             maxLines: 5,

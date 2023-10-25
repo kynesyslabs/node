@@ -1,17 +1,17 @@
 <script>
 	import { onMount } from "svelte";
+    import ace from "ace-builds";
+    import "ace-builds/src-noconflict/mode-json";
+    import "ace-builds/src-noconflict/theme-tomorrow_night_eighties";
     export let text;
     export let id;
 
     let editor;
 
     onMount(async() => {
-        let ace = await import('brace');
-        await import('brace/mode/javascript');
-        await import('brace/theme/tomorrow_night');
         editor = ace.edit(id);
-        editor.getSession().setMode('ace/mode/javascript');
-        editor.setTheme('ace/theme/tomorrow_night');
+        editor.setTheme('ace/theme/tomorrow_night_eighties');
+        editor.session.setMode('ace/mode/json');
         editor.setValue(text, -1);
         editor.setReadOnly(true);
         editor.setHighlightActiveLine(false);
