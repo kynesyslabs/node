@@ -51,8 +51,8 @@
 </style>
 
 <div class="modal-background" transition:budinofade>
-    <div transition:budinotraslato class="modal-txblock" style="width: 500px; max-width:calc(100% - 48px)">
-        <h3 class="operationcard-label">Select node addrress</h3>
+    <div transition:budinotraslato class="modal-txblock" style="width: 500px; max-width:calc(100% - 48px);">
+        <h3 class="operationcard-label">Node Address</h3>
         <div class="chain-options">
             {#each addresses as address, i}
                 <div class="node-container">
@@ -75,7 +75,10 @@
             {/each}
         </div>
         {#if !adding}
-            <button class="secondary input-group" on:click={()=>{adding = true;}}>Add address</button>
+            <div style="display: flex; gap:8px">
+                <button class="secondary input-group" on:click={()=>{close();}}>Cancel</button>
+                <button class="secondary input-group" on:click={()=>{adding = true;}}>Add address</button>
+            </div>
         {:else}
             <form on:submit={(ev)=>{
                 ev.preventDefault();
@@ -85,6 +88,7 @@
                 <input type="text" placeholder="Node address" class="smallinput" style="border:none;"/>
                 <button class="secondary" type="submit" style="border:none; border-left:1px solid var(--background3);">Add</button>
             </form>
+            <button class="futuristic" on:click={()=>{adding= false;}}>[cancel]</button>
         {/if}
     </div>
 </div>
