@@ -42,18 +42,18 @@ export default class RepresentativeShard {
     }
 
     // INFO We avoid to expose .shard directly so it can't be edited by mistake
-    public async getShard(): Promise<ProofOfRepresentation> {
+    public async getShard(peerList: Peer[]): Promise<ProofOfRepresentation> {
         let shard = this.shard
         if (!shard) {
-            return await this.generateShard()
+            return await this.generateShard(peerList)
         }
         return shard
     }
 
     // INFO Generating the shard if needed
-    private async generateShard(): Promise<ProofOfRepresentation> {
+    private async generateShard(peerList): Promise<ProofOfRepresentation> {
         let shard = new ProofOfRepresentation()
-        await shard.getSeed()
+        await shard.getSeed(undefined, peerList)
         shard.selectRepresentativeShard()
         this.shard = shard
         return shard
@@ -78,8 +78,11 @@ class ProofOfRepresentation {
     constructor() {}
 
     // INFO Creating the immutable common seed for this specific proof of representation session
-    private async createSeed(on_block: number): Promise<string> {
-        this.peers = await GLS.getGLSValidatorsAtBlock() // REVIEW Getting all the possible peers
+    private async createSeed(on_block: number, onlinePeers): Promise<string> {
+        // this.peers = await GLS.getGLSValidatorsAtBlock() // REVIEW Getting all the possible peers
+        this.peers = onlinePeers
+        console.log(this.peers)
+        console.log("this.peers")
         if (this.immutable) {
             return this.common_seed // NOTE Already initialized? We got the seed!
         }
@@ -110,11 +113,11 @@ class ProofOfRepresentation {
     }
 
     // INFO Getting out the current seed
-    async getSeed(block_n: number = null): Promise<string> {
+    async getSeed(block_n: number = null, onlinePeers): Promise<string> {
         if (!block_n) {
             block_n = Number(await Chain.getLastBlockNumber())
         } // REVIEW Fix sanity check here ^ to catch NaN errors
-        return this.createSeed(block_n)
+        return this.createSeed(block_n, onlinePeers)
     }
 
     async getPeers(): Promise<Peer[]> {
@@ -132,14 +135,14 @@ class ProofOfRepresentation {
         } // REVIEW Fix sanity check here ^ to catch NaN errors
         // For safety reasons we need to enforce the immutable flag
         if (!this.immutable) {
-            await this.createSeed(block_n)
+            await this.createSeed(block_n, this.peers) // REVIEW: make sure these are the correct peers
             this.immutable = true
         }
         // Allocating the empty validator list
         let generatedList = {}
         let SHARD_SIZE = 10 // TODO Put in Configuration
         // Getting the base seed
-        let baseSeed = await this.getSeed(block_n)
+        let baseSeed = await this.getSeed(block_n, this.peers) // REVIEW: make sure these are the correct peers
         for (let i = 0; i < SHARD_SIZE; i++) {
             // Updating the seed so that is identical for all but dynamic for the size of the shard
             let seed = baseSeed.concat(i.toString())
