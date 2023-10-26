@@ -14,6 +14,7 @@
     export let deleteOperation;
     export let onEdit;
     export let parent;
+    export let triggerUpdate;
     
     let taskinfo;
     let chaininfo;
@@ -35,7 +36,7 @@
     {
         taskinfo = tasks.find(t=>t.id === operation.type);
     }
-    let menuopen = false;
+    let menuopen = false;                       
 
     function consider(e, key) {
         operation[key] = e.detail.items;
@@ -55,7 +56,10 @@
             return;
         //apri l'editor se operation data non esiste e se non è un conditional
         if(thisop.type == "conditional")
+        {
+            triggerUpdate();
             return;
+        }
         //se è figlio di un conditional setta il flag true, altrimenti false
         if(!thisop.data)
         {
@@ -176,7 +180,7 @@
         {#each operation.items as op, i (op.id)}
             <!--ALWAYS WRAP CUSTOM COMPONENT IN HTML WHEN USING DNDZONE-->
             <div animate:flip={{duration: 250}}>
-                <svelte:self createTask={createTask} onEdit={onEdit} operation={op} parent={operation.items} deleteOperation={deleteOperation} duplicateOperation={duplicateOperation} />
+                <svelte:self triggerUpdate={triggerUpdate} createTask={createTask} onEdit={onEdit} operation={op} parent={operation.items} deleteOperation={deleteOperation} duplicateOperation={duplicateOperation} />
             </div>
         {/each}
     </div>
@@ -233,7 +237,7 @@
             <div use:dndzone={{items:operation.condition, dropFromOthersDisabled:operation.condition.length>0||operation.id=="id:dnd-shadow-placeholder-0000"?true:false, morphDisabled:true}} on:consider={(e)=>{consider(e, "condition")}} on:finalize={(e)=>{finalize(e, "condition")}} class="conditionaldnd">
                 {#each operation.condition as condition(condition.id)}
                     <div animate:flip={{duration: 250}}>
-                        <svelte:self createTask={createTask} operation={condition} onEdit={onEdit} parent={operation.condition} duplicateOperation={null}  deleteOperation={deleteOperation}></svelte:self>
+                        <svelte:self triggerUpdate={triggerUpdate} createTask={createTask} operation={condition} onEdit={onEdit} parent={operation.condition} duplicateOperation={null}  deleteOperation={deleteOperation}></svelte:self>
                     </div>
                 {/each}
             </div>
@@ -260,7 +264,7 @@
             <div use:dndzone={{items:operation.then, dropFromOthersDisabled:operation.id=="id:dnd-shadow-placeholder-0000"?true:false, morphDisabled:true}} on:consider={(e)=>{consider(e, "then")}} on:finalize={(e)=>{finalize(e, "then")}} class="conditionaldnd">
                 {#each operation.then as instruction(instruction.id)}
                     <div animate:flip={{duration: 250}}>
-                        <svelte:self createTask={createTask} operation={instruction} onEdit={onEdit} parent={operation.then} duplicateOperation={duplicateOperation}  deleteOperation={deleteOperation}></svelte:self>
+                        <svelte:self triggerUpdate={triggerUpdate} createTask={createTask} operation={instruction} onEdit={onEdit} parent={operation.then} duplicateOperation={duplicateOperation}  deleteOperation={deleteOperation}></svelte:self>
                     </div>
                 {/each}
             </div>
@@ -270,7 +274,7 @@
             <div use:dndzone={{items:operation.else, dropFromOthersDisabled:operation.id=="id:dnd-shadow-placeholder-0000"?true:false, morphDisabled:true}} on:consider={(e)=>{consider(e, "else")}} on:finalize={(e)=>{finalize(e, "else")}} class="conditionaldnd">
                 {#each operation.else as instruction(instruction.id)}
                     <div animate:flip={{duration: 250}}>
-                        <svelte:self createTask={createTask} operation={instruction} onEdit={onEdit} parent={operation.else} duplicateOperation={duplicateOperation} deleteOperation={deleteOperation}></svelte:self>
+                        <svelte:self triggerUpdate={triggerUpdate} createTask={createTask} operation={instruction} onEdit={onEdit} parent={operation.else} duplicateOperation={duplicateOperation} deleteOperation={deleteOperation}></svelte:self>
                     </div>
                 {/each}
             </div>

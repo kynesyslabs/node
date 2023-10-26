@@ -17,6 +17,8 @@
     let root = localStorage.getItem("operations")?JSON.parse(localStorage.getItem("operations")):{id:"root", items:[], type:"root"}
     $: localStorage.setItem("operations", JSON.stringify(root));
 
+    $:console.log(root.items);
+
     let required_connections = []
 
     checkRequired(root.items)
@@ -334,9 +336,9 @@
     <ConnectWalletDialog connection={editwallet} close={()=>{editwallet = null}}/>
 {/if}
 <div>
-    <PageTitle>Crosschain Transaction</PageTitle>
+    <PageTitle>xM</PageTitle>
     <div style="display: flex; align-items:center">
-        <h4 class="subtitle">Transaction Editor</h4>
+        <h4 class="subtitle">Build a Cross-Chain Transaction</h4>
         {#if root.items.length > 0}
         <button on:click={()=>{root.items=[]}} class="futuristic subtitle">[clear]</button>
         {/if}
@@ -349,7 +351,7 @@
         </div>
         {/if}
         <div class="dnd">
-            <OperationCard onEdit={(op, parent)=>{edit = op; editparent=parent;}} operation={root} duplicateOperation={duplicateOperation} deleteOperation={deleteOperation}/>
+            <OperationCard triggerUpdate={()=>{root = root}} onEdit={(op, parent)=>{edit = op; editparent=parent;}} operation={root} duplicateOperation={duplicateOperation} deleteOperation={deleteOperation}/>
         </div>
     </div>
     <h4 class="subtitle">Required Wallets</h4>

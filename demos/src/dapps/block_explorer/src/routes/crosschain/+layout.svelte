@@ -40,7 +40,7 @@
 <div style="max-width:1440px;margin:auto;width:100%;">
     <Header/>
     <main style="padding:0 24px; ">
-        <PageTitle>Crosschain Transaction</PageTitle>
+        <PageTitle>Cross-Chain Transaction</PageTitle>
         <div class="login-alert">
             <img alt="wallet icon" class="login-icon" src="/task-icons/wallet.svg"/>
             <p>You need to connect your wallet to create a crosschain transaction</p>
