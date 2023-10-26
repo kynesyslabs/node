@@ -82,7 +82,7 @@
 </style>
 
 <div style="position: relative; max-width:100%">
-    <div use:clickOutside role={`Select element`} on:click={()=>{if(!disabled)open=!open}} on:click_outside={()=>{open=false}} style={style} class="combobox smallcombobox">
+    <div use:clickOutside role={`Select element`} on:click={()=>{if(!disabled)open=!open}} on:click_outside={()=>{open=false}} style={style} class={`combobox smallcombobox`}>
         {#if options.length == 1}
             <div>
                 <p>{options[0].label}</p>

@@ -107,20 +107,45 @@
         margin-bottom: 16px;
     }
     .inputcontainer{
-        display: flex;
+        display: grid;
+        grid-template-columns: 150px 1fr auto;
         align-items: stretch;
     }
     .input{
-        width: 100%;
+        border-left: 0;
     }
-    .response{
-        border: 1px solid var(--background3);
+    .method{
+        border-right:none!important;
+        height:100%;
+        width:150px;
+        font-weight:bold;
     }
     .sendbutton{
         border: 1px solid var(--background3);
         border-left: none;
         display: flex;
         align-items: center;
+    }
+    @media screen and (max-width: 768px) {
+        .inputcontainer{
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
+        .input{
+            border-left: 1px solid var(--background3);
+        }
+        .sendbutton{
+            border: 1px solid var(--background3);
+            width: auto;
+            justify-content: end;
+            margin-left: auto;
+        }
+    }
+    .input{
+        width: 100%;
+    }
+    .response{
+        border: 1px solid var(--background3);
     }
     .sendicon{
         transform: rotate(45deg);
@@ -153,7 +178,7 @@
     <PageTitle>Web2 Request</PageTitle>
     <div style="margin-bottom: 64px;">
         <div class="inputcontainer">
-            <Combobox value="GET" options={requestType} style="border-right:none!important;height:100%;width:150px;font-weight:bold;"/>
+            <Combobox value="GET" options={requestType} style="height:100%;font-weight:bold;width:100%;min-height:45px"/>
             <input bind:value={url} on:input={handleChangeUrl} class="input" placeholder="Insert the URL here"/>
             <button class="secondary sendbutton" on:click={sendRequest}>
                 Send
