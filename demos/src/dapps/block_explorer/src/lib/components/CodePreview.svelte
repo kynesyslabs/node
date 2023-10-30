@@ -3,6 +3,7 @@
     import ace from "ace-builds";
     import "ace-builds/src-noconflict/mode-json";
     import "ace-builds/src-noconflict/theme-tomorrow_night_eighties";
+    import "ace-builds/src-noconflict/theme-chrome";
     export let text;
     export let id;
 
@@ -10,7 +11,16 @@
 
     onMount(async() => {
         editor = ace.edit(id);
-        editor.setTheme('ace/theme/tomorrow_night_eighties');
+        const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        console.log(dark)
+        if(dark)
+        {
+            editor.setTheme('ace/theme/tomorrow_night_eighties');
+        }
+        else
+        {
+            editor.setTheme('ace/theme/chrome');
+        }
         editor.session.setMode('ace/mode/json');
         editor.setValue(text, -1);
         editor.setReadOnly(true);
@@ -30,7 +40,6 @@
 
 <style>
     .text-editor-container{
-        border-radius: var(--border-radius);
         backdrop-filter: 14px;
     }
     .text-editor{

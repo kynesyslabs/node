@@ -180,12 +180,7 @@
         <div class="inputcontainer">
             <Combobox value="GET" options={requestType} style="height:100%;font-weight:bold;width:100%;min-height:45px"/>
             <input bind:value={url} on:input={handleChangeUrl} class="input" placeholder="Insert the URL here"/>
-            <button class="secondary sendbutton" on:click={sendRequest}>
-                Send
-                <span class="sendicon">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="18" width="18"><g id="mail-send-email-message--send-email-paper-airplane-deliver"><path id="Subtract" fill="#fefefe" fill-rule="evenodd" d="m22.928 1.14 -8.24 21.726 -4.024 -8.047 5.277 -5.277 -1.415 -1.414 -5.276 5.277L1.203 9.38l21.725 -8.24Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
-                </span>
-            </button>
+            <button class="secondary sendbutton" on:click={sendRequest}>Send</button>
         </div>
         {#if url}
         <div transition:budinoslide><p style="opacity:.6;margin:0;padding:8px">{url}</p></div>
@@ -216,7 +211,7 @@
                     <button on:click={()=>{selectedtab=tab.id}} class={`secondary tab ${tab.id==selectedtab?"selected":""}`}>{tab.label}</button>
                 {/each}
             </div>
-            <div style="background:var(--background-min);">
+            <div style="background:var(--background);">
                 <CodePreview id="ciao" text={code}/>
             </div>
         </div>

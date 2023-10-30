@@ -57,7 +57,7 @@
     .card-footer{
         padding: 16px;
         text-align: center;
-        background-color: var(--background2-min);
+        background-color: var(--background2);
         font-weight: bold;
     }
 
@@ -69,8 +69,8 @@
     }
 
     .page-controller-button{
-        background-color: #404040;
-        color: white;
+        background-color: var(--background3);
+        color: var(--color);
         padding: 4px 8px;
         box-shadow: rgba(17, 17, 26, 0.05) 0px 4px 16px, rgba(17, 17, 26, 0.05) 0px 8px 32px;
     }
@@ -85,14 +85,12 @@
         justify-content: space-between;
         align-items: center;
         padding: 16px;
-        border-bottom: 1px solid var(--border-color);
     }
 
     .transactions-grid{
         display: grid;
         grid-template-columns: 1fr 1fr 1fr 1fr;
         gap: 16px;
-        border-bottom: 1px solid var(--border-color);
         padding: 16px;
         width: 100%;
     }

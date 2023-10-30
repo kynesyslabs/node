@@ -19,6 +19,7 @@
         if(!demos.connected)
         return;
         let blockNumber = JSON.parse(await demos.getLastBlockNumber());
+        console.log("numeroblocco", blockNumber);
         let block = await demos.getBlockByNumber(blockNumber);
         return block;
     }
@@ -58,12 +59,12 @@
     }
     .card-footer{
         text-align: right;
-        color: white;
+        color: var(--color);
         margin: 16px 0 0;
         font-family: 'SourceCodePro', sans-serif;
     }
     .card-footer:hover{
-        color: var(--accent);
+        color: var(--color2);
         cursor: pointer;
     }
     
@@ -101,7 +102,7 @@
             <!--<img src="/logo/Logo DEMOS White.svg" alt="Logo DEMOS" width="240px" style="display:block; margin:auto;"/>-->
             <PageTitle>Block Explorer</PageTitle>
             <h4 class="subtitle">Discover Blocks and Transactions on the DEMOS Network</h4>
-            <Searchbar prompt="Search for an hash"/>
+            <Searchbar prompt="Search for a hash"/>
         </div>
     </div>
 
@@ -115,7 +116,7 @@
                     <BlockRow block={block}/>
                 {:catch error}
                     <div class="error-card">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="40" height="40"><g id="warning-triangle--frame-alert-warning-triangle-exclamation-caution"><path id="Subtract" fill="#ffffff" fill-rule="evenodd" d="m12 1.5-11 21h22l-11-21ZM11 16v-6h2v6h-2Zm0 2v2h2v-2h-2Z" clip-rule="evenodd"></path></g></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="40" height="40"><g id="warning-triangle--frame-alert-warning-triangle-exclamation-caution"><path id="Subtract" fill="var(--color)" fill-rule="evenodd" d="m12 1.5-11 21h22l-11-21ZM11 16v-6h2v6h-2Zm0 2v2h2v-2h-2Z" clip-rule="evenodd"></path></g></svg>
                         <p>Something went wrong</p>
                     </div>
                 {/await}
@@ -137,7 +138,7 @@
                     {/each}
                 {:catch error}
                     <div class="error-card">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="40" height="40"><g id="warning-triangle--frame-alert-warning-triangle-exclamation-caution"><path id="Subtract" fill="#ffffff" fill-rule="evenodd" d="m12 1.5-11 21h22l-11-21ZM11 16v-6h2v6h-2Zm0 2v2h2v-2h-2Z" clip-rule="evenodd"></path></g></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="40" height="40"><g id="warning-triangle--frame-alert-warning-triangle-exclamation-caution"><path id="Subtract" fill="var(--color)" fill-rule="evenodd" d="m12 1.5-11 21h22l-11-21ZM11 16v-6h2v6h-2Zm0 2v2h2v-2h-2Z" clip-rule="evenodd"></path></g></svg>
                         <p>Something went wrong</p>
                     </div>
                 {/await}

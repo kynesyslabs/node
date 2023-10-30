@@ -27,7 +27,6 @@
         align-items: center;
         gap: 16px;
         border-bottom: 0;
-        border-radius: var(--border-radius) var(--border-radius) 0 0;
         padding: 16px;
     }
 
@@ -40,8 +39,7 @@
         text-align: center;
         background-color: var(--header-color);
         font-weight: bold;
-        color: white;
-        border-radius: 0 0 var(--border-radius) var(--border-radius);
+        color: var(--color);
     }
 
     .page-controller{
@@ -52,10 +50,9 @@
     }
 
     .page-controller-button{
-        background-color: #404040;
-        color: white;
+        background-color: var(--background3);
+        color: var(--color);
         padding: 4px 8px;
-        border-radius: var(--border-radius);
         box-shadow: rgba(17, 17, 26, 0.05) 0px 4px 16px, rgba(17, 17, 26, 0.05) 0px 8px 32px;
     }
     .page-controller-label{
@@ -69,7 +66,6 @@
         display: grid;
         grid-template-columns: 1fr 1fr 1fr 1fr;
         gap: 16px;
-        border-bottom: 1px solid var(--border-color);
         padding: 16px;
         width: 100%;
     }

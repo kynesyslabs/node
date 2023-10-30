@@ -99,9 +99,9 @@
         transition: padding .2s ease-in-out, background-color .2s ease-in-out, color .2s ease-in-out;
     }
     .chain-option:hover:not(:disabled){
-        background-color: var(--accent);
+        background-color: var(--color2);
         padding: var(--input-padding);
-        color: black;
+        color: var(--background);
     }
     .selected-chain{
         display: flex;

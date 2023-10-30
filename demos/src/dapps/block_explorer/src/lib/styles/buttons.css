@@ -1,6 +1,6 @@
 button{
     background: none;
-    color: white;
+    color: var(--color);
     display: block;
     text-align: left;
     font-family: 'SourceCodePro', sans-serif;
@@ -17,11 +17,11 @@ button.primary {
     line-height: 1.4444;
     letter-spacing: 0.311px;
     border-radius: 0;
-    border: 1px solid var(--accent);
-    background: var(--accent);
+    border: 1px solid var(--color2);
+    background: var(--color2);
     padding: 16.2px 47px;
     text-align: center;
-    color: #141414; 
+    color: var(--background2); 
     text-decoration: unset;
     text-align: center;
 }
@@ -39,7 +39,7 @@ button.secondary {
     background: transparent;
     padding: 16.2px 47px;
     text-align: center;
-    color: var(--accent); 
+    color: var(--color2); 
     text-decoration: unset;
     text-align: center;
     font-weight: bold;
@@ -52,16 +52,16 @@ button.futuristic{
 }
 
 .small-button{
-    background-color:var(--background-min);
-    color: white;
+    background-color:var(--background2);
+    color: var(--color);
     padding: 4px 8px;
     box-shadow: rgba(17, 17, 26, 0.05) 0px 4px 16px, rgba(17, 17, 26, 0.05) 0px 8px 32px;
     cursor: pointer;
 }
 
 .small-button:hover{
-    background-color: var(--accent);
-    color: black;
+    background-color: var(--color2);
+    color: var(--background);
 }
 
 button.shallow{

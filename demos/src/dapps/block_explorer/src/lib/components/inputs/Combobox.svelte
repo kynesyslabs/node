@@ -60,14 +60,14 @@
         border-radius: 10px;
         box-shadow: var(--box-shadow);
         z-index: 300;
-        background-color: #505050;
+        background-color: var(--background3);
         top: 0;
     }
     .combobox-option{
         padding: 0 var(--input-padding);
         height: 52px;
         cursor: pointer;
-        background-color: #505050;
+        background-color: var(--background3);
         display: grid;
         grid-template-columns: 25px 1fr;
         position: relative;
@@ -76,8 +76,8 @@
         align-items: center;
     }
     .combobox-option:hover{
-        background-color: var(--accent);
-        color: black;
+        background-color: var(--color2);
+        color: var(--background);
     }
 </style>
 

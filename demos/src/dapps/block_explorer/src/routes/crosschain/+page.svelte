@@ -263,7 +263,7 @@
     }
     .lds-ripple div {
         position: absolute;
-        border: 4px solid #fff;
+        border: 4px solid var(--color);
         opacity: 1;
         border-radius: 50%;
         animation: lds-ripple 1s cubic-bezier(0, 0.2, 0.8, 1) infinite;
@@ -346,7 +346,7 @@
     <div class="txeditor">
         {#if root.items.length == 0}
         <div class="instructions">
-            <svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="#ffffff" fill-rule="evenodd" d="M1 1h3.17v2H3v1.171H1V1Zm13.58 0v3.17l-2 0V3h-1.172V1h3.171ZM9.236 1H6.342l0 2h2.895V1ZM1 14.58v-3.17h2v1.17h1.171v2H1Zm0-5.343V6.342h2l0 2.895H1Zm11.95 3.712 2.01 9.046 2.26-2.262L20.489 23 23 20.487l-3.266-3.266 2.261-2.262-2.913-.647-6.133-1.363Zm6.132-7.446H5.502v13.58h7.274l-1.802-8.11 8.108 1.802V5.503Z" clip-rule="evenodd"></path></svg>
+            <svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="var(--color)" fill-rule="evenodd" d="M1 1h3.17v2H3v1.171H1V1Zm13.58 0v3.17l-2 0V3h-1.172V1h3.171ZM9.236 1H6.342l0 2h2.895V1ZM1 14.58v-3.17h2v1.17h1.171v2H1Zm0-5.343V6.342h2l0 2.895H1Zm11.95 3.712 2.01 9.046 2.26-2.262L20.489 23 23 20.487l-3.266-3.266 2.261-2.262-2.913-.647-6.133-1.363Zm6.132-7.446H5.502v13.58h7.274l-1.802-8.11 8.108 1.802V5.503Z" clip-rule="evenodd"></path></svg>
             <p style="margin-bottom: 0;">Drop blocks here and start building your transaction</p>
         </div>
         {/if}
@@ -385,9 +385,7 @@
     {#if error != ""}
         <div class="alert-error">{error}</div>
     {/if}
-    <button on:click={execute} class="executebtn primary">Execute
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="24" width="24"><g id="end-point-arrow"><path id="Union" fill="#000000" fill-rule="evenodd" d="m14.472 17.92 -1.819 1.212 0.692 -2.073L14.697 13H1v-2h13.698l-1.353 -4.059 -0.692 -2.073 1.82 1.212 7.943 5.296 0.936 0.624 -0.936 0.624 -7.944 5.296Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
-    </button>
+    <button on:click={execute} class="executebtn primary">Execute</button>
     {#if result}
         <h4 class="subtitle">Result</h4>
         <div class="card" style="padding: 24px;">

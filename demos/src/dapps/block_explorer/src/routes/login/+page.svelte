@@ -83,7 +83,7 @@
 <div class="container">
     <div class="card">
         {#if $wallet.loggedIn}
-            <p style="margin:0">Succesful login!</p>
+            <p style="margin:0">Successfully logged in!</p>
         {:else}
             <!--<p style="margin:0"><span class="status-label">status:</span> not logged in</p>-->
             <input on:change={upload} type="file" class="custom-file-input"/>

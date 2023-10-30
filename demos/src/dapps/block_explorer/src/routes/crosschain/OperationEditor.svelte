@@ -130,7 +130,7 @@
         {:else}-->
             <div class="txblock">
                 <div class="opeditor-title">
-                    <img style="opacity: .3;" alt="task icon" src={taskinfo.icon}/>
+                    <img style="opacity: .3;" alt="task icon" class="taskicon" src={taskinfo.icon}/>
                     <div>
                         <h3 class="operationcard-label">{taskinfo.label} task <span style="opacity: .6;">on DEMOS network</span></h3>
                     </div>
@@ -144,7 +144,7 @@
                     {/if}
                 </div>
                 {#if chainflag}
-                    <div class="opeditor-params generic-shadow">
+                    <div class="opeditor-params">
                         {#each currentParams as param}
                             <TaskParam required={param.required} label={param.label} value={params[param.id]} onChange={(newValue)=>{params[param.id]=newValue;}} type={param.type}></TaskParam>
                         {/each}
