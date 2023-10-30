@@ -24,6 +24,59 @@ async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
 }
 
+export interface IPeerLastInfo {
+    peerLastBlockNumber: number,
+    peerLastBlockHash: string
+}
+
+
+// INFO Syncing with the network using majority vote as legitimate check
+// REVIEW Reimplement a smart way to sync the blockchain between two or more peers
+export async function _Sync(id: any) {
+    // Our data is stored locally for convenience
+    let ourLastBlockNumber = await Chain.getLastBlockNumber()
+    let ourLastBlockHash = await Chain.getLastBlockHash()
+    // Let's also store the actual peerlist
+    let peerlist = peerManager.getPeers()
+    let peerLastInfo: Map<string, IPeerLastInfo> = new Map()
+    // To determine which peers we should sync with, we need to know the last block number and hash of each peer 
+    for (let peer of peerlist) {
+        // TODO Ask their info
+        let peerConnectionString = peer.connectionString
+        let peerLastBlockNumber = "placeholder"
+        let peerLastBlockHash = "placeholder"
+        // Storing their info
+        peerLastInfo[peer.identity.toString("hex")] = {
+            lastBlockNumber: peerLastBlockNumber,
+            lastBlockHash: peerLastBlockHash,
+        }
+    }
+    // REVIEW Compute the blocks to ask and to which peers to ask based on their last block number and ours
+    // This gets us the max number between our last block number and the peers' last block number
+    let highestBlockNumber = Math.max(...Object.values(peerLastInfo).map(x => x.lastBlockNumber))
+    let blocksAndPeers: Map<number, Peer[]> = new Map()
+    // Assigning blocks and peers (if a peer report a block n > of blockNumber they should be able to give it to us)
+    for (let blockNumber = highestBlockNumber; blockNumber >= ourLastBlockNumber; blockNumber--) {
+        // Creating the block space
+        if (!blocksAndPeers[blockNumber]) { 
+            blocksAndPeers[blockNumber] = []
+        }
+        // Iterating over the peers
+        for (let peer of peerlist) {
+            let infos = peerLastInfo[peer.identity.toString("hex")]
+            // Has the peer a last block number higher than this block number?
+            if (infos && infos.lastBlockNumber >= blockNumber) {
+                blocksAndPeers[blockNumber].push(peer)
+            }
+        }    
+    }
+    // TODO For each block to ask we ask all the peers that have the block to give us the block hash
+    // TODO Comparing the block hashesh, the majority wins and we ask the block any of the peers that gave us the right block hash
+    // TODO As this is a sort of micro consensus, we also compute the hash and verify it
+    // TODO We keep going until the last syncable block
+    // TODO Now we keep in mind that we are synced and thus connected to the peers that have the same head hash as us
+}
+
 // INFO Syncing with the network
 export default async function Sync(id: any) {
     // TODO Give the type
