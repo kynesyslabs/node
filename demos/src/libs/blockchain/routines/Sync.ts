@@ -15,7 +15,7 @@ import PeerManager from "../../peer/PeerManager"
 import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
 import Peer from "../../peer/Peer"
-import * as demostd from "src/libs/utils/demos_stdlib"
+import { demostdlib } from "src/libs/utils"
 
 const peerManager = PeerManager.getInstance()
 import { Response } from "../../communications/types/responseregistry"
@@ -44,13 +44,13 @@ export async function _Sync(id: any) {
     for (let peer of peerlist) {
         let peerConnectionString = peer.connectionString
         // REVIEW Ask their info
-        let peerLastBlockNumber = await demostd.remoteCall(
+        let peerLastBlockNumber = await demostdlib.remoteCall(
             peer.identity.toString("hex"),
             peer,
             "getLastBlockNumber",
             "nodeCall",
         )
-        let peerLastBlockHash = await demostd.remoteCall(
+        let peerLastBlockHash = await demostdlib.remoteCall(
             peer.identity.toString("hex"),
             peer,
             "getLastBlockHash",
