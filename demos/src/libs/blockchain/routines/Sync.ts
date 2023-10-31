@@ -15,6 +15,7 @@ import PeerManager from "../../peer/PeerManager"
 import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
 import Peer from "../../peer/Peer"
+import * as demostd from "src/libs/utils/demos_stdlib"
 
 const peerManager = PeerManager.getInstance()
 import { Response } from "../../communications/types/responseregistry"
@@ -41,10 +42,20 @@ export async function _Sync(id: any) {
     let peerLastInfo: Map<string, IPeerLastInfo> = new Map()
     // To determine which peers we should sync with, we need to know the last block number and hash of each peer 
     for (let peer of peerlist) {
-        // TODO Ask their info
         let peerConnectionString = peer.connectionString
-        let peerLastBlockNumber = "placeholder"
-        let peerLastBlockHash = "placeholder"
+        // REVIEW Ask their info
+        let peerLastBlockNumber = await demostd.remoteCall(
+            peer.identity.toString("hex"),
+            peer,
+            "getLastBlockNumber",
+            "nodeCall",
+        )
+        let peerLastBlockHash = await demostd.remoteCall(
+            peer.identity.toString("hex"),
+            peer,
+            "getLastBlockHash",
+            "nodeCall",
+        )
         // Storing their info
         peerLastInfo[peer.identity.toString("hex")] = {
             lastBlockNumber: peerLastBlockNumber,

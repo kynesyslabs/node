@@ -1,9 +1,68 @@
 /* eslint-disable no-unused-vars */
+import ComLink from "../communications/comlink"
+import ComLinkUtils from "../communications/comlinkUtils"
+import { Identity } from "../identity"
+import { Peer } from "../peer"
+import Transmission from "../communications/transmission"
 import Transaction from "../blockchain/transaction"
 import { Operation } from "../blockchain/routines/executeOperations"
 import Mempool from "../blockchain/mempool"
 import GLS from "../blockchain/gls/gls"
+import sharedState from "src/utilities/sharedState"
+import ResponseRegistry from "../communications/responseRegistry"
 
+// INFO Compose, sign and send a signed comlink chain easily
+export async function remoteCall(receiver: any, // While is preferable to have an hex string we can use anything here 
+                                 peer: Peer, 
+                                 message: string, 
+                                 type: string = "nodeCall",
+                                 requireReply: boolean = false,
+                                 isReply: boolean = false)
+                                 : Promise<[boolean, any]> {
+    let {identity} = sharedState.getInstance()
+    // Initialize the comlink
+    let _comlink = new ComLink()
+    // Generate the transmission
+    let _askMessage = new Transmission(identity.ed25519.privateKey)
+    _askMessage.initialize(
+        "nodeCall",
+        message,
+        identity.ed25519.publicKey,
+        receiver,
+        null,
+        null,
+    )
+    // Hash and sign it
+    await _askMessage.finalize()
+    // Putting the message into a new comlink
+    console.log(
+        "[SYNC] Asking " +
+            peer.socket.id +
+            " for the last block at " +
+            peer.connectionString,
+    )
+    // Preparing for a response
+    _comlink.properties.require_reply = true
+    _comlink.properties.is_reply = false
+
+    // Propagating the responseRegistry actual status
+    ResponseRegistry.getInstance().requestResponse(_comlink)
+
+    // Ask for the last block
+    await _comlink.broadcastMessageToPeer(
+        peer,
+        _askMessage,
+        identity.ed25519.privateKey,
+    )
+
+    // Get out the response promise
+    let responsePromise = ResponseRegistry.getInstance().checkResponse(
+        _comlink.muid,
+    )
+    return responsePromise
+}
+
+// INFO Deriving a mempool operation from a given data by deriving a tx and the corresponding mempool operation
 export async function deriveMempoolOperation(
     data: any,
     insert: boolean = true,
