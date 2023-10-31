@@ -19,7 +19,7 @@
         display: flex;
         align-items: center;
         gap: 16px;
-        background-color: var(--background2-min);
+        background-color: var(--background2);
         border: 1px solid var(--background3);
     }
     .card p{

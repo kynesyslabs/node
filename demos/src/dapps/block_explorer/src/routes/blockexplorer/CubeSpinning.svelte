@@ -19,7 +19,7 @@
         text-align: center;
         display: block;
         position: absolute;
-        border: 2px solid white;
+        border: 2px solid var(--color);
     }
 
     .cube div.top {

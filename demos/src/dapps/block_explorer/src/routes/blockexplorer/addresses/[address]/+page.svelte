@@ -85,9 +85,9 @@
         position: absolute;
         top: 0;
         right: 0;
-        background-color: var(--accent);
+        background-color: var(--color2);
         border: none;
-        color: black;
+        color: var(--background);
         font-size: 2rem;
         cursor: pointer;
         padding: 8px 16px;

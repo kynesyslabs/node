@@ -74,10 +74,10 @@
         padding: 0 32px;
     }
     .desktoplinkcontainer:not(:last-child){
-        border-right: 1px solid var(--background2-min);
+        border-right: 1px solid var(--background2);
     }
     .page-link{
-        color: #fff;
+        color: var(--color);
         text-decoration: none;
         font-size: 1rem;
         font-weight: 100;
@@ -88,7 +88,7 @@
         position: relative;
     }
     .page-link-selected{
-        color: var(--accent);
+        color: var(--color2);
         text-decoration: none;
         font-size: 1rem;
         font-weight: 400;
@@ -106,7 +106,7 @@
         left: 0;
         width: 100%;
         height: 1px;
-        background: var(--accent);
+        background: var(--color2);
     }
     .page-link::after{
         content: "";
@@ -116,7 +116,7 @@
         left: 0;
         width: 100%;
         height: 1px;
-        background: var(--accent);
+        background: var(--color2);
         transform: scaleX(0);
         transition: transform .3s ease;
         transform-origin: left;
@@ -128,7 +128,7 @@
         margin-right: 0;
         margin-left: auto;
         background: none;
-        color: white;
+        color: var(--color);
         display: none;
     }
     .mobile-menu{
@@ -137,13 +137,12 @@
         left: 0;
         width: 100%;
         height: 100dvh;
-        background: rgba(0, 0, 0, .9);
-        backdrop-filter: blur(15px);
+        background: var(--background);
         z-index: 600;
         padding: 16px 32px;
     }
     .mobile-link{
-        color: #fff;
+        color: var(--color);
         text-decoration: none;
         font-size: 2rem;
         font-weight: 600;
@@ -154,7 +153,7 @@
         white-space: nowrap;
     }
     .mobile-link-selected{
-        color: var(--accent);
+        color: var(--color2);
         text-decoration: none;
         font-size: 2em;
         font-weight: 600;
@@ -166,7 +165,7 @@
         margin: 16px 0;
     }
     .mobile-link-selected::after{
-        color: var(--accent);
+        color: var(--color2);
         text-decoration: none;
         font-weight: 600;
         cursor: pointer;
@@ -192,7 +191,7 @@
 <div class="header" style={`z-index:${mobileMenuOpen?"2000":"500"};`}>
     <a href="/blockexplorer" style="flex-basis:100%;">
         <div>
-            <img alt="logo" class="logo" src="/logo/Logo DEMOS White.svg"/>
+            <img alt="logo" class="logo darkinvert" src="/logo/Logo DEMOS White.svg"/>
         </div>
     </a>
     <button on:click={()=>{mobileMenuOpen=true}} class="menu-button"><Fa icon={faBars} style="font-size:1.5rem"></Fa></button>
@@ -204,7 +203,7 @@
         {#if $wallet.loggedIn}
         <a href="/login" style="text-decoration: none;"><button class="secondary mobile-link">Log Out</button></a>
         {:else}
-        <a href="/login"><button class="mobile-link primary" style="color:black;">Connect Wallet</button></a>
+        <a href="/login"><button class="mobile-link primary" style="color:var(--background);">Connect Wallet</button></a>
         {/if}
     </div>
     {/if}
@@ -219,10 +218,10 @@
     </div>
     {#if $wallet.loggedIn}
         <div class="onlydesktop" style="flex-basis:100%;">
-            <button class="login-button secondary " on:click={logOut}>Log out</button>
+            <button class="login-button secondary " on:click={logOut}>Log Out</button>
         </div>
     {:else if location != "/login"}
-        <a href="/login" class="onlydesktop" style="flex-basis:100%;"><button class="primary login-button">Connect wallet</button></a>
+        <a href="/login" class="onlydesktop" style="flex-basis:100%;"><button class="primary login-button">Connect Wallet</button></a>
     {:else}
         <div class="onlydesktop" style="flex-basis: 100%;"> </div>
     {/if}

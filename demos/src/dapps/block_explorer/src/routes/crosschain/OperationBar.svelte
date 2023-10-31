@@ -48,7 +48,7 @@
         transition: transform .3s ease-in-out;
         z-index: 1000;
         border-right: 1px solid var(--background3);
-        background-color: black;
+        background-color: var(--background);
     }
     .available-blocks h4{
         margin: 0 0 8px;
@@ -69,9 +69,9 @@
         right: 0;
     }
     .open-button{
-        background-color: var(--accent);
+        background-color: var(--color2);
         border-radius: 0 50% 50% 0;
-        color: black;
+        color: var(--background);
         height: 32px;
         width: 32px;
         display: flex;

@@ -95,7 +95,13 @@ export default async function mainLoop(id: Identity) {
         } else {
             // We didn't find peers that have been online for 3 blocks. Use the online peers list as it is
             // In this case we assume the node is isolated, starting up or that other nodes are not online or still connencting to the network
-            currentlyOnlinePeers = onlinePeers
+            console.log("using online peers list as it is")
+            currentlyOnlinePeers = onlinePeers.map(peer => {
+                return {
+                    identity: peer.identity,
+                    publicKey: peer.connectionString,
+                }
+            })
         }
 
         console.log("🐸🐸🐸 Family:")
@@ -111,12 +117,16 @@ export default async function mainLoop(id: Identity) {
             hasSentNodeOnlineTx = false // Reset it for the next cycle.
             sharedState.getInstance().consensusMode = true
             // TODO Start consensus methods here
-            const shard = RepresentativeShard.getInstance().getShard()
+            const shard = await RepresentativeShard.getInstance().getShard(
+                currentlyOnlinePeers,
+            )
             console.log("[MAIN LOOP] Shard:")
             console.log(shard)
 
             // At the end of the consensus period, the main loop should start again
+
             sharedState.getInstance().consensusMode = false
+            sharedState.getInstance().mainLoopPaused = false // Pause the main loop
         }
     }
     // TODO

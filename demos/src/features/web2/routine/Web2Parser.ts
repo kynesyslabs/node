@@ -222,6 +222,7 @@ export  class Web2APIClass {
             body: raw_request.method === "POST"? JSON.stringify(raw_request.parameters["data"]) : null},
         )
         let string_result = JSON.stringify(fetched.json()) // Anyway...
+        console.log(string_result) // TODO Remove in production
         // Using the fetched result to build (or to continue) the Web2Request
         this.validate(string_result)
         // TODO (Also in validate) manage the case where we are not the first hop

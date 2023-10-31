@@ -188,7 +188,9 @@ export default class GLS {
     }
 
     // INFO The following getter is used to retrieve the list of all validators at a given block
-    static async getGLSValidatorsAtBlock(blockNumber: number = null) {
+    static async getGLSValidatorsAtBlock(
+        blockNumber: number = null,
+    ): Promise<unknown[]> {
         if (!blockNumber) {
             console.log("No block number provided, getting the last one")
             blockNumber = (await Chain.getLastBlock()).number

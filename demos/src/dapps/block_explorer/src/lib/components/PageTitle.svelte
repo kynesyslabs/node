@@ -10,7 +10,7 @@
         position: absolute;
         top: 0;
         height: 100%;
-        background: white;
+        background: var(--color);
         opacity: 1;
         animation: title-appear cubic-bezier(0.075, 0.82, 0.165, 1) .5s;
         visibility: visible;

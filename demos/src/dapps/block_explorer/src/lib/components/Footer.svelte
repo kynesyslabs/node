@@ -42,7 +42,7 @@
         justify-content: center;
     }
     .footer-link-container{
-        color:white;
+        color:var(--color);
         font-weight: 100;
         padding: 0 32px;
     }
@@ -67,7 +67,7 @@
     }
 
     .footer-link{
-        color: #fff;
+        color: var(--color);
         text-decoration: none;
         font-size: 1rem;
         font-weight: 100;
@@ -85,7 +85,7 @@
         left: 0;
         width: 100%;
         height: 1px;
-        background: var(--accent);
+        background: var(--color2);
         transform: scaleX(0);
         transition: transform .3s ease;
         transform-origin: left;
@@ -94,7 +94,7 @@
         transform: scaleX(1);
     }
     .footer-link-container:not(:last-child){
-        border-right: 1px solid var(--background2-min);
+        border-right: 1px solid var(--background2);
     }
 </style>
 

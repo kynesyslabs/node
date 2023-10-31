@@ -6,7 +6,7 @@
 </script>
 <style>
     .skeletonplaceholder{
-        background-color: var(--background2-min);
+        background-color: var(--background3);
         height: 20px;
         width: 100%;
         position: relative;
@@ -18,7 +18,7 @@
         position: absolute;
         top: 0;
         height: 100%;
-        background: white;
+        background: var(--background3);
         opacity: 1;
         animation: loadStarted cubic-bezier(0.075, 0.82, 0.165, 1) .25s forwards;
         visibility: visible;
@@ -34,7 +34,7 @@
         top: 0;
         height: 100%;
         width: 100%;
-        background: white;
+        background: var(--background3);
         opacity: 1;
         animation: loadFinished cubic-bezier(0.075, 0.82, 0.165, 1) .25s forwards;
         visibility: visible;
@@ -42,7 +42,7 @@
 </style>
 <div class="block-card">
     <div class="block-card-header">
-        <div class="block-icon-container generic-shadow">
+        <div class="block-icon-container">
             <img class="block-icon" alt="Block icon" src={transIcon}/>
         </div>
         <div style="width: 200px;">
@@ -64,7 +64,7 @@
             <div class="skeletonplaceholder delayed3"></div>
         {/if}
     </div>
-    <div class="reward-container generic-shadow">
+    <div class="reward-container">
         {#if transaction} 
             <p class="reward loaded delayed4" style="font-size:.8rem">{transaction.content.amount} DEM</p>
         {:else}

@@ -62,7 +62,7 @@
 <div class="dnd" use:dndzone={{items:availableBlocks, dropFromOthersDisabled:true, morphDisabled:true, centreDraggedOnCursor:true}} on:consider={considerAvailable} on:finalize={finalizeAvailable}>
     {#each availableBlocks as block(block.id)}
         <div class="card operation">
-            <img style="opacity: .3;" alt="task icon" src={blockIcons.find(item => item.id == block.type).icon}/>
+            <img style="opacity: .3;" alt="task icon" class="taskicon" src={blockIcons.find(item => item.id == block.type).icon}/>
             {block.label}
         </div>
     {/each}
