@@ -81,7 +81,23 @@ export async function _Sync(id: any) {
             }
         }    
     }
-    // TODO For each block to ask we ask all the peers that have the block to give us the block hash
+    // For each block to ask we ask all the peers that have the block to give us the block hash
+    for (let blockNumber of Object.keys(blocksAndPeers)) {
+        let hashes: Map <string, number> = new Map()
+        let peers = blocksAndPeers[blockNumber]
+        // Asking the peers for the block
+        for (let peer of peers) {
+            let blockHash = await demostdlib.remoteCall(
+                peer.identity.toString("hex"),
+                peer,
+                "getBlockHash",
+                "nodeCall",
+                true,
+                false,
+            )
+            hashes[peer.identity.toString("hex")] = blockHash
+        }
+    }
     // TODO Comparing the block hashesh, the majority wins and we ask the block any of the peers that gave us the right block hash
     // TODO As this is a sort of micro consensus, we also compute the hash and verify it
     // TODO We keep going until the last syncable block

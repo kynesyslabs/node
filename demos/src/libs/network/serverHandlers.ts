@@ -24,6 +24,7 @@ import { normalizeWebBuffers } from "./routines/normalizeWebBuffers"
 import Sessions from "./routines/sessionManager"
 import Block from "src/libs/blockchain/blocks"
 import Transaction from "src/libs/blockchain/transaction"
+import eggs from "./routines/eggs"
 
 var term = require("terminal-kit").terminal
 
@@ -318,6 +319,17 @@ export default class ServerHandlers {
                 break
             case "getPeerTime":
                 response = new Date().getTime()
+                break
+
+            // NOTE Don't look past here, go away
+            // INFO For real, nothing here to be seen
+            case "hots":
+                console.log("[SERVER] Received hots")
+                response = eggs.hots()
+                break
+            default:
+                console.log("[SERVER] Received unknown message")
+                response = "{ error: \"Unknown message\"}"
                 break
         }
         return { extra, require_reply, response }
