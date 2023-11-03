@@ -1,20 +1,19 @@
-<script>
-    import {Anchor, Node} from 'svelvet';
+<script lang="ts">
+	import { Handle, Position, type NodeProps } from '@xyflow/svelte';
+	import type { Writable } from 'svelte/store';
     import {chains, tasks} from '$lib/chainscript.js';
     import { v4 as uuidv4 } from 'uuid';
 
-    export let operation;
-    export let position;
-    export let source;
-    export let id;
+	type $$Props = NodeProps;
+
+	export let data;
 
     let node;
     let taskinfo;
     let chaininfo;
     let inputid = uuidv4();
 
-    $:console.log(node);
-
+	const { operation } = data;
     //cerca le info per la grafica se è il caso
     $:if(operation.type!=="conditional" && operation.data)
     {
@@ -31,43 +30,10 @@
         return str.substr(0, 10) + '...' + str.substr(str.length-4, str.length);
     }
 </script>
-<style>
-    .operation{
-        padding: 24px;
-        position: relative;
-        width: 100%;
-        display: flex;
-        align-items: center;
-        gap: 16px;
-    }
-    .input-anchors {
-		position: absolute;
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
-		top: 50%;
-        transform: translate(0, -50%);
-        left: -20px;
-	}
 
-	.output-anchors {
-		position: absolute;
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
-        top: 50%;
-        transform: translate(0, -50%);
-        right: -20px;
-	}
-</style>
-<Node id={id} position={position} connections={[[source.node, inputid]]}  bind:node={node}>
-    <div class="input-anchors">
-        <Anchor id={inputid}></Anchor>
-    </div>
-    <div class="output-anchors">
-        <Anchor output></Anchor>
-    </div>
-    <div class="card operation">
+<div class="card operation">
+	<Handle type="target" position={Position.Left} />
+<div class="card operation">
         <!--{JSON.stringify(node)}-->
         {#if chaininfo && taskinfo}
             <img style="opacity: .3;" alt="task icon" src={taskinfo.icon}/>
@@ -112,4 +78,16 @@
             {/if}
         </div>-->
     </div>
-</Node>
+	<Handle type="source" position={Position.Right} />
+</div>
+
+<style>
+    .operation{
+        padding: 24px;
+        position: relative;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+    }
+</style>
