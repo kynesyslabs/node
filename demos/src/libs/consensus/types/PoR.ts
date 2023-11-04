@@ -62,12 +62,12 @@ export default class RepresentativeShard {
     // TODO Define methods for using the shard
 }
 
-interface IValidator {
+export interface IValidator {
     connectionURL: string
     publicKey_string: string
     publicKey?: forge.pki.ed25519.BinaryBuffer
 }
-class ProofOfRepresentation {
+export class ProofOfRepresentation {
     private common_seed: string = null
     private peers: Peer[] // Populated by createSeed
     private validators: { [key: string]: IValidator | {} } = {}

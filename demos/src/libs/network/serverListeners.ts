@@ -90,6 +90,8 @@ export default class ServerListeners {
                 return // TODO Better error handling
             }
             let _comlink_request = parsed_comlink[0]
+            console.log("comlink request")
+            console.log(_comlink_request)
             let content = parsed_comlink[1]
 
             let extra: any, require_reply: any, response: any
@@ -116,8 +118,20 @@ export default class ServerListeners {
                     break
 
                 case "consensus":
+                    console.log(
+                        "[SERVER LISTENER HANDLER]: received consensus request",
+                    )
+                    console.log(
+                        parsed_comlink[0].chain.current.currentMessage.bundle
+                            .content.sender,
+                    )
                     ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleConsensusRequest())
+                        await ServerHandlers.handleConsensusRequest(
+                            request,
+                            content,
+                            parsed_comlink[0].chain.current.currentMessage
+                                .bundle.content.sender,
+                        ))
                     break
 
                 case "messages":

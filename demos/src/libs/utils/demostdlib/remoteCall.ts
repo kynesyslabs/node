@@ -1,4 +1,3 @@
-
 import ComLink from "../../communications/comlink"
 import { Peer } from "../../peer"
 import Transmission from "../../communications/transmission"
@@ -6,14 +5,15 @@ import sharedState from "src/utilities/sharedState"
 import ResponseRegistry from "../../communications/responseRegistry"
 
 // INFO Compose, sign and send a signed comlink chain easily
-export async function remoteCall(receiver: any, // While is preferable to have an hex string we can use anything here 
-                                 peer: Peer, 
-                                 message: string, 
-                                 type: string = "nodeCall",
-                                 requireReply: boolean = false,
-                                 isReply: boolean = false)
-                                 : Promise<[boolean, any]> {
-    let {identity} = sharedState.getInstance()
+export async function remoteCall(
+    receiver: any, // While is preferable to have an hex string we can use anything here
+    peer: Peer,
+    message: string,
+    type: string = "nodeCall",
+    requireReply: boolean = false,
+    isReply: boolean = false,
+): Promise<[boolean, any]> {
+    let { identity } = sharedState.getInstance()
     // Initialize the comlink
     let _comlink = new ComLink()
     // Generate the transmission
@@ -30,10 +30,7 @@ export async function remoteCall(receiver: any, // While is preferable to have a
     await _askMessage.finalize()
     // Putting the message into a new comlink
     console.log(
-        "[SYNC] Asking " +
-            peer.socket.id +
-            " for the last block at " +
-            peer.connectionString,
+        "[SYNC] Asking " + peer.socket.id + " for " + type + "\n" + message,
     )
     // Preparing for a response
     _comlink.properties.require_reply = requireReply
@@ -41,7 +38,7 @@ export async function remoteCall(receiver: any, // While is preferable to have a
 
     // Propagating the responseRegistry actual status
     ResponseRegistry.getInstance().requestResponse(_comlink)
-
+    console.log("[RESPONSE REQUESTED]")
     // Ask for the last block
     await _comlink.broadcastMessageToPeer(
         peer,

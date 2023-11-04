@@ -10,6 +10,7 @@ import Transmission from "src/libs/communications/transmission"
 import ComLink from "src/libs/communications/comlink"
 import { pki } from "node-forge"
 import RepresentativeShard from "src/libs/consensus/types/PoR"
+import QBFT from "src/libs/consensus/types/BFT"
 
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
@@ -99,7 +100,7 @@ export default async function mainLoop(id: Identity) {
             currentlyOnlinePeers = onlinePeers.map(peer => {
                 return {
                     identity: peer.identity,
-                    publicKey: peer.connectionString,
+                    connectionString: peer.connectionString,
                 }
             })
         }
@@ -112,21 +113,32 @@ export default async function mainLoop(id: Identity) {
         // !SECTION Todo list for a typical consensus operation
 
         if (isConsensusTimeReached) {
+            const sharedStateInstance = sharedState.getInstance()
             console.log("[MAIN LOOP] Consensus time reached")
-            sharedState.getInstance().mainLoopPaused = true // Pause the main loop
+            sharedStateInstance.mainLoopPaused = true // Pause the main loop
             hasSentNodeOnlineTx = false // Reset it for the next cycle.
-            sharedState.getInstance().consensusMode = true
-            // TODO Start consensus methods here
+            sharedStateInstance.consensusMode = true
+
             const shard = await RepresentativeShard.getInstance().getShard(
                 currentlyOnlinePeers,
             )
+
+            sharedStateInstance.shard = shard
             console.log("[MAIN LOOP] Shard:")
             console.log(shard)
 
+            // We should now propose a block
+            // We need to add the shard to the block
+
+            const consensus = await QBFT.representationAssembly(shard, id)
+            console.log("[MAIN LOOP] Consensus:")
+            console.log(consensus)
+
             // At the end of the consensus period, the main loop should start again
 
-            sharedState.getInstance().consensusMode = false
-            sharedState.getInstance().mainLoopPaused = false // Pause the main loop
+            delete sharedStateInstance.shard
+            sharedStateInstance.consensusMode = false
+            sharedStateInstance.mainLoopPaused = false // Pause the main loop
         }
     }
     // TODO

@@ -165,13 +165,18 @@ export default class ServerHandlers {
         return { extra, require_reply, response }
     }
 
-    // FIXME Use the new consensus classes
-    static async handleConsensusRequest(): Promise<any> {
+    static async handleConsensusRequest(
+        request: any,
+        content: any,
+        senderIdentity: any,
+    ): Promise<any> {
         let extra: string,
             require_reply = false
         let response: any
 
         console.log("[SERVER] Received consensus request")
+        console.log("[SERVER] Peer identity information:")
+        console.log(senderIdentity)
         if (!sharedState.getInstance().consensusMode) {
             return {
                 extra,
@@ -180,9 +185,32 @@ export default class ServerHandlers {
             }
         }
 
-        // TODO First part of rBFT: PoR Shard creation
-        let authorized = true
-        // TODO Check if we are a validator
+        let authorized = false
+        let senderPublicKey = senderIdentity.toString("hex")
+
+        const shard = sharedState.getInstance().shard
+
+        if (!shard) {
+            return {
+                extra,
+                require_reply,
+                response: { error: "No shard found in shared state" },
+            }
+        }
+        console.log("[SERVERHANDLER] Shard found in shared state")
+        console.log(shard)
+
+        const peerList = await shard.getPeers()
+
+        // Authorizing the sender
+        for (let peer of peerList) {
+            if (peer.identity.toString("hex") === senderPublicKey) {
+                authorized = true
+                break
+            }
+        }
+
+        // Return error if not authorized
         if (!authorized) {
             return {
                 extra,
@@ -191,9 +219,20 @@ export default class ServerHandlers {
             }
         }
 
-        // TODO Go through the rBFT phases
+        switch (content.message) {
+            case "getMempool":
+                response = await Mempool.getMempool()
+                console.log("[SERVERHANDLER] Received mempool")
+                console.log(response)
+                return { extra, require_reply, response }
 
-        return { extra, require_reply, response }
+            default:
+                return {
+                    extra,
+                    require_reply,
+                    response: { error: "Unknown message" },
+                }
+        }
     }
 
     static async handleMessage(content: any): Promise<any> {
@@ -329,7 +368,8 @@ export default class ServerHandlers {
                 break
             default:
                 console.log("[SERVER] Received unknown message")
-                response = "{ error: \"Unknown message\"}"
+                // eslint-disable-next-line quotes
+                response = '{ error: "Unknown message"}'
                 break
         }
         return { extra, require_reply, response }
