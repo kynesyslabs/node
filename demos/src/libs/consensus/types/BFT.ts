@@ -180,7 +180,7 @@ export default class QBFT {
             `[BFT] Checking consensus. Got ${pro} pro and ${con} against votes}`,
         )
         // let twothirdPlus1 = (total * 2) / 3 + 1 // REVIEW Is this correct?
-        let twothirdPlus1 = 0
+        let twothirdPlus1 = 1
         if (pro >= twothirdPlus1) {
             console.info("[sQBFT] We have a theoric consensus!\n")
             return true
