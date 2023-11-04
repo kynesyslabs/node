@@ -22,6 +22,13 @@ const peerManager = PeerManager.getInstance()
 export default async function mainLoop(id: Identity) {
     console.log("[MAIN LOOP] Started")
     var cycleTimestamp: number
+
+    sharedState.getInstance().privateKey = id.ed25519
+        .privateKey as unknown as pki.ed25519.BinaryBuffer
+
+    sharedState.getInstance().publicKey = id.ed25519
+        .publicKey as unknown as pki.ed25519.BinaryBuffer
+
     while (sharedState.getInstance().runMainLoop) {
         await sleep(500) // Sleep for 1 second
         if (sharedState.getInstance().mainLoopPaused) {

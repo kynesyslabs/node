@@ -47,10 +47,14 @@ export default async function buildProposedBlock(): Promise<Block> {
     proposedBlock.timestamp = new Date().getTime()
 
     // Cryptography on the block
+    console.log("[BLOCK] signing proposed block content")
+    console.log(proposedBlock.content)
     proposedBlock.hash = Hashing.sha256(JSON.stringify(proposedBlock.content))
+    console.log(proposedBlock.hash)
     if (!proposedBlock.validation_data) {
         proposedBlock.validation_data = {}
     }
+
     let signed_hash = Cryptography.sign(
         proposedBlock.hash,
         sharedState.getInstance().privateKey,
