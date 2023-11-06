@@ -25,13 +25,15 @@
         if(log[0])
         {
             updateWallet();
-            document.cookie=`prvkey=${prvkey}`;
+            localStorage.setItem("prvkey", prvkey);
         }
     }
 
-    const getCookieValue = (name) => (
-        document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)')?.pop() || ''
-    );
+    const getCookieValue = (name) => {
+        let value = localStorage.getItem(name)
+        console.log("Getting cookie", value);
+        return value;
+    }
     
     onMount(()=>{
         const selectedrpc = localStorage.getItem("selectedrpc");

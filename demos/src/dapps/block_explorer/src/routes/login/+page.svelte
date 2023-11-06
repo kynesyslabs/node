@@ -37,7 +37,7 @@
         if(log[0])
         {
             updateWallet();
-            document.cookie=`prvkey=${prvkey}`;
+            localStorage.setItem("prvkey",prvkey);
         }
     }
 </script>
@@ -83,7 +83,7 @@
 <div class="container">
     <div class="card">
         {#if $wallet.loggedIn}
-            <p style="margin:0">Successfully logged in!</p>
+            <p style="margin:0">Login Successful!</p>
         {:else}
             <!--<p style="margin:0"><span class="status-label">status:</span> not logged in</p>-->
             <input on:change={upload} type="file" class="custom-file-input"/>
