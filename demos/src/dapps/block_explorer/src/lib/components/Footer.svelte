@@ -1,6 +1,4 @@
 <script>
-    import {rpcaddress} from "$lib/env.js";
-	import RPCselection from "$lib/components/inputs/RPCselection.svelte";
     const links = [
         {
             label: "DOCS",
@@ -13,8 +11,6 @@
     ]
 
     import "$lib/assets/backgrounds/bubblesbg.jpeg";
-
-    let selectrpc = false;
 </script>
 <style>
     .footer{
@@ -48,22 +44,6 @@
     }
     .arrow{
         transform: rotate(181deg);
-    }
-    .node-selection{
-        margin-left: auto;
-        font-weight: 100;
-        width: fit-content;
-        opacity: .6;
-    }
-    .node-selection-header{
-        display: flex;
-        justify-content: space-between;
-        gap: 8px;
-    }
-    .change-node{
-        margin-left: auto;
-        font-weight: 100;
-        text-decoration: underline;
     }
 
     .footer-link{
@@ -109,14 +89,7 @@
             </div>
         {/each}
     </div>
-    <div class="node-selection">
-        <div class="node-selection-header">
-            <p style="margin:0; font-weight:600;">Connected node</p>
-            <button class="change-node" on:click={()=>{selectrpc = true}}>[change]</button>
-        </div>
-        <p style="margin:0;">{$rpcaddress}</p>
+    <div class="footer-link-container" style="margin-left: auto;">
+        <a href="/settings" class="footer-link">Settings</a>
     </div>
-    {#if selectrpc}
-    <RPCselection close={()=>{selectrpc = false}}/>
-    {/if}
 </div>

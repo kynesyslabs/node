@@ -5,7 +5,7 @@
     import '$lib/styles/buttons.css';
     import '$lib/styles/surfaces.css';
     import demos from "$lib/demos.js"
-    import {updateWallet, updateRpcAddress} from "$lib/env.js";
+    import {updateWallet, updateRpcAddress, updateTheme, theme} from "$lib/env.js";
 
     let logcheck = false;
     
@@ -47,6 +47,11 @@
             login(storedkey);
         }
         logcheck = true;
+        let savedtheme = localStorage.getItem("theme");
+        if(savedtheme)
+        {
+            updateTheme(savedtheme);
+        }
     })
 
     import "nprogress/nprogress.css";
@@ -120,7 +125,6 @@
         }
     }
 </style>
-
 {#if logcheck}
     <slot/>
 {:else}
