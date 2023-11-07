@@ -11,7 +11,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { Peer, PeerManager } from "src/libs/peer"
-import InstantMessaging from "src/features/messaging/instantMessaging"
+import InstantMessaging from "src/features/InstantMessagingProtocol/instantMessagingProtocol"
 import Mempool from "src/libs/blockchain/mempool"
 import chain from "src/libs/blockchain/chain"
 import handleWeb2 from "src/features/web2/Web2Dispatcher"
@@ -240,7 +240,7 @@ export default class ServerHandlers {
         // ...
         let extra: any
         let require_reply = false
-        const response = await InstantMessaging.parseMessage(content)
+        const response = "Not Yet Implemented"
         return { extra, require_reply, response }
     }
 
