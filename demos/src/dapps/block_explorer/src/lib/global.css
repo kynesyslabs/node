@@ -14,26 +14,49 @@
             --color: #000;
             --color2: #00000e;
             --color3: #303030;
-            --color4: #505357
-        }
-        .taskicon, .block-icon, .darkinvert{
-            filter: invert(0);
+            --color4: #505357;
+            --filter: invert(0);
         }
     }
-    @media (prefers-color-scheme: dark) {
-        :root {
-            --background: #000;
-            --background2: #141414;
-            --background3:#303030;
-            --color: #FFF;
-            --color2: #F8F8FF;
-            --color3: #cfcfcf;
-            --color4: #A8ACAF
-        }
-        .taskicon, .block-icon, .darkinvert{
-            filter: invert(1);
-        }
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background: #000;
+        --background2: #141414;
+        --background3:#303030;
+        --color: #FFF;
+        --color2: #F8F8FF;
+        --color3: #cfcfcf;
+        --color4: #A8ACAF;
+        --filter: invert(1);
     }
+}
+
+[data-theme="light"] {
+    --background: #FFF;
+    --background2: #ebebeb;
+    --background3: #cfcfcf;
+    --color: #000;
+    --color2: #00000e;
+    --color3: #303030;
+    --color4: #505357;
+    --filter: invert(0);
+}
+
+[data-theme="dark"] {
+    --background: #000;
+    --background2: #141414;
+    --background3:#303030;
+    --color: #FFF;
+    --color2: #F8F8FF;
+    --color3: #cfcfcf;
+    --color4: #A8ACAF;
+    --filter: invert(1);
+}
+  
+.taskicon, .block-icon, .darkinvert{
+    filter: var(--filter);
+}
 
 @media (max-width: 1399px) {
     :root{

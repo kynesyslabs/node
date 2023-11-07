@@ -12,8 +12,12 @@
     import PageTitle from '$lib/components/PageTitle.svelte';
     import { fly, slide } from "svelte/transition";
 
-   //localStorage.clear("operations");
-
+    const version = "1.0";
+    if(localStorage.getItem("version") != version)
+    {
+        localStorage.clear();
+        localStorage.setItem("version", version);
+    }
     let root = localStorage.getItem("operations")?JSON.parse(localStorage.getItem("operations")):{id:"root", items:[], type:"root"}
     $: localStorage.setItem("operations", JSON.stringify(root));
 

@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { cryptography } from "src/libs/crypto"
 import { Peer, PeerManager } from "src/libs/peer"
 import { comlinkUtils } from "src/libs/communications"
-import InstantMessaging from "src/features/messaging/instantMessaging"
+import InstantMessaging from "src/features/InstantMessagingProtocol/instantMessagingProtocol"
 import { Identity } from "src/libs/identity"
 import Transmission from "src/libs/communications/transmission"
 import { ConsensusRequest } from "../consensus/Consensus"

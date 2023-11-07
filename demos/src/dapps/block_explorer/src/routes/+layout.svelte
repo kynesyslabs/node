@@ -5,7 +5,7 @@
     import '$lib/styles/buttons.css';
     import '$lib/styles/surfaces.css';
     import demos from "$lib/demos.js"
-    import {updateWallet, updateRpcAddress} from "$lib/env.js";
+    import {updateWallet, updateRpcAddress, updateTheme, theme} from "$lib/env.js";
 
     let logcheck = false;
     
@@ -25,13 +25,15 @@
         if(log[0])
         {
             updateWallet();
-            document.cookie=`prvkey=${prvkey}`;
+            localStorage.setItem("prvkey", prvkey);
         }
     }
 
-    const getCookieValue = (name) => (
-        document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)')?.pop() || ''
-    );
+    const getCookieValue = (name) => {
+        let value = localStorage.getItem(name)
+        console.log("Getting cookie", value);
+        return value;
+    }
     
     onMount(()=>{
         const selectedrpc = localStorage.getItem("selectedrpc");
@@ -45,6 +47,11 @@
             login(storedkey);
         }
         logcheck = true;
+        let savedtheme = localStorage.getItem("theme");
+        if(savedtheme)
+        {
+            updateTheme(savedtheme);
+        }
     })
 
     import "nprogress/nprogress.css";
@@ -118,7 +125,6 @@
         }
     }
 </style>
-
 {#if logcheck}
     <slot/>
 {:else}

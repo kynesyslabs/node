@@ -42,12 +42,13 @@ export class ResponseRegistryDB {
                 "ComLink object must have required_reply property set to true",
             ]
         // Checking if the response request is already in the registry
-        var responseRegistry_query = await Chain.read("SELECT * from responseRegistry where muid = '" + comlink.muid + "'")
+        var responseRegistry_query = await Chain.read(
+            "SELECT * from responseRegistry where muid = '" +
+                comlink.muid +
+                "'",
+        )
         if (responseRegistry_query.length > 0) {
-            return [
-                false,
-                "Response request already in registry",
-            ]
+            return [false, "Response request already in registry"]
         }
         // Adding the response request to the registry
         let empty_response: Response = {
@@ -60,36 +61,32 @@ export class ResponseRegistryDB {
 
         let responseRegistry_write = await Chain.write(
             "INSERT INTO responseRegistry (muid, timestamp, response, comlink) VALUES ('" +
-            comlink.muid +
-            "', '" +
-            Date.now() +
-            "', '" +
-            JSON.stringify(empty_response) +
-            "', '" +
-           JSON.stringify(comlink) +
-            "')",
+                comlink.muid +
+                "', '" +
+                Date.now() +
+                "', '" +
+                JSON.stringify(empty_response) +
+                "', '" +
+                JSON.stringify(comlink) +
+                "')",
         )
-        return [
-            true,
-            responseRegistry_write,
-        ]
+        return [true, responseRegistry_write]
     }
-
 
     // REVIEW INFO Check if a response has been received
     static async hasResponse(comlink: ComLink) {
-        var responseRegistry_query = await Chain.read("SELECT * from responseRegistry where muid = '" + comlink.muid + "'")
+        var responseRegistry_query = await Chain.read(
+            "SELECT * from responseRegistry where muid = '" +
+                comlink.muid +
+                "'",
+        )
         // Leaving out the unrequested responses
         if (responseRegistry_query.length < 1) {
-            return [
-                false,
-                "No response request in registry",
-            ]
+            return [false, "No response request in registry"]
         }
         // Inspect the response
         let response = responseRegistry_query[0].response
-        if (!response)
-            return [false, "No response has been received"]
+        if (!response) return [false, "No response has been received"]
         // We have a response
         return [true, response]
     }
@@ -101,25 +98,28 @@ export class ResponseRegistryDB {
         comlink_muid: string,
         socket: Socket | socket_client.Socket,
     ) {
-        var responseRegistry_query = await Chain.read("SELECT * from responseRegistry where muid = '" + comlink_muid + "'")
+        var responseRegistry_query = await Chain.read(
+            "SELECT * from responseRegistry where muid = '" +
+                comlink_muid +
+                "'",
+        )
         // Leaving out the unrequested responses
         if (responseRegistry_query.length < 1) {
-            return [
-                false,
-                "No response request in registry",
-            ]
+            return [false, "No response request in registry"]
         }
         let responseElement = responseRegistry_query[0]
         let response = responseElement.response
         response.timestamp = Date.now()
         response.socket = socket
-        response.identity =
-            message.bundle.content.sender
-        response.message =
-            message.bundle.content.message
+        response.identity = message.bundle.content.sender
+        response.message = message.bundle.content.message
         // Writing the response
         var responseRegistry_write = await Chain.write(
-            "UPDATE (response) SET response = '" + JSON.stringify(response) + "' WHERE muid = '" + comlink_muid + "'",
+            "UPDATE (response) SET response = '" +
+                JSON.stringify(response) +
+                "' WHERE muid = '" +
+                comlink_muid +
+                "'",
         )
         return [true, responseRegistry_write]
     }
@@ -127,16 +127,19 @@ export class ResponseRegistryDB {
     // REVIEW INFO Check with the muid if a response has been received and return a promise
     async checkResponse(muid: string): Promise<[boolean, Response]> {
         let timeout = 0
-        var responseRegistry_query = await Chain.read("SELECT * from responseRegistry where muid = '" + muid + "'")
+        var responseRegistry_query = await Chain.read(
+            "SELECT * from responseRegistry where muid = '" + muid + "'",
+        )
         while (responseRegistry_query.length < 1) {
             await sleep(100)
             timeout += 100
             if (timeout > 2000) return [false, null]
-            responseRegistry_query = await Chain.read("SELECT * from responseRegistry where muid = '" + muid + "'")
+            responseRegistry_query = await Chain.read(
+                "SELECT * from responseRegistry where muid = '" + muid + "'",
+            )
         }
         return [true, responseRegistry_query[0].response]
     }
-
 }
 
 // NOTE This is a legacy, memory based implementation of the response registry.
@@ -178,6 +181,8 @@ export default class ResponseRegistry {
                 connection_string: null,
             },
         }
+        console.log("[CREATED RESPONSE REQUEST]")
+        console.log(this.list[comlink.muid])
         return [true, this.list[comlink.muid]]
     }
 
@@ -214,12 +219,19 @@ export default class ResponseRegistry {
     // INFO Check with the muid if a response has been received and return a promise
     async checkResponse(muid: string): Promise<[boolean, Response]> {
         let timeout = 0
+        console.log("Logging MUID: " + muid)
+        console.log(this.list)
         while (!this.list[muid].response.message) {
             await sleep(100)
             timeout += 100
             if (timeout > 2000) return [false, this.list[muid].response]
         }
-        console.log("[RESPONSES] " + this.list[muid].response.connection_string + " replied to " + muid)
+        console.log(
+            "[RESPONSES] " +
+                this.list[muid].response.connection_string +
+                " replied to " +
+                muid,
+        )
         return [true, this.list[muid].response]
     }
 }

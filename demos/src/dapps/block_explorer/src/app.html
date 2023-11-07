@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" id="html">
 	<head>
 		<meta charset="utf-8" />
 		<link rel="icon" href="%sveltekit.assets%/favicon.png" />
@@ -10,3 +10,27 @@
 		<div style="display: contents">%sveltekit.body%</div>
 	</body>
 </html>
+<script>
+	let storedTheme = localStorage.getItem('theme');
+	changeTheme();
+	window.addEventListener("storage", (event) => {
+		storedTheme = localStorage.getItem('theme');
+		changeTheme();
+	})
+	function changeTheme()
+	{
+		if(storedTheme)
+		{
+			if(storedTheme === 'dark')
+				document.getElementById('html').setAttribute("data-theme", "dark");
+			else if(storedTheme === 'light')
+				document.getElementById('html').setAttribute("data-theme", "light");
+			else
+				document.getElementById('html').setAttribute("data-theme", "");
+		}
+		else
+		{
+			document.getElementById('html').setAttribute("data-theme", "");
+		}
+	}
+</script>

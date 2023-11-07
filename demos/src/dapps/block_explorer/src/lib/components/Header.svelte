@@ -201,7 +201,7 @@
             <a class="nounderline" on:click={(e)=>{e.stopPropagation();mobileMenuOpen = false}} href={page.href}><div class={`${location.split("/").includes(page.test)?"mobile-link-selected":"mobile-link"} color-transition`}>{page.label}</div></a>
         {/each}
         {#if $wallet.loggedIn}
-        <a href="/login" style="text-decoration: none;"><button class="secondary mobile-link">Log Out</button></a>
+        <a style="text-decoration: none;"><button class="secondary mobile-link" on:click={logOut}>Log Out</button></a>
         {:else}
         <a href="/login"><button class="mobile-link primary" style="color:var(--background);">Connect Wallet</button></a>
         {/if}
