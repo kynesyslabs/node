@@ -18,7 +18,7 @@ export default class QBFT {
     // BFT part of the consensus.
     static async representationAssembly(
         shard: ProofOfRepresentation,
-        id: Identity,
+        id: Identity = null,
     ): Promise<[boolean, Block]> {
         let peers = await shard.getPeers()
         let peerManager = PeerManager.getInstance()

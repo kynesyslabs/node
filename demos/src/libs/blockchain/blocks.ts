@@ -28,7 +28,7 @@ export default class Block {
         this.status = null
         this.content = {
             ordered_transactions: [],
-            per_address_transactions: null,
+            per_address_transactions: new Map<string, string[]>(),
             web2data: {}, // objects containing hashes of fetched web2data
             previousHash: null,
         }
