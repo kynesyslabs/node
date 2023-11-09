@@ -20,13 +20,6 @@
 
 	// same for edges
 	const edges = writable([
-		{
-			id: '1-2',
-			type: 'default',
-			source: '1',
-			target: '2',
-			label: 'Edge Text'
-		}
 	]);
 
 	const nodeTypes = {
@@ -61,12 +54,15 @@
 			y: event.clientY
 		});
 
+		const newId = `${Math.random()}`;
+
 		const newNode = {
-			id: `${Math.random()}`,
+			id: newId,
 			type,
 			position,
-			data: { label: `${type} node` },
-			origin: [0.5, 0.0]
+			data: { label: `${type} node`, id:newId},
+			origin: [0.5, 0.0],
+			selectable:false
 		};
 
 		$nodes.push(newNode);
@@ -84,7 +80,7 @@
         on:dragover={onDragOver} on:drop={onDrop}
 	>
 		<Controls />
-		<Background variant={BackgroundVariant.Dots} />
+		<Background variant={BackgroundVariant.Dots} bgColor={"var(--background)"} patternColor={"var(--background4)"} />
 		<MiniMap />
 	</SvelteFlow>
 	<Drawer />

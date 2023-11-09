@@ -2,26 +2,12 @@
 	import { Handle, Position, type NodeProps } from '@xyflow/svelte';
     import { v4 as uuidv4 } from 'uuid';
     import ChainSelection from "./ChainSelection.svelte";
-	import TaskNode from './TaskNode.svelte';
 
 	type $$Props = NodeProps;
 
-	export let data;
-
-    let chain;
-    function updateChain(newValue)
-    {
-        chain = newValue;
-    }
+    export let label:string;
 
     let showoptions = true;
-
-    let node;
-    let taskinfo;
-    let chaininfo;
-    let inputid = uuidv4();
-
-	const { operation } = data;
 
     function trim_address(str) {
         if (str.length <= 20) 
@@ -30,20 +16,20 @@
     }
 </script>
 
-<TaskNode label="Pay">
-    <div class="input-box">
-        <label>Chain</label>
-        <ChainSelection value={chain} onChange={updateChain}></ChainSelection>
-    </div>
-    <div class="input-box">
-        <label>Address</label>
-        <input/>
-    </div>
-    <div class="input-box">
-        <label>Amount</label>
-        <input/>
-    </div>
-</TaskNode>
+<div class="card operation">
+	<Handle type="target" position={Position.Left} />
+        <div class="card-header">
+            <img class="taskicon" style="opacity: .3;" alt="task icon" src={"/task-icons/wallet.svg"}/>
+            <div>
+                <p class="operationcard-label">{label}</p>
+            </div>
+            <button class="futuristic" on:click={()=>{showoptions = !showoptions}}>{showoptions?"hide":"show"}</button>
+        </div>
+        {#if showoptions}
+            <slot/>
+        {/if}
+	<Handle type="source" position={Position.Right} />
+</div>
 
 <style>
     .operation{

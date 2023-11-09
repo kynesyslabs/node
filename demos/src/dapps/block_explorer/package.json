@@ -56,7 +56,6 @@
     "stream-http": "^3.2.0",
     "svelte-dnd-action": "^0.9.29",
     "svelte-fa": "^3.0.4",
-    "svelvet": "^8.1.0",
     "uuid": "^9.0.0",
     "vite-plugin-require": "^1.1.11",
     "xrpl": "^2.12.0"

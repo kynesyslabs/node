@@ -146,7 +146,7 @@ button{
     margin: auto;
 }
 
-.label{
+.label, label{
     margin: 8px 0;
     opacity: .75;
 }
