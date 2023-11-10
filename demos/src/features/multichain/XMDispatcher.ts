@@ -2,27 +2,32 @@
 // INFO Entry point for multichain requests
 import XMParser from "./routines/XMParser"
 import { XMScript } from "./routines/XMParser"
-import { deriveMempoolOperation } from "src/libs/utils/demostdlib/deriveMempoolOperation.ts"
+import { deriveMempoolOperation } from "src/libs/utils/demostdlib/deriveMempoolOperation"
 
 export default class multichainDispatcher {
-
     // INFO Digesting the request from the server
     static async digest(data: XMScript): Promise<any> {
         console.log("[XMChain Digestion] Processing:")
         console.log(data.multichain_operation)
         console.log("\n===== FUNCTIONS ===== \n")
-        for (let i = 0; i < Object.keys(data.multichain_operation).length; i++) {
+        for (
+            let i = 0;
+            i < Object.keys(data.multichain_operation).length;
+            i++
+        ) {
             // Named function
-            console.log("[XMChain Digestion] Found: " + Object.keys(data.multichain_operation)[i])
+            console.log(
+                "[XMChain Digestion] Found: " +
+                    Object.keys(data.multichain_operation)[i],
+            )
         }
         console.log("\n===== END OF ANALYSIS ===== \n")
         console.log("[XMChain Digestion] Proceeding: execution phase")
         // REVIEW Execute
         let result = multichainDispatcher.execute(data)
         // TODO Implement a response schema
-        return "Not yet implemented" // await multichainDispatcher.execute(data)        
+        return "Not yet implemented" // await multichainDispatcher.execute(data)
     }
-    
 
     // INFO Check syntax of xM Script
     static async load(script: string): Promise<any> {
@@ -39,7 +44,10 @@ export default class multichainDispatcher {
             results,
             true,
         )
-        let overallResult = { results: results, derivedOperation: derivedOperation }
+        let overallResult = {
+            results: results,
+            derivedOperation: derivedOperation,
+        }
         return overallResult // REVIEW is this ok?
     }
 
