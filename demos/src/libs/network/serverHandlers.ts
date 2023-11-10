@@ -60,11 +60,11 @@ export default class ServerHandlers {
     // !SECTION Consensus Voting
     // ANCHOR Vote request
 
-    static async handleVoteRequest(): Promise<string> {
+    static async handleVoteRequest(timestamp: number): Promise<string> {
         // Todo : compare the received response response with what we have locally, and return the vote result
         console.log("[SERVERHANDLER] handleVoteRequest")
         const mempool = await Mempool.getMempool()
-        const propsedBlock = await deriveBlock(mempool)
+        const propsedBlock = await deriveBlock(mempool, timestamp)
         let proposedBlockHash = propsedBlock.hash
         return proposedBlockHash
     }

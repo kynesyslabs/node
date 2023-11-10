@@ -16,4 +16,5 @@ export default interface BlockContent {
     per_address_transactions: Map<string, string[]>
     web2data: {} // TODO Add Web2 class
     previousHash: string
+    timestamp: number
 }

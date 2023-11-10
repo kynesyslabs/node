@@ -19,7 +19,7 @@ export default async function deriveBlock(
         .getInstance()
         .identity.ed25519.publicKey.toString("hex")
     derivedBlock.proposer = proposer
-    derivedBlock.timestamp = timestamp
+    derivedBlock.content.timestamp = timestamp
     // REVIEW Order transactions
     let ordered_transactions: Transaction[] = await orderTxs(
         mempoolData.transactions,

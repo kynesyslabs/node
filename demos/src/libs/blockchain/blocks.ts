@@ -20,7 +20,6 @@ export default class Block {
     content: BlockContent // TODO
     proposer: pki.PublicKey | pki.ed25519.BinaryBuffer
     validation_data: any
-    timestamp: number
 
     constructor() {
         this.number = null
@@ -31,10 +30,10 @@ export default class Block {
             per_address_transactions: new Map<string, string[]>(),
             web2data: {}, // objects containing hashes of fetched web2data
             previousHash: null,
+            timestamp: null,
         }
         this.proposer = null
         this.validation_data = null
-        this.timestamp = null
     }
 
     // ANCHOR Getters

@@ -137,7 +137,7 @@ export default async function mainLoop(id: Identity) {
             // We should now propose a block
             // We need to add the shard to the block
 
-            const consensus = await QBFT.representationAssembly(shard, id)
+            const consensus = await QBFT.representationAssembly(shard)
             console.log(
                 `[MAIN LOOP] Consensus: ${
                     consensus[0]

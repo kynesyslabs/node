@@ -250,7 +250,9 @@ export default class ServerListeners {
 
             switch (request.parameter) {
                 case "forgedProposedHash":
-                    res = await ServerHandlers.handleVoteRequest()
+                    res = await ServerHandlers.handleVoteRequest(
+                        request.timestamp,
+                    )
                     voteResponse = res
             }
 

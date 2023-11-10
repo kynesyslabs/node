@@ -1,10 +1,8 @@
 // INFO This library provides all the methods required to apply a QBFT consensus algorithm in a PoR/BFT network.
 import Mempool, { MempoolData } from "src/libs/blockchain/mempool"
 import Block from "src/libs/blockchain/blocks"
-import { io } from "socket.io-client"
 import PeerManager from "src/libs/peer/PeerManager"
 import Peer from "src/libs/peer/Peer"
-import { Identity } from "src/libs/identity"
 import { ProofOfRepresentation } from "./PoR"
 import { demostdlib } from "src/libs/utils"
 import deriveBlock from "../routines/deriveBlock"
@@ -18,7 +16,6 @@ export default class QBFT {
     // BFT part of the consensus.
     static async representationAssembly(
         shard: ProofOfRepresentation,
-        id: Identity = null,
     ): Promise<[boolean, Block]> {
         let peers = await shard.getPeers()
         let peerManager = PeerManager.getInstance()
@@ -144,13 +141,18 @@ export default class QBFT {
         let finalResult = await this.vote(
             "forgedProposedHash",
             forgedProposedHash,
+            medianTimestamp,
         )
         return [finalResult, propsedBlock]
     }
 
     // INFO Voting on a parameter through a list of peers and then computing the consensus
     // TODO Test and verify that works
-    static async vote(parameter: any, our: any): Promise<boolean> {
+    static async vote(
+        parameter: any,
+        our: any,
+        timestamp: number,
+    ): Promise<boolean> {
         let peerlist: Peer[] = await PeerManager.getInstance().getPeers()
         let numericResult = {
             pro: 0,
@@ -166,6 +168,7 @@ export default class QBFT {
                     "voteRequest",
                     {
                         parameter: parameter,
+                        timestamp: timestamp,
                     },
                     response => {
                         resolve(response)
@@ -209,7 +212,7 @@ export default class QBFT {
         total: number,
     ): boolean {
         console.log(
-            `[BFT] Checking consensus. Got ${pro} pro and ${con} against votes}`,
+            `[BFT] Checking consensus. Got ${pro} pro and ${con} against votes}, got ${total} votes`,
         )
         // let twothirdPlus1 = (total * 2) / 3 + 1 // REVIEW Is this correct?
         let twothirdPlus1 = 1

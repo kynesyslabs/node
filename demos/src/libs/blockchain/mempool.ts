@@ -15,7 +15,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 // INFO Singleton Mempool class
 import Transaction from "./transaction"
 import PeerManager from "../peer/PeerManager"
-import buildProposedBlock from "./routines/buildProposedBlock"
 import Block from "./blocks"
 import Chain from "./chain"
 import Hashing from "../crypto/hashing"
@@ -89,21 +88,6 @@ export default class Mempool {
         console.log("Mempool retrieved:")
         console.log(result)
         return result
-    }
-
-    // INFO The mempool contains a dynamic proposedBlock Block object
-    public static async getProposedBlock(): Promise<Block> {
-        console.log("[MEMPOOL MANAGER] Getting the proposed block]")
-        let mempool = await Mempool.getMempool()
-        if (!mempool.proposedBlock) {
-            mempool.proposedBlock = await buildProposedBlock()
-            await Chain.write(
-                "UPDATE mempool SET proposedBlock ='" +
-                    JSON.stringify(mempool.proposedBlock) +
-                    "' WHERE current = 1",
-            )
-        }
-        return mempool.proposedBlock
     }
 
     // INFO Writing a transaction to the mempool
