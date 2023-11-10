@@ -139,19 +139,23 @@ export default class QBFT {
         // Iterating over all the peers
         for (let i = 0; i < peerlist.length; i++) {
             let peer = peerlist[i]
-            let peerSocket = io(peer.connectionString) // REVIEW Connection to the peer
-            console.log("[BFT VOTING]: connectionstring")
-            console.log(peer.connectionString)
-            console.log("[BFT VOTING]: peersocket")
-            console.log(peerSocket)
-            // TODO Ask the peer for the parameter on its side
-            peerSocket.emit("browser_request", parameter)
-            const emitResponse = peerSocket.emit("vote", parameter)
-            let response
-            console.log("[BFT VOTING]: Response")
-            console.warn(response)
-            console.warn(emitResponse)
 
+            const response = await new Promise(resolve => {
+                peer.socket.emit(
+                    "voteRequest",
+                    {
+                        parameter: parameter,
+                    },
+                    response => {
+                        resolve(response)
+                    },
+                )
+            })
+
+            console.log("[BFT VOTING]: Response")
+
+            console.warn(response)
+            console.warn(our)
             // TODO Wait for the response from the peer (maybe use a classic comlink)
             // Compiling the registry
             if (response != our) {
