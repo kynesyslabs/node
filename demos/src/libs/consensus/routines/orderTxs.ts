@@ -20,13 +20,15 @@ export default async function orderTxs(
         mapping[tx.hash] = tx
     }
     // Sorting the ranking
-    let orderedTxsSortable: any[][]
+    let orderedTxsSortable: any[][] = []
     for (var txHash in ranking) {
         orderedTxsSortable.push([txHash, ranking[txHash]])
     }
-    orderedTxsSortable.sort(function (a, b) {
-        return a[1] - b[1]
-    })
+    if (orderedTxsSortable && orderedTxsSortable.length > 0) {
+        orderedTxsSortable.sort(function (a, b) {
+            return a[1] - b[1]
+        })
+    }
     // Assigning the transactions to the ordered transactions mapping
     for (let i = 0; i < orderedTxsSortable.length; i++) {
         let tx = mapping[orderedTxsSortable[i][0]]
