@@ -8,6 +8,7 @@ import { Identity } from "src/libs/identity"
 import { ProofOfRepresentation } from "./PoR"
 import { demostdlib } from "src/libs/utils"
 import deriveBlock from "../routines/deriveBlock"
+import { filterOutliers, median } from "src/libs/network/routines/timeSyncUtils"
 
 export default class QBFT {
     constructor() {}
@@ -36,6 +37,9 @@ export default class QBFT {
         let merged_mempool = our_mempool
         let pro = 0
         let con = 0
+
+        let mempoolList: MempoolData[] = []
+
         // TODO Test staker list for online status
         // TODO IMPLEMENT THIS!
         // TODO Share the staker list and consensus the staker list too
@@ -82,6 +86,9 @@ export default class QBFT {
                 console.log("Mempool not valid")
                 return [false, null]
             }
+
+            mempoolList.push(remotePool)
+
             // Merging with the remote pool as it is compatible
             let mergedResult = await Mempool.merge(remotePool)
             if (!mergedResult) {
@@ -101,6 +108,18 @@ export default class QBFT {
                 con++
             }
         }
+
+        const timestamps = mempoolList.map(mempool => mempool.timestamp)
+        let medianTimestamp
+        if (timestamps.length > 1) {
+            const filteredTimestamps = filterOutliers(timestamps)
+            medianTimestamp = median(filteredTimestamps)
+        } else {
+            medianTimestamp = timestamps[0]
+        }
+
+        console.log("[sQBFT]: median timestamp: " + medianTimestamp)
+
         // REVIEW If 2/3 + 1 have the same merged mempool, then we have a consensus
         console.warn(
             "[sQBFT Preliminary Validators Test] Ok: " +
@@ -115,7 +134,7 @@ export default class QBFT {
             return [false, null]
         }
         const mempool = await Mempool.getMempool()
-        const propsedBlock = await deriveBlock(mempool)
+        const propsedBlock = await deriveBlock(mempool, medianTimestamp)
 
         let forgedProposedHash = propsedBlock.hash
         // REVIEW BFT for the block with the others

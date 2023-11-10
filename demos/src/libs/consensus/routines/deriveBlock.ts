@@ -10,6 +10,7 @@ import assignTxs from "./assignTxs"
 
 export default async function deriveBlock(
     mempoolData: MempoolData,
+    timestamp: number,
 ): Promise<Block> {
     // Deriving an empty block and setting the few properties we can use right now
     let derivedBlock: Block = new Block()
@@ -18,7 +19,7 @@ export default async function deriveBlock(
         .getInstance()
         .identity.ed25519.publicKey.toString("hex")
     derivedBlock.proposer = proposer
-    derivedBlock.timestamp = new Date().getTime()
+    derivedBlock.timestamp = timestamp
     // REVIEW Order transactions
     let ordered_transactions: Transaction[] = await orderTxs(
         mempoolData.transactions,

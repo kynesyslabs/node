@@ -26,6 +26,7 @@ export interface MempoolData {
     current: number
     transactions: Transaction[]
     proposedBlock: Block
+    timestamp: number
 }
 
 export default class Mempool {
@@ -46,6 +47,7 @@ export default class Mempool {
                 current: 1,
                 transactions: [],
                 proposedBlock: null,
+                timestamp: new Date().getTime(),
             }
             await Chain.write(
                 "INSERT INTO mempool VALUES(" +
@@ -82,6 +84,7 @@ export default class Mempool {
             current: sql_result.current,
             transactions: JSON.parse(sql_result.transactions),
             proposedBlock: JSON.parse(sql_result.proposedBlock),
+            timestamp: new Date().getTime(),
         }
         console.log("Mempool retrieved:")
         console.log(result)

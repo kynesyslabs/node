@@ -25,6 +25,19 @@ export function variance(arr: number[]): number {
     return arr.map(x => Math.pow(x - _mean, 2)).reduce(add) / (arr.length - 1)
 }
 
+export function calculateIQR(data) {
+    const sortedData = [...data].sort((a, b) => a - b)
+    const q1 = sortedData[Math.floor(sortedData.length / 4)]
+    const q3 = sortedData[Math.ceil(sortedData.length * (3 / 4))]
+    const iqr = q3 - q1
+    return { iqr, q1, q3 }
+}
+
+export function filterOutliers(data) {
+    const { iqr, q1, q3 } = calculateIQR(data)
+    return data.filter(x => x >= q1 - 1.5 * iqr && x <= q3 + 1.5 * iqr)
+}
+
 export function median(arr: number[]): number {
     if (arr.length < 2) return arr[0]
 
