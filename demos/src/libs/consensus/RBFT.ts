@@ -26,7 +26,7 @@ KyneSys Labs: https://www.kynesys.xyz/
  *      b. Merge the Shard mempools so that everyone has a consistent view of the network.
  *      c. Forge a possible block from the merged Shard mempool
  *      d. Call the vote one more time to vote for the block hash and return the result
- * 
+ *
  * To better understand the above steps, you can look at the source code of this class in PoR.ts
  * The above mentioned class gives you an abstract high level interface for PoR/BFT consensus, so
  * you don't have to worry about the details of the implementation. You can anyway look at that
@@ -41,10 +41,10 @@ import Block from "../blockchain/blocks"
 // INFO The rBFT class gathers and conveniently exposes the high level interface for PoR/BFT consensus.
 export class rBFT {
     private static _instance: rBFT
-	
+
     private representativeShard: RepresentativeShard = null // Importing the representative shard from the PoR module
     private isReady: boolean = false // Flag to indicate if the PoR module has been initialized
-	
+
     constructor() {}
 
     // INFO Singleton: we cannot have more than one instance of this class at a time
@@ -54,7 +54,7 @@ export class rBFT {
         }
         return rBFT._instance
     }
-	
+
     // INFO Uses PoR module to generate a Representative Shard from common immutable parameters
     public async initialize(): Promise<void> {
         // Creating the PoR result object

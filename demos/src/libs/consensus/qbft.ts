@@ -118,7 +118,7 @@ export default class QBFT {
                 broadcastMsg("MsgPrePrepare", BigInt(1), inputValue)
             }
 
-            [timerChan, stopTimer] = d.NewTimer(BigInt(1))
+            ;[timerChan, stopTimer] = d.NewTimer(BigInt(1))
 
             // Handle events until finished.
             let conditioner = true
@@ -176,7 +176,7 @@ export default class QBFT {
                         if (stopTimer) {
                             stopTimer()
                         }
-                        [timerChan, stopTimer] = d.NewTimer(round)
+                        ;[timerChan, stopTimer] = d.NewTimer(round)
                         broadcastMsg("MsgPrepare", msg.Round, msg.Value)
                         break
 
