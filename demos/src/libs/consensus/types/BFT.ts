@@ -89,6 +89,8 @@ export default class QBFT {
                 return [false, null]
             }
 
+            //diocane
+
             // We now have the merged mempool in Mempool.getInstance()(for ex. the .transactions property)
             let compatible = true
             consensusTracking.results.set(
