@@ -242,7 +242,7 @@ export default class Chain {
             "'" +
             JSON.stringify(block.validation_data) +
             "', " +
-            block.timestamp +
+            block.content.timestamp +
             ")"
         // Execute the SQL query
         await this.write(sql_query)
@@ -268,7 +268,7 @@ export default class Chain {
         }
         console.log(genesis_tx)
         // Build a block containing the genesis tx
-        genesis_block.timestamp = genesis_tx.content.timestamp
+        genesis_block.content.timestamp = genesis_tx.content.timestamp
         genesis_block.content.ordered_transactions.push(genesis_tx)
         genesis_block.content.previousHash = "0x0"
         genesis_block.hash = Hashing.sha256(
@@ -281,7 +281,7 @@ export default class Chain {
             params: genesis_json,
             hash: genesis_block.hash,
             nonce: 0,
-            timestamp: genesis_block.timestamp,
+            timestamp: genesis_block.content.timestamp,
             status: true,
             fees: {
                 network_fee: 0,

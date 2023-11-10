@@ -48,7 +48,7 @@ export default class sharedState {
         const lastBlock = await chain.getLastBlock()
         chain.isGenesis(lastBlock)
 
-        const lastTimestamp = lastBlock.timestamp
+        const lastTimestamp = lastBlock.content.timestamp
         let delta = this.currentTimestamp - lastTimestamp
         // lastTimestamp = this.currentTimestamp // FIXME This must be the last block timestamp
 
