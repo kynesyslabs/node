@@ -55,6 +55,16 @@ export default class ServerHandlers {
         // and verify themselves again.
         return result
     }
+
+    // !SECTION Consensus Voting
+    // ANCHOR Vote request
+
+    static async handleVoteRequest(content: any): Promise<[boolean, any]> {
+        // Todo : compare the received response response with what we have locally, and return the vote result
+        let forgedProposedBlock = await Mempool.getProposedBlock()
+        let forgedProposedHash = forgedProposedBlock.hash
+    }
+
     // !SECTION Login On Chain
 
     // ANCHOR Comlinks

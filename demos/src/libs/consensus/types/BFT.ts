@@ -1,6 +1,4 @@
 // INFO This library provides all the methods required to apply a QBFT consensus algorithm in a PoR/BFT network.
-
-import term from "terminal-kit"
 import Mempool, { MempoolData } from "src/libs/blockchain/mempool"
 import Block from "src/libs/blockchain/blocks"
 import { io } from "socket.io-client"
@@ -121,6 +119,7 @@ export default class QBFT {
         let forgedProposedBlock = await Mempool.getProposedBlock()
         let forgedProposedHash = forgedProposedBlock.hash
         // REVIEW BFT for the block with the others
+        console.log("[sQBFT]: forgedProposedHash: " + forgedProposedHash)
         let finalResult = await this.vote(
             "forgedProposedHash",
             forgedProposedHash,
@@ -141,9 +140,18 @@ export default class QBFT {
         for (let i = 0; i < peerlist.length; i++) {
             let peer = peerlist[i]
             let peerSocket = io(peer.connectionString) // REVIEW Connection to the peer
+            console.log("[BFT VOTING]: connectionstring")
+            console.log(peer.connectionString)
+            console.log("[BFT VOTING]: peersocket")
+            console.log(peerSocket)
             // TODO Ask the peer for the parameter on its side
-            peerSocket.emit("vote", parameter) // FIXME To implement server side
+            peerSocket.emit("browser_request", parameter)
+            const emitResponse = peerSocket.emit("vote", parameter)
             let response
+            console.log("[BFT VOTING]: Response")
+            console.warn(response)
+            console.warn(emitResponse)
+
             // TODO Wait for the response from the peer (maybe use a classic comlink)
             // Compiling the registry
             if (response != our) {

@@ -36,6 +36,7 @@ export default class ServerListeners {
 
         await this.comlinkListener()
         await this.browserRequestListener()
+        await this.voteListener()
     }
 
     // INFO this set of listeners does not require authentication and
@@ -235,5 +236,24 @@ export default class ServerListeners {
 
     authAskEmit = async () => {
         await this.peer.socket.emit("auth_ask", "sign this")
+    }
+
+    voteListener = async () => {
+        this.peer.socket.on("vote", async request => {
+            term.yellow("[SERVER] Received vote request")
+            let req: any = JSON.parse(request)
+            let voteResponse: [boolean, any]
+            var res
+
+            console.log(request)
+
+            switch (req.voteAction) {
+                case "forgedProposedHash":
+                    res = await ServerHandlers.handleVoteRequest(req)
+                    voteResponse = [res[0], res[1]]
+            }
+
+            this.peer.socket.emit("vote", JSON.stringify(voteResponse))
+        })
     }
 }

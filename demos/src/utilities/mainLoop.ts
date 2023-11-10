@@ -138,8 +138,11 @@ export default async function mainLoop(id: Identity) {
             // We need to add the shard to the block
 
             const consensus = await QBFT.representationAssembly(shard, id)
-            console.log("[MAIN LOOP] Consensus:")
-            console.log(consensus)
+            console.log(
+                `[MAIN LOOP] Consensus: ${
+                    consensus[0]
+                }, proposed block: ${JSON.stringify(consensus[1])}`,
+            )
 
             // At the end of the consensus period, the main loop should start again
 
