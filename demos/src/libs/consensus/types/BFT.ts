@@ -111,11 +111,13 @@ export default class QBFT {
 
         const timestamps = mempoolList.map(mempool => mempool.timestamp)
         let medianTimestamp
-        if (timestamps.length > 1) {
+        if (timestamps.length === 1) {
+            medianTimestamp = timestamps[0]
+        } else if (timestamps.length === 2) {
+            medianTimestamp = (timestamps[0] + timestamps[2]) / 2
+        } else if (timestamps.length > 2) {
             const filteredTimestamps = filterOutliers(timestamps)
             medianTimestamp = median(filteredTimestamps)
-        } else {
-            medianTimestamp = timestamps[0]
         }
 
         console.log("[sQBFT]: median timestamp: " + medianTimestamp)
