@@ -7,6 +7,7 @@ import Peer from "src/libs/peer/Peer"
 import { Identity } from "src/libs/identity"
 import { ProofOfRepresentation } from "./PoR"
 import { demostdlib } from "src/libs/utils"
+import deriveBlock from "../routines/deriveBlock"
 
 export default class QBFT {
     constructor() {}
@@ -113,18 +114,17 @@ export default class QBFT {
         if (!consensusReached) {
             return [false, null]
         }
-        // REVIEW Sort the mempool
-        let sortedPool = await Mempool.sort(await Mempool.getMempool())
-        // Build the block
-        let forgedProposedBlock = await Mempool.getProposedBlock()
-        let forgedProposedHash = forgedProposedBlock.hash
+        const mempool = await Mempool.getMempool()
+        const propsedBlock = await deriveBlock(mempool)
+
+        let forgedProposedHash = propsedBlock.hash
         // REVIEW BFT for the block with the others
         console.log("[sQBFT]: forgedProposedHash: " + forgedProposedHash)
         let finalResult = await this.vote(
             "forgedProposedHash",
             forgedProposedHash,
         )
-        return [finalResult, forgedProposedBlock]
+        return [finalResult, propsedBlock]
     }
 
     // INFO Voting on a parameter through a list of peers and then computing the consensus
