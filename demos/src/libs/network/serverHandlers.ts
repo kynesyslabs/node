@@ -25,6 +25,7 @@ import Sessions from "./routines/sessionManager"
 import Block from "src/libs/blockchain/blocks"
 import Transaction from "src/libs/blockchain/transaction"
 import eggs from "./routines/eggs"
+import deriveBlock from "../consensus/routines/deriveBlock"
 
 var term = require("terminal-kit").terminal
 
@@ -62,9 +63,10 @@ export default class ServerHandlers {
     static async handleVoteRequest(): Promise<string> {
         // Todo : compare the received response response with what we have locally, and return the vote result
         console.log("[SERVERHANDLER] handleVoteRequest")
-        let forgedProposedBlock = await Mempool.getProposedBlock()
-        let forgedProposedHash = forgedProposedBlock.hash
-        return forgedProposedHash
+        const mempool = await Mempool.getMempool()
+        const propsedBlock = await deriveBlock(mempool)
+        let proposedBlockHash = propsedBlock.hash
+        return proposedBlockHash
     }
 
     // !SECTION Login On Chain

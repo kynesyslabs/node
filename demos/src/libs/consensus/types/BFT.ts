@@ -152,6 +152,10 @@ export default class QBFT {
                 )
             })
 
+            console.log("Voting will compare:\n")
+            console.log(response)
+            console.log(our)
+
             // Compiling the registry
             if (response != our) {
                 numericResult.con++

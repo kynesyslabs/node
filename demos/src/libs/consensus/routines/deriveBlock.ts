@@ -5,6 +5,7 @@ import Block from "src/libs/blockchain/blocks"
 import sharedState from "src/utilities/sharedState"
 import Transaction from "src/libs/blockchain/transaction"
 import orderTxs from "./orderTxs"
+import Hashing from "src/libs/crypto/hashing"
 import assignTxs from "./assignTxs"
 
 export default async function deriveBlock(
@@ -31,6 +32,7 @@ export default async function deriveBlock(
     derivedBlock.content.web2data = web2data
     // Taking the previous hash from the blockchain
     let previousHash = await Chain.getLastBlockHash()
+    derivedBlock.hash = Hashing.sha256(JSON.stringify(derivedBlock.content))
     derivedBlock.content.previousHash = previousHash
     return derivedBlock
 }
