@@ -152,11 +152,6 @@ export default class QBFT {
                 )
             })
 
-            console.log("[BFT VOTING]: Response")
-
-            console.warn(response)
-            console.warn(our)
-            // TODO Wait for the response from the peer (maybe use a classic comlink)
             // Compiling the registry
             if (response != our) {
                 numericResult.con++
