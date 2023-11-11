@@ -43,7 +43,7 @@ export default class sharedState {
     }
 
     public async getTimePassed(): Promise<number> {
-        this.currentTimestamp = Date.now()
+        this.currentTimestamp = new Date().getTime()
 
         const lastBlock = await chain.getLastBlock()
         console.warn("[SHAREDSTATE]: last block")
@@ -55,8 +55,12 @@ export default class sharedState {
             //REVIEW: is this different than other blocks?
             lastTimestamp = new Date().getTime() - 69420 * 1000
         } else {
-            lastTimestamp = lastBlock.content.timestamp
+            lastTimestamp = JSON.parse(
+                lastBlock.content as unknown as string,
+            ).timestamp
         }
+
+        console.log("LAST TIMESTAMP: " + lastTimestamp)
 
         let delta = this.currentTimestamp - lastTimestamp
         // lastTimestamp = this.currentTimestamp // FIXME This must be the last block timestamp
