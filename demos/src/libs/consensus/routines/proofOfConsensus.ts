@@ -8,6 +8,10 @@ export interface IPOC {
 	shard: Map <string, string>
 }
 
+export async function proofConsensusHandler(content: any) {
+	
+}
+
 export async function proofConsensus(hash: string, poc: IPOC = null): Promise<IPOC> {
 	// Creating a PoC if not provided
 	if (!poc) {

@@ -16,6 +16,8 @@ import { Peer } from "src/libs/peer"
 import { comlinkUtils } from "src/libs/communications"
 import { Identity } from "src/libs/identity"
 import Transmission from "src/libs/communications/transmission"
+import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
+
 var term = require("terminal-kit").terminal
 
 export interface BrowserRequest {
@@ -98,6 +100,9 @@ export default class ServerListeners {
             let extra: any, require_reply: any, response: any
 
             switch (content.type) {
+                case "proofOfConsensus":
+                    ;({ extra, require_reply, response } = await proofConsensusHandler(content))
+                    break
                 case "tx":
                     ;({ extra, require_reply, response } =
                         await ServerHandlers.handleTransaction(content))
