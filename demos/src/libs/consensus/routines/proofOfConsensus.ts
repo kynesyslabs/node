@@ -8,8 +8,6 @@ export interface IPOC {
     shard: Map<string, string>
 }
 
-export async function proofConsensusHandler(content: any) {}
-
 export async function proofConsensus(
     hash: string,
     poc: IPOC = null,
@@ -34,6 +32,16 @@ export async function proofConsensus(
     // Returning the PoC
     return poc
 }
+
+
+export async function proofConsensusHandler(content: any): Promise<any> {
+	let require_reply = true // REVIEW Sure?
+	let extra: string, response: IPOC
+	// TODO Check if the content is valid
+	response = await proofConsensus(content.hash, content.poc)
+	return { extra, response, require_reply }
+}
+
 
 export async function askPoC(hash: string, peer: Peer): Promise<any> {
     let response = await demostdlib.remoteCall(
