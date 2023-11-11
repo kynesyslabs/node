@@ -35,14 +35,27 @@ export interface IPeerLastInfo {
 // REVIEW Reimplement a smart way to sync the blockchain between two or more peers
 export async function _Sync(id: any) {
     // Our data is stored locally for convenience
+    console.log("[SYNC] Syncing with the network...")
+    console.log("[SYNC] Getting our last block number and hash...")
     let ourLastBlockNumber = await Chain.getLastBlockNumber()
     let ourLastBlockHash = await Chain.getLastBlockHash()
+    console.log(
+        "[SYNC] Our last block number is " +
+            ourLastBlockNumber +
+            " and our last block hash is " +
+            ourLastBlockHash,
+            "\n",
+    )
     // Let's also store the actual peerlist
+    console.log("[SYNC] Getting the peerlist...")
     let peerlist = peerManager.getPeers()
+    console.log("[SYNC] Peerlist has length: " + peerlist.length)
     let peerLastInfo: Map<string, IPeerLastInfo> = new Map()
-    // To determine which peers we should sync with, we need to know the last block number and hash of each peer 
+    // To determine which peers we should sync with, we need to know the last block number and hash of each peer
+    console.log("[SYNC] Iterating over the peerlist...") 
     for (let peer of peerlist) {
         let peerConnectionString = peer.connectionString
+        console.log("[SYNC] Asking " + peerConnectionString + " for their last block info...")
         // REVIEW Ask their info
         let peerLastBlockNumber = await demostdlib.remoteCall(
             peer.identity.toString("hex"),
@@ -50,23 +63,38 @@ export async function _Sync(id: any) {
             "getLastBlockNumber",
             "nodeCall",
         )
+        if (peerLastBlockNumber[0]) {
+            console.log("[SYNC] " + peerConnectionString + " has last block number " + peerLastBlockNumber[1])
+        } else {
+            console.log("[SYNC] " + peerConnectionString + " has no last block number")
+        }
         let peerLastBlockHash = await demostdlib.remoteCall(
             peer.identity.toString("hex"),
             peer,
             "getLastBlockHash",
             "nodeCall",
         )
+        if (peerLastBlockHash[0]) {
+            console.log("[SYNC] " + peerConnectionString + " has last block hash " + peerLastBlockHash[1])
+        } else {
+            console.log("[SYNC] " + peerConnectionString + " has no last block hash")
+        }
+        console.log("[SYNC] Storing their last block info...")
         // Storing their info
         peerLastInfo[peer.identity.toString("hex")] = {
             lastBlockNumber: peerLastBlockNumber,
             lastBlockHash: peerLastBlockHash,
         }
+        console.log("[SYNC] Proceeding to next peer...")
     }
+    console.log("[SYNC] PeerLastInfo has length: " + peerLastInfo.size)
     // REVIEW Compute the blocks to ask and to which peers to ask based on their last block number and ours
     // This gets us the max number between our last block number and the peers' last block number
     let highestBlockNumber = Math.max(...Object.values(peerLastInfo).map(x => x.lastBlockNumber))
+    console.log("[SYNC] We need to reach block number " + highestBlockNumber)
     let blocksAndPeers: Map<number, Peer[]> = new Map()
     // Assigning blocks and peers (if a peer report a block n > of blockNumber they should be able to give it to us)
+    console.log("[SYNC] Iterating over the peerlist to determine who has the blocks we need...")
     for (let blockNumber = highestBlockNumber; blockNumber >= ourLastBlockNumber; blockNumber--) {
         // Creating the block space
         if (!blocksAndPeers[blockNumber]) { 
@@ -77,31 +105,76 @@ export async function _Sync(id: any) {
             let infos = peerLastInfo[peer.identity.toString("hex")]
             // Has the peer a last block number higher than this block number?
             if (infos && infos.lastBlockNumber >= blockNumber) {
+                console.log("[SYNC] " + peer.connectionString + " has the block we need: " + blockNumber)
                 blocksAndPeers[blockNumber].push(peer)
             }
         }    
     }
+    console.log("[SYNC] BlocksAndPeers has length: " + blocksAndPeers.size)
     // For each block to ask we ask all the peers that have the block to give us the block hash
+    console.log("[SYNC] Iterating over the blocks to ask for their hashes...")
     for (let blockNumber of Object.keys(blocksAndPeers)) {
-        let hashes: Map <string, number> = new Map()
+        let hashes: any = {}
+        let hasHash: any = {}
         let peers = blocksAndPeers[blockNumber]
-        // Asking the peers for the block
+        // Asking the peers for the block hash
+        console.log("[SYNC] Asking the peers for the block hash...")
         for (let peer of peers) {
             let blockHash = await demostdlib.remoteCall(
                 peer.identity.toString("hex"),
                 peer,
-                "getBlockHash",
+                "getBlockHash", // FIXME Implement it!!
                 "nodeCall",
                 true,
                 false,
+                blockNumber,
             )
-            hashes[peer.identity.toString("hex")] = blockHash
+            console.log("[SYNC] " + peer.connectionString + " has the block hash " + blockHash[1] + " for block number " + blockNumber)
+            // Increasing the hash counter and storing a reference to the peer
+            if (hashes[blockHash[1]] === undefined) {
+                hashes[blockHash[1]] = 1
+            }
+            hashes[blockHash[1]] += 1
+            if (hasHash[blockHash[1]] === undefined) {
+                hasHash[blockHash[1]] = []
+            }
+            hasHash[blockHash[1]].push(peer)
         }
+        console.log("[SYNC] Hashes has length: " + hashes.length)
+        // The block hash with the highest number wins
+        let winningBlockHash = Object.keys(hashes).sort((a, b) => hashes[b] - hashes[a])[0]
+        console.log("[SYNC] The winning block hash is " + winningBlockHash)
+        // Asking the first peer we got for the block
+        let winningPeer: Peer = hasHash[winningBlockHash]
+        console.log("[SYNC] The winning peer is " + winningPeer.connectionString)
+        if (winningPeer) {
+            console.log("[SYNC] Asking the winning peer for the block...")
+            // TODO Absolutely verify if this even works with arguments
+            let blockResponse = await demostdlib.remoteCall(
+                winningPeer.identity.toString("hex"),
+                winningPeer,
+                "getBlockByHash",
+                "nodeCall",
+                true,
+                false,
+                winningBlockHash,
+            )
+            console.log("[SYNC] Block response: " + blockResponse[0])
+            // If the block is valid, we add it to our chain
+            if (blockResponse[0]) {
+                // REVIEW Add the block to the chain
+                await Chain.insertBlock(blockResponse[1])
+                console.log("[SYNC] Block added")
+                console.log(winningBlockHash)
+                console.log("[SYNC] Kindly provided by: ")
+                console.log(winningPeer.identity.toString("hex"))
+                console.log("\n============================\n\n")
+                //await sleep(1000)
+            }
+            console.log("[SYNC] Proceeding to next block...")
+        }
+
     }
-    // TODO Comparing the block hashesh, the majority wins and we ask the block any of the peers that gave us the right block hash
-    // TODO As this is a sort of micro consensus, we also compute the hash and verify it
-    // TODO We keep going until the last syncable block
-    // TODO Now we keep in mind that we are synced and thus connected to the peers that have the same head hash as us
 }
 
 // INFO Syncing with the network

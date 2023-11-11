@@ -2,6 +2,7 @@
 import sharedState from "./sharedState"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
 import Sync from "src/libs/blockchain/routines/Sync"
+import { _Sync } from "src/libs/blockchain/routines/Sync"
 import { Identity } from "src/libs/identity"
 
 import { Peer, PeerManager } from "src/libs/peer"
@@ -36,7 +37,7 @@ export default async function mainLoop(id: Identity) {
             continue // Check if the main loop is paused
         }
         // NOTE Syncing the blockchain
-        await Sync(id)
+        await _Sync(id) // REVIEW Test here
         // NOTE Using this as the timestamp of the current cycle
         // eslint-disable-next-line no-unused-vars
         cycleTimestamp = sharedState.getInstance().getTimestamp() // REVIEW Unused

@@ -38,29 +38,3 @@ export default async function findGenesisBlock() {
     console.log(genesis_block)
     console.log(genesis_block.hash)
 }
-
-// REVIEW Experimental incremental genesis
-// TODO Too and replace the above 
-export async function findGenesis() {
-    let blocks: any[] = await Chain.getGenesisBlocks()
-    if (blocks.length < 1) {
-        console.log("[BOOTSTRAP] Initializing the genesis block\n")
-        if (!fs.existsSync("data/genesis")) { // As a folder containing .json files
-            // Exit if there are no genesis block
-            console.log("No genesis files found, exiting")
-            // eslint-disable-next-line no-undef
-            process.exit(-5)
-        }
-        // Loading the genesis block
-        let genesis_json = JSON.parse(
-            fs.readFileSync("data/genesis/genesis.json", "utf8"), // TODO Read all json files recursively
-        )
-        // Adding the genesis block to the chain
-        let genesis_hashes = await Chain.generateGenesisBlocks(genesis_json)
-        console.log("Genesis blocks created: " + genesis_hashes + "\n")
-        await Chain.getGenesisUniqueBlock()
-        console.log("Derived artifact block")
-    } else {
-        console.log("Genesis block found ")
-    }    
-}
