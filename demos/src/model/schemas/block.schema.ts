@@ -37,9 +37,6 @@ const BlockSchema = new typeorm.EntitySchema({
         validation_data: {
             type: "text",
         },
-        timestamp: {
-            type: "date",
-        },
     },
     relations: {
         // define your relations here
