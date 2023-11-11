@@ -143,6 +143,8 @@ export default async function mainLoop(id: Identity) {
             )
 
             if (consensus[0]) {
+                const prevBlockNumber = (await chain.getLastBlock()).number
+                consensus[1].number = prevBlockNumber + 1
                 await chain.insertBlock(consensus[1])
             }
 

@@ -211,8 +211,13 @@ export default class Chain {
         // Returns the hash of the block
         // Block() class
         // REVIEW Build the SQL query
+        console.log(block.validation_data)
+
+        // INSERT INTO blocks (content, number, hash, status, proposer, validation_data) VALUES ('{"ordered_transactions":[],"per_address_transactions":{},"web2data":{},"previousHash":"9128badcab75e1c31de06df48eacd11062519cb595f1a0ce11eba33a5396bae5","timestamp":1699665621794}', null, 'adb56859bfcd497b8edc19fd14885b081afb57db4b6ac08dfa59a13962eeeac5', 'derived', 'c2936a9b5f383e9c2773628c55ebc7db2a757a0deeebe936826fd275f72475ea', '[{"message":"[\\"adb56859bfcd497b8edc19fd14885b081afb57db4b6ac08dfa59a13962eeeac5\\",\\"db2748d85b7c3b7dde2ac776c8d4b0dd53350ee052b040f4790a3beeffb085258a9b1591d5ccdab89f564862ef73b9d414aa7e9f5bdc7b23c37edfe68e9db608\\"]","timestamp":1699665622286,"identity":{"type":"Buffer","data":[194,147,106,155,95,56,62,156,39,115,98,140,85,235,199,219,42,117,122,13,238,235,233,54,130,111,210,117,247,36,117,234]},"connection_string":"http://2a02:a45c:c454:100:f0a4:a16d:f6f:96d1:53550"}])
+        let validation_data = JSON.stringify(block.validation_data)
+        validation_data = Buffer.from(validation_data).toString("hex")
         let sql_query =
-            "INSERT INTO blocks (content, number, hash, status, proposer, validation_data, timestamp) VALUES " +
+            "INSERT INTO blocks (content, number, hash, status, proposer, validation_data) VALUES " +
             "('" +
             JSON.stringify(block.content) +
             "', " +
@@ -228,10 +233,8 @@ export default class Chain {
             block.proposer +
             "', " +
             "'" +
-            JSON.stringify(block.validation_data) +
-            "', " +
-            block.content.timestamp +
-            ")"
+            validation_data +
+            "')"
         // Execute the SQL query
         await this.write(sql_query)
         // Calling the operations of the block on the GLS
