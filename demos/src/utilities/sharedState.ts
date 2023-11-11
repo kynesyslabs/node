@@ -46,9 +46,13 @@ export default class sharedState {
         this.currentTimestamp = Date.now()
 
         const lastBlock = await chain.getLastBlock()
-        chain.isGenesis(lastBlock)
+        if (chain.isGenesis(lastBlock)) {
+            console.log("[SHAREDSTATE]: Genesis block detected")
+            // TODO: is this different than other blocks?
+        }
 
         const lastTimestamp = lastBlock.content.timestamp
+
         let delta = this.currentTimestamp - lastTimestamp
         // lastTimestamp = this.currentTimestamp // FIXME This must be the last block timestamp
 
