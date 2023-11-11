@@ -134,9 +134,6 @@ export default async function mainLoop(id: Identity) {
             console.log("[MAIN LOOP] Shard:")
             console.log(shard)
 
-            // We should now propose a block
-            // We need to add the shard to the block
-
             const consensus = await QBFT.representationAssembly(shard)
             console.log(
                 `[MAIN LOOP] Consensus: ${
@@ -151,5 +148,4 @@ export default async function mainLoop(id: Identity) {
             sharedStateInstance.mainLoopPaused = false // Pause the main loop
         }
     }
-    // TODO
 }
