@@ -7,6 +7,7 @@ import { ProofOfRepresentation } from "./PoR"
 import { demostdlib } from "src/libs/utils"
 import deriveBlock from "../routines/deriveBlock"
 import { filterOutliers, median } from "src/libs/network/routines/timeSyncUtils"
+import { askPoC } from "../routines/proofOfConsensus"
 
 export default class QBFT {
     constructor() {}
@@ -136,6 +137,22 @@ export default class QBFT {
         const propsedBlock = await deriveBlock(mempool, medianTimestamp)
 
         let forgedProposedHash = propsedBlock.hash
+
+        const pocList = []
+        // Another loop to get the PoC
+        for (let i = 0; i < peersNumber; i++) {
+            let currentPeer = peers[i]
+
+            let peerInstance = peerManager.getPeer(
+                currentPeer.identity.toString("hex"),
+            )
+
+            pocList.push(askPoC(forgedProposedHash, peerInstance))
+        }
+
+        console.log("[BFT]: pocList")
+        console.log(pocList)
+
         // REVIEW BFT for the block with the others
         console.log("[sQBFT]: forgedProposedHash: " + forgedProposedHash)
         let finalResult = await this.vote(

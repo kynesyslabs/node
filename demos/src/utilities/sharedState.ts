@@ -46,12 +46,15 @@ export default class sharedState {
         this.currentTimestamp = Date.now()
 
         const lastBlock = await chain.getLastBlock()
+        let lastTimestamp: number
         if (chain.isGenesis(lastBlock)) {
+            //REVIEW - is this useless? I think so.
             console.log("[SHAREDSTATE]: Genesis block detected")
-            // TODO: is this different than other blocks?
+            //REVIEW: is this different than other blocks?
+            lastTimestamp = new Date().getTime() - 69420 * 1000
+        } else {
+            lastTimestamp = lastBlock.content.timestamp
         }
-
-        const lastTimestamp = lastBlock.content.timestamp
 
         let delta = this.currentTimestamp - lastTimestamp
         // lastTimestamp = this.currentTimestamp // FIXME This must be the last block timestamp
