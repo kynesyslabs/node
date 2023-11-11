@@ -71,7 +71,7 @@ export default class Chain {
         let response = await this.read(
             "SELECT hash FROM blocks ORDER BY number ASC LIMIT 1",
         )
-        return response[0].hash
+        return response[0]
     }
     // INFO Get any block by its number
     static async getBlockByNumber(number: number): Promise<Block> {
