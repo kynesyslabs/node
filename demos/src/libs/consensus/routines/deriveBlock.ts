@@ -33,9 +33,7 @@ export default async function deriveBlock(
     derivedBlock.content.web2data = web2data
     // Taking the previous hash from the blockchain
     let previousBlock = await Chain.getLastBlock()
-    console.log(previousBlock)
-    console.log(previousBlock.hash)
-    derivedBlock.content.previousHash = "placeholder"
-    process.exit(0)
+    let previousBlockHash = previousBlock.hash
+    derivedBlock.content.previousHash = previousBlockHash
     return derivedBlock
 }

@@ -36,16 +36,17 @@ export async function proofConsensusHandler(raw_content: any): Promise<any> {
     let extra: string, response: [string, string]
     let content = JSON.parse(raw_content.message)
     // REVIEW Check if the content is valid - Or maybe not
-    response = await proofConsensus(content.hash)
+    console.log("proofConsensusHandler")
+    console.log(content)
+    response = await proofConsensus(content)
     return { extra, response, require_reply }
 }
 
 export async function askPoC(hash: string, peer: Peer): Promise<any> {
-    let content = JSON.stringify({ hash: hash, poc: null })
     let response = await demostdlib.remoteCall(
         "any",
         peer,
-        content,
+        hash,
         "proofOfConsensus",
         true,
         false,
