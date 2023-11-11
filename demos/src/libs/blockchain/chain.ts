@@ -110,11 +110,6 @@ export default class Chain {
         return await this.read("SELECT * FROM blocks WHERE number=0")
     }
 
-    // REVIEW Experimental: support for incremental genesis
-    static async getGenesisBlocks(): Promise<Block[]> {
-        return await this.read("SELECT * FROM blocks WHERE signature='genesis'")
-    }
-
     // INFO Get the current pending transactions pool
     static async getPendingPool(): Promise<Transaction[]> {
         return await this.read(
@@ -149,15 +144,8 @@ export default class Chain {
 
     static isGenesis(block: Block): boolean {
         // Check if there are any ordered transactions
-        if (
-            block?.content?.ordered_transactions &&
-            block.content.ordered_transactions.length > 0
-        ) {
-            const firstTransaction: Transaction =
-                block.content.ordered_transactions[0]
-
-            // Check if the first transaction's type is "genesis"
-            return firstTransaction.content.type === "genesis"
+        if (block.number === 0) {
+            return true
         }
     }
 
@@ -247,7 +235,8 @@ export default class Chain {
         // Execute the SQL query
         await this.write(sql_query)
         // Calling the operations of the block on the GLS
-        await executeOperations(operations, block)
+        // FIXME Adjust operations BEFORE the consensus lol
+        //await executeOperations(operations, block)
         return block.hash
     }
     // INFO Generate the genesis block

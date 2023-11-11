@@ -134,9 +134,9 @@ export default class QBFT {
             return [false, null]
         }
         const mempool = await Mempool.getMempool()
-        const propsedBlock = await deriveBlock(mempool, medianTimestamp)
+        const proposedBlock = await deriveBlock(mempool, medianTimestamp)
 
-        let forgedProposedHash = propsedBlock.hash
+        let forgedProposedHash = proposedBlock.hash
 
         const pocList = []
         // Another loop to get the PoC
@@ -147,11 +147,16 @@ export default class QBFT {
                 currentPeer.identity.toString("hex"),
             )
 
-            pocList.push(askPoC(forgedProposedHash, peerInstance))
+            pocList.push(await askPoC(forgedProposedHash, peerInstance))
         }
 
         console.log("[BFT]: pocList")
         console.log(pocList)
+
+        // eslint-disable-next-line no-unused-vars
+        const validatorPocList = pocList.map(({ socket, ...rest }) => rest)
+
+        proposedBlock.validation_data = validatorPocList
 
         // REVIEW BFT for the block with the others
         console.log("[sQBFT]: forgedProposedHash: " + forgedProposedHash)
@@ -160,7 +165,7 @@ export default class QBFT {
             forgedProposedHash,
             medianTimestamp,
         )
-        return [finalResult, propsedBlock]
+        return [finalResult, proposedBlock]
     }
 
     // INFO Voting on a parameter through a list of peers and then computing the consensus

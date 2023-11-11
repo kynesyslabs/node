@@ -46,6 +46,8 @@ export default class sharedState {
         this.currentTimestamp = Date.now()
 
         const lastBlock = await chain.getLastBlock()
+        console.warn("[SHAREDSTATE]: last block")
+        console.warn(lastBlock)
         let lastTimestamp: number
         if (chain.isGenesis(lastBlock)) {
             //REVIEW - is this useless? I think so.

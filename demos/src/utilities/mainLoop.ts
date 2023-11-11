@@ -11,6 +11,7 @@ import ComLink from "src/libs/communications/comlink"
 import { pki } from "node-forge"
 import RepresentativeShard from "src/libs/consensus/types/PoR"
 import QBFT from "src/libs/consensus/types/BFT"
+import chain from "src/libs/blockchain/chain"
 
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
@@ -140,6 +141,10 @@ export default async function mainLoop(id: Identity) {
                     consensus[0]
                 }, proposed block: ${JSON.stringify(consensus[1])}`,
             )
+
+            if (consensus[0]) {
+                await chain.insertBlock(consensus[1])
+            }
 
             // At the end of the consensus period, the main loop should start again
 
