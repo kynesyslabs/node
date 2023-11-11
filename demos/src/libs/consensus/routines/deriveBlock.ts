@@ -35,5 +35,12 @@ export default async function deriveBlock(
     let previousBlock = await Chain.getLastBlock()
     let previousBlockHash = previousBlock.hash
     derivedBlock.content.previousHash = previousBlockHash
+    let sContent = JSON.stringify(derivedBlock.content)
+    derivedBlock.hash = Hashing.sha256(sContent)
+    console.log("Deriving block...")
+    console.log(derivedBlock.content)
+    console.log(sContent)
+    // process.exit(0)
+
     return derivedBlock
 }

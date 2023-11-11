@@ -34,7 +34,9 @@ export async function proofConsensus(hash: string): Promise<[string, string]> {
 export async function proofConsensusHandler(raw_content: any): Promise<any> {
     let require_reply = true // REVIEW Sure?
     let extra: string, response: [string, string]
-    let content = JSON.parse(raw_content.message)
+    console.log(raw_content)
+    // process.exit(0)
+    let content = raw_content.message
     // REVIEW Check if the content is valid - Or maybe not
     console.log("proofConsensusHandler")
     console.log(content)

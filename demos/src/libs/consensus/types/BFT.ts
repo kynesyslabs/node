@@ -138,6 +138,9 @@ export default class QBFT {
 
         let forgedProposedHash = proposedBlock.hash
 
+        console.log("IS IT NULL")
+        console.log(forgedProposedHash)
+
         const pocList = []
         // Another loop to get the PoC
         for (let i = 0; i < peersNumber; i++) {
