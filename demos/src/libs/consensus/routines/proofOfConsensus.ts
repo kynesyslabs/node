@@ -7,8 +7,18 @@ export async function proofConsensus(hash: string): Promise<[string, string]> {
     let poc: [string, string] = [hash, null]
     // Obtain Paperinik (PK, Public Key) and Public hash
     const pk = sharedState.getInstance().identity.ed25519.privateKey
-
+    const publicHex = sharedState
+        .getInstance()
+        .identity.ed25519.publicKey.toString("hex")
     // Signing the hash
+
+    console.log("publicHex")
+    console.log(publicHex)
+
+    console.log("WATMA")
+    console.log("pk: " + pk)
+    console.log(hash)
+
     const signature = Cryptography.sign(hash, pk)
 
     console.log("signature")
