@@ -207,7 +207,7 @@ export default class Chain {
     // INFO Insert a block into the database
     // NOTE Inserting a block is done after the consensus, so that together
     // with the block, we can write the GLS status changes to the chain.
-    static async insertBlock(block: Block, operations: Operation[] = []) {
+    static async insertBlock(block: Block, operations: Operation[] = [], position: number = null) {
         // Returns the hash of the block
         // Block() class
         // REVIEW Build the SQL query
@@ -218,25 +218,46 @@ export default class Chain {
 
         let validation_data = JSON.stringify(block.validation_data)
         validation_data = Buffer.from(validation_data).toString("hex")
-        let sql_query =
-            "INSERT INTO blocks (content, number, hash, status, proposer, validation_data) VALUES " +
-            "('" +
-            JSON.stringify(block.content) +
-            "', " +
-            block.number +
-            ", " +
-            "'" +
-            block.hash +
-            "', " +
-            "'" +
-            block.status +
-            "', " +
-            "'" +
-            block.proposer +
-            "', " +
-            "'" +
-            validation_data +
-            "')"
+        let sql_query: string = ""
+        // Based on user input, we append the block or we update the block
+        if (!position) {
+            sql_query =
+                "INSERT INTO blocks (content, number, hash, status, proposer, validation_data) VALUES " +
+                "('" +
+                JSON.stringify(block.content) +
+                "', " +
+                block.number +
+                ", " +
+                "'" +
+                block.hash +
+                "', " +
+                "'" +
+                block.status +
+                "', " +
+                "'" +
+                block.proposer +
+                "', " +
+                "'" +
+                validation_data +
+                "')"
+        } else {
+            // REVIEW GREATLY NEVER TESTED
+            sql_query =
+                "UPDATE blocks SET content = '" +
+                JSON.stringify(block.content) +
+                "', number = " +
+                block.number +
+                ", hash = '" +
+                block.hash +
+                "', status = '" +
+                block.status +
+                "', proposer = '" +
+                block.proposer +
+                "', validation_data = '" +
+                validation_data +
+                "' WHERE number = " +
+                position
+        }
         // Execute the SQL query
         await this.write(sql_query)
         // Calling the operations of the block on the GLS

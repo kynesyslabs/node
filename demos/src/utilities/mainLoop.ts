@@ -1,7 +1,7 @@
 // INFO The main loop executed in background by index.ts
 import sharedState from "./sharedState"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
-import Sync from "src/libs/blockchain/routines/Sync"
+import {fastSync} from "src/libs/blockchain/routines/Sync"
 import { _Sync } from "src/libs/blockchain/routines/Sync"
 import { Identity } from "src/libs/identity"
 
@@ -22,7 +22,7 @@ let hasSentNodeOnlineTx = false
 const peerManager = PeerManager.getInstance()
 
 export default async function mainLoop(id: Identity) {
-    console.log("[MAIN LOOP] Started")
+    console.log("[MAIN LOOP] ✅ Started")
     var cycleTimestamp: number
 
     sharedState.getInstance().privateKey = id.ed25519
@@ -37,7 +37,8 @@ export default async function mainLoop(id: Identity) {
             continue // Check if the main loop is paused
         }
         // NOTE Syncing the blockchain
-        await _Sync(id) // REVIEW Test here
+        await fastSync() // REVIEW Test here
+        console.log("[MAIN LOOP] Synced! 🟢 ")
         // NOTE Using this as the timestamp of the current cycle
         // eslint-disable-next-line no-unused-vars
         cycleTimestamp = sharedState.getInstance().getTimestamp() // REVIEW Unused

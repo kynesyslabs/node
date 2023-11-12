@@ -92,6 +92,16 @@ export default class ComLinkUtils {
         } else {
             content = request.chain.current.currentMessage.bundle.content
         }
+        if (!content) {
+            console.log("[COMLINK PARSING] Eww, no content specified. Erroring back.")
+            console.log(request.chain.current.currentMessage.bundle)
+            peerSocket.emit("error", {
+                muid: request.muid,
+                message: "Ewwwwwwwww no content specified",
+            })
+        }
+        console.log("[COMLINK PARSING] Content parsed")
+        console.log(content)
         if (!content.message) {
             console.log(
                 "[COMLINK PARSING] No message specified. Erroring back.",
@@ -99,7 +109,7 @@ export default class ComLinkUtils {
             )
             peerSocket.emit("error", {
                 muid: request.muid,
-                message: "No message specified",
+                message: "Eww...no message specified",
             })
             return false
         }

@@ -15,6 +15,10 @@ export async function remoteCall(
     args: any = null,
 ): Promise<[boolean, any]> {
     let { identity } = sharedState.getInstance()
+    console.log("[remoteCall] Type: " + type)
+    console.log("[remoteCall] Message: " + message)
+    console.log("[remoteCall] Receiver: " + receiver)
+    console.log("[remoteCall] Args: " + args)
     // Initialize the comlink
     let _comlink = new ComLink()
     // Generate the transmission

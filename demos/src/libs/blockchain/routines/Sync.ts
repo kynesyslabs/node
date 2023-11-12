@@ -20,6 +20,7 @@ import { demostdlib } from "src/libs/utils"
 const peerManager = PeerManager.getInstance()
 import { Response } from "../../communications/types/responseregistry"
 import ResponseRegistry from "src/libs/communications/responseRegistry"
+import Block from "../blocks"
 
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
@@ -53,7 +54,7 @@ export async function _Sync(id: any) {
     let peerLastInfo: Map<string, IPeerLastInfo> = new Map()
     // To determine which peers we should sync with, we need to know the last block number and hash of each peer
     console.log("[SYNC] Iterating over the peerlist...")
-    // FIXME Complete this method
+    // TODO Complete this method
     console.log("[SYNC] { DEBUG } Returning sync anyway")
     return true 
     // eslint-disable-next-line no-unreachable
@@ -127,7 +128,7 @@ export async function _Sync(id: any) {
             let blockHash = await demostdlib.remoteCall(
                 peer.identity.toString("hex"),
                 peer,
-                "getBlockHash", // FIXME Implement it!!
+                "getBlockHash",
                 "nodeCall",
                 true,
                 false,
@@ -181,164 +182,101 @@ export async function _Sync(id: any) {
     }
 }
 
-// INFO Syncing with the network
-export default async function Sync(id: any) {
-    // TODO Give the type
-    // TODO Implement all the ComLink and responseRegistry mechanism in a standalone function
-    let synced = true
 
-    // NOTE Reading our data
-    console.log("[SYNC] Our data: fetched")
-    let _currentLastBlockNumber = await Chain.getLastBlockNumber()
-
-    console.log("[SYNC] Our data: last block number: ")
-    console.log(_currentLastBlockNumber)
-    let _currentLastBlockHash = await Chain.getLastBlockHash()
-    _currentLastBlockHash = _currentLastBlockHash.hash
-    console.log("[SYNC] Our data: last block hash: ")
-    console.log(_currentLastBlockHash)
-    console.log("\n============================\n\n")
-    //await sleep(1000)
-
-    console.log("[SYNC] Fetching data from peers")
-    let peerlist = peerManager.getPeers()
-    // console.log(peerlist)
-
-    // NOTE This array contains all the responses promises and is filled step by step
-    let responses: Promise<[boolean, Response]>[] = []
-
-    // Asking to all the peers for the last block
-    for (let i = 0; i < peerlist.length; i++) {
-        // Creating a comlink object
-        let _comlink = new ComLink()
-        let _currentPeer = peerlist[i]
-        // Generate the message to ask for the last block
-        let _blockAskMessage = new Transmission(id.ed25519.privateKey)
-        _blockAskMessage.initialize(
-            "nodeCall",
-            "getLastBlockNumber",
-            id.ed25519.publicKey,
-            _currentPeer.identity,
-            null,
-            null,
-        )
-        // Hash and sign it
-        await _blockAskMessage.finalize()
-        // Putting the message into the comlink
-        console.log(
-            "[SYNC] Asking " +
-                _currentPeer.socket.id +
-                " for the last block at " +
-                _currentPeer.connectionString,
-        )
-        // Preparing for a response
-        _comlink.properties.require_reply = true
-        _comlink.properties.is_reply = false
-        // Propagating the responseRegistry actual status
-
-        ResponseRegistry.getInstance().requestResponse(_comlink)
-
-        // Ask for the last block
-        await _comlink.broadcastMessageToPeer(
-            _currentPeer,
-            _blockAskMessage,
-            id.ed25519.privateKey,
-        )
-
-        // Add the response promise to the responses array
-        let promise = ResponseRegistry.getInstance().checkResponse(
-            _comlink.muid,
-        )
-        responses.push(promise)
-
-        // LINK https://stackoverflow.com/questions/23893872/how-to-properly-remove-event-listeners-in-node-js-eventemitter
-        // The above link will be used to remove the listeners once the response is received, will be applied to keep clean the peers connections too
-    }
-
-    /* NOTE
-     * Using the following code, we are waiting for all the responses to be received without blocking for each one
-     * This is used to avoid returning to the main thread before each node has replied or timed out, but allows
-     * sending the same message to a lot of nodes without blocking and just waiting for the responses to be received at the end.
-     */
-    console.log("[SYNC] Waiting for the responses")
-    // Waiting all the responses
-    let results = await Promise.all(responses)
-    console.log("[SYNC] All responses received")
-    //console.log(results)
-
-    // Preparing a list of nodes which aren't in sync with us
-    let unsyncedNodes = {} // TODO typize it
-
-    // Ingesting the valid responses
-    let _block_numbers = {}
-    for (let i = 0; i < results.length; i++) {
-        let _result = results[i]
-        if (!_result[0]) {
-            console.log("[SYNC] Response " + i + " not received")
+// INFO Experimental fast syncing with the first peer
+// TODO This should be executed each time we connect to a new peer
+export async function fastSync(cPeerlist: Peer[] = [], singlePeer: Peer = null) {
+    // Our data is stored locally for convenience
+    console.log("[SYNC] Syncing with the network...")
+    console.log("[SYNC] Getting our last block number and hash...")
+    let ourLastBlockNumber = await Chain.getLastBlockNumber()
+    let ourLastBlockHash = await Chain.getLastBlockHash()
+    console.log(
+        "[SYNC] Our last block number is " +
+            ourLastBlockNumber +
+            " and our last block hash is " +
+            ourLastBlockHash,
+            "\n",
+    )
+    // Let's also store the actual peerlist or the things that we received from the caller
+    console.log("[SYNC] Getting the peerlist...")
+    let peerlist
+    if (!singlePeer) {
+        if (cPeerlist.length > 0) {
+            peerlist = cPeerlist
         } else {
-            console.log("[SYNC] Response " + i + " received")
-            let peer_identity = _result[1].identity
-            _block_numbers[peer_identity.toString("hex")] = {
-                socket: _result[1].socket,
-                connection_string: _result[1].connection_string,
-                block_number: JSON.parse(_result[1].message).number,
-                timestamp: _result[1].timestamp,
-                peer: peer_identity,
-            }
-            console.log(
-                "[SYNC FETCHED] Peer " +
-                    peer_identity.toString("hex") +
-                    " has the block number " +
-                    _block_numbers[peer_identity.toString("hex")].block_number +
-                    " at timestamp " +
-                    _block_numbers[peer_identity.toString("hex")].timestamp,
-            )
-            // NOTE Checking for synchronization
-            if (
-                _block_numbers[peer_identity.toString("hex")].block_number !=
-                _currentLastBlockNumber
-            ) {
-                // Not in sync peer
-                unsyncedNodes[peer_identity.toString("hex")] = {
-                    block_number:
-                        _block_numbers[peer_identity.toString("hex")]
-                            .block_number,
-                    timestamp:
-                        _block_numbers[peer_identity.toString("hex")].timestamp,
-                    full_identity: peer_identity,
-                    connection_string:
-                        _block_numbers[peer_identity.toString("hex")]
-                            .connection_string,
-                }
-            }
+            peerlist = peerManager.getPeers()
         }
-    }
-
-    // NOTE Checking if we are in sync with the network
-    if (Object.keys(unsyncedNodes).length == 0) {
-        console.log("[SYNC] We are in sync with the network")
-        synced = true
+        console.log("[SYNC] Peerlist has length: " + peerlist.length)
     } else {
-        console.log(
-            "[SYNC] We are not in sync with the network by: " +
-                Object.keys(unsyncedNodes).length +
-                " peers",
+        peerlist = [singlePeer]
+    }
+    // Selecting the first peer
+    let firstPeer = peerlist[0]
+    console.log("[SYNC] First peer is " + firstPeer.connectionString)
+    
+    // Asking the first peer for the last block number
+    let blockNumberResponse = await demostdlib.remoteCall(
+        firstPeer.connectionString,
+        firstPeer,
+        "getLastBlockNumber",
+        "nodeCall",
+        true,
+        false,
+        "",
+    )
+    let blockNumber: number = 0
+    if (blockNumberResponse[0]) {
+        blockNumber = blockNumberResponse[1].message
+        console.log("[SYNC] First peer has the last block number ")
+        console.log(blockNumber)
+    } else {
+        console.log("[SYNC] First peer does not have the last block number")
+        console.log("[SYNC] TODO: Not yet implemented; next peer logic")
+        process.exit(0)
+        //return true // TODO Not yet implemented ^
+    }
+    // Compute the block number difference
+    let blockNumberDifference = blockNumber - ourLastBlockNumber
+    console.log("[SYNC] Block number difference is " + blockNumberDifference)
+
+    console.log("[SYNC] We need to sync " + blockNumberDifference + " blocks")
+    
+    // We need to sync?
+    let blocktoAsk = ourLastBlockNumber
+
+    // TODO Clear this after testing
+    let testingMode = true
+    blockNumberDifference = 1
+    blocktoAsk = 0
+
+    // REVIEW This is a very naive way of doing this; we should use a better algorithm
+    // REVIEW (the AI says so, it wrote the comment above)
+    for (let i = 0; i < blockNumberDifference; i++) {
+        // sourcery skip: use-braces
+        if (!testingMode) blocktoAsk++
+        console.log("[SYNC] Asking the first peer for block " + blocktoAsk)
+        // Effectively asking the first peer for the block
+        let blockResponse = await demostdlib.remoteCall(
+            firstPeer.connectionString,
+            firstPeer,
+            "getBlockByNumber",
+            "nodeCall",
+            true,
+            false,
+            {blockNumber: blocktoAsk.toString()},
         )
-        synced = false
-        // REVIEW Each unsynced node mapped will be queried
-        let unsyncedNodesNames = Object.keys(unsyncedNodes)
-        for (let i = 0; i < unsyncedNodesNames.length; i++) {
-            let name = unsyncedNodesNames[i]
-            console.log("[SYNC] Asking " + name + " for the last block")
-            let node = unsyncedNodes[name]
-            console.log("[SYNC] Retrieving info...")
-            let { connection_string } = node
-            console.log("[SYNC] Connection string: " + connection_string)
-            // TODO Check if the block is forward or backward
-            // TODO If forward, ask for the block
-            // TODO Continue the sync process
-        }
+        // TODO Handle bad responses
+        console.log("[SYNC] Block response: " + blockResponse[0])
+        let parsedBlock: Block = JSON.parse(blockResponse[1].message)
+        console.log("[SYNC] Block hash:")
+        console.log(parsedBlock.hash)
+
+        return // TODO Debug return, proceed from here
+        // We now have a valid block to insert I guess
+        // eslint-disable-next-line no-unreachable
+        Chain.insertBlock(parsedBlock)
     }
 
-    return synced
+    process.exit(0)
 }

@@ -73,41 +73,49 @@ export default class ServerHandlers {
 
     // ANCHOR Comlinks
     static async handleTransaction(content: any): Promise<any> {
-        let require_reply = true // REVIEW Sure?
-        let extra: string, response: boolean
-
-        // Verify and execute the transaction
-        let validatedTx: any[]
-        try {
-            /* NOTE This workflow goeas as:
-             * The tx is validated, an operation is created and pushed in the GLS
-             * An operation for the gas is also pushed in the GLS
-             * The tx is pushed in the mempool if applicable
-             */
-            validatedTx = await validateTransaction(
-                content.type,
-                content.message,
-            )
-        } catch (e) {
-            term.red("[TX VALIDATION ERROR]: ")
-            term.red(e)
-            validatedTx = [false, e.message]
+            let require_reply = true // REVIEW Sure?
+            let extra: string, response: boolean
+            let fname = "[" + this.handleTransaction.name + "] "
+            term.yellow(fname + "Handling transaction...")
+            // Verify and execute the transaction
+            let validatedTx: any[]
+            try {
+                /* NOTE This workflow goeas as:
+                 * The tx is validated, an operation is created and pushed in the GLS
+                 * An operation for the gas is also pushed in the GLS
+                 * The tx is pushed in the mempool if applicable
+                 */
+                console.log(fname + "Validating transaction...")
+                validatedTx = await validateTransaction(
+                    content.type,
+                    content.message,
+                )
+                console.log(fname + "Fetching result...")
+            } catch (e) {
+                term.red.bold("[TX VALIDATION ERROR] 💀 : ")
+                term.red(e)
+                validatedTx = [false, e.message]
+            }
+            // Returning an appropriate response
+            if (!validatedTx[0]) {
+                term.yellow.bold(fname + "Invalid transaction: ")
+                console.log(validatedTx[1])
+                extra = "InvalidTransaction: " + validatedTx[1]
+                response = false
+            } else {
+                term.green.bold(fname + "Valid transaction: ")
+                console.log(validatedTx[1])
+                console.log(fname + "Adding transaction to mempool...")
+                // Adding the valid tx to the mempool
+                Mempool.addTransaction(validatedTx[1]) // Works by writing the registry
+                extra = validatedTx[1].hash
+                response = true
+            }
+            // TODO Broadcast the tx to the other peers
+            // Response is then sent back automatically as a reply (with our validation)
+            term.bold.white(fname + "Transaction handled.")
+            return { extra, require_reply, response }
         }
-        // Returning an appropriate response
-        if (!validatedTx[0]) {
-            extra = "InvalidTransaction: " + validatedTx[1]
-            response = false
-        } else {
-            // Adding the valid tx to the mempool
-            Mempool.addTransaction(validatedTx[1]) // Works by writing the registry
-            extra = validatedTx[1].hash
-            response = true
-        }
-        // TODO Broadcast the tx to the other peers
-        // Response is then sent back automatically as a reply (with our validation)
-
-        return { extra, require_reply, response }
-    }
 
     // INFO Handling XM Transaction
     static async handleXMChainOperation(content: any): Promise<any> {
@@ -321,7 +329,7 @@ export default class ServerHandlers {
                     data.blockNumber === undefined ||
                     data.blockNumber === null
                 ) {
-                    console.log("[SERVER ERROR] Missing blockNumber")
+                    console.log("[SERVER ERROR] Missing blockNumber 💀")
                     console.log(data)
                     receiver.emit("error", {
                         error: "No block specified",
