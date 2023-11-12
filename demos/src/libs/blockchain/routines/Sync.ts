@@ -52,7 +52,11 @@ export async function _Sync(id: any) {
     console.log("[SYNC] Peerlist has length: " + peerlist.length)
     let peerLastInfo: Map<string, IPeerLastInfo> = new Map()
     // To determine which peers we should sync with, we need to know the last block number and hash of each peer
-    console.log("[SYNC] Iterating over the peerlist...") 
+    console.log("[SYNC] Iterating over the peerlist...")
+    // FIXME Complete this method
+    console.log("[SYNC] { DEBUG } Returning sync anyway")
+    return true 
+    // eslint-disable-next-line no-unreachable
     for (let peer of peerlist) {
         let peerConnectionString = peer.connectionString
         console.log("[SYNC] Asking " + peerConnectionString + " for their last block info...")
