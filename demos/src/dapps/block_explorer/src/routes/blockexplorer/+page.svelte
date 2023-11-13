@@ -21,6 +21,7 @@
         let blockNumber = JSON.parse(await demos.getLastBlockNumber());
         console.log("numeroblocco", blockNumber);
         let block = await demos.getBlockByNumber(blockNumber);
+        console.log("blocco", block);
         return block;
     }
 

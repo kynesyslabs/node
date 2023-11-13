@@ -165,7 +165,7 @@
             <p class="info-title">Status:</p>
             <p class="info-text">{block.status}</p>
             <p class="info-title">Timestamp:</p>
-            <p class="info-text">{block.timestamp}</p>
+            <p class="info-text">{block.content.timestamp}</p>
             <p class="info-title">Proposer:</p>
             <p class="info-text">{block.proposer}</p>
             <p class="info-title">Transactions:</p>

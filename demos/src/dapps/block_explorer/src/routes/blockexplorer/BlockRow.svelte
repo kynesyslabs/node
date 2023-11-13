@@ -3,6 +3,12 @@
     import {timeAgo} from "$lib/env.js";
     import "$lib/styles/blockexplorer.css";
     export let block;
+    function trim_address(str) {
+        if (str.length <= 20) 
+        return str;
+        return str.substr(0, 10) + '...' + str.substr(str.length-4, str.length);
+    }
+
 </script>
 <style>
     .skeletonplaceholder{
@@ -50,7 +56,7 @@
         <div style="width: 100%;">
             {#if block}
                 <a class="accessible loaded" href={`/blockexplorer/blocks/${block.number}`}><p style="margin-top:0;margin-bottom:8px;">{block.number}</p></a>
-                <p class="loaded delayed1" style="margin: 0; color:rgb(128,128,128); font-size:.9rem;">{timeAgo.format(block.timestamp*1000)}</p>
+                <p class="loaded delayed1" style="margin: 0; color:rgb(128,128,128); font-size:.9rem;">{timeAgo.format(block.content.timestamp*1000)}</p>
             {:else}
                 <div class="skeletonplaceholder" style="margin-bottom:8px"></div>
                 <div class="skeletonplaceholder delayed1" style="height:18px;"></div>
@@ -59,7 +65,7 @@
     </div>
     <div>
         {#if block}
-            <p class="loaded delayed2" style="margin-top:0;margin-bottom:8px;">Proposer <span class="fake-link">{block.proposer}</span></p>
+            <p class="loaded delayed2" style="margin-top:0;margin-bottom:8px;">Proposer <span class="fake-link">{trim_address(block.proposer)}</span></p>
             <p class="loaded delayed3" style="margin: 0;font-size:.9rem;color:rgb(128,128,128);"><span>{block.content.ordered_transactions.length} transactions</span></p>
         {:else}
             <div class="skeletonplaceholder delayed2" style="margin-bottom:8px"></div>
