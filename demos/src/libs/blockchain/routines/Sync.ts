@@ -280,5 +280,5 @@ export async function fastSync(cPeerlist: Peer[] = [], singlePeer: Peer = null) 
     }
 
     console.log("✅ [ Syncing with the network completed successfully ] ✅")
-    process.exit(0)
+    //process.exit(0)
 }
