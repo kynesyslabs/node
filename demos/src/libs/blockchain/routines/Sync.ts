@@ -246,9 +246,11 @@ export async function fastSync(cPeerlist: Peer[] = [], singlePeer: Peer = null) 
     let blocktoAsk = ourLastBlockNumber
 
     // TODO Clear this after testing
-    let testingMode = true
-    blockNumberDifference = 1
-    blocktoAsk = 0
+    let testingMode = false
+    if (testingMode) {
+        blockNumberDifference = 1
+        blocktoAsk = 0
+    }
 
     // REVIEW This is a very naive way of doing this; we should use a better algorithm
     // REVIEW (the AI says so, it wrote the comment above)
@@ -272,11 +274,11 @@ export async function fastSync(cPeerlist: Peer[] = [], singlePeer: Peer = null) 
         console.log("[SYNC] Block hash:")
         console.log(parsedBlock.hash)
 
-        return // TODO Debug return, proceed from here
         // We now have a valid block to insert I guess
         // eslint-disable-next-line no-unreachable
         Chain.insertBlock(parsedBlock)
     }
 
+    console.log("✅ [ Syncing with the network completed successfully ] ✅")
     process.exit(0)
 }
