@@ -1,8 +1,27 @@
 /* INFO Enigma - An experimental wrapper for Post Quantum Cryptography in Typescript designed with ease of use in mind
 
+    LICENSE
+
+    © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
+
+    Full license text: https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode
+    Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
+
+    KyneSys Labs: https://www.kynesys.xyz/
+
     This module incorporates two Post Quantum Cryptography methods:
+    - Rijndael: symmetric encryption algorithm considered the state of the art of its category
+    - Argon2: quantum-safe hashing algorithm
     - McEliece: post-quantum cryptography algorithm that uses a keypair to share secrets between two parties.
     - Dilithium: post-quantum cryptography algorithm that uses a keypair to sign and verify messages.
+
+    The Rijdael algorithm is a symmetric encryption algorithm and as many of the most used symmetric encryption algorithms 
+    is considered to be quantum-safe. While even standard AES-256 is considered to be quantum-safe, the Rijndael algorithm
+    is considered to improve robustness, performance, and security when compared to standard AES-256 as AES specification
+    is a subset of Rijdael algorithm itself.
+
+    The Argon2 algorithm is a quantum-safe hashing algorithm that is designed to protect against various dehashing attacks.
+    It is used to replace less secure hashing algorithms such as SHA-1, SHA-256, and so on.
 
     The McEliece algorithm is used to encrypt and decrypt messages, much like a symmetric classic encryption algorithm.
     Thanks to its post-quantum security, however, it is not possible to retrieve the secrets as easily as with a classic algorithm.
@@ -14,12 +33,15 @@
     that can be used to verify signatures without sharing the initial message, as proofs of authenticity.
 
     Credits:
+    - https://github.com/Snack-X for https://github.com/Snack-X/rijndael-js
+    - https://github.com/ranisalt for https://github.com/ranisalt/node-argon2 
     - https://github.com/cyph for its https://github.com/cyph/pqcrypto.js library (superdilithium, supersphincs and a lot of knowledge)
     - https://github.com/tniessen for its https://github.com/tniessen/node-mceliece-nist library (mceliece and a lot of knowledge too)
     - I can't find the ntru library developer unfortunately, feel free to contact me if its you
 
 */
-
+import argon2 from "argon2"
+import Rijndael from "rijndael-js"
 import { superDilithium } from "superdilithium"
 // import { superSphincs } from "supersphincs" // Same as above, just replace the two strings
 import { McEliece } from "mceliece-nist"
@@ -166,7 +188,9 @@ export default class Enigma {
         return this.signingKeyPair
 	}
 
-	/* SECTION Encryption / Decryption with McEliece */
+	/* SECTION Keys generation and incapsulation with McEliece */
+
+    // Incapsulate a secret with a public key
 	async generateSecrets(peerPublicKey: any) {
 		let {key, encryptedKey} = await this.kem.generateKey(peerPublicKey)
         let normalizedResult = {
@@ -176,10 +200,44 @@ export default class Enigma {
 		return normalizedResult
 	}
 
+    // Decapsulate a secret from a shared secret
 	async deriveSharedSecret(shared: any) {
 		let secret = await this.kem.decryptKey(this.mcelieceKeypair.privateKey, shared)
 		return secret
 	}
 
-    // TODO Encryption?
+    /* SECTION Hashing with Argon2 */
+
+    async hash(input: string | Buffer): Promise<string> {
+        if (typeof input === "string") {
+            input = Buffer.from(input, "utf8")
+        }
+        let hash = await argon2.hash(input)
+        return hash
+    }
+
+    async checkHash(input: string | Buffer, hash: string): Promise<boolean> {
+        if (typeof input === "string") {
+            input = Buffer.from(input, "utf8")
+        }
+        if (await argon2.verify(hash, input)) {
+            return true
+        } else {
+            return false
+        }
+    }
+
+    /* SECTION Symmetric encryption and decryption with Rijndael */
+
+    async encrypt(input: string, key: string): Promise<Buffer> { // Key can be 16/24/32 bytes long (128/192/256 bit)
+        let cipher = new Rijndael(key, "cbc")
+        let ciphertext = Buffer.from(cipher.encrypt(input, "256", "Ut enim ad minim veniam, quis no")) // TODO Custom iv same block size
+        return ciphertext
+    }
+
+    async decrypt(input: Buffer): Promise<Buffer> {
+        let cipher = new Rijndael(input, "cbc")
+        let plainbuffer = Buffer.from(cipher.decrypt(input, "256", "Ut enim ad minim veniam, quis no"))
+        return plainbuffer
+    }
 }

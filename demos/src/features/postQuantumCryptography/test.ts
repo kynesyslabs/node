@@ -34,6 +34,14 @@ async function testing() {
 	let secret = await enigma.deriveSharedSecret(sharedSecret.shared)
 	console.log(secret)
 	// Now we should use the secret to set up a symmetric encryption communication channel
+	let password = "MySecret"
+	console.log("[BOB] Hashing and sending the password hash...")
+	let hash = await enigma.hash(password)
+	console.log(hash)
+	console.log("\n[Hashing] Pretending to be someon else...\n")
+	console.log("[ALICE] [Hashing] We received a hash from the peer!")
+	let verifiedHash = await enigma.checkHash(password, hash)
+	console.log(verifiedHash)
 }
 
 testing()
