@@ -61,7 +61,7 @@ export default class Chain {
     // INFO Get the last block number
     static async getLastBlockNumber(): Promise<number> {
         let response = await this.read(
-            "SELECT number FROM blocks ORDER BY number ASC LIMIT 1",
+            "SELECT number FROM blocks ORDER BY number DESC LIMIT 1",
         )
         console.log(response)
         return response[0].number
@@ -69,7 +69,7 @@ export default class Chain {
     // INFO Get the last block hash
     static async getLastBlockHash() {
         let response = await this.read(
-            "SELECT hash FROM blocks ORDER BY number ASC LIMIT 1",
+            "SELECT hash FROM blocks ORDER BY number DESC LIMIT 1",
         )
         return response[0].hash
     }

@@ -210,7 +210,7 @@ export default class ServerHandlers {
         let authorized = false
         let senderPublicKey = senderIdentity.toString("hex")
 
-        const shard = sharedState.getInstance().shard
+        const {shard} = sharedState.getInstance()
 
         if (!shard) {
             return {
