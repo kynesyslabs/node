@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { type NodeProps } from '@xyflow/svelte';
     import { v4 as uuidv4 } from 'uuid';
 	import TaskNode from './TaskNode.svelte';
 
