@@ -1,10 +1,7 @@
 <script lang="ts">
-	import { Handle, Position, type NodeProps } from '@xyflow/svelte';
+	import { type NodeProps } from '@xyflow/svelte';
     import { v4 as uuidv4 } from 'uuid';
-    import ChainSelection from "./ChainSelection.svelte";
 	import TaskNode from './TaskNode.svelte';
-
-	type $$Props = NodeProps;
 
 	export let data;
 
@@ -31,10 +28,6 @@
 </script>
 
 <TaskNode label="Pay">
-    <div class="input-box">
-        <label>Chain</label>
-        <ChainSelection value={chain} onChange={updateChain}></ChainSelection>
-    </div>
     <div class="input-box">
         <label>Address</label>
         <input/>

@@ -1,23 +1,19 @@
 <script lang="ts">
 	import { Handle, Position, type NodeProps } from '@xyflow/svelte';
-    import { v4 as uuidv4 } from 'uuid';
-    import ChainSelection from "./ChainSelection.svelte";
+	
+    type $$Props = NodeProps;
+    
+    export let data;
 
-	type $$Props = NodeProps;
+    console.log(data);
 
     export let label:string;
 
     let showoptions = true;
-
-    function trim_address(str) {
-        if (str.length <= 20) 
-        return str;
-        return str.substr(0, 10) + '...' + str.substr(str.length-4, str.length);
-    }
 </script>
 
 <div class="card operation">
-	<Handle type="target" position={Position.Left} />
+	<Handle on:connect={()=>{console.log("connect")}} type="target" position={Position.Left} />
         <div class="card-header">
             <img class="taskicon" style="opacity: .3;" alt="task icon" src={"/task-icons/wallet.svg"}/>
             <div>
@@ -26,9 +22,14 @@
             <button class="futuristic" on:click={()=>{showoptions = !showoptions}}>{showoptions?"hide":"show"}</button>
         </div>
         {#if showoptions}
+            <div class="input-box">
+                <label>Chain</label>
+                <!--<ChainSelection value={chain} onChange={updateChain}></ChainSelection>-->
+            </div>
             <slot/>
         {/if}
-	<Handle type="source" position={Position.Right} />
+	<Handle on:connect={()=>{console.log("connect")}} type="source" position={Position.Right} />
+
 </div>
 
 <style>

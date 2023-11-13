@@ -13,8 +13,6 @@
     export let onOpen;
     export let evmTask;
 
-    console.log(evmTask);
-
     let searchMode = false;
     let searchResults;
 
