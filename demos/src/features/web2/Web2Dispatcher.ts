@@ -6,7 +6,7 @@ import required from "src/utilities/required"
 import Cryptography from "src/libs/crypto/cryptography"
 import sharedState from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
-import { deriveMempoolOperation } from "src/libs/utils/demostdlib/deriveMempoolOperation.ts"
+import { deriveMempoolOperation } from "src/libs/utils/demostdlib/deriveMempoolOperation"
 
 // INFO Upon receiving a request from a socket, we
 // need to attest and handle the other attestations (if we 
@@ -26,6 +26,7 @@ export default async function handleWeb2(payload: IWeb2Payload, senderSocket: an
     console.log(request)
     //process.exit(0)
 
+
     let web2request = Web2API(null, senderSocket, payload) // NOTE null is important here
     let instanceName = web2request.name // Numeric and progressive
     // Checking if we are the original rpc that received the request
@@ -34,6 +35,8 @@ export default async function handleWeb2(payload: IWeb2Payload, senderSocket: an
     // ANCHOR Original RPC logic
     // NOTE If we are the original rpc and this is the original request, we need to validate the request
     // and wait for the attestations to arrive
+    
+    // FIXME The returning transaction should contain the data requested
     if (originalFlag) {
         try {
             // Ensuring we reach the quorum if we are the original rpc that received the request

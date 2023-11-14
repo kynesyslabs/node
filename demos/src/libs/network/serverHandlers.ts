@@ -98,9 +98,9 @@ export default class ServerHandlers {
             }
             // Returning an appropriate response
             if (!validatedTx[0]) {
-                term.yellow.bold(fname + "Invalid transaction: ")
+                term.yellow.bold(fname + "Invalid transaction 💀 : ")
                 console.log(validatedTx[1])
-                extra = "InvalidTransaction: " + validatedTx[1]
+                extra = "InvalidTransaction 💀: " + validatedTx[1]
                 response = false
             } else {
                 term.green.bold(fname + "Valid transaction: ")
@@ -110,6 +110,7 @@ export default class ServerHandlers {
                 Mempool.addTransaction(validatedTx[1]) // Works by writing the registry
                 extra = validatedTx[1].hash
                 response = true
+                process.exit(0) /* TODO Eliminate this debug line */
             }
             // TODO Broadcast the tx to the other peers
             // Response is then sent back automatically as a reply (with our validation)

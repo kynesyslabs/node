@@ -233,8 +233,8 @@ export async function fastSync(cPeerlist: Peer[] = [], singlePeer: Peer = null) 
     } else {
         console.log("[SYNC] First peer does not have the last block number")
         console.log("[SYNC] TODO: Not yet implemented; next peer logic")
-        process.exit(0)
-        //return true // TODO Not yet implemented ^
+        //process.exit(0)
+        return true // TODO Not yet implemented ^
     }
     // Compute the block number difference
     let blockNumberDifference = blockNumber - ourLastBlockNumber

@@ -235,8 +235,8 @@ export default class Enigma {
         return ciphertext
     }
 
-    async decrypt(input: Buffer): Promise<Buffer> {
-        let cipher = new Rijndael(input, "cbc")
+    async decrypt(input: Buffer, key: string): Promise<Buffer> {
+        let cipher = new Rijndael(key, "cbc")
         let plainbuffer = Buffer.from(cipher.decrypt(input, "256", "Ut enim ad minim veniam, quis no"))
         return plainbuffer
     }
