@@ -1,6 +1,6 @@
 <script>
     import Fa from 'svelte-fa'
-    import { faArrowRightLong, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
+    import { faArrowRightLong } from '@fortawesome/free-solid-svg-icons'
     import '$lib/global.css'
     import { goto } from '$app/navigation';
 	import Searchbar from './HomeSearchbar.svelte';
@@ -19,11 +19,19 @@
         if(!demos.connected)
         return;
         let blockNumber = JSON.parse(await demos.getLastBlockNumber());
-        console.log("numeroblocco", blockNumber);
         let block = await demos.getBlockByNumber(blockNumber);
-        console.log("blocco", block);
         return block;
     }
+
+    async function getBlocks() 
+    {
+        if(!demos.connected)
+        return;
+        let blockNumber = JSON.parse(await demos.getLastBlockNumber());
+        let block = await demos.getBlockByNumber(blockNumber);
+        return block;
+    }
+
 
     function onSearch(hash)
     {
@@ -113,6 +121,15 @@
             <div class="card">
                 {#await getBlock()}
                     <BlockRow/>
+                    <BlockRow/>
+                    <BlockRow/>
+                    <BlockRow/>
+                    <BlockRow/>
+                    <BlockRow/>
+                    <BlockRow/>
+                    <BlockRow/>
+                    <BlockRow/>
+                    <BlockRow/>
                 {:then block}
                     <BlockRow block={block}/>
                 {:catch error}
@@ -132,6 +149,15 @@
             <h4 class="card-header">Latest Transactions</h4>
             <div class="card">
                 {#await getBlock()}
+                    <TransactionRow/>
+                    <TransactionRow/>
+                    <TransactionRow/>
+                    <TransactionRow/>
+                    <TransactionRow/>
+                    <TransactionRow/>
+                    <TransactionRow/>
+                    <TransactionRow/>
+                    <TransactionRow/>
                     <TransactionRow/>
                 {:then block}
                     {#each block.content.ordered_transactions as transaction}
