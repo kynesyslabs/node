@@ -1,15 +1,21 @@
-<script lang="ts">
-	import { Handle, Position, type NodeProps } from '@xyflow/svelte';
-	
-    type $$Props = NodeProps;
+<script>
+	import { Handle, Position} from '@xyflow/svelte';
+    import ChainSelection from './ChainSelection.svelte';
+    import { useStore } from '@xyflow/svelte';
     
     export let data;
 
-    console.log(data);
-
-    export let label:string;
+    $:console.log(data);
+    const {nodes} = useStore();
+    export let label;
 
     let showoptions = true;
+    
+    /*function updateChain(chainName)
+    {
+        nodes.update()
+    }*/
+    console.log($nodes);
 </script>
 
 <div class="card operation">
@@ -24,7 +30,7 @@
         {#if showoptions}
             <div class="input-box">
                 <label>Chain</label>
-                <!--<ChainSelection value={chain} onChange={updateChain}></ChainSelection>-->
+                <ChainSelection value={data.chain} onChange={(ch)=>{data.chain=ch}}></ChainSelection>
             </div>
             <slot/>
         {/if}

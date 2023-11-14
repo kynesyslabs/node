@@ -10,7 +10,6 @@
 	import { Operation } from '$lib/chainscript';
 
 	import Drawer from './Drawer.svelte';
-	import PayNode from './PayNode.svelte';
 	import ReadContractNode from './ReadContractNode.svelte';
 	import ConditionalNode from './ConditionalNode.svelte';
 	import EqualsNode from './EqualsNode.svelte';
