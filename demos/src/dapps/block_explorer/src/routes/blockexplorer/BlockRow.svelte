@@ -56,7 +56,7 @@
         <div style="width: 100%;">
             {#if block}
                 <a class="accessible loaded" href={`/blockexplorer/blocks/${block.number}`}><p style="margin-top:0;margin-bottom:8px;">{block.number}</p></a>
-                <p class="loaded delayed1" style="margin: 0; color:rgb(128,128,128); font-size:.9rem;">{timeAgo.format(block.content.timestamp*1000)}</p>
+                <p class="loaded delayed1" style="margin: 0; color:rgb(128,128,128); font-size:.9rem;">{timeAgo.format(block.content.timestamp)}</p>
             {:else}
                 <div class="skeletonplaceholder" style="margin-bottom:8px"></div>
                 <div class="skeletonplaceholder delayed1" style="height:18px;"></div>
