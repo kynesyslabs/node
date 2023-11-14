@@ -16,7 +16,6 @@ import GLS from "../gls/gls"
 import { Operation } from "../gls/gls"
 import calculateCurrentGas from "./calculateCurrentGas"
 var term = require("terminal-kit").terminal
- 
 
 // INFO Cryptographically validate a transaction, calculate gas and see if the execution is valid
 // REVIEW is it overkill to write an interface for the return value?
@@ -35,7 +34,10 @@ export default async function validateTransaction(
     tx.content = request.tx.content
     tx.signature = request.tx.signature
     // As usual converting buffers to nodejs buffers
-    if (typeof(tx.signature) === "object" && request.tx.signature.type === "Buffer") {
+    if (
+        typeof tx.signature === "object" &&
+        request.tx.signature.type === "Buffer"
+    ) {
         tx.signature = Buffer.from(request.tx.signature)
         console.log("Normalized signature")
     }

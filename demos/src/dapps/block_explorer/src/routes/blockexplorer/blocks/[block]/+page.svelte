@@ -2,8 +2,7 @@
     import '$lib/global.css';
     export let data;
     import Fa from 'svelte-fa'
-    import { faArrowLeftLong, faArrowRightLong, faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
-    import blockIcon from '$lib/assets/icons/cube-icon.png';
+    import { faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
     import demos from "$lib/demos.js";
     import {rpcaddress} from "$lib/env.js";
 	import CubeSpinning from '../../CubeSpinning.svelte';
@@ -20,39 +19,9 @@
 </script>
 
 <style>
-    .block-icon{
-        filter: invert();
-        width: 55px;
-    }
     .card{
         margin-bottom: 64px;
     }
-
-
-    .card-header{
-        display: flex;
-        align-items: center;
-        gap: 32px;
-        justify-content: center;
-        margin: 0 0 64px;
-    }
-
-    .block-header{
-        display: flex;
-        align-items: center;
-        gap: 16px;
-    }
-
-    .adjacent-button{
-        padding: 8px;
-        cursor: pointer;
-        width: 37px;
-        height: 37px;
-        display: flex;
-        justify-content: center;
-        position: relative;
-    }
-    
 
     .card-footer{
         padding: 16px;
@@ -165,7 +134,7 @@
             <p class="info-title">Status:</p>
             <p class="info-text">{block.status}</p>
             <p class="info-title">Timestamp:</p>
-            <p class="info-text">{block.timestamp}</p>
+            <p class="info-text">{block.content.timestamp}</p>
             <p class="info-title">Proposer:</p>
             <p class="info-text">{block.proposer}</p>
             <p class="info-title">Transactions:</p>

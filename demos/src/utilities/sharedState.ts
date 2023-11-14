@@ -43,12 +43,25 @@ export default class sharedState {
     }
 
     public async getTimePassed(): Promise<number> {
-        this.currentTimestamp = Date.now()
+        this.currentTimestamp = new Date().getTime()
 
         const lastBlock = await chain.getLastBlock()
-        chain.isGenesis(lastBlock)
+        console.warn("[SHAREDSTATE]: last block")
+        console.warn(lastBlock)
+        let lastTimestamp: number
+        if (chain.isGenesis(lastBlock)) {
+            //REVIEW - is this useless? I think so.
+            console.log("[SHAREDSTATE]: Genesis block detected")
+            //REVIEW: is this different than other blocks?
+            lastTimestamp = new Date().getTime() - 69420 * 1000
+        } else {
+            lastTimestamp = JSON.parse(
+                lastBlock.content as unknown as string,
+            ).timestamp
+        }
 
-        const lastTimestamp = lastBlock.timestamp
+        console.log("LAST TIMESTAMP: " + lastTimestamp)
+
         let delta = this.currentTimestamp - lastTimestamp
         // lastTimestamp = this.currentTimestamp // FIXME This must be the last block timestamp
 

@@ -17,9 +17,6 @@ export class Blocks {
     @Column("text", { name: "validation_data" })
     validationData: string
 
-    @Column("date", { name: "timestamp" })
-    timestamp: string
-
     @PrimaryGeneratedColumn({ type: "integer", name: "id" })
     id: number
 

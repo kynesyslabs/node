@@ -12,8 +12,13 @@ export async function remoteCall(
     type: string = "nodeCall",
     requireReply: boolean = false,
     isReply: boolean = false,
+    args: any = null,
 ): Promise<[boolean, any]> {
     let { identity } = sharedState.getInstance()
+    console.log("[remoteCall] Type: " + type)
+    console.log("[remoteCall] Message: " + message)
+    console.log("[remoteCall] Receiver: " + receiver)
+    console.log("[remoteCall] Args: " + args)
     // Initialize the comlink
     let _comlink = new ComLink()
     // Generate the transmission
@@ -23,7 +28,7 @@ export async function remoteCall(
         message,
         identity.ed25519.publicKey,
         receiver,
-        null,
+        args,
         null,
     )
     // Hash and sign it

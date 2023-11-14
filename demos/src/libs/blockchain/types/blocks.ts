@@ -13,7 +13,8 @@ import Transactions from "../transaction"
 
 export default interface BlockContent {
     ordered_transactions: Transactions[]
-    per_address_transactions: Map<string, Transactions[]>
+    per_address_transactions: Map<string, string[]>
     web2data: {} // TODO Add Web2 class
     previousHash: string
+    timestamp: number
 }

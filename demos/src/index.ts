@@ -143,7 +143,7 @@ async function main() {
     // Setting the shared state
     sharedState.getInstance().identity = id
     // Log identity
-    term.green("[MAIN] WE ARE " + id.ed25519.publicKey.toString("hex") + "\n")
+    term.green("[MAIN] 🔗 WE ARE " + id.ed25519.publicKey.toString("hex") + " 🔗 \n")
 
     try {
         await Identity.getInstance().getPublicIP()
@@ -154,9 +154,9 @@ async function main() {
     }
 
     // INFO We start the server
-    term.yellow("[BOOTSTRAP] Starting the server\n")
+    term.yellow("[BOOTSTRAP] 🖥️ Starting the server\n")
     await server.listen(SERVER_PORT)
-    term.green("[SERVER] listening on *:" + SERVER_PORT + "\n")
+    term.green("[SERVER] 🖥️ listening on *:" + SERVER_PORT + "\n")
     await networkServer.setupListeners(io_server)
 
     // INFO Now ensuring we have an initialized chain or initializing the genesis block
@@ -165,18 +165,18 @@ async function main() {
     // Loading the peers
 
     // INFO Setting the common variables and propagating them
-    term.yellow("[BOOTSTRAP] Bootstrapping peers...\n")
+    term.yellow("[BOOTSTRAP] 🌐 Bootstrapping peers...\n")
     const peerList = await peerBootstrap(PEER_LIST)
     for (const peer of peerList) {
         peerManager.addPeer(peer)
     }
 
     term.green(
-        "[BOOTSTRAP] Peers loaded (" + peerManager.getPeers().length + ")\n",
+        "[BOOTSTRAP] 🌐 Peers loaded (" + peerManager.getPeers().length + ")\n",
     )
     // Checking for listening mode
     if (peerManager.getPeers().length < 1) {
-        console.log("[WARNING] No peers detected, listening...")
+        console.log("[WARNING] 🔍 No peers detected, listening...")
         enough_peers = false
     }
     // TODO Enough_peers will be shared between modules so that can be checked async
@@ -190,7 +190,7 @@ async function main() {
         if (COMMANDLINE_MODE) {
             commandLine() // While doing the rest of the stuff needed, a comand line interface is available
         }
-        term.yellow("[MAIN] Starting the background loop\n")
+        term.yellow("[MAIN] ✅ Starting the background loop\n")
         mainLoop(id) // Is an async function so running without waiting send that to the background
     }
 }

@@ -1,7 +1,8 @@
 // INFO The main loop executed in background by index.ts
 import sharedState from "./sharedState"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
-import Sync from "src/libs/blockchain/routines/Sync"
+import {fastSync} from "src/libs/blockchain/routines/Sync"
+import { _Sync } from "src/libs/blockchain/routines/Sync"
 import { Identity } from "src/libs/identity"
 
 import { Peer, PeerManager } from "src/libs/peer"
@@ -11,6 +12,7 @@ import ComLink from "src/libs/communications/comlink"
 import { pki } from "node-forge"
 import RepresentativeShard from "src/libs/consensus/types/PoR"
 import QBFT from "src/libs/consensus/types/BFT"
+import chain from "src/libs/blockchain/chain"
 
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
@@ -20,7 +22,7 @@ let hasSentNodeOnlineTx = false
 const peerManager = PeerManager.getInstance()
 
 export default async function mainLoop(id: Identity) {
-    console.log("[MAIN LOOP] Started")
+    console.log("[MAIN LOOP] ✅ Started")
     var cycleTimestamp: number
 
     sharedState.getInstance().privateKey = id.ed25519
@@ -35,7 +37,8 @@ export default async function mainLoop(id: Identity) {
             continue // Check if the main loop is paused
         }
         // NOTE Syncing the blockchain
-        await Sync(id)
+        await fastSync() // REVIEW Test here
+        console.log("[MAIN LOOP] Synced! 🟢 ")
         // NOTE Using this as the timestamp of the current cycle
         // eslint-disable-next-line no-unused-vars
         cycleTimestamp = sharedState.getInstance().getTimestamp() // REVIEW Unused
@@ -134,12 +137,18 @@ export default async function mainLoop(id: Identity) {
             console.log("[MAIN LOOP] Shard:")
             console.log(shard)
 
-            // We should now propose a block
-            // We need to add the shard to the block
+            const consensus = await QBFT.representationAssembly(shard)
+            console.log(
+                `[MAIN LOOP] Consensus: ${
+                    consensus[0]
+                }, proposed block: ${JSON.stringify(consensus[1])}`,
+            )
 
-            const consensus = await QBFT.representationAssembly(shard, id)
-            console.log("[MAIN LOOP] Consensus:")
-            console.log(consensus)
+            if (consensus[0]) {
+                const prevBlockNumber = (await chain.getLastBlock()).number
+                consensus[1].number = prevBlockNumber + 1
+                await chain.insertBlock(consensus[1])
+            }
 
             // At the end of the consensus period, the main loop should start again
 
@@ -148,5 +157,4 @@ export default async function mainLoop(id: Identity) {
             sharedStateInstance.mainLoopPaused = false // Pause the main loop
         }
     }
-    // TODO
 }

@@ -10,14 +10,13 @@ global.multichain = multichain
 // REVIEW Define XMScript (chs) class?
 
 export interface ITask {
-    type: string;
-    params: {};
+    type: string
+    params: {}
     // TODO AND NOTE
-    // Here the client should send 
+    // Here the client should send
     // the signed transactions that it requires
-    signedPayloads: any[]; 
+    signedPayloads: any[]
 }
-
 
 // NOTE: We receive the operations as:
 /*
@@ -28,23 +27,22 @@ multichain_operation: {
 }
 */
 export interface IOperation {
-    chain: string;
-    subchain: string;
-    is_evm: boolean;
-    rpc: string;
-    task: ITask;
+    chain: string
+    subchain: string
+    is_evm: boolean
+    rpc: string
+    task: ITask
 }
 
 export interface old_XMScript {
-    operations: IOperation[];
+    operations: IOperation[]
 }
 
 export interface XMScript {
-    "multichain_operation": { [key: string]: IOperation };
+    multichain_operation: { [key: string]: IOperation }
 }
 
 class XMParser {
-
     // INFO Same as below but with file support
     static async loadFile(path: string): Promise<XMScript> {
         if (!fs.existsSync(path)) {
@@ -54,12 +52,12 @@ class XMParser {
         let script = fs.readFileSync(path, "utf8")
         return await XMParser.load(script)
     }
-	
+
     // INFO Transforming a string in a XMScript
     static async load(script: string): Promise<XMScript> {
         // Let's ensure it is already an array
         if (!(script.startsWith("[") && script.endsWith("]"))) {
-            script = "[" + script + "]"        
+            script = "[" + script + "]"
         }
         let xmscript: XMScript = JSON.parse(script)
         return xmscript
@@ -73,13 +71,16 @@ class XMParser {
         return result
     }
 
-
     // INFO This returns the results of the execution of the XMScript
     static async execute(fullscript: XMScript): Promise<any> {
         let results = {}
         let name: string, operation: IOperation
         // Iterating over the operations
-        for (let id = 0; id < Object.keys(fullscript.multichain_operation).length; id++) {
+        for (
+            let id = 0;
+            id < Object.keys(fullscript.multichain_operation).length;
+            id++
+        ) {
             name = Object.keys(fullscript.multichain_operation)[id]
             operation = fullscript.multichain_operation[name]
             results[name] = await XMParser.executeOperation(operation)
@@ -95,17 +96,17 @@ class XMParser {
         let chainID = 0
         if (operation.is_evm) {
             // Choosing the right chain ID
-            if(operation.chain == "ethereum") {
-                if(operation.subchain == "mainnet") {
+            if (operation.chain == "ethereum") {
+                if (operation.subchain == "mainnet") {
                     chainID = 1
-                } else if(operation.subchain == "ropsten") {
+                } else if (operation.subchain == "ropsten") {
                     chainID = 3
-                } else if(operation.subchain == "rinkeby") {
+                } else if (operation.subchain == "rinkeby") {
                     chainID = 4
-                } else if(operation.subchain == "goerli") {
+                } else if (operation.subchain == "goerli") {
                     chainID = 5
                 }
-            } else if(operation.chain == "bsc") {
+            } else if (operation.chain == "bsc") {
                 if (operation.subchain == "mainnet") {
                     chainID = 56
                 } else if (operation.subchain == "testnet") {
@@ -118,7 +119,7 @@ class XMParser {
                 chainID = parseInt(operation.subchain)
                 if (isNaN(chainID)) {
                     console.log("Invalid subchain")
-                    return {result: "error", error: "Invalid subchain"}
+                    return { result: "error", error: "Invalid subchain" }
                 }
             }
         }
@@ -133,16 +134,19 @@ class XMParser {
         if (operation.task.type == "pay") {
             // NOTE Generic sanity check on payloads
             if (!checkSignedPayloads(1, operation.task.signedPayloads)) {
-                return {result: "error", error: "Invalid signedPayloads length"}
+                return {
+                    result: "error",
+                    error: "Invalid signedPayloads length",
+                }
             }
             // ANCHOR EVM
             if (operation.is_evm) {
                 console.log("[XMScript Parser] EVM Pay")
-                let result = await multichain.EVM.getInstance(chainID).sendSignedTransaction(
-                    operation.task.signedPayloads[0],
-                )
+                let result = await multichain.EVM.getInstance(
+                    chainID,
+                ).sendSignedTransaction(operation.task.signedPayloads[0])
             }
-            // Non EVM Section has more complexity 
+            // Non EVM Section has more complexity
             else {
                 console.log("NON EVM PAY")
                 // ANCHOR Ripple
@@ -156,27 +160,29 @@ class XMParser {
                     let xrplInstance = new multichain.XRPL(rpc_url)
                     let result = await xrplInstance.sendTransaction(
                         operation.task.signedPayloads[0],
-                    )                
+                    )
                 }
             }
 
             // FIXME Find a way to standardize the calls as they have the same name across chains (except for EVM) (e.g. sendSignedTransaction)
-        }        
-        
+        }
+
         // TODO
         return result
     }
-
 }
 
 function checkSignedPayloads(num: number, signedPayloads: any[]): boolean {
-                // NOTE Sanity check on the signedPayloads length
-                let sanityCheck = required(signedPayloads.length == num, "Invalid signedPayloads length")
-                if (!sanityCheck) {
-                    return false
-                }
-                console.log("[XMScript Parser] Signed payload seems ok.")
-                return true
+    // NOTE Sanity check on the signedPayloads length
+    let sanityCheck = required(
+        signedPayloads.length == num,
+        "Invalid signedPayloads length",
+    )
+    if (!sanityCheck) {
+        return false
+    }
+    console.log("[XMScript Parser] Signed payload seems ok.")
+    return true
 }
 
 export default XMParser

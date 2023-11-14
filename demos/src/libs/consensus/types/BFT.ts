@@ -1,14 +1,13 @@
 // INFO This library provides all the methods required to apply a QBFT consensus algorithm in a PoR/BFT network.
-
-import term from "terminal-kit"
 import Mempool, { MempoolData } from "src/libs/blockchain/mempool"
 import Block from "src/libs/blockchain/blocks"
-import { io } from "socket.io-client"
 import PeerManager from "src/libs/peer/PeerManager"
 import Peer from "src/libs/peer/Peer"
-import { Identity } from "src/libs/identity"
 import { ProofOfRepresentation } from "./PoR"
 import { demostdlib } from "src/libs/utils"
+import deriveBlock from "../routines/deriveBlock"
+import { filterOutliers, median } from "src/libs/network/routines/timeSyncUtils"
+import { askPoC } from "../routines/proofOfConsensus"
 
 export default class QBFT {
     constructor() {}
@@ -18,7 +17,6 @@ export default class QBFT {
     // BFT part of the consensus.
     static async representationAssembly(
         shard: ProofOfRepresentation,
-        id: Identity,
     ): Promise<[boolean, Block]> {
         let peers = await shard.getPeers()
         let peerManager = PeerManager.getInstance()
@@ -37,6 +35,9 @@ export default class QBFT {
         let merged_mempool = our_mempool
         let pro = 0
         let con = 0
+
+        let mempoolList: MempoolData[] = []
+
         // TODO Test staker list for online status
         // TODO IMPLEMENT THIS!
         // TODO Share the staker list and consensus the staker list too
@@ -83,6 +84,9 @@ export default class QBFT {
                 console.log("Mempool not valid")
                 return [false, null]
             }
+
+            mempoolList.push(remotePool)
+
             // Merging with the remote pool as it is compatible
             let mergedResult = await Mempool.merge(remotePool)
             if (!mergedResult) {
@@ -102,6 +106,20 @@ export default class QBFT {
                 con++
             }
         }
+
+        const timestamps = mempoolList.map(mempool => mempool.timestamp)
+        let medianTimestamp
+        if (timestamps.length === 1) {
+            medianTimestamp = timestamps[0]
+        } else if (timestamps.length === 2) {
+            medianTimestamp = (timestamps[0] + timestamps[2]) / 2
+        } else if (timestamps.length > 2) {
+            const filteredTimestamps = filterOutliers(timestamps)
+            medianTimestamp = median(filteredTimestamps)
+        }
+
+        console.log("[sQBFT]: median timestamp: " + medianTimestamp)
+
         // REVIEW If 2/3 + 1 have the same merged mempool, then we have a consensus
         console.warn(
             "[sQBFT Preliminary Validators Test] Ok: " +
@@ -115,22 +133,51 @@ export default class QBFT {
         if (!consensusReached) {
             return [false, null]
         }
-        // REVIEW Sort the mempool
-        let sortedPool = await Mempool.sort(await Mempool.getMempool())
-        // Build the block
-        let forgedProposedBlock = await Mempool.getProposedBlock()
-        let forgedProposedHash = forgedProposedBlock.hash
+        const mempool = await Mempool.getMempool()
+        const proposedBlock = await deriveBlock(mempool, medianTimestamp)
+
+        let forgedProposedHash = proposedBlock.hash
+
+        console.log("IS IT NULL")
+        console.log(forgedProposedHash)
+
+        const pocList = []
+        // Another loop to get the PoC
+        for (let i = 0; i < peersNumber; i++) {
+            let currentPeer = peers[i]
+
+            let peerInstance = peerManager.getPeer(
+                currentPeer.identity.toString("hex"),
+            )
+
+            pocList.push(await askPoC(forgedProposedHash, peerInstance))
+        }
+
+        console.log("[BFT]: pocList")
+        console.log(pocList)
+
+        // eslint-disable-next-line no-unused-vars
+        const validatorPocList = pocList.map(({ socket, ...rest }) => rest)
+
+        proposedBlock.validation_data = validatorPocList
+
         // REVIEW BFT for the block with the others
+        console.log("[sQBFT]: forgedProposedHash: " + forgedProposedHash)
         let finalResult = await this.vote(
             "forgedProposedHash",
             forgedProposedHash,
+            medianTimestamp,
         )
-        return [finalResult, forgedProposedBlock]
+        return [finalResult, proposedBlock]
     }
 
     // INFO Voting on a parameter through a list of peers and then computing the consensus
     // TODO Test and verify that works
-    static async vote(parameter: any, our: any): Promise<boolean> {
+    static async vote(
+        parameter: any,
+        our: any,
+        timestamp: number,
+    ): Promise<boolean> {
         let peerlist: Peer[] = await PeerManager.getInstance().getPeers()
         let numericResult = {
             pro: 0,
@@ -140,11 +187,24 @@ export default class QBFT {
         // Iterating over all the peers
         for (let i = 0; i < peerlist.length; i++) {
             let peer = peerlist[i]
-            let peerSocket = io(peer.connectionString) // REVIEW Connection to the peer
-            // TODO Ask the peer for the parameter on its side
-            peerSocket.emit("vote", parameter) // FIXME To implement server side
-            let response
-            // TODO Wait for the response from the peer (maybe use a classic comlink)
+
+            const response = await new Promise(resolve => {
+                peer.socket.emit(
+                    "voteRequest",
+                    {
+                        parameter: parameter,
+                        timestamp: timestamp,
+                    },
+                    response => {
+                        resolve(response)
+                    },
+                )
+            })
+
+            console.log("Voting will compare:\n")
+            console.log(response)
+            console.log(our)
+
             // Compiling the registry
             if (response != our) {
                 numericResult.con++
@@ -177,7 +237,7 @@ export default class QBFT {
         total: number,
     ): boolean {
         console.log(
-            `[BFT] Checking consensus. Got ${pro} pro and ${con} against votes}`,
+            `[BFT] Checking consensus. Got ${pro} pro and ${con} against votes}, got ${total} votes`,
         )
         // let twothirdPlus1 = (total * 2) / 3 + 1 // REVIEW Is this correct?
         let twothirdPlus1 = 1

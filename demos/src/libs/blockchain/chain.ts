@@ -61,7 +61,7 @@ export default class Chain {
     // INFO Get the last block number
     static async getLastBlockNumber(): Promise<number> {
         let response = await this.read(
-            "SELECT number FROM blocks ORDER BY number ASC LIMIT 1",
+            "SELECT number FROM blocks ORDER BY number DESC LIMIT 1",
         )
         console.log(response)
         return response[0].number
@@ -69,7 +69,7 @@ export default class Chain {
     // INFO Get the last block hash
     static async getLastBlockHash() {
         let response = await this.read(
-            "SELECT hash FROM blocks ORDER BY number ASC LIMIT 1",
+            "SELECT hash FROM blocks ORDER BY number DESC LIMIT 1",
         )
         return response[0].hash
     }
@@ -110,11 +110,6 @@ export default class Chain {
         return await this.read("SELECT * FROM blocks WHERE number=0")
     }
 
-    // REVIEW Experimental: support for incremental genesis
-    static async getGenesisBlocks(): Promise<Block[]> {
-        return await this.read("SELECT * FROM blocks WHERE signature='genesis'")
-    }
-
     // INFO Get the current pending transactions pool
     static async getPendingPool(): Promise<Transaction[]> {
         return await this.read(
@@ -149,15 +144,8 @@ export default class Chain {
 
     static isGenesis(block: Block): boolean {
         // Check if there are any ordered transactions
-        if (
-            block?.content?.ordered_transactions &&
-            block.content.ordered_transactions.length > 0
-        ) {
-            const firstTransaction: Transaction =
-                block.content.ordered_transactions[0]
-
-            // Check if the first transaction's type is "genesis"
-            return firstTransaction.content.type === "genesis"
+        if (block.number === 0) {
+            return true
         }
     }
 
@@ -219,35 +207,62 @@ export default class Chain {
     // INFO Insert a block into the database
     // NOTE Inserting a block is done after the consensus, so that together
     // with the block, we can write the GLS status changes to the chain.
-    static async insertBlock(block: Block, operations: Operation[] = []) {
+    static async insertBlock(block: Block, operations: Operation[] = [], position: number = null) {
         // Returns the hash of the block
         // Block() class
         // REVIEW Build the SQL query
-        let sql_query =
-            "INSERT INTO blocks (content, number, hash, status, proposer, validation_data, timestamp) VALUES " +
-            "('" +
-            JSON.stringify(block.content) +
-            "', " +
-            block.number +
-            ", " +
-            "'" +
-            block.hash +
-            "', " +
-            "'" +
-            block.status +
-            "', " +
-            "'" +
-            block.proposer +
-            "', " +
-            "'" +
-            JSON.stringify(block.validation_data) +
-            "', " +
-            block.timestamp +
-            ")"
+        console.log(block.validation_data)
+
+        console.log("BLOCK CONTENT TO BE WRITTEN:")
+        console.log(block.content)
+
+        let validation_data = JSON.stringify(block.validation_data)
+        validation_data = Buffer.from(validation_data).toString("hex")
+        let sql_query: string = ""
+        // Based on user input, we append the block or we update the block
+        if (!position) {
+            sql_query =
+                "INSERT INTO blocks (content, number, hash, status, proposer, validation_data) VALUES " +
+                "('" +
+                JSON.stringify(block.content) +
+                "', " +
+                block.number +
+                ", " +
+                "'" +
+                block.hash +
+                "', " +
+                "'" +
+                block.status +
+                "', " +
+                "'" +
+                block.proposer +
+                "', " +
+                "'" +
+                validation_data +
+                "')"
+        } else {
+            // REVIEW GREATLY NEVER TESTED
+            sql_query =
+                "UPDATE blocks SET content = '" +
+                JSON.stringify(block.content) +
+                "', number = " +
+                block.number +
+                ", hash = '" +
+                block.hash +
+                "', status = '" +
+                block.status +
+                "', proposer = '" +
+                block.proposer +
+                "', validation_data = '" +
+                validation_data +
+                "' WHERE number = " +
+                position
+        }
         // Execute the SQL query
         await this.write(sql_query)
         // Calling the operations of the block on the GLS
-        await executeOperations(operations, block)
+        // FIXME Adjust operations BEFORE the consensus lol
+        //await executeOperations(operations, block)
         return block.hash
     }
     // INFO Generate the genesis block
@@ -268,7 +283,7 @@ export default class Chain {
         }
         console.log(genesis_tx)
         // Build a block containing the genesis tx
-        genesis_block.timestamp = genesis_tx.content.timestamp
+        genesis_block.content.timestamp = genesis_tx.content.timestamp
         genesis_block.content.ordered_transactions.push(genesis_tx)
         genesis_block.content.previousHash = "0x0"
         genesis_block.hash = Hashing.sha256(
@@ -281,7 +296,7 @@ export default class Chain {
             params: genesis_json,
             hash: genesis_block.hash,
             nonce: 0,
-            timestamp: genesis_block.timestamp,
+            timestamp: genesis_block.content.timestamp,
             status: true,
             fees: {
                 network_fee: 0,

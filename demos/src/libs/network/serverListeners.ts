@@ -16,6 +16,8 @@ import { Peer } from "src/libs/peer"
 import { comlinkUtils } from "src/libs/communications"
 import { Identity } from "src/libs/identity"
 import Transmission from "src/libs/communications/transmission"
+import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
+
 var term = require("terminal-kit").terminal
 
 export interface BrowserRequest {
@@ -36,6 +38,7 @@ export default class ServerListeners {
 
         await this.comlinkListener()
         await this.browserRequestListener()
+        await this.voteRequestListener()
     }
 
     // INFO this set of listeners does not require authentication and
@@ -97,6 +100,9 @@ export default class ServerListeners {
             let extra: any, require_reply: any, response: any
 
             switch (content.type) {
+                case "proofOfConsensus":
+                    ;({ extra, require_reply, response } = await proofConsensusHandler(content))
+                    break
                 case "tx":
                     ;({ extra, require_reply, response } =
                         await ServerHandlers.handleTransaction(content))
@@ -235,5 +241,27 @@ export default class ServerListeners {
 
     authAskEmit = async () => {
         await this.peer.socket.emit("auth_ask", "sign this")
+    }
+
+    voteRequestListener = async () => {
+        this.peer.socket.on("voteRequest", async (request, callback) => {
+            term.yellow("[SERVER] Received vote request\n")
+            console.log(request)
+            let voteResponse: string
+            var res: string
+
+            console.log("request")
+            console.log(request)
+
+            switch (request.parameter) {
+                case "forgedProposedHash":
+                    res = await ServerHandlers.handleVoteRequest(
+                        request.timestamp,
+                    )
+                    voteResponse = res
+            }
+
+            callback(voteResponse)
+        })
     }
 }
