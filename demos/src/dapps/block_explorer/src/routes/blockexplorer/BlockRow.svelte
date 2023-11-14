@@ -65,7 +65,7 @@
     </div>
     <div>
         {#if block}
-            <p class="loaded delayed2" style="margin-top:0;margin-bottom:8px;">Proposer <span class="fake-link">{trim_address(block.proposer)}</span></p>
+            <p class="loaded delayed2" style="margin-top:0;margin-bottom:8px;">Proposer <a href={`/blockexplorer/addresses/${block.proposer}`}>{trim_address(block.proposer)}</a></p>
             <p class="loaded delayed3" style="margin: 0;font-size:.9rem;color:rgb(128,128,128);"><span>{block.content.ordered_transactions.length} transactions</span></p>
         {:else}
             <div class="skeletonplaceholder delayed2" style="margin-bottom:8px"></div>
