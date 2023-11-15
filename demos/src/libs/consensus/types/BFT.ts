@@ -151,6 +151,8 @@ export default class QBFT {
             )
 
             pocList.push(await askPoC(forgedProposedHash, peerInstance))
+            console.warn(forgedProposedHash)
+            console.warn(peerInstance)
         }
 
         console.log("[BFT]: pocList")
