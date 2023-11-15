@@ -29,7 +29,8 @@ export let modules = {
 	// TODO Make some properties configurable
 	communications: {
 			response_registry: { 
-				prune_interval: 5000, // Milliseconds between responseRegistry pruning operations // Make it configurable
+				flag_interval: 5000, // Milliseconds between responseRegistry pruning operations // Make it configurable
+				flag_hardlimit: 10000, // Maximum number of milliseconds a response can exist 
 			},
 			comlink: {
 				rate_limit_size: 5, // How many comlinks can be sent in an interval? // TODO Make it configurable
