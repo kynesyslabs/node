@@ -36,11 +36,12 @@ export class ResponseRegistryDB {
     // REVIEW INFO Preparing a responseRegistry entry for a response
     static async requestResponse(comlink: ComLink): Promise<any> {
         // Sanity check
-        if (!comlink.properties.require_reply)
-            return [
-                false,
-                "ComLink object must have required_reply property set to true",
-            ]
+        if (!comlink.properties.require_reply) {
+          return [
+              false,
+              "ComLink object must have required_reply property set to true",
+          ]
+        }
         // Checking if the response request is already in the registry
         var responseRegistry_query = await Chain.read(
             "SELECT * from responseRegistry where muid = '" +
@@ -85,8 +86,10 @@ export class ResponseRegistryDB {
             return [false, "No response request in registry"]
         }
         // Inspect the response
-        let response = responseRegistry_query[0].response
-        if (!response) return [false, "No response has been received"]
+        let {response} = responseRegistry_query[0]
+        if (!response) {
+          return [false, "No response has been received"]
+        }
         // We have a response
         return [true, response]
     }
@@ -108,7 +111,7 @@ export class ResponseRegistryDB {
             return [false, "No response request in registry"]
         }
         let responseElement = responseRegistry_query[0]
-        let response = responseElement.response
+        let {response} = responseElement
         response.timestamp = Date.now()
         response.socket = socket
         response.identity = message.bundle.content.sender
@@ -133,7 +136,9 @@ export class ResponseRegistryDB {
         while (responseRegistry_query.length < 1) {
             await sleep(100)
             timeout += 100
-            if (timeout > 2000) return [false, null]
+            if (timeout > 2000) {
+              return [false, null]
+            }
             responseRegistry_query = await Chain.read(
                 "SELECT * from responseRegistry where muid = '" + muid + "'",
             )
@@ -163,6 +168,7 @@ export default class ResponseRegistry {
     }
     // INFO Register a response request
     requestResponse(comlink: ComLink) {
+// sourcery skip: use-braces
         if (!comlink.properties.require_reply)
             return [
                 false,
@@ -189,10 +195,12 @@ export default class ResponseRegistry {
     // TODO Do it in db from now on
     // INFO Check if a response has been received
     hasResponse(comlink: ComLink) {
-        if (!this.list[comlink.muid])
-            return [false, "No response has been requested"]
-        if (!this.list[comlink.muid].response)
-            return [false, "No response has been received"]
+        if (!this.list[comlink.muid]) {
+          return [false, "No response has been requested"]
+        }
+        if (!this.list[comlink.muid].response) {
+          return [false, "No response has been received"]
+        }
         return [true, this.list[comlink.muid].response]
     }
 
@@ -204,8 +212,9 @@ export default class ResponseRegistry {
         socket: Socket | socket_client.Socket,
         connection_string: string,
     ) {
-        if (!this.list[comlink_muid])
-            return [false, "No response has been requested"]
+        if (!this.list[comlink_muid]) {
+          return [false, "No response has been requested"]
+        }
         this.list[comlink_muid].response.timestamp = Date.now()
         this.list[comlink_muid].response.socket = socket
         this.list[comlink_muid].response.identity =
@@ -216,6 +225,13 @@ export default class ResponseRegistry {
         return [true, this.list[comlink_muid]]
     }
 
+    // FIXME Fundamental: implement autopruning
+    deleteResponse(comlink_muid) {
+        if (this.list[comlink_muid]) {
+            this.list[comlink_muid] = undefined
+        }
+    }
+
     // INFO Check with the muid if a response has been received and return a promise
     async checkResponse(muid: string): Promise<[boolean, Response]> {
         let timeout = 0
@@ -224,7 +240,9 @@ export default class ResponseRegistry {
         while (!this.list[muid].response.message) {
             await sleep(100)
             timeout += 100
-            if (timeout > 2000) return [false, this.list[muid].response]
+            if (timeout > 2000) {
+              return [false, this.list[muid].response]
+            }
         }
         console.log(
             "[RESPONSES] " +

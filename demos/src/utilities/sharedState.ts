@@ -5,6 +5,7 @@ import chain from "src/libs/blockchain/chain"
 import { IValidator, ProofOfRepresentation } from "src/libs/consensus/types/PoR"
 require("dotenv").config({ path: "../../.commons" })
 import { Identity } from "src/libs/identity"
+import Security from "src/libs/network/securityModule"
 
 export default class sharedState {
     private static instance: sharedState
@@ -17,6 +18,9 @@ export default class sharedState {
     runMainLoop: boolean = true
     mainLoopPaused: boolean = false
     consensusMode: boolean = false
+
+    // NOTE The Security class is separated due to the high level of importance
+    security: Security
 
     shard: ProofOfRepresentation
 
@@ -63,7 +67,7 @@ export default class sharedState {
         console.log("LAST TIMESTAMP: " + lastTimestamp)
 
         let delta = this.currentTimestamp - lastTimestamp
-        // lastTimestamp = this.currentTimestamp // FIXME This must be the last block timestamp
+        // lastTimestamp = this.currentTimestamp // REVIEW Done? | This must be the last block timestamp
 
         console.log("this.lastTimestamp")
         console.log(JSON.stringify(lastBlock))
