@@ -284,7 +284,7 @@ export default class ResponseRegistry {
             let now = new Date().getTime()
             console.log("[ResponseRegistry] [PRUNE] Now: " + now.toString())
             let delta = now - ResponseRegistry.instance.lastPruned
-            console.log("[ResponseRegistry] [PRUNE] Last Pruned: " + delta.toString())
+            console.log("[ResponseRegistry] [PRUNE] Last Pruned: " + ResponseRegistry.instance.lastPruned.toString())
             console.log("[ResponseRegistry] [PRUNE] Delta: " + delta.toString())
             if (delta > Security.modules. communications.response_registry.prune_interval) {
                 console.log("[ResponseRegistry] [PRUNE] Time to prune!")
