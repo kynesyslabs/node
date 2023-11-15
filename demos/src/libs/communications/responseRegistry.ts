@@ -220,7 +220,10 @@ export default class ResponseRegistry {
     async checkResponse(muid: string): Promise<[boolean, Response]> {
         let timeout = 0
         console.log("Logging MUID: " + muid)
-        console.log(this.list)
+        console.log(
+            "Response Registry length: " + Object.keys(this.list).length,
+        )
+
         while (!this.list[muid].response.message) {
             await sleep(100)
             timeout += 100
