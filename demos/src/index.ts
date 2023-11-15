@@ -21,6 +21,7 @@ import { Server } from "socket.io"
 import mainLoop from "./utilities/mainLoop"
 import sharedState from "./utilities/sharedState"
 
+import groundControl from "./libs/utils/demostdlib/groundControl"
 
 import * as dotenv from "dotenv"
 dotenv.config()
@@ -58,6 +59,8 @@ let PEER_LIST: any
 
 const id = Identity.getInstance()
 const app = express()
+
+groundControl.init()
 
 // SECTION REVIEW ZONE
 var https = require("https") // REVEIEW SSL COMPATIBILITY

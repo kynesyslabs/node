@@ -18,11 +18,6 @@ interface SIComlink {
 	checkRateLimits: Function,
 }
 
-interface SICommunications {
-	response_registry: SIResponseRegistry,
-	comlink: SIComlink,	
-}
-
 export let modules = {
 
 	// SECTION Modules
