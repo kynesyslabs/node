@@ -252,18 +252,15 @@ export default class ResponseRegistry {
         console.log("[ResponseRegistry] [PRUNE] Pruning started...")
         // Getting prune time from the sharedState
         let pruneTime = Security.modules.communications.response_registry.prune_interval
-        let now = new Date().getTime()
+        let total = Object.keys(this.list).length
         let counter = 0
-        let gc = 0
-        let us = 0
+        let now = new Date().getTime()
         let item: string | number
         for (item in this.list) {
             console.log(this.list[item])
             if (!this.list[item]) {
-                gc += 1
               continue // Garbage collector kindly managed it for us
             }
-            counter += 1
             // TODO Greatly improve this simple method
             // At the moment, after X milliseconds the responses are closed
             let delta = now - this.list[item].timestamp
@@ -272,15 +269,15 @@ export default class ResponseRegistry {
                 console.log("[ResponseRegistry] [PRUNE] Pruned: ")
                 console.log(item)
                 delete this.list[item]
-                us += 1
+                counter += 1
             }
         }
         this.lastPruned = now
+        let postTotal = Object.keys(this.list).length
         console.log("[ResponseRegistry] [PRUNE] Pruning Report:")
-        console.log("[Total] " + counter.toString())
-        console.log("[Cleaned by Garbage Collector] " + gc.toString())
-        console.log("[Cleaned by us] " + us.toString())
-        console.log("[Last in the registry] " + item)
+        console.log("[Pre] " + total.toString())
+        console.log("[Post] " + postTotal.toString())
+        console.log("[Pruned] " + postTotal.toString())
     }
 
     // FIXME Fundamental: implement autopruning
