@@ -19,9 +19,6 @@ export default class sharedState {
     mainLoopPaused: boolean = false
     consensusMode: boolean = false
 
-    // NOTE The Security class is separated due to the high level of importance
-    security: Security
-
     shard: ProofOfRepresentation
 
     serverPort: number = 53550

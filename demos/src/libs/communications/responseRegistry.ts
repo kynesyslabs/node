@@ -16,6 +16,7 @@ import { Socket } from "socket.io"
 import * as socket_client from "socket.io-client"
 import Chain from "../blockchain/chain"
 import sharedState from "src/utilities/sharedState"
+import * as Security from "../network/securityModule"
 
 async function sleep(ms) {
     return new Promise(resolve => {
@@ -152,19 +153,40 @@ export class ResponseRegistryDB {
 export default class ResponseRegistry {
     list: { [key: string]: ResponseRegistryElement }
     database: any
+    lastPruned: number
 
     // The instance of ResponseRegistry
     private static instance: ResponseRegistry
 
     private constructor() {
         this.list = {}
+        this.lastPruned = new Date().getTime()
     }
 
     // Method to get the instance of ResponseRegistry
     static getInstance(): ResponseRegistry {
+        let pruningMode = true // TODO Debug line
+
         if (!ResponseRegistry.instance) {
             ResponseRegistry.instance = new ResponseRegistry()
         }
+
+        // REVIEW Pruning automatically
+        if (pruningMode) {
+            console.log("[ResponseRegistry] [getInstance] Pre-flight pruning...") 
+            let now = new Date().getTime()
+            console.log("[ResponseRegistry] [PRUNE] Now: " + now.toString())
+            let delta = now - ResponseRegistry.instance.lastPruned
+            console.log("[ResponseRegistry] [PRUNE] Last Pruned: " + delta.toString())
+            console.log("[ResponseRegistry] [PRUNE] Delta: " + delta.toString())
+            if (delta > Security.modules. communications.response_registry.prune_interval) {
+                console.log("[ResponseRegistry] [PRUNE] Time to prune!")
+                ResponseRegistry.instance.prune()
+            } else {
+                console.log("[ResponseRegistry] [PRUNE] No need to prune!")
+            }
+        }
+        console.log("[ResponseRegistry] [PRUNE] Instance retrieved")
         return ResponseRegistry.instance
     }
     // INFO Register a response request
@@ -226,23 +248,41 @@ export default class ResponseRegistry {
         return [true, this.list[comlink_muid]]
     }
 
-    async prune() {
+    prune() {
+        console.log("[ResponseRegistry] [PRUNE] Pruning started...")
         // Getting prune time from the sharedState
-        let pruneTime = sharedState.getInstance().security.communications.response_registry.prune_time
+        let pruneTime = Security.modules.communications.response_registry.prune_interval
         let now = new Date().getTime()
+        let counter = 0
+        let gc = 0
+        let us = 0
         for (let item in this.list) {
+            counter += 1
+            console.log(this.list[item])
+            if (!this.list[item]) {
+                gc += 1
+              continue // Garbage collector kindly managed it for us
+            }
             // TODO Greatly improve this simple method
             // At the moment, after X milliseconds the responses are closed
             let delta = now - this.list[item].timestamp
             if (delta >= pruneTime) {
                 // Deleting expired sessions
+                console.log("[ResponseRegistry] [PRUNE] Pruned: ")
+                console.log(item)
                 this.list[item] = null
+                us += 1
             }
         }
+        this.lastPruned = now
+        console.log("[ResponseRegistry] [PRUNE] Pruning Report:")
+        console.log("[Total] " + counter.toString())
+        console.log("[Cleaned by Garbage Collector] " + gc.toString())
+        console.log("[Cleaned by us] " + us.toString())
     }
 
     // FIXME Fundamental: implement autopruning
-    deleteResponse(comlink_muid) {
+    deleteResponse(comlink_muid: string | number) {
         if (this.list[comlink_muid]) {
             this.list[comlink_muid] = undefined
         }

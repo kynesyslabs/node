@@ -20,6 +20,7 @@ import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
 import sharedState from "src/utilities/sharedState"
 import { demostdlib } from "../utils"
 import { ISecurityReport } from "./securityModule"
+import * as Security from "./securityModule"
 
 var term = require("terminal-kit").terminal
 
@@ -210,12 +211,10 @@ export default class ServerListeners {
             )
 
             // TODO & REVIEW Call security module for send limiting messages
-            let secDisabled = true
+            let secDisabled = false
             if (!secDisabled) {
                 let ts = new Date().getTime()
-                let securityInterceptor: ISecurityReport = await sharedState
-                    .getInstance()
-                    .security.communications.comlink.checkRateLimits(ts)
+                let  securityInterceptor: ISecurityReport = await Security.modules.communications.comlink.checkRateLimits(ts)
                 if (!securityInterceptor.state) {
                     switch (securityInterceptor.code) {
                         case "429":
