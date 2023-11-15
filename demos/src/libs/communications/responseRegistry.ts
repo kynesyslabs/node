@@ -17,6 +17,7 @@ import * as socket_client from "socket.io-client"
 import Chain from "../blockchain/chain"
 import sharedState from "src/utilities/sharedState"
 import * as Security from "../network/securityModule"
+const term = require("terminal-kit").terminal
 
 async function sleep(ms) {
     return new Promise(resolve => {
@@ -291,7 +292,7 @@ export default class ResponseRegistry {
     async checkResponse(muid: string): Promise<[boolean, Response]> {
         let timeout = 0
         console.log("Logging MUID: " + muid)
-        console.log(
+        term.yellow.bold.bgBlue(
             "Response Registry length: " + Object.keys(this.list).length,
         )
 
