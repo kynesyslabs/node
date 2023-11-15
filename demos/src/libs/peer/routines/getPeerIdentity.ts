@@ -45,13 +45,15 @@ export default async function getPeerIdentity(
     await identity_ask.finalize()
     comlink.properties.require_reply = true
     comlink.properties.is_reply = false
-    console.log("[PEER AUTHENTICATION] Sending comlink")
+    console.log("[PEER AUTHENTICATION] Sending comlink requesting authentication")
     console.log(comlink)
     // Adding the response request
     ResponseRegistry.getInstance().requestResponse(comlink)
+    console.log("[PEER AUTHENTICATION] Response registry is ready")
     // Broadcasting the request
     await comlink.broadcastMessageToPeer(peer, identity_ask, id.privateKey)
     // Awaiting the response
+    console.log("[PEER AUTHENTICATION] Awaiting the response")
     let response = await ResponseRegistry.getInstance().checkResponse(
         comlink.muid,
     )
