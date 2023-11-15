@@ -155,6 +155,10 @@ export default class QBFT {
 
         console.log("[BFT]: pocList")
         console.log(pocList)
+        if (pocList === null) {
+            // eslint-disable-next-line no-debugger
+            return [false, null]
+        }
 
         // eslint-disable-next-line no-unused-vars
         const validatorPocList = pocList.map(({ socket, ...rest }) => rest)
