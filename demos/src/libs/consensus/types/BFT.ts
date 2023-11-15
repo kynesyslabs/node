@@ -157,8 +157,20 @@ export default class QBFT {
 
         console.log("[BFT]: pocList")
         console.log(pocList)
-        if (pocList === null) {
-            // eslint-disable-next-line no-debugger
+
+        var errored
+        pocList.forEach(pocItem => {
+            if (pocItem === null) {
+                errored = true
+                console.log(consensusReached)
+                console.log(mempool)
+                console.log(proposedBlock)
+                console.log(forgedProposedHash)
+                // eslint-disable-next-line no-debugger
+                debugger
+            }
+        })
+        if (errored === true) {
             return [false, null]
         }
 
