@@ -166,28 +166,10 @@ export default class ResponseRegistry {
 
     // Method to get the instance of ResponseRegistry
     static getInstance(): ResponseRegistry {
-        let pruningMode = true // TODO Debug line
-
         if (!ResponseRegistry.instance) {
             ResponseRegistry.instance = new ResponseRegistry()
         }
 
-        // REVIEW Pruning automatically
-        if (pruningMode) {
-            console.log("[ResponseRegistry] [getInstance] Pre-flight pruning...") 
-            let now = new Date().getTime()
-            console.log("[ResponseRegistry] [PRUNE] Now: " + now.toString())
-            let delta = now - ResponseRegistry.instance.lastPruned
-            console.log("[ResponseRegistry] [PRUNE] Last Pruned: " + delta.toString())
-            console.log("[ResponseRegistry] [PRUNE] Delta: " + delta.toString())
-            if (delta > Security.modules. communications.response_registry.prune_interval) {
-                console.log("[ResponseRegistry] [PRUNE] Time to prune!")
-                ResponseRegistry.instance.prune()
-            } else {
-                console.log("[ResponseRegistry] [PRUNE] No need to prune!")
-            }
-        }
-        console.log("[ResponseRegistry] [PRUNE] Instance retrieved")
         return ResponseRegistry.instance
     }
     // INFO Register a response request
@@ -293,8 +275,25 @@ export default class ResponseRegistry {
         let timeout = 0
         console.log("Logging MUID: " + muid)
         term.yellow.bold.bgBlue(
-            "Response Registry length: " + Object.keys(this.list).length,
+            "Response Registry length: " + Object.keys(this.list).length + "\n",
         )
+        // REVIEW Pruning automatically
+        let pruningMode = true // TODO Debug line
+        if (pruningMode) {
+            console.log("[ResponseRegistry] [getInstance] Pre-flight pruning...") 
+            let now = new Date().getTime()
+            console.log("[ResponseRegistry] [PRUNE] Now: " + now.toString())
+            let delta = now - ResponseRegistry.instance.lastPruned
+            console.log("[ResponseRegistry] [PRUNE] Last Pruned: " + delta.toString())
+            console.log("[ResponseRegistry] [PRUNE] Delta: " + delta.toString())
+            if (delta > Security.modules. communications.response_registry.prune_interval) {
+                console.log("[ResponseRegistry] [PRUNE] Time to prune!")
+                ResponseRegistry.instance.prune()
+            } else {
+                console.log("[ResponseRegistry] [PRUNE] No need to prune!")
+            }
+        }
+        console.log("[ResponseRegistry] Instance retrieved")
 
         while (!this.list[muid].response.message) {
             await sleep(100)
