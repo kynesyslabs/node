@@ -1,7 +1,6 @@
 <script>
     import '$lib/global.css';
     export let data;
-    import transIcon from '$lib/assets/icons/agreement-icon.png';
 	import CopyButton from '$lib/components/CopyButton.svelte';
     import demos from "$lib/demos.js";
     import {rpcaddress} from "$lib/env.js";
@@ -15,6 +14,7 @@
         if(!demos.connected)
         return;
         let transaction = await demos.getTxByHash(data.transaction);
+        console.log(transaction);
         return transaction;
     }
 </script>

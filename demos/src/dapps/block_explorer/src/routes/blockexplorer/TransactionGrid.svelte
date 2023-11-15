@@ -20,7 +20,7 @@
     .card-footer{
         padding: 16px;
         text-align: center;
-        background-color: var(--header-color);
+        background-color: var(--background2);
         font-weight: bold;
         color: var(--color);
     }
@@ -54,7 +54,7 @@
     }
 
     .grid-header-row{
-        background-color: var(--header-color);
+        background-color: var(--background2);
     }
 
     .grid-header-label{
