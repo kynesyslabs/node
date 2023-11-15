@@ -15,6 +15,7 @@ import Transmission from "./transmission"
 import { Socket } from "socket.io"
 import * as socket_client from "socket.io-client"
 import Chain from "../blockchain/chain"
+import sharedState from "src/utilities/sharedState"
 
 async function sleep(ms) {
     return new Promise(resolve => {
@@ -223,6 +224,21 @@ export default class ResponseRegistry {
             message.bundle.content.message
         this.list[comlink_muid].response.connection_string = connection_string
         return [true, this.list[comlink_muid]]
+    }
+
+    async prune() {
+        // Getting prune time from the sharedState
+        let pruneTime = sharedState.getInstance().security.communications.response_registry.prune_time
+        let now = new Date().getTime()
+        for (let item in this.list) {
+            // TODO Greatly improve this simple method
+            // At the moment, after X milliseconds the responses are closed
+            let delta = now - this.list[item].timestamp
+            if (delta >= pruneTime) {
+                // Deleting expired sessions
+                this.list[item] = null
+            }
+        }
     }
 
     // FIXME Fundamental: implement autopruning

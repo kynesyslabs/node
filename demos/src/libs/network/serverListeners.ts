@@ -108,7 +108,8 @@ export default class ServerListeners {
             // NOTE And here we have the real deal
             switch (content.type) {
                 case "proofOfConsensus":
-                    ;({ extra, require_reply, response } = await proofConsensusHandler(content))
+                    ;({ extra, require_reply, response } =
+                        await proofConsensusHandler(content))
                     break
                 case "tx":
                     ;({ extra, require_reply, response } =
@@ -209,18 +210,28 @@ export default class ServerListeners {
             )
 
             // TODO & REVIEW Call security module for send limiting messages
-            let ts = new Date().getTime()
-            let securityInterceptor: ISecurityReport = await sharedState.getInstance().security.communications.comlink.checkRateLimits(ts)
-            if (!securityInterceptor.state) {
-                switch (securityInterceptor.code) {
-                    case "429":
-                        break
+            let secDisabled = true
+            if (!secDisabled) {
+                let ts = new Date().getTime()
+                let securityInterceptor: ISecurityReport = await sharedState
+                    .getInstance()
+                    .security.communications.comlink.checkRateLimits(ts)
+                if (!securityInterceptor.state) {
+                    switch (securityInterceptor.code) {
+                        case "429":
+                            break
 
-                    default:
-                        term.red.bold("[COMLINK] [SECURITY INTERCEPTOR] Unknown error: " + securityInterceptor.code.toString())
-                        term.red.bold("[COMLINK] [SECURITY INTERCEPTOR] Reported:")
-                        console.log(securityInterceptor.message)
-                        break
+                        default:
+                            term.red.bold(
+                                "[COMLINK] [SECURITY INTERCEPTOR] Unknown error: " +
+                                    securityInterceptor.code.toString(),
+                            )
+                            term.red.bold(
+                                "[COMLINK] [SECURITY INTERCEPTOR] Reported:",
+                            )
+                            console.log(securityInterceptor.message)
+                            break
+                    }
                 }
             }
 
