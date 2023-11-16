@@ -74,9 +74,10 @@ export default class ServerHandlers {
 
     // ANCHOR Comlinks
     static async handleTransaction(content: any): Promise<any> {
+            term.yellow("[handleTransactions] Handling a native DEMOS tx...\n")
             let require_reply = true // REVIEW Sure?
             let extra: string, response: boolean
-            let fname = "[" + this.handleTransaction.name + "] "
+            let fname = "[handleTransactions] "
             term.yellow(fname + "Handling transaction...")
             // Verify and execute the transaction
             let validatedTx: any[]

@@ -112,7 +112,9 @@ export default class ServerListeners {
                     ;({ extra, require_reply, response } =
                         await proofConsensusHandler(content))
                     break
+                    
                 case "tx":
+                    term.yellow.bold("[SERVER] Received tx\n")
                     ;({ extra, require_reply, response } =
                         await ServerHandlers.handleTransaction(content))
                     break
