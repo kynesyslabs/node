@@ -5,7 +5,8 @@ import chain from "src/libs/blockchain/chain"
 import { IValidator, ProofOfRepresentation } from "src/libs/consensus/types/PoR"
 require("dotenv").config({ path: "../../.commons" })
 import { Identity } from "src/libs/identity"
-import Security from "src/libs/network/securityModule"
+// eslint-disable-next-line no-unused-vars
+import * as Security from "src/libs/network/securityModule"
 
 export default class sharedState {
     private static instance: sharedState
@@ -18,6 +19,7 @@ export default class sharedState {
     runMainLoop: boolean = true
     mainLoopPaused: boolean = false
     consensusMode: boolean = false
+    syncStatus: boolean = false
 
     shard: ProofOfRepresentation
 

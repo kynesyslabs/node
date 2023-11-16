@@ -8,6 +8,7 @@
 	import PageTitle from '../../../lib/components/PageTitle.svelte';
     import { page } from '$app/stores';
     import { goto } from "$app/navigation";
+	import BlockRow from '../BlockRow.svelte';
  
     const url = $page.url;
     let thepage = url.searchParams.get('page')?parseInt(url.searchParams.get('page')):1;
@@ -55,7 +56,7 @@
     .card-footer{
         padding: 16px;
         text-align: center;
-        background-color: var(--header-color);
+        background-color: var(--background2);
         font-weight: bold;
         color: var(--color);
     }
@@ -89,7 +90,7 @@
     }
 
     .grid-header-row{
-        background-color: var(--header-color);
+        background-color: var(--background2);
     }
 
     .grid-header-label{
@@ -113,30 +114,29 @@
         <div class="card-header">   
             <p class="card-header-label">Total of {info.number} blocks</p>
         </div>
-            <div class="transactions-grid grid-header-row">
+            <!--<div class="transactions-grid grid-header-row">
                 <p class="grid-header-label">Number</p>
                 <p class="grid-header-label">Timestamp</p>
                 <p class="grid-header-label">Tx</p>
                 <p class="grid-header-label">Proposer</p>
-            </div>
-            <div class="transactions-grid">
-                {#each info.blocks as block}
-                    <a class="accessible grid-cell" href={`/blockexplorer/blocks/${block.number}`}><p class="grid-cell">{block.number}</p></a>
-                    <p class="grid-cell">{block.content.timestamp}</p>
-                    <p class="grid-cell">{block.content.ordered_transactions.length}</p>
-                    <p class="grid-cell">{block.proposer}</p>
-                {/each}
-                {#if thepage == Math.ceil(info.number/50)}
-                <p class="grid-cell">7</p><p class="grid-cell">Missing Block</p><p class="grid-cell"></p><p class="grid-cell"></p>
-                <p class="grid-cell">6</p><p class="grid-cell">Missing Block</p><p class="grid-cell"></p><p class="grid-cell"></p>
-                <p class="grid-cell">5</p><p class="grid-cell">Missing Block</p><p class="grid-cell"></p><p class="grid-cell"></p>
-                <p class="grid-cell">4</p><p class="grid-cell">Missing Block</p><p class="grid-cell"></p><p class="grid-cell"></p>
-                <p class="grid-cell">3</p><p class="grid-cell">Missing Block</p><p class="grid-cell"></p><p class="grid-cell"></p>
-                <p class="grid-cell">2</p><p class="grid-cell">Missing Block</p><p class="grid-cell"></p><p class="grid-cell"></p>
-                <p class="grid-cell">1</p><p class="grid-cell">Missing Block</p><p class="grid-cell"></p><p class="grid-cell"></p>
-                <p class="grid-cell">0</p><p class="grid-cell">Missing Block</p><p class="grid-cell"></p><p class="grid-cell"></p>
-                {/if}
-            </div>
+            </div>-->
+            {#each info.blocks as block}
+            <!--<a class="accessible grid-cell" href={`/blockexplorer/blocks/${block.number}`}><p class="grid-cell">{block.number}</p></a>
+            <p class="grid-cell">{block.content.timestamp}</p>
+            <p class="grid-cell">{block.content.ordered_transactions.length}</p>
+            <p class="grid-cell">{block.proposer}</p>-->
+            <BlockRow block={block}/>
+            {/each}
+            {#if thepage == Math.ceil(info.number/50)}
+            <BlockRow missing></BlockRow>
+            <BlockRow missing></BlockRow>
+            <BlockRow missing></BlockRow>
+            <BlockRow missing></BlockRow>
+            <BlockRow missing></BlockRow>
+            <BlockRow missing></BlockRow>
+            <BlockRow missing></BlockRow>
+            <BlockRow missing></BlockRow>
+            {/if}
             <div class="card-footer">
                 <div class="page-controller">
                     <button class="page-controller-button" on:click={()=>{gotoPage(1)}}>First</button>

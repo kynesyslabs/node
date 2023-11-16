@@ -1,6 +1,4 @@
 :root{
-    --header-color: rgba(255, 255, 255, 0.08);
-
     --input-padding: 16.2px;
 
     --lgray:#A8ACAF;
@@ -9,8 +7,8 @@
 @media (prefers-color-scheme: light) {
         :root {
             --background: #FFF;
-            --background2: #ebebeb;
-            --background3: #cfcfcf;
+            --background2: #f5f5f5;
+            --background3: #d9d9d9;
             --color: #000;
             --color2: #00000e;
             --color3: #303030;
@@ -34,8 +32,8 @@
 
 [data-theme="light"] {
     --background: #FFF;
-    --background2: #ebebeb;
-    --background3: #cfcfcf;
+    --background2: #f5f5f5;
+    --background3: #d9d9d9;
     --color: #000;
     --color2: #00000e;
     --color3: #303030;
@@ -153,8 +151,6 @@ button{
 
 .card-header{
     margin: 0;
-    /*margin-bottom: 24px;*/
-    /*background-color: var(--header-color);*/
 }
 
 /* Tooltip container */
@@ -169,7 +165,7 @@ button{
     transition: opacity .2s ease-in-out;
     width: 120px;
     background-color: var(--background2);
-    color: #fff;
+    color: var(--color);
     text-align: center;
     padding: 5px 0;
 

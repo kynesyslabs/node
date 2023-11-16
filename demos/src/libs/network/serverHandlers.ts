@@ -26,6 +26,7 @@ import Block from "src/libs/blockchain/blocks"
 import Transaction from "src/libs/blockchain/transaction"
 import eggs from "./routines/eggs"
 import deriveBlock from "../consensus/routines/deriveBlock"
+import { Response } from "../communications/types/responseregistry"
 
 var term = require("terminal-kit").terminal
 
@@ -316,6 +317,62 @@ export default class ServerHandlers {
                     response.push(peer)
                 }
                 break
+            // REVIEW Both below for getting the last hash (untested yet)
+            case "getPreviousHashFromBlockNumber":
+                console.log("[SERVER] Received getPreviousHashFromBlockNumber")
+                if (
+                    data.blockNumber === undefined || data.blockNumber < 0 
+                ) {
+                    response = "error"
+                    extra = "Block number is not valid"
+                    break
+                }
+                response = await chain.getBlockByNumber(data.blockNumber)
+                console.log("[CHAIN.ts] Received reply from the database: got a block")
+                response = response.content.previousHash
+                break
+            case "getPreviousHashFromBlockHash":
+                console.log("[SERVER] Received getPreviousHashFromBlockNumber")
+                if (
+                    data.blockHash === undefined || data.blockHash === ""
+                ) {
+                    response = "error"
+                    extra = "Block hash is not valid"
+                    break
+                }
+                response = await chain.getBlockByHash(data.blockHash)
+                console.log("[CHAIN.ts] Received reply from the database: got a block")
+                response = response.content.previousHash
+                break
+            // REVIEW (untested) Headers instead of full blocks
+            case "getBlockHeaderByNumber":
+                if (
+                    data.blockNumber === undefined || data.blockNumber < 0
+                    || data.blockNumber === ""
+                ) {
+                    response = "error"
+                    extra = "Block number is not valid"
+                    break
+                }
+                response = await chain.getBlockByNumber(data.blockNumber)
+                console.log("[CHAIN.ts] Received reply from the database: extracting header")
+                response = response.getHeader()
+                console.log(response)
+                break
+            case "getBlockHeaderByHash":
+                if (
+                    data.blockHash === undefined || data.blockHash === ""
+                ) {
+                    response = "error"
+                    extra = "Block hash is not valid"
+                    break
+                }
+                response = await chain.getBlockByHash(data.blockHash)
+                console.log("[CHAIN.ts] Received reply from the database: extracting header")
+                response = response.getHeader()
+                console.log(response)
+                break
+                
             case "getLastBlockNumber":
                 console.log("[SERVER] Received getLastBlockNumber")
                 response = await chain.getLastBlockNumber()

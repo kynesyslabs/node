@@ -84,6 +84,7 @@ export default class PeerManager {
             console.log("[WARN] No connection string detected")
         }
         // FIXME Run the routine in peers to get it
+        // REVIEW Sync?
         return true
     }
 

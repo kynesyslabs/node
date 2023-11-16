@@ -154,14 +154,14 @@ export class ResponseRegistryDB {
 export default class ResponseRegistry {
     list: { [key: string]: ResponseRegistryElement }
     database: any
-    lastPruned: number
+    lastFlagged: number
 
     // The instance of ResponseRegistry
     private static instance: ResponseRegistry
 
     private constructor() {
         this.list = {}
-        this.lastPruned = new Date().getTime()
+        this.lastFlagged = new Date().getTime()
     }
 
     // Method to get the instance of ResponseRegistry
@@ -231,10 +231,10 @@ export default class ResponseRegistry {
         return [true, this.list[comlink_muid]]
     }
 
-    prune() {
-        console.log("[ResponseRegistry] [PRUNE] Pruning started...")
-        // Getting prune time from the sharedState
-        let pruneTime = Security.modules.communications.response_registry.prune_interval
+    flag() {
+        console.log("[ResponseRegistry] [GARBAGE_FLAGGER] Pruning started...")
+        // Getting flag time from the sharedState
+        let flagTime = Security.modules.communications.response_registry.flag_hardlimit
         let total = Object.keys(this.list).length
         let counter = 0
         let now = new Date().getTime()
@@ -247,20 +247,17 @@ export default class ResponseRegistry {
             // TODO Greatly improve this simple method
             // At the moment, after X milliseconds the responses are closed
             let delta = now - this.list[item].timestamp
-            if (delta >= pruneTime) {
+            if (delta >= flagTime) {
                 // Deleting expired sessions
-                console.log("[ResponseRegistry] [PRUNE] Pruned: ")
-                console.log(item)
-                delete this.list[item]
+                console.log("[ResponseRegistry] [GARBAGE_FLAGGER] Flagged: " + item)
+                this.list[item] = undefined
                 counter += 1
             }
         }
-        this.lastPruned = now
-        let postTotal = Object.keys(this.list).length
-        console.log("[ResponseRegistry] [PRUNE] Pruning Report:")
-        console.log("[Pre] " + total.toString())
-        console.log("[Post] " + postTotal.toString())
-        console.log("[Pruned] " + postTotal.toString())
+        this.lastFlagged = now
+        console.log("[ResponseRegistry] [GARBAGE_FLAGGER] Pruning Report:")
+        console.log("[Items] " + total.toString())
+        console.log("[Flagged] " + counter.toString())
     }
 
     // FIXME Fundamental: implement autopruning
@@ -282,15 +279,15 @@ export default class ResponseRegistry {
         if (pruningMode) {
             console.log("[ResponseRegistry] [getInstance] Pre-flight pruning...") 
             let now = new Date().getTime()
-            console.log("[ResponseRegistry] [PRUNE] Now: " + now.toString())
-            let delta = now - ResponseRegistry.instance.lastPruned
-            console.log("[ResponseRegistry] [PRUNE] Last Pruned: " + ResponseRegistry.instance.lastPruned.toString())
-            console.log("[ResponseRegistry] [PRUNE] Delta: " + delta.toString())
-            if (delta > Security.modules. communications.response_registry.prune_interval) {
-                console.log("[ResponseRegistry] [PRUNE] Time to prune!")
-                ResponseRegistry.instance.prune()
+            console.log("[ResponseRegistry] [GARBAGE_FLAGGER] Now: " + now.toString())
+            let delta = now - ResponseRegistry.instance.lastFlagged
+            console.log("[ResponseRegistry] [GARBAGE_FLAGGER] Last Flagged: " + ResponseRegistry.instance.lastFlagged.toString())
+            console.log("[ResponseRegistry] [GARBAGE_FLAGGER] Delta: " + delta.toString())
+            if (delta > Security.modules. communications.response_registry.flag_interval) {
+                console.log("[ResponseRegistry] [GARBAGE_FLAGGER] Time to flag!")
+                ResponseRegistry.instance.flag()
             } else {
-                console.log("[ResponseRegistry] [PRUNE] No need to prune!")
+                console.log("[ResponseRegistry] [GARBAGE_FLAGGER] No need to flag!")
             }
         }
         console.log("[ResponseRegistry] Instance retrieved")

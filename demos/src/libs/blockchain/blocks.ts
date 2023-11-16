@@ -38,5 +38,17 @@ export default class Block {
 
     // ANCHOR Getters
 
+    // INFO The header is the smallest placeholder to verify a block health
+    getHeader(): any {
+        let header = {
+            number: this.number,
+            hash: this.hash,
+            status: this.status,
+            previousHash: this.content.previousHash,
+            timestamp: this.content.timestamp,
+        }
+        return header
+    }
+
     // ANCHOR Setters
 }
