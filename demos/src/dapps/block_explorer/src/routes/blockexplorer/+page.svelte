@@ -20,7 +20,7 @@
         return;
         let blockNumber = JSON.parse(await demos.getLastBlockNumber());
         let block = await demos.getBlockByNumber(blockNumber);
-        console.log("myblocks", await getBlocks());
+        block.content = JSON.parse(block.content);
         return block;
     }
 
@@ -35,6 +35,15 @@
             blockRequests.push(demos.getBlockByNumber(i));
         }
         let blockValues = await Promise.all(blockRequests);
+        try{
+            blockValues.forEach(block=>{
+                block.content = JSON.parse(block.content);
+            })
+        }  
+        catch(e)
+        {
+            console.log("parse error", e);
+        }
         return blockValues;
     }
 

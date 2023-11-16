@@ -25,6 +25,15 @@
             blockRequests.push(demos.getBlockByNumber(i));
         }
         let blocks = await Promise.all(blockRequests);
+        try{
+            blocks.forEach(block=>{
+                block.content = JSON.parse(block.content);
+            })
+        }  
+        catch(e)
+        {
+            console.log("parse error", e);
+        }
         return {number:blockNumber, blocks:blocks};
     }
 
@@ -35,76 +44,6 @@
         window.location.replace(newUrl);
     }
 </script>
-
-<style>
-    .title{
-        text-align: center;
-        margin-bottom: 64px;
-    }
-    .card-header{
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        border-bottom: 0;
-        padding: 16px;
-    }
-
-    .card-header-label{
-        margin: 0;
-    }
-
-    .card-footer{
-        padding: 16px;
-        text-align: center;
-        background-color: var(--background2);
-        font-weight: bold;
-        color: var(--color);
-    }
-
-    .page-controller{
-        display: flex;
-        gap:4px;
-        align-items: center;
-        justify-content: right;
-    }
-
-    .page-controller-button{
-        background-color: var(--background3);
-        color: var(--color);
-        padding: 4px 8px;
-        box-shadow: rgba(17, 17, 26, 0.05) 0px 4px 16px, rgba(17, 17, 26, 0.05) 0px 8px 32px;
-    }
-    .page-controller-label{
-        margin:0;
-        font-size: .8rem;
-        position: relative;
-        margin-top: 4px;
-    }
-
-    .transactions-grid{
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr 1fr;
-        gap: 16px;
-        padding: 16px;
-        width: 100%;
-    }
-
-    .grid-header-row{
-        background-color: var(--background2);
-    }
-
-    .grid-header-label{
-        font-weight: bold;
-        margin:0;
-    }
-
-    .grid-cell{
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        margin: 0;
-    }
-</style>
 
 {#await getBlocks(thepage)}
     <CubeSpinning/>
@@ -152,3 +91,46 @@
 {:catch}
     <p style="text-align: center;">Something went wrong</p>
 {/await}
+
+
+<style>
+    .card-header{
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        border-bottom: 0;
+        padding: 16px;
+    }
+
+    .card-header-label{
+        margin: 0;
+    }
+
+    .card-footer{
+        padding: 16px;
+        text-align: center;
+        background-color: var(--background2);
+        font-weight: bold;
+        color: var(--color);
+    }
+
+    .page-controller{
+        display: flex;
+        gap:4px;
+        align-items: center;
+        justify-content: right;
+    }
+
+    .page-controller-button{
+        background-color: var(--background3);
+        color: var(--color);
+        padding: 4px 8px;
+        box-shadow: rgba(17, 17, 26, 0.05) 0px 4px 16px, rgba(17, 17, 26, 0.05) 0px 8px 32px;
+    }
+    .page-controller-label{
+        margin:0;
+        font-size: .8rem;
+        position: relative;
+        margin-top: 4px;
+    }
+</style>

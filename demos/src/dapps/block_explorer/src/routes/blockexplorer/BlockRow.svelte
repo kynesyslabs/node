@@ -12,7 +12,6 @@
     });
     function onResize() {
         address_section_width = document.getElementById("address_section").offsetWidth;
-        console.log(address_section_width);
     }
     function trim_address(str) {
         if (str.length <= 20) 

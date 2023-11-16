@@ -15,7 +15,7 @@
         if(!demos.connected)
         return;
         let block = await demos.getBlockByNumber(data.blocknumber);
-        console.log(block);
+        block.content = JSON.parse(block.content);
         return block;
     }
 </script>
@@ -159,7 +159,7 @@
         grid-template-columns: 120px 1fr;
         width: 100%;
         gap: 0 16px;
-        padding: 8px 28px;
+        padding: 16px 28px;
     }
     @media screen and (max-width: 600px){
         .info-grid{
