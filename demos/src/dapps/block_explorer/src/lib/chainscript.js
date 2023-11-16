@@ -86,8 +86,6 @@ const mychains = [
     },
 ]
 
-console.log(getAllChains());
-
 const chains = mychains.concat(getAllChains().filter(c=>c.chainId!==1).map(c=>{
     return {
         id: c.chain,
