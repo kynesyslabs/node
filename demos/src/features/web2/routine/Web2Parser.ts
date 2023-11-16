@@ -1,7 +1,7 @@
 /* eslint-disable no-unused-vars */
 // This class represents a typical web2 data request
 import * as forge from "node-forge"
-import fetch from "node-fetch"
+import axios, { AxiosResponse } from "axios"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import sharedState from "src/utilities/sharedState"
@@ -113,6 +113,8 @@ export  class Web2APIClass {
     // NOTE Index of the request
     name = null
 
+    digestedPromise: Promise<any> = null
+
     // INFO Creating a named instance and bootstrapping it
     constructor(name: string, sendSock: any, payload: IWeb2Payload = null) {
         this.name = name
@@ -128,10 +130,11 @@ export  class Web2APIClass {
         }
         // REVIEW Should be ok anyway
         // NOTE Not awaiting cause we need to let devs decide when to await with awaitQuorum
-        this.digest()
+        this.digestedPromise = this.digest()
     }
 
     // INFO Getting the digest of the request
+    // NOTE This is where the Web2Request is processed and the answer is created
     private async digest(): Promise<IWeb2Request> {
         required(this.request, "Missing request")
         console.log("[ACTUAL REQUEST]")
@@ -144,12 +147,7 @@ export  class Web2APIClass {
             case "GET": // Handling everything that we can handle with fetch
                 console.log("HTTP(S) ACTION")
                 // NOTE The following try/catch statement is most likely not needed in production
-                try {
-                    this.request.result = await this.retrieve(this.request.raw)
-                }
-                catch (error) {
-                    this.request.result = "Error: " + JSON.stringify(error)
-                }
+                this.request.result = await this.retrieve(this.request.raw)
                 break
             case "POST":
                 term.red("[ERROR] Not implemented yet")
@@ -178,6 +176,9 @@ export  class Web2APIClass {
                 break
         }
         // Building our own attestation
+        term.yellow("[Web2Parser] Digested:\n")
+        console.log(this.request)
+        term.yellow("[Web2Parser] Building attestation\n")
         let hashedResult = Hashing.sha256(JSON.stringify(this.request.result))
         let ourIdentity = sharedState.getInstance().identity.ed25519.publicKey
         let signatureResult = Cryptography.sign(hashedResult, ourIdentity)
@@ -192,11 +193,18 @@ export  class Web2APIClass {
         // NOTE This does not overwrite the original properties of the request
         console.log(this.request)
         this.request.attestations[ourIdentity.toString("hex")] = attestation
+        term.yellow("[Web2Parser] Adding attestation to request\n")
+        this.request.raw.stage.hop_number += 1 // REVIEW If this is ok
         return this.request
     }
 
     // INFO Experimental a new approach to requests
     private async retrieve(raw_request: IRawWeb2Request): Promise<any> {
+        // TODO Next line is for debug purposes
+        raw_request.headers = {}
+
+        term.green("[Web2Parser] Retrieving resource from raw request...\n")
+        console.log(raw_request)
         let params: IParam[] = raw_request.parameters
         let {url} = raw_request
         // Url normalization
@@ -211,22 +219,51 @@ export  class Web2APIClass {
             let param_string = params.map(param => param.name + "=" + param.value).join("&")
             url += "?" + param_string
         }
-        // NOTE Now we should have a normalized url, so we can make the request
-        let fetched = await fetch(
-            url,
-            { method: raw_request.method,
-            headers: raw_request.headers,
+        // SECTION Sanitizing
+        // Truncating useless parts
+        let offender_strings = [["/?undefined=undefined", ""]]
+        for (let offender_string of offender_strings) {
+            if (url.includes(offender_string[0])) {
+                url = url.replace(offender_string[0], offender_string[1])
+            }
+        }
+        // Adding http(s) if needed (defaulting to http for compatibility but idk)
+        if (!url.startsWith("http://") &&!url.startsWith("https://")) {
+            url = "http://" + url
+        }
+        term.yellow.bold("[Web2Parser] Retrieving derived url: " + url + "\n")
+        let payload = { 
+            headers: raw_request.headers, //FIXME on budino
             // NOTE The following line selectively sets the body to null if the method is not POST
             // and look for the "data" parameter in the parameters array if the method is POST
             // TODO Handle the case where the method is POST but no "data" parameter is present
-            body: raw_request.method === "POST"? JSON.stringify(raw_request.parameters["data"]) : null},
-        )
-        let string_result = JSON.stringify(fetched.json()) // Anyway...
-        console.log(string_result) // TODO Remove in production
+            url: url }
+        // NOTE Now we should have a normalized url, so we can make the request
+        let fetched: any
+        try {
+            fetched = await axios.get(payload.url, { headers: payload.headers})
+        } catch (error) {
+            console.log(error)
+            term.red.bold("[Web2Parser] Error retrieving resource: " + error + "\n")
+            fetched = {"status": 500, "statusText": "Axios Error", "data": error}
+            return fetched
+        }
+        term.yellow("[Web2Parser] Retrieved: " + payload.url + "\n")
+        let data_result = fetched.data
+        term.bold("[Web2Parser] Data result:\n")
+        console.log(data_result)
+        let sanitizedResult = {
+        "status": fetched.status,
+        "statusText": fetched.statusText,
+        "data": data_result,
+        }
+        term.yellow.bold("\nResult to validate:\n")
+        console.log(sanitizedResult)
+        term.yellow.bold("[Web2Parser] Validating...\n")
         // Using the fetched result to build (or to continue) the Web2Request
-        this.validate(string_result)
+        await this.validate(JSON.stringify(sanitizedResult))
         // TODO (Also in validate) manage the case where we are not the first hop
-        return fetched
+        return sanitizedResult
     }
 
 
@@ -256,13 +293,22 @@ export  class Web2APIClass {
 
     // INFO This method inserts validation data into the request
     async validate(content: string): Promise<void> {
+        term.yellow.bold("[Web2Parser] Validating...\n")
+        if (!(typeof(content) === "string")) {
+            content = JSON.stringify(content)
+        }
+        // REVIEW This is not the best way to do it
         // Hashing and signing the result
         let hashed_result = Hashing.sha256(content)
         this.request.hash = hashed_result
+        term.bold("[Web2Parser] Result:\n")
+        console.log(hashed_result)
         let signature = Cryptography.sign(
             hashed_result, 
             sharedState.getInstance().identity.ed25519.privateKey)
         this.request.signature = signature
+        term.bold("[Web2Parser] Signature:\n")
+        console.log(signature)
         // Composing our attestation
         let attestation: IWeb2Attestation = {
             hash: hashed_result,
@@ -271,9 +317,12 @@ export  class Web2APIClass {
             signature: signature,
             valid: null,
         }
+        term.bold("[Web2Parser] Attestation:\n")
+        console.log(attestation)
         // Adding the attestation to the request
         let hex_key = sharedState.getInstance().identity.ed25519.publicKey.toString("hex") // REVIEW Is this ok?
         this.request.attestations[hex_key] = attestation
+        term.bold("[Web2Parser] Added attestation to request\n")
         // And the content too
         // REVIEW If we are not the first hop, we should not overwrite the original result
         /*
