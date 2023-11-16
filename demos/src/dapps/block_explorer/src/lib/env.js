@@ -21,6 +21,12 @@ export const updateTheme = (th) => {
 export const wallet = writable(demos.DemosWebAuth.getInstance());
 export const updateWallet = () => {
     wallet.set(demos.DemosWebAuth.getInstance());
+    //save new key to local storage
+    const prvkey = demos.DemosWebAuth.getInstance()?.stringified_keypair?.privateKey;
+    if(prvkey)
+        localStorage.setItem("prvkey", demos.DemosWebAuth.getInstance().stringified_keypair.privateKey)
+    else
+        localStorage.removeItem("prvkey");
 };
 
 //helpers
