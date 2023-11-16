@@ -5,6 +5,9 @@
     import PageTitle from '$lib/components/PageTitle.svelte';
     async function sendTransaction(ev){
         ev.preventDefault();
+        demos.connect();
+        if(!demos.connected)
+        return;
         let txdata = transaction;
         txdata.content.type = ev.target[0].value;
         txdata.content.from = ev.target[1].value;
@@ -17,16 +20,20 @@
         let txprep = await demos.transactions.prepare();
         console.log("signing transaction");
         let txsigned = await demos.transactions.sign(txprep, $wallet.keypair.privateKey);
-        console.log("broadcasting transaction");
-        let txsent = await demos.transactions.broadcast(txsigned);
-        console.log(txsent);
+        console.log("transazione signata", txsigned);
+        let txsent;
+        try{
+            txsent = await demos.transactions.broadcast(txsigned);
+            console.log("transaction success", txsent);
+        }
+        catch(e){
+            console.log("transaction broadcast error", e);
+            return;
+        }
     }
 </script>
 
 <style>
-    .title{
-        margin: 0;
-    }
     .label{
         margin: 8px 0;
         opacity: .75;
