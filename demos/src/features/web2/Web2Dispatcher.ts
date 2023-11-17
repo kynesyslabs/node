@@ -40,7 +40,6 @@ export default async function handleWeb2(payload: IWeb2Payload, senderSocket: an
     // ANCHOR Original RPC logic
     // NOTE If we are the original rpc and this is the original request, we need to validate the request
     // and wait for the attestations to arrive
-    // FIXME The returning transaction should contain the data requested
     if (originalFlag) {
         console.log("[web2Dispatcher] This is the original rpc.")
         try {
@@ -77,7 +76,7 @@ export default async function handleWeb2(payload: IWeb2Payload, senderSocket: an
     // REVIEW And then we can send the response back to the client
     console.log("[web2Dispatcher] Done! Sending the response back to the client...")
     console.log("[web2Dispatcher] Attestations validated. Deriving a transaction...")
-    let derivedTx = await toMempool(instanceName) // FIXME Does not create a valid tx (all null)
+    let derivedTx = await toMempool(instanceName) 
     console.log("[web2Dispatcher] Transaction derived.")
     console.log(derivedTx)
     // Sending back the result
@@ -94,7 +93,6 @@ async function toMempool(
     let derivedOperation: Operation
     // NOTE If all the attestations are valid we can create the transaction, insert it and gibe back the result
     // Deriving an operation and a tx from the web2 request
-    // FIXME All null? WTF lol
     derivedOperation = await deriveMempoolOperation(
         Web2API(instanceName).request,
         insert)

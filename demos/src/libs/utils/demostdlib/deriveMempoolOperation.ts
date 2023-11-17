@@ -3,7 +3,9 @@ import Transaction from "../../blockchain/transaction"
 import { Operation } from "../../blockchain/routines/executeOperations"
 import Mempool from "../../blockchain/mempool"
 import GLS from "../../blockchain/gls/gls"
+import sharedState from "src/utilities/sharedState"
 
+// REVIEW See if is fixed (should return something)
 // INFO Deriving a mempool operation from a given data by deriving a tx and the corresponding mempool operation
 export async function deriveMempoolOperation(
     data: any,
@@ -22,11 +24,11 @@ export async function deriveMempoolOperation(
     let derivedTx: Transaction
     let derivedOperation: Operation
     // Deriving a transaction
-    derivedTx = await createTransaction(data)
+    derivedTx = await createTransaction(data) // A simple tx with web2 data inside
     console.log("Derived tx:")
     console.log(derivedTx)
     // Deriving an operation from the tx
-    derivedOperation = await createOperation(derivedTx)
+    derivedOperation = await createOperation(derivedTx) // An operation witnessing the validity of the web2 request
     console.log("Derived operation:")
     console.log(derivedOperation)
     if (insert) {
@@ -53,7 +55,17 @@ export async function createOperation(transaction: Transaction): Promise<Operati
             additional_fee: null,
         },
     }
-    // TODO
+    operation.operator = "Web2Certification"
+    operation.nonce = 0 // TODO Get it from chain or gls or whatever it is
+    operation.timestamp = transaction.content.timestamp
+    operation.params = transaction.content.data
+    operation.status = true // TODO Get it from the content itself somehow
+
+    // TODO Fee calculation logic here
+    operation.fees.network_fee = 0
+    operation.fees.rpc_fee = 0
+    operation.fees.additional_fee = 0
+
     return operation
 }
 
@@ -80,7 +92,8 @@ export async function createTransaction(
         confirmations: [],
         state_changes: [],
     }
-    transaction.content.data["content"] = data
-    // TODO
+    transaction.content.data = data
+    transaction.content.timestamp = Date.now()
+    // TODO See how to be general purpose but specific (a shared format?)
     return transaction
 }
