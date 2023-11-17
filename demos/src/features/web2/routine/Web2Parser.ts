@@ -221,7 +221,7 @@ export  class Web2APIClass {
         }
         // SECTION Sanitizing
         // Truncating useless parts
-        let offender_strings = [["/?undefined=undefined", ""]]
+        let offender_strings = [["/?undefined=undefined", "/&undefined=undefined"]]
         for (let offender_string of offender_strings) {
             if (url.includes(offender_string[0])) {
                 url = url.replace(offender_string[0], offender_string[1])

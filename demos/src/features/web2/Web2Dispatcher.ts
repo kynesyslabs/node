@@ -77,7 +77,7 @@ export default async function handleWeb2(payload: IWeb2Payload, senderSocket: an
     // REVIEW And then we can send the response back to the client
     console.log("[web2Dispatcher] Done! Sending the response back to the client...")
     console.log("[web2Dispatcher] Attestations validated. Deriving a transaction...")
-    let derivedTx = await toMempool(instanceName)
+    let derivedTx = await toMempool(instanceName) // FIXME Does not create a valid tx (all null)
     console.log("[web2Dispatcher] Transaction derived.")
     console.log(derivedTx)
     // Sending back the result
