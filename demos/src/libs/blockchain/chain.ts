@@ -208,7 +208,11 @@ export default class Chain {
     // INFO Insert a block into the database
     // NOTE Inserting a block is done after the consensus, so that together
     // with the block, we can write the GLS status changes to the chain.
-    static async insertBlock(block: Block, operations: Operation[] = [], position: number = null) {
+    static async insertBlock(
+        block: Block,
+        operations: Operation[] = [],
+        position: number = null,
+    ) {
         // Returns the hash of the block
         // Block() class
         // REVIEW Build the SQL query
@@ -343,5 +347,40 @@ export default class Chain {
             "SELECT hash FROM status_hashes WHERE block='" + block_number + "'"
         return await this.read(query)[0]
     }
-    // !SECTION Specific operations
+    // !SECTION Maintennance operations
+
+    static async pruneUntilGenesis() {
+        try {
+            const query = "DELETE FROM blocks WHERE number > 0"
+            await this.write(query)
+            console.log("Pruned all blocks except the genesis block.")
+        } catch (err) {
+            console.error("[pruneUntilGenesis] [ERROR]: " + JSON.stringify(err))
+            throw err
+        }
+    }
+
+    static async setGenesisBlockTime() {
+        try {
+            const query = "DELETE FROM blocks WHERE number > 0"
+            await this.write(query)
+            console.log("Pruned all blocks except the genesis block.")
+        } catch (err) {
+            console.error("[pruneUntilGenesis] [ERROR]: " + JSON.stringify(err))
+            throw err
+        }
+    }
+
+    static async updateGenesisTimestamp(newTimestamp) {
+        try {
+            const sqlQuery = `UPDATE blocks SET content = JSON_SET(content, ${newTimestamp}, ?) WHERE number = 0`
+            await this.write(sqlQuery)
+            console.log("Updated the timestamp of the genesis block.")
+        } catch (err) {
+            console.error(
+                "[updateGenesisTimestamp] [ERROR]: " + JSON.stringify(err),
+            )
+            throw err
+        }
+    }
 }
