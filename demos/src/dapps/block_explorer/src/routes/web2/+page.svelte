@@ -26,9 +26,12 @@
     ]
     const tabs = [
         {id:"body",label:"Body"},
-        {id:"cookies",label:"Cookies"},
+        //{id:"cookies",label:"Cookies"},
         {id:"headers",label:"Headers"},
     ]
+
+    let theresponse;
+
     let selectedtab = "body";
 
     function isValidUrl(string) {
@@ -85,8 +88,12 @@
 
     async function sendRequest()
     {
+        if(params[params.length-1][0] == ""||params[params.length-1][1] == "")
+            params.pop();
+        console.log("url", url, "params", params);
         let response = await demos.Web2Transactions("GET", url, params, null, 5);
-        console.log(response);
+        theresponse = JSON.parse(response);
+        console.log("response", theresponse);
     }
 
     let url="";
@@ -99,6 +106,53 @@
         params.pop();
     }
 </script>
+
+<div>
+    <PageTitle>Web2 Request</PageTitle>
+    <div style="margin-bottom: 64px;">
+        <div class="inputcontainer">
+            <Combobox value="GET" options={requestType} style="height:100%;font-weight:bold;width:100%;min-height:45px"/>
+            <input bind:value={url} on:input={handleChangeUrl} class="input" placeholder="Insert the URL here"/>
+            <button class="secondary sendbutton" on:click={sendRequest}>Send</button>
+        </div>
+        {#if url}
+        <div transition:budinoslide><p style="opacity:.6;margin:0;padding:8px">{url}</p></div>
+        {/if}
+    </div>
+    {#if isValidUrl(url)}
+        <div style="padding-bottom:64px;" transition:budinoslide>
+            <h4 class="subtitle">Params</h4>
+            <div class="params">
+                <div style="margin-bottom:0;" class="inputcontainer">
+                    <div class="fakeinput">Key</div>
+                    <div class="fakeinput">Value</div>
+                </div>
+                {#each params as param, index}
+                    <div class="inputcontainer">
+                        <input class="smallinput" on:input={(ev)=>{handleChangeParams(ev, index, 0)}} value={param[0]} placeholder="Insert param key"/>
+                        <input class="smallinput" on:input={(ev)=>{handleChangeParams(ev, index, 1)}} value={param[1]} placeholder="Insert param value"/>
+                    </div>
+                {/each}
+            </div>
+        </div>
+    {/if}
+    {#if theresponse}
+    <div>
+        <h4 class="subtitle">Response</h4>
+        <div class="response">
+            <div class="tabs">
+                {#each tabs as tab}
+                    <button on:click={()=>{selectedtab=tab.id}} class={`secondary tab ${tab.id==selectedtab?"selected":""}`}>{tab.label}</button>
+                {/each}
+            </div>
+            <div style="background:var(--background);">
+                <CodePreview id="ciao" text={selectedtab=="body"?JSON.stringify(theresponse.result, null, "\t"):selectedtab=="headers"?JSON.stringify(theresponse.raw.headers,  null, "\t"):""}/>
+            </div>
+        </div>
+    </div>
+    {/if}
+</div>
+
 <style>
     .title{
         margin: 0;
@@ -174,46 +228,3 @@
         border-bottom: 0;
     }
 </style>
-<div>
-    <PageTitle>Web2 Request</PageTitle>
-    <div style="margin-bottom: 64px;">
-        <div class="inputcontainer">
-            <Combobox value="GET" options={requestType} style="height:100%;font-weight:bold;width:100%;min-height:45px"/>
-            <input bind:value={url} on:input={handleChangeUrl} class="input" placeholder="Insert the URL here"/>
-            <button class="secondary sendbutton" on:click={sendRequest}>Send</button>
-        </div>
-        {#if url}
-        <div transition:budinoslide><p style="opacity:.6;margin:0;padding:8px">{url}</p></div>
-        {/if}
-    </div>
-    {#if isValidUrl(url)}
-        <div style="padding-bottom:64px;" transition:budinoslide>
-            <h4 class="subtitle">Params</h4>
-            <div class="params">
-                <div style="margin-bottom:0;" class="inputcontainer">
-                    <div class="fakeinput">Key</div>
-                    <div class="fakeinput">Value</div>
-                </div>
-                {#each params as param, index}
-                    <div class="inputcontainer">
-                        <input class="smallinput" on:input={(ev)=>{handleChangeParams(ev, index, 0)}} value={param[0]} placeholder="Insert param key"/>
-                        <input class="smallinput" on:input={(ev)=>{handleChangeParams(ev, index, 1)}} value={param[1]} placeholder="Insert param value"/>
-                    </div>
-                {/each}
-            </div>
-        </div>
-    {/if}
-    <div>
-        <h4 class="subtitle">Response</h4>
-        <div class="response">
-            <div class="tabs">
-                {#each tabs as tab}
-                    <button on:click={()=>{selectedtab=tab.id}} class={`secondary tab ${tab.id==selectedtab?"selected":""}`}>{tab.label}</button>
-                {/each}
-            </div>
-            <div style="background:var(--background);">
-                <CodePreview id="ciao" text={code}/>
-            </div>
-        </div>
-    </div>
-</div>
