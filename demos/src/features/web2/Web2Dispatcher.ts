@@ -82,7 +82,7 @@ export default async function handleWeb2(payload: IWeb2Payload, senderSocket: an
     console.log(derivedTx)
     // Sending back the result
     // REVIEW Maybe is more efficient somewhere else
-    return [true, JSON.stringify(derivedTx)]
+    return [true, JSON.stringify(web2interface.request)]
 }
 
 // INFO Derive a valid DEMOS tx and GLS operation from a web2 request
