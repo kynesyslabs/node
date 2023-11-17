@@ -227,6 +227,10 @@ export  class Web2APIClass {
                 url = url.replace(offender_string[0], offender_string[1])
             }
         }
+        // Ugly patch
+        if (url.includes("http:///")) {
+            url = url.replace("http:///", "http://")
+        }
         // Adding http(s) if needed (defaulting to http for compatibility but idk)
         if (!url.startsWith("http://") &&!url.startsWith("https://")) {
             url = "http://" + url
