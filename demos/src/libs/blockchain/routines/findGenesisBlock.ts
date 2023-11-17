@@ -25,11 +25,11 @@ export default async function findGenesisBlock() {
             process.exit(-5)
         }
         // Loading the genesis block
-        let genesis_json = JSON.parse(
+        let genesis_data = JSON.parse(
             fs.readFileSync("data/genesis.json", "utf8"),
         )
         // Adding the genesis block to the chain
-        let genesis_hash = await Chain.generateGenesisBlock(genesis_json)
+        let genesis_hash = await Chain.generateGenesisBlock(genesis_data)
         console.log("Genesis block created: " + genesis_hash + "\n")
         genesis_block = await Chain.getGenesisBlock()
     } else {

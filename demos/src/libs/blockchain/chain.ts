@@ -213,78 +213,68 @@ export default class Chain {
         operations: Operation[] = [],
         position: number = null,
     ) {
-        // Returns the hash of the block
-        // Block() class
-        // REVIEW Build the SQL query
-        console.log(block.validation_data)
+        // Convert block content and validation data to JSON strings
+        const blockContentJson = JSON.stringify(block.content)
+        const validationDataJson = JSON.stringify(block.validation_data)
 
-        console.log("BLOCK CONTENT TO BE WRITTEN:")
-        console.log(block.content)
+        // Prepare the SQL query
+        let sqlQuery = ""
+        const queryParams = []
 
-        let validation_data = JSON.stringify(block.validation_data)
-        validation_data = Buffer.from(validation_data).toString("hex")
-        let sql_query: string = ""
-        // Based on user input, we append the block or we update the block
-        if (!position) {
-            sql_query =
-                "INSERT INTO blocks (content, number, hash, status, proposer, validation_data) VALUES " +
-                "('" +
-                JSON.stringify(block.content) +
-                "', " +
-                block.number +
-                ", " +
-                "'" +
-                block.hash +
-                "', " +
-                "'" +
-                block.status +
-                "', " +
-                "'" +
-                block.proposer +
-                "', " +
-                "'" +
-                validation_data +
-                "')"
+        if (position === null) {
+            // If position is not provided, insert a new block
+            sqlQuery =
+                "INSERT INTO blocks (content, number, hash, status, proposer, validation_data) VALUES (?, ?, ?, ?, ?, ?)"
+            queryParams.push(
+                blockContentJson,
+                block.number,
+                block.hash,
+                block.status,
+                block.proposer,
+                validationDataJson,
+            )
         } else {
-            // REVIEW GREATLY NEVER TESTED
-            sql_query =
-                "UPDATE blocks SET content = '" +
-                JSON.stringify(block.content) +
-                "', number = " +
-                block.number +
-                ", hash = '" +
-                block.hash +
-                "', status = '" +
-                block.status +
-                "', proposer = '" +
-                block.proposer +
-                "', validation_data = '" +
-                validation_data +
-                "' WHERE number = " +
-                position
+            // If position is provided, update an existing block
+            sqlQuery =
+                "UPDATE blocks SET content = ?, number = ?, hash = ?, status = ?, proposer = ?, validation_data = ? WHERE number = ?"
+            queryParams.push(
+                blockContentJson,
+                block.number,
+                block.hash,
+                block.status,
+                block.proposer,
+                validationDataJson,
+                position,
+            )
         }
-        // Execute the SQL query
-        await this.write(sql_query)
-        // Calling the operations of the block on the GLS
-        // FIXME Adjust operations BEFORE the consensus lol
-        //await executeOperations(operations, block)
-        return block.hash
+
+        // Execute the SQL query using parameterized queries
+        try {
+            const db = await Datasource.getInstance()
+            return await db.getDataSource().query(sqlQuery, queryParams)
+        } catch (err) {
+            console.log("[ChainDB] [ERROR]: " + JSON.stringify(err))
+            console.error(err)
+            throw err
+        }
     }
+
     // INFO Generate the genesis block
-    static async generateGenesisBlock(genesis_json: any): Promise<string> {
+    static async generateGenesisBlock(genesis_data: any): Promise<string> {
         // TODO Add a type for the block json
-        console.log(genesis_json)
+        console.log(genesis_data)
         let genesis_block = new Block()
         genesis_block.number = 0
         // Define the genesis transaction
         let genesis_tx = new Transaction()
         genesis_tx.content.type = "genesis"
-        genesis_tx.content.data = genesis_json
+        console.log("genesis_tx.content.data")
+        console.log(genesis_tx.content.data)
         genesis_tx.hash = Hashing.sha256(JSON.stringify(genesis_tx.content))
-        if (!genesis_json.timestamp) {
+        if (!genesis_data.timestamp) {
             genesis_tx.content.timestamp = Date.now()
         } else {
-            genesis_tx.content.timestamp = genesis_json.timestamp
+            genesis_tx.content.timestamp = genesis_data.timestamp
         }
         console.log(genesis_tx)
         // Build a block containing the genesis tx
@@ -349,7 +339,7 @@ export default class Chain {
     }
     // !SECTION Maintennance operations
 
-    static async pruneUntilGenesis() {
+    static async pruneBlocksToGenesisBlock() {
         try {
             const query = "DELETE FROM blocks WHERE number > 0"
             await this.write(query)
@@ -360,9 +350,9 @@ export default class Chain {
         }
     }
 
-    static async setGenesisBlockTime() {
+    static async nukeGenesis() {
         try {
-            const query = "DELETE FROM blocks WHERE number > 0"
+            const query = "DELETE FROM blocks WHERE number >= 0"
             await this.write(query)
             console.log("Pruned all blocks except the genesis block.")
         } catch (err) {

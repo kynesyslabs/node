@@ -1,7 +1,7 @@
 // INFO The main loop executed in background by index.ts
 import sharedState from "./sharedState"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
-import {fastSync} from "src/libs/blockchain/routines/Sync"
+import { fastSync } from "src/libs/blockchain/routines/Sync"
 import { _Sync } from "src/libs/blockchain/routines/Sync"
 import { Identity } from "src/libs/identity"
 
@@ -119,6 +119,11 @@ export default async function mainLoop(id: Identity) {
         console.log(currentlyOnlinePeers)
 
         // we now have a list of online peers that can be used for consensus
+
+        // chain.pruneBlocksToGenesisBlock()
+        // chain.updateGenesisTimestamp(new Date().getTime())
+        // chain.nukeGenesis()
+        // throw new Error("pruned")
 
         // !SECTION Todo list for a typical consensus operation
 
