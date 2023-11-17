@@ -13,7 +13,7 @@ import { deriveMempoolOperation } from "src/libs/utils/demostdlib/deriveMempoolO
 // are either first or not last of the chain), and then
 // send back to the client or to the origin rpc the
 // transaction that will be granted as web2 result
-export default async function handleWeb2(payload: IWeb2Payload, senderSocket: any): Promise<[boolean, Operation]> {
+export default async function handleWeb2(payload: IWeb2Payload, senderSocket: any): Promise<[boolean, string]> {
     // Creating the workable interface
     // TODO Remember that web2 could need to be signed and could need a fee
     // NOTE From now on, Web2API will reply to instanceName with the same instance
@@ -82,7 +82,7 @@ export default async function handleWeb2(payload: IWeb2Payload, senderSocket: an
     console.log(derivedTx)
     // Sending back the result
     // REVIEW Maybe is more efficient somewhere else
-    return [true, derivedTx]
+    return [true, JSON.stringify(derivedTx)]
 }
 
 // INFO Derive a valid DEMOS tx and GLS operation from a web2 request
