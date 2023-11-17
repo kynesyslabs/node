@@ -219,22 +219,7 @@ export  class Web2APIClass {
             let param_string = params.map(param => param.name + "=" + param.value).join("&")
             url += "?" + param_string
         }
-        // SECTION Sanitizing
-        // Truncating useless parts
-        let offender_strings = [["/?undefined=undefined", "/&undefined=undefined"]]
-        for (let offender_string of offender_strings) {
-            if (url.includes(offender_string[0])) {
-                url = url.replace(offender_string[0], offender_string[1])
-            }
-        }
-        // Ugly patch
-        if (url.includes("http:///")) {
-            url = url.replace("http:///", "http://")
-        }
-        // Adding http(s) if needed (defaulting to http for compatibility but idk)
-        if (!url.startsWith("http://") &&!url.startsWith("https://")) {
-            url = "http://" + url
-        }
+        // NOTE We should have a normalized url, so we can make the request
         term.yellow.bold("[Web2Parser] Retrieving derived url: " + url + "\n")
         let payload = { 
             headers: raw_request.headers, //FIXME on budino
