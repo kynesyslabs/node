@@ -160,11 +160,13 @@ export default class GLS {
         return full_nfts_balance.nfts[nft_address]
     }
 
-    static async getGLSGasMultiplier() {
-        let response = await Chain.read(
-            "SELECT gas_multiplier FROM status_properties", // TODO Implement and make it dynamic
-        )
-        return response[0].gas_multiplier
+    static async getGLSGasMultiplier(): Promise<number> {
+        // TODO Implement and make it dynamic
+        /* let response = await Chain.read(
+            "SELECT gas_multiplier FROM status_properties", 
+        ) 
+        return response[0].gas_multiplier */
+        return 1
     }
 
     // SECTION Validators management
