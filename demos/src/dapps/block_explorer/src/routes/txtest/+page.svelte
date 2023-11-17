@@ -3,9 +3,10 @@
     import {transaction} from "$lib/demos_libs/utils/skeletons.js";
     import {wallet} from '$lib/env.js';
     import PageTitle from '$lib/components/PageTitle.svelte';
+    import {rpcaddress} from '$lib/env.js';
     async function sendTransaction(ev){
         ev.preventDefault();
-        demos.connect();
+        demos.connect($rpcaddress);
         if(!demos.connected)
         return;
         let txdata = transaction;
@@ -20,7 +21,6 @@
         let txprep = await demos.transactions.prepare();
         console.log("signing transaction");
         let txsigned = await demos.transactions.sign(txprep, $wallet.keypair.privateKey);
-        console.log("transazione signata", txsigned);
         let txsent;
         try{
             txsent = await demos.transactions.broadcast(txsigned);
@@ -30,6 +30,7 @@
             console.log("transaction broadcast error", e);
             return;
         }
+        console.log("transazione signata", txsigned);
     }
 </script>
 
