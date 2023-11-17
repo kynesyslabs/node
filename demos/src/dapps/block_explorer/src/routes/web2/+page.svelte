@@ -123,14 +123,13 @@
         <div style="padding-bottom:64px;" transition:budinoslide>
             <h4 class="subtitle">Params</h4>
             <div class="params">
-                <div style="margin-bottom:0;" class="inputcontainer">
-                    <div class="fakeinput">Key</div>
-                    <div class="fakeinput">Value</div>
-                </div>
                 {#each params as param, index}
-                    <div class="inputcontainer">
-                        <input class="smallinput" on:input={(ev)=>{handleChangeParams(ev, index, 0)}} value={param[0]} placeholder="Insert param key"/>
-                        <input class="smallinput" on:input={(ev)=>{handleChangeParams(ev, index, 1)}} value={param[1]} placeholder="Insert param value"/>
+                    <div class="paramcontainer">
+                        <div class="indexcontainer">{index+1}</div>
+                        <div class="inputscontainer">
+                            <input class="smallinput" on:input={(ev)=>{handleChangeParams(ev, index, 0)}} value={param[0]} placeholder="Insert param key"/>
+                            <input class="smallinput" on:input={(ev)=>{handleChangeParams(ev, index, 1)}} value={param[1]} placeholder="Insert param value"/>
+                        </div>
                     </div>
                 {/each}
             </div>
@@ -160,9 +159,28 @@
     .subtitle{
         margin-bottom: 16px;
     }
+    .indexcontainer{
+        background-color: var(--background2);
+        border: 1px solid var(--background3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: 8px;
+    }
+    .paramcontainer{
+        display: grid;
+        grid-template-columns: 35px 1fr;
+        margin-bottom: 32px;
+    }
     .inputcontainer{
         display: grid;
         grid-template-columns: 150px 1fr auto;
+        align-items: stretch;
+    }
+    .inputscontainer{
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
         align-items: stretch;
     }
     .input{
