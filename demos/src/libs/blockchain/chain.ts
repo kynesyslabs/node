@@ -287,8 +287,8 @@ export default class Chain {
         // REVIEW Create a GLS Operation and execute it
         let genesis_op: Operation = {
             operator: "genesis",
-            actor: null,
-            params: genesis_json,
+            actor: "DEMOS Network",
+            params: JSON.stringify(genesis_block.content),
             hash: genesis_block.hash,
             nonce: 0,
             timestamp: genesis_block.content.timestamp,

@@ -91,6 +91,10 @@ export default class Mempool {
     }
 
     // INFO Writing a transaction to the mempool
+    /* NOTE 
+        Here we should already have cryptographically valid data: adding the transaction to the mempool is the way
+        to flag it for verification and execution at consensus.
+    */
     public static async addTransaction(
         transaction: Transaction,
     ): Promise<void> {

@@ -58,7 +58,8 @@ export default async function validateTransaction(
     if (fromBalance < gasAmount) {
         return null // No gas money? No transaction!
     }
-    // Deducting the gas from the account
+    // Deducting the gas from the account and assigning the operation to be executed
+    // as child of this transaction
     let operation: Operation = {
         operator: "pay_gas",
         actor: from,

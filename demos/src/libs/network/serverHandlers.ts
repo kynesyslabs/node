@@ -98,13 +98,20 @@ export default class ServerHandlers {
                 term.red(e)
                 validatedTx = [false, e.message]
             }
+
             // Returning an appropriate response
             if (!validatedTx[0]) {
+                // An invalid transaction won't even be added to the mempool
                 term.yellow.bold(fname + "Invalid transaction 💀 : ")
                 console.log(validatedTx[1])
                 extra = "InvalidTransaction 💀: " + validatedTx[1]
                 response = false
             } else {
+                /* NOTE 
+                    We just processed the cryptographic validity of the transaction.
+                    We have no idea of its state validity and thus won't modify the GLS, but
+                    it can go into the mempool to be further processed if its cryptographically valid.
+                */
                 term.green.bold(fname + "Valid transaction: ")
                 console.log(validatedTx[1])
                 console.log(fname + "Adding transaction to mempool...")
@@ -112,7 +119,7 @@ export default class ServerHandlers {
                 Mempool.addTransaction(validatedTx[1]) // Works by writing the registry
                 extra = validatedTx[1].hash
                 response = true
-                process.exit(0) /* TODO Eliminate this debug line */
+                //process.exit(0) /* TODO Eliminate this debug line */
             }
             // TODO Broadcast the tx to the other peers
             // Response is then sent back automatically as a reply (with our validation)
