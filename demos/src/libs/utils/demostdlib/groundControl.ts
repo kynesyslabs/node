@@ -19,7 +19,7 @@ export default class groundControl {
 	static server: any
 
 	// INFO Literally just initialize the server and its listener
-	static async init(port: number = 10250, host: string = "127.0.0.1") {
+	static async init(port: number = 10250, host: string = "0.0.0.0") {
 		groundControl.server = http.createServer(async(req, res) => {
 			res.statusCode = 200
 			let {url} = req
