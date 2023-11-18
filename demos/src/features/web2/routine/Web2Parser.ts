@@ -211,9 +211,10 @@ export  class Web2APIClass {
         if (url.includes("?")) {
             url = url.split("?")[0]
         }
+        /* 
         if (!(url.endsWith("/"))) {
             url += "/"
-        }
+        } */
         // If we have parameters, add them to the request
         if (params.length > 1) { // 1 is due to the fact that theoretically we should have at least the url
             let param_string = params.map(param => param.name + "=" + param.value).join("&")
