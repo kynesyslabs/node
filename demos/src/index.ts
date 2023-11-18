@@ -60,7 +60,12 @@ let PEER_LIST: any
 const id = Identity.getInstance()
 const app = express()
 
-groundControl.init()
+// TODO Put into .env
+groundControl.init(1250, "0.0.0.0", "https", {
+    key: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.key",
+    cert: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.crt",
+    ca: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.ca",
+})
 
 // SECTION REVIEW ZONE
 var https = require("https") // REVEIEW SSL COMPATIBILITY
