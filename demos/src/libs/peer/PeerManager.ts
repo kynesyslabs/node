@@ -60,6 +60,13 @@ export default class PeerManager {
                 connectedList.push(_peer)
             }
         }
+        // Merging and returning
+        if (peers) {
+            actorList.push(...authenticatedList)
+        }
+        if (connections) {
+            actorList.push(...connectedList)
+        }
         console.log("[PEERMANAGER] Retrieved and filtered actor list length: " + actorList.length)
         return actorList
     }
