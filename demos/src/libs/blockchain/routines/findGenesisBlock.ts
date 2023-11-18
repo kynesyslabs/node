@@ -15,7 +15,8 @@ import * as fs from "fs"
 export default async function findGenesisBlock() {
     let genesis_block_q = await Chain.getGenesisBlock()
     let genesis_block = genesis_block_q[0]
-    console.log(genesis_block)
+    // console.log(genesis_block)
+    // throw new Error("genesis block found")
     if (!genesis_block) {
         console.log("[BOOTSTRAP] Initializing the genesis block\n")
         if (!fs.existsSync("data/genesis.json")) {
@@ -28,6 +29,9 @@ export default async function findGenesisBlock() {
         let genesis_data = JSON.parse(
             fs.readFileSync("data/genesis.json", "utf8"),
         )
+        // console.log("imported genesis json data")
+        // console.log(genesis_data)
+        // throw new Error()
         // Adding the genesis block to the chain
         let genesis_hash = await Chain.generateGenesisBlock(genesis_data)
         console.log("Genesis block created: " + genesis_hash + "\n")

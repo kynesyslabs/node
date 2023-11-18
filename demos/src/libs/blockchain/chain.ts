@@ -288,7 +288,7 @@ export default class Chain {
         let genesis_op: Operation = {
             operator: "genesis",
             actor: "DEMOS Network",
-            params: JSON.stringify(genesis_block.content),
+            params: genesis_data,
             hash: genesis_block.hash,
             nonce: 0,
             timestamp: genesis_block.content.timestamp,
@@ -352,7 +352,7 @@ export default class Chain {
 
     static async nukeGenesis() {
         try {
-            const query = "DELETE FROM blocks WHERE number >= 0"
+            const query = "DELETE FROM blocks WHERE number=0"
             await this.write(query)
             console.log("Pruned all blocks except the genesis block.")
         } catch (err) {

@@ -2,7 +2,6 @@
 import sharedState from "./sharedState"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
 import { fastSync } from "src/libs/blockchain/routines/Sync"
-import { _Sync } from "src/libs/blockchain/routines/Sync"
 import { Identity } from "src/libs/identity"
 
 import { Peer, PeerManager } from "src/libs/peer"
