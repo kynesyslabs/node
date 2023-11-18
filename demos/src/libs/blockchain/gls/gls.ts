@@ -190,11 +190,20 @@ export default class GLS {
 
     static async getGLSGasMultiplier(): Promise<number> {
         // TODO Implement and make it dynamic
-        /* let response = await Chain.read(
-            "SELECT gas_multiplier FROM status_properties", 
-        ) 
-        return response[0].gas_multiplier */
+        /* let chainProperties = await GLS.getGLSChainProperties()
+        return chainProperties.gas_multiplier */
         return 1
+    }
+
+    // INFO In the GLS properties table, the special row "DEMOS Network" defines, in the other
+    // field, the properties of the chain itself shared by all its members.
+    // TODO Maybe implement it at genesis or retrieve the genesis from chain? 
+    static async getGLSChainProperties(): Promise<any> {
+        let response = await Chain.read(
+            "SELECT other FROM status_properties WHERE address = 'DEMOS Network'", 
+        ) 
+        let chainProperties = response[0]
+        return chainProperties
     }
 
     // SECTION Validators management
