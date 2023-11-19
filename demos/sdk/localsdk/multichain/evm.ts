@@ -17,6 +17,7 @@ import DefaultChain from "./types/defaultChain"
 import { IEVM } from "./types/defaultChain"
 import required from "src/utilities/required"
 import { sign } from "crypto"
+import { evmProviders } from "./configs/evmProviders"
 
 
 export default class EVM extends DefaultChain implements IEVM {
@@ -67,8 +68,15 @@ export default class EVM extends DefaultChain implements IEVM {
         return balance.toString()
     }
 
+    // Redirection
+    async transfer(receiver: string, amount: string): Promise<any> {
+        return await this.pay(receiver, amount)
+    }
+
     // INFO Simply sending an amount to an address
-    async pay(address: string, amount: string): Promise<any> {
+    // NOTE Returns the transaction hash as a string
+    // ANCHOR MVP
+    async pay(address: string, amount: string): Promise<string> {
         required(this.wallet)
         let tx = { to: address, value: ethers.utils.parseEther(amount) }
         let tx_hashed = await this.sendTransaction(tx)
@@ -82,6 +90,12 @@ export default class EVM extends DefaultChain implements IEVM {
         return info
     }
 
+    async getContractInstance(address: string, abi: string): Promise<Contract> {
+        required(this.provider)
+        let contract = new Contract(address, abi, this.provider)
+        return contract
+    }
+
     // INFO Here we simply return the correct skeleton for a normal transaction
     async createRawTransaction(): Promise<TransactionRequest> {
         return this.empty_transaction
@@ -93,6 +107,7 @@ export default class EVM extends DefaultChain implements IEVM {
     }
 
     // INFO If the wallet is connected, send a transaction
+    // ANCHOR MVP
     async sendTransaction (transaction: TransactionRequest): Promise<string> {
         if (!this.wallet) { throw new Error("Wallet not connected") }
         const txResponse = await this.wallet.sendTransaction(transaction) // NOTE It will be signed automatically
@@ -110,7 +125,12 @@ export default class EVM extends DefaultChain implements IEVM {
         return await this.provider.sendTransaction(signed_transaction)
     }
 
+    async waitForReceipt (tx_hash: string): Promise<ethers.ethers.providers.TransactionReceipt> {
+        return await this.provider.getTransactionReceipt(tx_hash)
+    }
+
     // REVIEW Reader for contracts
+    // ANCHOR MVP
     async readFromContract(contract_instance: Contract, function_name: string, args: any): Promise<any> {
         return await contract_instance[function_name](...args)
     }

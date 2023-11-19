@@ -12,6 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import * as xrpl from "xrpl"
 // import WebSocket from "ws" // NOTE tsx compatibility
 import DefaultChain from "./types/defaultChain"
+import { chainProviders } from "./configs/chainProviders"
 
 // LINK https://js.xrpl.org/
 
@@ -89,7 +90,8 @@ export default class XRPL  extends DefaultChain {
     // SECTION Writes
 
     // INFO Sending XRP to an address
-    async pay(receiver: string, amount: string): Promise<xrpl.TxResponse> {
+    // ANCHOR MVP
+    async pay(receiver: string, amount: string, send: boolean = true): Promise<any> {
         // Preparing a payment tx
         const prepared = await this.provider.autofill({
             "TransactionType": "Payment",
@@ -103,7 +105,13 @@ export default class XRPL  extends DefaultChain {
 		console.log("Prepared transaction instructions:", prepared)
 		console.log("Transaction cost:", xrpl.dropsToXrp(prepared.Fee), "XRP")
 		console.log("Transaction expires after ledger:", max_ledger) */
-        return await this.sendTransaction(prepared)
+        if (send) {
+            return await this.sendTransaction(prepared)
+        } else {
+            // Just signing the tx
+            let signed = this.wallet.sign(prepared)
+            return signed
+        }
     }
 
     async info(): Promise<string> {
