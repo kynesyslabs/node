@@ -253,13 +253,18 @@ export default class Chain {
 
         // Check if the position is provided and if a block with that position exists
         let existingBlock = null
+        console.log("[ChainDB] [ INFO ]: Checking if block with position " + position + " already exists")
         if (position !== null) {
+            console.log(true)
             existingBlock = await blockRepository.findOneBy({
                 number: position,
             })
+        } else {
+            console.log(false)
         }
 
         if (existingBlock) {
+            console.log("[ChainDB] [ INFO ]: Block with position " + position + " does exist: updating a new block")
             // Update the existing block
             existingBlock.content = block.content
             existingBlock.number = block.number
@@ -269,8 +274,11 @@ export default class Chain {
             existingBlock.validation_data = block.validation_data
             return blockRepository.save(existingBlock)
         } else {
+            console.log("[ChainDB] [ INFO ]: Block with position " + position + " does not exist: inserting a new block")
             // Insert a new block
-            return blockRepository.save(block)
+            let result = blockRepository.save(block)
+            console.log(result)
+            return result
         }
     }
 
@@ -316,6 +324,7 @@ export default class Chain {
         }
         // Insert the genesis block into the database
         console.log(genesis_block)
+        console.log("[GENESIS] Block generated, ready to insert it")
         return await this.insertBlock(genesis_block, [genesis_op])
     }
 
