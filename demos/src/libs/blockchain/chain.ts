@@ -15,7 +15,15 @@ import Transaction from "./transaction"
 import Hashing from "../crypto/hashing"
 import Datasource from "src/model/datasource"
 import { Operation } from "./gls/gls"
-import executeOperations from "./routines/executeOperations"
+
+import BlockSchema from "src/model/schemas/block.schema"
+import TransactionSchema from "src/model/schemas/transaction.schema"
+import StatusNativeSchema from "src/model/schemas/status_native"
+import StatusPropertiesSchema from "src/model/schemas/status_properties"
+import StatusHashesSchema from "src/model/schemas/status_hashes"
+import StatusNativeType from "./types/statusNative"
+import StatusPropertiesType from "./types/statusProperties"
+import { MoreThan } from "typeorm"
 
 export default class Chain {
     private static instance: Chain
@@ -25,6 +33,17 @@ export default class Chain {
             this.instance = new Chain()
         }
         return this.instance
+    }
+
+    static async getModelInstance(
+        model:
+            | typeof Block
+            | typeof Transaction
+            | typeof StatusNativeSchema
+            | typeof StatusPropertiesSchema,
+    ) {
+        const db = await Datasource.getInstance()
+        return db.getDataSource().getRepository(model)
     }
 
     static async read(sql_query: string): Promise<any> {
@@ -52,94 +71,107 @@ export default class Chain {
     // SECTION Getters
 
     // INFO Returns a transaction by its hash
-    static async getTxByHash(hash: string): Promise<any> {
-        let sql_query =
-            "SELECT * FROM transactions WHERE hash = '" + hash + "';"
-        let response = await Chain.read(sql_query)
-        return response[0]
+    static async getTxByHash(hash: string): Promise<Transaction> {
+        const transactionRepository = await this.getModelInstance(
+            TransactionSchema,
+        )
+        return (await transactionRepository.findOneBy({
+            where: { hash },
+        })) as Transaction
     }
 
     // INFO Get the last block number
     static async getLastBlockNumber(): Promise<number> {
-        let response = await this.read(
-            "SELECT number FROM blocks ORDER BY number DESC LIMIT 1",
-        )
-        console.log(response)
-        return response[0].number
+        const blockRepository = await this.getModelInstance(Block)
+        const lastBlock = await blockRepository.findOne({
+            order: { number: "DESC" },
+        })
+        return lastBlock ? lastBlock.number : 0
     }
     // INFO Get the last block hash
     static async getLastBlockHash() {
-        let response = await this.read(
-            "SELECT hash FROM blocks ORDER BY number DESC LIMIT 1",
-        )
-        return response[0].hash
+        const blockRepository = await this.getModelInstance(BlockSchema)
+        const lastBlock = await blockRepository.findOne({
+            order: { number: "DESC" },
+            select: ["hash"],
+        })
+
+        return lastBlock?.hash
     }
     // INFO Get any block by its number
     static async getBlockByNumber(number: number): Promise<Block> {
-        let response = await this.read(
-            "SELECT * FROM blocks WHERE number='" + number + "'",
-        )
-        return response[0]
+        const blockRepository = await this.getModelInstance(BlockSchema)
+        return (await blockRepository.findOneBy({ where: { number } })) as Block
     }
     // INFO Get any block by its hash
     static async getBlockByHash(hash: string): Promise<Block> {
-        let response = await this.read(
-            "SELECT * FROM blocks WHERE hash='" + hash + "'",
-        )
-        return response[0]
+        const blockRepository = await this.getModelInstance(BlockSchema)
+        return (await blockRepository.findOneBy({ where: { hash } })) as Block
     }
     // INFO Get a group of blocks by their status
     static async getBlockNumbersByStatus(status: string): Promise<number[]> {
-        const blocks = await this.read(
-            "SELECT number FROM blocks WHERE status=" + status,
-        )
+        const blockRepository = await this.getModelInstance(BlockSchema)
 
+        const blocks = await blockRepository.findBy({ status })
         return blocks.map(block => block.number)
     }
+
     // INFO Get a group of blocks by their proposer
     static async getBlockNumbersByProposer(
         proposer: string,
     ): Promise<number[]> {
-        const blocks = await this.read(
-            "SELECT number FROM blocks WHERE proposer=" + proposer,
-        )
+        const blockRepository = await this.getModelInstance(BlockSchema)
+        const blocks = await blockRepository.findBy({ proposer })
         return blocks.map(block => block.number)
     }
 
     static async getGenesisBlock(): Promise<Block> {
         // Playground for async testing
-        return await this.read("SELECT * FROM blocks WHERE number=0")
+        const blockRepository = await this.getModelInstance(BlockSchema)
+        return (await blockRepository.findOneBy({ number: 0 })) as Block
     }
 
     // INFO Get the current pending transactions pool
     static async getPendingPool(): Promise<Transaction[]> {
-        return await this.read(
-            "SELECT * FROM transactions WHERE status='pending'",
+        const transactionRepository = await this.getModelInstance(
+            TransactionSchema,
         )
+        return (await transactionRepository.findBy({
+            status: "pending",
+        })) as Transaction[]
     }
 
     // ANCHOR Transactions
     static async getTransactionFromHash(hash: string): Promise<Transaction> {
-        let tx = await Chain.read(
-            "SELECT * FROM transactions WHERE hash = '" + hash + "'",
+        const transactionRepository = await this.getModelInstance(
+            TransactionSchema,
         )
-        // TODO Would be nice to fit it into a Transaction object
-        return tx
+        return (await transactionRepository.findOneBy({ hash })) as Transaction
     }
 
     // REVIEW Giving back all the properties of an address
-    static async getAddressInfo(address: string): Promise<any> {
-        let native_state = await Chain.read(
-            "SELECT * FROM status_native WHERE address = '" + address + "'",
+
+    static async getAddressInfo(address: string): Promise<{
+        native: StatusNativeType | null
+        properties: StatusPropertiesType | null
+    }> {
+        const nativeStateRepository = await this.getModelInstance(
+            StatusNativeSchema,
         )
-        native_state = native_state[0] || null
-        let properties_state = await Chain.read(
-            "SELECT * FROM status_properties WHERE address = '" + address + "'",
+        const propertiesStateRepository = await this.getModelInstance(
+            StatusPropertiesSchema,
         )
-        properties_state = properties_state[0] || null
+
+        const nativeState = (await nativeStateRepository.findOneBy({
+            address,
+        })) as StatusNativeType
+        const propertiesState = (await propertiesStateRepository.findOneBy({
+            address,
+        })) as StatusPropertiesType
+
         return {
-            native: native_state,
-            properties: properties_state,
+            native: nativeState,
+            properties: propertiesState,
         }
     }
 
@@ -151,11 +183,12 @@ export default class Chain {
     }
 
     static async getLastBlock(): Promise<Block> {
-        const lastBlock = await this.read(
-            "SELECT * FROM blocks ORDER BY number DESC LIMIT 1",
-        )
+        const blockRepository = await this.getModelInstance(BlockSchema)
+        const lastBlock = (await blockRepository.findOne({
+            order: { number: "DESC" },
+        })) as Block
 
-        return lastBlock[0]
+        return lastBlock
     }
 
     static async getOnlinePeersForLastThreeBlocks(): Promise<
@@ -212,55 +245,34 @@ export default class Chain {
         block: Block,
         operations: Operation[] = [],
         position: number = null,
-    ) {
-        // Convert block content and validation data to JSON strings
-        const blockContentJson = JSON.stringify(block.content)
-        const validationDataJson = JSON.stringify(block.validation_data)
+    ): Promise<Block> {
+        const blockRepository = await this.getModelInstance(BlockSchema)
 
-        // Prepare the SQL query
-        let sqlQuery = ""
-        const queryParams = []
-
-        if (position === null) {
-            // If position is not provided, insert a new block
-            sqlQuery =
-                "INSERT INTO blocks (content, number, hash, status, proposer, validation_data) VALUES (?, ?, ?, ?, ?, ?)"
-            queryParams.push(
-                blockContentJson,
-                block.number,
-                block.hash,
-                block.status,
-                block.proposer,
-                validationDataJson,
-            )
-        } else {
-            // If position is provided, update an existing block
-            sqlQuery =
-                "UPDATE blocks SET content = ?, number = ?, hash = ?, status = ?, proposer = ?, validation_data = ? WHERE number = ?"
-            queryParams.push(
-                blockContentJson,
-                block.number,
-                block.hash,
-                block.status,
-                block.proposer,
-                validationDataJson,
-                position,
-            )
+        // Check if the position is provided and if a block with that position exists
+        let existingBlock = null
+        if (position !== null) {
+            existingBlock = await blockRepository.findOneBy({
+                number: position,
+            })
         }
 
-        // Execute the SQL query using parameterized queries
-        try {
-            const db = await Datasource.getInstance()
-            return await db.getDataSource().query(sqlQuery, queryParams)
-        } catch (err) {
-            console.log("[ChainDB] [ERROR]: " + JSON.stringify(err))
-            console.error(err)
-            throw err
+        if (existingBlock) {
+            // Update the existing block
+            existingBlock.content = block.content
+            existingBlock.number = block.number
+            existingBlock.hash = block.hash
+            existingBlock.status = block.status
+            existingBlock.proposer = block.proposer
+            existingBlock.validation_data = block.validation_data
+            return blockRepository.save(existingBlock)
+        } else {
+            // Insert a new block
+            return blockRepository.save(block)
         }
     }
 
     // INFO Generate the genesis block
-    static async generateGenesisBlock(genesis_data: any): Promise<string> {
+    static async generateGenesisBlock(genesis_data: any): Promise<Block> {
         // TODO Add a type for the block json
         console.log(genesis_data)
         let genesis_block = new Block()
@@ -319,58 +331,68 @@ export default class Chain {
 
     // SECTION Specific operations
     // INFO Getting the status of a given address either from the native or the properties table
-    static async statusOf(address: string, type: number) {
-        // Type can be: 0, 1 (native, properties)
-        let field
-        if (type == 0) {
-            field = "native" // The native table is the one storing the current balance plus the transactions made by the address
-        } else if (type == 1) {
-            field = "properties" // The properties table is the one enabling smart features
+    static async statusOf(
+        address: string,
+        type: number,
+    ): Promise<StatusNativeType | StatusPropertiesType | null> {
+        if (type === 0) {
+            const statusNativeRepository = await this.getModelInstance(
+                StatusNativeSchema,
+            )
+
+            return (await statusNativeRepository.findOneBy({
+                address,
+            })) as StatusNativeType
+        } else if (type === 1) {
+            const statusPropertiesRepository = await this.getModelInstance(
+                StatusPropertiesSchema,
+            )
+
+            return (await statusPropertiesRepository.findOneBy({
+                address,
+            })) as StatusPropertiesType
         }
-        let query =
-            "SELECT * FROM status_" + field + " WHERE address='" + address + "'"
-        return await this.read(query)[0]
+        return null
     } // TODO Implement specific time-saving operations to get specific data (see the tables in the db)
     // INFO Getting the hash of the status at a given block
     static async statusHashAt(block_number: number) {
-        let query =
-            "SELECT hash FROM status_hashes WHERE block='" + block_number + "'"
-        return await this.read(query)[0]
+        const statusHashesRepository = await this.getModelInstance(
+            StatusHashesSchema,
+        )
+
+        const statusHashRecord = await statusHashesRepository.findOneBy({
+            block: block_number,
+        })
+        return statusHashRecord ? statusHashRecord.hash : null
     }
     // !SECTION Maintennance operations
 
-    static async pruneBlocksToGenesisBlock() {
-        try {
-            const query = "DELETE FROM blocks WHERE number > 0"
-            await this.write(query)
-            console.log("Pruned all blocks except the genesis block.")
-        } catch (err) {
-            console.error("[pruneUntilGenesis] [ERROR]: " + JSON.stringify(err))
-            throw err
-        }
+    static async pruneBlocksToGenesisBlock(): Promise<void> {
+        const blockRepository = await this.getModelInstance(BlockSchema)
+
+        await blockRepository.delete({ number: MoreThan(0) })
+        console.log("Pruned all blocks except the genesis block.")
     }
 
-    static async nukeGenesis() {
-        try {
-            const query = "DELETE FROM blocks WHERE number=0"
-            await this.write(query)
-            console.log("Pruned all blocks except the genesis block.")
-        } catch (err) {
-            console.error("[pruneUntilGenesis] [ERROR]: " + JSON.stringify(err))
-            throw err
-        }
+    static async nukeGenesis(): Promise<void> {
+        const blockRepository = await this.getModelInstance(BlockSchema)
+
+        await blockRepository.delete({ number: 0 })
+        console.log("Deleted the genesis block.")
     }
 
-    static async updateGenesisTimestamp(newTimestamp) {
-        try {
-            const sqlQuery = `UPDATE blocks SET content = JSON_SET(content, ${newTimestamp}, ?) WHERE number = 0`
-            await this.write(sqlQuery)
+    static async updateGenesisTimestamp(newTimestamp: number): Promise<void> {
+        const blockRepository = await this.getModelInstance(BlockSchema)
+
+        const genesisBlock = await blockRepository.findOneBy({ number: 0 })
+        if (genesisBlock) {
+            // Update the timestamp in the content field
+            genesisBlock.content = {
+                ...genesisBlock.content,
+                timestamp: newTimestamp,
+            }
+            await blockRepository.save(genesisBlock)
             console.log("Updated the timestamp of the genesis block.")
-        } catch (err) {
-            console.error(
-                "[updateGenesisTimestamp] [ERROR]: " + JSON.stringify(err),
-            )
-            throw err
         }
     }
 }
