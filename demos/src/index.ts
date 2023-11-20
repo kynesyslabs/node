@@ -61,7 +61,7 @@ const id = Identity.getInstance()
 const app = express()
 
 // TODO Put into .env
-groundControl.init(10250, "0.0.0.0", "https", {
+groundControl.init(10250, "0.0.0.0", "http", {
     key: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.key",
     cert: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.crt",
     ca: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.ca",
@@ -148,14 +148,16 @@ async function main() {
 
     // NOTE The whole first part of main ensures the environment is ready to run
     await id.ensureIdentity()
+    term.green("[BOOTSTRAP] Our identity is ready\n")
     // Setting the shared state
     sharedState.getInstance().identity = id
     // Log identity
-    term.green("[MAIN] 🔗 WE ARE " + id.ed25519.publicKey.toString("hex") + " 🔗 \n")
+    term.green("\n[MAIN] 🔗 WE ARE " + id.ed25519.publicKey.toString("hex") + " 🔗 \n")
+
 
     try {
         await Identity.getInstance().getPublicIP()
-        term.green("IP: " + Identity.getInstance().publicIP)
+        term.green("IP: " + Identity.getInstance().publicIP + "\n")
     } catch (e) {
         console.log(e)
         term.orange("[WARN] {OFFLINE?} Failed to get public IP\n")
@@ -167,8 +169,10 @@ async function main() {
     term.green("[SERVER] 🖥️ listening on *:" + SERVER_PORT + "\n")
     await networkServer.setupListeners(io_server)
 
+    term.yellow("[BOOTSTRAP] Looking for the genesis block\n")
     // INFO Now ensuring we have an initialized chain or initializing the genesis block
     await findGenesisBlock()
+    term.green("[GENESIS] 🖥️ Found the genesis block\n")
 
     // Loading the peers
 

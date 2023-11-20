@@ -46,10 +46,13 @@ export default class PeerManager {
     }
 
     private _getActors(peers: boolean, connections: boolean): Peer[] {
+        console.log("[PeerManager] Getting all peers...")
         const actorList: Peer[] = []
         const connectedList: Peer[] = []
         const authenticatedList: Peer[] = []
+        console.log(this.peerList)
         for (const peer in this.peerList) {
+            console.log("[PeerManager] Getting peer " + peer)
             let _peer = this.peerList[peer]
             // Filtering
             if (_peer.identity != undefined) {

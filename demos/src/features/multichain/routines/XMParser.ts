@@ -159,9 +159,10 @@ class XMParser {
             console.log(
                 "[XMScript Parser] Pay task payloads are ok: Valid payloads (require 1 has 1)",
             )
-            // ANCHOR EVM
+            // ANCHOR EVM (which is quite simple: send a signed transaction. Done.)
             if (operation.is_evm) {
                 console.log("[XMScript Parser] EVM Pay: trying to send the payload as a signed transaction...") // REVIEW Simulations?
+                // TODO Add check and instance creation on the fly
                 result = await multichain.EVM.getInstance(
                     chainID,
                 ).sendSignedTransaction(operation.task.signedPayloads[0])

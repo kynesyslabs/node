@@ -13,8 +13,18 @@ import Chain from "src/libs/blockchain/chain"
 import * as fs from "fs"
 
 export default async function findGenesisBlock() {
+    console.log("[GENESIS] Looking for the genesis block...")
     let genesis_block_q = await Chain.getGenesisBlock()
-    let genesis_block = genesis_block_q[0]
+    console.log("[GENESIS] Received query:")
+    console.log(genesis_block_q)
+    let genesis_block
+    if (!genesis_block_q) {
+        console.log("[GENESIS] No genesis block found.")
+        genesis_block = null
+    }
+    else {
+        genesis_block = genesis_block_q[0]
+    }
     // console.log(genesis_block)
     // throw new Error("genesis block found")
     if (!genesis_block) {
@@ -25,16 +35,19 @@ export default async function findGenesisBlock() {
             // eslint-disable-next-line no-undef
             process.exit(-5)
         }
+        console.log("[BOOTSTRAP] Loading the genesis block\n")
         // Loading the genesis block
         let genesis_data = JSON.parse(
             fs.readFileSync("data/genesis.json", "utf8"),
         )
+        console.log("[BOOTSTRAP] Loaded the genesis block\n")
         // console.log("imported genesis json data")
         // console.log(genesis_data)
         // throw new Error()
         // Adding the genesis block to the chain
+        console.log("[BOOTSTRAP] Adding the genesis block to the chain\n")
         let genesis_hash = await Chain.generateGenesisBlock(genesis_data)
-        console.log("Genesis block created: " + genesis_hash + "\n")
+        console.log("[BOOTSTRAP] Genesis block created: " + genesis_hash + "\n")
         genesis_block = await Chain.getGenesisBlock()
     } else {
         console.log("Genesis block found: ")
