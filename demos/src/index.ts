@@ -9,11 +9,11 @@ Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
 KyneSys Labs: https://www.kynesys.xyz/
 
 */
-var term = require( "terminal-kit" ).terminal
+var term = require("terminal-kit").terminal
 //import process from "node:process"
 import * as fs from "fs"
 //import * as express from "express" // NOTE ts-node compatibility
-const express = require( "express" ) // NOTE tsx & ts-node compatibility
+const express = require("express") // NOTE tsx & ts-node compatibility
 // import express from "express"// NOTE tsx compatibility
 const http = require("http")
 import { Server } from "socket.io"
@@ -30,7 +30,7 @@ import { Identity } from "./libs/identity"
 import { PeerManager } from "./libs/peer"
 import { server as networkServer } from "./libs/network"
 
-import commandLine from "./utilities/commandLine"
+// import commandLine from "./utilities/commandLine"
 
 import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
@@ -42,7 +42,6 @@ if (!fs.existsSync("./demos_peers")) {
     enough_peers = false
     console.log("No peers found, listening for peers...")
 }
-
 
 // ANCHOR Overrides
 let OVERRIDE_PORT = null
@@ -90,7 +89,6 @@ const io_server = new Server(server, {
 // Instances of classes we need to keep in memory for the rest of the modules, as we use them as state containers which will be passed around
 const peerManager = PeerManager.getInstance()
 
-
 // ANCHOR Routine to handle parameters in advanced mode
 async function digestArguments() {
     let args = process.argv
@@ -98,7 +96,7 @@ async function digestArguments() {
         console.log("digest arguments")
         for (let i = 3; i < args.length; i++) {
             // Handle simple commands
-            if (!(args[i].includes("="))) {
+            if (!args[i].includes("=")) {
                 console.log("cmd: " + args[i])
                 process.exit(0)
             }
@@ -106,7 +104,7 @@ async function digestArguments() {
             let param = args[i].split("=")
             // NOTE These are all the parameters supported
             switch (param[0]) {
-                case "port":   
+                case "port":
                     console.log("Overriding port")
                     OVERRIDE_PORT = param[1]
                     break
@@ -124,7 +122,6 @@ async function digestArguments() {
                     break
                 default:
                     console.log("Invalid parameter: " + param)
-
             }
         }
     }
@@ -132,7 +129,6 @@ async function digestArguments() {
 
 // ANCHOR Entry point
 async function main() {
-
     // NOTE Overriding if necessary
     if (OVERRIDE_PORT) {
         SERVER_PORT = OVERRIDE_PORT
@@ -152,8 +148,9 @@ async function main() {
     // Setting the shared state
     sharedState.getInstance().identity = id
     // Log identity
-    term.green("\n[MAIN] 🔗 WE ARE " + id.ed25519.publicKey.toString("hex") + " 🔗 \n")
-
+    term.green(
+        "\n[MAIN] 🔗 WE ARE " + id.ed25519.publicKey.toString("hex") + " 🔗 \n",
+    )
 
     try {
         await Identity.getInstance().getPublicIP()
@@ -197,10 +194,10 @@ async function main() {
         // await message_test()
         // INFO Starting the sync loop
         if (OVERRIDE_IS_TESTER) {
-            return await commandLine() // Testing mode is just for debugging or showcase purposes
+            // return await commandLine() // Testing mode is just for debugging or showcase purposes
         }
         if (COMMANDLINE_MODE) {
-            commandLine() // While doing the rest of the stuff needed, a comand line interface is available
+            // commandLine() // While doing the rest of the stuff needed, a comand line interface is available
         }
         term.yellow("[MAIN] ✅ Starting the background loop\n")
         mainLoop(id) // Is an async function so running without waiting send that to the background
@@ -217,11 +214,15 @@ async function redundance() {
         await server.listen(SERVER_PORT)
         let peerList = PeerManager.getInstance().getPeers()
         let courtesyMessage = "[WARN] {OFFLINE} " + JSON.stringify(e) + "\n"
-        let showMessage = courtesyMessage + "\nYou can try at: " + JSON.stringify(peerList, null, 4)
+        let showMessage =
+            courtesyMessage +
+            "\nYou can try at: " +
+            JSON.stringify(peerList, null, 4)
         // Courtesy listener
-        server.on("connection", (socket) => {
+        server.on("connection", socket => {
             socket.emit("error", showMessage)
-            socket.on("data", () => { // REVIEW Should this be a catch all?
+            socket.on("data", () => {
+                // REVIEW Should this be a catch all?
                 socket.emit("error", showMessage)
             })
         })
@@ -247,6 +248,6 @@ process.on("unhandledRejection", (reason, promise) => {
     term.red("[WARNING] The node will continue to run but unpredictable behavior could occur\n")
 })
 */
-  
+
 digestArguments()
 redundance()
