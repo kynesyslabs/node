@@ -35,7 +35,7 @@ export default class groundControl {
         if (protocol === "https") {
             let protocolOutcome: requiredOutcome = null
             let errorFlag: boolean = false
-			// We want to check one by one if the keys are present and valid before starting the server
+            // We want to check one by one if the keys are present and valid before starting the server
             protocolOutcome = required(
                 keys,
                 "[groundControl] [ Failure ] Missing keys",
@@ -66,22 +66,24 @@ export default class groundControl {
                 protocol = "http"
                 console.log("[groundControl] [ Failure ] Switching to HTTP")
             } else {
-				// Else we can start da server
-				try {
-                groundControl.options = {
-                    key: fs.readFileSync(keys.key),
-                    cert: fs.readFileSync(keys.cert),
-                    ca: fs.readFileSync(keys.ca),
-                }
-                groundControl.server = https.createServer(
-                    groundControl.options,
-                    groundControl.HandlerMethod,
-                )
-				} catch (e) {
-					// Also here, we fallback happily
+                // Else we can start da server
+                try {
+                    groundControl.options = {
+                        key: fs.readFileSync(keys.key),
+                        cert: fs.readFileSync(keys.cert),
+                        ca: fs.readFileSync(keys.ca),
+                    }
+                    groundControl.server = https.createServer(
+                        groundControl.options,
+                        groundControl.HandlerMethod,
+                    )
+                } catch (e) {
+                    // Also here, we fallback happily
                     console.log(e)
-                    console.log("[groundControl] [ Failure ] Failed to start HTTPS server. Switching to HTTP")
-					protocol = "http"
+                    console.log(
+                        "[groundControl] [ Failure ] Failed to start HTTPS server. Switching to HTTP",
+                    )
+                    protocol = "http"
                 }
             }
         }
@@ -93,7 +95,7 @@ export default class groundControl {
         }
         groundControl.server.listen(port, host, () => {
             console.log(
-                "Ground Control Server is running at" +
+                "Ground Control Server is running at " +
                     protocol +
                     "://" +
                     host +

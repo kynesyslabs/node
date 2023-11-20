@@ -22,6 +22,7 @@ import StatusNativeSchema from "src/model/schemas/status_native"
 import StatusPropertiesSchema from "src/model/schemas/status_properties"
 import StatusHashesSchema from "src/model/schemas/status_hashes"
 import StatusNativeType from "./types/statusNative"
+import AddressInfo from "./types/addressInfo"
 import StatusPropertiesType from "./types/statusProperties"
 import { MoreThan } from "typeorm"
 
@@ -151,10 +152,7 @@ export default class Chain {
 
     // REVIEW Giving back all the properties of an address
 
-    static async getAddressInfo(address: string): Promise<{
-        native: StatusNativeType | null
-        properties: StatusPropertiesType | null
-    }> {
+    static async getAddressInfo(address: string): Promise<AddressInfo> {
         const nativeStateRepository = await this.getModelInstance(
             StatusNativeSchema,
         )

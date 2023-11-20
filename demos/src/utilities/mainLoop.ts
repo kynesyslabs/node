@@ -9,8 +9,8 @@ import Chain from "src/libs/blockchain/chain"
 import Transmission from "src/libs/communications/transmission"
 import ComLink from "src/libs/communications/comlink"
 import { pki } from "node-forge"
-import RepresentativeShard from "src/libs/consensus/types/PoR"
-import QBFT from "src/libs/consensus/types/BFT"
+import RepresentativeShard from "src/libs/consensus/mechanisms/PoR"
+import QBFT from "src/libs/consensus/mechanisms/BFT"
 import chain from "src/libs/blockchain/chain"
 
 async function sleep(time: number) {

@@ -1,13 +1,12 @@
 /* eslint-disable no-unused-vars */
 // This class represents a typical web2 data request
 import * as forge from "node-forge"
-import axios, { AxiosResponse } from "axios"
+import axios from "axios"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import sharedState from "src/utilities/sharedState"
 import { PeerManager } from "src/libs/peer"
 import required from "src/utilities/required"
-import pay from "src/features/multichain/routines/writes/pay"
 const term = require("terminal-kit").terminal
 
 AbortSignal.timeout ??= function timemout(ms) {
@@ -25,70 +24,83 @@ export interface IParam {
 // NOTE This should be the thing we receive from the handler as a request
 // NOTE Basically is the comlink message
 export interface IWeb2Payload {
-        type: "web2Request",
-        message: IWeb2Request,
-      sender: any,
-      receiver: any,
-      timestamp: any,
-      data: any,
-      extra: any
+    type: "web2Request"
+    message: IWeb2Request
+    sender: any
+    receiver: any
+    timestamp: any
+    data: any
+    extra: any
 }
-
 
 // INFO A complete web2 request
 export interface IWeb2Request {
-	raw: IRawWeb2Request,
-    result: any,
-	attestations: {}
-	hash: string,
-	signature?: forge.pki.ed25519.BinaryBuffer,
+    raw: IRawWeb2Request
+    result: any
+    attestations: {}
+    hash: string
+    signature?: forge.pki.ed25519.BinaryBuffer
 }
 
 // INFO A request without any attestations or identity data
 export interface IRawWeb2Request {
-    action: string,
-    parameters: IParam[],
-    requestedParameters: [] | null,
-    method: "POST" | "GET" | "PUT" | "DELETE" | "PATCH",
-    url: string,
-    headers: any,
-    minAttestations: number,
+    action: string
+    parameters: IParam[]
+    requestedParameters: [] | null
+    method: "POST" | "GET" | "PUT" | "DELETE" | "PATCH"
+    url: string
+    headers: any
+    minAttestations: number
     // Handling the various stages of an IWeb2Request
     stage: {
         // The one that will handle the response too
         origin: {
-            identity: forge.pki.ed25519.BinaryBuffer,
-            connection_url: string,
-        },
+            identity: forge.pki.ed25519.BinaryBuffer
+            connection_url: string
+        }
         // Starting from 0, each attestation it is increased
-        hop_number: number,
-    }    
+        hop_number: number
+    }
 }
-
 
 // ANCHOR Useful interfaces
 export interface IWeb2Attestation {
-	hash: string,
-	timestamp: number,
-	identity: forge.pki.PublicKey,
-	signature: forge.pki.ed25519.BinaryBuffer,
-    valid: boolean,
+    hash: string
+    timestamp: number
+    identity: forge.pki.PublicKey
+    signature: forge.pki.ed25519.BinaryBuffer
+    valid: boolean
 }
 
 // INFO Simply handles the singleton stuff
-export default function Web2API (named: string = null, sendSock: any = null, req: IWeb2Payload = null): Web2APIClass {
-    let apiInstance: Web2APIClass = Web2APIClass.getInstance(named, sendSock, req)
+export default function Web2API(
+    named: string = null,
+    sendSock: any = null,
+    req: IWeb2Payload = null,
+): Web2APIClass {
+    let apiInstance: Web2APIClass = Web2APIClass.getInstance(
+        named,
+        sendSock,
+        req,
+    )
     return apiInstance
 }
 
 // INFO Giving superpowers to the request
-export  class Web2APIClass {
+export class Web2APIClass {
     static requests: Map<string, Web2APIClass> = new Map<string, Web2APIClass>()
     static progressive: 0
 
     // INFO Named singleton (multiton?)
-    static getInstance(named: string = null, sendSock: any = null, req: IWeb2Payload = null): Web2APIClass {
-        if (!named) { named = String(Web2APIClass.progressive); Web2APIClass.progressive += 1 }
+    static getInstance(
+        named: string = null,
+        sendSock: any = null,
+        req: IWeb2Payload = null,
+    ): Web2APIClass {
+        if (!named) {
+            named = String(Web2APIClass.progressive)
+            Web2APIClass.progressive += 1
+        }
         // Setting the name
         if (!Web2APIClass.requests.has(named)) {
             term.yellow("Creating new Web2API instance\n")
@@ -100,7 +112,10 @@ export  class Web2APIClass {
             term.yellow("Proceeding\n")
             required(sendSock, "Missing sender socket")
             required(req, "Missing request")
-            Web2APIClass.requests.set(named, new Web2APIClass(named, sendSock, req))
+            Web2APIClass.requests.set(
+                named,
+                new Web2APIClass(named, sendSock, req),
+            )
         }
         return Web2APIClass.requests.get(named)
     }
@@ -139,7 +154,7 @@ export  class Web2APIClass {
         required(this.request, "Missing request")
         console.log("[ACTUAL REQUEST]")
         console.log(this.request)
-        let {action} = this.request.raw 
+        let { action } = this.request.raw
         let params = this.request.raw.parameters
         // NOTE Dispatching the request to the appropriate handler
         term.yellow("Action: " + action + "\n")
@@ -170,7 +185,7 @@ export  class Web2APIClass {
                 this.request.result = "Not implemented yet"
                 // TODO
                 break
-            default: 
+            default:
                 term.red("[ERROR] Invalid action: " + action + "\n")
                 this.request.result = "Invalid action: " + action
                 break
@@ -206,7 +221,7 @@ export  class Web2APIClass {
         term.green("[Web2Parser] Retrieving resource from raw request...\n")
         console.log(raw_request)
         let params: IParam[] = raw_request.parameters
-        let {url} = raw_request
+        let { url } = raw_request
         // Url normalization
         if (url.includes("?")) {
             url = url.split("?")[0]
@@ -216,26 +231,32 @@ export  class Web2APIClass {
             url += "/"
         } */
         // If we have parameters, add them to the request
-        if (params.length > 1) { // 1 is due to the fact that theoretically we should have at least the url
-            let param_string = params.map(param => param.name + "=" + param.value).join("&")
+        if (params.length > 1) {
+            // 1 is due to the fact that theoretically we should have at least the url
+            let param_string = params
+                .map(param => param.name + "=" + param.value)
+                .join("&")
             url += "?" + param_string
         }
         // NOTE We should have a normalized url, so we can make the request
         term.yellow.bold("[Web2Parser] Retrieving derived url: " + url + "\n")
-        let payload = { 
+        let payload = {
             headers: raw_request.headers, //FIXME on budino
             // NOTE The following line selectively sets the body to null if the method is not POST
             // and look for the "data" parameter in the parameters array if the method is POST
             // TODO Handle the case where the method is POST but no "data" parameter is present
-            url: url }
+            url: url,
+        }
         // NOTE Now we should have a normalized url, so we can make the request
         let fetched: any
         try {
-            fetched = await axios.get(payload.url, { headers: payload.headers})
+            fetched = await axios.get(payload.url, { headers: payload.headers })
         } catch (error) {
             console.log(error)
-            term.red.bold("[Web2Parser] Error retrieving resource: " + error + "\n")
-            fetched = {"status": 500, "statusText": "Axios Error", "data": error}
+            term.red.bold(
+                "[Web2Parser] Error retrieving resource: " + error + "\n",
+            )
+            fetched = { status: 500, statusText: "Axios Error", data: error }
             return fetched
         }
         term.yellow("[Web2Parser] Retrieved: " + payload.url + "\n")
@@ -243,9 +264,9 @@ export  class Web2APIClass {
         term.bold("[Web2Parser] Data result:\n")
         console.log(data_result)
         let sanitizedResult = {
-        "status": fetched.status,
-        "statusText": fetched.statusText,
-        "data": data_result,
+            status: fetched.status,
+            statusText: fetched.statusText,
+            data: data_result,
         }
         term.yellow.bold("\nResult to validate:\n")
         console.log(sanitizedResult)
@@ -256,9 +277,12 @@ export  class Web2APIClass {
         return sanitizedResult
     }
 
-
     // INFO Fetching (via different methods) an url and attesting it in this.request
-    private async _retrieve(raw_request: IRawWeb2Request, body: any = null, headers: any = {}) {        
+    private async _retrieve(
+        raw_request: IRawWeb2Request,
+        body: any = null,
+        headers: any = {},
+    ) {
         // TODO Scope with special params
         // TODO Implement body params on POST
         // TODO Implement headers
@@ -267,14 +291,12 @@ export  class Web2APIClass {
         let fetched: any
         let timeout = 5000 // REVIEW Make it customizable
         //  REVIEW fetch the url better with more customization if possible
-        fetched = await fetch(
-            this.request.raw.url, { 
-                method: this.request.raw.method,
-                body: body,// For POST stuff
-                headers: headers, // like { 'Content-Type': 'application/json' }
-                signal: AbortSignal.timeout(timeout), 
-            },
-        )
+        fetched = await fetch(this.request.raw.url, {
+            method: this.request.raw.method,
+            body: body, // For POST stuff
+            headers: headers, // like { 'Content-Type': 'application/json' }
+            signal: AbortSignal.timeout(timeout),
+        })
         return fetched // "Not implemented yet"
         // REVIEW How to handle timeouts?
         // Stamping the result
@@ -284,7 +306,7 @@ export  class Web2APIClass {
     // INFO This method inserts validation data into the request
     async validate(content: string): Promise<void> {
         term.yellow.bold("[Web2Parser] Validating...\n")
-        if (!(typeof(content) === "string")) {
+        if (!(typeof content === "string")) {
             content = JSON.stringify(content)
         }
         // REVIEW This is not the best way to do it
@@ -294,8 +316,9 @@ export  class Web2APIClass {
         term.bold("[Web2Parser] Result:\n")
         console.log(hashed_result)
         let signature = Cryptography.sign(
-            hashed_result, 
-            sharedState.getInstance().identity.ed25519.privateKey)
+            hashed_result,
+            sharedState.getInstance().identity.ed25519.privateKey,
+        )
         this.request.signature = signature
         term.bold("[Web2Parser] Signature:\n")
         console.log(signature)
@@ -310,7 +333,9 @@ export  class Web2APIClass {
         term.bold("[Web2Parser] Attestation:\n")
         console.log(attestation)
         // Adding the attestation to the request
-        let hex_key = sharedState.getInstance().identity.ed25519.publicKey.toString("hex") // REVIEW Is this ok?
+        let hex_key = sharedState
+            .getInstance()
+            .identity.ed25519.publicKey.toString("hex") // REVIEW Is this ok?
         this.request.attestations[hex_key] = attestation
         term.bold("[Web2Parser] Added attestation to request\n")
         // And the content too
@@ -319,17 +344,16 @@ export  class Web2APIClass {
          * The questionable logic is that the .result property should be lazy static, that means
          * that it should be set only when it is actually needed (aka at the beginning) but
          * is not really protected as there is no advantage of editing it in the middle of the process.
-         * 
+         *
          * At the end of the process, the result is anyway compared with the various attestations
          * within the validators array.
-         * 
-        */
+         *
+         */
         if (this.request.result === undefined) {
             this.request.result = content
         }
         //this.request.result = content
     }
-
 
     // INFO Verifying this.request based on the attestations
     async verify(): Promise<boolean> {
@@ -341,12 +365,13 @@ export  class Web2APIClass {
             // REVIEW Checking the hash validity for all the attestations
             let stringifiedContent = JSON.stringify(this.request.raw)
             let hash = Hashing.sha256(stringifiedContent)
-            let hash_valid = hash===attestation.hash
+            let hash_valid = hash === attestation.hash
             // REVIEW Checking the signature validity for all the attestations
             let signature_valid = Cryptography.verify(
                 attestation.signature.toString("hex"),
                 attestation.hash,
-                attestation.identity)
+                attestation.identity,
+            )
             // Noting the result of the verification in the attestation array
             let isValid = hash_valid && signature_valid
             attestation.valid = isValid
@@ -379,23 +404,26 @@ export  class Web2APIClass {
     }
 
     // INFO Easy awaiter with timeout
-    /* NOTE 
+    /* NOTE
      * The role of this method is to help the original rpc receiving the web2 request to
      * wait (with a customizable timeout) for the attestations to arrive.
      * The whole web2 on chain structure is designed to be as much asynchronous as possible,
      * so the receiving rpc needs to be able to wait without blocking all its services.
-     * 
+     *
      * This method is based on the idea that the original rpc should be agnostic to the
      * actual position of the request in the attestation process, and should only wait for
      * the attestations to arrive.
-     * 
-    */
-    async awaitQuorum(quorum: number = 10, timeout: number = 9000): Promise<boolean> {
+     *
+     */
+    async awaitQuorum(
+        quorum: number = 10,
+        timeout: number = 9000,
+    ): Promise<boolean> {
         let reachedQuorum: boolean = false
         let timer: number = 0
         // NOTE We wait for timeout seconds before surrendering
         while (timer < timeout) {
-            await new Promise((resolve) => setTimeout(resolve, 100)) // Each 100 ms we can check for updates
+            await new Promise(resolve => setTimeout(resolve, 100)) // Each 100 ms we can check for updates
             if (this.getAttestationsNumber() >= quorum) {
                 reachedQuorum = true
                 break

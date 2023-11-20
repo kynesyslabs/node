@@ -6,11 +6,11 @@ export class StatusNative {
     address: string | null
 
     @Column("text", { name: "balance", nullable: true })
-    balance: string | null
+    balance: number | null
 
     @Column("integer", { name: "nonce", nullable: true })
     nonce: number | null
 
     @Column("text", { name: "tx_list", nullable: true })
-    txList: string | null
+    tx_list: string | null
 }
