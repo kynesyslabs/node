@@ -2,6 +2,12 @@ import { Column, Entity, PrimaryGeneratedColumn } from "typeorm"
 
 @Entity("blocks")
 export class Blocks {
+    @PrimaryGeneratedColumn({ type: "integer", name: "id" })
+    id: number
+
+    @Column("json", { name: "content" })
+    content: NonNullable<any>
+
     @Column("integer", { name: "number" })
     number: number
 
@@ -16,10 +22,4 @@ export class Blocks {
 
     @Column("text", { name: "validation_data" })
     validationData: string
-
-    @PrimaryGeneratedColumn({ type: "integer", name: "id" })
-    id: number
-
-    @Column("json", { name: "content" })
-    content: NonNullable<unknown>
 }

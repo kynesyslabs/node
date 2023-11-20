@@ -16,7 +16,7 @@ import Hashing from "../crypto/hashing"
 import Datasource from "src/model/datasource"
 import { Operation } from "./gls/gls"
 
-import BlockSchema from "src/model/schemas/block.schema"
+import { Blocks } from "src/model/entities/Blocks"
 import TransactionSchema from "src/model/schemas/transaction.schema"
 import StatusNativeSchema from "src/model/schemas/status_native"
 import StatusPropertiesSchema from "src/model/schemas/status_properties"
@@ -91,7 +91,7 @@ export default class Chain {
     }
     // INFO Get the last block hash
     static async getLastBlockHash() {
-        const blockRepository = await this.getModelInstance(BlockSchema)
+        const blockRepository = await this.getModelInstance(Blocks)
         const lastBlock = await blockRepository.findOne({
             order: { number: "DESC" },
             select: ["hash"],
@@ -101,17 +101,17 @@ export default class Chain {
     }
     // INFO Get any block by its number
     static async getBlockByNumber(number: number): Promise<Block> {
-        const blockRepository = await this.getModelInstance(BlockSchema)
+        const blockRepository = await this.getModelInstance(Blocks)
         return (await blockRepository.findOneBy({ where: { number } })) as Block
     }
     // INFO Get any block by its hash
     static async getBlockByHash(hash: string): Promise<Block> {
-        const blockRepository = await this.getModelInstance(BlockSchema)
+        const blockRepository = await this.getModelInstance(Blocks)
         return (await blockRepository.findOneBy({ where: { hash } })) as Block
     }
     // INFO Get a group of blocks by their status
     static async getBlockNumbersByStatus(status: string): Promise<number[]> {
-        const blockRepository = await this.getModelInstance(BlockSchema)
+        const blockRepository = await this.getModelInstance(Blocks)
 
         const blocks = await blockRepository.findBy({ status })
         return blocks.map(block => block.number)
@@ -121,16 +121,16 @@ export default class Chain {
     static async getBlockNumbersByProposer(
         proposer: string,
     ): Promise<number[]> {
-        const blockRepository = await this.getModelInstance(BlockSchema)
+        const blockRepository = await this.getModelInstance(Blocks)
         const blocks = await blockRepository.findBy({ proposer })
         return blocks.map(block => block.number)
     }
 
     static async getGenesisBlock(): Promise<Block> {
         // Playground for async testing
-        const blockRepository = await this.getModelInstance(BlockSchema)
-        console.log(blockRepository)
-        let genBlock =  await blockRepository.findOneBy({ number: 0 })
+        const blockRepository = await this.getModelInstance(Blocks)
+        let genBlock = await blockRepository.findOneBy({ number: 0 })
+        console.log("genesis Block")
         console.log(genBlock)
         return genBlock as Block
     }
@@ -184,7 +184,7 @@ export default class Chain {
     }
 
     static async getLastBlock(): Promise<Block> {
-        const blockRepository = await this.getModelInstance(BlockSchema)
+        const blockRepository = await this.getModelInstance(Blocks)
         const lastBlock = (await blockRepository.findOne({
             order: { number: "DESC" },
         })) as Block
@@ -247,22 +247,32 @@ export default class Chain {
         operations: Operation[] = [],
         position: number = null,
     ): Promise<Block> {
-        const blockRepository = await this.getModelInstance(BlockSchema)
+        const blockRepository = await this.getModelInstance(Blocks)
 
         // Check if the position is provided and if a block with that position exists
         let existingBlock = null
-        console.log("[ChainDB] [ INFO ]: Checking if block with position " + position + " already exists")
+        console.log(
+            "[ChainDB] [ INFO ]: Checking if block with position " +
+                position +
+                " already exists",
+        )
         if (position !== null) {
-            console.log(true)
+            console.log("Block does not have null position")
             existingBlock = await blockRepository.findOneBy({
                 number: position,
             })
         } else {
-            console.log(false)
+            console.log(
+                "[ChainDB] [ INFO ]: Found block with null position, possibly genesis block",
+            )
         }
 
         if (existingBlock) {
-            console.log("[ChainDB] [ INFO ]: Block with position " + position + " does exist: updating a new block")
+            console.log(
+                "[ChainDB] [ INFO ]: Block with position " +
+                    position +
+                    " does exist: updating a new block",
+            )
             // Update the existing block
             existingBlock.content = block.content
             existingBlock.number = block.number
@@ -270,11 +280,16 @@ export default class Chain {
             existingBlock.status = block.status
             existingBlock.proposer = block.proposer
             existingBlock.validation_data = block.validation_data
-            return blockRepository.save(existingBlock)
+            console.log("about to save block")
+            return await blockRepository.save(existingBlock)
         } else {
-            console.log("[ChainDB] [ INFO ]: Block with position " + position + " does not exist: inserting a new block")
+            console.log(
+                "[ChainDB] [ INFO ]: Block with position " +
+                    position +
+                    " does not exist: inserting a new block",
+            )
             // Insert a new block
-            let result = blockRepository.save(block)
+            let result = await blockRepository.save(block)
             console.log(result)
             return result
         }
@@ -378,21 +393,21 @@ export default class Chain {
     // !SECTION Maintennance operations
 
     static async pruneBlocksToGenesisBlock(): Promise<void> {
-        const blockRepository = await this.getModelInstance(BlockSchema)
+        const blockRepository = await this.getModelInstance(Blocks)
 
         await blockRepository.delete({ number: MoreThan(0) })
         console.log("Pruned all blocks except the genesis block.")
     }
 
     static async nukeGenesis(): Promise<void> {
-        const blockRepository = await this.getModelInstance(BlockSchema)
+        const blockRepository = await this.getModelInstance(Blocks)
 
         await blockRepository.delete({ number: 0 })
         console.log("Deleted the genesis block.")
     }
 
     static async updateGenesisTimestamp(newTimestamp: number): Promise<void> {
-        const blockRepository = await this.getModelInstance(BlockSchema)
+        const blockRepository = await this.getModelInstance(Blocks)
 
         const genesisBlock = await blockRepository.findOneBy({ number: 0 })
         if (genesisBlock) {
