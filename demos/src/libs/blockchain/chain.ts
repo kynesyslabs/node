@@ -128,7 +128,10 @@ export default class Chain {
     static async getGenesisBlock(): Promise<Block> {
         // Playground for async testing
         const blockRepository = await this.getModelInstance(BlockSchema)
-        return (await blockRepository.findOneBy({ number: 0 })) as Block
+        console.log(blockRepository)
+        let genBlock =  await blockRepository.findOneBy({ number: 0 })
+        console.log(genBlock)
+        return genBlock as Block
     }
 
     // INFO Get the current pending transactions pool
