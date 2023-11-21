@@ -1,12 +1,12 @@
-/* eslint-disable no-unused-vars */
-// This class represents a typical web2 data request
 import * as forge from "node-forge"
 import axios from "axios"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
+import required from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
 import { PeerManager } from "src/libs/peer"
-import required from "src/utilities/required"
+/* eslint-disable no-unused-vars */
+// This class represents a typical web2 data request
 const term = require("terminal-kit").terminal
 
 AbortSignal.timeout ??= function timemout(ms) {
@@ -166,23 +166,23 @@ export class Web2APIClass {
                 break
             case "POST":
                 term.red("[ERROR] Not implemented yet")
-                this.request.result = "Not implemented yet"
+                this.request.result = "Not implemented yet: POST"
                 break
             case "PUT":
                 term.red("[ERROR] Not implemented yet")
-                this.request.result = "Not implemented yet"
+                this.request.result = "Not implemented yet: PUT"
                 break
             case "DELETE":
                 term.red("[ERROR] Not implemented yet")
-                this.request.result = "Not implemented yet"
+                this.request.result = "Not implemented yet: DELETE"
                 break
             case "PATCH":
                 term.red("[ERROR] Not implemented yet")
-                this.request.result = "Not implemented yet"
+                this.request.result = "Not implemented yet: PATCH"
                 break
             case "IPFS":
                 term.red("[ERROR] Not implemented yet")
-                this.request.result = "Not implemented yet"
+                this.request.result = "Not implemented yet: IPFS"
                 // TODO
                 break
             default:

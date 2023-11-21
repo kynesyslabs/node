@@ -8,8 +8,6 @@ import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 // NOTE We define multichain into global so that we can use it later
 global.multichain = multichain
 
-// REVIEW Define XMScript (chs) class?
-
 export interface ITask {
     type: string
     params: string // We want them stringified

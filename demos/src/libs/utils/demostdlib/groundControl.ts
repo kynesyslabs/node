@@ -12,6 +12,7 @@ import http from "node:http"
 import https from "node:https"
 import required, { requiredOutcome } from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
+import { PeerManager } from "src/libs/peer"
 
 export default class groundControl {
     static host: string
@@ -168,6 +169,16 @@ export default class groundControl {
                     metric = groundControl.get.sync_status().toString()
                     status = 200
                     break
+                case "connected_peers":
+                    metric = groundControl.get.connected_peers().toString()
+                    status = 200
+                    break
+                case "response_registry_size":
+                    // TODO in responseRegistry
+                    break
+                case "mempool_size":
+                    // TODO in mempool
+                    break
                 // TODO: implement more metrics
                 default:
                     metric = "No data available for this metric"
@@ -185,6 +196,10 @@ export default class groundControl {
     static get = {
         sync_status: function () {
             return sharedState.getInstance().syncStatus
+        },
+        connected_peers: function () {
+            let plist = PeerManager.getInstance().getAll()
+            return plist.length
         },
     }
 }
