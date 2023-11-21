@@ -45,7 +45,6 @@ export default async function validateTransaction(
     console.log(tx.signature)
     tx.hash = request.tx.hash
     tx.confirmations = request.tx.confirmations
-    tx.state_changes = request.tx.state_changes
     tx.content.transaction_fee = request.tx.content.transaction_fee
 
     console.log("[TX RECEIVED] Examining:\n")

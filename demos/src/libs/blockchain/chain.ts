@@ -17,10 +17,11 @@ import Datasource from "src/model/datasource"
 import { Operation } from "./gls/gls"
 
 import { Blocks } from "src/model/entities/Blocks"
-import TransactionSchema from "src/model/schemas/transaction.schema"
-import StatusNativeSchema from "src/model/schemas/status_native"
-import StatusPropertiesSchema from "src/model/schemas/status_properties"
-import StatusHashesSchema from "src/model/schemas/status_hashes"
+import { Transactions } from "src/model/entities/Transactions"
+import RawTransaction from "./types/rawTransaction"
+import { StatusNative } from "src/model/entities/StatusNative"
+import { StatusProperties } from "src/model/entities/StatusProperties"
+import { StatusHashes } from "src/model/entities/StatusHashes"
 import StatusNativeType from "./types/statusNative"
 import AddressInfo from "./types/addressInfo"
 import StatusPropertiesType from "./types/statusProperties"
@@ -36,54 +37,24 @@ export default class Chain {
         return this.instance
     }
 
-    static async getModelInstance(
-        model:
-            | typeof Block
-            | typeof Transaction
-            | typeof StatusNativeSchema
-            | typeof StatusPropertiesSchema,
-    ) {
-        const db = await Datasource.getInstance()
-        return db.getDataSource().getRepository(model)
-    }
-
-    static async read(sql_query: string): Promise<any> {
-        try {
-            const db = await Datasource.getInstance()
-            return await db.getDataSource().query(sql_query)
-        } catch (err) {
-            console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
-            console.error(err)
-            throw err
-        }
-    }
-
-    static async write(sql_query: string) {
-        try {
-            const db = await Datasource.getInstance()
-            return await db.getDataSource().query(sql_query)
-        } catch (err) {
-            console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
-            console.error(err)
-            throw err
-        }
-    }
-
     // SECTION Getters
 
     // INFO Returns a transaction by its hash
-    static async getTxByHash(hash: string): Promise<Transaction> {
-        const transactionRepository = await this.getModelInstance(
-            TransactionSchema,
-        )
-        return (await transactionRepository.findOneBy({
-            where: { hash },
-        })) as Transaction
+    static async getTxByHash(hash: string): Promise<Transactions> {
+        const db = await Datasource.getInstance()
+        const transactionRepository = db
+            .getDataSource()
+            .getRepository(Transactions)
+
+        return await transactionRepository.findOneBy({
+            hash,
+        })
     }
 
     // INFO Get the last block number
     static async getLastBlockNumber(): Promise<number> {
-        const blockRepository = await this.getModelInstance(Block)
+        const db = await Datasource.getInstance()
+        const blockRepository = db.getDataSource().getRepository(Blocks)
         const lastBlock = await blockRepository.findOne({
             order: { number: "DESC" },
         })
@@ -91,7 +62,8 @@ export default class Chain {
     }
     // INFO Get the last block hash
     static async getLastBlockHash() {
-        const blockRepository = await this.getModelInstance(Blocks)
+        const db = await Datasource.getInstance()
+        const blockRepository = db.getDataSource().getRepository(Blocks)
         const lastBlock = await blockRepository.findOne({
             order: { number: "DESC" },
             select: ["hash"],
@@ -100,18 +72,21 @@ export default class Chain {
         return lastBlock?.hash
     }
     // INFO Get any block by its number
-    static async getBlockByNumber(number: number): Promise<Block> {
-        const blockRepository = await this.getModelInstance(Blocks)
-        return (await blockRepository.findOneBy({ where: { number } })) as Block
+    static async getBlockByNumber(number: number): Promise<Blocks> {
+        const db = await Datasource.getInstance()
+        const blockRepository = db.getDataSource().getRepository(Blocks)
+        return await blockRepository.findOneBy({ number })
     }
     // INFO Get any block by its hash
-    static async getBlockByHash(hash: string): Promise<Block> {
-        const blockRepository = await this.getModelInstance(Blocks)
-        return (await blockRepository.findOneBy({ where: { hash } })) as Block
+    static async getBlockByHash(hash: string): Promise<Blocks> {
+        const db = await Datasource.getInstance()
+        const blockRepository = db.getDataSource().getRepository(Blocks)
+        return await blockRepository.findOneBy({ hash })
     }
     // INFO Get a group of blocks by their status
     static async getBlockNumbersByStatus(status: string): Promise<number[]> {
-        const blockRepository = await this.getModelInstance(Blocks)
+        const db = await Datasource.getInstance()
+        const blockRepository = db.getDataSource().getRepository(Blocks)
 
         const blocks = await blockRepository.findBy({ status })
         return blocks.map(block => block.number)
@@ -121,47 +96,61 @@ export default class Chain {
     static async getBlockNumbersByProposer(
         proposer: string,
     ): Promise<number[]> {
-        const blockRepository = await this.getModelInstance(Blocks)
+        const db = await Datasource.getInstance()
+        const blockRepository = db.getDataSource().getRepository(Blocks)
         const blocks = await blockRepository.findBy({ proposer })
         return blocks.map(block => block.number)
     }
 
-    static async getGenesisBlock(): Promise<Block> {
+    static async getGenesisBlock(): Promise<Blocks> {
         // Playground for async testing
-        const blockRepository = await this.getModelInstance(Blocks)
+        const db = await Datasource.getInstance()
+        const blockRepository = db.getDataSource().getRepository(Blocks)
+        console.log(blockRepository) // Log the repository to check its properties
+
+        try {
+            const allBlocks = await blockRepository.find()
+            console.log(allBlocks) // Log all records from the table
+        } catch (error) {
+            console.error(error) // Log any error that occurs
+        }
         let genBlock = await blockRepository.findOneBy({ number: 0 })
         console.log("genesis Block")
         console.log(genBlock)
-        return genBlock as Block
+        return genBlock
     }
 
     // INFO Get the current pending transactions pool
-    static async getPendingPool(): Promise<Transaction[]> {
-        const transactionRepository = await this.getModelInstance(
-            TransactionSchema,
-        )
-        return (await transactionRepository.findBy({
+    static async getPendingPool(): Promise<RawTransaction[]> {
+        const db = await Datasource.getInstance()
+        const transactionRepository = db
+            .getDataSource()
+            .getRepository(Transactions)
+        return await transactionRepository.findBy({
             status: "pending",
-        })) as Transaction[]
+        })
     }
 
     // ANCHOR Transactions
-    static async getTransactionFromHash(hash: string): Promise<Transaction> {
-        const transactionRepository = await this.getModelInstance(
-            TransactionSchema,
-        )
-        return (await transactionRepository.findOneBy({ hash })) as Transaction
+    static async getTransactionFromHash(hash: string): Promise<RawTransaction> {
+        const db = await Datasource.getInstance()
+        const transactionRepository = db
+            .getDataSource()
+            .getRepository(Transactions)
+        return await transactionRepository.findOneBy({ hash })
     }
 
     // REVIEW Giving back all the properties of an address
 
     static async getAddressInfo(address: string): Promise<AddressInfo> {
-        const nativeStateRepository = await this.getModelInstance(
-            StatusNativeSchema,
-        )
-        const propertiesStateRepository = await this.getModelInstance(
-            StatusPropertiesSchema,
-        )
+        const db = await Datasource.getInstance()
+        const nativeStateRepository = db
+            .getDataSource()
+            .getRepository(StatusNative)
+
+        const propertiesStateRepository = db
+            .getDataSource()
+            .getRepository(StatusProperties)
 
         const nativeState = (await nativeStateRepository.findOneBy({
             address,
@@ -183,11 +172,12 @@ export default class Chain {
         }
     }
 
-    static async getLastBlock(): Promise<Block> {
-        const blockRepository = await this.getModelInstance(Blocks)
-        const lastBlock = (await blockRepository.findOne({
+    static async getLastBlock(): Promise<Blocks> {
+        const db = await Datasource.getInstance()
+        const blockRepository = db.getDataSource().getRepository(Blocks)
+        const lastBlock = await blockRepository.findOne({
             order: { number: "DESC" },
-        })) as Block
+        })
 
         return lastBlock
     }
@@ -246,8 +236,9 @@ export default class Chain {
         block: Block,
         operations: Operation[] = [],
         position: number = null,
-    ): Promise<Block> {
-        const blockRepository = await this.getModelInstance(Blocks)
+    ): Promise<any> {
+        const db = await Datasource.getInstance()
+        const blockRepository = db.getDataSource().getRepository(Blocks)
 
         // Check if the position is provided and if a block with that position exists
         let existingBlock = null
@@ -361,17 +352,19 @@ export default class Chain {
         type: number,
     ): Promise<StatusNativeType | StatusPropertiesType | null> {
         if (type === 0) {
-            const statusNativeRepository = await this.getModelInstance(
-                StatusNativeSchema,
-            )
+            const db = await Datasource.getInstance()
+            const statusNativeRepository = db
+                .getDataSource()
+                .getRepository(StatusNative)
 
             return (await statusNativeRepository.findOneBy({
                 address,
             })) as StatusNativeType
         } else if (type === 1) {
-            const statusPropertiesRepository = await this.getModelInstance(
-                StatusPropertiesSchema,
-            )
+            const db = await Datasource.getInstance()
+            const statusPropertiesRepository = db
+                .getDataSource()
+                .getRepository(StatusProperties)
 
             return (await statusPropertiesRepository.findOneBy({
                 address,
@@ -381,9 +374,10 @@ export default class Chain {
     } // TODO Implement specific time-saving operations to get specific data (see the tables in the db)
     // INFO Getting the hash of the status at a given block
     static async statusHashAt(block_number: number) {
-        const statusHashesRepository = await this.getModelInstance(
-            StatusHashesSchema,
-        )
+        const db = await Datasource.getInstance()
+        const statusHashesRepository = db
+            .getDataSource()
+            .getRepository(StatusHashes)
 
         const statusHashRecord = await statusHashesRepository.findOneBy({
             block: block_number,
@@ -393,21 +387,24 @@ export default class Chain {
     // !SECTION Maintennance operations
 
     static async pruneBlocksToGenesisBlock(): Promise<void> {
-        const blockRepository = await this.getModelInstance(Blocks)
+        const db = await Datasource.getInstance()
+        const blockRepository = db.getDataSource().getRepository(Blocks)
 
         await blockRepository.delete({ number: MoreThan(0) })
         console.log("Pruned all blocks except the genesis block.")
     }
 
     static async nukeGenesis(): Promise<void> {
-        const blockRepository = await this.getModelInstance(Blocks)
+        const db = await Datasource.getInstance()
+        const blockRepository = db.getDataSource().getRepository(Blocks)
 
         await blockRepository.delete({ number: 0 })
         console.log("Deleted the genesis block.")
     }
 
     static async updateGenesisTimestamp(newTimestamp: number): Promise<void> {
-        const blockRepository = await this.getModelInstance(Blocks)
+        const db = await Datasource.getInstance()
+        const blockRepository = db.getDataSource().getRepository(Blocks)
 
         const genesisBlock = await blockRepository.findOneBy({ number: 0 })
         if (genesisBlock) {

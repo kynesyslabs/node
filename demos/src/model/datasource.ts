@@ -11,9 +11,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { DataSource } from "typeorm"
 
-import BlockSchema from "./schemas/block.schema"
-import TransactionSchema from "./schemas/transaction.schema"
-import MempoolSchema from "./schemas/mempool.schema"
+import { Blocks } from "./entities/Blocks"
+import { Transactions } from "./entities/Transactions"
+import { Mempool } from "./entities/Mempool"
+import { Consensus } from "./entities/Consensus"
 
 class Datasource {
     private static instance: Datasource
@@ -24,11 +25,10 @@ class Datasource {
             type: "sqlite",
             database: "./data/chain.db",
             entities: [
-                BlockSchema,
-                TransactionSchema,
-                MempoolSchema,
-                // Blocks,
-                // Consensus,
+                Blocks,
+                Transactions,
+                Mempool,
+                Consensus,
                 // Mempool,
                 // PgpKeyServer,
                 // ResponseRegistry,
@@ -38,7 +38,7 @@ class Datasource {
                 // Validators,
             ],
             synchronize: true, // set this to false in production
-            logging: false,
+            logging: true,
         })
     }
 

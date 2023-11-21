@@ -1,4 +1,5 @@
 import { Column, Entity, PrimaryGeneratedColumn } from "typeorm"
+import { pki } from "node-forge"
 
 @Entity("blocks")
 export class Blocks {
@@ -18,7 +19,7 @@ export class Blocks {
     status: string
 
     @Column("varchar", { name: "proposer" })
-    proposer: string
+    proposer: pki.PublicKey | pki.ed25519.BinaryBuffer
 
     @Column("text", { name: "validation_data" })
     validationData: string
