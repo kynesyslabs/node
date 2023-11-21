@@ -5,6 +5,7 @@
     import demos from '$lib/demos.js';
     import {rpcaddress} from '$lib/env.js';
     import PageTitle from '$lib/components/PageTitle.svelte';
+    import CubeSpinning from "$lib/components/CubeSpinning.svelte"
 
     demos.connect($rpcaddress);
 
@@ -26,9 +27,13 @@
     ]
     const tabs = [
         {id:"body",label:"Body"},
-        //{id:"cookies",label:"Cookies"},
+        {id:"verification",label:"Verification Data"},
         {id:"headers",label:"Headers"},
     ]
+
+    let method = "GET";
+
+    let waiting = false;
 
     let theresponse;
 
@@ -88,12 +93,14 @@
 
     async function sendRequest()
     {
+        waiting = true;
         if(params[params.length-1][0] == ""||params[params.length-1][1] == "")
             params.pop();
         console.log("url", url, "params", params);
-        let response = await demos.Web2Transactions("GET", url, params, null, 5);
+        let response = await demos.Web2Transactions(method, url, params, null, 5);
         theresponse = JSON.parse(response);
-        console.log("response", theresponse);
+        waiting = false;
+        //console.log("response", theresponse.attestations);
     }
 
     let url="";
@@ -111,7 +118,7 @@
     <PageTitle>Web2 Request</PageTitle>
     <div style="margin-bottom: 64px;">
         <div class="inputcontainer">
-            <Combobox value="GET" options={requestType} style="height:100%;font-weight:bold;width:100%;min-height:45px"/>
+            <Combobox value={method} onChange={(v)=>{method = v;}} options={requestType} style="height:100%;font-weight:bold;width:100%;min-height:45px"/>
             <input bind:value={url} on:input={handleChangeUrl} class="input" placeholder="Insert the URL here"/>
             <button class="secondary sendbutton" on:click={sendRequest}>Send</button>
         </div>
@@ -121,19 +128,22 @@
     </div>
     {#if isValidUrl(url)}
         <div style="padding-bottom:64px;" transition:budinoslide>
-            <h4 class="subtitle">Params</h4>
+            <h4 class="subtitle">Parameters</h4>
             <div class="params">
                 {#each params as param, index}
                     <div class="paramcontainer">
                         <div class="indexcontainer">{index+1}</div>
                         <div class="inputscontainer">
-                            <input class="smallinput" on:input={(ev)=>{handleChangeParams(ev, index, 0)}} value={param[0]} placeholder="Insert param key"/>
-                            <input class="smallinput" on:input={(ev)=>{handleChangeParams(ev, index, 1)}} value={param[1]} placeholder="Insert param value"/>
+                            <input class="smallinput" on:input={(ev)=>{handleChangeParams(ev, index, 0)}} value={param[0]} placeholder="Insert parameter key"/>
+                            <input class="smallinput" on:input={(ev)=>{handleChangeParams(ev, index, 1)}} value={param[1]} placeholder="Insert parameter value"/>
                         </div>
                     </div>
                 {/each}
             </div>
         </div>
+    {/if}
+    {#if waiting}
+        <CubeSpinning/>
     {/if}
     {#if theresponse}
     <div>
@@ -145,7 +155,7 @@
                 {/each}
             </div>
             <div style="background:var(--background);">
-                <CodePreview id="ciao" text={selectedtab=="body"?JSON.stringify(theresponse.result, null, "\t"):selectedtab=="headers"?JSON.stringify(theresponse.raw.headers,  null, "\t"):""}/>
+                <CodePreview id="ciao" text={selectedtab=="body"?JSON.stringify(theresponse.result, null, "\t"):selectedtab=="verification"?JSON.stringify(theresponse.attestations,  null, "\t"):selectedtab=="headers"?JSON.stringify(theresponse.raw.headers,  null, "\t"):""}/>
             </div>
         </div>
     </div>
