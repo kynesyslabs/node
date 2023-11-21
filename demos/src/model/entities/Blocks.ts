@@ -22,5 +22,5 @@ export class Blocks {
     proposer: pki.PublicKey | pki.ed25519.BinaryBuffer
 
     @Column("text", { name: "validation_data" })
-    validationData: string
+    validation_data: string
 }

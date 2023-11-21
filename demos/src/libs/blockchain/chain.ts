@@ -76,19 +76,22 @@ export default class Chain {
     static async getLastBlockNumber(): Promise<number> {
         const db = await Datasource.getInstance()
         const blockRepository = db.getDataSource().getRepository(Blocks)
-        const lastBlock = await blockRepository.findOne({
-            order: { number: "DESC" },
-        })
+        const lastBlock = await blockRepository
+            .createQueryBuilder("block")
+            .orderBy("block.number", "DESC")
+            .getOne()
+
         return lastBlock ? lastBlock.number : 0
     }
     // INFO Get the last block hash
     static async getLastBlockHash() {
         const db = await Datasource.getInstance()
         const blockRepository = db.getDataSource().getRepository(Blocks)
-        const lastBlock = await blockRepository.findOne({
-            order: { number: "DESC" },
-            select: ["hash"],
-        })
+
+        const lastBlock = await blockRepository
+            .createQueryBuilder("block")
+            .orderBy("block.number", "DESC")
+            .getOne()
 
         return lastBlock?.hash
     }
@@ -124,9 +127,12 @@ export default class Chain {
     }
 
     static async getGenesisBlock(): Promise<Blocks> {
-        // Playground for async testing
+        console.log("get genesis block")
         const db = await Datasource.getInstance()
+        console.log("db")
+        console.log(db)
         const blockRepository = db.getDataSource().getRepository(Blocks)
+        console.log("blockRepository")
         console.log(blockRepository) // Log the repository to check its properties
 
         try {
@@ -196,9 +202,10 @@ export default class Chain {
     static async getLastBlock(): Promise<Blocks> {
         const db = await Datasource.getInstance()
         const blockRepository = db.getDataSource().getRepository(Blocks)
-        const lastBlock = await blockRepository.findOne({
-            order: { number: "DESC" },
-        })
+        const lastBlock = await blockRepository
+            .createQueryBuilder("block")
+            .orderBy("block.number", "DESC")
+            .getOne()
 
         return lastBlock
     }
@@ -301,6 +308,7 @@ export default class Chain {
                     " does not exist: inserting a new block",
             )
             // Insert a new block
+            console.log(block)
             let result = await blockRepository.save(block)
             console.log(result)
             return result
@@ -329,6 +337,9 @@ export default class Chain {
         genesis_block.content.timestamp = genesis_tx.content.timestamp
         genesis_block.content.ordered_transactions.push(genesis_tx)
         genesis_block.content.previousHash = "0x0"
+        genesis_block.status = "confirmed"
+        genesis_block.proposer = "0x000000000000000000000000"
+        genesis_block.validation_data = "genesis"
         genesis_block.hash = Hashing.sha256(
             JSON.stringify(genesis_block.content),
         )
