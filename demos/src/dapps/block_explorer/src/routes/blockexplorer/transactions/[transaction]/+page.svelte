@@ -4,8 +4,8 @@
 	import CopyButton from '$lib/components/CopyButton.svelte';
     import demos from "$lib/demos.js";
     import {rpcaddress} from "$lib/env.js";
-    import CubeSpinning from '../../CubeSpinning.svelte';
-	import PageTitle from '../../../../lib/components/PageTitle.svelte';
+    import CubeSpinning from "$lib/components/CubeSpinning.svelte"
+	import PageTitle from '$lib/components/PageTitle.svelte';
 
     demos.connect($rpcaddress);
 

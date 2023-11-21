@@ -4,10 +4,9 @@
     import {faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
     import demos from '$lib/demos.js';
     import {rpcaddress} from '$lib/env.js';
-    import CubeSpinning from '../CubeSpinning.svelte';
+    import CubeSpinning from "$lib/components/CubeSpinning.svelte"
 	import PageTitle from '../../../lib/components/PageTitle.svelte';
     import { page } from '$app/stores';
-    import { goto } from "$app/navigation";
 	import BlockRow from '../BlockRow.svelte';
  
     const url = $page.url;

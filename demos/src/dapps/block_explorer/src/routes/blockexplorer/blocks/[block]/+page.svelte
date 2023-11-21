@@ -5,7 +5,7 @@
     import { faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
     import demos from "$lib/demos.js";
     import {rpcaddress} from "$lib/env.js";
-	import CubeSpinning from '../../CubeSpinning.svelte';
+    import CubeSpinning from "$lib/components/CubeSpinning.svelte"
     import PageTitle from '$lib/components/PageTitle.svelte';
     import CopyButton from '$lib/components/CopyButton.svelte';
 

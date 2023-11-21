@@ -1,9 +1,8 @@
 <script>
     import '$lib/global.css';
-	import TransactionGrid from '../TransactionGrid.svelte';
     import demos from '$lib/demos.js';
     import {rpcaddress} from '$lib/env.js';
-    import CubeSpinning from '../CubeSpinning.svelte';
+    import CubeSpinning from "$lib/components/CubeSpinning.svelte"
 	import PageTitle from '../../../lib/components/PageTitle.svelte';
 	import TransactionRow from '../TransactionRow.svelte';
 

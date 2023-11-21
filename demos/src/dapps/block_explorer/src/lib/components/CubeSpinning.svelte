@@ -1,4 +1,8 @@
 <style>
+    .cube-container{
+        margin: 64px 0;
+        position: relative;
+    }
     .cube {
         -webkit-transform-style: preserve-3d;
         -webkit-animation: spin 3s infinite ease-out;
@@ -56,11 +60,13 @@
     }
 </style>
 
-<div class="cube">
-    <div class="top"></div>
-    <div class="right"></div>
-    <div class="bottom"></div>
-    <div class="left"></div>
-    <div class="front"></div>
-    <div class="back"></div>
+<div class="cube-container">
+    <div class="cube">
+        <div class="top"></div>
+        <div class="right"></div>
+        <div class="bottom"></div>
+        <div class="left"></div>
+        <div class="front"></div>
+        <div class="back"></div>
+    </div>
 </div>

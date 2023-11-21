@@ -11,7 +11,6 @@
     main{
         margin: 64px 0;
         flex: 1;
-        overflow: hidden;
     }
     .content-container{
         max-width: 1440px;

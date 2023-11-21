@@ -20,10 +20,10 @@
     ]
 }`
     const requestType=[
-        {id:"GET",label:"GET"},
-        {id:"POST",label:"POST"},
-        {id:"PUT",label:"PUT"},
-        {id:"DELETE",label:"DELETE"},   
+        {id:"GET",label:"GET", disabled:false},
+        {id:"POST",label:"POST", disabled:true},
+        {id:"PUT",label:"PUT", disabled:true},
+        {id:"DELETE",label:"DELETE", disabled:true},   
     ]
     const tabs = [
         {id:"body",label:"Body"},
@@ -145,7 +145,7 @@
     {#if waiting}
         <CubeSpinning/>
     {/if}
-    {#if theresponse}
+    {#if theresponse && !waiting}
     <div>
         <h4 class="subtitle">Response</h4>
         <div class="response">
