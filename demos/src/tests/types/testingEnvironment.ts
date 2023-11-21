@@ -1,6 +1,6 @@
 // INFO Import everything
 
-import Block from "src/libs/blockchain/blocks"
+import Block from "src/libs/blockchain/block"
 import Transaction from "src/libs/blockchain/transaction"
 import Mempool from "src/libs/blockchain/mempool"
 import GLS from "src/libs/blockchain/gls/gls"
@@ -49,14 +49,20 @@ export default class testingEnvironment {
 
     static async retrieve(): Promise<testingEnvironment> {
         // Printing configuration
-        term.yellow("[DEMOS Infrastructure Testing Environment] Environment loaded\n ")
+        term.yellow(
+            "[DEMOS Infrastructure Testing Environment] Environment loaded\n ",
+        )
         term.green(process.env.RPC_URL + "\n")
 
         if (!testingEnvironment.instance) {
-            term.yellow("[DEMOS Infrastructure Testing Environment] Starting...\n")
+            term.yellow(
+                "[DEMOS Infrastructure Testing Environment] Starting...\n",
+            )
             testingEnvironment.instance = new testingEnvironment()
         }
-        term.green("[DEMOS Infrastructure Testing Environment] Retrieving instance...\n")
+        term.green(
+            "[DEMOS Infrastructure Testing Environment] Retrieving instance...\n",
+        )
         term.yellow("[START OF AVAILABLE MODULES]\n")
         console.log(testingEnvironment.instance.modules)
         console.log("[END OF AVAILABLE MODULES]")
@@ -70,18 +76,26 @@ export default class testingEnvironment {
 
     // INFO Connection to the testing environment rpc
     connect() {
-        this.connection = io(process.env.RPC_URL, {rejectUnauthorized: false})
+        this.connection = io(process.env.RPC_URL, { rejectUnauthorized: false })
         this.connection.on("connect", () => {
             this.estabilished = true
-            term.bold.green("[DEMOS Infrastructure Testing Environment] Connection established\n")
+            term.bold.green(
+                "[DEMOS Infrastructure Testing Environment] Connection established\n",
+            )
         })
         this.connection.on("disconnect", () => {
-            term.bold.red("[DEMOS Infrastructure Testing Environment] Connection lost\n")
+            term.bold.red(
+                "[DEMOS Infrastructure Testing Environment] Connection lost\n",
+            )
         })
         this.connection.on("connect_error", () => {
-            term.bold.red("[DEMOS Infrastructure Testing Environment] Connection error\n")
+            term.bold.red(
+                "[DEMOS Infrastructure Testing Environment] Connection error\n",
+            )
             console.log(this.connection)
-            term.bold.red("[DEMOS Infrastructure Testing Environment] Connection error\n")
+            term.bold.red(
+                "[DEMOS Infrastructure Testing Environment] Connection error\n",
+            )
         })
     }
 
@@ -92,7 +106,9 @@ export default class testingEnvironment {
             timeout -= 1
         }
         if (!this.estabilished) throw new Error("Connection not established")
-        term.bold.green("[DEMOS Infrastructure Testing Environment] Connection confirmed\n")
+        term.bold.green(
+            "[DEMOS Infrastructure Testing Environment] Connection confirmed\n",
+        )
         return this.estabilished
     }
 }

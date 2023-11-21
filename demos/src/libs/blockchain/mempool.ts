@@ -15,7 +15,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 // INFO Singleton Mempool class
 import Transaction from "./transaction"
 import PeerManager from "../peer/PeerManager"
-import Block from "./blocks"
+import Block from "./block"
 import Chain from "./chain"
 import Hashing from "../crypto/hashing"
 import Cryptography from "../crypto/cryptography"

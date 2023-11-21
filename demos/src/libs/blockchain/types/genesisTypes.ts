@@ -1,6 +1,6 @@
 // INFO Defining the structure of a valid Genesis block
 import Chain from "../chain"
-import Block from "../blocks"
+import Block from "../block"
 /* INFO
  *
  * block, and are not present in the following ones.

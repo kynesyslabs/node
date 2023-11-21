@@ -10,7 +10,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import Block from "./blocks"
+import Block from "./block"
 import Transaction from "./transaction"
 import Hashing from "../crypto/hashing"
 import Datasource from "src/model/datasource"

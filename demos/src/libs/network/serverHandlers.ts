@@ -11,7 +11,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { Peer, PeerManager } from "src/libs/peer"
-import InstantMessaging from "src/features/InstantMessagingProtocol/instantMessagingProtocol"
 import Mempool from "src/libs/blockchain/mempool"
 import chain from "src/libs/blockchain/chain"
 import handleWeb2 from "src/features/web2/Web2Dispatcher"
@@ -22,8 +21,8 @@ import sharedState from "src/utilities/sharedState"
 import { BrowserRequest } from "./serverListeners"
 import { normalizeWebBuffers } from "./routines/normalizeWebBuffers"
 import Sessions from "./routines/sessionManager"
-import Block from "src/libs/blockchain/blocks"
-import Transaction from "src/libs/blockchain/transaction"
+import Blocks from "src/libs/blockchain/block"
+import Transactions from "src/libs/blockchain/transaction"
 import eggs from "./routines/eggs"
 import deriveBlock from "../consensus/routines/deriveBlock"
 import AddressInfo from "../blockchain/types/addressInfo"
@@ -308,9 +307,9 @@ export default class ServerHandlers {
             | string
             | Peer[]
             | number
-            | Block
-            | Transaction
-            | Transaction[]
+            | Blocks
+            | Transactions
+            | Transactions[]
             | AddressInfo
         let socketized_response: Peer[]
         let { data } = content
@@ -375,7 +374,8 @@ export default class ServerHandlers {
                 console.log(
                     "[CHAIN.ts] Received reply from the database: extracting header",
                 )
-                response = response.getHeader()
+                // Fixme: we now have a raw block, and have to instantiate a block from that.
+                // response = response.getHeader()
                 console.log(response)
                 break
             case "getBlockHeaderByHash":
@@ -388,7 +388,8 @@ export default class ServerHandlers {
                 console.log(
                     "[CHAIN.ts] Received reply from the database: extracting header",
                 )
-                response = response.getHeader()
+                // Fixme: we now have a raw block, and have to instantiate a block from that.
+                // response = response.getHeader()
                 console.log(response)
                 break
 

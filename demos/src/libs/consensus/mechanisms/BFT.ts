@@ -1,6 +1,6 @@
 // INFO This library provides all the methods required to apply a QBFT consensus algorithm in a PoR/BFT network.
 import Mempool, { MempoolData } from "src/libs/blockchain/mempool"
-import Block from "src/libs/blockchain/blocks"
+import Block from "src/libs/blockchain/block"
 import PeerManager from "src/libs/peer/PeerManager"
 import Peer from "src/libs/peer/Peer"
 import { ProofOfRepresentation } from "./PoR"
