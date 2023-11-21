@@ -12,7 +12,7 @@ export async function deriveMempoolOperation(
     insert: boolean = true,
 ): Promise<any> {
     // Sanity check
-    if (typeof(data) !== "string") {
+    if (typeof data !== "string") {
         try {
             data = JSON.stringify(data)
         } catch (e) {
@@ -40,7 +40,9 @@ export async function deriveMempoolOperation(
     return derivedOperation
 }
 
-export async function createOperation(transaction: Transaction): Promise<Operation> {
+export async function createOperation(
+    transaction: Transaction,
+): Promise<Operation> {
     let operation: Operation = {
         operator: null,
         actor: null,
@@ -69,9 +71,7 @@ export async function createOperation(transaction: Transaction): Promise<Operati
     return operation
 }
 
-export async function createTransaction(
-    data: any,
-): Promise<Transaction> {
+export async function createTransaction(data: any): Promise<Transaction> {
     let transaction: Transaction = {
         content: {
             type: null,
@@ -85,12 +85,12 @@ export async function createTransaction(
                 network_fee: null,
                 rpc_fee: null,
                 additional_fee: null,
-            }, 
+            },
         },
         signature: null,
         hash: null,
         confirmations: [],
-        state_changes: [],
+        status: null,
     }
     transaction.content.data = data
     transaction.content.timestamp = Date.now()

@@ -37,6 +37,27 @@ export default class Chain {
         return this.instance
     }
 
+    static async read(sql_query: string): Promise<any> {
+        try {
+            const db = await Datasource.getInstance()
+            return await db.getDataSource().query(sql_query)
+        } catch (err) {
+            console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
+            console.error(err)
+            throw err
+        }
+    }
+
+    static async write(sql_query: string) {
+        try {
+            const db = await Datasource.getInstance()
+            return await db.getDataSource().query(sql_query)
+        } catch (err) {
+            console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
+            console.error(err)
+            throw err
+        }
+    }
     // SECTION Getters
 
     // INFO Returns a transaction by its hash

@@ -55,7 +55,7 @@ export default class sharedState {
         console.warn("[SHAREDSTATE]: last block")
         console.warn(lastBlock)
         let lastTimestamp: number
-        if (chain.isGenesis(lastBlock)) {
+        if (chain.isGenesis(lastBlock as any)) {
             //REVIEW - is this useless? I think so.
             console.log("[SHAREDSTATE]: Genesis block detected")
             //REVIEW: is this different than other blocks?
