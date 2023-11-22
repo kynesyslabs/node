@@ -1,8 +1,8 @@
-import { Column, Entity } from "typeorm"
+import { Column, Entity, PrimaryColumn } from "typeorm"
 
 @Entity("pgp_key_server")
 export class PgpKeyServer {
-    @Column("text", { name: "key" })
+    @PrimaryColumn("text", { name: "key" })
     key: string
 
     @Column("text", { name: "email", nullable: true })

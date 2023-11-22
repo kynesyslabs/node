@@ -16,9 +16,11 @@ KyneSys Labs: https://www.kynesys.xyz/
 import Transaction from "./transaction"
 import PeerManager from "../peer/PeerManager"
 import Block from "./block"
-import Chain from "./chain"
 import Hashing from "../crypto/hashing"
 import Cryptography from "../crypto/cryptography"
+
+import Datasource from "src/model/datasource"
+import { Mempool as MempoolEntity } from "src/model/entities/Mempool"
 
 export interface MempoolData {
     number: number
@@ -28,61 +30,59 @@ export interface MempoolData {
     timestamp: number
 }
 
+export interface SerializedMempoolData {
+    number: number
+    current: number
+    transactions: string
+    proposedBlock: string
+    timestamp: number
+}
+
 export default class Mempool {
     // INFO Reading the whole current mempool
-    // REVIEW What if the mempool is empty?
-    // FIXME If the mempool is empty we should anyway have a MempoolData object
     public static async getMempool(): Promise<MempoolData> {
-        let sql_results = await Chain.read(
-            "SELECT * from mempool WHERE current = 1",
-        )
-        let sql_result = sql_results[0]
-        console.log(sql_result)
+        const db = await Datasource.getInstance()
+        const mempoolRepository = db
+            .getDataSource()
+            .getRepository(MempoolEntity)
+
+        const results = await mempoolRepository.findBy({ current: 1 })
+
+        console.log(results)
         // In case there is no current mempool, lets create it
-        if (!sql_result || sql_result.length === 0) {
+        if (!results || results.length === 0) {
             console.log("[Mempool] No current mempool found, creating one...")
-            let newMempool: MempoolData = {
+            let newMempool: SerializedMempoolData = {
                 number: 0,
                 current: 1,
-                transactions: [],
+                transactions: JSON.stringify([]),
                 proposedBlock: null,
                 timestamp: new Date().getTime(),
             }
-            await Chain.write(
-                "INSERT INTO mempool VALUES(" +
-                    newMempool.number +
-                    ", " +
-                    newMempool.current +
-                    ", '" +
-                    JSON.stringify(newMempool.transactions) +
-                    "', '" +
-                    null +
-                    "')",
-            )
-            sql_result = await Chain.read(
-                "SELECT * from mempool WHERE current = 1",
-            )
+            const db = await Datasource.getInstance()
+            const mempoolRepository = db
+                .getDataSource()
+                .getRepository(MempoolEntity)
+
+            mempoolRepository.save(newMempool)
+
+            const results = await mempoolRepository.findBy({ current: 1 })
         }
         console.log("[MEMPOOL MANAGER] Mempool query result:")
-        console.log(sql_result)
-        // Normalizing disguised strings
-        if (typeof sql_result === "string") {
-            sql_results = JSON.parse(sql_result)
-        }
-        // If this is an array, we take the first element
-        if (Array.isArray(sql_result)) {
-            sql_result = sql_result[0]
-        }
+        console.log(results)
+
+        const firstResult = results[0]
+
         // Else we take the object itself
 
         console.log("[MEMPOOL MANAGER] Normalized mempool query result:")
-        console.log(sql_result)
+        console.log(firstResult)
         // Serializing
         let result: MempoolData = {
-            number: sql_result.number,
-            current: sql_result.current,
-            transactions: JSON.parse(sql_result.transactions),
-            proposedBlock: JSON.parse(sql_result.proposedBlock),
+            number: firstResult.number,
+            current: firstResult.current,
+            transactions: JSON.parse(firstResult.transactions),
+            proposedBlock: JSON.parse(firstResult.proposedBlock),
             timestamp: new Date().getTime(),
         }
         console.log("Mempool retrieved:")
@@ -98,53 +98,105 @@ export default class Mempool {
     public static async addTransaction(
         transaction: Transaction,
     ): Promise<void> {
-        let mempool = await Mempool.getMempool()
+        let mempool = await this.getMempool()
+        console.log("adding transaction, found this mempool:")
         console.log(mempool)
         mempool.transactions.push(transaction) // REVIEW What if it is empty?
-        await Chain.write(
-            "UPDATE mempool SET transactions ='" +
-                JSON.stringify(mempool.transactions) +
-                "' WHERE current = 1",
-        )
+
+        const db = await Datasource.getInstance()
+        const mempoolRepository = db
+            .getDataSource()
+            .getRepository(MempoolEntity)
+
+        const serializedMempool: SerializedMempoolData = {
+            number: mempool.number,
+            current: mempool.current,
+            transactions: JSON.stringify(mempool.transactions),
+            proposedBlock: JSON.stringify(mempool.proposedBlock),
+            timestamp: mempool.timestamp,
+        }
+
+        await mempoolRepository.update({ current: 1 }, serializedMempool)
     }
 
-    // INFO Writing the headers of the PoR to the mempool
     public static async addHeaders(headers: any): Promise<void> {
-        // TODO Add types
-        let mempool = await Mempool.getMempool()
-        // REVIEW Ensure the schema of the headers is correctly inserted into the db
-        await Chain.write(
-            "UPDATE mempool SET headers ='" +
-                JSON.stringify(headers) +
-                "' WHERE current = 1",
-        )
+        let mempool = await this.getMempool()
+        // REVIEW: Validate or transform headers to ensure they fit the schema expected by the database
+
+        const db = await Datasource.getInstance()
+        const mempoolRepository = db
+            .getDataSource()
+            .getRepository(MempoolEntity)
+
+        try {
+            await mempoolRepository.update(
+                { current: 1 },
+                { headers: JSON.stringify(headers) },
+            )
+        } catch (error) {
+            console.error("Error updating headers in mempool:", error)
+            // Handle the error appropriately
+        }
     }
 
-    // INFO Removing a transaction from the mempool
     public static async removeTransaction(
         transaction: Transaction,
     ): Promise<void> {
-        let mempool = await Mempool.getMempool()
+        let mempool = await this.getMempool() // Assuming getMempool is updated to work with TypeORM
+
         let index = mempool.transactions.indexOf(transaction)
-        mempool.transactions.splice(index, 1)
-        await Chain.write(
-            "UPDATE mempool SET transactions ='" +
-                JSON.stringify(mempool.transactions) +
-                "' WHERE current = 1",
-        )
+        if (index > -1) {
+            mempool.transactions.splice(index, 1)
+
+            const db = await Datasource.getInstance()
+            const mempoolRepository = db
+                .getDataSource()
+                .getRepository(MempoolEntity)
+
+            try {
+                await mempoolRepository.update(
+                    { current: 1 },
+                    { transactions: JSON.stringify(mempool.transactions) },
+                )
+            } catch (error) {
+                console.error("Error removing transaction from mempool:", error)
+                // Handle the error appropriately
+            }
+        } else {
+            console.warn("Transaction not found in mempool.")
+        }
     }
 
-    // INFO Adding a new mempool
     public static async nextMempool(): Promise<void> {
-        let mempool = await Mempool.getMempool()
-        // Calculating the next number
-        let next_number = mempool.number + 1
-        // Archiving the current mempool
-        await Chain.write("UPDATE mempool SET current = 0 WHERE current = 1")
-        // Creating a new mempool line
-        await Chain.write(
-            "INSERT INTO mempool VALUES(" + next_number + ", 1, '[]', '{}')",
-        )
+        const db = await Datasource.getInstance()
+        const mempoolRepository = db
+            .getDataSource()
+            .getRepository(MempoolEntity)
+
+        try {
+            // Getting the current mempool
+            let mempool = await this.getMempool() // Assuming getMempool is updated to work with TypeORM
+            let next_number = mempool.number + 1
+
+            // Archiving the current mempool
+            await mempoolRepository.update(
+                { current: 1 }, // Identify the current mempool
+                { current: 0 }, // Set current to 0 to archive
+            )
+
+            // Creating a new mempool entity
+            let newMempool = mempoolRepository.create({
+                number: next_number,
+                current: 1,
+                transactions: JSON.stringify([]),
+                proposedBlock: JSON.stringify({}),
+            })
+
+            await mempoolRepository.save(newMempool)
+        } catch (error) {
+            console.error("Error in nextMempool:", error)
+            // Handle the error appropriately
+        }
     }
 
     /* TODO Representative Shard
@@ -240,11 +292,20 @@ export default class Mempool {
         mempool.transactions = mempool.transactions.concat(
             received_mempool.transactions,
         ) // REVIEW is this the best way to merge?
-        await Chain.write(
-            "UPDATE mempool SET transactions = '" +
-                JSON.stringify(mempool.transactions) +
-                "' WHERE current = 1",
-        )
+        const db = await Datasource.getInstance()
+        const mempoolRepository = db
+            .getDataSource()
+            .getRepository(MempoolEntity)
+
+        try {
+            await mempoolRepository.update(
+                { current: 1 }, // Assuming 'current' is a unique identifier for the mempool record
+                { transactions: JSON.stringify(mempool.transactions) },
+            )
+        } catch (error) {
+            console.error("Error removing transaction from mempool:", error)
+            // Handle the error appropriately
+        }
         return true
     }
 
@@ -265,11 +326,20 @@ export default class Mempool {
                 return 1
             }
         })
-        await Chain.write(
-            "UPDATE mempool SET transactions = '" +
-                JSON.stringify(mempool.transactions) +
-                "' WHERE current = 1",
-        )
+        const db = await Datasource.getInstance()
+        const mempoolRepository = db
+            .getDataSource()
+            .getRepository(MempoolEntity)
+
+        try {
+            await mempoolRepository.update(
+                { current: 1 }, // Assuming 'current' is a unique identifier for the mempool record
+                { transactions: JSON.stringify(mempool.transactions) },
+            )
+        } catch (error) {
+            console.error("Error removing transaction from mempool:", error)
+            // Handle the error appropriately
+        }
         return mempool
     }
 
@@ -287,11 +357,28 @@ export default class Mempool {
                 replace
             ) {
                 local_mempool.transactions.splice(i, 1)
-                await Chain.write(
-                    "UPDATE mempool SET transactions = '" +
-                        JSON.stringify(local_mempool.transactions) +
-                        "' WHERE current = 1",
-                )
+
+                const db = await Datasource.getInstance()
+                const mempoolRepository = db
+                    .getDataSource()
+                    .getRepository(MempoolEntity)
+
+                try {
+                    await mempoolRepository.update(
+                        { current: 1 }, // Assuming 'current' is a unique identifier for the mempool record
+                        {
+                            transactions: JSON.stringify(
+                                local_mempool.transactions,
+                            ),
+                        },
+                    )
+                } catch (error) {
+                    console.error(
+                        "Error removing transaction from mempool:",
+                        error,
+                    )
+                    // Handle the error appropriately
+                }
             }
         }
 

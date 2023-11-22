@@ -15,6 +15,11 @@ import { Blocks } from "./entities/Blocks"
 import { Transactions } from "./entities/Transactions"
 import { Mempool } from "./entities/Mempool"
 import { Consensus } from "./entities/Consensus"
+import { PgpKeyServer } from "./entities/PgpKeyServer"
+import { ResponseRegistry } from "./entities/ResponseRegistry"
+import { StatusHashes } from "./entities/StatusHashes"
+import { StatusProperties } from "./entities/StatusProperties"
+import { Validators } from "./entities/Validators"
 
 class Datasource {
     private static instance: Datasource
@@ -27,15 +32,14 @@ class Datasource {
             entities: [
                 Blocks,
                 Transactions,
-                // Mempool,
-                // Consensus,
-                // Mempool,
-                // PgpKeyServer,
-                // ResponseRegistry,
-                // StatusHashes,
-                // StatusProperties,
-                // Transactions,
-                // Validators,
+                Mempool,
+                Consensus,
+                PgpKeyServer,
+                ResponseRegistry,
+                StatusHashes,
+                StatusProperties,
+                Transactions,
+                Validators,
             ],
             synchronize: true, // set this to false in production
             logging: true,

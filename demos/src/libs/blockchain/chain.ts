@@ -129,18 +129,8 @@ export default class Chain {
     static async getGenesisBlock(): Promise<Blocks> {
         console.log("get genesis block")
         const db = await Datasource.getInstance()
-        console.log("db")
-        console.log(db)
         const blockRepository = db.getDataSource().getRepository(Blocks)
-        console.log("blockRepository")
-        console.log(blockRepository) // Log the repository to check its properties
 
-        try {
-            const allBlocks = await blockRepository.find()
-            console.log(allBlocks) // Log all records from the table
-        } catch (error) {
-            console.error(error) // Log any error that occurs
-        }
         let genBlock = await blockRepository.findOneBy({ number: 0 })
         console.log("genesis Block")
         console.log(genBlock)

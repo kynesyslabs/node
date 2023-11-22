@@ -1,16 +1,16 @@
-import { Column, Entity } from "typeorm";
+import { Column, Entity, PrimaryColumn } from "typeorm"
 
 @Entity("responseRegistry")
 export class ResponseRegistry {
-  @Column("text", { name: "muid", nullable: true })
-  muid: string | null;
+    @PrimaryColumn("text", { name: "muid" })
+    muid: string | null
 
-  @Column("integer", { name: "timestamp", nullable: true })
-  timestamp: number | null;
+    @Column("integer", { name: "timestamp", nullable: true })
+    timestamp: number | null
 
-  @Column("text", { name: "response", nullable: true })
-  response: string | null;
+    @Column("text", { name: "response", nullable: true })
+    response: string | null
 
-  @Column("text", { name: "comlink", nullable: true })
-  comlink: string | null;
+    @Column("text", { name: "comlink", nullable: true })
+    comlink: string | null
 }

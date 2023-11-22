@@ -12,6 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 var term = require("terminal-kit").terminal
 //import process from "node:process"
 import * as fs from "fs"
+import "reflect-metadata"
 //import * as express from "express" // NOTE ts-node compatibility
 const express = require("express") // NOTE tsx & ts-node compatibility
 // import express from "express"// NOTE tsx compatibility
@@ -60,11 +61,11 @@ const id = Identity.getInstance()
 const app = express()
 
 // TODO Put into .env
-groundControl.init(10250, "0.0.0.0", "http", {
-    key: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.key",
-    cert: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.crt",
-    ca: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.ca",
-})
+// groundControl.init(10250, "0.0.0.0", "http", {
+//     key: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.key",
+//     cert: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.crt",
+//     ca: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.ca",
+// })
 
 // SECTION REVIEW ZONE
 var https = require("https") // REVEIEW SSL COMPATIBILITY

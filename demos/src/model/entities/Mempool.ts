@@ -1,12 +1,15 @@
-import { Column, Entity } from "typeorm"
+import { Column, Entity, PrimaryGeneratedColumn } from "typeorm"
 
 @Entity("mempool")
 export class Mempool {
-    @Column("integer", { name: "number", nullable: true })
-    number: number | null
+    @PrimaryGeneratedColumn({ type: "integer", name: "id" })
+    id: number
 
-    @Column("integer", { name: "current", nullable: true })
-    current: number | null
+    @Column("integer", { name: "number" })
+    number: number
+
+    @Column("integer", { name: "current" })
+    current: number
 
     @Column("text", { name: "transactions", nullable: true })
     transactions: string | null
