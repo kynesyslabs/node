@@ -119,26 +119,6 @@ export default class Mempool {
         await mempoolRepository.update({ current: 1 }, serializedMempool)
     }
 
-    public static async addHeaders(headers: any): Promise<void> {
-        let mempool = await this.getMempool()
-        // REVIEW: Validate or transform headers to ensure they fit the schema expected by the database
-
-        const db = await Datasource.getInstance()
-        const mempoolRepository = db
-            .getDataSource()
-            .getRepository(MempoolEntity)
-
-        try {
-            await mempoolRepository.update(
-                { current: 1 },
-                { headers: JSON.stringify(headers) },
-            )
-        } catch (error) {
-            console.error("Error updating headers in mempool:", error)
-            // Handle the error appropriately
-        }
-    }
-
     public static async removeTransaction(
         transaction: Transaction,
     ): Promise<void> {

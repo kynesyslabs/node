@@ -107,8 +107,6 @@ export class ProofOfRepresentation {
             on_block: on_block,
             combined: combined,
         }
-        // REVIEW Add the header to the mempool too
-        Mempool.addHeaders(this.validators["header"])
         return seed
     }
 
