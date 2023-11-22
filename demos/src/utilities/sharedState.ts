@@ -61,13 +61,10 @@ export default class sharedState {
             //REVIEW: is this different than other blocks?
             lastTimestamp = new Date().getTime() - 69420 * 1000
         } else {
-            const blockContent = JSON.parse(
-                lastBlock.content as unknown as string,
-            )
             console.log("blockContent")
-            console.log(blockContent)
-            console.log(blockContent.timestamp)
-            lastTimestamp = blockContent.timestamp
+            console.log(lastBlock.content)
+            console.log(lastBlock.content.timestamp)
+            lastTimestamp = lastBlock.content.timestamp
         }
 
         console.log("LAST TIMESTAMP: " + lastTimestamp)
