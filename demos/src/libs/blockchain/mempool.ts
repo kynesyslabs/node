@@ -46,7 +46,7 @@ export default class Mempool {
             .getDataSource()
             .getRepository(MempoolEntity)
 
-        const results = await mempoolRepository.findBy({ current: 1 })
+        let results = await mempoolRepository.findBy({ current: 1 })
 
         console.log(results)
         // In case there is no current mempool, lets create it
@@ -66,7 +66,7 @@ export default class Mempool {
 
             mempoolRepository.save(newMempool)
 
-            const results = await mempoolRepository.findBy({ current: 1 })
+            results = await mempoolRepository.findBy({ current: 1 })
         }
         console.log("[MEMPOOL MANAGER] Mempool query result:")
         console.log(results)
