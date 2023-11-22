@@ -64,7 +64,7 @@ export default class Mempool {
                 .getDataSource()
                 .getRepository(MempoolEntity)
 
-            mempoolRepository.save(newMempool)
+            await mempoolRepository.save(newMempool)
 
             results = await mempoolRepository.findBy({ current: 1 })
         }
