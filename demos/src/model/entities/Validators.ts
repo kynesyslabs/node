@@ -1,8 +1,8 @@
-import { Column, Entity } from "typeorm"
+import { Column, Entity, PrimaryColumn } from "typeorm"
 
 @Entity("validators")
 export class Validators {
-    @Column("text", { name: "address", nullable: true })
+    @PrimaryColumn("text", { name: "address" })
     address: string | null
 
     @Column("text", { name: "status", nullable: true })

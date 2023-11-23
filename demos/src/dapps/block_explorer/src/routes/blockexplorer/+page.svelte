@@ -20,16 +20,31 @@
         return;
         let blockNumber = JSON.parse(await demos.getLastBlockNumber());
         let block = await demos.getBlockByNumber(blockNumber);
+        block.content = JSON.parse(block.content);
         return block;
     }
 
     async function getBlocks() 
     {
+        let blockRequests = [];
         if(!demos.connected)
         return;
         let blockNumber = JSON.parse(await demos.getLastBlockNumber());
-        let block = await demos.getBlockByNumber(blockNumber);
-        return block;
+        for(let i = blockNumber; i > Math.max(blockNumber - 10, 0); i--)
+        {   
+            blockRequests.push(demos.getBlockByNumber(i));
+        }
+        let blockValues = await Promise.all(blockRequests);
+        try{
+            blockValues.forEach(block=>{
+                block.content = JSON.parse(block.content);
+            })
+        }  
+        catch(e)
+        {
+            console.log("parse error", e);
+        }
+        return blockValues;
     }
 
 
@@ -119,7 +134,7 @@
         <div class="section-container">
         <h4 class="card-header">Latest Blocks</h4>
             <div class="card">
-                {#await getBlock()}
+                {#await getBlocks()}
                     <BlockRow/>
                     <BlockRow/>
                     <BlockRow/>
@@ -130,8 +145,17 @@
                     <BlockRow/>
                     <BlockRow/>
                     <BlockRow/>
-                {:then block}
-                    <BlockRow block={block}/>
+                {:then blocks}
+                    {#if blocks.length > 0}
+                        {#each blocks as block}
+                            <BlockRow block={block}/>
+                        {/each}
+                    {:else}
+                        <div class="error-card">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="40" height="40"><g id="warning-triangle--frame-alert-warning-triangle-exclamation-caution"><path id="Subtract" fill="var(--color)" fill-rule="evenodd" d="m12 1.5-11 21h22l-11-21ZM11 16v-6h2v6h-2Zm0 2v2h2v-2h-2Z" clip-rule="evenodd"></path></g></svg>
+                            <p>No block found in this node</p>
+                        </div>
+                    {/if}
                 {:catch error}
                     <div class="error-card">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="40" height="40"><g id="warning-triangle--frame-alert-warning-triangle-exclamation-caution"><path id="Subtract" fill="var(--color)" fill-rule="evenodd" d="m12 1.5-11 21h22l-11-21ZM11 16v-6h2v6h-2Zm0 2v2h2v-2h-2Z" clip-rule="evenodd"></path></g></svg>
@@ -160,9 +184,16 @@
                     <TransactionRow/>
                     <TransactionRow/>
                 {:then block}
-                    {#each block.content.ordered_transactions as transaction}
-                        <TransactionRow transaction={transaction}/>
-                    {/each}
+                    {#if block.content.ordered_transactions.length > 0}
+                        {#each block.content.ordered_transactions as transaction}
+                            <TransactionRow transaction={transaction}/>
+                        {/each}
+                    {:else}
+                    <div class="error-card">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="40" height="40"><g id="warning-triangle--frame-alert-warning-triangle-exclamation-caution"><path id="Subtract" fill="var(--color)" fill-rule="evenodd" d="m12 1.5-11 21h22l-11-21ZM11 16v-6h2v6h-2Zm0 2v2h2v-2h-2Z" clip-rule="evenodd"></path></g></svg>
+                        <p>No transaction found in the last block</p>
+                    </div>
+                    {/if}
                 {:catch error}
                     <div class="error-card">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="40" height="40"><g id="warning-triangle--frame-alert-warning-triangle-exclamation-caution"><path id="Subtract" fill="var(--color)" fill-rule="evenodd" d="m12 1.5-11 21h22l-11-21ZM11 16v-6h2v6h-2Zm0 2v2h2v-2h-2Z" clip-rule="evenodd"></path></g></svg>

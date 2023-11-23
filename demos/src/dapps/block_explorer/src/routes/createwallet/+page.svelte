@@ -4,16 +4,16 @@
     import { saveAs } from 'file-saver';
 	import Fa from 'svelte-fa';
 	import { faDownload } from '@fortawesome/free-solid-svg-icons';
-    import {updateWallet} from '$lib/env.js';
+    import {wallet, updateWallet} from '$lib/env.js';
     import PageTitle from '$lib/components/PageTitle.svelte';
-    let logged = demos.DemosWebAuth.getInstance().loggedIn;
+    let logged = $wallet.loggedIn;
     let created = false;
     if(!logged)
         createWallet();
     async function createWallet()
     {
         created = await demos.DemosWebAuth.getInstance().create();
-        updateWallet(); 
+        updateWallet();
         logged = true;
     }
 

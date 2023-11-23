@@ -57,13 +57,12 @@
         position: absolute;
         left: 0;
         width: 100%;
-        border-radius: 10px;
         box-shadow: var(--box-shadow);
         z-index: 300;
         background-color: var(--background3);
         top: 0;
     }
-    .combobox-option{
+    .combobox-option, .disabled-option{
         padding: 0 var(--input-padding);
         height: 52px;
         cursor: pointer;
@@ -74,6 +73,10 @@
         z-index: 500;
         font-size: 1rem;
         align-items: center;
+    }
+    .disabled-option{
+        opacity: .4;
+        border-radius: 0;
     }
     .combobox-option:hover{
         background-color: var(--color2);
@@ -96,9 +99,11 @@
     {#if open}
     <div transition:comoboxAnimation={{duration:200, easing:cubicInOut}} id="dialog" class="combobox-dialog">
         {#each options as option, i}
-            <div role={`Element`} class="combobox-option" on:click={()=>{handleChange(option.id)}}>
+            <div role={`Element`} class={option.disabled?"disabled-option":"combobox-option"} on:click={option.disabled?()=>{}:()=>{handleChange(option.id)}}>
                 {#if option.id===value}
                 <Fa icon={faCheck}></Fa>
+                {:else if option.disabled}
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="16" height="16"><g id="padlock-square-1--combination-combo-lock-locked-padlock-secure-security-shield-keyhole"><path id="Union" fill="var(--color)" fill-rule="evenodd" d="M8 7a4 4 0 1 1 8 0v3H8V7Zm-2 3V7a6 6 0 1 1 12 0v3h3v13H3V10h3Zm5 8.5v-4h2v4h-2Z" clip-rule="evenodd"></path></g></svg>
                 {:else}
                 <div></div>
                 {/if}

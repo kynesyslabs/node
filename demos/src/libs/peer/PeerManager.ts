@@ -13,8 +13,7 @@ import Peer from "./Peer"
 
 export default class PeerManager {
     private static instance: PeerManager
-    private peerList: Record<string, Peer>
-    // TODO Use a mapping too to link a connection string to a peer?
+    private peerList: Record<string, Peer> // Storing all the connections, will be filtered once the request is done
 
     private constructor() {
         this.peerList = {}
@@ -34,19 +33,45 @@ export default class PeerManager {
     }
 
     getPeers(): Peer[] {
-        const peerList: Peer[] = []
+        return this._getActors(true, false)
+    }
+
+    // INFO Getting all peers that have no identity (aka clients, dapps and so on)
+    getConnections(): Peer[] {
+        return this._getActors(false, true)
+    }
+
+    getAll(): Peer[] {
+        return this._getActors(true, true)
+    }
+
+    private _getActors(peers: boolean, connections: boolean): Peer[] {
+        console.log("[PeerManager] Getting all peers...")
+        const actorList: Peer[] = []
+        const connectedList: Peer[] = []
+        const authenticatedList: Peer[] = []
+        console.log(this.peerList)
         for (const peer in this.peerList) {
+            console.log("[PeerManager] Getting peer " + peer)
             let _peer = this.peerList[peer]
+            // Filtering
             if (_peer.identity != undefined) {
-                peerList.push(this.peerList[peer])
+                console.log("[PEERMANAGER] This peer has an identity: treating it as an authenticated peer")
+                authenticatedList.push(_peer)
             } else {
-                console.log(
-                    "[PEERMANAGER] This peer has no identity: treating it as a read only peer",
-                )
+                console.log("[PEERMANAGER] This peer has no identity: treating it as a connection only peer")
+                connectedList.push(_peer)
             }
         }
-        console.log("[PEERMANAGER] Peerlist length: " + peerList.length)
-        return peerList
+        // Merging and returning
+        if (peers) {
+            actorList.push(...authenticatedList)
+        }
+        if (connections) {
+            actorList.push(...connectedList)
+        }
+        console.log("[PEERMANAGER] Retrieved and filtered actor list length: " + actorList.length)
+        return actorList
     }
 
     getPeer(identity: string): Peer {
@@ -84,6 +109,7 @@ export default class PeerManager {
             console.log("[WARN] No connection string detected")
         }
         // FIXME Run the routine in peers to get it
+        // REVIEW Sync?
         return true
     }
 

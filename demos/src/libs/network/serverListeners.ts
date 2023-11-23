@@ -17,6 +17,10 @@ import { comlinkUtils } from "src/libs/communications"
 import { Identity } from "src/libs/identity"
 import Transmission from "src/libs/communications/transmission"
 import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
+import sharedState from "src/utilities/sharedState"
+import { demostdlib } from "../utils"
+import { ISecurityReport } from "./securityModule"
+import * as Security from "./securityModule"
 
 var term = require("terminal-kit").terminal
 
@@ -41,6 +45,7 @@ export default class ServerListeners {
         await this.voteRequestListener()
     }
 
+    // NOTE Browser requests follows a completely different path from the others
     // INFO this set of listeners does not require authentication and
     // are not comlink as well, so they need to have their own listeners
     async browserRequestListener() {
@@ -72,12 +77,14 @@ export default class ServerListeners {
         })
     }
 
+    // NOTE ComLinks are managed "centrally" here so apply securityModule stuff here
     async comlinkListener() {
         this.peer.socket.on("comlink", async request => {
             term.yellow("[SERVER] Received comlink\n")
             const id_ed25519 = await cryptography.load("./.demos_identity")
             const receiver = this.peer.socket
             var parsed_comlink
+            // TODO This can be put into securityModule for consistency
             try {
                 // Parsing comlink
                 parsed_comlink = await comlinkUtils.parseComlink(
@@ -99,11 +106,15 @@ export default class ServerListeners {
 
             let extra: any, require_reply: any, response: any
 
+            // NOTE And here we have the real deal
             switch (content.type) {
                 case "proofOfConsensus":
-                    ;({ extra, require_reply, response } = await proofConsensusHandler(content))
+                    ;({ extra, require_reply, response } =
+                        await proofConsensusHandler(content))
                     break
+                    
                 case "tx":
+                    term.yellow.bold("[SERVER] Received tx\n")
                     ;({ extra, require_reply, response } =
                         await ServerHandlers.handleTransaction(content))
                     break
@@ -178,6 +189,7 @@ export default class ServerListeners {
             // ANCHOR Reply logic
             // REVIEW unless specified, we now send back the updated comlink as a response
             // Building a message to send back in the comlink
+            // TODO Use demostdlib
 
             var response_message = new Transmission(
                 Identity.getInstance().ed25519.privateKey,
@@ -199,6 +211,31 @@ export default class ServerListeners {
                 response_message,
                 id_ed25519.privateKey,
             )
+
+            // TODO & REVIEW Call security module for send limiting messages
+            let secDisabled = false
+            if (!secDisabled) {
+                let ts = new Date().getTime()
+                let  securityInterceptor: ISecurityReport = await Security.modules.communications.comlink.checkRateLimits(ts)
+                if (!securityInterceptor.state) {
+                    switch (securityInterceptor.code) {
+                        case "429":
+                            break
+
+                        default:
+                            term.red.bold(
+                                "[COMLINK] [SECURITY INTERCEPTOR] Unknown error: " +
+                                    securityInterceptor.code.toString(),
+                            )
+                            term.red.bold(
+                                "[COMLINK] [SECURITY INTERCEPTOR] Reported:",
+                            )
+                            console.log(securityInterceptor.message)
+                            break
+                    }
+                }
+            }
+
             // Sending back the response
             console.log("[SERVER] Sending back comlink")
             console.log(JSON.stringify(_comlink_request))

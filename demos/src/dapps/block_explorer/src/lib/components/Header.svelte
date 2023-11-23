@@ -34,6 +34,7 @@
         document.cookie="prvkey=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;"
         await demos.DemosWebAuth.getInstance().logout();
         updateWallet();
+        localStorage.removeItem("prvkey");
         goto("/login");
     }
     let mobileMenuOpen = false;

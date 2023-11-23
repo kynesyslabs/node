@@ -3,7 +3,7 @@
 	import TaskParam from "./TaskParam.svelte";
 	import ChainSelection from "$lib/components/inputs/ChainSelection.svelte";
     import {budinofade, budinotraslato} from '$lib/transitions.js';
-    import {cloneDeep} from 'lodash';
+    import cloneDeep from 'lodash/cloneDeep';
     import {Operation} from '$lib/chainscript.js';
     import "$lib/styles/crosschain/operationeditor.css"
 

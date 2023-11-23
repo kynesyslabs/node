@@ -1,17 +1,16 @@
 // INFO In this module is offloaded the parsing of XM requests
 import * as multichain from "sdk/localsdk/multichain"
-import sendSigned from "./writes/sendSigned"
 import * as fs from "fs"
 import required from "src/utilities/required"
+import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
+import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 
 // NOTE We define multichain into global so that we can use it later
 global.multichain = multichain
 
-// REVIEW Define XMScript (chs) class?
-
 export interface ITask {
     type: string
-    params: {}
+    params: string // We want them stringified
     // TODO AND NOTE
     // Here the client should send
     // the signed transactions that it requires
@@ -91,8 +90,8 @@ class XMParser {
     static async executeOperation(operation: IOperation): Promise<any> {
         let result = {}
 
-        // NOTE chainID is 0 except for EVM chains
-        // This snippet is what we need to support all the EVM chains
+        // chainID is 0 except for EVM chains
+        // NOTE This snippet is what we need to support all the EVM chains
         let chainID = 0
         if (operation.is_evm) {
             // Choosing the right chain ID
@@ -112,6 +111,12 @@ class XMParser {
                 } else if (operation.subchain == "testnet") {
                     chainID = 97
                 }
+            } else if (operation.chain == "polygon") {
+                if (operation.subchain == "mainnet") {
+                    chainID = 137
+                } else if (operation.subchain == "mumbai") {
+                    chainID = 80001
+                }
             }
             // Fallback on direct chain id
             else {
@@ -129,49 +134,112 @@ class XMParser {
         // let res = await multichain[operation.chain][operation.task.type](operation.task.params)
 
         // NOTE Deciding the operations
+        
         // TODO Checking if we have a conditional operation
-        // Types
+
+        // REVOEW Here is maybe to rewrite with modules (see if it is more efficient)
+
+        // ANCHOR MVP
+        /* SECTION Write tasks */
+        // NOTE For the following tasks we need to check the signed payloads against checkSignedPayloads()
+
+        // INFO Pay task
         if (operation.task.type == "pay") {
+            console.log("[XMScript Parser] Pay task. Examining payloads (require 1)...")
             // NOTE Generic sanity check on payloads
             if (!checkSignedPayloads(1, operation.task.signedPayloads)) {
+                console.log("[XMScript Parser] Pay task failed: Invalid payloads (require 1 has 0)")
                 return {
                     result: "error",
                     error: "Invalid signedPayloads length",
                 }
             }
-            // ANCHOR EVM
+            console.log(
+                "[XMScript Parser] Pay task payloads are ok: Valid payloads (require 1 has 1)",
+            )
+            // ANCHOR EVM (which is quite simple: send a signed transaction. Done.)
             if (operation.is_evm) {
-                console.log("[XMScript Parser] EVM Pay")
-                let result = await multichain.EVM.getInstance(
+                console.log("[XMScript Parser] EVM Pay: trying to send the payload as a signed transaction...") // REVIEW Simulations?
+                // TODO Add check and instance creation on the fly
+                result = await multichain.EVM.getInstance(
                     chainID,
                 ).sendSignedTransaction(operation.task.signedPayloads[0])
             }
             // Non EVM Section has more complexity
             else {
-                console.log("NON EVM PAY")
+                console.log("[XMScript Parser] Non-EVM PAY")
                 // ANCHOR Ripple
                 if (operation.chain == "xrpl") {
+                    console.log("[XMScript Parser] Ripple Pay")
                     // Testnet support
-                    let rpc_url = "https://s1.ripple.com:51234/"
-                    if (operation.subchain == "testnet") {
-                        rpc_url = "https://s.altnet.rippletest.net:51234/"
-                    }
-                    console.log("XRP PAY") // TODO
+                    let rpc_url = chainProviders.ripple.mainnet
+                    rpc_url = chainProviders.ripple[operation.subchain]
+                    console.log("[XMScript Parser] Ripple Pay: we will use " + rpc_url + " to connect to " + operation.subchain)
+                    console.log("[XMScript Parser] Ripple Pay: trying to send the payload as a signed transaction...") // REVIEW Simulations?
                     let xrplInstance = new multichain.XRPL(rpc_url)
-                    let result = await xrplInstance.sendTransaction(
+                    result = await xrplInstance.sendTransaction(
                         operation.task.signedPayloads[0],
                     )
                 }
             }
 
-            // FIXME Find a way to standardize the calls as they have the same name across chains (except for EVM) (e.g. sendSignedTransaction)
         }
 
-        // TODO
+        /* SECTION Read only tasks */
+        // NOTE For the following tasks, we can safely skip checkSignedPayloads()
+
+        // ANCHOR MVP
+        // INFO Read contract task
+        else if (operation.task.type == "readContract") {
+            // Mainly EVM but let's let it open for weird chains
+            // Workflow: loading the provider url in our configuration, creating an instance, parsing the request
+            // and sending back the chain response as it is
+            if (operation.is_evm) {
+                let providerUrl = evmProviders[operation.chain][operation.subchain] // REVIEW Error handling
+                let evmInstance = multichain.EVM.createInstance(chainID, providerUrl) // REVIEW We should be connected
+                let params = JSON.parse(operation.task.params) // REVIEW Error handling
+                if (!params.address) {
+                    return {
+                        result: "error",
+                        error: "Absent contract address",
+                    }
+                }
+                if (!params.abi) {
+                    return {
+                        result: "error",
+                        error: "Absent contract ABI",
+                    }
+                }
+                if (!params.method) {
+                    return {
+                        result: "error",
+                        error: "Absent contract method",
+                    }
+                }
+                // Getting a contract instance using the evm library
+                let contractInstance = await evmInstance.getContractInstance(
+                    params.address,
+                    params.abi,
+                )
+                result = await contractInstance[params.method](...params.params) // REVIEW Big IF
+                return {
+                    result: result,
+                    status: true,
+                }
+            } else {
+                return {
+                    result: "error",
+                    error: "Not implemented yet: readContract on non-EVM chains",
+                }
+            }
+        }
+
+        // Returning the result from the above methods
         return result
     }
 }
 
+// INFO Each non-read task has to be checked here
 function checkSignedPayloads(num: number, signedPayloads: any[]): boolean {
     // NOTE Sanity check on the signedPayloads length
     let sanityCheck = required(

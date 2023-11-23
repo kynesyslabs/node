@@ -22,7 +22,6 @@ import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import { pki } from "node-forge"
 import { TransactionContent } from "./types/transactions"
-import StateChange from "./gls/types/StateChange"
 import Confirmation from "./types/confirmation"
 
 interface TransactionResponse {
@@ -32,13 +31,12 @@ interface TransactionResponse {
     data: {}
 }
 
-
 export default class Transaction {
     content: TransactionContent
     signature: pki.ed25519.BinaryBuffer
     hash: string
+    status: string
     confirmations: Confirmation[]
-    state_changes: StateChange[] // REVIEW Should be included in content?
 
     constructor() {
         this.content = {
@@ -53,19 +51,19 @@ export default class Transaction {
                 network_fee: null,
                 rpc_fee: null,
                 additional_fee: null,
-
             },
         }
         this.signature = null
         this.hash = null
         this.confirmations = []
-        // REVIEW Should we add state changes?
-        this.state_changes = []
+        this.status = null
     }
 
-
     // INFO Given a transaction, sign it with the private key of the sender
-    public static sign(tx: Transaction, privateKey: pki.ed25519.BinaryBuffer): any[] {
+    public static sign(
+        tx: Transaction,
+        privateKey: pki.ed25519.BinaryBuffer,
+    ): any[] {
         // Check sanity of the structure of the tx object
         if (!tx.content) {
             return [false, "Missing tx.content"]
@@ -117,7 +115,8 @@ export default class Transaction {
         publicKey: pki.ed25519.BinaryBuffer,
         privateKey: pki.ed25519.BinaryBuffer,
     ) {
-        let confirmed = this.sanityCheck(tx) && this.isCoherent(tx) && this.structured(tx)
+        let confirmed =
+            this.sanityCheck(tx) && this.isCoherent(tx) && this.structured(tx)
         if (confirmed) {
             let confirmation = new Confirmation()
             confirmation.data.validator = publicKey
@@ -157,4 +156,3 @@ export default class Transaction {
         return _structured
     }
 }
-

@@ -45,7 +45,6 @@ export default async function validateTransaction(
     console.log(tx.signature)
     tx.hash = request.tx.hash
     tx.confirmations = request.tx.confirmations
-    tx.state_changes = request.tx.state_changes
     tx.content.transaction_fee = request.tx.content.transaction_fee
 
     console.log("[TX RECEIVED] Examining:\n")
@@ -58,7 +57,8 @@ export default async function validateTransaction(
     if (fromBalance < gasAmount) {
         return null // No gas money? No transaction!
     }
-    // Deducting the gas from the account
+    // Deducting the gas from the account and assigning the operation to be executed
+    // as child of this transaction
     let operation: Operation = {
         operator: "pay_gas",
         actor: from,

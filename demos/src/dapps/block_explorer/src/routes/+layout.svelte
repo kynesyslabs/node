@@ -5,21 +5,19 @@
     import '$lib/styles/buttons.css';
     import '$lib/styles/surfaces.css';
     import demos from "$lib/demos.js"
-    import {updateWallet, updateRpcAddress, updateTheme, theme} from "$lib/env.js";
+    import {updateWallet, updateRpcAddress, updateTheme} from "$lib/env.js";
 
     let logcheck = false;
     
     async function login(prvkey)
-    {
+    { 
         let key
         try {
             const parsed = JSON.parse(prvkey);
             const arrayed = Object.values(parsed);
             key = new Uint8Array(arrayed);
-            console.log("Key passed as object")
         } catch(e) {
             key = prvkey
-            console.log("Key passed as string")
         }
         const log = await demos.DemosWebAuth.getInstance().login(key);
         if(log[0])
@@ -28,23 +26,17 @@
             localStorage.setItem("prvkey", prvkey);
         }
     }
-
-    const getCookieValue = (name) => {
-        let value = localStorage.getItem(name)
-        console.log("Getting cookie", value);
-        return value;
-    }
     
-    onMount(()=>{
+    onMount(async ()=>{
         const selectedrpc = localStorage.getItem("selectedrpc");
         if(selectedrpc)
         {
             updateRpcAddress(selectedrpc);
         }
-        const storedkey = getCookieValue("prvkey");
+        const storedkey = localStorage.getItem("prvkey");
         if(storedkey)
         {
-            login(storedkey);
+            await login(storedkey);
         }
         logcheck = true;
         let savedtheme = localStorage.getItem("theme");

@@ -1,4 +1,5 @@
-TheGreatMentalNotepad.md
+MVP_Notes.md
+demos/package-lock.json
 .parcel-cache
 dist
 kyntainer.tar
@@ -28,4 +29,6 @@ demos/src/dapps/block_explorer/node_modules
 demos/src/dapps/block_explorer_2/yarn.lock
 demos/src/dapps/block_explorer_2/.*
 demos/src/management/dist
-.DS_Store
+.DS_Storedemos_peers_local
+demos/demos_peers_local
+../demos_peers_local

@@ -2,9 +2,14 @@
 
 import * as forge from "node-forge"
 import chain from "src/libs/blockchain/chain"
-import { IValidator, ProofOfRepresentation } from "src/libs/consensus/types/PoR"
+import {
+    IValidator,
+    ProofOfRepresentation,
+} from "src/libs/consensus/mechanisms/PoR"
 require("dotenv").config({ path: "../../.commons" })
 import { Identity } from "src/libs/identity"
+// eslint-disable-next-line no-unused-vars
+import * as Security from "src/libs/network/securityModule"
 
 export default class sharedState {
     private static instance: sharedState
@@ -17,6 +22,7 @@ export default class sharedState {
     runMainLoop: boolean = true
     mainLoopPaused: boolean = false
     consensusMode: boolean = false
+    syncStatus: boolean = false
 
     shard: ProofOfRepresentation
 
@@ -49,21 +55,22 @@ export default class sharedState {
         console.warn("[SHAREDSTATE]: last block")
         console.warn(lastBlock)
         let lastTimestamp: number
-        if (chain.isGenesis(lastBlock)) {
+        if (chain.isGenesis(lastBlock as any)) {
             //REVIEW - is this useless? I think so.
             console.log("[SHAREDSTATE]: Genesis block detected")
             //REVIEW: is this different than other blocks?
             lastTimestamp = new Date().getTime() - 69420 * 1000
         } else {
-            lastTimestamp = JSON.parse(
-                lastBlock.content as unknown as string,
-            ).timestamp
+            console.log("blockContent")
+            console.log(lastBlock.content)
+            console.log(lastBlock.content.timestamp)
+            lastTimestamp = lastBlock.content.timestamp
         }
 
         console.log("LAST TIMESTAMP: " + lastTimestamp)
 
         let delta = this.currentTimestamp - lastTimestamp
-        // lastTimestamp = this.currentTimestamp // FIXME This must be the last block timestamp
+        // lastTimestamp = this.currentTimestamp // REVIEW Done? | This must be the last block timestamp
 
         console.log("this.lastTimestamp")
         console.log(JSON.stringify(lastBlock))

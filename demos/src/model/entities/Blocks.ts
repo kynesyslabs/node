@@ -1,7 +1,14 @@
 import { Column, Entity, PrimaryGeneratedColumn } from "typeorm"
+import { pki } from "node-forge"
 
 @Entity("blocks")
 export class Blocks {
+    @PrimaryGeneratedColumn({ type: "integer", name: "id" })
+    id: number
+
+    @Column("json", { name: "content" })
+    content: NonNullable<any>
+
     @Column("integer", { name: "number" })
     number: number
 
@@ -12,14 +19,8 @@ export class Blocks {
     status: string
 
     @Column("varchar", { name: "proposer" })
-    proposer: string
+    proposer: pki.PublicKey | pki.ed25519.BinaryBuffer
 
     @Column("text", { name: "validation_data" })
-    validationData: string
-
-    @PrimaryGeneratedColumn({ type: "integer", name: "id" })
-    id: number
-
-    @Column("json", { name: "content" })
-    content: NonNullable<unknown>
+    validation_data: string
 }

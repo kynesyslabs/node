@@ -1,12 +1,11 @@
 <script>
     import '$lib/global.css';
     export let data;
-    import transIcon from '$lib/assets/icons/agreement-icon.png';
 	import CopyButton from '$lib/components/CopyButton.svelte';
     import demos from "$lib/demos.js";
     import {rpcaddress} from "$lib/env.js";
-    import CubeSpinning from '../../CubeSpinning.svelte';
-	import PageTitle from '../../../../lib/components/PageTitle.svelte';
+    import CubeSpinning from "$lib/components/CubeSpinning.svelte"
+	import PageTitle from '$lib/components/PageTitle.svelte';
 
     demos.connect($rpcaddress);
 
@@ -15,84 +14,20 @@
         if(!demos.connected)
         return;
         let transaction = await demos.getTxByHash(data.transaction);
+        console.log(transaction);
         return transaction;
     }
 </script>
-
-<style>
-    .info-title{
-        font-weight: bold;
-        margin: 0;
-    }
-
-    .info-text{
-        margin: 0;
-        opacity: .8;
-    }
-
-    .info{
-        word-wrap: break-word;
-        word-break: break-all;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-    .block-icon{
-        filter: invert();
-        width: 45px;
-    }
-
-    .card-header{
-        display: flex;
-        align-items: center;
-        gap: 16px;
-    }
-
-    .block-header{
-        display: flex;
-        align-items: center;
-        width: 100%;
-        margin-bottom: 64px;
-        gap: 16px;
-        justify-content: center;
-    }
-
-    .info-grid{
-        display: grid;
-        grid-template-columns: 100px 1fr;
-        width: 100%;
-        gap: 8px;
-    }
-    .info-grid:not(:last-child){
-        margin-bottom: 32px;
-    }
-    .info-title{
-        font-weight: bold;
-    }
-    .card{
-        padding: 32px;
-        width: fit-content;
-        margin: 0 auto 64px;
-    }
-    @media (max-width: 650px){
-        .info-grid{
-            grid-template-columns: 1fr;
-        }
-        .card{
-            padding: 24px;
-        }
-    }
-</style>
 
 {#await getTransaction()}
     <CubeSpinning/>
 {:then transaction}
     <PageTitle>Transaction Details</PageTitle>
-    <div class="card">
-        <div class="info-grid">
-            <p class="info-title">Hash:</p>
-            <div class="info"><p class="info-text">{transaction.hash}</p><CopyButton text={transaction.hash}/></div>
-        </div>
+    <div class="header">
+        <p style="margin:0;" class="wrapword">{transaction.hash}</p>
+        <CopyButton text={transaction.hash}></CopyButton>
+    </div>
+    <div class="card" style="padding: 12px 0;">
         <div class="info-grid">
             <p class="info-title">Type:</p>
             <div class="info"><p class="info-text">{transaction.content.type}</p></div>
@@ -115,3 +50,53 @@
         </div>
     </div>
 {/await}
+
+<style>
+    .card{
+        margin-bottom: 64px;
+    }
+
+    .info{
+        word-wrap: break-word;
+        word-break: break-all;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+
+    .info-grid{
+        display: grid;
+        grid-template-columns: 120px 1fr;
+        width: 100%;
+        gap: 0 16px;
+        padding: 16px 28px;
+    }
+    
+    @media screen and (max-width: 600px){
+        .info-grid{
+            grid-template-columns: 1fr;
+        }
+    }
+
+
+    .info-title{
+        font-weight: bold;
+        margin: 0;
+    }
+
+    .info-text{
+        margin: 0;
+        opacity: .8;
+        word-wrap: break-word;
+        word-break: break-all;
+    }
+    .header{
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-top: -34px;
+        margin-bottom: 64px;
+    }
+</style>

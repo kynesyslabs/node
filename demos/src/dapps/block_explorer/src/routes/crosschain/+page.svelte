@@ -10,18 +10,16 @@
     import {chains} from "$lib/chainscript.js";
 	import ConnectWalletDialog from "./ConnectWalletDialog.svelte";
     import PageTitle from '$lib/components/PageTitle.svelte';
-    import { fly, slide } from "svelte/transition";
+    import { fly } from "svelte/transition";
 
-    const version = "1.0";
+    const version = "1.01";
     if(localStorage.getItem("version") != version)
     {
-        localStorage.clear();
+        localStorage.removeItem("operations");
         localStorage.setItem("version", version);
     }
     let root = localStorage.getItem("operations")?JSON.parse(localStorage.getItem("operations")):{id:"root", items:[], type:"root"}
     $: localStorage.setItem("operations", JSON.stringify(root));
-
-    $:console.log(root.items);
 
     let required_connections = []
 

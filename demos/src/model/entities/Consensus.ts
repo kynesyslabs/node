@@ -1,8 +1,8 @@
-import { Column, Entity } from "typeorm"
+import { Column, Entity, PrimaryColumn } from "typeorm"
 
 @Entity("consensus")
 export class Consensus {
-    @Column("integer", { name: "round", nullable: true })
+    @PrimaryColumn("integer", { name: "round" })
     round: number | null
 
     @Column("text", { name: "lastBlockHash", nullable: true })

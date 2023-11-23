@@ -11,12 +11,12 @@ export class Transactions {
     @Column("varchar", { name: "signature" })
     signature: string
 
+    @Column("varchar", { name: "status" })
+    status: string
+
     @Column("varchar", { name: "hash" })
     hash: string
 
     @Column("integer", { name: "confirmations" })
     confirmations: number
-
-    @Column("json", { name: "state_changes" })
-    stateChanges: NonNullable<unknown>
 }

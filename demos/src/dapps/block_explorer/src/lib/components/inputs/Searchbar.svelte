@@ -2,7 +2,7 @@
 	import { faCircleNotch, faSearch, faTimesCircle } from "@fortawesome/free-solid-svg-icons";
 	import Fa from "svelte-fa";
     import { budinofade } from "$lib/transitions";
-    import { debounce } from "debounce";
+    import debounce from "debounce";
     export let onChange;
     export let setSearchMode;
     export let style;

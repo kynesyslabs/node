@@ -9,6 +9,34 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+/* INFO GLS
+    * While the GLS is not part of the blockchain itself, that does not mean that
+    * blockchain security does not apply to it. Even if a DEMOS Node does not store
+    * the GLS as part of the blockchain (mainly due to its mutable nature), every
+    * GLS property can and is traced back to the corresponding set of Operations.
+    * From there, finding the corresponding Transaction for each Operation is trivial.
+    * This ensures that even if it is a separate table, the GLS remains cryptographically secure.
+    * 
+*/
+
+/* INFO Operations
+    * An Operation is a modification of the GLS derived from a transaction
+    * While in transactions like "transfer X tokens to Y" the Operation is
+    * a simple transfer, one could think that Operation = Transaction but
+    * it is very likely and very possible that from a Transaction multiple
+    * Operations are derived. For example, sending X tokens to y also means
+    * that the sender will pay gas so another Operation: "pay Z gas".
+    * 
+    * Operations are useful because while Transactions store in the Blockchain
+    * everything that happens, Operations quickly update the Blockchain GLS
+    * with all the necessary references to the corresponding Transactions
+    * without having to load and parse every single Transaction to verify the GLS.
+    *  
+    * Basically, Operations have the role of a quick reference index to modify, derive
+    * and trace back the GLS modifications efficiently.
+    * 
+*/
+
 // TODO genesis.json: see how it is stored on chain and make a method to
 // TODO insert it in the gls automatically so that the parameters of the
 // TODO chain are both immutable and editable at the same time
@@ -160,11 +188,22 @@ export default class GLS {
         return full_nfts_balance.nfts[nft_address]
     }
 
-    static async getGLSGasMultiplier() {
+    static async getGLSGasMultiplier(): Promise<number> {
+        // TODO Implement and make it dynamic
+        /* let chainProperties = await GLS.getGLSChainProperties()
+        return chainProperties.gas_multiplier */
+        return 1
+    }
+
+    // INFO In the GLS properties table, the special row "DEMOS Network" defines, in the other
+    // field, the properties of the chain itself shared by all its members.
+    // TODO Maybe implement it at genesis or retrieve the genesis from chain? 
+    static async getGLSChainProperties(): Promise<any> {
         let response = await Chain.read(
-            "SELECT gas_multiplier FROM status_properties", // TODO Implement and make it dynamic
-        )
-        return response[0].gas_multiplier
+            "SELECT other FROM status_properties WHERE address = 'DEMOS Network'", 
+        ) 
+        let chainProperties = response[0]
+        return chainProperties
     }
 
     // SECTION Validators management

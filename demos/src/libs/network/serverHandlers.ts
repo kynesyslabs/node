@@ -11,7 +11,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { Peer, PeerManager } from "src/libs/peer"
-import InstantMessaging from "src/features/InstantMessagingProtocol/instantMessagingProtocol"
 import Mempool from "src/libs/blockchain/mempool"
 import chain from "src/libs/blockchain/chain"
 import handleWeb2 from "src/features/web2/Web2Dispatcher"
@@ -22,10 +21,12 @@ import sharedState from "src/utilities/sharedState"
 import { BrowserRequest } from "./serverListeners"
 import { normalizeWebBuffers } from "./routines/normalizeWebBuffers"
 import Sessions from "./routines/sessionManager"
-import Block from "src/libs/blockchain/blocks"
-import Transaction from "src/libs/blockchain/transaction"
+import { Blocks } from "src/model/entities/Blocks"
+import { Transactions } from "src/model/entities/Transactions"
 import eggs from "./routines/eggs"
 import deriveBlock from "../consensus/routines/deriveBlock"
+import AddressInfo from "../blockchain/types/addressInfo"
+import { Address } from "cluster"
 
 var term = require("terminal-kit").terminal
 
@@ -73,49 +74,58 @@ export default class ServerHandlers {
 
     // ANCHOR Comlinks
     static async handleTransaction(content: any): Promise<any> {
-            let require_reply = true // REVIEW Sure?
-            let extra: string, response: boolean
-            let fname = "[" + this.handleTransaction.name + "] "
-            term.yellow(fname + "Handling transaction...")
-            // Verify and execute the transaction
-            let validatedTx: any[]
-            try {
-                /* NOTE This workflow goeas as:
-                 * The tx is validated, an operation is created and pushed in the GLS
-                 * An operation for the gas is also pushed in the GLS
-                 * The tx is pushed in the mempool if applicable
-                 */
-                console.log(fname + "Validating transaction...")
-                validatedTx = await validateTransaction(
-                    content.type,
-                    content.message,
-                )
-                console.log(fname + "Fetching result...")
-            } catch (e) {
-                term.red.bold("[TX VALIDATION ERROR] 💀 : ")
-                term.red(e)
-                validatedTx = [false, e.message]
-            }
-            // Returning an appropriate response
-            if (!validatedTx[0]) {
-                term.yellow.bold(fname + "Invalid transaction: ")
-                console.log(validatedTx[1])
-                extra = "InvalidTransaction: " + validatedTx[1]
-                response = false
-            } else {
-                term.green.bold(fname + "Valid transaction: ")
-                console.log(validatedTx[1])
-                console.log(fname + "Adding transaction to mempool...")
-                // Adding the valid tx to the mempool
-                Mempool.addTransaction(validatedTx[1]) // Works by writing the registry
-                extra = validatedTx[1].hash
-                response = true
-            }
-            // TODO Broadcast the tx to the other peers
-            // Response is then sent back automatically as a reply (with our validation)
-            term.bold.white(fname + "Transaction handled.")
-            return { extra, require_reply, response }
+        term.yellow("[handleTransactions] Handling a native DEMOS tx...\n")
+        let require_reply = true // REVIEW Sure?
+        let extra: string, response: boolean
+        let fname = "[handleTransactions] "
+        term.yellow(fname + "Handling transaction...")
+        // Verify and execute the transaction
+        let validatedTx: any[]
+        try {
+            /* NOTE This workflow goeas as:
+             * The tx is validated, an operation is created and pushed in the GLS
+             * An operation for the gas is also pushed in the GLS
+             * The tx is pushed in the mempool if applicable
+             */
+            console.log(fname + "Validating transaction...")
+            validatedTx = await validateTransaction(
+                content.type,
+                content.message,
+            )
+            console.log(fname + "Fetching result...")
+        } catch (e) {
+            term.red.bold("[TX VALIDATION ERROR] 💀 : ")
+            term.red(e)
+            validatedTx = [false, e.message]
         }
+
+        // Returning an appropriate response
+        if (!validatedTx[0]) {
+            // An invalid transaction won't even be added to the mempool
+            term.yellow.bold(fname + "Invalid transaction 💀 : ")
+            console.log(validatedTx[1])
+            extra = "InvalidTransaction 💀: " + validatedTx[1]
+            response = false
+        } else {
+            /* NOTE 
+                    We just processed the cryptographic validity of the transaction.
+                    We have no idea of its state validity and thus won't modify the GLS, but
+                    it can go into the mempool to be further processed if its cryptographically valid.
+                */
+            term.green.bold(fname + "Valid transaction: ")
+            console.log(validatedTx[1])
+            console.log(fname + "Adding transaction to mempool...")
+            // Adding the valid tx to the mempool
+            Mempool.addTransaction(validatedTx[1]) // Works by writing the registry
+            extra = validatedTx[1].hash
+            response = true
+            //process.exit(0) /* TODO Eliminate this debug line */
+        }
+        // TODO Broadcast the tx to the other peers
+        // Response is then sent back automatically as a reply (with our validation)
+        term.bold.white(fname + "Transaction handled.")
+        return { extra, require_reply, response }
+    }
 
     // INFO Handling XM Transaction
     static async handleXMChainOperation(content: any): Promise<any> {
@@ -210,7 +220,7 @@ export default class ServerHandlers {
         let authorized = false
         let senderPublicKey = senderIdentity.toString("hex")
 
-        const {shard} = sharedState.getInstance()
+        const { shard } = sharedState.getInstance()
 
         if (!shard) {
             return {
@@ -293,7 +303,14 @@ export default class ServerHandlers {
         // ...
         let extra: any
         let require_reply = false
-        let response: string | Peer[] | number | Block | Transaction[]
+        let response:
+            | string
+            | Peer[]
+            | number
+            | Blocks
+            | Transactions
+            | Transactions[]
+            | AddressInfo
         let socketized_response: Peer[]
         let { data } = content
         console.log(typeof data)
@@ -315,6 +332,67 @@ export default class ServerHandlers {
                     response.push(peer)
                 }
                 break
+            // REVIEW Both below for getting the last hash (untested yet)
+            case "getPreviousHashFromBlockNumber":
+                console.log("[SERVER] Received getPreviousHashFromBlockNumber")
+                if (data.blockNumber === undefined || data.blockNumber < 0) {
+                    response = "error"
+                    extra = "Block number is not valid"
+                    break
+                }
+                response = await chain.getBlockByNumber(data.blockNumber)
+                console.log(
+                    "[CHAIN.ts] Received reply from the database: got a block",
+                )
+                response = response.content.previousHash
+                break
+            case "getPreviousHashFromBlockHash":
+                console.log("[SERVER] Received getPreviousHashFromBlockNumber")
+                if (data.blockHash === undefined || data.blockHash === "") {
+                    response = "error"
+                    extra = "Block hash is not valid"
+                    break
+                }
+                response = await chain.getBlockByHash(data.blockHash)
+                console.log(
+                    "[CHAIN.ts] Received reply from the database: got a block",
+                )
+                response = response.content.previousHash
+                break
+            // REVIEW (untested) Headers instead of full blocks
+            case "getBlockHeaderByNumber":
+                if (
+                    data.blockNumber === undefined ||
+                    data.blockNumber < 0 ||
+                    data.blockNumber === ""
+                ) {
+                    response = "error"
+                    extra = "Block number is not valid"
+                    break
+                }
+                response = await chain.getBlockByNumber(data.blockNumber)
+                console.log(
+                    "[CHAIN.ts] Received reply from the database: extracting header",
+                )
+                // Fixme: we now have a raw block, and have to instantiate a block from that.
+                // response = response.getHeader()
+                console.log(response)
+                break
+            case "getBlockHeaderByHash":
+                if (data.blockHash === undefined || data.blockHash === "") {
+                    response = "error"
+                    extra = "Block hash is not valid"
+                    break
+                }
+                response = await chain.getBlockByHash(data.blockHash)
+                console.log(
+                    "[CHAIN.ts] Received reply from the database: extracting header",
+                )
+                // Fixme: we now have a raw block, and have to instantiate a block from that.
+                // response = response.getHeader()
+                console.log(response)
+                break
+
             case "getLastBlockNumber":
                 console.log("[SERVER] Received getLastBlockNumber")
                 response = await chain.getLastBlockNumber()

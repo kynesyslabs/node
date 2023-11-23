@@ -1,7 +1,7 @@
 {
     "type": "sqlite",
     "database": "./data/chain.db",
-    "entities": ["src/model/schemas/*.ts"],
+    "entities": ["src/model/entities/*.ts"],
     "migrations": ["src/migrations/**/*.ts"],
     "synchronize": true,
     "logging": false

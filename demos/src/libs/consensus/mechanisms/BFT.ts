@@ -1,6 +1,6 @@
 // INFO This library provides all the methods required to apply a QBFT consensus algorithm in a PoR/BFT network.
 import Mempool, { MempoolData } from "src/libs/blockchain/mempool"
-import Block from "src/libs/blockchain/blocks"
+import Block from "src/libs/blockchain/block"
 import PeerManager from "src/libs/peer/PeerManager"
 import Peer from "src/libs/peer/Peer"
 import { ProofOfRepresentation } from "./PoR"
@@ -151,10 +151,28 @@ export default class QBFT {
             )
 
             pocList.push(await askPoC(forgedProposedHash, peerInstance))
+            console.warn(forgedProposedHash)
+            console.warn(peerInstance)
         }
 
         console.log("[BFT]: pocList")
         console.log(pocList)
+
+        var errored
+        pocList.forEach(pocItem => {
+            if (pocItem === null) {
+                errored = true
+                console.log(consensusReached)
+                console.log(mempool)
+                console.log(proposedBlock)
+                console.log(forgedProposedHash)
+                // eslint-disable-next-line no-debugger
+                debugger
+            }
+        })
+        if (errored === true) {
+            return [false, null]
+        }
 
         // eslint-disable-next-line no-unused-vars
         const validatorPocList = pocList.map(({ socket, ...rest }) => rest)
