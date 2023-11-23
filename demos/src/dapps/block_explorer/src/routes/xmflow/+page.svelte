@@ -10,11 +10,13 @@
 	import { Operation } from '$lib/chainscript';
 
 	import Drawer from './Drawer.svelte';
-	import ReadContractNode from './ReadContractNode.svelte';
 	import ConditionalNode from './ConditionalNode.svelte';
 	import EqualsNode from './EqualsNode.svelte';
 	import StartNode from './StartNode.svelte';
 	import TaskNode from './TaskNode.svelte';
+
+    import cloneDeep from 'lodash/cloneDeep';
+	import { get } from 'svelte/store';
 
     const { screenToFlowCoordinate } = useSvelteFlow();
 
@@ -33,7 +35,7 @@
 	const edges = writable([
 	]);
 
-	let required_connections = [];
+	let required_connections = writable([]);
 
 	function checkRequired(edges, myedge)
 	{
@@ -42,9 +44,15 @@
 		const targetnode = $nodes.find(node=>node.id==myedge.target);
 		if(!targetnode)
 			return
-		/*if(required_connections.findIndex(rq=>rq.id==) == -1)
-		required_connections.push({id: operation.data.chain, wallet:null});
-        required_connections = required_connections;*/
+		const chain = targetnode?.data?.operation?.chain;
+		if(!chain)
+			return
+		if($required_connections.findIndex(rq=>rq.id==chain) == -1)
+		{
+			let newrequired = cloneDeep(get(required_connections));
+			newrequired.push({id: chain, wallet:null});
+			required_connections.set(newrequired);
+		}
 		checkRequired(edges, edges.find(edge=>edge.source==myedge.target))
 	}
 
@@ -54,7 +62,7 @@
 		'start': StartNode,
 		'operation': OperationNode,
         'pay':TaskNode,
-        'readcontract':ReadContractNode,
+        'contract_read':TaskNode,
         'conditional':ConditionalNode,
         'equals':EqualsNode,
 	};
@@ -88,7 +96,7 @@
 			id: newId,
 			type,
 			position,
-			data: { label: `${type} node`, id:newId, data:new Operation(type)},
+			data: { id:newId, operation:new Operation({tasktype:type})},
 			origin: [0.5, 0.0],
 			selectable:false
 		};

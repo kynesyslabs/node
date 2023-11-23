@@ -29,7 +29,7 @@
 </div>
 <div class="category">
     <h4 class="blocks-title">EVM Tasks</h4>
-    <div class="card operation" on:dragstart={(event) => onDragStart(event, 'readcontract')}
+    <div class="card operation" on:dragstart={(event) => onDragStart(event, 'contract_read')}
         draggable={true}>
         <img
             style="opacity: .3;"

@@ -1,11 +1,43 @@
 <script>
+    import {chains} from "$lib/chainscript";
+    import {trim_address} from "$lib/env";
+    import EVM from '$lib/demos_libs/xmlibs/chains/evm';
+    import XRPL from '$lib/demos_libs/xmlibs/chains/xrpl';
+
+    let chainobjs={
+        "evm":EVM,
+        "xrpl":XRPL
+    }
+
     export let required_connections
+    let editing = false;
+    let error = "";
+    async function connectWallet(connection, prvkey)
+    {
+        error = "";
+        let mychainwallet;
+        const thisrpc = chains.find(c=>connection.id==c.id).rpc;
+        if(chains.find(c=>connection.id==c.id).is_evm)
+            mychainwallet = await chainobjs["evm"].create(chains.find(c=>connection.id==c.id).rpc);
+        else
+            mychainwallet = await chainobjs[connection.id].create(chains.find(c=>connection.id==c.id).rpc);
+        try
+        {
+            await mychainwallet.connectWallet(prvkey);
+        }
+        catch(err){
+            error = err;
+            return
+        }
+        connection.wallet = mychainwallet;
+        editing=false;
+    }
 </script>
 
 <div style="margin-bottom: 32px;">
-    <h4>Available blocks</h4>
-    <div class="label">You can drag these nodes to the editor pane.</div>
-    {#each required_connections as required_wallet}
+    <h4>Required Wallets</h4>
+    <div class="label">You need to connect the following wallets to execute the transaction</div>
+    {#each $required_connections as required_wallet}
         <div class="wallet-connection card">
             <div class="wallet-info">
                 {#if chains.find(ch=>ch.id==required_wallet.id).icon}
@@ -15,11 +47,21 @@
             </div>
             {#if required_wallet.wallet}
                 <div class="wallet-info">
-                    <p class="wallet-address">{trim_address(required_wallet.wallet.getAddress())}</p>
+                    <p class="wallet-address">{trim_address(required_wallet.wallet.getAddress(), 20)}</p>
                     <svg class="wallet-status" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="24" height="24"><g id="check-circle--checkmark-addition-circle-success-check-validation-add-form-tick"><path id="Subtract" fill="green" fill-rule="evenodd" d="M12 23c6.075 0 11-4.925 11-11S18.075 1 12 1 1 5.925 1 12s4.925 11 11 11Zm-.47-6.625 6-7.5-1.56-1.25-5.355 6.693-2.714-2.327-1.302 1.518 3.5 3 .786.674.646-.808Z" clip-rule="evenodd"></path></g></svg>
                 </div>
             {:else}
-                <button on:click={()=>{editwallet=required_wallet}} class="secondary" style="width: 100%;">Connect wallet</button>
+                {#if !editing}
+                <button on:click={()=>{editing=required_wallet.id}} class="secondary" style="width: 100%;">Connect wallet</button>
+                {:else if editing == required_wallet.id}
+                    <label class="operationcard-label label">Private key</label>
+                    <input on:input={(ev)=>{
+                        if(ev.target.value!=""){connectWallet(required_wallet, ev.target.value)}
+                    }} placeholder="Paste here"/>
+                    {#if error != ""}
+                        <div class="alert-error">{error}</div>
+                    {/if}
+                {/if}
             {/if}
         </div>
     {/each}
@@ -27,8 +69,31 @@
 
 <style>
     .label {
-		margin: 1rem 0;
 		font-size: 0.9rem;
         opacity: .6;
+        display: block;
 	}
+    .wallet-connection{
+        width: 100%;
+        padding: 24px;
+    }
+    .network-name{
+        font-weight: bold;
+        margin: 0 0 16px;
+    }
+    .wallet-info{
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .wallet-address{
+        margin: 2px 0 0;
+    }
+    .wallet-status{
+        margin: 0;
+    }
+    .operationcard-label{
+        margin-top: 0;
+        margin-bottom: 8px;
+    }
 </style>

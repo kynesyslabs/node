@@ -19,7 +19,7 @@
 <style>
 
 	.drawer {
-		max-width: 616px;
+		max-width: 429px;
 		height: 100dvh;
 		position: fixed;
 		left: 0;
