@@ -96,12 +96,14 @@
 		});
 
 		const newId = uuidv4();
-
+		let data = {};
+		if(type=="pay"||type=="contract_read")
+		data = { id:newId, operation:new Operation({tasktype:type})};
 		const newNode = {
 			id: newId,
 			type,
 			position,
-			data: { id:newId, operation:new Operation({tasktype:type})},
+			data: data,
 			origin: [0.5, 0.0],
 			selectable:false
 		};
