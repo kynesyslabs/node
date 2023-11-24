@@ -37,35 +37,35 @@
 <div style="margin-bottom: 32px;">
     <h4>Required Wallets</h4>
     <div class="label">You need to connect the following wallets to execute the transaction</div>
-    {#each $required_connections as required_wallet}
-        <div class="wallet-connection card">
+</div>
+{#each $required_connections as required_wallet}
+    <div class="wallet-connection card">
+        <div class="wallet-info">
+            {#if chains.find(ch=>ch.id==required_wallet.id).icon}
+            <img style="margin-bottom: 20px;" alt="chain icon" src={chains.find(ch=>ch.id==required_wallet.id).icon} width="24" height="24"/>
+            {/if}
+            <h4 class="network-name">{chains.find(ch=>ch.id==required_wallet.id).label}</h4>
+        </div>
+        {#if required_wallet.wallet}
             <div class="wallet-info">
-                {#if chains.find(ch=>ch.id==required_wallet.id).icon}
-                <img style="margin-bottom: 20px;" alt="chain icon" src={chains.find(ch=>ch.id==required_wallet.id).icon} width="24" height="24"/>
-                {/if}
-                <h4 class="network-name">{chains.find(ch=>ch.id==required_wallet.id).label}</h4>
+                <p class="wallet-address">{trim_address(required_wallet.wallet.getAddress(), 20)}</p>
+                <svg class="wallet-status" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="24" height="24"><g id="check-circle--checkmark-addition-circle-success-check-validation-add-form-tick"><path id="Subtract" fill="green" fill-rule="evenodd" d="M12 23c6.075 0 11-4.925 11-11S18.075 1 12 1 1 5.925 1 12s4.925 11 11 11Zm-.47-6.625 6-7.5-1.56-1.25-5.355 6.693-2.714-2.327-1.302 1.518 3.5 3 .786.674.646-.808Z" clip-rule="evenodd"></path></g></svg>
             </div>
-            {#if required_wallet.wallet}
-                <div class="wallet-info">
-                    <p class="wallet-address">{trim_address(required_wallet.wallet.getAddress(), 20)}</p>
-                    <svg class="wallet-status" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="24" height="24"><g id="check-circle--checkmark-addition-circle-success-check-validation-add-form-tick"><path id="Subtract" fill="green" fill-rule="evenodd" d="M12 23c6.075 0 11-4.925 11-11S18.075 1 12 1 1 5.925 1 12s4.925 11 11 11Zm-.47-6.625 6-7.5-1.56-1.25-5.355 6.693-2.714-2.327-1.302 1.518 3.5 3 .786.674.646-.808Z" clip-rule="evenodd"></path></g></svg>
-                </div>
-            {:else}
-                {#if !editing}
-                <button on:click={()=>{editing=required_wallet.id}} class="secondary" style="width: 100%;">Connect wallet</button>
-                {:else if editing == required_wallet.id}
-                    <label class="operationcard-label label">Private key</label>
-                    <input on:input={(ev)=>{
-                        if(ev.target.value!=""){connectWallet(required_wallet, ev.target.value)}
-                    }} placeholder="Paste here"/>
-                    {#if error != ""}
-                        <div class="alert-error">{error}</div>
-                    {/if}
+        {:else}
+            {#if !editing}
+            <button on:click={()=>{editing=required_wallet.id}} class="secondary" style="width: 100%; justify-content:center;">Connect Wallet</button>
+            {:else if editing == required_wallet.id}
+                <label class="operationcard-label label">Private key</label>
+                <input class="prv-input" on:input={(ev)=>{
+                    if(ev.target.value!=""){connectWallet(required_wallet, ev.target.value)}
+                }} placeholder="Paste here"/>
+                {#if error != ""}
+                    <div class="alert-error">{error}</div>
                 {/if}
             {/if}
-        </div>
-    {/each}
-</div>
+        {/if}
+    </div>
+{/each}
 
 <style>
     .label {
@@ -76,6 +76,7 @@
     .wallet-connection{
         width: 100%;
         padding: 24px;
+        margin-bottom: 16px;
     }
     .network-name{
         font-weight: bold;
@@ -95,5 +96,8 @@
     .operationcard-label{
         margin-top: 0;
         margin-bottom: 8px;
+    }
+    .prv-input{
+        width: 100%;
     }
 </style>

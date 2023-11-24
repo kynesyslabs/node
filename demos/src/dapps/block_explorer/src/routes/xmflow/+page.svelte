@@ -37,11 +37,11 @@
 
 	let required_connections = writable([]);
 
-	function checkRequired(edges, myedge)
+	function checkRequired(nodes, edges, myedge)
 	{
 		if(!myedge)
 			return
-		const targetnode = $nodes.find(node=>node.id==myedge.target);
+		const targetnode = nodes.find(node=>node.id==myedge.target);
 		if(!targetnode)
 			return
 		const chain = targetnode?.data?.operation?.chain;
@@ -53,10 +53,15 @@
 			newrequired.push({id: chain, wallet:null});
 			required_connections.set(newrequired);
 		}
-		checkRequired(edges, edges.find(edge=>edge.source==myedge.target))
+		checkRequired(nodes, edges, edges.find(edge=>edge.source==myedge.target))
 	}
 
-	$:checkRequired($edges, $edges.find(edge=>edge.source=="start"));
+	function calculateRequired(nodes, edges){
+		required_connections.set([]);
+		checkRequired(nodes, edges, edges.find(edge=>edge.source=="start"))
+	}
+
+	$:calculateRequired($nodes, $edges);
 
 	const nodeTypes = {
 		'start': StartNode,
