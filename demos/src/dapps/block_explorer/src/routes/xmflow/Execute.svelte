@@ -32,6 +32,8 @@
         connection.wallet = mychainwallet;
         editing=false;
     }
+
+    $:console.log($required_connections.every(value=>value.wallet));
 </script>
 
 <div style="margin-bottom: 32px;">
@@ -66,6 +68,9 @@
         {/if}
     </div>
 {/each}
+{#if $required_connections.every(value=>value.wallet)}
+<button class="primary execute-button">Execute</button>
+{/if}
 
 <style>
     .label {
@@ -99,5 +104,9 @@
     }
     .prv-input{
         width: 100%;
+    }
+    .execute-button{
+        width: 100%;
+        justify-content: center;
     }
 </style>

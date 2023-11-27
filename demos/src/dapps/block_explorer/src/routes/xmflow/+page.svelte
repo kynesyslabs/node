@@ -35,30 +35,61 @@
 	const edges = writable([
 	]);
 
+	let temp_required = [];
+
 	let required_connections = writable([]);
 
 	function checkRequired(nodes, edges, myedge)
 	{
 		if(!myedge)
+		{
+			consolidateRequired();
 			return
+		}
 		const targetnode = nodes.find(node=>node.id==myedge.target);
 		if(!targetnode)
+		{
+			consolidateRequired();
 			return
+		}
+		//this does not need to consolidate because the transaction must go on even without a chain selected
 		const chain = targetnode?.data?.operation?.chain;
 		if(!chain)
 			return
-		if($required_connections.findIndex(rq=>rq.id==chain) == -1)
+		if(temp_required.findIndex(rq=>rq==chain) == -1)
 		{
-			let newrequired = cloneDeep(get(required_connections));
-			newrequired.push({id: chain, wallet:null});
-			required_connections.set(newrequired);
+			temp_required.push(chain);
 		}
 		checkRequired(nodes, edges, edges.find(edge=>edge.source==myedge.target))
 	}
 
 	function calculateRequired(nodes, edges){
-		required_connections.set([]);
+		temp_required = [];
 		checkRequired(nodes, edges, edges.find(edge=>edge.source=="start"))
+	}
+
+	function consolidateRequired(){
+		let required_copy = cloneDeep(get(required_connections));
+		//remove connections that are not required anymore
+		required_copy.forEach((rq, index) => {
+			//find the index of the chain in the temp array
+			const connection_index = temp_required.findIndex(temp_chain=>temp_chain==rq.id);
+			//if chain does not exist in the temp array, remove it from the actual one
+			if(connection_index == -1)
+			{
+				required_copy.splice(index, 1);
+			}
+		});
+		//add connections that are required
+		temp_required.forEach((chain) =>{
+			const chain_index = required_copy.findIndex(rq=>rq.id==chain);
+			if(chain_index == -1)
+			{
+				required_copy.push({id:chain, wallet:null});
+			}
+		})
+		console.log("consolidated array", required_copy);
+		required_connections.set(required_copy);
 	}
 
 	$:calculateRequired($nodes, $edges);
