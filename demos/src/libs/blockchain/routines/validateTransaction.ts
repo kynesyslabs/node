@@ -52,7 +52,13 @@ export default async function validateTransaction(
 
     // NOTE Charge the gas for the transaction
     let from = tx.content.from.toString("hex")
-    let fromBalance = await GLS.getGLSNativeBalance(from)
+    let fromBalance = 0
+    try {
+        fromBalance = await GLS.getGLSNativeBalance(from)
+    } catch (e) {
+        term.red.bold("[NATIVE TX] [BALANCE ERROR] No balance found for this address: " + from  + "\n")
+        return [false, "[NATIVE TX] [BALANCE ERROR] No balance found for this address: " + from  + "\n"]
+    }
     let gasAmount = await calculateCurrentGas(tx)
     if (fromBalance < gasAmount) {
         return null // No gas money? No transaction!
