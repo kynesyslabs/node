@@ -3,6 +3,11 @@
     import {trim_address} from "$lib/env";
     import EVM from '$lib/demos_libs/xmlibs/chains/evm';
     import XRPL from '$lib/demos_libs/xmlibs/chains/xrpl';
+    import XMTransactions from "$lib/demos_libs/XMTransactions.js";
+	import { useStore } from "@xyflow/svelte";
+    import cloneDeep from 'lodash/cloneDeep';
+
+    const {nodes, edges} = useStore();
 
     let chainobjs={
         "evm":EVM,
@@ -11,10 +16,13 @@
 
     export let required_connections
     let editing = false;
-    let error = "";
+    //private key input errors
+    let wallet_errors = {};
+    //signing, validating, executing errors
+    let exectution_errors = [];
     async function connectWallet(connection, prvkey)
     {
-        error = "";
+        wallet_errors[connection.id] = [];
         let mychainwallet;
         const thisrpc = chains.find(c=>connection.id==c.id).rpc;
         if(chains.find(c=>connection.id==c.id).is_evm)
@@ -26,14 +34,74 @@
             await mychainwallet.connectWallet(prvkey);
         }
         catch(err){
-            error = err;
+            wallet_errors[connection.id].push(err);
             return
         }
         connection.wallet = mychainwallet;
         editing=false;
     }
 
-    $:console.log($required_connections.every(value=>value.wallet));
+    async function signAll(myedge, resolvePromise, rejectPromise)
+    {
+        if(!myedge)
+        {
+            resolvePromise();
+            return
+        }
+        let nodesClone = cloneDeep($nodes);
+		const targetnode = nodesClone.find(node=>node.id==myedge.target);
+        if(!targetnode)
+        {
+            resolvePromise();
+            return
+        }
+        try{
+            let wallet = $required_connections.find(rq=>rq.id==targetnode.data.operation.chain).wallet;
+            let signedPayload = await wallet.preparePay(targetnode.data.operation.task.params.to, targetnode.data.operation.task.params.amount);
+            targetnode.data.operation.task.signedPayloads = [signedPayload];
+            nodes.set(nodesClone);
+            signAll($edges.find(edge=>edge.source==myedge.target), resolvePromise, rejectPromise)
+        }
+        catch(err){
+            rejectPromise(err);
+        }
+    }
+    
+    function flowToChainscript(nodes, edges, myedge, resolvePromise)
+    {
+        if(!myedge)
+        {
+            resolvePromise();
+            return
+        }
+		const targetnode = nodes.find(node=>node.id==myedge.target);
+        if(!targetnode)
+        {
+            resolvePromise();
+            return
+        }
+        XMTransactions.operation.create(targetnode.data.id, targetnode.data.operation.chain, targetnode.data.operation.subchain, targetnode.data.operation.is_evm, targetnode.data.operation.rpc, targetnode.data.operation.task, targetnode.data.operation.conditional)
+        flowToChainscript(nodes, edges, edges.find(edge=>edge.source==myedge.target), resolvePromise)
+    }
+
+    function execute()
+    {
+        const signPromise = new Promise((resolve, reject)=>{
+            signAll($edges.find(edge=>edge.source=="start"), resolve, reject)
+        })
+        signPromise.then(()=>{
+            console.log("signed")
+        }).catch((err)=>{
+            exectution_errors.push(err);
+        })
+        const chainscriptPromise = new Promise((resolve, reject)=>{
+            console.log("nuova promise")
+            flowToChainscript($nodes, $edges, $edges.find(edge=>edge.source=="start"), resolve)
+        })
+        chainscriptPromise.then(()=>{
+            console.log("chainscript", XMTransactions.operation.get())
+        })
+    }
 </script>
 
 <div style="margin-bottom: 32px;">
@@ -61,15 +129,20 @@
                 <input class="prv-input" on:input={(ev)=>{
                     if(ev.target.value!=""){connectWallet(required_wallet, ev.target.value)}
                 }} placeholder="Paste here"/>
-                {#if error != ""}
-                    <div class="alert-error">{error}</div>
+                {#if wallet_errors[required_wallet.id]}
+                    {#each wallet_errors[required_wallet.id] as error}
+                        <div class="alert-error">{error}</div>
+                    {/each}
                 {/if}
             {/if}
         {/if}
     </div>
 {/each}
+{#each exectution_errors as error}
+    <div class="alert-error">{error}</div>
+{/each}
 {#if $required_connections.every(value=>value.wallet)}
-<button class="primary execute-button">Execute</button>
+<button class="primary execute-button" on:click={execute}>Execute</button>
 {/if}
 
 <style>

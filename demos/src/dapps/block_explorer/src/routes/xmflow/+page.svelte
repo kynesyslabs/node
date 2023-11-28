@@ -88,7 +88,6 @@
 				required_copy.push({id:chain, wallet:null});
 			}
 		})
-		console.log("consolidated array", required_copy);
 		required_connections.set(required_copy);
 	}
 
