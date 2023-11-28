@@ -47,6 +47,8 @@ export default class PeerManager {
 
     private _getActors(peers: boolean, connections: boolean): Peer[] {
         console.log("[PeerManager] Getting all peers...")
+        console.log("[PeerManager] peers: " + peers)
+        console.log("[PeerManager] connections: " + connections)
         const actorList: Peer[] = []
         const connectedList: Peer[] = []
         const authenticatedList: Peer[] = []
@@ -56,10 +58,14 @@ export default class PeerManager {
             let _peer = this.peerList[peer]
             // Filtering
             if (_peer.identity != undefined) {
-                console.log("[PEERMANAGER] This peer has an identity: treating it as an authenticated peer")
+                console.log(
+                    "[PEERMANAGER] This peer has an identity: treating it as an authenticated peer",
+                )
                 authenticatedList.push(_peer)
             } else {
-                console.log("[PEERMANAGER] This peer has no identity: treating it as a connection only peer")
+                console.log(
+                    "[PEERMANAGER] This peer has no identity: treating it as a connection only peer",
+                )
                 connectedList.push(_peer)
             }
         }
@@ -70,7 +76,10 @@ export default class PeerManager {
         if (connections) {
             actorList.push(...connectedList)
         }
-        console.log("[PEERMANAGER] Retrieved and filtered actor list length: " + actorList.length)
+        console.log(
+            "[PEERMANAGER] Retrieved and filtered actor list length: " +
+                actorList.length,
+        )
         return actorList
     }
 

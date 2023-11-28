@@ -1,6 +1,6 @@
 import { Column, Entity, PrimaryColumn } from "typeorm"
 
-@Entity("responseRegistry")
+@Entity("response_registry")
 export class ResponseRegistry {
     @PrimaryColumn("text", { name: "muid" })
     muid: string | null

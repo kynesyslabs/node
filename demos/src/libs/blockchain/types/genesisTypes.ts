@@ -1,6 +1,6 @@
 // INFO Defining the structure of a valid Genesis block
 import Chain from "../chain"
-import Block from "../block"
+import { Blocks } from "src/model/entities/Blocks"
 /* INFO
  *
  * block, and are not present in the following ones.
@@ -51,7 +51,7 @@ export interface forkGenesis extends StandardGenesis {
 
 // INFO The Genesis class with its methods
 export default class Genesis {
-    genesisBlock: Block //  The genesis block
+    genesisBlock: Blocks //  The genesis block
     genesisStatus: GenesisArtifact // JSON artifact of the final genesis block
     balances: any
 

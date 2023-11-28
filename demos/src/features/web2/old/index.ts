@@ -10,4 +10,4 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 export { default as handlers } from "src/features/web2/old/handlers"
-export { Web2Data } from "src/features/web2/web2class"
+export { Web2Data } from "src/features/web2/old/web2class"

@@ -59,11 +59,20 @@ export default class subOperations {
     ): Promise<OperationResult> {
         let from: string = operation.params.from
         let to: string = operation.params.to
-        let amount: string = operation.params.amount
+        let amount = parseInt(operation.params.amount, 10)
+
+        // Check if amount is a valid number
+        if (isNaN(amount)) {
+            return {
+                success: false,
+                message: "Invalid amount",
+            }
+        }
         let balance_from = await GLS.getGLSNativeBalance(from)
         let balance_to = await GLS.getGLSNativeBalance(to)
         // Sanity checks
-        if (amount == "0") {
+
+        if (amount == 0) {
             return {
                 success: false,
                 message: "Amount cannot be 0",
@@ -76,8 +85,8 @@ export default class subOperations {
         }
         // TODO
         // If we are here, we have a valid operation
-        let new_balance_from = balance_from - parseInt(amount)
-        let new_balance_to = balance_to + parseInt(amount)
+        let new_balance_from = balance_from - amount
+        let new_balance_to = balance_to + amount
         await GLS.setGLSNativeBalance(from, new_balance_from, operation.hash)
         await GLS.setGLSNativeBalance(to, new_balance_to, operation.hash)
         // Returning success

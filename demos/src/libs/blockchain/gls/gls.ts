@@ -10,47 +10,50 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 /* INFO GLS
-    * While the GLS is not part of the blockchain itself, that does not mean that
-    * blockchain security does not apply to it. Even if a DEMOS Node does not store
-    * the GLS as part of the blockchain (mainly due to its mutable nature), every
-    * GLS property can and is traced back to the corresponding set of Operations.
-    * From there, finding the corresponding Transaction for each Operation is trivial.
-    * This ensures that even if it is a separate table, the GLS remains cryptographically secure.
-    * 
-*/
+ * While the GLS is not part of the blockchain itself, that does not mean that
+ * blockchain security does not apply to it. Even if a DEMOS Node does not store
+ * the GLS as part of the blockchain (mainly due to its mutable nature), every
+ * GLS property can and is traced back to the corresponding set of Operations.
+ * From there, finding the corresponding Transaction for each Operation is trivial.
+ * This ensures that even if it is a separate table, the GLS remains cryptographically secure.
+ *
+ */
 
 /* INFO Operations
-    * An Operation is a modification of the GLS derived from a transaction
-    * While in transactions like "transfer X tokens to Y" the Operation is
-    * a simple transfer, one could think that Operation = Transaction but
-    * it is very likely and very possible that from a Transaction multiple
-    * Operations are derived. For example, sending X tokens to y also means
-    * that the sender will pay gas so another Operation: "pay Z gas".
-    * 
-    * Operations are useful because while Transactions store in the Blockchain
-    * everything that happens, Operations quickly update the Blockchain GLS
-    * with all the necessary references to the corresponding Transactions
-    * without having to load and parse every single Transaction to verify the GLS.
-    *  
-    * Basically, Operations have the role of a quick reference index to modify, derive
-    * and trace back the GLS modifications efficiently.
-    * 
-*/
+ * An Operation is a modification of the GLS derived from a transaction
+ * While in transactions like "transfer X tokens to Y" the Operation is
+ * a simple transfer, one could think that Operation = Transaction but
+ * it is very likely and very possible that from a Transaction multiple
+ * Operations are derived. For example, sending X tokens to y also means
+ * that the sender will pay gas so another Operation: "pay Z gas".
+ *
+ * Operations are useful because while Transactions store in the Blockchain
+ * everything that happens, Operations quickly update the Blockchain GLS
+ * with all the necessary references to the corresponding Transactions
+ * without having to load and parse every single Transaction to verify the GLS.
+ *
+ * Basically, Operations have the role of a quick reference index to modify, derive
+ * and trace back the GLS modifications efficiently.
+ *
+ */
 
 // TODO genesis.json: see how it is stored on chain and make a method to
 // TODO insert it in the gls automatically so that the parameters of the
 // TODO chain are both immutable and editable at the same time
 
 import Chain from "../chain"
-import Token from "./types/Token"
-import NFT from "./types/NFT"
-import * as express from "express"
 import { TxFee } from "../types/transactions"
 import executeOperations from "../routines/executeOperations"
 import { Actor } from "../routines/executeOperations"
 import * as fs from "fs"
+import Datasource from "src/model/datasource"
 var term = require("terminal-kit").terminal
 import Hashing from "src/libs/crypto/hashing"
+import { LessThanOrEqual } from "typeorm"
+import { StatusNative } from "src/model/entities/StatusNative"
+import { Validators } from "src/model/entities/Validators"
+import { StatusProperties } from "src/model/entities/StatusProperties"
+import { StatusHashes } from "src/model/entities/StatusHashes"
 
 export interface OperationResult {
     success: boolean
@@ -131,41 +134,75 @@ export default class GLS {
 
     // SECTION Getters
     static async getGLSStatusHashTable() {
-        return await Chain.read("SELECT * FROM status_hashes")
+        const db = await Datasource.getInstance()
+        const statusHashesRepository = db
+            .getDataSource()
+            .getRepository(StatusHashes)
+        return await statusHashesRepository.find()
     }
 
     static async getGLSStatusNativeTable() {
-        return await Chain.read("SELECT * FROM status_native")
+        const db = await Datasource.getInstance()
+        const statusNativeRepository = db
+            .getDataSource()
+            .getRepository(StatusNative)
+        return await statusNativeRepository.find()
     }
+
     static async getGLSStatusPropertiesTable() {
-        return await Chain.read("SELECT * FROM status_properties")
+        const db = await Datasource.getInstance()
+        const statusPropertiesRepository = db
+            .getDataSource()
+            .getRepository(StatusProperties)
+        return await statusPropertiesRepository.find()
     }
+
     static async getGLSLastHash() {
-        let response = await Chain.read(
-            "SELECT hash FROM status_hashes ORDER BY id DESC LIMIT 1",
-        )
-        return response[0]
+        const db = await Datasource.getInstance()
+        const statusHashesRepository = db
+            .getDataSource()
+            .getRepository(StatusHashes)
+        const lastHashes = await statusHashesRepository.find({
+            order: { id: "DESC" },
+            take: 1,
+        })
+        return lastHashes.length > 0 ? lastHashes[0].hash : null
     }
+
     static async getGLSNativeFor(address: string) {
-        let response = await Chain.read(
-            "SELECT * FROM status_native WHERE address='" + address + "'",
-        )
-        return response[0]
+        const db = await Datasource.getInstance()
+        const statusNativeRepository = db
+            .getDataSource()
+            .getRepository(StatusNative)
+        return await statusNativeRepository.findOne({
+            where: { address },
+        })
     }
+
     static async getGLSPropertiesFor(address: string) {
-        return await Chain.read(
-            "SELECT * FROM status_properties WHERE address='" + address + "'",
-        )
+        const db = await Datasource.getInstance()
+        const statusPropertiesRepository = db
+            .getDataSource()
+            .getRepository(StatusProperties)
+        return await statusPropertiesRepository.findOne({
+            where: { address },
+        })
     }
 
     // ANCHOR Balances retrieval
 
     static async getGLSNativeBalance(address: string) {
-        let response = await Chain.read(
-            "SELECT balance FROM status_native WHERE address='" + address + "'",
-        )
+        const db = await Datasource.getInstance()
+        const statusNativeRepository = db
+            .getDataSource()
+            .getRepository(StatusNative)
+
         try {
-            return response[0].balance
+            const response = await statusNativeRepository.findOne({
+                select: ["balance"],
+                where: { address },
+            })
+            return response ? response.balance : 0
         } catch (e) {
             term.yellow("[GET BALANCE] No balance for: " + address + "\n")
             return 0
@@ -173,19 +210,39 @@ export default class GLS {
     }
 
     static async getGLSTokenBalance(address: string, token_address: string) {
-        let response = await Chain.read(
-            "SELECT tokens FROM status_properties WHERE address='",
-        )
-        let full_tokens_balance = response[0]
-        return full_tokens_balance.tokens[token_address]
+        const db = await Datasource.getInstance()
+        const statusPropertiesRepository = db
+            .getDataSource()
+            .getRepository(StatusProperties)
+
+        try {
+            const response = await statusPropertiesRepository.findOne({
+                select: ["tokens"],
+                where: { address },
+            })
+            return response && response.tokens
+                ? response.tokens[token_address]
+                : 0
+        } catch (e) {
+            console.error(e)
+        }
     }
 
     static async getGLSNFTBalance(address: string, nft_address: string) {
-        let response = await Chain.read(
-            "SELECT nfts FROM status_properties WHERE address='",
-        )
-        let full_nfts_balance = response[0]
-        return full_nfts_balance.nfts[nft_address]
+        const db = await Datasource.getInstance()
+        const statusPropertiesRepository = db
+            .getDataSource()
+            .getRepository(StatusProperties)
+
+        try {
+            const response = await statusPropertiesRepository.findOne({
+                select: ["nfts"],
+                where: { address },
+            })
+            return response && response.nfts ? response.nfts[nft_address] : 0
+        } catch (e) {
+            console.error(e)
+        }
     }
 
     static async getGLSGasMultiplier(): Promise<number> {
@@ -197,13 +254,23 @@ export default class GLS {
 
     // INFO In the GLS properties table, the special row "DEMOS Network" defines, in the other
     // field, the properties of the chain itself shared by all its members.
-    // TODO Maybe implement it at genesis or retrieve the genesis from chain? 
+    // TODO Maybe implement it at genesis or retrieve the genesis from chain?
     static async getGLSChainProperties(): Promise<any> {
-        let response = await Chain.read(
-            "SELECT other FROM status_properties WHERE address = 'DEMOS Network'", 
-        ) 
-        let chainProperties = response[0]
-        return chainProperties
+        const db = await Datasource.getInstance()
+        const statusPropertiesRepository = db
+            .getDataSource()
+            .getRepository(StatusProperties)
+
+        try {
+            const response = await statusPropertiesRepository.findOne({
+                select: ["other"],
+                where: { address: "DEMOS Network" },
+            })
+            return response ? response.other : null
+        } catch (e) {
+            // Handle the error appropriately
+            console.error("Error fetching GLS chain properties:", e)
+        }
     }
 
     // SECTION Validators management
@@ -211,66 +278,93 @@ export default class GLS {
     // INFO The following getter is used to retrieve the hashed form of the sum of all the stakes at block N
     static async getGLSHashedStakes(n: number = null) {
         if (!n) {
-            n = await Chain.getLastBlockNumber()
+            n = await Chain.getLastBlockNumber() // Ensure this method is also ported to TypeORM if necessary
         }
-        let stakes = await Chain.read(
-            "SELECT * FROM validators WHERE first_seen <= " +
-                n +
-                " ORDER BY first_seen DESC",
-        )
-        // Hashing
-        let total = 0
-        for (let i = 0; i < stakes.length; i++) {
-            total += stakes[i].stake // TODO Probably won't work but is a poc rn
+
+        const db = await Datasource.getInstance()
+        const validatorsRepository = db
+            .getDataSource()
+            .getRepository(Validators)
+
+        try {
+            const stakes = await validatorsRepository.find({
+                where: { first_seen: LessThanOrEqual(n) },
+                order: { first_seen: "DESC" },
+            })
+
+            // Hashing
+            let total = 0
+            stakes.forEach(stake => {
+                total += stake.stake // Replace 'stake.stake' with the correct field name if different
+            })
+
+            return Hashing.sha256(total.toString()) // Ensure Hashing.sha256 is defined and works as expected
+        } catch (e) {
+            console.error("Error fetching GLS hashed stakes:", e)
         }
-        return Hashing.sha256(total.toString())
     }
 
     // INFO The following getter is used to retrieve the list of all validators at a given block
     static async getGLSValidatorsAtBlock(
         blockNumber: number = null,
     ): Promise<unknown[]> {
+        const db = await Datasource.getInstance()
+        const validatorsRepository = db
+            .getDataSource()
+            .getRepository(Validators)
+
         if (!blockNumber) {
             console.log("No block number provided, getting the last one")
-            blockNumber = (await Chain.getLastBlock()).number
+            blockNumber = (await Chain.getLastBlock()).number // Ensure getLastBlock is also ported to TypeORM
         }
         console.log("blockNumber: " + blockNumber)
-        let block_nodes = await Chain.read(
-            "SELECT * FROM validators WHERE valid_at<=" +
-                blockNumber +
-                " AND status=2 ORDER BY valid_at DESC",
-        )
-        if (!block_nodes) {
-            return []
+
+        try {
+            const blockNodes = await validatorsRepository.find({
+                where: {
+                    valid_at: LessThanOrEqual(blockNumber),
+                    status: "2",
+                },
+                order: { valid_at: "DESC" },
+            })
+
+            return blockNodes || []
+        } catch (e) {
+            console.error("Error fetching GLS validators at block:", e)
+            return [] // or handle the error as needed
         }
-        return block_nodes
     }
 
     // INFO Get a validator (or a public key anyway) status in the staking
     // NOTE While accepting a blockNumber, it defaults to the last one
     static async getGLSValidatorStatus(
-        // NOTE We want the hexed string as it is stored like that on chain
         publicKeyHex: string,
         blockNumber: number = null,
     ) {
+        const db = await Datasource.getInstance()
+        const validatorsRepository = db
+            .getDataSource()
+            .getRepository(Validators)
+
         if (!blockNumber) {
-            blockNumber = await Chain.getLastBlockNumber()
+            blockNumber = await Chain.getLastBlockNumber() // Ensure this method is also ported to TypeORM
         }
-        // Let's see if the validator is contained within the block
-        let info = await Chain.read(
-            "SELECT * FROM validators" +
-                " WHERE first_seen<=" +
-                blockNumber +
-                " AND address=" +
-                publicKeyHex,
-        )
-        // REVIEW Better handling of errors?
+
         try {
-            return info[0]
+            const info = await validatorsRepository.findOne({
+                where: {
+                    first_seen: LessThanOrEqual(blockNumber),
+                    address: publicKeyHex,
+                },
+            })
+
+            return info || null
         } catch (e) {
-            return null
+            console.error("Error fetching validator status:", e)
+            return null // or handle the error as needed
         }
     }
+
     // !SECTION Validators management
 
     // !SECTION Getters
@@ -281,41 +375,48 @@ export default class GLS {
         native: number,
         tx_hash: string,
     ) {
-        // Updating tx list
-        let tx_list = await Chain.read(
-            "SELECT tx_list FROM status_native WHERE address='" + address + "'",
-        )
-        // Create it if it doesn't exist
-        console.log(tx_list)
-        if (tx_list.length === 0) {
-            tx_list = [{ tx_list: "[]" }]
-            await Chain.write(
-                "INSERT INTO status_native(address, balance, nonce, tx_list) VALUES('" +
-                    address +
-                    "','0','0', '[]')",
+        const db = await Datasource.getInstance()
+        const statusNativeRepository = db
+            .getDataSource()
+            .getRepository(StatusNative)
+
+        try {
+            let nativeStatus = await statusNativeRepository.findOne({
+                select: ["tx_list"],
+                where: { address },
+            })
+
+            if (!nativeStatus) {
+                console.log("Creating new native status")
+                nativeStatus = statusNativeRepository.create({
+                    address: address,
+                    balance: 0,
+                    nonce: 0,
+                    tx_list: JSON.stringify([]),
+                })
+                await statusNativeRepository.save(nativeStatus)
+            }
+
+            console.log(nativeStatus.tx_list)
+            let tx_list = JSON.parse(nativeStatus.tx_list || "[]")
+            tx_list.push(tx_hash)
+
+            await statusNativeRepository.update(
+                { address },
+                {
+                    balance: native,
+                    tx_list: JSON.stringify(tx_list),
+                },
             )
+
+            console.log(tx_list)
+            // TODO: Decide if we should use status_hashes too
+            // Note: The original function returns responses from Chain.write, consider what you need to return here.
+            return // Adjust the return value as needed based on your requirements.
+        } catch (e) {
+            console.error("Error setting GLS native balance:", e)
+            throw e // or handle the error as needed
         }
-        console.log(tx_list)
-        tx_list = JSON.parse(tx_list[0].tx_list)
-        tx_list.push(tx_hash)
-        tx_list = JSON.stringify(tx_list)
-        // Updating balance and tx_list on db
-        let balance_response = await Chain.write(
-            "UPDATE status_native SET balance=" +
-                native +
-                " WHERE address='" +
-                address +
-                "'",
-        )
-        let tx_list_response = await Chain.write(
-            "UPDATE status_native SET tx_list='" +
-                tx_list +
-                "' WHERE address='" +
-                address +
-                "'",
-        )
-        // TODO Decide if we should use status_hashes too
-        return [balance_response, tx_list_response]
     }
 
     // TODO Build objects for tokens and nfts and write setters for them

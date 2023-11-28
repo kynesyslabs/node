@@ -1,4 +1,4 @@
-import { Web2Data } from "src/features/web2"
+import { Web2Data } from "src/features/web2/old"
 // INFO This singleton is used to store the state of the application through different parts of the application.
 
 export default class web2Registry {

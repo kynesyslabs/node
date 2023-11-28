@@ -2,10 +2,7 @@
 
 import * as forge from "node-forge"
 import chain from "src/libs/blockchain/chain"
-import {
-    IValidator,
-    ProofOfRepresentation,
-} from "src/libs/consensus/mechanisms/PoR"
+import { ProofOfRepresentation } from "src/libs/consensus/mechanisms/PoR"
 require("dotenv").config({ path: "../../.commons" })
 import { Identity } from "src/libs/identity"
 // eslint-disable-next-line no-unused-vars

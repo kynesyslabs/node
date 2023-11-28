@@ -9,14 +9,17 @@ export class Validators {
     status: string | null
 
     @Column("text", { name: "connection_url", nullable: true })
-    connectionUrl: string | null
+    connection_url: string | null
 
     @Column("text", { name: "staked", nullable: true })
     staked: string | null
 
     @Column("integer", { name: "first_seen", nullable: true })
-    firstSeen: number | null
+    first_seen: number | null
 
     @Column("integer", { name: "valid_at", nullable: true })
-    validAt: number | null
+    valid_at: number | null
+
+    @Column("integer", { name: "stake", nullable: true })
+    stake: number | null
 }
