@@ -169,6 +169,7 @@ export default class Mempool {
                 current: 1,
                 transactions: JSON.stringify([]),
                 proposedBlock: JSON.stringify({}),
+                timestamp: new Date().getTime(),
             })
 
             await mempoolRepository.save(newMempool)
