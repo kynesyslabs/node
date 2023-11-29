@@ -19,8 +19,8 @@ export interface TxFee {
 
 export interface TransactionContent {
     type: string
-    from: forge.pki.ed25519.BinaryBuffer
-    to: forge.pki.ed25519.BinaryBuffer
+    from: forge.pki.ed25519.BinaryBuffer | forge.pki.PublicKey
+    to: forge.pki.ed25519.BinaryBuffer | forge.pki.PrivateKey
     amount: number
     data: [string, string] // type as string and content in hex string
     nonce: number // Increments every time a transaction is sent from the same account

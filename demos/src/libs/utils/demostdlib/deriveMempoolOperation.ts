@@ -95,7 +95,7 @@ export async function createTransaction(data: any): Promise<Transaction> {
         status: null,
     }
     // Setting us as the sender
-    transaction.content.from = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
+    transaction.content.from = sharedState.getInstance().identity.ed25519.publicKey
     transaction.content.to = "blockchain"
     transaction.content.amount = 0
     transaction.content.nonce = 0
