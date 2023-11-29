@@ -228,7 +228,7 @@ export default class Mempool {
                 "[MEMPOOL VERIFICATION] Signature: " +
                     signature.data.toString("hex"),
             )
-            let public_key = tx.content.from
+            let public_key = tx.content.from as any
             console.log(
                 "[MEMPOOL VERIFICATION] Public key: " +
                     public_key.data.toString("hex"),
