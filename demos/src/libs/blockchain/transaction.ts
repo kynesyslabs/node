@@ -23,6 +23,7 @@ import Hashing from "../crypto/hashing"
 import { pki } from "node-forge"
 import { TransactionContent } from "./types/transactions"
 import Confirmation from "./types/confirmation"
+import { compressData, decompressData } from "../utils/demostdlib"
 
 interface TransactionResponse {
     status: string
@@ -159,5 +160,17 @@ export default class Transaction {
         let _structured = true
         // TODO Do this
         return _structured
+    }
+
+    // SECTION Compression support
+
+    public static compress(tx: Transaction): Transaction {
+        let _tx = compressData(tx)
+        return _tx
+    }
+
+    public static decompress(tx: Transaction): Transaction {
+        let _tx = decompressData(tx)
+        return _tx
     }
 }

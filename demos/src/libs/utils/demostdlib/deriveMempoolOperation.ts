@@ -39,6 +39,7 @@ export async function deriveMempoolOperation(
         // And we do the same for the derived operation in the GLS
         GLS.getInstance().operations.push(derivedOperation)
     }
+    // TODO Size limit?
     return derivedOperation
 }
 
@@ -94,14 +95,22 @@ export async function createTransaction(data: any): Promise<Transaction> {
         confirmations: [],
         status: null,
     }
+    // Setting us as the sender
+    transaction.content.from = sharedState.getInstance().identity.ed25519.publicKey
+    transaction.content.to = "blockchain"
+    transaction.content.amount = 0
+    transaction.content.nonce = 0
+    // TODO Fees
+    // Adding data
     transaction.content.data = data
     transaction.content.timestamp = Date.now()
     // Hashing the content and signing the transaction
     transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
-    transaction.signature = Cryptography.sign(
+    let signature = Cryptography.sign(
         transaction.hash,
         sharedState.getInstance().identity.ed25519.privateKey,
     )
+    transaction.signature = signature
     // TODO See how to be general purpose but specific (a shared format?)
     return transaction
 }
