@@ -10,8 +10,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 import { pki } from "node-forge"
 
-import forge from "node-forge"
-
 export interface TxFee {
     network_fee: number
     rpc_fee: number
