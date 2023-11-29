@@ -12,7 +12,8 @@
     {
         if(!demos.connected)
         return;
-        let transaction = await demos.getTxByHash("dd3fc542784875538efef89815672c693f8175f1007450b8e890c618650dd03e");
+        let transaction = await demos.getTxByHash("415463b7405bcf75605013de2deded4e8e12a0c73a5faa9d98cebb2e2e1a75bb");
+        console.log("transaction", transaction)
         let transactions = [transaction];
         console.log("transactions", transactions);
         return transactions;
@@ -30,17 +31,6 @@
         {#each transactions as transaction}
             <TransactionRow transaction={transaction}/>        
         {/each}
-        <!--<div class="card-footer">
-            <div class="page-controller">
-                <button class="page-controller-button" on:click={()=>{gotoPage(1)}}>First</button>
-                <button class="page-controller-button" on:click={()=>{gotoPage(Math.max(thepage-1, 1))}}><Fa style="font-size:.8rem" icon={faChevronLeft}/></button>
-                    <p class="page-controller-label">Page {thepage} of {Math.ceil(info.number/50)}</p>
-                <button class="page-controller-button" on:click={()=>{gotoPage(Math.min(thepage+1, Math.ceil(info.number/50)))}}><Fa style="font-size:.8rem" icon={faChevronRight}/></button>
-                <button class="page-controller-button" on:click={()=>{
-                    gotoPage(Math.ceil(info.number/50));
-                }}>Last</button>
-            </div>
-        </div>-->
     </div>
 {:catch}
     <p style="text-align: center;">Something went wrong</p>

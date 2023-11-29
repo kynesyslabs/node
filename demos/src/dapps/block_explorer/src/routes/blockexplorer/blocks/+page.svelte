@@ -19,20 +19,26 @@
     {
         let blockRequests = [];
         let blockNumber = JSON.parse(await demos.getLastBlockNumber());
-        for(let i = blockNumber - ((page-1)*50); i > Math.max(blockNumber - ((page-1)*50) -50, 7); i--)
+        for(let i = blockNumber - ((page-1)*50); i >= Math.max(blockNumber - ((page-1)*50) -49, 0); i--)
         {   
             blockRequests.push(demos.getBlockByNumber(i));
         }
         let blocks = await Promise.all(blockRequests);
         try{
-            blocks.forEach(block=>{
-                block.content = JSON.parse(block.content);
-            })
-        }  
+            for( let i = 0; i < blocks.length; i++)
+            {
+                blocks[i] = JSON.parse(blocks[i]);
+                if(blocks[i].content.timestamp.length == 10)
+                {
+                    blocks[i].content.timestamp = blocks[i].content.timestamp*1000;
+                }
+            }
+        }
         catch(e)
         {
             console.log("parse error", e);
         }
+        console.log("blocks", blocks);
         return {number:blockNumber, blocks:blocks};
     }
 
@@ -65,16 +71,6 @@
             <p class="grid-cell">{block.proposer}</p>-->
             <BlockRow block={block}/>
             {/each}
-            {#if thepage == Math.ceil(info.number/50)}
-            <BlockRow missing></BlockRow>
-            <BlockRow missing></BlockRow>
-            <BlockRow missing></BlockRow>
-            <BlockRow missing></BlockRow>
-            <BlockRow missing></BlockRow>
-            <BlockRow missing></BlockRow>
-            <BlockRow missing></BlockRow>
-            <BlockRow missing></BlockRow>
-            {/if}
             <div class="card-footer">
                 <div class="page-controller">
                     <button class="page-controller-button" on:click={()=>{gotoPage(1)}}>First</button>

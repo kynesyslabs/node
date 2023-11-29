@@ -15,7 +15,7 @@
         if(!demos.connected)
         return;
         let block = await demos.getBlockByNumber(data.blocknumber);
-        block.content = JSON.parse(block.content);
+        block = JSON.parse(block);
         return block;
     }
 </script>

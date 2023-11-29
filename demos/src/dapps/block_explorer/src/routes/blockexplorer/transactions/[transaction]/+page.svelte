@@ -14,7 +14,7 @@
         if(!demos.connected)
         return;
         let transaction = await demos.getTxByHash(data.transaction);
-        console.log(transaction);
+        transaction = JSON.parse(transaction);
         return transaction;
     }
 </script>
