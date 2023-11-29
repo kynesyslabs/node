@@ -177,7 +177,7 @@ export default class QBFT {
         // eslint-disable-next-line no-unused-vars
         const validatorPocList = pocList.map(({ socket, ...rest }) => rest)
 
-        proposedBlock.validation_data = validatorPocList
+        proposedBlock.validation_data = JSON.stringify(validatorPocList)
 
         // REVIEW BFT for the block with the others
         console.log("[sQBFT]: forgedProposedHash: " + forgedProposedHash)
