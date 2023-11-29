@@ -101,7 +101,7 @@ export async function createTransaction(data: any): Promise<Transaction> {
     transaction.content.amount = 0
     transaction.content.nonce = 0
     // TODO Fees
-    // Adding data
+    // Adding data  
     transaction.content.data = data
     transaction.content.timestamp = Date.now()
     // Hashing the content and signing the transaction
