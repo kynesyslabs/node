@@ -39,6 +39,7 @@ export async function deriveMempoolOperation(
         // And we do the same for the derived operation in the GLS
         GLS.getInstance().operations.push(derivedOperation)
     }
+    // TODO Size limit?
     return derivedOperation
 }
 
