@@ -182,9 +182,6 @@
 </script>
 
 <style>
-    .title{
-        margin: 0;
-    }
     .subtitle{
         margin-bottom: 16px;
     }

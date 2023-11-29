@@ -32,6 +32,11 @@ export const updateWallet = () => {
 //helpers
 TimeAgo.addLocale(en);
 export const timeAgo = new TimeAgo('en-US');
+export const trim_address = (str, length)=>{
+    if (str.length <= length - 3 || str.length <= 20)
+    return str;
+    return str.substr(0, Math.ceil(length/2)) + '...' + str.substr(str.length-Math.floor(length/2), str.length);
+}
 
 //wallets
 //export const MMSDK = new MetaMaskSDK({dappMetadata:{name:"Morph JS"}});
