@@ -419,6 +419,12 @@ export default class ServerHandlers {
                             data.blockNumber,
                     )
                     response = await chain.getBlockByNumber(data.blockNumber)
+                    
+                    // REVIEW Debug lines
+                    console.log(response)
+                    response = JSON.stringify(response)
+                    console.log(response)
+                    
                 }
                 break
             case "getBlockByHash":
@@ -427,7 +433,14 @@ export default class ServerHandlers {
                         error: "No block specified",
                     })
                 }
+                console.log("[SERVER] Received getBlockByHash: " + data.hash)
                 response = await chain.getBlockByHash(data.hash)
+
+                // REVIEW Debug lines
+                console.log(response)
+                response = JSON.stringify(response)
+                console.log(response)
+
                 break
             case "getTxByHash":
                 if (!data.hash) {
