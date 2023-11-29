@@ -122,7 +122,7 @@ export default class Mempool {
     public static async removeTransaction(
         transaction: Transaction,
     ): Promise<void> {
-        let mempool = await this.getMempool() // Assuming getMempool is updated to work with TypeORM
+        let mempool = await this.getMempool()
 
         let index = mempool.transactions.indexOf(transaction)
         if (index > -1) {
@@ -140,7 +140,6 @@ export default class Mempool {
                 )
             } catch (error) {
                 console.error("Error removing transaction from mempool:", error)
-                // Handle the error appropriately
             }
         } else {
             console.warn("Transaction not found in mempool.")
@@ -226,12 +225,12 @@ export default class Mempool {
             let { signature } = tx
             console.log(
                 "[MEMPOOL VERIFICATION] Signature: " +
-                    signature.toString("hex"),
+                    signature.data.toString("hex"),
             )
             let public_key = tx.content.from
             console.log(
                 "[MEMPOOL VERIFICATION] Public key: " +
-                    public_key.toString("hex"),
+                    public_key.data.toString("hex"),
             )
             let signature_valid = Cryptography.verify(
                 tx_hash,

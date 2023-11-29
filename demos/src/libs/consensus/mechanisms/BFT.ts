@@ -30,6 +30,7 @@ export default class QBFT {
         }
         // Starting
         console.log("[BFT] Getting mempool")
+        // Fixme: this does nothing ATM
         let our_mempool = await Mempool.getMempool()
         console.log("[BFT] Got mempool")
         let merged_mempool = our_mempool

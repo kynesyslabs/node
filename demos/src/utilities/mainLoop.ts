@@ -12,6 +12,7 @@ import { pki } from "node-forge"
 import RepresentativeShard from "src/libs/consensus/mechanisms/PoR"
 import QBFT from "src/libs/consensus/mechanisms/BFT"
 import chain from "src/libs/blockchain/chain"
+import Mempool from "src/libs/blockchain/mempool"
 
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
@@ -152,6 +153,9 @@ export default async function mainLoop(id: Identity) {
                 const prevBlockNumber = (await chain.getLastBlock()).number
                 consensus[1].number = prevBlockNumber + 1
                 await chain.insertBlock(consensus[1])
+
+                // Next mempool
+                await Mempool.nextMempool()
             }
 
             // At the end of the consensus period, the main loop should start again

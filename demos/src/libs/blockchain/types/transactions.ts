@@ -8,6 +8,7 @@ Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
 KyneSys Labs: https://www.kynesys.xyz/
 
 */
+import { pki } from "node-forge"
 
 import forge from "node-forge"
 
@@ -17,10 +18,15 @@ export interface TxFee {
     additional_fee: number
 }
 
+interface Signature {
+    type: string
+    data: pki.ed25519.BinaryBuffer
+}
+
 export interface TransactionContent {
     type: string
-    from: forge.pki.ed25519.BinaryBuffer
-    to: forge.pki.ed25519.BinaryBuffer
+    from: Signature
+    to: Signature
     amount: number
     data: [string, string] // type as string and content in hex string
     nonce: number // Increments every time a transaction is sent from the same account

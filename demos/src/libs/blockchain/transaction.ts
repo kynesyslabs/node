@@ -31,9 +31,14 @@ interface TransactionResponse {
     data: {}
 }
 
+interface Signature {
+    type: string
+    data: pki.ed25519.BinaryBuffer
+}
+
 export default class Transaction {
     content: TransactionContent
-    signature: pki.ed25519.BinaryBuffer
+    signature: Signature
     hash: string
     status: string
     confirmations: Confirmation[]
