@@ -99,8 +99,13 @@
         console.log("url", url, "params", params);
         let response = await demos.Web2Transactions(method, url, params, null, 5);
         theresponse = JSON.parse(response);
+        Object.keys(theresponse.attestations).forEach((key)=>{
+            theresponse.attestations[key].identity.data= theresponse.attestations[key].identity.data.toString();
+            theresponse.attestations[key].signature.data= theresponse.attestations[key].signature.data.toString();
+        })
+        //theresponse.attestations.identity.data= theresponse.attestations.identity.data.toString();
         waiting = false;
-        //console.log("response", theresponse.attestations);
+        console.log("response", theresponse);
     }
 
     let url="";
@@ -149,6 +154,22 @@
     <div>
         <h4 class="subtitle">Response</h4>
         <div class="response">
+            <div class="request-recap">
+                {#if theresponse.raw.url.slice(0, 5)=="https"}
+                    <div class="secure-badge">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="24" height="24"><g id="padlock-shield--combination-combo-lock-locked-padlock-secure-security-shield"><path id="Subtract" fill="var(--background)" fill-rule="evenodd" d="M1.5 1v16.5L12 23l10.5-5.5V1h-21Zm14.25 8.996H17V16.5H7V9.996h1.25V7.75a3.75 3.75 0 1 1 7.5 0v2.246Zm-2 0V7.75a1.75 1.75 0 1 0-3.5 0v2.246h3.5Z" clip-rule="evenodd"></path></g></svg>
+                        <p>
+                        Secure
+                        </p>
+                    </div>
+                {:else}
+                    Not secure
+                {/if}
+                <p class="used-method">
+                    {theresponse.raw.action}
+                </p>
+                {theresponse.raw.url}
+            </div>
             <div class="tabs">
                 {#each tabs as tab}
                     <button on:click={()=>{selectedtab=tab.id}} class={`secondary tab ${tab.id==selectedtab?"selected":""}`}>{tab.label}</button>
@@ -254,5 +275,22 @@
         font-weight: bold;
         width: 100%;
         border-bottom: 0;
+    }
+    .request-recap{
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        border-bottom: 1px solid var(--background3);
+    }
+    .secure-badge{
+        display: flex;
+        align-items: center;
+        padding: 0 16px;
+        gap:8px;
+        background-color: var(--color);
+        color: var(--background);
+    }
+    .used-method{
+        font-weight: bold;
     }
 </style>
