@@ -1,2 +1,7 @@
+# Basic configurations that are needed to communicate with other nodes
 CONSENSUS_CHECK_INTERVAL=100
 CONSENSUS_TIME=10000
+# Here you can set your RPC Fee to a custom value (calculated in % of the base fee)
+RPC_FEE_PERCENT = 5
+# 64GB is a lot. Change this value to something realistic
+MAX_MESSAGE_SIZE = 64 * 1024 * 1024 * 1024 

@@ -4,6 +4,8 @@ import { Operation } from "../../blockchain/routines/executeOperations"
 import Mempool from "../../blockchain/mempool"
 import GLS from "../../blockchain/gls/gls"
 import sharedState from "src/utilities/sharedState"
+import Cryptography from "src/libs/crypto/cryptography"
+import Hashing from "src/libs/crypto/hashing"
 
 // REVIEW See if is fixed (should return something)
 // INFO Deriving a mempool operation from a given data by deriving a tx and the corresponding mempool operation
@@ -94,6 +96,12 @@ export async function createTransaction(data: any): Promise<Transaction> {
     }
     transaction.content.data = data
     transaction.content.timestamp = Date.now()
+    // Hashing the content and signing the transaction
+    transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
+    transaction.signature = Cryptography.sign(
+        transaction.hash,
+        sharedState.getInstance().identity.ed25519.privateKey,
+    )
     // TODO See how to be general purpose but specific (a shared format?)
     return transaction
 }

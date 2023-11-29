@@ -27,10 +27,10 @@ export default class sharedState {
     // !SECTION shared state variables
 
     // TODO The following variables should be in the genesis
-    maxMessageSize = 500000000000 // 5 GB just for debug purpose
+    maxMessageSize = parseInt(process.env.MAX_MESSAGE_SIZE) // 5 GB just for debug purpose
 
     // SECTION shared useful variables
-    rpcFee: number = 0 // TODO Implement
+    rpcFee: number = parseInt(process.env.RPC_FEE_PERCENT) // TODO Implement // Percentage of the fee to be charged for the rpc
     publicKey: forge.pki.ed25519.BinaryBuffer // TODO Implement
     privateKey: forge.pki.ed25519.BinaryBuffer // TODO Implement
 
