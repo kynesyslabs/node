@@ -144,7 +144,7 @@ button{
     margin: auto;
 }
 
-.label{
+.label, label{
     margin: 8px 0;
     opacity: .75;
 }
@@ -261,4 +261,8 @@ button{
     height: 64px;
     display: block;
     opacity: .3;
+}
+
+.svelte-flow__attribution a{
+    display: none;
 }

@@ -3,6 +3,19 @@ input:not([type='file'])
     background-color: transparent;
     border: 1px solid var(--background3);
     font-family: 'SourceCodePro', sans-serif;
+    color: var(--color);
+    font-weight: 400;
+    line-height: 1.4444;
+    letter-spacing: 0.311px;
+    padding: 12px;
+    max-width: 100%;
+    font-size: 1rem;
+}
+
+.legacyinput{
+    background-color: transparent;
+    border: 1px solid var(--background3);
+    font-family: 'SourceCodePro', sans-serif;
     height: 70px;
     color: var(--color);
     font-size: 18px;
@@ -41,7 +54,8 @@ input:focus{
 }
 
 input::placeholder {
-    color: #545459;
+    color: var(--color);
+    opacity: 0.5;
 }
 
 input:focus {
@@ -85,27 +99,27 @@ input:focus {
 }
 
 @media (max-width: 1399px){
-    input, .combobox{
+    .legacyinput, .combobox{
         height: 65px;
     }
 }
 @media (max-width:1199px)
 {
-    input, .combobox{
+    .legacyinput, .combobox{
         height: 62px;
         font-size: 1.0625rem;
     }
 }
 @media (max-width: 991px)
 {
-    input, .combobox {
+    .legacyinput, .combobox {
         height: 58px;
         font-size: 1rem;
     }
 }
 @media (max-width: 767px)
 {
-    input, .combobox{
+    .legacyinput, .combobox{
         height: 52px;
         font-size: 1rem;
     }

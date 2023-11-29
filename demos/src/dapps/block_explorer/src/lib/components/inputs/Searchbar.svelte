@@ -5,6 +5,7 @@
     import debounce from "debounce";
     export let onChange;
     export let setSearchMode;
+    export let style;
     let value = "";
     let loading = false;
     const debounced = debounce(()=>{loading = false; onChange(value)}, 1000);
@@ -27,7 +28,7 @@
         color:#A8ACAF;
     }
 </style>
-<div class="input-container">
+<div class="input-container" style={style}>
     <Fa style="color:#A8ACAF;" icon={faSearch}></Fa>
     <input bind:value={value} class="embedded-input" type="text" placeholder="Search" />
     {#if loading}

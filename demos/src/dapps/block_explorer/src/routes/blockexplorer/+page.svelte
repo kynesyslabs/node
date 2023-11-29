@@ -34,6 +34,7 @@
         {   
             blockRequests.push(demos.getBlockByNumber(i));
         }
+        console.log("blockRequests", blockRequests);
         let blockValues = await Promise.all(blockRequests);
         try{
             blockValues.forEach(block=>{
@@ -44,6 +45,7 @@
         {
             console.log("parse error", e);
         }
+        console.log("blockValues", blockValues);
         return blockValues;
     }
 
