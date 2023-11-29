@@ -281,7 +281,6 @@ let demos = {
 			blockNumber: blockNumber
 		});
 		block = JSON.parse(block);
-		block.content = JSON.parse(block.content);
 		console.log(typeof block);
 		return block;
 	},
