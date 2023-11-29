@@ -302,7 +302,6 @@ let demos = {
 			hash: txHash
 		});
 		tx = JSON.parse(tx);
-		tx.content = JSON.parse(tx.content);
 		console.log(typeof tx);
 		return tx;
 	},

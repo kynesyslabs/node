@@ -14,7 +14,8 @@
         if(!demos.connected)
         return;
         let transaction = await demos.getTxByHash(data.transaction);
-        transaction = JSON.parse(transaction);
+        console.log("thishash", data.transaction)
+        console.log("transaction", transaction)
         return transaction;
     }
 </script>
@@ -49,6 +50,9 @@
             <div class="info"><p class="info-text">{transaction.content.amount}</p></div>
         </div>
     </div>
+{:catch err}
+    <p style="text-align: center;">Something went wrong </p>
+    <p style="text-align: center;">{err}</p>
 {/await}
 
 <style>
