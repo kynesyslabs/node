@@ -21,9 +21,8 @@ export default async function findGenesisBlock() {
     if (!genesis_block_q) {
         console.log("[GENESIS] No genesis block found.")
         genesis_block = null
-    }
-    else {
-        genesis_block = genesis_block_q[0]
+    } else {
+        genesis_block = genesis_block_q
     }
     // console.log(genesis_block)
     // throw new Error("genesis block found")
