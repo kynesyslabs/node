@@ -1,11 +1,12 @@
 <script>
-	import { Handle, Position} from '@xyflow/svelte';
+	import { Position} from '@xyflow/svelte';
     import ChainSelection from './ChainSelection.svelte';
     import { useStore } from '@xyflow/svelte';
     import {tasks} from '$lib/chainscript';
     import cloneDeep from 'lodash/cloneDeep';
     import {get} from 'svelte/store';
     import CodeEditor from "$lib/components/CodeEditor.svelte";
+	import OnePathHandle from './OnePathHandle.svelte';
     
     export let data;
 
@@ -35,7 +36,7 @@
 </script>
 
 <div class="card operation">
-	<Handle on:connect={()=>{console.log("connect")}} type="target" position={Position.Left} />
+	<OnePathHandle id="input" nodeId={id} type="target" position={Position.Left} />
         <div class="card-header">
             <img class="taskicon" style="opacity: .3;" alt="task icon" src={task.icon}/>
             <div>
@@ -60,7 +61,7 @@
             {/each}
             <slot/>
         {/if}
-	<Handle on:connect={()=>{console.log("connect")}} type="source" position={Position.Right} />
+	<OnePathHandle id="output" nodeId={id} type="source" position={Position.Right} />
 </div>
 
 <style>

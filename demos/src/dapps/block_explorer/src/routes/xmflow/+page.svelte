@@ -17,6 +17,7 @@
 
     import cloneDeep from 'lodash/cloneDeep';
 	import { get } from 'svelte/store';
+	import e from 'cors';
 
     const { screenToFlowCoordinate } = useSvelteFlow();
 
@@ -128,7 +129,9 @@
 		const newId = uuidv4();
 		let data = {};
 		if(type=="pay"||type=="contract_read")
-		data = { id:newId, operation:new Operation({tasktype:type})};
+		data = { id:newId, showOptions:true, operation:new Operation({tasktype:type})};
+		else
+		data = {id:newId}
 		const newNode = {
 			id: newId,
 			type,

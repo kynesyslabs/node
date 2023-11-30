@@ -1,11 +1,13 @@
 <script>
-    import { Handle, Position } from '@xyflow/svelte';
+    import { Position } from '@xyflow/svelte';
+	import OnePathHandle from './OnePathHandle.svelte';
+    export let data;
 </script>
 <div class="card operation">
-	<Handle type="target" id="1" style="top:25%;" position={Position.Left} />
-	<Handle type="target" id="2" style="top:75%;" position={Position.Left} />
+	<OnePathHandle nodeId={data.id} type="target" id="element1" style="top:25%;" position={Position.Left} />
+	<OnePathHandle nodeId={data.id} type="target" id="element2" style="top:75%;" position={Position.Left} />
     <p>=</p>
-	<Handle type="source" position={Position.Right} />
+	<OnePathHandle nodeId={data.id} type="source" id="result" position={Position.Right} />
 </div>
 
 <style>
