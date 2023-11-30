@@ -17,7 +17,6 @@
 
     import cloneDeep from 'lodash/cloneDeep';
 	import { get } from 'svelte/store';
-	import e from 'cors';
 
     const { screenToFlowCoordinate } = useSvelteFlow();
 
