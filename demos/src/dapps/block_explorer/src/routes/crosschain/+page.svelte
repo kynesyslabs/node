@@ -8,19 +8,26 @@
     import cloneDeep from 'lodash/cloneDeep';
     import { Buffer } from "buffer";
     import {chains} from "$lib/chainscript.js";
-	import ConnectWalletDialog from "./ConnectWalletDialog.svelte";
     import PageTitle from '$lib/components/PageTitle.svelte';
     import { fly } from "svelte/transition";
+    import XMWalletConnectionCard from "../../lib/components/xM_WalletConnectionCard.svelte";
+    import EVM from '$lib/demos_libs/xmlibs/chains/evm';
+    import XRPL from '$lib/demos_libs/xmlibs/chains/xrpl';
 
+    //Avoid version conflicts
     const version = "1.01";
     if(localStorage.getItem("version") != version)
     {
         localStorage.removeItem("operations");
         localStorage.setItem("version", version);
     }
+
+    //Save
     let root = localStorage.getItem("operations")?JSON.parse(localStorage.getItem("operations")):{id:"root", items:[], type:"root"}
     $: localStorage.setItem("operations", JSON.stringify(root));
 
+    /**Required chains and their wallets
+     * @type {{id: string, wallet: any}[]} */
     let required_connections = []
 
     checkRequired(root.items)
@@ -66,11 +73,10 @@
         document.documentElement.style.overflow = 'auto';
     }
 
-    //prima abbiamo usato l'index, poi abbiamo usato l'id... adesso passiamo direttamente la reference
+    //reference to the operation being edited
     let edit = null;
+    //reference to the parent of the operation being edited
     let editparent = null;
-
-    let editwallet = null;
     
     async function onUpdate(operation, data)
     {
@@ -127,6 +133,8 @@
         }
     }
 
+    /**Every key is a chain*/
+    let wallet_errors = {};
     let error = "";
 
     async function signAll(parentArray)
@@ -179,7 +187,89 @@
     }
 
     let state="editor";
+
+    let chainobjs={
+        "evm":EVM,
+        "xrpl":XRPL
+    }
+
+    async function connectWallet(connection, prvkey)
+    {
+        error = "";
+        let mychainwallet;
+        const thisrpc = chains.find(c=>connection.id==c.id).rpc;
+        if(chains.find(c=>connection.id==c.id).is_evm)
+            mychainwallet = await chainobjs["evm"].create(chains.find(c=>connection.id==c.id).rpc);
+        else
+            mychainwallet = await chainobjs[connection.id].create(chains.find(c=>connection.id==c.id).rpc);
+        try
+        {
+            await mychainwallet.connectWallet(prvkey);
+            required_connections.find(cs=>cs.id == connection.id).wallet = mychainwallet;
+            return true;
+        }
+        catch(err){
+            error = err;
+            return false
+        }
+    }
 </script>
+
+<!--success dialog-->
+{#if success}
+    <div transition:fly class="success-dialog">Success!</div>
+{/if}
+{#if processing}
+    <div class="overlay">
+        <div class="lds-ripple"><div></div><div></div></div> 
+    </div>
+{/if}
+{#if edit !== null}
+    <OperationEditor onSave={(data)=>{onUpdate(edit, data); edit = null; editparent=null;}} operation={edit} onClose={()=>{edit = null; editparent = null;}} onDelete={()=>{deleteOperation(editparent, edit); edit=null; editparent=null;}}/>
+{/if}
+<div>
+    <PageTitle>xM</PageTitle>
+    <div style="display: flex; align-items:center">
+        <h4 class="subtitle">Build a Cross-Chain Transaction</h4>
+        {#if root.items.length > 0}
+        <button on:click={()=>{root.items=[]}} class="futuristic subtitle">[clear]</button>
+        {/if}
+    </div>
+    <div class="txeditor">
+        {#if root.items.length == 0}
+        <div class="instructions">
+            <svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="var(--color)" fill-rule="evenodd" d="M1 1h3.17v2H3v1.171H1V1Zm13.58 0v3.17l-2 0V3h-1.172V1h3.171ZM9.236 1H6.342l0 2h2.895V1ZM1 14.58v-3.17h2v1.17h1.171v2H1Zm0-5.343V6.342h2l0 2.895H1Zm11.95 3.712 2.01 9.046 2.26-2.262L20.489 23 23 20.487l-3.266-3.266 2.261-2.262-2.913-.647-6.133-1.363Zm6.132-7.446H5.502v13.58h7.274l-1.802-8.11 8.108 1.802V5.503Z" clip-rule="evenodd"></path></svg>
+            <p style="margin-bottom: 0;">Drop blocks here and start building your transaction</p>
+        </div>
+        {/if}
+        <div class="dnd">
+            <OperationCard triggerUpdate={()=>{root = root}} onEdit={(op, parent)=>{edit = op; editparent=parent;}} operation={root} duplicateOperation={duplicateOperation} deleteOperation={deleteOperation}/>
+        </div>
+    </div>
+    <h4 class="subtitle">Required Wallets</h4>
+    <div class="connections">
+        <div class="wallet-connection card">
+            <h4 class="network-name">DEMOS</h4>
+            <div class="wallet-info">
+                <p class="wallet-address">{trim_address(Buffer.from($wallet.keypair.publicKey).toString("hex"))}</p>
+                <svg class="wallet-status" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="24" height="24"><g id="check-circle--checkmark-addition-circle-success-check-validation-add-form-tick"><path id="Subtract" fill="green" fill-rule="evenodd" d="M12 23c6.075 0 11-4.925 11-11S18.075 1 12 1 1 5.925 1 12s4.925 11 11 11Zm-.47-6.625 6-7.5-1.56-1.25-5.355 6.693-2.714-2.327-1.302 1.518 3.5 3 .786.674.646-.808Z" clip-rule="evenodd"></path></g></svg>
+            </div>
+        </div>
+        {#each required_connections as required_wallet}
+            <XMWalletConnectionCard chain={required_wallet} {connectWallet} error={wallet_errors[required_wallet.id]} />
+        {/each}
+    </div>
+    {#if error != ""}
+        <div class="alert-error">{error}</div>
+    {/if}
+    <button on:click={execute} class="executebtn primary">Execute</button>
+    {#if result}
+        <h4 class="subtitle">Result</h4>
+        <div class="card" style="padding: 24px;">
+            {result}
+        </div>
+    {/if}
+</div>
 
 <style>
     .subtitle{
@@ -317,78 +407,3 @@
         text-align: center;
     }
 </style>
-
-
-<!--success dialog-->
-{#if success}
-    <div transition:fly class="success-dialog">Success!</div>
-{/if}
-{#if processing}
-    <div class="overlay">
-        <div class="lds-ripple"><div></div><div></div></div> 
-    </div>
-{/if}
-{#if edit !== null}
-    <OperationEditor onSave={(data)=>{onUpdate(edit, data); edit = null; editparent=null;}} operation={edit} onClose={()=>{edit = null; editparent = null;}} onDelete={()=>{deleteOperation(editparent, edit); edit=null; editparent=null;}}/>
-{/if}
-{#if editwallet}
-    <ConnectWalletDialog connection={editwallet} close={()=>{editwallet = null}}/>
-{/if}
-<div>
-    <PageTitle>xM</PageTitle>
-    <div style="display: flex; align-items:center">
-        <h4 class="subtitle">Build a Cross-Chain Transaction</h4>
-        {#if root.items.length > 0}
-        <button on:click={()=>{root.items=[]}} class="futuristic subtitle">[clear]</button>
-        {/if}
-    </div>
-    <div class="txeditor">
-        {#if root.items.length == 0}
-        <div class="instructions">
-            <svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="var(--color)" fill-rule="evenodd" d="M1 1h3.17v2H3v1.171H1V1Zm13.58 0v3.17l-2 0V3h-1.172V1h3.171ZM9.236 1H6.342l0 2h2.895V1ZM1 14.58v-3.17h2v1.17h1.171v2H1Zm0-5.343V6.342h2l0 2.895H1Zm11.95 3.712 2.01 9.046 2.26-2.262L20.489 23 23 20.487l-3.266-3.266 2.261-2.262-2.913-.647-6.133-1.363Zm6.132-7.446H5.502v13.58h7.274l-1.802-8.11 8.108 1.802V5.503Z" clip-rule="evenodd"></path></svg>
-            <p style="margin-bottom: 0;">Drop blocks here and start building your transaction</p>
-        </div>
-        {/if}
-        <div class="dnd">
-            <OperationCard triggerUpdate={()=>{root = root}} onEdit={(op, parent)=>{edit = op; editparent=parent;}} operation={root} duplicateOperation={duplicateOperation} deleteOperation={deleteOperation}/>
-        </div>
-    </div>
-    <h4 class="subtitle">Required Wallets</h4>
-    <div class="connections">
-        <div class="wallet-connection card">
-            <h4 class="network-name">DEMOS</h4>
-            <div class="wallet-info">
-                <p class="wallet-address">{trim_address(Buffer.from($wallet.keypair.publicKey).toString("hex"))}</p>
-                <svg class="wallet-status" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="24" height="24"><g id="check-circle--checkmark-addition-circle-success-check-validation-add-form-tick"><path id="Subtract" fill="green" fill-rule="evenodd" d="M12 23c6.075 0 11-4.925 11-11S18.075 1 12 1 1 5.925 1 12s4.925 11 11 11Zm-.47-6.625 6-7.5-1.56-1.25-5.355 6.693-2.714-2.327-1.302 1.518 3.5 3 .786.674.646-.808Z" clip-rule="evenodd"></path></g></svg>
-            </div>
-        </div>
-        {#each required_connections as required_wallet}
-        <div class="wallet-connection card">
-            <div class="wallet-info">
-                {#if chains.find(ch=>ch.id==required_wallet.id).icon}
-                <img style="margin-bottom: 20px;" alt="chain icon" src={chains.find(ch=>ch.id==required_wallet.id).icon} width="24" height="24"/>
-                {/if}
-                <h4 class="network-name">{chains.find(ch=>ch.id==required_wallet.id).label}</h4>
-            </div>
-            {#if required_wallet.wallet}
-                <div class="wallet-info">
-                    <p class="wallet-address">{trim_address(required_wallet.wallet.getAddress())}</p>
-                    <svg class="wallet-status" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="24" height="24"><g id="check-circle--checkmark-addition-circle-success-check-validation-add-form-tick"><path id="Subtract" fill="green" fill-rule="evenodd" d="M12 23c6.075 0 11-4.925 11-11S18.075 1 12 1 1 5.925 1 12s4.925 11 11 11Zm-.47-6.625 6-7.5-1.56-1.25-5.355 6.693-2.714-2.327-1.302 1.518 3.5 3 .786.674.646-.808Z" clip-rule="evenodd"></path></g></svg>
-                </div>
-            {:else}
-                <button on:click={()=>{editwallet=required_wallet}} class="secondary" style="width: 100%;">Connect wallet</button>
-            {/if}
-        </div>
-        {/each}
-    </div>
-    {#if error != ""}
-        <div class="alert-error">{error}</div>
-    {/if}
-    <button on:click={execute} class="executebtn primary">Execute</button>
-    {#if result}
-        <h4 class="subtitle">Result</h4>
-        <div class="card" style="padding: 24px;">
-            {result}
-        </div>
-    {/if}
-</div>
