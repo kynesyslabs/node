@@ -12,10 +12,12 @@
 <div class="wallet-connection card">
     <!-- CHAIN NAME AND ICON-->
     <div class="wallet-info">
-        {#if chains.find(ch=>ch.id==chain.id).icon}
-        <img style="margin-bottom: 20px;" alt="chain icon" src={chains.find(ch=>ch.id==chain.id).icon} width="24" height="24"/>
+        {#if chains.find(ch=>ch.id==chain.id)}
+            {#if chains.find(ch=>ch.id==chain.id).icon}
+            <img style="margin-bottom: 20px;" alt="chain icon" src={chains.find(ch=>ch.id==chain.id).icon} width="24" height="24"/>
+            {/if}
+            <h4 class="network-name">{chains.find(ch=>ch.id==chain.id).label}</h4>
         {/if}
-        <h4 class="network-name">{chains.find(ch=>ch.id==chain.id).label}</h4>
     </div>
     <!-- CONNECTED? WALLET INFO : INPUT -->
     {#if chain.wallet}
@@ -32,7 +34,6 @@
                 if(ev.target.value=="")
                 return
                 const connectionResult = await connectWallet(chain, ev.target.value)
-                console.log("result", connectionResult);
                 if(connectionResult)
                 {
                     editing = false;

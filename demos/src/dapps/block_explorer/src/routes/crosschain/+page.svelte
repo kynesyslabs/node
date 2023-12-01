@@ -29,15 +29,20 @@
     /**Required chains and their wallets
      * @type {{id: string, wallet: any}[]} */
     let required_connections = []
+    /** Used when checking requirements. It contains only the list of the required chains.
+     * @type {string[]}*/
+    let temp_required = [];
 
     /** Errors relative to required wallets. Every object key rapresents a chain. */
     let wallet_errors = {};
-    
+
     let error = "";
 
     checkRequired(root.items)
     function checkRequired(parentArray)
     {
+        if(parentArray == root.items)
+            temp_required = [];
         error = "";
         for(const operation of parentArray)
         {
@@ -49,14 +54,40 @@
             }
             else if(operation.type=="pay")
             {
-                if(required_connections.findIndex(rq=>rq.id==operation.data.chain) == -1)
+                if(temp_required.findIndex(rq=>rq.id==operation.data.chain) == -1)
                 {
-                    required_connections.push({id: operation.data.chain, wallet:null});
-                    required_connections = required_connections;
+                    temp_required.push(operation.data.chain);
+                    temp_required = temp_required;
                 }
             }
         }
+        if(parentArray == root.items)
+            consolidateRequired();
     }
+
+    function consolidateRequired(){
+		let required_copy = cloneDeep(required_connections);
+		//remove connections that are not required anymore
+		required_copy.forEach((rq, index) => {
+			//find the index of the chain in the temp array
+			const connection_index = temp_required.findIndex(temp_chain=>temp_chain==rq.id);
+			//if chain does not exist in the temp array, remove it from the actual one
+			if(connection_index == -1)
+			{
+				required_copy.splice(index, 1);
+			}
+		});
+		//add connections that are required
+		temp_required.forEach((chain) =>{
+			const chain_index = required_copy.findIndex(rq=>rq.id==chain);
+			if(chain_index == -1)
+			{
+				required_copy.push({id:chain, wallet:null});
+			}
+		})
+		required_connections = required_copy;
+	}
+
 
     //loading variable
     let processing = false;
@@ -88,7 +119,6 @@
     {
         operation.data = data;
         root = root;
-        required_connections = [];
         checkRequired(root.items)
     }
 
@@ -99,7 +129,6 @@
         let index = parentArray.findIndex(op=>op.id == operation.id);
         parentArray.splice(index+1, 0, newOperation);
         root = root;
-        required_connections = [];
         checkRequired(root.items)
     }
 
@@ -108,7 +137,6 @@
         let index = parentArray.findIndex(op=>op.id == operation.id);
         parentArray.splice(index, 1);
         root = root;
-        required_connections = [];
         checkRequired(root.items);
     }
 
@@ -188,7 +216,6 @@
         XMTransactions.operation.clear();
         createAll(root.items);
         state="send";
-        console.log("sending", XMTransactions.operation.get());
         let executionresult = await demos.crosschain.execute(XMTransactions.operation.get())
         processing = false;
         success = true;
