@@ -30,9 +30,15 @@
      * @type {{id: string, wallet: any}[]} */
     let required_connections = []
 
+    /** Errors relative to required wallets. Every object key rapresents a chain. */
+    let wallet_errors = {};
+    
+    let error = "";
+
     checkRequired(root.items)
     function checkRequired(parentArray)
     {
+        error = "";
         for(const operation of parentArray)
         {
             if(operation.type=="conditional")
@@ -133,20 +139,16 @@
         }
     }
 
-    /**Every key is a chain*/
-    let wallet_errors = {};
-    let error = "";
-
-    async function signAll(parentArray)
+    async function signAll(parentArray, resolve, reject)
     {
         error = "";
         for(const operation of parentArray)
         {
             if(operation.type=="conditional")
             {
-                signAll(operation.condition);
-                signAll(operation.then);
-                signAll(operation.else);
+                await signAll(operation.condition, resolve, reject);
+                await signAll(operation.then, resolve, reject);
+                await signAll(operation.else, resolve, reject);
             }
             else if(operation.type=="pay")
             {
@@ -156,10 +158,12 @@
                     operation.data.task.signedPayloads = [signedPayload];
                 }
                 catch(err){
-                    error = err;
+                    reject(err);
                 }
             }
         }
+        if(parentArray == root.items)
+            resolve();
     }
 
     async function execute()
@@ -168,12 +172,23 @@
         state="connect";
         demos.connect($rpcaddress);
         state="sign";
-        await signAll(root.items);
+        const signPromise = new Promise((resolve, reject)=>{
+            signAll(root.items, resolve, reject);
+        })
+        try{
+            await signPromise;
+        }
+        catch(err){
+            error = err;
+            processing = false;
+            return;
+        }
         //convert the tree to a flat array
         state="create";
         XMTransactions.operation.clear();
         createAll(root.items);
         state="send";
+        console.log("sending", XMTransactions.operation.get());
         let executionresult = await demos.crosschain.execute(XMTransactions.operation.get())
         processing = false;
         success = true;
@@ -206,6 +221,7 @@
         {
             await mychainwallet.connectWallet(prvkey);
             required_connections.find(cs=>cs.id == connection.id).wallet = mychainwallet;
+            required_connections = required_connections;
             return true;
         }
         catch(err){
@@ -262,7 +278,13 @@
     {#if error != ""}
         <div class="alert-error">{error}</div>
     {/if}
-    <button on:click={execute} class="executebtn primary">Execute</button>
+
+    {#if required_connections.every(value=>value.wallet) && !error}
+        <button class="primary executebtn" on:click={execute}>Execute</button>
+    {:else}
+        <button disabled class="executebtn primary tooltip"><span class="tooltiptext">{error?"Resolve error":"Connect all chains"}</span>Execute</button>
+    {/if}
+
     {#if result}
         <h4 class="subtitle">Result</h4>
         <div class="card" style="padding: 24px;">
