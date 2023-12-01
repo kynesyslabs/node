@@ -10,7 +10,7 @@ export const updateRpcAddress = (address) => {
 }
 
 //theme
-export const theme = writable("auto");
+export const theme = writable("dark");
 export const updateTheme = (th) => {
     theme.set(th);
     localStorage.setItem("theme", th);

@@ -1,8 +1,7 @@
 <script>
-    import {rpcaddress, theme, updateTheme} from "$lib/env.js";
+    import { theme, updateTheme} from "$lib/env.js";
 	import RPCselection from "./RPCselection.svelte";
     import PageTitle from "$lib/components/PageTitle.svelte";
-    let selectrpc = false;
 </script>
 
 <PageTitle>Settings</PageTitle>
