@@ -18,11 +18,12 @@
     let editing = false;
     //private key input errors
     let wallet_errors = {};
+    $:console.log(wallet_errors);
     //signing, validating, executing errors
-    let exectution_errors = [];
+    let execution_errors = [];
     async function connectWallet(connection, prvkey)
     {
-        wallet_errors[connection.id] = [];
+        wallet_errors[connection.id] = undefined;
         let mychainwallet;
         const thisrpc = chains.find(c=>connection.id==c.id).rpc;
         if(chains.find(c=>connection.id==c.id).is_evm)
@@ -63,7 +64,7 @@
             signAll($edges.find(edge=>edge.source==myedge.target), resolvePromise, rejectPromise)
         }
         catch(err){
-            rejectPromise(err);
+            rejectPromise({chain: targetnode.data.operation.chain, error: err});
         }
     }
     
@@ -86,13 +87,14 @@
 
     function execute()
     {
+        wallet_errors = {};
         const signPromise = new Promise((resolve, reject)=>{
             signAll($edges.find(edge=>edge.source=="start"), resolve, reject)
         })
         signPromise.then(()=>{
             console.log("signed")
         }).catch((err)=>{
-            exectution_errors.push(err);
+            wallet_errors[err.chain] = err;
         })
         const chainscriptPromise = new Promise((resolve, reject)=>{
             console.log("nuova promise")
@@ -110,17 +112,20 @@
 </div>
 {#each $required_connections as required_wallet}
     <div class="wallet-connection card">
+        <!-- CHAIN NAME AND ICON-->
         <div class="wallet-info">
             {#if chains.find(ch=>ch.id==required_wallet.id).icon}
             <img style="margin-bottom: 20px;" alt="chain icon" src={chains.find(ch=>ch.id==required_wallet.id).icon} width="24" height="24"/>
             {/if}
             <h4 class="network-name">{chains.find(ch=>ch.id==required_wallet.id).label}</h4>
         </div>
+        <!-- CONNECTED? WALLET INFO -->
         {#if required_wallet.wallet}
             <div class="wallet-info">
                 <p class="wallet-address">{trim_address(required_wallet.wallet.getAddress(), 20)}</p>
                 <svg class="wallet-status" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="24" height="24"><g id="check-circle--checkmark-addition-circle-success-check-validation-add-form-tick"><path id="Subtract" fill="green" fill-rule="evenodd" d="M12 23c6.075 0 11-4.925 11-11S18.075 1 12 1 1 5.925 1 12s4.925 11 11 11Zm-.47-6.625 6-7.5-1.56-1.25-5.355 6.693-2.714-2.327-1.302 1.518 3.5 3 .786.674.646-.808Z" clip-rule="evenodd"></path></g></svg>
             </div>
+        <!-- KEY INPUT AND CONNECT BUTTON -->
         {:else}
             {#if !editing}
             <button on:click={()=>{editing=required_wallet.id}} class="secondary" style="width: 100%; justify-content:center;">Connect Wallet</button>
@@ -136,9 +141,13 @@
                 {/if}
             {/if}
         {/if}
+        <!-- ERRORS -->
+        {#if wallet_errors[required_wallet.id] !== undefined}
+            <div class="alert-error">{wallet_errors[required_wallet.id].error}</div>
+        {/if}
     </div>
 {/each}
-{#each exectution_errors as error}
+{#each execution_errors as error}
     <div class="alert-error">{error}</div>
 {/each}
 {#if $required_connections.every(value=>value.wallet)}
@@ -181,5 +190,8 @@
     .execute-button{
         width: 100%;
         justify-content: center;
+    }
+    .alert-error{
+        margin: 16px 0 0;
     }
 </style>
