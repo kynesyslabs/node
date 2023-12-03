@@ -4,6 +4,7 @@ import Genesis from "../../types/genesisTypes"
 import Chain from "../../chain"
 import Block from "../../block"
 
+
 async function transfer() {
 
 }

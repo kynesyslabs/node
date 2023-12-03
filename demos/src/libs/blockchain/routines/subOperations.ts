@@ -11,6 +11,8 @@ import glsRoutines from "./gls_routines"
 
 // REVIEW Is this working?
 export default class subOperations {
+    public static glsRoutines = glsRoutines
+
     private static result: OperationResult = {
         success: true,
         message: "No error occurred",

@@ -127,7 +127,7 @@ export default class GLS {
     }
 
     // NOTE Due to the complexity of this method, it is imported by the appropriate module
-    // INFO Any type of transaction is already converted as a native DEMOS transaction 
+    // INFO Any type of transaction is already converted as a native DEMOS transaction
     //      so that the appropriate Operatin can be executed
     async executeOperations(): Promise<Map<string, Actor>> {
         const result = await executeOperations(this.operations)
@@ -181,12 +181,16 @@ export default class GLS {
         })
     }
 
-    static async getGLSPropertiesFor(address: string) {
+    static async getGLSPropertiesFor(
+        address: string,
+        field: keyof StatusProperties,
+    ) {
         const db = await Datasource.getInstance()
         const statusPropertiesRepository = db
             .getDataSource()
             .getRepository(StatusProperties)
         return await statusPropertiesRepository.findOne({
+            select: [field],
             where: { address },
         })
     }
@@ -371,9 +375,124 @@ export default class GLS {
 
     // !SECTION Getters
 
+    static async getGLSNativeStatus(address: string): Promise<StatusNative> {
+        const db = await Datasource.getInstance()
+        const statusNativeRepository = db
+            .getDataSource()
+            .getRepository(StatusNative)
+        let nativeStatus: any
+        try {
+            nativeStatus = await statusNativeRepository.findOne({
+                where: { address },
+            })
+        } catch (e) {
+            nativeStatus = {
+                address,
+                balance: "0",
+                nonce: 0,
+                tx_list: "",
+            }
+        }
+        return nativeStatus
+    }
+
+    static async getGLSStatusProperties(
+        address: string,
+    ): Promise<StatusProperties> {
+        const db = await Datasource.getInstance()
+        const statusPropertiesRepository = db
+            .getDataSource()
+            .getRepository(StatusProperties)
+        let statusProperties: any
+        try {
+            statusProperties = await statusPropertiesRepository.findOne({
+                where: { address },
+            })
+        } catch (e) {
+            statusProperties = null
+        }
+        return statusProperties
+    }
+
     // SECTION Setters
     // NOTE For consistency, setters should return a Promise<boolean>
-    
+
+    // INFO Assigning a XM Transaction to an address
+    static async addToGLSXM(address: string, xm_hash: string): Promise<OperationResult> {
+        let result: OperationResult = {
+            success: false,
+            message: "",
+        }
+        try {
+            let statusProperties: any
+            // Getting the table
+            const db = await Datasource.getInstance()
+            const statusPropertiesRepository = db
+                .getDataSource()
+                .getRepository(StatusProperties)
+            statusProperties = statusPropertiesRepository.findOne({
+                select: ["xm"],
+                where: { address },
+            })
+            // Or creating it if it doesn't exist
+            if (!statusProperties) {
+                statusProperties = new StatusProperties()
+                statusProperties.address = address
+                statusProperties.xm = "[]"
+            }
+            // Loading the object
+            let jStatusProperties = JSON.parse(statusProperties.xm)
+            jStatusProperties.push(xm_hash)
+            // And updating it
+            statusProperties.xm = JSON.stringify(jStatusProperties)
+            await statusProperties.update()
+            result.success = true
+        } catch (e) {
+            result.message = e.message
+        }
+        return result
+    }
+
+    // INFO Assigning a Web2 Transaction to an address
+    static async addToGLSWeb2(
+        address: string,
+        web2_hash: string,
+    ): Promise<OperationResult> {
+        let result: OperationResult = {
+            success: false,
+            message: "",
+        }
+        try {
+            let statusProperties: any
+            // Getting the table
+            const db = await Datasource.getInstance()
+            const statusPropertiesRepository = db
+                .getDataSource()
+                .getRepository(StatusProperties)
+            statusProperties = statusPropertiesRepository.findOne({
+                select: ["web2"],
+                where: { address },
+            })
+            // Or creating it if it doesn't exist
+            if (!statusProperties) {
+                statusProperties = new StatusProperties()
+                statusProperties.address = address
+                statusProperties.web2 = "[]"
+            }
+            // Loading the object
+            let jStatusProperties = JSON.parse(statusProperties.web2)
+            jStatusProperties.push(web2_hash)
+            // And updating it
+            statusProperties.web2 = JSON.stringify(jStatusProperties)
+            await statusProperties.update()
+            result.success = true
+        } catch (e) {
+            result.success = false
+            result.message = e.message
+        }
+        return result
+    }
+
     static async setGLSNativeBalance(
         address: string,
         native: number,

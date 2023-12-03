@@ -1,9 +1,7 @@
 import { Operation, OperationResult } from "../executeOperations"
 import GLS from "../../gls/gls"
-import Genesis from "../../types/genesisTypes"
-import Chain from "../../chain"
-import Block from "../../block"
 
-export async function assignWeb2() {
-
+export async function assignWeb2(operation: Operation): Promise<OperationResult> {
+	let {address, web2_hash} = operation.params
+	return await GLS.addToGLSWeb2(address, web2_hash)
 }

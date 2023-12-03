@@ -27,6 +27,7 @@ import eggs from "./routines/eggs"
 import deriveBlock from "../consensus/routines/deriveBlock"
 import AddressInfo from "../blockchain/types/addressInfo"
 import { Address } from "cluster"
+import GLS from "../blockchain/gls/gls"
 
 var term = require("terminal-kit").terminal
 
@@ -467,7 +468,8 @@ export default class ServerHandlers {
                         error: "No address specified",
                     })
                 }
-                response = await chain.getAddressInfo(data.address)
+                var nStat = await GLS.getGLSNativeStatus(data.address)
+                response = nStat.toString() // REVIEW It works ?
                 break
             case "getPeerTime":
                 response = new Date().getTime()

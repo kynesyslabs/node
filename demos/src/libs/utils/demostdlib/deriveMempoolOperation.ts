@@ -7,16 +7,23 @@ import sharedState from "src/utilities/sharedState"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 
+interface DerivableNative {
+    address: string,
+    type: "web2" | "xm" | "native",
+    data: any | string
+}
+
+
 // REVIEW See if is fixed (should return something)
 // INFO Deriving a mempool operation from a given data by deriving a tx and the corresponding mempool operation
 export async function deriveMempoolOperation(
-    data: any,
+    data: DerivableNative,
     insert: boolean = true,
 ): Promise<any> {
     // Sanity check
-    if (typeof data !== "string") {
+    if (typeof data.data !== "string") {
         try {
-            data = JSON.stringify(data)
+            data.data = JSON.stringify(data.data)
         } catch (e) {
             console.log(e)
             return false
@@ -26,7 +33,8 @@ export async function deriveMempoolOperation(
     let derivedTx: Transaction
     let derivedOperation: Operation
     // Deriving a transaction
-    derivedTx = await createTransaction(data) // A simple tx with web2 data inside
+    // TODO Replace with deriveTransaction(data) using data.type
+    derivedTx = await createTransaction(data.data) // A simple tx with web2 data inside
     console.log("Derived tx:")
     console.log(derivedTx)
     // Deriving an operation from the tx
@@ -42,6 +50,56 @@ export async function deriveMempoolOperation(
     // TODO Size limit?
     return derivedOperation
 }
+
+
+/* TODO Plan for the future
+ * We receive some form of data that can be:
+ * 1. A web2 request
+ * 2. A xm request
+ * 3. A native transaction
+ * We have to parse the data and create a transaction with the appropriate type and data
+ * Then we have to derive the operation(s) from that transaction
+ * 
+ * Pseudocode:
+ * 
+ * createTransaction(data: any): Promise<Transaction> -> a tx with type and data
+ * createOperation(transaction: Transaction): Promise<Operation[]> -> the various operations derived from the tx
+ * 
+ * TODO: Standardize the three types responses (we should just need the hashes after all as we are assigning for xm and web2)
+ * 
+*/
+
+export async function deriveTransaction(data: any): Promise<Transaction> {
+    // TODO Need to pass the data for registering the tx in the mempool (type, address...)
+    if (data.type === "web2") {
+        return await createTransactionProxy(data.data)
+    } else if (data.type === "xm") {
+        return await createTransactionProxy(data.data)
+    } else {
+        return null
+    }
+}
+
+export async function deriveOperations(transaction: Transaction): Promise<Operation[]> {
+    let operations = []
+    // Analyzing the transaction type
+    switch (transaction.content.type) {
+        // TODO Do this
+        case "web2":
+            break
+        case "xm":
+            break
+        case "native":
+            break
+        default:
+            break
+    }
+    return null
+}
+
+// REVIEW operations are basically changes frozen until the block is mined
+
+/* DEPRECATED */
 
 export async function createOperation(
     transaction: Transaction,
@@ -60,7 +118,8 @@ export async function createOperation(
             additional_fee: null,
         },
     }
-    operation.operator = "Web2Certification"
+
+    operation.operator = "Web2Certification" // FIXME New method bls
     operation.nonce = 0 // TODO Get it from chain or gls or whatever it is
     operation.timestamp = transaction.content.timestamp
     operation.params = transaction.content.data
@@ -72,6 +131,10 @@ export async function createOperation(
     operation.fees.additional_fee = 0
 
     return operation
+}
+
+async function createTransactionProxy(data: any): Promise<Transaction> {
+    return await createTransaction(data)
 }
 
 export async function createTransaction(data: any): Promise<Transaction> {
@@ -110,7 +173,7 @@ export async function createTransaction(data: any): Promise<Transaction> {
         transaction.hash,
         sharedState.getInstance().identity.ed25519.privateKey,
     )
-    transaction.signature = signature
+    transaction.signature.data = signature // REVIEW Should be correct but it was transaction.signature = signature before
     // TODO See how to be general purpose but specific (a shared format?)
     return transaction
 }
