@@ -127,6 +127,8 @@ export default class GLS {
     }
 
     // NOTE Due to the complexity of this method, it is imported by the appropriate module
+    // INFO Any type of transaction is already converted as a native DEMOS transaction 
+    //      so that the appropriate Operatin can be executed
     async executeOperations(): Promise<Map<string, Actor>> {
         const result = await executeOperations(this.operations)
         return result
@@ -370,11 +372,13 @@ export default class GLS {
     // !SECTION Getters
 
     // SECTION Setters
+    // NOTE For consistency, setters should return a Promise<boolean>
+    
     static async setGLSNativeBalance(
         address: string,
         native: number,
         tx_hash: string,
-    ) {
+    ): Promise<boolean> {
         const db = await Datasource.getInstance()
         const statusNativeRepository = db
             .getDataSource()
@@ -412,10 +416,12 @@ export default class GLS {
             console.log(tx_list)
             // TODO: Decide if we should use status_hashes too
             // Note: The original function returns responses from Chain.write, consider what you need to return here.
-            return // Adjust the return value as needed based on your requirements.
+            return true // Adjust the return value as needed based on your requirements.
         } catch (e) {
             console.error("Error setting GLS native balance:", e)
-            throw e // or handle the error as needed
+            console.log("[GLS ERROR: NATIVE] ")
+            console.log(e)
+            return false
         }
     }
 

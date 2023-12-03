@@ -4,6 +4,11 @@ import Genesis from "../types/genesisTypes"
 import Chain from "../chain"
 import Block from "../block"
 
+// NOTE Due to the modularity of the code, many routines will be stored in their own modules
+// TODO Move everything there if possible
+import glsRoutines from "./gls_routines"
+
+
 // REVIEW Is this working?
 export default class subOperations {
     private static result: OperationResult = {
@@ -53,7 +58,7 @@ export default class subOperations {
         return result
     }
 
-    // INFO Remove & Add transfer operation
+    // INFO Remove & Add transfer operation for native balances
     static async transferNative(
         operation: Operation,
     ): Promise<OperationResult> {

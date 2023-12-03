@@ -19,6 +19,7 @@ import { PgpKeyServer } from "./entities/PgpKeyServer"
 import { ResponseRegistry } from "./entities/ResponseRegistry"
 import { StatusHashes } from "./entities/StatusHashes"
 import { StatusProperties } from "./entities/StatusProperties"
+import { StatusNative } from "./entities/StatusNative"
 import { Validators } from "./entities/Validators"
 
 class Datasource {
@@ -38,6 +39,7 @@ class Datasource {
                 ResponseRegistry,
                 StatusHashes,
                 StatusProperties,
+                StatusNative,
                 Transactions,
                 Validators,
             ],

@@ -90,7 +90,7 @@ async function executeSequence(
         }
         // TODO Implement nonce verification united to fee control to expose replacements
         // TODO How to handle all the txs together? In the results registry we will have to tinker a lot
-        // Dispatching the operation to the appropriate method
+        // ANCHOR Dispatching the operation to the appropriate method
         switch (operations[i].operator) {
             case "genesis":
                 console.log("Genesis block: applying genesis operations")
