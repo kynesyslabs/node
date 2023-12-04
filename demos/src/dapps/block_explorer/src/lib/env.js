@@ -37,6 +37,11 @@ export const trim_address = (str, length)=>{
     return str;
     return str.substr(0, Math.ceil(length/2)) + '...' + str.substr(str.length-Math.floor(length/2), str.length);
 }
+export const normalize_timestamp = (timestamp) => {
+    if(timestamp.length == 10)
+        return blocks[i].content.timestamp = blocks[i].content.timestamp*1000;
+    return timestamp;
+}
 
 //wallets
 //export const MMSDK = new MetaMaskSDK({dappMetadata:{name:"Morph JS"}});

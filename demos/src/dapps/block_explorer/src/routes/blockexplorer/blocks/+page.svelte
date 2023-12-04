@@ -14,12 +14,13 @@
 
     demos.connect($rpcaddress);
 
+    const displayedBlocks = 10;
 
     async function getBlocks(page)
     {
         let blockRequests = [];
         let blockNumber = JSON.parse(await demos.getLastBlockNumber());
-        for(let i = blockNumber - ((page-1)*50); i >= Math.max(blockNumber - ((page-1)*50) -49, 0); i--)
+        for(let i = blockNumber - ((page-1)*displayedBlocks); i >= Math.max(blockNumber - ((page-1)*displayedBlocks) - 9, 0); i--)
         {   
             blockRequests.push(demos.getBlockByNumber(i));
         }
@@ -75,10 +76,10 @@
                 <div class="page-controller">
                     <button class="page-controller-button" on:click={()=>{gotoPage(1)}}>First</button>
                     <button class="page-controller-button" on:click={()=>{gotoPage(Math.max(thepage-1, 1))}}><Fa style="font-size:.8rem" icon={faChevronLeft}/></button>
-                        <p class="page-controller-label">Page {thepage} of {Math.ceil(info.number/50)}</p>
-                    <button class="page-controller-button" on:click={()=>{gotoPage(Math.min(thepage+1, Math.ceil(info.number/50)))}}><Fa style="font-size:.8rem" icon={faChevronRight}/></button>
+                        <p class="page-controller-label">Page {thepage} of {Math.ceil(info.number/displayedBlocks)}</p>
+                    <button class="page-controller-button" on:click={()=>{gotoPage(Math.min(thepage+1, Math.ceil(info.number/displayedBlocks)))}}><Fa style="font-size:.8rem" icon={faChevronRight}/></button>
                     <button class="page-controller-button" on:click={()=>{
-                        gotoPage(Math.ceil(info.number/50));
+                        gotoPage(Math.ceil(info.number/displayedBlocks));
                     }}>Last</button>
                 </div>
             </div>

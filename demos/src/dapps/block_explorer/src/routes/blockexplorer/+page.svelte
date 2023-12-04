@@ -30,7 +30,7 @@
         if(!demos.connected)
         return;
         let blockNumber = JSON.parse(await demos.getLastBlockNumber());
-        for(let i = blockNumber; i > Math.max(blockNumber - 10, 0); i--)
+        for(let i = blockNumber; i >= Math.max(blockNumber - 9, 0); i--)
         {   
             blockRequests.push(demos.getBlockByNumber(i));
         }

@@ -3,6 +3,7 @@
     import {timeAgo} from "$lib/env.js";
     import "$lib/styles/blockexplorer.css";
 	import { onMount } from 'svelte';
+    import {normalize_timestamp} from "$lib/env.js";
     export let block;
     export let missing;
     console.log(missing);
@@ -37,7 +38,7 @@
                 <img class="block-icon" alt="Block icon" src={blockIcon}/>
                 <a class="accessible loaded" href={`/blockexplorer/blocks/${block.number}`}><p class="block-number">Block #{block.number}</p></a>
             </div>
-            <p class="loaded delayed1" style="margin: 0; color:rgb(128,128,128); font-size:.9rem;">{timeAgo.format(block.content.timestamp)}</p>
+            <p class="loaded delayed1" style="margin: 0; color:rgb(128,128,128); font-size:.9rem;">{timeAgo.format(normalize_timestamp(block.content.timestamp))}</p>
         {:else}
             <div class="skeletonplaceholder" style="margin-bottom:8px"></div>
             <div class="skeletonplaceholder delayed1" style="height:18px;"></div>
