@@ -120,7 +120,7 @@ export default class groundControl {
         }
         console.log(url)
         let args = groundControl.parse(url)
-        console.log(args)
+       //console.log(args)
         let response = await groundControl.dispatch(args)
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify(response))

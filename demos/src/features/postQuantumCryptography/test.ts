@@ -22,7 +22,7 @@ async function testing() {
 	// NOTE We are using ourselves but that should be a peer's public key
 	let peerKey = enigma.mcelieceKeypair.publicKey
     console.log("[BOB] [Encryption] Using ALICE public key: ")
-    console.log(peerKey)
+    //console.log(peerKey)
 	let sharedSecret = await enigma.generateSecrets(peerKey)
 	console.log("[BOB] Shared secret generated")
     console.log(sharedSecret.secret)

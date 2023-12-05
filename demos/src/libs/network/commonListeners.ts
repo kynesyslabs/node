@@ -44,7 +44,7 @@ export default class CommonListeners {
 
     private authAskListener = async () => {
         this.peer.socket.on("auth_ask", async (data: { message: string }) => {
-            console.log(data)
+           //console.log(data)
             // REVIEW Signing data.message with the private key
             let _signature = cryptography.sign(
                 data.message,
@@ -69,7 +69,7 @@ export default class CommonListeners {
                 muid: request.muid,
                 data: null,
             }
-            console.log(request.cmd) // TODO Create a type for the request format
+           //console.log(request.cmd) // TODO Create a type for the request format
             if (request === "public_ip") {
                 let ip = await Identity.getInstance().getPublicIP()
                 response.data = ip
@@ -120,7 +120,7 @@ export default class CommonListeners {
     private errorListener = async () => {
         this.peer.socket.on("error", async request => {
             console.log("[PEER] Received error:")
-            console.log(request)
+           //console.log(request)
         })
     }
 }

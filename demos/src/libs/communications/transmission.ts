@@ -50,7 +50,7 @@ export default class Transmission {
         this.bundle.content.timestamp = Date.now()
         this.receiver_peer = receiver
         console.log("[TRANSMISSION] Initialized message")
-        console.log(this.bundle)
+        //console.log(this.bundle)
     }
 
     // INFO Hash and sign a message

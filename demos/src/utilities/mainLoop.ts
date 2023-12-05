@@ -115,8 +115,14 @@ export default async function mainLoop(id: Identity) {
             })
         }
 
-        console.log("🐸🐸🐸 Family:")
-        console.log(currentlyOnlinePeers)
+        console.log("Family:")
+        let famLen = currentlyOnlinePeers.length
+        let famString = ""
+        for (let i = 0; i < famLen; i++) {
+            famString += "🐸 "
+        }
+        console.log(famString)
+        //console.log(currentlyOnlinePeers)
 
         // we now have a list of online peers that can be used for consensus
 
@@ -139,8 +145,8 @@ export default async function mainLoop(id: Identity) {
             )
 
             sharedStateInstance.shard = shard
-            console.log("[MAIN LOOP] Shard:")
-            console.log(shard)
+            console.log("[MAIN LOOP] Shard selected")
+            // console.log(shard)
 
             const consensus = await QBFT.representationAssembly(shard)
             console.log(

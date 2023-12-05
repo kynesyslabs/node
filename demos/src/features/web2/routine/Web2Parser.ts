@@ -104,11 +104,11 @@ export class Web2APIClass {
         // Setting the name
         if (!Web2APIClass.requests.has(named)) {
             term.yellow("Creating new Web2API instance\n")
-            console.log("Using the following parameters:")
-            console.log("\n{Name}")
-            console.log(named)
-            console.log("\n{Request}")
-            console.log(req)
+            //console.log("Using the following parameters:")
+            //console.log("\n{Name}")
+            //console.log(named)
+            //console.log("\n{Request}")
+            //console.log(req)
             term.yellow("Proceeding\n")
             required(sendSock, "Missing sender socket")
             required(req, "Missing request")
@@ -136,7 +136,7 @@ export class Web2APIClass {
         this.senderSocket = sendSock
         if (!payload.message) {
             console.log("[Web2API] No request attached. Is this right?")
-            console.log(payload)
+            //console.log(payload)
             this.request.raw.minAttestations = 10
             this.request.raw.stage.hop_number = 0
         } else {
@@ -153,7 +153,7 @@ export class Web2APIClass {
     private async digest(): Promise<IWeb2Request> {
         required(this.request, "Missing request")
         console.log("[ACTUAL REQUEST]")
-        console.log(this.request)
+        //console.log(this.request)
         let { action } = this.request.raw
         let params = this.request.raw.parameters
         // NOTE Dispatching the request to the appropriate handler
@@ -206,7 +206,7 @@ export class Web2APIClass {
         }
         // Adding the attestation to the request
         // NOTE This does not overwrite the original properties of the request
-        console.log(this.request)
+        //console.log(this.request)
         this.request.attestations[ourIdentity.toString("hex")] = attestation
         term.yellow("[Web2Parser] Adding attestation to request\n")
         this.request.raw.stage.hop_number += 1 // REVIEW If this is ok
@@ -219,7 +219,7 @@ export class Web2APIClass {
         raw_request.headers = {}
 
         term.green("[Web2Parser] Retrieving resource from raw request...\n")
-        console.log(raw_request)
+       //console.log(raw_request)
         let params: IParam[] = raw_request.parameters
         let { url } = raw_request
         // Url normalization
@@ -262,14 +262,14 @@ export class Web2APIClass {
         term.yellow("[Web2Parser] Retrieved: " + payload.url + "\n")
         let data_result = fetched.data
         term.bold("[Web2Parser] Data result:\n")
-        console.log(data_result)
+        //console.log(data_result)
         let sanitizedResult = {
             status: fetched.status,
             statusText: fetched.statusText,
             data: data_result,
         }
         term.yellow.bold("\nResult to validate:\n")
-        console.log(sanitizedResult)
+        //console.log(sanitizedResult)
         term.yellow.bold("[Web2Parser] Validating...\n")
         // Using the fetched result to build (or to continue) the Web2Request
         await this.validate(JSON.stringify(sanitizedResult))
@@ -321,7 +321,7 @@ export class Web2APIClass {
         )
         this.request.signature = signature
         term.bold("[Web2Parser] Signature:\n")
-        console.log(signature)
+        //console.log(signature)
         // Composing our attestation
         let attestation: IWeb2Attestation = {
             hash: hashed_result,
@@ -331,7 +331,7 @@ export class Web2APIClass {
             valid: null,
         }
         term.bold("[Web2Parser] Attestation:\n")
-        console.log(attestation)
+        //console.log(attestation)
         // Adding the attestation to the request
         let hex_key = sharedState
             .getInstance()

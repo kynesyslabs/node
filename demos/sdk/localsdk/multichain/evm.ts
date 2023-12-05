@@ -147,7 +147,7 @@ export default class EVM extends DefaultChain implements IEVM {
         let contractInstance = new ethers.Contract(contract, abi, this.provider)
         // REVIEW THis could work
         return contractInstance.on(event, (data: any) => {
-            console.log(data)
+            ////console.log(data)
             // TODO Do something with the data
         })
     }
@@ -157,7 +157,7 @@ export default class EVM extends DefaultChain implements IEVM {
         let contractInstance = new ethers.Contract(contract, abi, this.provider)
         // REVIEW 99% Won't work
         return contractInstance.on("*", (data: any) => {
-            console.log(data)
+            ////console.log(data)
             // TODO Do something with the data
         })
     }

@@ -298,9 +298,9 @@ export default class Chain {
                     " does not exist: inserting a new block",
             )
             // Insert a new block
-            console.log(block)
+            //console.log(block)
             let result = await blockRepository.save(block)
-            console.log(result)
+           //console.log(result)
             return result
         }
     }
@@ -308,21 +308,21 @@ export default class Chain {
     // INFO Generate the genesis block
     static async generateGenesisBlock(genesis_data: any): Promise<Block> {
         // TODO Add a type for the block json
-        console.log(genesis_data)
+        //console.log(genesis_data)
         let genesis_block = new Block()
         genesis_block.number = 0
         // Define the genesis transaction
         let genesis_tx = new Transaction()
         genesis_tx.content.type = "genesis"
-        console.log("genesis_tx.content.data")
-        console.log(genesis_tx.content.data)
+        //console.log("genesis_tx.content.data")
+        //console.log(genesis_tx.content.data)
         genesis_tx.hash = Hashing.sha256(JSON.stringify(genesis_tx.content))
         if (!genesis_data.timestamp) {
             genesis_tx.content.timestamp = Date.now()
         } else {
             genesis_tx.content.timestamp = genesis_data.timestamp
         }
-        console.log(genesis_tx)
+        //console.log(genesis_tx)
         // Build a block containing the genesis tx
         genesis_block.content.timestamp = genesis_tx.content.timestamp
         genesis_block.content.ordered_transactions.push(genesis_tx)
@@ -349,7 +349,7 @@ export default class Chain {
             },
         }
         // Insert the genesis block into the database
-        console.log(genesis_block)
+        //console.log(genesis_block)
         console.log("[GENESIS] Block generated, ready to insert it")
         return await this.insertBlock(genesis_block, [genesis_op])
     }

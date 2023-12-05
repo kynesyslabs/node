@@ -15,8 +15,8 @@ import * as fs from "fs"
 export default async function findGenesisBlock() {
     console.log("[GENESIS] Looking for the genesis block...")
     let genesis_block_q = await Chain.getGenesisBlock()
-    console.log("[GENESIS] Received query:")
-    console.log(genesis_block_q)
+    console.log("[GENESIS] Received genesis search query")
+    //console.log(genesis_block_q)
     let genesis_block
     if (!genesis_block_q) {
         console.log("[GENESIS] No genesis block found.")

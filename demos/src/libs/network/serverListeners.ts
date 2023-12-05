@@ -101,7 +101,7 @@ export default class ServerListeners {
             }
             let _comlink_request = parsed_comlink[0]
             console.log("comlink request")
-            console.log(_comlink_request)
+            //console.log(_comlink_request)
             let content = parsed_comlink[1]
 
             let extra: any, require_reply: any, response: any
@@ -238,7 +238,7 @@ export default class ServerListeners {
 
             // Sending back the response
             console.log("[SERVER] Sending back comlink")
-            console.log(JSON.stringify(_comlink_request))
+            //console.log(JSON.stringify(_comlink_request))
             receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
         })
         // TODO See in communications.js and find the best way to validate, check and digest the request
@@ -283,12 +283,12 @@ export default class ServerListeners {
     voteRequestListener = async () => {
         this.peer.socket.on("voteRequest", async (request, callback) => {
             term.yellow("[SERVER] Received vote request\n")
-            console.log(request)
+           //console.log(request)
             let voteResponse: string
             var res: string
 
             console.log("request")
-            console.log(request)
+           //console.log(request)
 
             switch (request.parameter) {
                 case "forgedProposedHash":

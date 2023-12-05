@@ -36,11 +36,11 @@ export async function deriveMempoolOperation(
     // TODO Replace with deriveTransaction(data) using data.type
     derivedTx = await createTransaction(data.data) // A simple tx with web2 data inside
     console.log("Derived tx:")
-    console.log(derivedTx)
+    //console.log(derivedTx)
     // Deriving an operation from the tx
     derivedOperation = await createOperation(derivedTx) // An operation witnessing the validity of the web2 request
     console.log("Derived operation:")
-    console.log(derivedOperation)
+    //console.log(derivedOperation)
     if (insert) {
         // Inserting the operation in the next mempool session with the proper data
         Mempool.addTransaction(derivedTx)

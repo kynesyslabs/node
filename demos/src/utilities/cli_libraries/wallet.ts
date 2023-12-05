@@ -104,7 +104,7 @@ export default class Wallet {
                 break
             // NOTE Showing the wallet
             case "show": // Shows the wallet
-                console.log(this.identity)
+                //console.log(this.identity)
                 break
         }
     }

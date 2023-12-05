@@ -35,7 +35,7 @@ export default class XRPL  extends DefaultChain {
     public connect(rpc: string): any {
         this._connect(rpc).then(res => {
             // TODO something
-            console.log(res)
+            //console.log(res)
             // TODO Check if connected
             return true
         })

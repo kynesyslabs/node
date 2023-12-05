@@ -110,7 +110,7 @@ async function http_request(
                 web2Data: web2Data,
             })
             console.log("received attestedResponseWeb2Data")
-            console.log(JSON.stringify(attestedResponseWeb2Data))
+            //console.log(JSON.stringify(attestedResponseWeb2Data))
             break
         default:
             console.log("Wrong http verb")
@@ -134,7 +134,7 @@ async function http_request(
         const isItReallyGood = finalWeb2Data.getData()
 
         console.log("is it really good?")
-        console.log(Object.keys(isItReallyGood))
+        //console.log(Object.keys(isItReallyGood))
         console.log(JSON.stringify(isItReallyGood))
 
         return isItReallyGood
@@ -193,7 +193,7 @@ async function http_attest(
         const data = response.data //TODO - consider extracting data via a mapping function with some selector?
         console.log("Retrieved data from " + url + " at " + timestamp)
 
-        console.log(Object.keys(web2Data))
+        //console.log(Object.keys(web2Data))
 
         web2Data.addWitness(
             id.ed25519.publicKey,

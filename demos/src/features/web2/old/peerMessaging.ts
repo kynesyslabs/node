@@ -60,7 +60,7 @@ export async function sendMessageToPeers(
 
         console.log("WEB2/PEERMESSAGING: Message being sent")
         // Send the message
-        console.log(JSON.stringify(message))
+        //console.log(JSON.stringify(message))
         await comLink.broadcastMessageToPeer(
             currentPeer,
             message,
@@ -72,7 +72,7 @@ export async function sendMessageToPeers(
             comLink.muid,
         )
         console.log("WEB2/PEERMESSAGING: Message received")
-        console.log(response)
+        //console.log(response)
 
         if (response[0]) {
             if (response[1]?.message) {

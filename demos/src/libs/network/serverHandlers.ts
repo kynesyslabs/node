@@ -88,12 +88,12 @@ export default class ServerHandlers {
              * An operation for the gas is also pushed in the GLS
              * The tx is pushed in the mempool if applicable
              */
-            console.log(fname + "Validating transaction...")
+           //console.log(fname + "Validating transaction...")
             validatedTx = await validateTransaction(
                 content.type,
                 content.message,
             )
-            console.log(fname + "Fetching result...")
+           //console.log(fname + "Fetching result...")
         } catch (e) {
             term.red.bold("[TX VALIDATION ERROR] 💀 : ")
             term.red(e)
@@ -115,7 +115,7 @@ export default class ServerHandlers {
                 */
             term.green.bold(fname + "Valid transaction: ")
             console.log(validatedTx[1])
-            console.log(fname + "Adding transaction to mempool...")
+           //console.log(fname + "Adding transaction to mempool...")
             // Adding the valid tx to the mempool
             Mempool.addTransaction(validatedTx[1]) // Works by writing the registry
             extra = validatedTx[1].hash
@@ -179,7 +179,7 @@ export default class ServerHandlers {
          * The tx is pushed in the mempool if applicable.
          */
         console.log("[SERVER] Received web2Request")
-        console.log(JSON.stringify(request))
+        //console.log(JSON.stringify(request))
 
         let extra: any,
             require_reply = false
@@ -256,7 +256,7 @@ export default class ServerHandlers {
             case "getMempool":
                 response = await Mempool.getMempool()
                 console.log("[SERVERHANDLER] Received mempool")
-                console.log(response)
+               //console.log(response)
                 return { extra, require_reply, response }
 
             default:
@@ -314,8 +314,8 @@ export default class ServerHandlers {
             | AddressInfo
         let socketized_response: Peer[]
         let { data } = content
-        console.log(typeof data)
-        console.log(JSON.stringify(content))
+        //console.log(typeof data)
+        //console.log(JSON.stringify(content))
         switch (content.message) {
             case "crosschain_operation":
             case "multichain_operation":
@@ -377,7 +377,7 @@ export default class ServerHandlers {
                 )
                 // Fixme: we now have a raw block, and have to instantiate a block from that.
                 // response = response.getHeader()
-                console.log(response)
+               //console.log(response)
                 break
             case "getBlockHeaderByHash":
                 if (data.blockHash === undefined || data.blockHash === "") {
@@ -391,14 +391,14 @@ export default class ServerHandlers {
                 )
                 // Fixme: we now have a raw block, and have to instantiate a block from that.
                 // response = response.getHeader()
-                console.log(response)
+               //console.log(response)
                 break
 
             case "getLastBlockNumber":
                 console.log("[SERVER] Received getLastBlockNumber")
                 response = await chain.getLastBlockNumber()
                 console.log("[CHAIN.ts] Received reply from the database") // REVIEW Debug
-                console.log(response)
+               //console.log(response)
                 break
             case "getLastBlockHash":
                 response = await chain.getLastBlockHash()
@@ -409,7 +409,7 @@ export default class ServerHandlers {
                     data.blockNumber === null
                 ) {
                     console.log("[SERVER ERROR] Missing blockNumber 💀")
-                    console.log(data)
+                   //console.log(data)
                     receiver.emit("error", {
                         error: "No block specified",
                         muid: content.muid,
@@ -422,9 +422,9 @@ export default class ServerHandlers {
                     response = await chain.getBlockByNumber(data.blockNumber)
                     
                     // REVIEW Debug lines
-                    console.log(response)
+                   //console.log(response)
                     response = JSON.stringify(response)
-                    console.log(response)
+                   //console.log(response)
                     
                 }
                 break
@@ -438,9 +438,9 @@ export default class ServerHandlers {
                 response = await chain.getBlockByHash(data.hash)
 
                 // REVIEW Debug lines
-                console.log(response)
+               //console.log(response)
                 response = JSON.stringify(response)
-                console.log(response)
+               //console.log(response)
 
                 break
             case "getTxByHash":
@@ -458,7 +458,7 @@ export default class ServerHandlers {
             case "getPeerIdentity":
                 // NOTE We don't need to sign anything as the comlink is signed already
                 response = "I am " + id_ed25519.publicKey.toString("hex")
-                console.log(response)
+               //console.log(response)
                 break
 
             // INFO Address info endpoint

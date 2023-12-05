@@ -35,7 +35,7 @@ async function main() {
         if (answer === "exit") {
             exit_flag = true
         } else {
-            console.log(answer)
+            //console.log(answer)
             await parser(answer)
         }
     }

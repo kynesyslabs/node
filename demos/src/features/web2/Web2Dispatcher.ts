@@ -23,10 +23,10 @@ export default async function handleWeb2(
     // NOTE Also note that Web2API automatically starts the request validation
 
     console.log("[PAYLOAD FOR WEB2] ")
-    console.log(payload)
+    //console.log(payload)
     let request: IWeb2Request = payload.message
     console.log("[REQUEST FOR WEB2] ")
-    console.log(request)
+    //console.log(request)
     //process.exit(0)
 
     let web2interface = Web2API(null, senderSocket, payload) // NOTE null is important here
@@ -93,7 +93,7 @@ export default async function handleWeb2(
     )
     let derivedTx = await toMempool(instanceName)
     console.log("[web2Dispatcher] Transaction derived.")
-    console.log(derivedTx)
+    //console.log(derivedTx)
     // Sending back the result
     // REVIEW Maybe is more efficient somewhere else
     return [true, JSON.stringify(web2interface.request)]

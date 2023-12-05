@@ -117,7 +117,7 @@ export default class ComLink {
             // Emitting the message
             let result = await this.broadcastToPeer(peer)
             console.log("[COMMUNICATIONS] Message sent")
-            console.log(result)
+           //console.log(result)
             return result
         }
         console.log("[COMMUNICATIONS] Invalid peer")
@@ -175,8 +175,8 @@ export default class ComLink {
         let stringifiedMessage = JSON.stringify(_currentMessage.bundle.content)
         let _derivedMessageHash = Hashing.sha256(stringifiedMessage)
         if (!(_derivedMessageHash === _currentMessage.bundle.hash)) {
-            console.log(_currentMessage)
-            console.log(stringifiedMessage)
+            //console.log(_currentMessage)
+            //console.log(stringifiedMessage)
             return [false, "comlink message hash mismatch: " + _derivedMessageHash]
         }
         // Check if current hash matches the current field
@@ -187,7 +187,7 @@ export default class ComLink {
         }
         // Check if the comlink signature matches the comlink sender
         console.log("[!] Extracting publicKey")
-        console.log(_currentMessage.bundle.content.sender)
+        //console.log(_currentMessage.bundle.content.sender)
         let _publicKey = _currentMessage.bundle.content.sender
         console.log("[!] Checking chain.comlinkCurrentHash")
         let _signatureValidity = Cryptography.verify(
@@ -199,7 +199,7 @@ export default class ComLink {
             return [false, "invalid comlink current hash signature"]
         // Check if the message signature matches the sender too
         console.log("[!] Checking bundle.hash")
-        console.log(typeof(_currentMessage.bundle.hash))
+        //console.log(typeof(_currentMessage.bundle.hash))
         let _messageSignatureValidity = Cryptography.verify(
             _currentMessage.bundle.hash,
             _currentMessage.bundle.signature,

@@ -1,7 +1,7 @@
 // INFO forgeBuffer comes in as the raw result of forge methods
 export function ForgeToHex(forgeBuffer: any) {
     console.log("[forge to string encoded]")
-    console.log(forgeBuffer)
+   //console.log(forgeBuffer)
     let rebuffer = Buffer.from(forgeBuffer)
     forgeBuffer = rebuffer.toString("hex")
     console.log("DECODED INTO:")
@@ -15,13 +15,13 @@ export function HexToForge(forgeString: string) {
     forgeString = forgeString.slice(2)
     let finalArray = new Uint8Array(64)
     console.log("[string to forge encoded]")
-    console.log(forgeString)
+   //console.log(forgeString)
     for (let i = 0; i < forgeString.length; i += 2) {
         const hexValue = forgeString.substr(i, 2)
         const decimalValue = parseInt(hexValue, 16)
         finalArray[i / 2] = decimalValue
     }
     console.log("ENCODED INTO:")
-    console.log(finalArray)
+   //console.log(finalArray)
     return finalArray
 }

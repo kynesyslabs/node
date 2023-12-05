@@ -97,7 +97,7 @@ function runMultipleTimes(n: number): Boolean {
         }
         results.push(res)
     }
-    console.log(results)
+   //console.log(results)
     return true
 }
 

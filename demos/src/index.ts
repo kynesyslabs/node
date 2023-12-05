@@ -141,7 +141,7 @@ async function main() {
     }
     PEER_LIST = JSON.parse(fs.readFileSync(PEER_LIST_FILE, "utf8"))
     term.green("[BOOTSTRAP] Loaded a list of peers:\n")
-    console.log(PEER_LIST)
+    //console.log(PEER_LIST)
 
     // NOTE The whole first part of main ensures the environment is ready to run
     await id.ensureIdentity()

@@ -29,7 +29,7 @@ export default class ComLinkUtils {
         _comlink_request.chain = request.chain
         _comlink_request.muid = request.muid
         _comlink_request.properties = request.properties
-        console.log(_comlink_request)
+        //console.log(_comlink_request)
         // REVIEW Refusing to process requests which currentMessage size is over a defined amount
         let reqSize = sizeOf(_comlink_request)
         if (reqSize > sharedState.getInstance().maxMessageSize) {
@@ -40,7 +40,7 @@ export default class ComLinkUtils {
             })
         }
         // Debug log
-        console.log("\n" + _comlink_request.chain.current.currentMessage + "\n")
+        //console.log("\n" + _comlink_request.chain.current.currentMessage + "\n")
         // Checking validity of the comlink for non nodeCall transactions
         // NOTE nodeCall transactions are read only and can be called by any client even without authentication
         console.log("The request has a current message that is a: " + typeof(_comlink_request.chain.current.currentMessage))
@@ -94,18 +94,18 @@ export default class ComLinkUtils {
         }
         if (!content) {
             console.log("[COMLINK PARSING] Eww, no content specified. Erroring back.")
-            console.log(request.chain.current.currentMessage.bundle)
+           //console.log(request.chain.current.currentMessage.bundle)
             peerSocket.emit("error", {
                 muid: request.muid,
                 message: "Ewwwwwwwww no content specified",
             })
         }
         console.log("[COMLINK PARSING] Content parsed")
-        console.log(content)
+        //console.log(content)
         if (!content.message) {
             console.log(
                 "[COMLINK PARSING] No message specified. Erroring back.",
-                console.log(content),
+                //console.log(content),
             )
             peerSocket.emit("error", {
                 muid: request.muid,

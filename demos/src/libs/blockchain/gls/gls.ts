@@ -520,7 +520,7 @@ export default class GLS {
                 await statusNativeRepository.save(nativeStatus)
             }
 
-            console.log(nativeStatus.tx_list)
+            //console.log(nativeStatus.tx_list)
             let tx_list = JSON.parse(nativeStatus.tx_list || "[]")
             tx_list.push(tx_hash)
 
@@ -532,7 +532,7 @@ export default class GLS {
                 },
             )
 
-            console.log(tx_list)
+            //console.log(tx_list)
             // TODO: Decide if we should use status_hashes too
             // Note: The original function returns responses from Chain.write, consider what you need to return here.
             return true // Adjust the return value as needed based on your requirements.

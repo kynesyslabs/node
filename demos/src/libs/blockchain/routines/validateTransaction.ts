@@ -59,13 +59,14 @@ export default async function validateTransaction(
         term.red.bold("[NATIVE TX] [BALANCE ERROR] No balance found for this address: " + from  + "\n")
         return [false, "[NATIVE TX] [BALANCE ERROR] No balance found for this address: " + from  + "\n"]
     }
+    // TODO Work on this method
     let gasAmount = await calculateCurrentGas(tx)
     if (fromBalance < gasAmount) {
-        return null // No gas money? No transaction!
+        return [false, "[NATIVE TX] [BALANCE ERROR] Insufficient balance for gas; required: " + gasAmount  + "\n"]
     }
-    // Deducting the gas from the account and assigning the operation to be executed
+    // NOTE Deducting the gas from the account and assigning the operation to be executed
     // as child of this transaction
-    let operation: Operation = {
+    let gas_operation: Operation = {
         operator: "pay_gas",
         actor: from,
         params: { amount: gasAmount.toString() },
@@ -75,20 +76,35 @@ export default async function validateTransaction(
         status: "pending",
         fees: tx.content.transaction_fee,
     }
-    console.log("[TX RECEIVED] Operation derived:\n")
-    console.log(operation)
-    GLS.getInstance().operations.push(operation)
+    console.log("[TX RECEIVED] Gas Operation derived\n")
+    //console.log(gas_operation)
     // Verify tx validity
     let verified = Transaction.confirmTx(tx, privateKey, publicKey) // REVIEW Are the buffers ok?
     if (!verified) {
         return [false, "Transaction not verified: " + tx.hash]
     }
     // REVIEW Execute or Revert the transaction
+    // NOTE executeTransaction returns an array of [success, message, operations]
+    // The operations are the Operation objects that are executed in the GLS after the consensus
+    // has confirmed the transaction in the block.
     let execution = await executeTransaction(tx)
     if (!execution[0]) {
         return [false, "Execution failed: " + execution[1]]
     }
+    
+    // ANCHOR TX Pre-execution, operation derivation and GLS Operation registry update are defined here
+
+    // NOTE Now we can save the gas operation as the tx is set to be executed 
+    // and the gas will be deducted anyway
+    GLS.getInstance().operations.push(gas_operation)
     // If the tx is valid and executable, we confirm it
     tx.confirmations.push(verified)
+    // Finally, we add all the derived operations to the GLS
+    for (let i = 0; i < execution[2].length; i++) {
+        console.log("[TX RECEIVED] Operation derived")
+        //console.log(execution[2][i])
+        GLS.getInstance().operations.push(execution[2][i])
+        console.log("[TX RECEIVED] Operation added to the GLS\n")
+    }
     return [true, tx]
 }

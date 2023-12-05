@@ -263,7 +263,7 @@ export default class ResponseRegistry {
         let now = new Date().getTime()
         let item: string | number
         for (item in this.list) {
-            console.log(this.list[item])
+            //console.log(this.list[item])
             if (!this.list[item]) {
                 continue // Garbage collector kindly managed it for us
             }

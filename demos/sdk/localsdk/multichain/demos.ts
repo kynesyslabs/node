@@ -56,20 +56,20 @@ export default class Demos {
 
         this.socket.on("comlink", (data) => {
             console.log("[ComLink] Received data") 
-            console.log(data)
-            console.log(data.chain.current.currentMessage)
+            //console.log(data)
+            //console.log(data.chain.current.currentMessage)
         })
 
         this.socket.on("comlink_reply", (data) => {
             console.log("[ComLink Reply] Received data") 
             //console.log(data)
             let response = JSON.parse(data.chain.current.currentMessage.bundle.content.message)
-            console.log(response)
+            //console.log(response)
         })
 
         this.socket.on("error", (data) => {
             console.log("[Error] Received data") 
-            console.log(data)
+            ////console.log(data)
         })
 
         // Fallback

@@ -49,8 +49,8 @@ export default class sharedState {
         this.currentTimestamp = new Date().getTime()
 
         const lastBlock = await chain.getLastBlock()
-        console.warn("[SHAREDSTATE]: last block")
-        console.warn(lastBlock)
+        console.warn("[SHAREDSTATE]: getting last block")
+        //console.warn(lastBlock)
         let lastTimestamp: number
         if (chain.isGenesis(lastBlock as any)) {
             //REVIEW - is this useless? I think so.
@@ -58,9 +58,8 @@ export default class sharedState {
             //REVIEW: is this different than other blocks?
             lastTimestamp = new Date().getTime() - 69420 * 1000
         } else {
-            console.log("blockContent")
-            console.log(lastBlock.content)
-            console.log(lastBlock.content.timestamp)
+            //console.log("blockContent")
+            //console.log(lastBlock.content)
             lastTimestamp = lastBlock.content.timestamp
         }
 
@@ -69,13 +68,9 @@ export default class sharedState {
         let delta = this.currentTimestamp - lastTimestamp
         // lastTimestamp = this.currentTimestamp // REVIEW Done? | This must be the last block timestamp
 
-        console.log("this.lastTimestamp")
-        console.log(JSON.stringify(lastBlock))
-        console.log(this.lastTimestamp)
-        console.log("this.currentTimestamp")
-        console.log(this.currentTimestamp)
-        console.log("delta")
-        console.log(delta)
+        console.log("this.lastTimestamp: " + this.lastTimestamp)
+        console.log("this.currentTimestamp: " + this.currentTimestamp)
+        console.log("delta: " + delta.toString())
 
         return delta
     }

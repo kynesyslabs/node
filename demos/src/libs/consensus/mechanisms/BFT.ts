@@ -65,7 +65,7 @@ export default class QBFT {
                 true,
             )
             console.log("[BFT] Received Remote Mempool Response")
-            console.log(remotePoolResponse)
+           //console.log(remotePoolResponse)
 
             // Check the response
             if (remotePoolResponse[0] !== true) {
@@ -76,7 +76,7 @@ export default class QBFT {
             remotePool = JSON.parse(remotePoolResponse[1].message)
 
             console.log("[BFT] Received Remote Mempool")
-            console.log(remotePool)
+           //console.log(remotePool)
 
             console.log("[BFT] Receiving Mempool")
             // Fast validity check is done by the Mempool module above
@@ -140,7 +140,7 @@ export default class QBFT {
         let forgedProposedHash = proposedBlock.hash
 
         console.log("IS IT NULL")
-        console.log(forgedProposedHash)
+       //console.log(forgedProposedHash)
 
         const pocList = []
         // Another loop to get the PoC
@@ -164,9 +164,9 @@ export default class QBFT {
             if (pocItem === null) {
                 errored = true
                 console.log(consensusReached)
-                console.log(mempool)
+                //console.log(mempool)
                 console.log(proposedBlock)
-                console.log(forgedProposedHash)
+               //console.log(forgedProposedHash)
                 // eslint-disable-next-line no-debugger
                 debugger
             }
@@ -221,7 +221,7 @@ export default class QBFT {
             })
 
             console.log("Voting will compare:\n")
-            console.log(response)
+           //console.log(response)
             console.log(our)
 
             // Compiling the registry

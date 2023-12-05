@@ -31,10 +31,11 @@ Each block, the nodes execute the Operation objects ordering them by their times
 */
 
 // INFO Given a transaction, use GLS to see if it is executable and return a result
-export default async function executeTransaction(transaction: Transaction): Promise<[boolean, string]> {
+export default async function executeTransaction(transaction: Transaction): Promise<[boolean, string, Operation[]]> {
 
-    let success: boolean
-    let message: string
+    let success: boolean = true
+    let message: string = ""
+    let operations: Operation[] = []
 
  
     // ANCHOR Managing simple value transfer
@@ -61,7 +62,8 @@ export default async function executeTransaction(transaction: Transaction): Prom
             status: "pending",
             fees: transaction.content.transaction_fee,
         }
-        GLS.getInstance().operations.push(operation)
+        // Adding the operation to the list of operations
+        operations.push(operation)
         // Subtract value from sender's balance
         operation = {
             operator: "remove_native",
@@ -73,10 +75,11 @@ export default async function executeTransaction(transaction: Transaction): Prom
             status: "pending",
             fees: transaction.content.transaction_fee,
         }
-        GLS.getInstance().operations.push(operation)
+        // Adding the operation to the list of operations
+        operations.push(operation)
         success = true
         message = "Transaction successful"
-        return [success, message]
+        return [success, message, operations]
     }
 
     // ANCHOR Managing complex operations
@@ -84,5 +87,5 @@ export default async function executeTransaction(transaction: Transaction): Prom
         // TODO Execute the code based on a currently not defined schema
     }
 
-    return [success, message]
+    return [success, message, operations]
 }

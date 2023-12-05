@@ -48,7 +48,7 @@ export default async function getPeerTime(
     comlink.properties.require_reply = true
     comlink.properties.is_reply = false
     console.log("[PEER TIMESYNC] Sending comlink")
-    console.log(comlink)
+    //console.log(comlink)
     // Adding the response request
     ResponseRegistry.getInstance().requestResponse(comlink)
     // Broadcasting the request
@@ -58,7 +58,7 @@ export default async function getPeerTime(
         comlink.muid,
     )
     console.log("[PEER TIMESYNC] Response received")
-    console.log(response)
+   //console.log(response)
 
     // Response management
     if (response[0]) {

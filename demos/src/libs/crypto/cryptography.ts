@@ -45,7 +45,7 @@ export default class Cryptography {
 
     static saveToHex(forgeBuffer: pki.PrivateKey): string {
         console.log("[forge to string encoded]")
-        console.log(forgeBuffer) // REVIEW if it is like this
+       //console.log(forgeBuffer) // REVIEW if it is like this
         let stringBuffer = forgeBuffer.toString("hex")
         console.log("DECODED INTO:")
         console.log("0x" + stringBuffer)
@@ -115,7 +115,7 @@ export default class Cryptography {
             finalArray[i / 2] = decimalValue
         }
         console.log("ENCODED INTO:")
-        console.log(finalArray)
+       //console.log(finalArray)
         // Condensing
         console.log("That means:")
         keypair.privateKey = Buffer.from(finalArray)
@@ -150,23 +150,23 @@ export default class Cryptography {
     ) {
         // REVIEW
         if(signature.type=="Buffer") {
-            console.log("Normalizing signature...")
+            console.log("[*] Normalizing signature...")
             signature = Buffer.from(signature)
         }
         if(publicKey.type=="Buffer") {
-            console.log("Normalizing publicKey...")
+            console.log("[*] Normalizing publicKey...")
             publicKey = Buffer.from(publicKey)
         }
 
-        console.log("\n\nSigned: \n")
-        console.log(signed + " is a " + typeof(signed))
-        console.log("\n\nSignature: \n")
-        console.log(signature)
-        console.log(" is a " + typeof(signature))
-        console.log("\n\nPublic Key:\n")
-        console.log(publicKey)
-        console.log(" is a " + typeof(publicKey))
-        console.log("\n")
+        //console.log("\n\nSigned: \n")
+        //console.log(signed + " is a " + typeof(signed))
+        //console.log("\n\nSignature: \n")
+        //console.log(signature)
+        //console.log(" is a " + typeof(signature))
+        //console.log("\n\nPublic Key:\n")
+        //console.log(publicKey)
+        //console.log(" is a " + typeof(publicKey))
+        //console.log("\n")
         console.log("[*] Verifying the signature...")
         return ed25519.verify({
             message: signed,

@@ -50,7 +50,7 @@ export default async function getPeerConnectionString(peer: Peer, id: any): Prom
     // Response management
     if (response[0]) {
         console.log("[PEER CONNECTION] Received response")
-        console.log(response[1])
+       //console.log(response[1])
         peer.connectionString = response[1].message
     } else {
         console.log("[PEER CONNECTION] No response received")
