@@ -173,7 +173,7 @@ export async function createTransaction(data: any): Promise<Transaction> {
         transaction.hash,
         sharedState.getInstance().identity.ed25519.privateKey,
     )
-    transaction.signature.data = signature // REVIEW Should be correct but it was transaction.signature = signature before
+    transaction.signature = signature // REVIEW Should be correct but it was transaction.signature = signature before
     // TODO See how to be general purpose but specific (a shared format?)
     return transaction
 }
