@@ -50,6 +50,8 @@
 
     function handleChangeUrl()
     {
+        if(!url.includes("http://") && !url.includes("https://"))
+            url = "https://"+url;
         if(isValidUrl(url))
         {
             if(url.includes("?"))
@@ -91,27 +93,46 @@
         url = newurl;
     }
 
+    function handleChangeHeaders(ev, headerIndex, keyindex)
+    {
+        headers[headerIndex][keyindex] = ev.target.value;
+        if(headerIndex==headers.length-1)
+        {
+            headers.push(["",""])
+        }
+        //delete all empty headers but the last one
+        let newheaders = [];
+        headers.forEach((header)=>{
+            if(header[0] !== "" || header[1] !== "")
+                newheaders.push(header);
+        })
+        newheaders.push(["",""]);
+        headers = newheaders;
+    }
+
     async function sendRequest()
     {
         waiting = true;
         if(params[params.length-1][0] == ""||params[params.length-1][1] == "")
             params.pop();
         console.log("url", url, "params", params);
-        let response = await demos.Web2Transactions(method, url, params, null, 5);
+        let response = await demos.Web2Transactions(method, url, params, headers, 5);
         theresponse = JSON.parse(response);
         Object.keys(theresponse.attestations).forEach((key)=>{
             theresponse.attestations[key].identity.data= theresponse.attestations[key].identity.data.toString();
             theresponse.attestations[key].signature.data= theresponse.attestations[key].signature.data.toString();
         })
-        //theresponse.attestations.identity.data= theresponse.attestations.identity.data.toString();
         waiting = false;
-        console.log("response", theresponse);
     }
 
     let url="";
     let params = [
         ["", ""]
     ];
+
+    let headers = [
+        ["", ""]
+    ]
 
     $:if(params[params.length-1][0] == "" && params[params.length-1][1] == "" && params.length>1 && params[params.length-2][0] == "" && params[params.length-2][1] == "")
     {
@@ -141,6 +162,20 @@
                         <div class="inputscontainer">
                             <input class="smallinput" on:input={(ev)=>{handleChangeParams(ev, index, 0)}} value={param[0]} placeholder="Insert parameter key"/>
                             <input class="smallinput" on:input={(ev)=>{handleChangeParams(ev, index, 1)}} value={param[1]} placeholder="Insert parameter value"/>
+                        </div>
+                    </div>
+                {/each}
+            </div>
+        </div>
+        <div style="padding-bottom:64px;" transition:budinoslide>
+            <h4 class="subtitle">Headers</h4>
+            <div class="params">
+                {#each headers as header, index}
+                    <div class="paramcontainer">
+                        <div class="indexcontainer">{index+1}</div>
+                        <div class="inputscontainer">
+                            <input class="smallinput" on:input={(ev)=>{handleChangeHeaders(ev, index, 0)}} value={header[0]} placeholder="Insert parameter key"/>
+                            <input class="smallinput" on:input={(ev)=>{handleChangeHeaders(ev, index, 1)}} value={header[1]} placeholder="Insert parameter value"/>
                         </div>
                     </div>
                 {/each}
