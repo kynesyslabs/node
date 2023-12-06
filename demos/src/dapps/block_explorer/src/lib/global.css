@@ -167,8 +167,9 @@ button{
 .tooltip .tooltiptext {
     opacity: 0;
     transition: opacity .2s ease-in-out;
-    width: 120px;
-    background-color: var(--background2);
+    width: 150px;
+    background-color: var(--background);
+    border: 1px solid var(--background3);
     color: var(--color);
     text-align: center;
     padding: 5px 0;
@@ -177,7 +178,7 @@ button{
     z-index: 1;
     bottom: calc(100% + 8px);
     left: 50%;
-    margin-left: -60px; /* Use half of the width (120/2 = 60), to center the tooltip */
+    margin-left: -75px; /*  half of the width  */
     pointer-events: none;
 
 }
@@ -190,7 +191,7 @@ button{
     font-weight: normal;
     font-size: .9rem;
 }
-.tooltip .tooltiptext::after {
+.tooltip .tooltiptext::before {
     content: " ";
     position: absolute;
     top: 100%; /* At the bottom of the tooltip */
@@ -198,7 +199,18 @@ button{
     margin-left: -5px;
     border-width: 5px;
     border-style: solid;
-    border-color: var(--background2) transparent transparent transparent;
+    border-color: var(--background3) transparent transparent transparent;
+  }
+
+  .tooltip .tooltiptext::after {
+    content: " ";
+    position: absolute;
+    top: 100%; /* At the bottom of the tooltip */
+    left: 50%;
+    margin-left: -4px;
+    border-width: 4px;
+    border-style: solid;
+    border-color: var(--background) transparent transparent transparent;
   }
 
   .ace_tooltip

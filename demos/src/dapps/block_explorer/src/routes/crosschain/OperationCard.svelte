@@ -47,6 +47,7 @@
     }
 
     function createTask(e, key){
+        triggerUpdate();
         if(e.detail.info.trigger === "droppedIntoAnother" || !e.detail.info.id)
         {
             return;
@@ -56,10 +57,7 @@
             return;
         //apri l'editor se operation data non esiste e se non è un conditional
         if(thisop.type == "conditional")
-        {
-            triggerUpdate();
             return;
-        }
         //se è figlio di un conditional setta il flag true, altrimenti false
         if(!thisop.data)
         {
@@ -241,8 +239,8 @@
                     </div>
                 {/each}
             </div>
-            <Combobox value={operation.symbol} options={conditionOptions} onChange={(newValue)=>{operation.symbol = newValue}} style="width:150px; background-color:var(--background3)"></Combobox>
-            <input placeholder="Input condition here" value={operation.input} on:change={(e)=>{operation.input = e.target.value}} style="background-color:var(--background3); font-size:1rem; height:52px;"/>
+            <Combobox value={operation.symbol} options={conditionOptions} onChange={(newValue)=>{operation.symbol = newValue}} style="width:150px; background-color:var(--background2)"></Combobox>
+            <input placeholder="Input condition here" value={operation.input} on:change={(e)=>{operation.input = e.target.value}} style="background-color:var(--background2); font-size:1rem; height:52px;"/>
             <div style="position: relative;margin-left:auto">
                 <button on:click={()=>{menuopen = true;}} class="shallow color-transition"><Fa icon={faEllipsisV}></Fa></button>
                 {#if menuopen}

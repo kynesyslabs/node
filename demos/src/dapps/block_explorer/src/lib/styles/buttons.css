@@ -27,8 +27,9 @@ button.primary {
 }
 
 button.primary:disabled{
-    background-color: rgba(255,255,255,0.2);
-    border-color: rgba(255,255,255,0.2);
+    color: var(--background3);
+    border: var(--background3);
+    background: var(--background2);
 }
 
 button.secondary {

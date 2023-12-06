@@ -1,4 +1,5 @@
 <script>
+    // @ts-check
 	import OperationEditor from "./OperationEditor.svelte";
 	import OperationCard from "./OperationCard.svelte";
     import XMTransactions from "$lib/demos_libs/XMTransactions.js";
@@ -13,6 +14,7 @@
     import XMWalletConnectionCard from "../../lib/components/xM_WalletConnectionCard.svelte";
     import EVM from '$lib/demos_libs/xmlibs/chains/evm';
     import XRPL from '$lib/demos_libs/xmlibs/chains/xrpl';
+    import CodePreview from '$lib/components/CodePreview.svelte';
 
     //Avoid version conflicts
     const version = "1.01";
@@ -22,13 +24,21 @@
         localStorage.setItem("version", version);
     }
 
-    //Save
+    /** @typedef {"pay" | "conditional"} OperationType*/
+    /** @typedef {{id: string, data: any, type: OperationType, condition?: any[], then?: any[], else?: any[], symbol?: string, input?: string}} Operation*/
+    /** @typedef {{id: string, items: Operation[], type: "root"}} Root*/
+    /** @type {Root} */
     let root = localStorage.getItem("operations")?JSON.parse(localStorage.getItem("operations")):{id:"root", items:[], type:"root"}
     $: localStorage.setItem("operations", JSON.stringify(root));
+
+    /** @typedef {"editor" | "code"} Tab*/
+    /** @type {Tab} */
+	let tab = "editor";
 
     /**Required chains and their wallets
      * @type {{id: string, wallet: any}[]} */
     let required_connections = []
+    
     /** Used when checking requirements. It contains only the list of the required chains.
      * @type {string[]}*/
     let temp_required = [];
@@ -88,6 +98,18 @@
 		required_connections = required_copy;
 	}
 
+    /** @type {Object}*/
+    let chainscriptObj = null;
+
+    $: updateChainscript(root.items);
+
+    /** @param {Operation[]} rootArray*/
+    function updateChainscript(rootArray)
+    {
+        XMTransactions.operation.clear();
+        createAll(rootArray);
+        chainscriptObj = XMTransactions.operation.get();
+    }
 
     //loading variable
     let processing = false;
@@ -149,13 +171,15 @@
         {id:"notequals", label:"!="},
     ]
 
+    /** @param {Operation[]} parentArray Current array of operation taken in analisys*/
     function createAll(parentArray)
     {
         for(const operation of parentArray)
         {
             if(operation.type=="conditional")
             {
-                XMTransactions.operation.create_condition(operation.id, "if", `${operation.condition[0].id} ${conditionOptions.find(s=>s.id == operation.symbol).label} ${operation.input}`, operation.then.map(op=>op.id), operation.else.map(op=>op.id));
+                if(operation.condition.length > 0)
+                    XMTransactions.operation.create_condition(operation.id, "if", `${operation.condition[0].id} ${conditionOptions.find(s=>s.id == operation.symbol).label} ${operation.input}`, operation.then.map(op=>op.id), operation.else.map(op=>op.id));
                 createAll(operation.condition);
                 createAll(operation.then);
                 createAll(operation.else);
@@ -275,33 +299,43 @@
     <div style="display: flex; align-items:center">
         <h4 class="subtitle">Build a Cross-Chain Transaction</h4>
         {#if root.items.length > 0}
-        <button on:click={()=>{root.items=[]}} class="futuristic subtitle">[clear]</button>
+        <button on:click={()=>{root.items=[]}} class="futuristic intestazione">[clear]</button>
         {/if}
     </div>
-    <div class="txeditor">
-        {#if root.items.length == 0}
-        <div class="instructions">
-            <svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="var(--color)" fill-rule="evenodd" d="M1 1h3.17v2H3v1.171H1V1Zm13.58 0v3.17l-2 0V3h-1.172V1h3.171ZM9.236 1H6.342l0 2h2.895V1ZM1 14.58v-3.17h2v1.17h1.171v2H1Zm0-5.343V6.342h2l0 2.895H1Zm11.95 3.712 2.01 9.046 2.26-2.262L20.489 23 23 20.487l-3.266-3.266 2.261-2.262-2.913-.647-6.133-1.363Zm6.132-7.446H5.502v13.58h7.274l-1.802-8.11 8.108 1.802V5.503Z" clip-rule="evenodd"></path></svg>
-            <p style="margin-bottom: 0;">Drop blocks here and start building your transaction</p>
-        </div>
-        {/if}
-        <div class="dnd">
-            <OperationCard triggerUpdate={()=>{root = root}} onEdit={(op, parent)=>{edit = op; editparent=parent;}} operation={root} duplicateOperation={duplicateOperation} deleteOperation={deleteOperation}/>
-        </div>
+    <div class="tabs">
+        <button class={`tab ${tab=="editor"?"selected":""}`} on:click={()=>{tab="editor"}}>Editor</button>
+        <button class={`tab ${tab=="code"?"selected":""}`} on:click={()=>{tab="code"}}>Code preview</button>
     </div>
-    <h4 class="subtitle">Required Wallets</h4>
-    <div class="connections">
-        <div class="wallet-connection card">
-            <h4 class="network-name">DEMOS</h4>
-            <div class="wallet-info">
-                <p class="wallet-address">{trim_address(Buffer.from($wallet.keypair.publicKey).toString("hex"))}</p>
-                <svg class="wallet-status" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="24" height="24"><g id="check-circle--checkmark-addition-circle-success-check-validation-add-form-tick"><path id="Subtract" fill="green" fill-rule="evenodd" d="M12 23c6.075 0 11-4.925 11-11S18.075 1 12 1 1 5.925 1 12s4.925 11 11 11Zm-.47-6.625 6-7.5-1.56-1.25-5.355 6.693-2.714-2.327-1.302 1.518 3.5 3 .786.674.646-.808Z" clip-rule="evenodd"></path></g></svg>
+    {#if tab=="editor"}
+        <div class="txeditor">
+            {#if root.items.length == 0}
+            <div class="instructions">
+                <svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="var(--color)" fill-rule="evenodd" d="M1 1h3.17v2H3v1.171H1V1Zm13.58 0v3.17l-2 0V3h-1.172V1h3.171ZM9.236 1H6.342l0 2h2.895V1ZM1 14.58v-3.17h2v1.17h1.171v2H1Zm0-5.343V6.342h2l0 2.895H1Zm11.95 3.712 2.01 9.046 2.26-2.262L20.489 23 23 20.487l-3.266-3.266 2.261-2.262-2.913-.647-6.133-1.363Zm6.132-7.446H5.502v13.58h7.274l-1.802-8.11 8.108 1.802V5.503Z" clip-rule="evenodd"></path></svg>
+                <p style="margin-bottom: 0;">Drop blocks here and start building your transaction</p>
+            </div>
+            {/if}
+            <div class="dnd">
+                <OperationCard triggerUpdate={()=>{root = root}} onEdit={(op, parent)=>{edit = op; editparent=parent;}} operation={root} duplicateOperation={duplicateOperation} deleteOperation={deleteOperation} parent={parent}/>
             </div>
         </div>
-        {#each required_connections as required_wallet}
-            <XMWalletConnectionCard chain={required_wallet} {connectWallet} error={wallet_errors[required_wallet.id]} />
-        {/each}
-    </div>
+        <h4 class="intestazione">Required Wallets</h4>
+        <div class="connections">
+            <div class="wallet-connection card">
+                <h4 class="network-name">DEMOS</h4>
+                <div class="wallet-info">
+                    <p class="wallet-address">{trim_address(Buffer.from($wallet.keypair.publicKey).toString("hex"))}</p>
+                    <svg class="wallet-status" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="24" height="24"><g id="check-circle--checkmark-addition-circle-success-check-validation-add-form-tick"><path id="Subtract" fill="green" fill-rule="evenodd" d="M12 23c6.075 0 11-4.925 11-11S18.075 1 12 1 1 5.925 1 12s4.925 11 11 11Zm-.47-6.625 6-7.5-1.56-1.25-5.355 6.693-2.714-2.327-1.302 1.518 3.5 3 .786.674.646-.808Z" clip-rule="evenodd"></path></g></svg>
+                </div>
+            </div>
+            {#each required_connections as required_wallet}
+                <XMWalletConnectionCard chain={required_wallet} {connectWallet} error={wallet_errors[required_wallet.id]} />
+            {/each}
+        </div>
+    {:else if tab=="code"}
+        <div class="card">
+            <CodePreview id="xm_code_preview" text={JSON.stringify(chainscriptObj, null, 2)}></CodePreview>
+        </div>
+    {/if}
     {#if error != ""}
         <div class="alert-error">{error}</div>
     {/if}
@@ -321,7 +355,29 @@
 </div>
 
 <style>
+    .tabs {
+		display: flex;
+		align-items: center;
+		margin-bottom: 16px;
+	}
+	.tab {
+		padding: 8px 16px;
+		border: none;
+		color: var(--color);
+		font-size: 0.9rem;
+		margin-right: 8px;
+		cursor: pointer;
+	}
+	.tab.selected{
+		background-color: var(--color);
+		color: var(--background);
+	}
     .subtitle{
+        margin-top: -32px;
+        margin-bottom: 48px;
+        opacity: .4;
+    }
+    .intestazione{
         margin-bottom: 16px;
     }
     .txeditor{
