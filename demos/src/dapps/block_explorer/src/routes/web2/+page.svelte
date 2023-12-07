@@ -188,22 +188,27 @@
     {#if theresponse && !waiting}
     <div>
         <h4 class="subtitle">Response</h4>
+        <!--<button>[Switch to table view]</button>-->
         <div class="response">
             <div class="request-recap">
-                {#if theresponse.raw.url.slice(0, 5)=="https"}
-                    <div class="secure-badge">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="24" height="24"><g id="padlock-shield--combination-combo-lock-locked-padlock-secure-security-shield"><path id="Subtract" fill="var(--background)" fill-rule="evenodd" d="M1.5 1v16.5L12 23l10.5-5.5V1h-21Zm14.25 8.996H17V16.5H7V9.996h1.25V7.75a3.75 3.75 0 1 1 7.5 0v2.246Zm-2 0V7.75a1.75 1.75 0 1 0-3.5 0v2.246h3.5Z" clip-rule="evenodd"></path></g></svg>
-                        <p>
-                        Secure
-                        </p>
+                <div class="request-url-container">
+                    {#if theresponse.raw.url.slice(0, 5)=="https"}
+                        <div class="secure-badge tooltipleft">
+                            <span class="tooltiptextleft">This request was sent over HTTPS</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="16" height="16"><g id="padlock-square-1--combination-combo-lock-locked-padlock-secure-security-shield-keyhole"><path id="Union" fill="var(--success)" fill-rule="evenodd" d="M8 7a4 4 0 1 1 8 0v3H8V7Zm-2 3V7a6 6 0 1 1 12 0v3h3v13H3V10h3Zm5 8.5v-4h2v4h-2Z" clip-rule="evenodd"></path></g></svg>
+                        </div>
+                    {:else}
+                        <div class="secure-badge">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="16" height="16"><g id="disabled-padlock"><path id="Subtract" fill="var(--error)" fill-rule="evenodd" d="m19.47 23-13-13H3l0 13 16.47 0ZM.34 1.754l-.047-.047L1.707.293l4.654 4.653A6.002 6.002 0 0 1 18 7v3h3l0 9.586 2.707 2.707-1.414 1.414-.516-.515.003-.003L.343 1.75l-.003.003ZM16 10h-4.586L8.02 6.605A4 4 0 0 1 16 7v3Z" clip-rule="evenodd"></path></g></svg>
+                        </div>
+                    {/if}
+                    <div class="used-method">
+                        {theresponse.raw.action}
                     </div>
-                {:else}
-                    Not secure
-                {/if}
-                <p class="used-method">
-                    {theresponse.raw.action}
-                </p>
-                {theresponse.raw.url}
+                    <div class="request-url">
+                        {theresponse.raw.url}
+                    </div>
+                </div>
             </div>
             <div class="tabs">
                 {#each tabs as tab}
@@ -318,14 +323,28 @@
         border-bottom: 1px solid var(--background3);
     }
     .secure-badge{
-        display: flex;
-        align-items: center;
-        padding: 0 16px;
-        gap:8px;
-        background-color: var(--color);
-        color: var(--background);
+        position: relative;
+        top: 1px;
     }
     .used-method{
         font-weight: bold;
+        opacity: .6;
+    }
+    .request-url-container{
+        display: flex;
+        padding: 12px 16px;
+        background-color: var(--background2);
+        border: 1px solid var(--background3);
+        width: calc(100% - 32px);
+        margin: 16px;
+        gap: 16px;
+    }
+    .request-url{
+        /*no wrap*/
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+        width: calc(100%);
     }
 </style>

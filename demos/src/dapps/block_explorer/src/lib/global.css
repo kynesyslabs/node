@@ -14,6 +14,7 @@
             --color3: #303030;
             --color4: #505357;
             --error: #e8839c;
+            --success: #00b894;
             --filter: invert(0);
         }
     }
@@ -28,6 +29,7 @@
         --color3: #cfcfcf;
         --color4: #A8ACAF;
         --error:#b8294d;
+        --success: #00b894;
         --filter: invert(1);
     }
 }
@@ -156,62 +158,6 @@ button{
 .card-header{
     margin: 0;
 }
-
-/* Tooltip container */
-.tooltip {
-    position: relative;
-    display: inline-block;
-}
-  
-/* Tooltip text */
-.tooltip .tooltiptext {
-    opacity: 0;
-    transition: opacity .2s ease-in-out;
-    width: 150px;
-    background-color: var(--background);
-    border: 1px solid var(--background3);
-    color: var(--color);
-    text-align: center;
-    padding: 5px 0;
-
-    position: absolute;
-    z-index: 1;
-    bottom: calc(100% + 8px);
-    left: 50%;
-    margin-left: -75px; /*  half of the width  */
-    pointer-events: none;
-
-}
-  
-/* Show the tooltip text when you mouse over the tooltip container */
-  .tooltip:hover .tooltiptext {
-    opacity: 1;
-}
-.tooltiptext{
-    font-weight: normal;
-    font-size: .9rem;
-}
-.tooltip .tooltiptext::before {
-    content: " ";
-    position: absolute;
-    top: 100%; /* At the bottom of the tooltip */
-    left: 50%;
-    margin-left: -5px;
-    border-width: 5px;
-    border-style: solid;
-    border-color: var(--background3) transparent transparent transparent;
-  }
-
-  .tooltip .tooltiptext::after {
-    content: " ";
-    position: absolute;
-    top: 100%; /* At the bottom of the tooltip */
-    left: 50%;
-    margin-left: -4px;
-    border-width: 4px;
-    border-style: solid;
-    border-color: var(--background) transparent transparent transparent;
-  }
 
   .ace_tooltip
   {
