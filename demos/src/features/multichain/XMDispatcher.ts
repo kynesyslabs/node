@@ -1,8 +1,12 @@
 /* eslint-disable no-unused-vars */
 // INFO Entry point for multichain requests
+import { json } from "stream/consumers"
 import XMParser from "./routines/XMParser"
 import { XMScript } from "./routines/XMParser"
-import { deriveMempoolOperation } from "src/libs/utils/demostdlib/deriveMempoolOperation"
+import {
+    DerivableNative,
+    deriveMempoolOperation,
+} from "src/libs/utils/demostdlib/deriveMempoolOperation"
 
 export default class multichainDispatcher {
     // INFO Digesting the request from the server
@@ -57,12 +61,15 @@ export default class multichainDispatcher {
         insert: boolean = true,
     ): Promise<any> {
         // We should have a valid, attested request: lets handle it
-        // NOTE If all the attestations are valid we can create the transaction, insert it and gibe back the result
+        // NOTE If all the attestations are valid we can create the transaction, insert it and give back the result
         // Creating a tx from the completed request if is possible
         let jsonNote = {
             script: script,
             results: results,
         }
-        return await deriveMempoolOperation(jsonNote, insert)
+
+        console.log(jsonNote)
+
+        return await deriveMempoolOperation(jsonNote as any, insert)
     }
 }

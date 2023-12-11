@@ -38,7 +38,7 @@ export default async function validateTransaction(
         typeof tx.signature === "object" &&
         request.tx.signature.type === "Buffer"
     ) {
-        tx.signature = Buffer.from(request.tx.signature)
+        tx.signature = Buffer.from(request.tx.signature) as any
         console.log("Normalized signature")
     }
     console.log("Signature: ")
@@ -56,13 +56,27 @@ export default async function validateTransaction(
     try {
         fromBalance = await GLS.getGLSNativeBalance(from)
     } catch (e) {
-        term.red.bold("[NATIVE TX] [BALANCE ERROR] No balance found for this address: " + from  + "\n")
-        return [false, "[NATIVE TX] [BALANCE ERROR] No balance found for this address: " + from  + "\n"]
+        term.red.bold(
+            "[NATIVE TX] [BALANCE ERROR] No balance found for this address: " +
+                from +
+                "\n",
+        )
+        return [
+            false,
+            "[NATIVE TX] [BALANCE ERROR] No balance found for this address: " +
+                from +
+                "\n",
+        ]
     }
     // TODO Work on this method
     let gasAmount = await calculateCurrentGas(tx)
     if (fromBalance < gasAmount) {
-        return [false, "[NATIVE TX] [BALANCE ERROR] Insufficient balance for gas; required: " + gasAmount  + "\n"]
+        return [
+            false,
+            "[NATIVE TX] [BALANCE ERROR] Insufficient balance for gas; required: " +
+                gasAmount +
+                "\n",
+        ]
     }
     // NOTE Deducting the gas from the account and assigning the operation to be executed
     // as child of this transaction
@@ -91,10 +105,10 @@ export default async function validateTransaction(
     if (!execution[0]) {
         return [false, "Execution failed: " + execution[1]]
     }
-    
+
     // ANCHOR TX Pre-execution, operation derivation and GLS Operation registry update are defined here
 
-    // NOTE Now we can save the gas operation as the tx is set to be executed 
+    // NOTE Now we can save the gas operation as the tx is set to be executed
     // and the gas will be deducted anyway
     GLS.getInstance().operations.push(gas_operation)
     // If the tx is valid and executable, we confirm it

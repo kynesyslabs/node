@@ -14,7 +14,6 @@ KyneSys Labs: https://www.kynesys.xyz/
     consensus has confirmed the transaction in the block.
 */
 
-
 import Transaction from "../transaction"
 import GLS from "../gls/gls"
 import { Operation } from "../gls/gls"
@@ -31,13 +30,13 @@ Each block, the nodes execute the Operation objects ordering them by their times
 */
 
 // INFO Given a transaction, use GLS to see if it is executable and return a result
-export default async function executeTransaction(transaction: Transaction): Promise<[boolean, string, Operation[]]> {
-
+export default async function executeTransaction(
+    transaction: Transaction,
+): Promise<[boolean, string, Operation[]?]> {
     let success: boolean = true
     let message: string = ""
     let operations: Operation[] = []
 
- 
     // ANCHOR Managing simple value transfer
     if (transaction.content.amount > 0) {
         let operation: Operation
@@ -55,7 +54,7 @@ export default async function executeTransaction(transaction: Transaction): Prom
         operation = {
             operator: "add_native",
             actor: receiver,
-            params: {amount: transaction.content.amount},
+            params: { amount: transaction.content.amount },
             hash: transaction.hash,
             nonce: transaction.content.nonce,
             timestamp: transaction.content.timestamp,
@@ -68,7 +67,7 @@ export default async function executeTransaction(transaction: Transaction): Prom
         operation = {
             operator: "remove_native",
             actor: sender,
-            params: {amount: transaction.content.amount},
+            params: { amount: transaction.content.amount },
             hash: transaction.hash,
             nonce: transaction.content.nonce,
             timestamp: transaction.content.timestamp,

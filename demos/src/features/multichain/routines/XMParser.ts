@@ -134,7 +134,7 @@ class XMParser {
         // let res = await multichain[operation.chain][operation.task.type](operation.task.params)
 
         // NOTE Deciding the operations
-        
+
         // TODO Checking if we have a conditional operation
 
         // REVOEW Here is maybe to rewrite with modules (see if it is more efficient)
@@ -144,11 +144,16 @@ class XMParser {
         // NOTE For the following tasks we need to check the signed payloads against checkSignedPayloads()
 
         // INFO Pay task
-        if (operation.task.type == "pay") {
-            console.log("[XMScript Parser] Pay task. Examining payloads (require 1)...")
+        console.log(JSON.stringify(operation))
+        if (operation.task?.type == "pay") {
+            console.log(
+                "[XMScript Parser] Pay task. Examining payloads (require 1)...",
+            )
             // NOTE Generic sanity check on payloads
             if (!checkSignedPayloads(1, operation.task.signedPayloads)) {
-                console.log("[XMScript Parser] Pay task failed: Invalid payloads (require 1 has 0)")
+                console.log(
+                    "[XMScript Parser] Pay task failed: Invalid payloads (require 1 has 0)",
+                )
                 return {
                     result: "error",
                     error: "Invalid signedPayloads length",
@@ -159,7 +164,9 @@ class XMParser {
             )
             // ANCHOR EVM (which is quite simple: send a signed transaction. Done.)
             if (operation.is_evm) {
-                console.log("[XMScript Parser] EVM Pay: trying to send the payload as a signed transaction...") // REVIEW Simulations?
+                console.log(
+                    "[XMScript Parser] EVM Pay: trying to send the payload as a signed transaction...",
+                ) // REVIEW Simulations?
                 // TODO Add check and instance creation on the fly
                 result = await multichain.EVM.getInstance(
                     chainID,
@@ -174,15 +181,21 @@ class XMParser {
                     // Testnet support
                     let rpc_url = chainProviders.ripple.mainnet
                     rpc_url = chainProviders.ripple[operation.subchain]
-                    console.log("[XMScript Parser] Ripple Pay: we will use " + rpc_url + " to connect to " + operation.subchain)
-                    console.log("[XMScript Parser] Ripple Pay: trying to send the payload as a signed transaction...") // REVIEW Simulations?
+                    console.log(
+                        "[XMScript Parser] Ripple Pay: we will use " +
+                            rpc_url +
+                            " to connect to " +
+                            operation.subchain,
+                    )
+                    console.log(
+                        "[XMScript Parser] Ripple Pay: trying to send the payload as a signed transaction...",
+                    ) // REVIEW Simulations?
                     let xrplInstance = new multichain.XRPL(rpc_url)
                     result = await xrplInstance.sendTransaction(
                         operation.task.signedPayloads[0],
                     )
                 }
             }
-
         }
 
         /* SECTION Read only tasks */
@@ -190,13 +203,17 @@ class XMParser {
 
         // ANCHOR MVP
         // INFO Read contract task
-        else if (operation.task.type == "readContract") {
+        else if (operation.task?.type == "readContract") {
             // Mainly EVM but let's let it open for weird chains
             // Workflow: loading the provider url in our configuration, creating an instance, parsing the request
             // and sending back the chain response as it is
             if (operation.is_evm) {
-                let providerUrl = evmProviders[operation.chain][operation.subchain] // REVIEW Error handling
-                let evmInstance = multichain.EVM.createInstance(chainID, providerUrl) // REVIEW We should be connected
+                let providerUrl =
+                    evmProviders[operation.chain][operation.subchain] // REVIEW Error handling
+                let evmInstance = multichain.EVM.createInstance(
+                    chainID,
+                    providerUrl,
+                ) // REVIEW We should be connected
                 let params = JSON.parse(operation.task.params) // REVIEW Error handling
                 if (!params.address) {
                     return {

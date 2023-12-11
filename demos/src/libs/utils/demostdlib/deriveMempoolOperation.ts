@@ -7,12 +7,11 @@ import sharedState from "src/utilities/sharedState"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 
-interface DerivableNative {
-    address: string,
-    type: "web2" | "xm" | "native",
+export interface DerivableNative {
+    address: string
+    type: "web2" | "xm" | "native"
     data: any | string
 }
-
 
 // REVIEW See if is fixed (should return something)
 // INFO Deriving a mempool operation from a given data by deriving a tx and the corresponding mempool operation
@@ -51,7 +50,6 @@ export async function deriveMempoolOperation(
     return derivedOperation
 }
 
-
 /* TODO Plan for the future
  * We receive some form of data that can be:
  * 1. A web2 request
@@ -59,15 +57,15 @@ export async function deriveMempoolOperation(
  * 3. A native transaction
  * We have to parse the data and create a transaction with the appropriate type and data
  * Then we have to derive the operation(s) from that transaction
- * 
+ *
  * Pseudocode:
- * 
+ *
  * createTransaction(data: any): Promise<Transaction> -> a tx with type and data
  * createOperation(transaction: Transaction): Promise<Operation[]> -> the various operations derived from the tx
- * 
+ *
  * TODO: Standardize the three types responses (we should just need the hashes after all as we are assigning for xm and web2)
- * 
-*/
+ *
+ */
 
 export async function deriveTransaction(data: any): Promise<Transaction> {
     // TODO Need to pass the data for registering the tx in the mempool (type, address...)
@@ -80,7 +78,9 @@ export async function deriveTransaction(data: any): Promise<Transaction> {
     }
 }
 
-export async function deriveOperations(transaction: Transaction): Promise<Operation[]> {
+export async function deriveOperations(
+    transaction: Transaction,
+): Promise<Operation[]> {
     let operations = []
     // Analyzing the transaction type
     switch (transaction.content.type) {
@@ -159,12 +159,13 @@ export async function createTransaction(data: any): Promise<Transaction> {
         status: null,
     }
     // Setting us as the sender
-    transaction.content.from = sharedState.getInstance().identity.ed25519.publicKey
+    transaction.content.from =
+        sharedState.getInstance().identity.ed25519.publicKey
     transaction.content.to = "blockchain"
     transaction.content.amount = 0
     transaction.content.nonce = 0
     // TODO Fees
-    // Adding data  
+    // Adding data
     transaction.content.data = data
     transaction.content.timestamp = Date.now()
     // Hashing the content and signing the transaction
@@ -173,7 +174,7 @@ export async function createTransaction(data: any): Promise<Transaction> {
         transaction.hash,
         sharedState.getInstance().identity.ed25519.privateKey,
     )
-    transaction.signature = signature // REVIEW Should be correct but it was transaction.signature = signature before
+    transaction.signature = signature as any // REVIEW Should be correct but it was transaction.signature = signature before
     // TODO See how to be general purpose but specific (a shared format?)
     return transaction
 }

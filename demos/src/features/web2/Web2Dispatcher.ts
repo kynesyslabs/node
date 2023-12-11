@@ -106,7 +106,7 @@ async function toMempool(instanceName: string, insert: boolean = true) {
     // NOTE If all the attestations are valid we can create the transaction, insert it and give back the result
     // Deriving an operation and a tx from the web2 request
     derivedOperation = await deriveMempoolOperation(
-        Web2API(instanceName).request,
+        Web2API(instanceName).request as any,
         insert,
     )
     return derivedOperation
