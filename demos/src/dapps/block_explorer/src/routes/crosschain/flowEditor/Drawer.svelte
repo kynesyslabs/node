@@ -17,11 +17,10 @@
 </aside>
 
 <style>
-
 	.drawer {
 		max-width: 429px;
-		height: 100dvh;
-		position: fixed;
+		height: 100%;
+		position: absolute;
 		left: 0;
 		top: 0;
 		padding: 24px;
@@ -33,6 +32,7 @@
 		border-right: 1px solid var(--background3);
 		background-color: var(--background);
 		transform: translate(100%, 0);
+		overflow: auto;
 	}
 	.open {
 		transform: translate(0, 0);

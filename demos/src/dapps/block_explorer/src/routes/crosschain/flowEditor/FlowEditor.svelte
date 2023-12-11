@@ -145,7 +145,7 @@
 	};
 </script>
 
-<main>
+<main style="position: relative;">
 	<SvelteFlow
 		{nodeTypes}
 		{nodes}

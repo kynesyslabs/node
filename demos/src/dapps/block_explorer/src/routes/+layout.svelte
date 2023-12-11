@@ -5,7 +5,7 @@
     import '$lib/styles/buttons.css';
     import '$lib/styles/surfaces.css';
     import demos from "$lib/demos.js"
-    import {updateWallet, updateRpcAddress, updateTheme} from "$lib/env.js";
+    import {updateWallet, updateRpcAddress, updateTheme, updateSelectedEditor} from "$lib/env.js";
 
     let logcheck = false;
     
@@ -43,6 +43,15 @@
         if(savedtheme)
         {
             updateTheme(savedtheme);
+        }
+        else
+        {
+            updateTheme("dark");
+        }
+        let savededitor = localStorage.getItem("selectedEditor");
+        if(savededitor)
+        {
+            updateSelectedEditor(savededitor);
         }
     })
 

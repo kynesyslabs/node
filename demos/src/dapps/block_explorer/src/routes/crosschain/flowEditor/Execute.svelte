@@ -5,7 +5,7 @@
     import XMTransactions from "$lib/demos_libs/XMTransactions.js";
 	import { useStore } from "@xyflow/svelte";
     import cloneDeep from 'lodash/cloneDeep';
-	import XMWalletConnectionCard from "../../lib/components/xM_WalletConnectionCard.svelte";
+	import XMWalletConnectionCard from "../xM_WalletConnectionCard.svelte";
 
     const {nodes, edges} = useStore();
 

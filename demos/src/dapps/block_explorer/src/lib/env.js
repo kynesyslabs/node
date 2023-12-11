@@ -3,17 +3,31 @@ import demos from "$lib/demos.js";
 import TimeAgo from 'javascript-time-ago';
 import en from 'javascript-time-ago/locale/en'
 
+
+//these global variables stored in local storage are loaded in the main layout.svelte! (can't use localStorage in server side code)
+
 //connection
-export const rpcaddress = writable("https://rpc.demoscan.live");
+export const rpcaddress = writable("https://node2.demoscan.live");
 export const updateRpcAddress = (address) => {
     rpcaddress.set(address);
 }
 
 //theme
 export const theme = writable("dark");
+/** @param {"auto" | "light" | "dark"} th*/
 export const updateTheme = (th) => {
     theme.set(th);
     localStorage.setItem("theme", th);
+    window.dispatchEvent(new Event("storage"));
+}
+
+
+//selected xM editor
+export const selectedEditor = writable("auto")
+/** @param {"auto" | "block" | "flow"} editor*/
+export const updateSelectedEditor = (editor) => {
+    selectedEditor.set(editor);
+    localStorage.setItem("selectedEditor", editor);
     window.dispatchEvent(new Event("storage"));
 }
 

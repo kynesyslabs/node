@@ -1,5 +1,5 @@
 <script>
-    import { theme, updateTheme} from "$lib/env.js";
+    import { theme, updateTheme, selectedEditor, updateSelectedEditor} from "$lib/env.js";
 	import RPCselection from "./RPCselection.svelte";
     import PageTitle from "$lib/components/PageTitle.svelte";
 </script>
@@ -7,7 +7,7 @@
 <PageTitle>Settings</PageTitle>
 <div class="card">
     <RPCselection/>
-    <hr style="margin-bottom: 16px;">
+    <hr style="margin: 32px 0;">
     <!--theme selection-->
     <div>
         <h4>Theme</h4>
@@ -21,6 +21,22 @@
             </button>
             <button on:click={()=>{updateTheme("dark")}} class={`tab ${$theme=="dark"?"selected":""}`}>
                 Dark
+            </button>
+        </div>
+    </div>
+    <hr style="margin: 32px 0;">
+    <div style="margin-bottom: 16px;">
+        <h4>xM Editor</h4>
+        <!--tab buttons-->
+        <div class="tab-container">
+            <button on:click={()=>{updateSelectedEditor("auto")}} class={`tab ${$selectedEditor=="auto"?"selected":""}`}>
+                Auto
+            </button>
+            <button on:click={()=>{updateSelectedEditor("block")}} class={`tab ${$selectedEditor=="block"?"selected":""}`}>
+                Block Editor
+            </button>
+            <button on:click={()=>{updateSelectedEditor("flow")}} class={`tab ${$selectedEditor=="flow"?"selected":""}`}>
+                Flow Editor BETA
             </button>
         </div>
     </div>
