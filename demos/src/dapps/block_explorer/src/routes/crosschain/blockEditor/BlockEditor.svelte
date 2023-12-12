@@ -294,9 +294,8 @@
     <OperationEditor onSave={(data)=>{onUpdate(edit, data); edit = null; editparent=null;}} operation={edit} onClose={()=>{edit = null; editparent = null;}} onDelete={()=>{deleteOperation(editparent, edit); edit=null; editparent=null;}}/>
 {/if}
 <div>
-    <PageTitle>xM</PageTitle>
+    <PageTitle subtitle="Build a Cross-Chain Transaction">xM</PageTitle>
     <div style="display: flex; align-items:center">
-        <h4 class="subtitle">Build a Cross-Chain Transaction</h4>
         {#if root.items.length > 0}
         <button on:click={()=>{root.items=[]}} class="futuristic intestazione">[clear]</button>
         {/if}
