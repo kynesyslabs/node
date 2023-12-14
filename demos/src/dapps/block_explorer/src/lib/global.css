@@ -153,6 +153,7 @@ button{
 .label, label{
     margin: 8px 0;
     opacity: .75;
+    display: block;
 }
 
 .card-header{

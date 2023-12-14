@@ -266,7 +266,7 @@
             headers = [
                 ["", ""]
             ]
-        }}>New request</button>
+        }}>New Request</button>
     {/if}
 </div>
 

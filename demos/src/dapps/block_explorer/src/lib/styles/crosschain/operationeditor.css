@@ -34,17 +34,11 @@
     max-width: calc(100% - 32px);
     max-height: calc(100dvh - 48px);
     z-index: 1000;
-    padding: 64px;
+    padding: 32px;
     overflow: auto;
     transform: translate(-50%, -50%) scale(1);
     border: 1px solid var(--background3);
     box-shadow: 2px 2px 0 0 var(--background3);
-}
-
-@media (max-width: 768px){
-    .modal-txblock{
-        padding: 32px;
-    }
 }
 
 .modal-background{

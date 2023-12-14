@@ -1,8 +1,10 @@
 <script>
+    export let id="";
+    /** @type {import("$lib/types").ComboboxOption[]}*/
     export let options;
     export let value;
     export let onChange;
-    export let style;
+    export let style="";
 	import { faCheck, faChevronDown } from "@fortawesome/free-solid-svg-icons";
     import Fa from "svelte-fa";
     import { cubicInOut } from 'svelte/easing';
@@ -84,7 +86,7 @@
     }
 </style>
 
-<div style="position: relative; max-width:100%">
+<div id={id} style="position: relative; max-width:100%">
     <div use:clickOutside role={`Select element`} on:click={()=>{if(!disabled)open=!open}} on:click_outside={()=>{open=false}} style={style} class={`combobox smallcombobox`}>
         {#if options.length == 1}
             <div>

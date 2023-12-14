@@ -125,6 +125,7 @@ const tasks = [
         label:"Read Contract",
         constraints:["evm"],
         icon:"/task-icons/contract.svg",
+        inputType:"contract",
         params:[
             {
                 id:"address",

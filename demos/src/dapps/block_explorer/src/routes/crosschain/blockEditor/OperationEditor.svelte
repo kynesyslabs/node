@@ -6,6 +6,7 @@
     import cloneDeep from 'lodash/cloneDeep';
     import {Operation} from '$lib/chainscript.js';
     import "$lib/styles/crosschain/operationeditor.css"
+	import ContractInput from '../ContractInput.svelte';
 
 
     export let onClose;
@@ -24,15 +25,18 @@
     let editorchains = txblock.chain=="crosschain"?txblock.subchain:[txblock.chain, null];
     //mutlichain bool
     let multichain = txblock.chain=="crosschain";
-    //params values
+
+    /** @type {Object.<string, any>} params values */
     let params = txblock.task.params;
+
     //txblock clone for editing
     let txblockClone = cloneDeep(txblock);
 
     //error variable for display
     let errorDisplay = null;
 
-    //current params for selected task
+    /** @typedef {{id:string, label:string, type:string, required:boolean}} TaskParam*/
+    /** @type {TaskParam[]} current params for selected task*/
     let currentParams = tasks.find(t=>t.id === txblock.task.type).params;
 
     //utils per mostrare graficamente le informazioni
@@ -145,9 +149,16 @@
                 </div>
                 {#if chainflag}
                     <div class="opeditor-params">
+                        {#if taskinfo.inputType !== "contract"}
                         {#each currentParams as param}
                             <TaskParam required={param.required} label={param.label} value={params[param.id]} onChange={(newValue)=>{params[param.id]=newValue;}} type={param.type}></TaskParam>
                         {/each}
+                        {:else}
+                            <ContractInput params={params} onChange={(newValue)=>{
+                                params = newValue
+                                console.log("changed params", params);
+                            }}/>
+                        {/if}
                     </div>
                 {/if}
                 {#if errorDisplay}
