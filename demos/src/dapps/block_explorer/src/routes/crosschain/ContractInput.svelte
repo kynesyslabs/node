@@ -13,16 +13,16 @@
 
     //initial values
     const addressParam = params["address"];
-    //let abiParam = params["abi"];
     const methodParam = params["method"];
-    const paramsParam = params["params"];
+    const paramsParam = params["params"]?JSON.parse(params["params"]):{};
+
 
     //current values
     let currentaddress = addressParam;
     let currentmethod = methodParam;
     let currentmethodparams = paramsParam?paramsParam:{};
     /** @type {Object[]}*/
-    let abi = [];
+    let abi = params["abi"]?JSON.parse(params["abi"]):[];
     let currentParams;
     $: currentParams = {address: currentaddress, method: currentmethod, params: JSON.stringify(currentmethodparams), abi: JSON.stringify(abi)}
 
@@ -33,6 +33,7 @@
 
     function ChangeCurrentParams(paramid, value)
     {
+        console.log("change", paramid, value);
         currentmethodparams[paramid] = value;
     }
 
@@ -49,11 +50,11 @@
     */
 
     /** @type {evmFunction[]}*/ 
-    let functionList = [];
+    let functionList = abi?abi.filter(item => item.type === "function"):[];
     /** @type {import("$lib/types").ComboboxOption[]}*/
     let options = [];
     /**@type {evmFunction}*/  
-    let selectedFunction = null;
+    let selectedFunction = functionList.length>0&&currentmethod?functionList.find(fun=>fun.name==currentmethod):null;
     /** @type {evmFunctionInput} THIS ARE THE PARAMETERS FOR THE CONTRACT METHOD, NOT THE TASK*/
     let methodparams = [];
 
@@ -109,7 +110,7 @@
             {#each methodparams as param}
                 <div>
                     <label for={param.name}>{param.name}</label>
-                    <input on:input={(ev)=>{ChangeCurrentParams(param.name, ev.target.value)}} class="smallinput" id={param.name}/>
+                    <input value={currentmethodparams[param.name]?currentmethodparams[param.name]:""} on:input={(ev)=>{ChangeCurrentParams(param.name, ev.target.value)}} class="smallinput" id={param.name}/>
                 </div>
             {/each}
             </div>

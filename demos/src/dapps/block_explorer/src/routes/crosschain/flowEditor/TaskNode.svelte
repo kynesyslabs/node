@@ -7,6 +7,7 @@
     import {get} from 'svelte/store';
     import CodeEditor from "$lib/components/CodeEditor.svelte";
 	import OnePathHandle from './OnePathHandle.svelte';
+    import ContractInput from '../ContractInput.svelte';
     
     export let data;
 
@@ -49,16 +50,26 @@
                 <label>Chain</label>
                 <ChainSelection value={operation.chain} onChange={(ch)=>{updateChain(ch)}}></ChainSelection>
             </div>
-            {#each task.params as param}
-                <div class="input-box">
-                    <label>{param.label}</label>
-                    {#if param.type!=="json"}
-                    <input type="text" value={operation.task.params[param.id]} on:change={(e)=>{updateParam(param.id, e.target.value)}}/>
-                    {:else}
-                    <CodeEditor id={id+param.label} text={operation.task.params[param.id]} onChange={(newValue)=>{updateParam(param.id, newValue)}}/>
-                    {/if}
-                </div>
-            {/each}
+            {#if task.inputType !== "contract"}
+                {#each task.params as param}
+                    <div class="input-box">
+                        <label>{param.label}</label>
+                        {#if param.type!=="json"}
+                        <input type="text" value={operation.task.params[param.id]} on:change={(e)=>{updateParam(param.id, e.target.value)}}/>
+                        {:else}
+                        <CodeEditor id={id+param.label} text={operation.task.params[param.id]} onChange={(newValue)=>{updateParam(param.id, newValue)}}/>
+                        {/if}
+                    </div>
+                {/each}
+            {:else}
+                <ContractInput params={get(nodes).find(n=>n.id==id).data.operation.task.params} onChange={(newValue)=>{
+                    console.log("contract input changed", newValue);
+                    let newNodes = cloneDeep(get(nodes));
+                    const node = newNodes.find(n=>n.id==id);
+                    node.data.operation.task.params = newValue;
+                    nodes.set(newNodes);
+                }}/>
+            {/if}
             <slot/>
         {/if}
 	<OnePathHandle id="output" nodeId={id} type="source" position={Position.Right} />
