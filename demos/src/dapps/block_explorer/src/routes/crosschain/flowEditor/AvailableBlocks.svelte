@@ -1,6 +1,9 @@
 <script lang="ts">
     import { blockIcons } from '$lib/chainscript.js';
+    export let closeDrawer;
 	const onDragStart = (event: DragEvent, nodeType: string) => {
+        closeDrawer();
+
 		if (!event.dataTransfer) {
 			return null;
 		}
