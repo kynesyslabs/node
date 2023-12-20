@@ -8,6 +8,7 @@
 	import { flip } from "svelte/animate";
     import Combobox from '$lib/components/inputs/Combobox.svelte';
     import {Operation} from '$lib/chainscript.js';
+	import CardMenu from '$lib/components/CardMenu.svelte';
 
     export let operation;
     export let duplicateOperation;
@@ -83,6 +84,100 @@
         return str.substr(0, 10) + '...' + str.substr(str.length-4, str.length);
     }
 </script>
+
+{#if operation.type == "root"}
+    <div class="root dnd" use:dndzone={{items:operation.items, morphDisabled:true, flipDurationMs:250, centreDraggedOnCursor:true}} on:consider={(e)=>{consider(e, "items")}} on:finalize={(e)=>{finalize(e, "items")}}>
+        {#each operation.items as op, i (op.id)}
+            <!--ALWAYS WRAP CUSTOM COMPONENT IN HTML WHEN USING DNDZONE-->
+            <div animate:flip={{duration: 250}}>
+                <svelte:self triggerUpdate={triggerUpdate} createTask={createTask} onEdit={onEdit} operation={op} parent={operation.items} deleteOperation={deleteOperation} duplicateOperation={duplicateOperation} />
+            </div>
+        {/each}
+    </div>
+{:else if operation.type != "conditional"}
+    <div class="card operation">
+        {#if chaininfo && taskinfo}
+            <img style="opacity: .3;" alt="task icon" class="taskicon" src={taskinfo.icon}/>
+            <div>
+                <p class="operationcard-label">{taskinfo.label} on {chaininfo.label}</p>
+                <div class="params-preview">
+                    {#each taskinfo.params as param}
+                        {#if operation.data.task.params[param.id]&&param.type!=="json"}
+                        <p class="ellipsis">{param.label}: <span style="font-weight: normal;">{param.type=="address"?trim_address(operation.data.task.params[param.id]):operation.data.task.params[param.id]}</span></p>
+                        {/if}
+                    {/each}
+                </div>
+            </div>
+            {#if chaininfo.icon}
+                <img width=24px alt="blockchain icon" style="margin-left: auto;" src={chaininfo.icon}/>
+            {/if}
+        {:else if taskinfo}
+            <img style="opacity: .3;" alt="task icon" class="taskicon" src={taskinfo.icon}/>
+            <div>
+                <p class="operationcard-label">{taskinfo.label}</p>
+            </div>
+        {/if}
+        <div style={`position: relative; margin-left:${!chaininfo?.icon?"auto":"0"};`}>
+            <CardMenu menuItems={[
+                {label:"Edit", callback:()=>{onEdit(operation, parent)}, icon:`<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><g id="pencil--change-edit-modify-pencil-write-writing"><path id="Subtract" fill="currentColor" fill-rule="evenodd" d="M8.31 22.75H1.25l0-7.06L11.94 5 19 12.06 8.31 22.75ZM20.06 11l3-3L16 .94l-3 3L20.06 11Z" clip-rule="evenodd"></path></g></svg>`}, //add pencil icon 
+                {label:"Duplicate", callback:()=>{duplicateOperation(parent, operation)}, icon:`<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><g id="copy-document"><path id="Union" fill="currentColor" fill-rule="evenodd" d="M3 1H2v19h2V3h11V1H3Zm12.25 9.5V4.75h-9.5v18h16v-11.5h-6.5v-.75Zm1.5-.75v-5h.06l4.94 4.94v.06h-5Z" clip-rule="evenodd"></path></g></svg>`}, //add copy icon
+                {label:"Delete", callback:()=>{deleteOperation(parent, operation)}, icon:`<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><g id="recycle-bin-2--remove-delete-empty-bin-trash-garbage"><path id="Subtract" fill="currentColor" fill-rule="evenodd" d="M9.17 5a3.001 3.001 0 0 1 5.66 0H9.17ZM7.1 5a5.002 5.002 0 0 1 9.8 0H23v2h-2v16H3V7H1V5h6.1Zm.4 13.5v-8h2v8h-2Zm7-8v8h2v-8h-2Z" clip-rule="evenodd"></path></g></svg>`} //add trash icon
+            ]}></CardMenu>
+        </div>
+    </div>
+{:else if operation.type == "conditional"}
+    <div class="card">
+        <div class="conditional">
+            <img style="opacity: .3;" alt="conditional operation icon" src="/task-icons/curly-brackets.svg"/>
+            <p>if</p>
+            <div use:dndzone={{items:operation.condition, dropFromOthersDisabled:operation.condition.length>0||operation.id=="id:dnd-shadow-placeholder-0000"?true:false, morphDisabled:true}} on:consider={(e)=>{consider(e, "condition")}} on:finalize={(e)=>{finalize(e, "condition")}} class="conditionaldnd">
+                {#each operation.condition as condition(condition.id)}
+                    <div animate:flip={{duration: 250}}>
+                        <svelte:self triggerUpdate={triggerUpdate} createTask={createTask} operation={condition} onEdit={onEdit} parent={operation.condition} duplicateOperation={null}  deleteOperation={deleteOperation}></svelte:self>
+                    </div>
+                {/each}
+            </div>
+            <Combobox value={operation.symbol} options={conditionOptions} onChange={(newValue)=>{operation.symbol = newValue}} style="width:150px; background-color:var(--background2)"></Combobox>
+            <input placeholder="Input condition here" value={operation.input} on:change={(e)=>{operation.input = e.target.value}} style="background-color:var(--background2); font-size:1rem; height:52px;"/>
+            <div style="position: relative;margin-left:auto">
+                <button on:click={()=>{menuopen = true;}} class="shallow color-transition"><Fa icon={faEllipsisV}></Fa></button>
+                {#if menuopen}
+                    <div use:clickOutside on:click_outside={()=>{menuopen = false}} transition:toprightbudino={{duration:200}} class="dialog">
+                        <button on:click={()=>{duplicateOperation(parent, operation); menuopen=false;}} class="dialog-option color-transition">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="copy-document"><path id="Union" fill="var(--color)" fill-rule="evenodd" d="M3 1H2v19h2V3h11V1H3Zm12.25 9.5V4.75h-9.5v18h16v-11.5h-6.5v-0.75Zm1.5 -0.75v-5h0.06l4.94 4.94v0.06h-5Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
+                            Duplicate
+                        </button>
+                        <button on:click={()=>{deleteOperation(parent, operation)}} class="dialog-option color-transition">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="recycle-bin-2--remove-delete-empty-bin-trash-garbage"><path class="color-transition" id="Subtract" fill="var(--color)" fill-rule="evenodd" d="M9.17 5a3.001 3.001 0 0 1 5.66 0H9.17ZM7.1 5a5.002 5.002 0 0 1 9.8 0H23v2h-2v16H3V7H1V5h6.1Zm0.4 13.5v-8h2v8h-2Zm7 -8v8h2v-8h-2Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
+                            Delete
+                        </button>
+                    </div>
+                {/if}
+            </div>
+        </div>
+        <div class="conditional">
+            <p>then</p>
+            <div use:dndzone={{items:operation.then, dropFromOthersDisabled:operation.id=="id:dnd-shadow-placeholder-0000"?true:false, morphDisabled:true}} on:consider={(e)=>{consider(e, "then")}} on:finalize={(e)=>{finalize(e, "then")}} class="conditionaldnd">
+                {#each operation.then as instruction(instruction.id)}
+                    <div animate:flip={{duration: 250}}>
+                        <svelte:self triggerUpdate={triggerUpdate} createTask={createTask} operation={instruction} onEdit={onEdit} parent={operation.then} duplicateOperation={duplicateOperation}  deleteOperation={deleteOperation}></svelte:self>
+                    </div>
+                {/each}
+            </div>
+        </div>
+        <div class="conditional">
+            <p>else</p>
+            <div use:dndzone={{items:operation.else, dropFromOthersDisabled:operation.id=="id:dnd-shadow-placeholder-0000"?true:false, morphDisabled:true}} on:consider={(e)=>{consider(e, "else")}} on:finalize={(e)=>{finalize(e, "else")}} class="conditionaldnd">
+                {#each operation.else as instruction(instruction.id)}
+                    <div animate:flip={{duration: 250}}>
+                        <svelte:self triggerUpdate={triggerUpdate} createTask={createTask} operation={instruction} onEdit={onEdit} parent={operation.else} duplicateOperation={duplicateOperation} deleteOperation={deleteOperation}></svelte:self>
+                    </div>
+                {/each}
+            </div>
+        </div>
+    </div>
+{/if}
+
 <style>
     .operationcard-label{
         margin: 0;
@@ -172,110 +267,3 @@
         gap: 16px;
     }
 </style>
-
-{#if operation.type == "root"}
-    <div class="root dnd" use:dndzone={{items:operation.items, morphDisabled:true, flipDurationMs:250, centreDraggedOnCursor:true}} on:consider={(e)=>{consider(e, "items")}} on:finalize={(e)=>{finalize(e, "items")}}>
-        {#each operation.items as op, i (op.id)}
-            <!--ALWAYS WRAP CUSTOM COMPONENT IN HTML WHEN USING DNDZONE-->
-            <div animate:flip={{duration: 250}}>
-                <svelte:self triggerUpdate={triggerUpdate} createTask={createTask} onEdit={onEdit} operation={op} parent={operation.items} deleteOperation={deleteOperation} duplicateOperation={duplicateOperation} />
-            </div>
-        {/each}
-    </div>
-{:else if operation.type != "conditional"}
-    <div class="card operation">
-        {#if chaininfo && taskinfo}
-            <img style="opacity: .3;" alt="task icon" class="taskicon" src={taskinfo.icon}/>
-            <div>
-                <p class="operationcard-label">{taskinfo.label} on {chaininfo.label}</p>
-                <div class="params-preview">
-                    {#each taskinfo.params as param}
-                        {#if operation.data.task.params[param.id]&&param.type!=="json"}
-                        <p class="ellipsis">{param.label}: <span style="font-weight: normal;">{param.type=="address"?trim_address(operation.data.task.params[param.id]):operation.data.task.params[param.id]}</span></p>
-                        {/if}
-                    {/each}
-                </div>
-            </div>
-            {#if chaininfo.icon}
-                <img width=24px alt="blockchain icon" style="margin-left: auto;" src={chaininfo.icon}/>
-            {/if}
-        {:else if taskinfo}
-            <img style="opacity: .3;" alt="task icon" class="taskicon" src={taskinfo.icon}/>
-            <div>
-                <p class="operationcard-label">{taskinfo.label}</p>
-            </div>
-        {/if}
-        <div style={`position: relative; margin-left:${!chaininfo?.icon?"auto":"0"};`}>
-            <button on:click={()=>{menuopen = true;}} class="shallow color-transition"><Fa icon={faEllipsisV}></Fa></button>
-            {#if menuopen}
-                <div use:clickOutside on:click_outside={()=>{menuopen = false}} transition:toprightbudino={{duration:200}} class="dialog">
-                    <button on:click={()=>{onEdit(operation, parent)}} class="dialog-option color-transition">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="pen-1--content-creation-edit-pen-write"><path id="Union" fill="var(--color)" fill-rule="evenodd" d="M20.5 9 15 3.5 17.5 1 23 6.5 20.5 9ZM11 1.586l0.707 0.707 2.25 2.25L14 4.5l5.5 5.5 -9.5 9.5L4.5 14l8.043 -8.043L11 4.414 5.707 9.707 4.293 8.293l6 -6L11 1.586Zm-8 18V15.5l0.5 -0.5L9 20.5l-0.5 0.5H4.414l-1.707 1.707 -1.414 -1.414L3 19.586Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
-                        Edit
-                    </button>
-                    {#if duplicateOperation}
-                    <button on:click={()=>{duplicateOperation(parent, operation); menuopen=false}} class="dialog-option color-transition">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="copy-document"><path id="Union" fill="var(--color)" fill-rule="evenodd" d="M3 1H2v19h2V3h11V1H3Zm12.25 9.5V4.75h-9.5v18h16v-11.5h-6.5v-0.75Zm1.5 -0.75v-5h0.06l4.94 4.94v0.06h-5Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
-                        Duplicate
-                    </button>
-                    {/if}
-                    <button on:click={()=>{deleteOperation(parent, operation)}} class="dialog-option color-transition">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="recycle-bin-2--remove-delete-empty-bin-trash-garbage"><path class="color-transition" id="Subtract" fill="var(--color)" fill-rule="evenodd" d="M9.17 5a3.001 3.001 0 0 1 5.66 0H9.17ZM7.1 5a5.002 5.002 0 0 1 9.8 0H23v2h-2v16H3V7H1V5h6.1Zm0.4 13.5v-8h2v8h-2Zm7 -8v8h2v-8h-2Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
-                        Delete
-                    </button>
-                </div>
-            {/if}
-        </div>
-    </div>
-{:else if operation.type == "conditional"}
-    <div class="card">
-        <div class="conditional">
-            <img style="opacity: .3;" alt="conditional operation icon" src="/task-icons/curly-brackets.svg"/>
-            <p>if</p>
-            <div use:dndzone={{items:operation.condition, dropFromOthersDisabled:operation.condition.length>0||operation.id=="id:dnd-shadow-placeholder-0000"?true:false, morphDisabled:true}} on:consider={(e)=>{consider(e, "condition")}} on:finalize={(e)=>{finalize(e, "condition")}} class="conditionaldnd">
-                {#each operation.condition as condition(condition.id)}
-                    <div animate:flip={{duration: 250}}>
-                        <svelte:self triggerUpdate={triggerUpdate} createTask={createTask} operation={condition} onEdit={onEdit} parent={operation.condition} duplicateOperation={null}  deleteOperation={deleteOperation}></svelte:self>
-                    </div>
-                {/each}
-            </div>
-            <Combobox value={operation.symbol} options={conditionOptions} onChange={(newValue)=>{operation.symbol = newValue}} style="width:150px; background-color:var(--background2)"></Combobox>
-            <input placeholder="Input condition here" value={operation.input} on:change={(e)=>{operation.input = e.target.value}} style="background-color:var(--background2); font-size:1rem; height:52px;"/>
-            <div style="position: relative;margin-left:auto">
-                <button on:click={()=>{menuopen = true;}} class="shallow color-transition"><Fa icon={faEllipsisV}></Fa></button>
-                {#if menuopen}
-                    <div use:clickOutside on:click_outside={()=>{menuopen = false}} transition:toprightbudino={{duration:200}} class="dialog">
-                        <button on:click={()=>{duplicateOperation(parent, operation); menuopen=false;}} class="dialog-option color-transition">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="copy-document"><path id="Union" fill="var(--color)" fill-rule="evenodd" d="M3 1H2v19h2V3h11V1H3Zm12.25 9.5V4.75h-9.5v18h16v-11.5h-6.5v-0.75Zm1.5 -0.75v-5h0.06l4.94 4.94v0.06h-5Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
-                            Duplicate
-                        </button>
-                        <button on:click={()=>{deleteOperation(parent, operation)}} class="dialog-option color-transition">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" height="16" width="16"><g id="recycle-bin-2--remove-delete-empty-bin-trash-garbage"><path class="color-transition" id="Subtract" fill="var(--color)" fill-rule="evenodd" d="M9.17 5a3.001 3.001 0 0 1 5.66 0H9.17ZM7.1 5a5.002 5.002 0 0 1 9.8 0H23v2h-2v16H3V7H1V5h6.1Zm0.4 13.5v-8h2v8h-2Zm7 -8v8h2v-8h-2Z" clip-rule="evenodd" stroke-width="1"></path></g></svg>
-                            Delete
-                        </button>
-                    </div>
-                {/if}
-            </div>
-        </div>
-        <div class="conditional">
-            <p>then</p>
-            <div use:dndzone={{items:operation.then, dropFromOthersDisabled:operation.id=="id:dnd-shadow-placeholder-0000"?true:false, morphDisabled:true}} on:consider={(e)=>{consider(e, "then")}} on:finalize={(e)=>{finalize(e, "then")}} class="conditionaldnd">
-                {#each operation.then as instruction(instruction.id)}
-                    <div animate:flip={{duration: 250}}>
-                        <svelte:self triggerUpdate={triggerUpdate} createTask={createTask} operation={instruction} onEdit={onEdit} parent={operation.then} duplicateOperation={duplicateOperation}  deleteOperation={deleteOperation}></svelte:self>
-                    </div>
-                {/each}
-            </div>
-        </div>
-        <div class="conditional">
-            <p>else</p>
-            <div use:dndzone={{items:operation.else, dropFromOthersDisabled:operation.id=="id:dnd-shadow-placeholder-0000"?true:false, morphDisabled:true}} on:consider={(e)=>{consider(e, "else")}} on:finalize={(e)=>{finalize(e, "else")}} class="conditionaldnd">
-                {#each operation.else as instruction(instruction.id)}
-                    <div animate:flip={{duration: 250}}>
-                        <svelte:self triggerUpdate={triggerUpdate} createTask={createTask} operation={instruction} onEdit={onEdit} parent={operation.else} duplicateOperation={duplicateOperation} deleteOperation={deleteOperation}></svelte:self>
-                    </div>
-                {/each}
-            </div>
-        </div>
-    </div>
-{/if}
