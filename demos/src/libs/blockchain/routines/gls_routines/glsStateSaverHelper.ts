@@ -18,8 +18,8 @@ export default class glsStateSave {
         let hashed_ops = Hashing.sha256(JSON.stringify(ops)) // REVIEW Stringify?
         const db = await Datasource.getInstance()
         const StatusHashesRepository = db
-                .getDataSource()
-                .getRepository(StatusHashes)
+            .getDataSource()
+            .getRepository(StatusHashes)
         // Adding the hash to the database
         await StatusHashesRepository.insert(
             StatusHashesRepository.create({
