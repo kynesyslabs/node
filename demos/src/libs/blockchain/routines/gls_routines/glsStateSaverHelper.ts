@@ -4,15 +4,28 @@ import Chain from "../../chain"
 import { StatusHashes } from "src/model/entities/StatusHashes"
 import Datasource from "src/model/datasource"
 import Hashing from "src/libs/crypto/hashing"
+import { Operation } from "../executeOperations"
+import { Hash } from "crypto"
 
 // REVIEW This could be avoided probably, by using inline hashes instead of hashing the whole table
 // TODO Expand the operation registry (if any) to support inlining of hashes into GLS states.
 
+// INFO Take the ordered list of operations from the consensus mechanism and hash it
 export default class glsStateSave {
     constructor() {}
 
-    static postConsensusEngraving() {
-        // TODO Take the ordered list of operations from the consensus mechanism and hash it
+    static async postConsensusEngraving(ops: Operation[]) {
+        let hashed_ops = Hashing.sha256(JSON.stringify(ops)) // REVIEW Stringify?
+        const db = await Datasource.getInstance()
+        const StatusHashesRepository = db
+                .getDataSource()
+                .getRepository(StatusHashes)
+        // Adding the hash to the database
+        await StatusHashesRepository.insert(
+            StatusHashesRepository.create({
+                hash: hashed_ops,
+            }),
+        ) // REVIEW Test it
     }
 
     static getLastConsenusStateHash() {
