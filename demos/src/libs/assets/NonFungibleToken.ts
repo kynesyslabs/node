@@ -15,7 +15,6 @@ interface tokenMetadataInterface {
 
 // A NFT contract like this implements the above interfaces
 export default class nonFungibleToken {
-
     public tokenType: string
     public tokenName: string
     public symbol: string
@@ -24,4 +23,3 @@ export default class nonFungibleToken {
 
     constructor() {}
 }
-
