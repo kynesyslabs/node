@@ -35,6 +35,19 @@
     let mobilesidebaropen = false;
 </script>
 
+<div class={`available-blocks ${mobilesidebaropen?"open":""}`}>
+    <h4 style="margin-bottom: 32px;">Available blocks</h4>
+    {#each availableBlocks as blocks}
+        <div class="category">
+            <h4 class="blocks-title">{blocks.label}</h4>
+            <DNDs closeBar={closeMe} blocks={blocks.blocks}/>
+        </div>
+    {/each}
+    <div class="minimizedsidebar">
+        <button on:click={()=>{mobilesidebaropen=!mobilesidebaropen}} class="open-button" style={mobilesidebaropen?"border-radius:50%;":""}><Fa style="width:32px;" icon={mobilesidebaropen?faChevronLeft:faChevronRight}></Fa></button>
+    </div>
+</div>
+
 <style>
     .available-blocks{
         max-width: 616px;
@@ -100,16 +113,3 @@
         }
     }
 </style>
-
-<div class={`available-blocks ${mobilesidebaropen?"open":""}`}>
-    <h4 style="margin-bottom: 32px;">Available blocks</h4>
-    {#each availableBlocks as blocks}
-        <div class="category">
-            <h4 class="blocks-title">{blocks.label}</h4>
-            <DNDs closeBar={closeMe} blocks={blocks.blocks}/>
-        </div>
-    {/each}
-    <div class="minimizedsidebar">
-        <button on:click={()=>{mobilesidebaropen=!mobilesidebaropen}} class="open-button" style={mobilesidebaropen?"border-radius:50%;":""}><Fa style="width:32px;" icon={mobilesidebaropen?faChevronLeft:faChevronRight}></Fa></button>
-    </div>
-</div>

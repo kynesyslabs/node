@@ -8,8 +8,16 @@
     import CodeEditor from "$lib/components/CodeEditor.svelte";
 	import OnePathHandle from './OnePathHandle.svelte';
     import ContractInput from '../ContractInput.svelte';
+	import CardMenu from '$lib/components/CardMenu.svelte';
     
     export let data;
+
+    const menuItems = [
+        {
+            label: "Delete",
+            callback: ()=>{console.log("delete")}
+        }
+    ];
 
     let {id, operation} = data;
     $: id = data.id;
@@ -44,6 +52,7 @@
                 <p class="operationcard-label">{task.label}</p>
             </div>
             <button class="futuristic" on:click={()=>{showoptions = !showoptions}}>{showoptions?"hide":"show"}</button>
+            <!---<CardMenu menuItems={menuItems}></CardMenu>-->
         </div>
         {#if showoptions}
             <div class="input-box">

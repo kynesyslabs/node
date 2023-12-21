@@ -9,8 +9,6 @@
             url:"https://twitter.com/KynesysLabs"
         }
     ]
-
-    import "$lib/assets/backgrounds/bubblesbg.jpeg";
 </script>
 <style>
     .footer{

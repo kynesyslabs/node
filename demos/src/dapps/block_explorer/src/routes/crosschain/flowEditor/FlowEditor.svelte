@@ -157,7 +157,9 @@
 	>
 		<Controls />
 		<Background variant={BackgroundVariant.Dots} bgColor={"var(--background)"} patternColor={"var(--background4)"} />
+		{#if window.innerWidth > 768}
 		<MiniMap />
+		{/if}
 	</SvelteFlow>
 	<Drawer required_connections={required_connections}/>
 </main>
@@ -166,6 +168,6 @@
 	main {
 		height: 100vh;
         display: flex;
-    flex-direction: column-reverse;
+    	flex-direction: column-reverse;
 	}
 </style>

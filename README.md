@@ -2,19 +2,13 @@
 
 ## By KyneSys Labs
 
+WIP - Things will break
+
 ### Run DEMOS
 
     cd demos
     yarn install
     yarn server
-
-or
-
-    cd demos
-    bun install
-    bun server
-
-NOTE: The bun implementation is still in progress and, at the moment, leverage just a few of bun capabilities. In the future, the bun implementation will be improved. Excluding performances, anyways, the two options are the very same.
 
 ### License
 

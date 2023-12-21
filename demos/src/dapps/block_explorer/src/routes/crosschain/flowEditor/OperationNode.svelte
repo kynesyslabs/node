@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { Handle, Position, type NodeProps } from '@xyflow/svelte';
-	import type { Writable } from 'svelte/store';
     import {chains, tasks} from '$lib/chainscript.js';
     import { v4 as uuidv4 } from 'uuid';
 
