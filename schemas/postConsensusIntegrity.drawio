@@ -1,0 +1,58 @@
+<mxfile host="Electron" modified="2023-12-21T12:21:00.430Z" agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/22.1.2 Chrome/114.0.5735.289 Electron/25.9.4 Safari/537.36" etag="RF0MheNHqrH6qvd7lIkg" version="22.1.2" type="device">
+  <diagram name="Pagina-1" id="_bIlElsCaqbqX0w7z6oh">
+    <mxGraphModel dx="1114" dy="836" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" background="#7D7D7D" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-1" value="Consensus Result" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;rounded=1;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="250" y="104" width="140" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-2" value="Forged block" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;rounded=1;shadow=1;" vertex="1" parent="kYlBuoQv7y_qrkEEZKRV-1">
+          <mxGeometry y="30" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-3" value="GLS Operations" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;rounded=1;shadow=1;" vertex="1" parent="kYlBuoQv7y_qrkEEZKRV-1">
+          <mxGeometry y="60" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-4" value="Validation Data" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;rounded=1;shadow=1;" vertex="1" parent="kYlBuoQv7y_qrkEEZKRV-1">
+          <mxGeometry y="90" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-5" value="GLS Native&lt;br&gt;GLS Properties" style="shape=card;whiteSpace=wrap;html=1;rounded=1;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="70" y="319" width="116" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-6" value="Executed by all the clients" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;shadow=1;" edge="1" parent="1" source="kYlBuoQv7y_qrkEEZKRV-3" target="kYlBuoQv7y_qrkEEZKRV-5">
+          <mxGeometry x="0.3929" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-8" value="Blockchain" style="shape=card;whiteSpace=wrap;html=1;rounded=1;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="470" y="319" width="210" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-9" value="Stored" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0;entryDx=55;entryDy=0;entryPerimeter=0;shadow=1;" edge="1" parent="1" source="kYlBuoQv7y_qrkEEZKRV-2" target="kYlBuoQv7y_qrkEEZKRV-8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-10" value="Stored" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;shadow=1;" edge="1" parent="1" source="kYlBuoQv7y_qrkEEZKRV-4" target="kYlBuoQv7y_qrkEEZKRV-8">
+          <mxGeometry x="-0.4783" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-12" value="GLS Hashes" style="shape=card;whiteSpace=wrap;html=1;rounded=1;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="207" y="319" width="116" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-14" value="Hashed and stored" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0;entryDx=15;entryDy=15;entryPerimeter=0;shadow=1;" edge="1" parent="1" source="kYlBuoQv7y_qrkEEZKRV-3" target="kYlBuoQv7y_qrkEEZKRV-12">
+          <mxGeometry x="0.3333" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-17" value="" style="strokeWidth=2;html=1;shape=mxgraph.flowchart.annotation_2;align=left;labelPosition=right;pointerEvents=1;rotation=-90;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="419.5" y="239.5" width="50" height="477" as="geometry" />
+        </mxCell>
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-18" value="&lt;h1&gt;Reliable, quick and redundant integrity&lt;/h1&gt;&lt;p&gt;In addition to storing blocks sequentially and to storing a quick-access global state, this mechanism enables much faster and easier operation verification and data&lt;br&gt;integrity attestation.&lt;/p&gt;" style="text;html=1;strokeColor=none;fillColor=none;spacing=5;spacingTop=-20;whiteSpace=wrap;overflow=hidden;rounded=0;shadow=1;glass=0;" vertex="1" parent="1">
+          <mxGeometry x="211.75" y="521" width="465.5" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-19" value="Post consensus data spreading and integrity attestation" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontSize=25;rotation=0;labelBorderColor=default;labelBackgroundColor=default;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="10" y="11" width="700" height="22" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

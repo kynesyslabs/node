@@ -16,6 +16,8 @@ KyneSys Labs: https://www.kynesys.xyz/
  * GLS property can and is traced back to the corresponding set of Operations.
  * From there, finding the corresponding Transaction for each Operation is trivial.
  * This ensures that even if it is a separate table, the GLS remains cryptographically secure.
+ * The specifications to achieve this grade of security requires nodes to store GLS
+ * data along with the corresponding on-chain data to be able to verify it at any time.
  *
  */
 
@@ -53,7 +55,6 @@ import { LessThanOrEqual } from "typeorm"
 import { StatusNative } from "src/model/entities/StatusNative"
 import { Validators } from "src/model/entities/Validators"
 import { StatusProperties } from "src/model/entities/StatusProperties"
-import { StatusHashes } from "src/model/entities/StatusHashes"
 
 export interface OperationResult {
     success: boolean
@@ -134,15 +135,6 @@ export default class GLS {
         return result
     }
 
-    // SECTION Getters
-    static async getGLSStatusHashTable() {
-        const db = await Datasource.getInstance()
-        const statusHashesRepository = db
-            .getDataSource()
-            .getRepository(StatusHashes)
-        return await statusHashesRepository.find()
-    }
-
     static async getGLSStatusNativeTable() {
         const db = await Datasource.getInstance()
         const statusNativeRepository = db
@@ -157,18 +149,6 @@ export default class GLS {
             .getDataSource()
             .getRepository(StatusProperties)
         return await statusPropertiesRepository.find()
-    }
-
-    static async getGLSLastHash() {
-        const db = await Datasource.getInstance()
-        const statusHashesRepository = db
-            .getDataSource()
-            .getRepository(StatusHashes)
-        const lastHashes = await statusHashesRepository.find({
-            order: { id: "DESC" },
-            take: 1,
-        })
-        return lastHashes.length > 0 ? lastHashes[0].hash : null
     }
 
     static async getGLSNativeFor(address: string) {
@@ -418,7 +398,10 @@ export default class GLS {
     // NOTE For consistency, setters should return a Promise<boolean>
 
     // INFO Assigning a XM Transaction to an address
-    static async addToGLSXM(address: string, xm_hash: string): Promise<OperationResult> {
+    static async addToGLSXM(
+        address: string,
+        xm_hash: string,
+    ): Promise<OperationResult> {
         let result: OperationResult = {
             success: false,
             message: "",
