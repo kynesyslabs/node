@@ -15,7 +15,14 @@
     const menuItems = [
         {
             label: "Delete",
-            callback: ()=>{console.log("delete")}
+            callback: ()=>{
+                let newNodes = cloneDeep(get(nodes));
+                const node = newNodes.find(n=>n.id==id);
+                const index = newNodes.indexOf(node);
+                newNodes.splice(index, 1);
+                nodes.set(newNodes);
+            },
+            icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><g id="recycle-bin-2--remove-delete-empty-bin-trash-garbage"><path id="Subtract" fill="currentColor" fill-rule="evenodd" d="M9.17 5a3.001 3.001 0 0 1 5.66 0H9.17ZM7.1 5a5.002 5.002 0 0 1 9.8 0H23v2h-2v16H3V7H1V5h6.1Zm.4 13.5v-8h2v8h-2Zm7-8v8h2v-8h-2Z" clip-rule="evenodd"></path></g></svg>`
         }
     ];
 
@@ -52,7 +59,7 @@
                 <p class="operationcard-label">{task.label}</p>
             </div>
             <button class="futuristic" on:click={()=>{showoptions = !showoptions}}>{showoptions?"hide":"show"}</button>
-            <!---<CardMenu menuItems={menuItems}></CardMenu>-->
+            <CardMenu menuItems={menuItems}></CardMenu>
         </div>
         {#if showoptions}
             <div class="input-box">
