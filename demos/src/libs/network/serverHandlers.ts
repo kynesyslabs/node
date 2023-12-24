@@ -135,7 +135,7 @@ export default class ServerHandlers {
          * when applicable.
          * A transaction is derived from the executed operation.
          * An operation is then created and pushed in the GLS.
-         * An operation for the gas is also pushed in the GLS.
+         * An operation for the gas is also pushed it pn the GLS.
          * The tx is pushed in the mempool if applicable.
          */
         let extra: any
