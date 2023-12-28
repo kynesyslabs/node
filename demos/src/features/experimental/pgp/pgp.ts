@@ -1,5 +1,5 @@
 import * as openpgp from "openpgp"
-import * as forge from "node-forge"
+import forge from "node-forge"
 import { PgpKeyServer } from "src/model/entities/PgpKeyServer"
 import Datasource from "src/model/datasource"
 

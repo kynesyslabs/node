@@ -9,7 +9,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import forge, { pki } from "node-forge"
+import forge from "node-forge"
 
 export default class RSA {
     // INFO Generates a new RSA keypair from a given ecdsa private key
@@ -19,7 +19,7 @@ export default class RSA {
         const seed = md.digest().toHex()
         const prng = forge.random.createInstance()
         prng.seedFileSync = () => seed
-        const keypair = pki.rsa.generateKeyPair({
+        const keypair = forge.pki.rsa.generateKeyPair({
             bits: 4096,
             prng,
         })

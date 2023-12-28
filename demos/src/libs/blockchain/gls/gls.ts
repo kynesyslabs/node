@@ -49,7 +49,10 @@ import executeOperations from "../routines/executeOperations"
 import { Actor } from "../routines/executeOperations"
 import * as fs from "fs"
 import Datasource from "src/model/datasource"
-var term = require("terminal-kit").terminal
+
+import terminalkit from "terminal-kit"
+var term = terminalkit.terminal
+
 import Hashing from "src/libs/crypto/hashing"
 import { LessThanOrEqual } from "typeorm"
 import { StatusNative } from "src/model/entities/StatusNative"
@@ -431,7 +434,7 @@ export default class GLS {
             await statusProperties.update()
             result.success = true
         } catch (e) {
-            result.message = e.message
+            result.message = JSON.stringify(e)
         }
         return result
     }
@@ -471,7 +474,7 @@ export default class GLS {
             result.success = true
         } catch (e) {
             result.success = false
-            result.message = e.message
+            result.message = JSON.stringify(e)
         }
         return result
     }

@@ -17,7 +17,9 @@ import ComLinkUtils from "../communications/comlinkUtils"
 import ResponseRegistry from "../communications/responseRegistry"
 import getRemoteIP from "../network/routines/getRemoteIP"
 import sharedState from "src/utilities/sharedState"
-var term = require("terminal-kit").terminal
+
+import terminalkit from "terminal-kit"
+var term = terminalkit.terminal
 
 export default class CommonListeners {
     private peer: any
@@ -44,7 +46,7 @@ export default class CommonListeners {
 
     private authAskListener = async () => {
         this.peer.socket.on("auth_ask", async (data: { message: string }) => {
-           //console.log(data)
+            //console.log(data)
             // REVIEW Signing data.message with the private key
             let _signature = cryptography.sign(
                 data.message,
@@ -60,7 +62,6 @@ export default class CommonListeners {
         })
     }
 
-    
     // INFO For non sensitive data
     private publicListener = async () => {
         this.peer.socket.on("public", request => async () => {
@@ -69,7 +70,7 @@ export default class CommonListeners {
                 muid: request.muid,
                 data: null,
             }
-           //console.log(request.cmd) // TODO Create a type for the request format
+            //console.log(request.cmd) // TODO Create a type for the request format
             if (request === "public_ip") {
                 let ip = await Identity.getInstance().getPublicIP()
                 response.data = ip
@@ -90,7 +91,9 @@ export default class CommonListeners {
             console.log("[PEER] Received reply to " + request.muid)
             //console.log(JSON.stringify(request, null, 2))
             // REVIEW Check if the responseRegistry contains the muid of the request
-            const response = ResponseRegistry.getInstance().hasResponse(request.muid)
+            const response = ResponseRegistry.getInstance().hasResponse(
+                request.muid,
+            )
             if (!response) {
                 console.log("[PEER] No response expected for " + request.muid)
                 return
@@ -104,7 +107,7 @@ export default class CommonListeners {
             let parsed_comlink = await ComLinkUtils.parseComlink(
                 request,
                 this.peer.socket,
-            ) 
+            )
             if (!parsed_comlink) {
                 return
             }
@@ -112,15 +115,24 @@ export default class CommonListeners {
             let content = parsed_comlink[1]
             // Registering the response
             let connection_string: string = await getRemoteIP()
-            connection_string = "http://" + connection_string + ":" + sharedState.getInstance().serverPort
-            ResponseRegistry.getInstance().registerResponse(request.chain.current.currentMessage, request.muid, this.peer.socket, connection_string)
+            connection_string =
+                "http://" +
+                connection_string +
+                ":" +
+                sharedState.getInstance().serverPort
+            ResponseRegistry.getInstance().registerResponse(
+                request.chain.current.currentMessage,
+                request.muid,
+                this.peer.socket,
+                connection_string,
+            )
         })
     }
 
     private errorListener = async () => {
         this.peer.socket.on("error", async request => {
             console.log("[PEER] Received error:")
-           //console.log(request)
+            //console.log(request)
         })
     }
 }

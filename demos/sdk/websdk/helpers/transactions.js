@@ -1,5 +1,5 @@
 import { calls } from "./calls.js"
-import * as forge from "node-forge"
+import forge from "node-forge"
 
 // INFO Supporting txs
 let transactions = {

@@ -18,7 +18,10 @@ import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
 import Peer from "../../peer/Peer"
 import { demostdlib } from "src/libs/utils"
-const term = require("terminal-kit").terminal
+
+import terminalkit from "terminal-kit"
+var term = terminalkit.terminal
+
 const peerManager = PeerManager.getInstance()
 import { Response } from "../../communications/types/responseregistry"
 import ResponseRegistry from "src/libs/communications/responseRegistry"

@@ -14,11 +14,14 @@
         "baseUrl": "./",
         "types": ["node"],
         "incremental": true,
-        "skipLibCheck": true,
         "strictNullChecks": false,
         "noImplicitAny": false,
         "strictBindCallApply": false,
-        "forceConsistentCasingInFileNames": false,
-        "noFallthroughCasesInSwitch": false
+
+        /* Linting */
+        "skipLibCheck": true,
+        "strict": true,
+        "noFallthroughCasesInSwitch": true,
+        "forceConsistentCasingInFileNames": true
     }
 }

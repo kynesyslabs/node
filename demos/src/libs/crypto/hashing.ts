@@ -9,14 +9,12 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import { sha256 } from "node-forge"
+import forge from "node-forge"
 
 export default class Hashing {
     static sha256(message: string) {
-        const md = sha256.create()
+        const md = forge.sha256.create()
         md.update(message)
         return md.digest().toHex()
     }
-
-        
 }

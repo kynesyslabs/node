@@ -1,9 +1,11 @@
 // INFO This singleton is used to store the state of the application through different parts of the application.
 
-import * as forge from "node-forge"
+import forge from "node-forge"
 import chain from "src/libs/blockchain/chain"
 import { ProofOfRepresentation } from "src/libs/consensus/mechanisms/PoR"
-require("dotenv").config({ path: "../../.commons" })
+import * as dotenv from "dotenv"
+dotenv.config({ path: "../../.commons" })
+
 import { Identity } from "src/libs/identity"
 // eslint-disable-next-line no-unused-vars
 import * as Security from "src/libs/network/securityModule"

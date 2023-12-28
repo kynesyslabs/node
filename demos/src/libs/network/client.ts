@@ -13,7 +13,9 @@ import { io } from "socket.io-client"
 import Peer from "../peer/Peer"
 import CommonListeners from "./commonListeners"
 import ClientListeners from "./clientListeners"
-var term = require("terminal-kit").terminal
+
+import terminalkit from "terminal-kit"
+var term = terminalkit.terminal
 
 // NOTE Sleep function
 async function sleep(ms) {
@@ -35,7 +37,9 @@ export default class Client {
 
         const connectionSocket = io(address + ":" + port)
         connectionSocket.on("connect", async () => {
-            term.green("[CLIENT] Connected to peer at " + address + ":" + port + "\n")
+            term.green(
+                "[CLIENT] Connected to peer at " + address + ":" + port + "\n",
+            )
             _peerForged.identity = "placeholder" // TODO Add identity filling and verification
             _peerForged.socket = connectionSocket
             _peerForged.connectionString = address + ">" + port

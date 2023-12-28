@@ -26,10 +26,10 @@ import { Transactions } from "src/model/entities/Transactions"
 import eggs from "./routines/eggs"
 import deriveBlock from "../consensus/routines/deriveBlock"
 import AddressInfo from "../blockchain/types/addressInfo"
-import { Address } from "cluster"
 import GLS from "../blockchain/gls/gls"
 
-var term = require("terminal-kit").terminal
+import terminalkit from "terminal-kit"
+var term = terminalkit.terminal
 
 export default class ServerHandlers {
     // ANCHOR BrowserRequest

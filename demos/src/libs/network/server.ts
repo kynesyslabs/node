@@ -12,7 +12,9 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { Server as ServerType } from "socket.io"
 import { Peer } from "../peer"
 import ServerListeners from "./serverListeners"
-var term = require("terminal-kit").terminal
+
+import terminalkit from "terminal-kit"
+var term = terminalkit.terminal
 
 export default class Server {
     static setupListeners = async function (server: ServerType) {

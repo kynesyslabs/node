@@ -21,7 +21,7 @@ export default async function peerBootstrap(
     local_list: string[],
 ): Promise<Peer[]> {
     const id_ed25519 = await cryptography.load("./.demos_identity")
-
+    console.log("[PEER BOOTSTRAP] Loading peers...")
     // Validity check
     for (let i = 0; i < local_list.length; i++) {
         console.log("[PEER BOOTSTRAP] Checking peer " + local_list[i])

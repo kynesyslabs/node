@@ -18,7 +18,8 @@ import * as Security from "../network/securityModule"
 import Datasource from "src/model/datasource"
 import { ResponseRegistry as ResponseRegistryModel } from "src/model/entities/ResponseRegistry"
 
-const term = require("terminal-kit").terminal
+import terminalkit from "terminal-kit"
+var term = terminalkit.terminal
 
 async function sleep(ms) {
     return new Promise(resolve => {

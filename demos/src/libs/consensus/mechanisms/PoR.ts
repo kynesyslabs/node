@@ -2,11 +2,11 @@
 
 import Chain from "../../blockchain/chain"
 import GLS from "../../blockchain/gls/gls"
-import * as forge from "node-forge"
+import forge from "node-forge"
 import Hashing from "../../crypto/hashing"
-import Peer from "../../peer/peer"
+import Peer from "../../peer/Peer"
 import required from "src/utilities/required"
-import * as seedrandom from "seedrandom"
+import seedrandom from "seedrandom"
 
 import Mempool from "../../blockchain/mempool"
 

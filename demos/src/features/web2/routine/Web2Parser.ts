@@ -1,4 +1,4 @@
-import * as forge from "node-forge"
+import forge from "node-forge"
 import axios from "axios"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
@@ -7,7 +7,9 @@ import sharedState from "src/utilities/sharedState"
 import { PeerManager } from "src/libs/peer"
 /* eslint-disable no-unused-vars */
 // This class represents a typical web2 data request
-const term = require("terminal-kit").terminal
+
+import terminalkit from "terminal-kit"
+var term = terminalkit.terminal
 
 AbortSignal.timeout ??= function timemout(ms) {
     const ctrl = new AbortController()
@@ -219,7 +221,7 @@ export class Web2APIClass {
         raw_request.headers = {}
 
         term.green("[Web2Parser] Retrieving resource from raw request...\n")
-       //console.log(raw_request)
+        //console.log(raw_request)
         let params: IParam[] = raw_request.parameters
         let { url } = raw_request
         // Url normalization

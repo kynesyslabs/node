@@ -10,17 +10,17 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import ComLink from "./comlink"
-import required from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
 import sizeOf from "src/utilities/sizeOf"
-var term = require("terminal-kit").terminal
+
+import terminalkit from "terminal-kit"
+var term = terminalkit.terminal
 
 export default class ComLinkUtils {
     // INFO common comlink digestor
     static async parseComlink(
         request,
         peerSocket,
-        
     ): Promise<[ComLink, any] | boolean> {
         // We need to check if the message request is valid (is a ComLink object)
         term.yellow("[COMLINKUTILS] Received comlink\n")
@@ -33,7 +33,11 @@ export default class ComLinkUtils {
         // REVIEW Refusing to process requests which currentMessage size is over a defined amount
         let reqSize = sizeOf(_comlink_request)
         if (reqSize > sharedState.getInstance().maxMessageSize) {
-            term.red("[COMLINK MESSAGE SIZE ERROR] Request size is over the limit: " + reqSize.toString() + " bytes\n")
+            term.red(
+                "[COMLINK MESSAGE SIZE ERROR] Request size is over the limit: " +
+                    reqSize.toString() +
+                    " bytes\n",
+            )
             peerSocket.emit("comlink", {
                 status: "error",
                 message: "TOO_BIG",
@@ -43,11 +47,16 @@ export default class ComLinkUtils {
         //console.log("\n" + _comlink_request.chain.current.currentMessage + "\n")
         // Checking validity of the comlink for non nodeCall transactions
         // NOTE nodeCall transactions are read only and can be called by any client even without authentication
-        console.log("The request has a current message that is a: " + typeof(_comlink_request.chain.current.currentMessage))
+        console.log(
+            "The request has a current message that is a: " +
+                typeof _comlink_request.chain.current.currentMessage,
+        )
         let type_of_call
         try {
-            type_of_call = _comlink_request.chain.current.currentMessage.bundle.content.type 
-        } catch(e) {
+            type_of_call =
+                _comlink_request.chain.current.currentMessage.bundle.content
+                    .type
+        } catch (e) {
             term.red("[COMLINK VALIDATION ERROR] " + e + "\n")
             peerSocket.emit("comlink", {
                 status: "error",
@@ -55,7 +64,7 @@ export default class ComLinkUtils {
             })
             return false
         }
-        if (!(type_of_call=== "nodeCall")) {
+        if (!(type_of_call === "nodeCall")) {
             let valid: any[]
             try {
                 valid = await _comlink_request.validateComlink()
@@ -93,8 +102,10 @@ export default class ComLinkUtils {
             content = request.chain.current.currentMessage.bundle.content
         }
         if (!content) {
-            console.log("[COMLINK PARSING] Eww, no content specified. Erroring back.")
-           //console.log(request.chain.current.currentMessage.bundle)
+            console.log(
+                "[COMLINK PARSING] Eww, no content specified. Erroring back.",
+            )
+            //console.log(request.chain.current.currentMessage.bundle)
             peerSocket.emit("error", {
                 muid: request.muid,
                 message: "Ewwwwwwwww no content specified",

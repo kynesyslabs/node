@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import Hashing from "../crypto/hashing"
 import Cryptography from "../crypto/cryptography"
 import { pki } from "node-forge"
-import * as forge from "node-forge"
+import forge from "node-forge"
 import { Socket } from "socket.io-client"
 import Transmission from "./transmission"
 import Peer from "../peer/Peer"
@@ -52,7 +52,6 @@ export default class ComLink {
         }
         // REVIEW Does it clone the object? Hopefully not
         ComLink.instances.set(muid, this)
-
     }
 
     // INFO Muid generator
@@ -81,7 +80,11 @@ export default class ComLink {
 
         // Also includes the connection_string
         let connection_string: string = await getRemoteIP()
-        connection_string = "http://" + connection_string + ":" + sharedState.getInstance().serverPort
+        connection_string =
+            "http://" +
+            connection_string +
+            ":" +
+            sharedState.getInstance().serverPort
         this.properties.connection_string = connection_string
     }
 
@@ -117,7 +120,7 @@ export default class ComLink {
             // Emitting the message
             let result = await this.broadcastToPeer(peer)
             console.log("[COMMUNICATIONS] Message sent")
-           //console.log(result)
+            //console.log(result)
             return result
         }
         console.log("[COMMUNICATIONS] Invalid peer")
@@ -169,7 +172,6 @@ export default class ComLink {
 
     // INFO Generic comlink validation function
     async validateComlink() {
-
         var _currentMessage = this.chain.current.currentMessage
         // Check if the current message hash matches the message
         let stringifiedMessage = JSON.stringify(_currentMessage.bundle.content)
@@ -177,7 +179,10 @@ export default class ComLink {
         if (!(_derivedMessageHash === _currentMessage.bundle.hash)) {
             //console.log(_currentMessage)
             //console.log(stringifiedMessage)
-            return [false, "comlink message hash mismatch: " + _derivedMessageHash]
+            return [
+                false,
+                "comlink message hash mismatch: " + _derivedMessageHash,
+            ]
         }
         // Check if current hash matches the current field
         let stringifiedCurrent = JSON.stringify(this.chain.current)

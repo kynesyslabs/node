@@ -17,12 +17,11 @@ import { comlinkUtils } from "src/libs/communications"
 import { Identity } from "src/libs/identity"
 import Transmission from "src/libs/communications/transmission"
 import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
-import sharedState from "src/utilities/sharedState"
-import { demostdlib } from "../utils"
 import { ISecurityReport } from "./securityModule"
 import * as Security from "./securityModule"
 
-var term = require("terminal-kit").terminal
+import terminalkit from "terminal-kit"
+var term = terminalkit.terminal
 
 export interface BrowserRequest {
     message: string

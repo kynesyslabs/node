@@ -11,7 +11,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import type { IPeerConfig } from "./types/Peer"
 import { Socket } from "socket.io-client"
-import * as forge from "node-forge"
+import forge from "node-forge"
 
 export default class Peer {
     connectionString: string

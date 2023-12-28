@@ -9,14 +9,15 @@ Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
 KyneSys Labs: https://www.kynesys.xyz/
 
 */
-var term = require("terminal-kit").terminal
+
+import terminalkit from "terminal-kit"
+var term = terminalkit.terminal
+
 //import process from "node:process"
 import * as fs from "fs"
 import "reflect-metadata"
-//import * as express from "express" // NOTE ts-node compatibility
-const express = require("express") // NOTE tsx & ts-node compatibility
-// import express from "express"// NOTE tsx compatibility
-const http = require("http")
+import express from "express"
+import * as http from "http"
 import { Server } from "socket.io"
 
 import mainLoop from "./utilities/mainLoop"
@@ -68,7 +69,7 @@ const app = express()
 // })
 
 // SECTION REVIEW ZONE
-var https = require("https") // REVEIEW SSL COMPATIBILITY
+import * as https from "https"
 var ssl_options = {
     key: fs.readFileSync("src/ssl/server.key"),
     cert: fs.readFileSync("src/ssl/server.crt"),
@@ -78,8 +79,12 @@ const s_server = https.createServer(ssl_options, app) // REVIEW Use tHIS instead
 // !SECTION REVIEW ZONE
 
 const server = http.createServer(app)
+//import { eiows } from "eiows"
 const io_server = new Server(server, {
-    wsEngine: require("eiows").Server, // TODO REVIEW Comment this line to use the standard ws engine
+    //wsEngine: eiows.Server, // TODO REVIEW Comment this line to use the standard ws engine
+    perMessageDeflate: {
+        threshold: 32768,
+    },
     cors: {
         origin: "*",
         methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
@@ -89,6 +94,7 @@ const io_server = new Server(server, {
 
 // Instances of classes we need to keep in memory for the rest of the modules, as we use them as state containers which will be passed around
 const peerManager = PeerManager.getInstance()
+console.log("[MAIN] peerManager started")
 
 // ANCHOR Routine to handle parameters in advanced mode
 async function digestArguments() {
@@ -176,6 +182,7 @@ async function main() {
 
     // INFO Setting the common variables and propagating them
     term.yellow("[BOOTSTRAP] 🌐 Bootstrapping peers...\n")
+    console.log(PEER_LIST)
     const peerList = await peerBootstrap(PEER_LIST)
     for (const peer of peerList) {
         peerManager.addPeer(peer)
@@ -205,50 +212,5 @@ async function main() {
     }
 }
 
-// INFO Container method to be able to redirect clients to other nodes if needed
-async function redundance() {
-    try {
-        await main()
-    } catch (e) {
-        server.close() // REVIEW Is this ok?
-        // Listening to the same port as the normal process
-        await server.listen(SERVER_PORT)
-        let peerList = PeerManager.getInstance().getPeers()
-        let courtesyMessage = "[WARN] {OFFLINE} " + JSON.stringify(e) + "\n"
-        let showMessage =
-            courtesyMessage +
-            "\nYou can try at: " +
-            JSON.stringify(peerList, null, 4)
-        // Courtesy listener
-        server.on("connection", socket => {
-            socket.emit("error", showMessage)
-            socket.on("data", () => {
-                // REVIEW Should this be a catch all?
-                socket.emit("error", showMessage)
-            })
-        })
-    }
-}
-
-/* NOTE Uncomment this to enable never-fail stupid option
-// First things first: global error management to avoid total crashes
-// TODO See the link below for a better solution
-// LINK https://github.com/foreversd/forever
-// TODO EVEN BETTER
-// LINK https://github.com/foreversd/forever-monitor
-process.on("uncaughtException", (err, origin) => {
-    term.red.bold("[FATAL] Uncaught exception: " + err.message + "\n")
-    console.log(err)
-    console.log("Origin: ")
-    console.log(origin)
-    term.red("[WARNING] The node will continue to run but unpredictable behavior could occur\n")
-})
-process.on("unhandledRejection", (reason, promise) => {
-    term.red.bold("[FATAL] Unhandled Rejection. Details:")
-    console.log("Unhandled Rejection at:", promise, "reason:", reason)
-    term.red("[WARNING] The node will continue to run but unpredictable behavior could occur\n")
-})
-*/
-
 digestArguments()
-redundance()
+main()

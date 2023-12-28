@@ -1,10 +1,10 @@
 // INFO Singleton managing the wallet in a cli environment
-import * as forge from "node-forge"
+import forge from "node-forge"
 import * as fs from "fs"
 
 export interface Identity {
-	privateKey: forge.pki.ed25519.BinaryBuffer
-	publicKey: forge.pki.ed25519.BinaryBuffer
+    privateKey: forge.pki.ed25519.BinaryBuffer
+    publicKey: forge.pki.ed25519.BinaryBuffer
 }
 
 export default class Wallet {
@@ -37,11 +37,13 @@ export default class Wallet {
         if (divided_input.length < 2 || divided_input.length > 3) {
             console.log("Please specify a command")
             return
-        } 
+        }
         var mode = divided_input[1]
         switch (mode.toLowerCase()) {
             default:
-                console.log("Please specify a valid mode between create and load")
+                console.log(
+                    "Please specify a valid mode between create and load",
+                )
                 break
             // NOTE New wallet from scratch
             case "create":
@@ -89,7 +91,9 @@ export default class Wallet {
             case "read": // Requires an input from the user or default to a file
                 var load_filename: string
                 if (divided_input.length < 3) {
-                    console.log("Trying to read from default file name: wallet.demos")
+                    console.log(
+                        "Trying to read from default file name: wallet.demos",
+                    )
                     load_filename = "wallet.demos"
                 } else {
                     load_filename = divided_input[2]
@@ -111,7 +115,9 @@ export default class Wallet {
 
     load(pk: string) {
         this.identity.privateKey = Buffer.from(pk, "hex")
-        this.identity.publicKey = forge.pki.ed25519.publicKeyFromPrivateKey({privateKey: this.identity.privateKey})
+        this.identity.publicKey = forge.pki.ed25519.publicKeyFromPrivateKey({
+            privateKey: this.identity.privateKey,
+        })
     }
 
     save(filename: string) {
@@ -121,7 +127,8 @@ export default class Wallet {
     read(filename: string) {
         let stringed_pk = fs.readFileSync(filename, "utf8")
         this.identity.privateKey = Buffer.from(stringed_pk, "hex")
-        this.identity.publicKey = forge.pki.ed25519.publicKeyFromPrivateKey({privateKey: this.identity.privateKey})
+        this.identity.publicKey = forge.pki.ed25519.publicKeyFromPrivateKey({
+            privateKey: this.identity.privateKey,
+        })
     }
-
 }

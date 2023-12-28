@@ -1,9 +1,8 @@
 import testingEnvironment from "./types/testingEnvironment"
 import Transaction from "src/libs/blockchain/transaction"
-import * as forge from "node-forge"
+import forge from "node-forge"
 import Identity from "../libs/identity/identity"
 const term = require("terminal-kit").terminal
-
 
 async function main() {
     // Loading the environment
@@ -21,7 +20,7 @@ async function main() {
         1,
         "test",
         our_identity.publicKey,
-        receiver_identity.publicKey, 
+        receiver_identity.publicKey,
         "data",
         our_identity.privateKey,
     )
@@ -32,8 +31,8 @@ async function main() {
 }
 
 async function createTransaction(
-    value: number, 
-    txType: string, 
+    value: number,
+    txType: string,
     sender: forge.pki.ed25519.BinaryBuffer,
     receiver: forge.pki.ed25519.BinaryBuffer,
     txData: any,
@@ -50,7 +49,7 @@ async function createTransaction(
     tx.content.data = txData
     // Get our identity and sign the tx
     let signature_result = Transaction.sign(tx, signerKey)
-    if (!signature_result[0]) throw new Error ("Signature creation failed")
+    if (!signature_result[0]) throw new Error("Signature creation failed")
     tx.signature = signature_result[1]
     // Hashing the transaction too
     tx = Transaction.hash(tx)

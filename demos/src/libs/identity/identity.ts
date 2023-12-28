@@ -13,18 +13,20 @@ import * as fs from "fs"
 import { cryptography } from "../crypto"
 import { pki } from "node-forge"
 import getRemoteIP from "../network/routines/getRemoteIP"
-var term = require( "terminal-kit" ).terminal
+
+import terminalkit from "terminal-kit"
+var term = terminalkit.terminal
 
 export default class Identity {
     private static instance: Identity
     public ed25519: pki.KeyPair
     public ed25519_hex: {
-        privateKey: string,
+        privateKey: string
         publicKey: string
     }
     public rsa: pki.rsa.KeyPair
     public rsa_hex: {
-        privateKey: string,
+        privateKey: string
         publicKey: string
     }
     public publicIP: string
@@ -49,7 +51,7 @@ export default class Identity {
         if (fs.existsSync("./.demos_identity")) {
             // Loading the identity
             // TODO Add load with cryptography
-            this.ed25519 = await cryptography.load("./.demos_identity") 
+            this.ed25519 = await cryptography.load("./.demos_identity")
             term.yellow("Loaded ecdsa identity")
         } else {
             this.ed25519 = cryptography.new()

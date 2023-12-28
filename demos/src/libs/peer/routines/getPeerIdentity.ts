@@ -45,7 +45,9 @@ export default async function getPeerIdentity(
     await identity_ask.finalize()
     comlink.properties.require_reply = true
     comlink.properties.is_reply = false
-    console.log("[PEER AUTHENTICATION] Sending comlink requesting authentication")
+    console.log(
+        "[PEER AUTHENTICATION] Sending comlink requesting authentication",
+    )
     //console.log(comlink)
     // Adding the response request
     ResponseRegistry.getInstance().requestResponse(comlink)
@@ -58,11 +60,11 @@ export default async function getPeerIdentity(
         comlink.muid,
     )
     console.log("[PEER AUTHENTICATION] Response received")
-   //console.log(response)
+    //console.log(response)
     // Response management
     if (response[0]) {
         console.log("[PEER AUTHENTICATION] Received response")
-       //console.log(response[1].identity.toString("hex"))
+        //console.log(response[1].identity.toString("hex"))
         if (response[1].identity.toString("hex") === expectedKey) {
             console.log("[PEER AUTHENTICATION] Identity is the expected one")
         } else {
@@ -72,9 +74,9 @@ export default async function getPeerIdentity(
             console.log("Expected: ")
             console.log(expectedKey)
             console.log("Received: ")
-           //console.log(response[1].identity.toString("hex"))
+            console.log(response[1].identity.toString("hex"))
             console.log("Non hex:")
-           //console.log(response[1].identity)
+            console.log(response[1].identity)
             return null
         }
         // Adding the property to the peer

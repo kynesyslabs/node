@@ -15,7 +15,9 @@ import executeTransaction from "./executeTransaction"
 import GLS from "../gls/gls"
 import { Operation } from "../gls/gls"
 import calculateCurrentGas from "./calculateCurrentGas"
-var term = require("terminal-kit").terminal
+
+import terminalkit from "terminal-kit"
+var term = terminalkit.terminal
 
 // INFO Cryptographically validate a transaction, calculate gas and see if the execution is valid
 // REVIEW is it overkill to write an interface for the return value?

@@ -1,19 +1,18 @@
-import * as forge from "node-forge"
+import forge from "node-forge"
 import Network from "./network"
 import * as socket from "socket.io"
 import * as socket_client from "socket.io-client"
-
 
 export default class Client {
     private static instance: Client
 
     STATUS_PROMPT: string
     STATUS_FLAG: string
-	
+
     rpc_url: string
     socket: socket_client.Socket
-    identity:forge.pki.ed25519.BinaryBuffer // PrivateKey will be stored here most probably
-	
+    identity: forge.pki.ed25519.BinaryBuffer // PrivateKey will be stored here most probably
+
     constructor() {
         this.rpc_url = ""
         this.identity = null
@@ -46,6 +45,4 @@ export default class Client {
     }
 
     // !SECTION CLI Operations
-
-	
 }

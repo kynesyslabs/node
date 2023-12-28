@@ -9,31 +9,31 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import { pki, random } from "node-forge"
-import * as forge from "node-forge"
+import forge from "node-forge"
 import { promises as fs } from "fs"
 import { Identity } from "../identity"
-const term = require("terminal-kit")
-const {ed25519} = forge.pki
-const crypto = require("crypto")
+
+import terminalkit from "terminal-kit"
+var term = terminalkit.terminal
+
+import * as crypto from "crypto"
 const algorithm = "aes-256-cbc"
 
 export default class Cryptography {
-    
     static new() {
-        const seed = random.getBytesSync(32)
-        const keys = pki.ed25519.generateKeyPair({ seed })
+        const seed = forge.random.getBytesSync(32)
+        const keys = forge.pki.ed25519.generateKeyPair({ seed })
         console.log("Generated new keypair")
         return keys
     }
 
     // INFO Method to generate a new key pair from a seed
     static newFromSeed(stringSeed: string) {
-        return pki.ed25519.generateKeyPair({ seed: stringSeed })
+        return forge.pki.ed25519.generateKeyPair({ seed: stringSeed })
     }
 
     // TODO Eliminate the old legacy compatibility
-    static async save(keypair: pki.KeyPair, path: string, mode="hex") {
+    static async save(keypair: forge.pki.KeyPair, path: string, mode = "hex") {
         console.log(keypair.privateKey)
         if (mode === "hex") {
             let hexPrivKey = Cryptography.saveToHex(keypair.privateKey)
@@ -43,9 +43,9 @@ export default class Cryptography {
         }
     }
 
-    static saveToHex(forgeBuffer: pki.PrivateKey): string {
+    static saveToHex(forgeBuffer: forge.pki.PrivateKey): string {
         console.log("[forge to string encoded]")
-       //console.log(forgeBuffer) // REVIEW if it is like this
+        //console.log(forgeBuffer) // REVIEW if it is like this
         let stringBuffer = forgeBuffer.toString("hex")
         console.log("DECODED INTO:")
         console.log("0x" + stringBuffer)
@@ -54,9 +54,10 @@ export default class Cryptography {
 
     // SECTION Encrypted save and load
     static async saveEncrypted(
-        keypair: pki.KeyPair,
+        keypair: forge.pki.KeyPair,
         path: string,
-        password: string) {
+        password: string,
+    ) {
         const key = crypto.createCipher(algorithm, password)
         // Getting the private key in hex form
         const hex_key = keypair.privateKey.toString("hex")
@@ -65,10 +66,8 @@ export default class Cryptography {
         await fs.writeFile(path, encryptedMessage)
     }
 
-    static async loadEncrypted(
-        path: string,
-        password: string) {
-        let keypair: pki.KeyPair = {
+    static async loadEncrypted(path: string, password: string) {
+        let keypair: forge.pki.KeyPair = {
             privateKey: null,
             publicKey: null,
         }
@@ -79,7 +78,7 @@ export default class Cryptography {
         const decryptedKey = decipher.update(contentOfFile, "hex", "utf8")
         // Loading
         if (decryptedKey.includes("{")) {
-            keypair = Cryptography.loadFromBufferString (contentOfFile)
+            keypair = Cryptography.loadFromBufferString(contentOfFile)
         } else {
             keypair = Cryptography.loadFromHex(contentOfFile)
         }
@@ -87,23 +86,22 @@ export default class Cryptography {
     }
     // !SECTION Encrypted save and load
 
-
     static async load(path) {
-        let keypair: pki.KeyPair = {
+        let keypair: forge.pki.KeyPair = {
             privateKey: null,
             publicKey: null,
         }
 
         const contentOfFile = await fs.readFile(path, "utf8")
         if (contentOfFile.includes("{")) {
-            keypair = Cryptography.loadFromBufferString (contentOfFile)
+            keypair = Cryptography.loadFromBufferString(contentOfFile)
         } else {
             keypair = Cryptography.loadFromHex(contentOfFile)
         }
         return keypair
     }
 
-    static loadFromHex(content: string): pki.KeyPair {
+    static loadFromHex(content: string): forge.pki.KeyPair {
         let keypair = { publicKey: null, privateKey: null }
         content = content.slice(2)
         let finalArray = new Uint8Array(64)
@@ -115,45 +113,50 @@ export default class Cryptography {
             finalArray[i / 2] = decimalValue
         }
         console.log("ENCODED INTO:")
-       //console.log(finalArray)
+        //console.log(finalArray)
         // Condensing
         console.log("That means:")
         keypair.privateKey = Buffer.from(finalArray)
         console.log(keypair.privateKey)
         console.log("And the public key is:")
-        keypair.publicKey = ed25519.publicKeyFromPrivateKey({privateKey: keypair.privateKey})
+        keypair.publicKey = forge.pki.ed25519.publicKeyFromPrivateKey({
+            privateKey: keypair.privateKey,
+        })
         console.log(keypair.publicKey)
         return keypair
     }
 
-    static loadFromBufferString(content: string): pki.KeyPair {
+    static loadFromBufferString(content: string): forge.pki.KeyPair {
         let keypair = { publicKey: null, privateKey: null }
         keypair.privateKey = Buffer.from(JSON.parse(content))
-        keypair.publicKey = pki.ed25519.publicKeyFromPrivateKey({
+        keypair.publicKey = forge.pki.ed25519.publicKeyFromPrivateKey({
             privateKey: keypair.privateKey,
         })
         return keypair
     }
 
-    static sign(message: string, privateKey: pki.ed25519.BinaryBuffer | any) {
-        return pki.ed25519.sign({
+    static sign(
+        message: string,
+        privateKey: forge.pki.ed25519.BinaryBuffer | any,
+    ) {
+        return forge.pki.ed25519.sign({
             message,
             encoding: "utf8",
             privateKey,
         })
     }
 
-    static verify( 
+    static verify(
         signed: string,
-        signature: any | pki.ed25519.BinaryBuffer,
-        publicKey: any | pki.ed25519.BinaryBuffer,
+        signature: any | forge.pki.ed25519.BinaryBuffer,
+        publicKey: any | forge.pki.ed25519.BinaryBuffer,
     ) {
         // REVIEW
-        if(signature.type=="Buffer") {
+        if (signature.type == "Buffer") {
             console.log("[*] Normalizing signature...")
             signature = Buffer.from(signature)
         }
-        if(publicKey.type=="Buffer") {
+        if (publicKey.type == "Buffer") {
             console.log("[*] Normalizing publicKey...")
             publicKey = Buffer.from(publicKey)
         }
@@ -168,18 +171,17 @@ export default class Cryptography {
         //console.log(" is a " + typeof(publicKey))
         //console.log("\n")
         console.log("[*] Verifying the signature...")
-        return ed25519.verify({
+        return forge.pki.ed25519.verify({
             message: signed,
             encoding: "utf8",
             signature: signature,
             // eslint-disable-next-line comma-dangle
-            publicKey: publicKey
+            publicKey: publicKey,
         })
     }
 
     // ANCHOR Encryption part
     static rsa = {
-
         // INFO Generating a new RSA keypair from our ecdsa private key
         derive: (): forge.pki.rsa.KeyPair => {
             let md = forge.md.sha256.create()
@@ -193,9 +195,12 @@ export default class Cryptography {
         },
 
         // INFO Encryption method using the public key
-        encrypt: (message: string, publicKey: any | pki.rsa.PublicKey): [boolean, any] => {
+        encrypt: (
+            message: string,
+            publicKey: any | forge.pki.rsa.PublicKey,
+        ): [boolean, any] => {
             // NOTE Supporting "fake buffers" from web browsers
-            if(publicKey.type=="Buffer") {
+            if (publicKey.type == "Buffer") {
                 console.log("[ENCRYPTION] Normalizing publicKey...")
                 publicKey = Buffer.from(publicKey)
             }
@@ -206,22 +211,28 @@ export default class Cryptography {
         },
 
         // INFO Decryption method using the private key
-        decrypt: (message: string, privateKey: any | pki.rsa.PrivateKey = null): [boolean, any] => {
+        decrypt: (
+            message: string,
+            privateKey: any | forge.pki.rsa.PrivateKey = null,
+        ): [boolean, any] => {
             // NOTE Supporting "fake buffers" from web browsers
             try {
-                if(privateKey.type=="Buffer") {
+                if (privateKey.type == "Buffer") {
                     term.yellow("[DECRYPTION] Normalizing privateKey...\n")
                     privateKey = Buffer.from(privateKey)
                 }
-            }
-            catch (e) {
-                term.yellow("[DECRYPTION] Looks like there is nothing to normalize here, let's proceed\n")
+            } catch (e) {
+                term.yellow(
+                    "[DECRYPTION] Looks like there is nothing to normalize here, let's proceed\n",
+                )
                 console.log(e)
             }
             // Converting back the message and decrypting it
             // NOTE If no private key is provided, we try to use our one
             if (!privateKey) {
-                term.yellow("[DECRYPTION] No private key provided, using our one...\n")
+                term.yellow(
+                    "[DECRYPTION] No private key provided, using our one...\n",
+                )
                 privateKey = Identity.getInstance().rsa.privateKey
                 if (!privateKey) {
                     term.red("[DECRYPTION] No private key found\n")
@@ -233,5 +244,4 @@ export default class Cryptography {
             return [true, decrypted.toString()]
         },
     }
-
 }

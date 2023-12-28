@@ -2,7 +2,7 @@
 
 import { hashing } from "../crypto"
 import Cryptography from "../crypto/cryptography"
-import * as forge from "node-forge"
+import forge from "node-forge"
 
 export default class fungibleToken {
     public metadata: {

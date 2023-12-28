@@ -1,4 +1,3 @@
-
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
@@ -14,7 +13,9 @@ import ComLink from "src/libs/communications/comlink"
 import Transmission from "src/libs/communications/transmission"
 import * as socket_client from "socket.io-client"
 import { io } from "socket.io-client"
-const  term = require("terminal-kit").terminal
+
+import terminalkit from "terminal-kit"
+var term = terminalkit.terminal
 
 export default class Demos {
     socket: socket_client.Socket
@@ -22,9 +23,13 @@ export default class Demos {
     constructor() {
         this.socket = null
     }
-    
+
     // INFO Connecting to a Demos RPC
-    async connect(protocol: string = "http", server: string = "localhost", port: number = 53550): Promise<boolean> {
+    async connect(
+        protocol: string = "http",
+        server: string = "localhost",
+        port: number = 53550,
+    ): Promise<boolean> {
         this.socket = io(protocol + "://" + server + ":" + port)
         this.setSocket()
         let timer = 0
@@ -41,8 +46,8 @@ export default class Demos {
 
     // INFO Set listeners for socket events
     setSocket() {
-        this.socket.on ("connect", () => {
-            console.log ("[Connected]Connected to server")
+        this.socket.on("connect", () => {
+            console.log("[Connected]Connected to server")
         })
 
         this.socket.on("auth_ask", () => {
@@ -54,35 +59,34 @@ export default class Demos {
             console.log("[AuthOk] Auth ok")
         })
 
-        this.socket.on("comlink", (data) => {
-            console.log("[ComLink] Received data") 
+        this.socket.on("comlink", data => {
+            console.log("[ComLink] Received data")
             //console.log(data)
             //console.log(data.chain.current.currentMessage)
         })
 
-        this.socket.on("comlink_reply", (data) => {
-            console.log("[ComLink Reply] Received data") 
+        this.socket.on("comlink_reply", data => {
+            console.log("[ComLink Reply] Received data")
             //console.log(data)
-            let response = JSON.parse(data.chain.current.currentMessage.bundle.content.message)
+            let response = JSON.parse(
+                data.chain.current.currentMessage.bundle.content.message,
+            )
             //console.log(response)
         })
 
-        this.socket.on("error", (data) => {
-            console.log("[Error] Received data") 
+        this.socket.on("error", data => {
+            console.log("[Error] Received data")
             ////console.log(data)
         })
 
         // Fallback
 
-        this.socket.onAny((eventName, data) => { 
+        this.socket.onAny((eventName, data) => {
             console.log("[RECEIVED] " + eventName)
-            //console.log (data)	
+            //console.log (data)
             //console.log("\n======")
         })
     }
-
-
-    
 
     // NOTE Get the last block number easily
     getLastBlockNumber() {
@@ -98,27 +102,30 @@ export default class Demos {
     getPeerList() {
         this.nodeCall("getPeerlist")
     }
-    
+
     // NOTE Get a block by its number eily
     getBlockByNumber(num: number) {
         console.log("getBlockByNumber: num = " + num)
-        this.nodeCall("getBlockByNumber", {blockNumber: num})
-    } 
+        this.nodeCall("getBlockByNumber", { blockNumber: num })
+    }
 
     // NOTE Get a block by its hash
     getBlockByHash(hash: string) {
         console.log("getBlockByHash called with hash", hash)
-        this.nodeCall("getBlockByHash", {hash: hash})
+        this.nodeCall("getBlockByHash", { hash: hash })
     }
 
     // NOTE Get the node mempool if authorized
-    getMempool() { 
+    getMempool() {
         this.nodeCall("getMempool")
     }
 
     // INFO NodeCalls use the same structure
     nodeCall(message: string, args: any = {}) {
-        if (!this.socket.connected) { console.log("[ERROR] We are disconnected"); return }
+        if (!this.socket.connected) {
+            console.log("[ERROR] We are disconnected")
+            return
+        }
         let comlink = new ComLink()
         let transmission = new Transmission()
         transmission.bundle.content.type = "nodeCall"
@@ -126,9 +133,8 @@ export default class Demos {
         transmission.bundle.content.data = args
         comlink.chain.current.currentMessage = transmission
         console.log("Sending message to server with muid: " + comlink.muid)
-        this.socket.emit ("comlink", comlink)
+        this.socket.emit("comlink", comlink)
     }
-
 }
 
 async function sleep(time: number) {

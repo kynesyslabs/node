@@ -2,7 +2,7 @@
 
 import required from "src/utilities/required"
 import DefaultChain from "./types/defaultChain"
-import * as TronWeb from "tronweb"
+import TronWeb from "tronweb"
 
 // LINK to the testnet https://api.shasta.trongrid.io
 
@@ -46,9 +46,7 @@ export default class TRON extends DefaultChain {
         })
     }
 
-    createWallet() {
-
-    }
+    createWallet() {}
 
     signTransaction(raw_transaction: any): Promise<any> {
         throw new Error("Method not implemented.")
@@ -56,5 +54,4 @@ export default class TRON extends DefaultChain {
     sendTransaction(signed_transaction: any) {
         throw new Error("Method not implemented.")
     }
-	
 }
