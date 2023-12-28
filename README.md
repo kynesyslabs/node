@@ -4,19 +4,25 @@
 
 WIP - Things will break
 
-### Run DEMOS
+## Introduction
 
-    cd demos
-    yarn install
-    yarn server
+The code you are looking at is a work in progress.
+The only official Morph repositori is: https://github.com/tcsenpai/morph-js
+Which was ported from the INACTIVE original: https://github.com/thecookingsenpai/morph-ks
 
-### License
+The following paragraphs explain the code structure and how to use it.
 
-LICENSE
+## Linters, formatting and guidelines
 
-© 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
+In this repository are actively used the following linters and formatters to keep the code consistent:
 
-Full license text: <https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode>
-Human readable license: <https://creativecommons.org/licenses/by-nc-nd/4.0/>
+- trunk
+- mega-linter by OX Security
+- eslint
+- prettier
 
-KyneSys Labs: <https://www.kynesys.xyz/>
+Please double check the related configuration files and documentation if needed.
+
+## Typescript Engine
+
+While we support actively executing this code

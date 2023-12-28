@@ -32,3 +32,5 @@ demos/src/management/dist
 .DS_Storedemos_peers_local
 demos/demos_peers_local
 ../demos_peers_local
+
+megalinter-reports/

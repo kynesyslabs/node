@@ -1,14 +1,10 @@
-from textual.app import App, ComposeResult
-from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import Button, Static
-from textual.widgets import RichLog, Input
 import subprocess
 import sys
-import os
 from threading import Thread
-from time import sleep
 
-
+from textual.app import App, ComposeResult
+from textual.containers import Horizontal, VerticalScroll
+from textual.widgets import Button, RichLog, Static
 
 demosNode = None
 text_log = None
@@ -19,7 +15,6 @@ stop_force = False
 
 
 class DemosTUI(App[str]):
-    
     CSS = """
 RichLog {
 	border: solid;
@@ -28,24 +23,24 @@ RichLog {
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
-                RichLog(highlight=True, markup=True, wrap=True, name="log"),
-		)
+            RichLog(highlight=True, markup=True, wrap=True, name="log"),
+        )
         yield Horizontal(
             VerticalScroll(
                 Static("Controls", classes="header"),
-                #Button("Default", disabled=True),
-                #Button("Primary!", variant="primary", disabled=True),
+                # Button("Default", disabled=True),
+                # Button("Primary!", variant="primary", disabled=True),
                 Horizontal(
-					Button.success("Start", disabled=False, name="start"),
-					Button.warning("Restart", disabled=False, name="restart"),
-					Button.error("Stop", disabled=False, name="stop"),
-				),
+                    Button.success("Start", disabled=False, name="start"),
+                    Button.warning("Restart", disabled=False, name="restart"),
+                    Button.error("Stop", disabled=False, name="stop"),
+                ),
                 Horizontal(
                     Button("Update DEMOS", disabled=False, name="update"),
-				),
-				Button.error("Quit", disabled=False, name="quit"),
-				Static("DEMOS TUI"),
-				Static("(c) 2023 KyneSys Labs"),
+                ),
+                Button.error("Quit", disabled=False, name="quit"),
+                Static("DEMOS TUI"),
+                Static("(c) 2023 KyneSys Labs"),
             ),
         )
 
@@ -69,12 +64,12 @@ RichLog {
         elif event.button.name == "update":
             text_log.write("Updating DEMOS...")
             updater()
-            
-    
+
     def on_ready(self) -> None:
         global text_log
         texts = self.query(RichLog)
         text_log = texts[0]
+
 
 def writer():
     global node_pid
@@ -82,42 +77,44 @@ def writer():
     global stop_force
     global text_log
     while not stop_force:
-        for line in iter(demosNode.stdout.readline, b''):
+        for line in iter(demosNode.stdout.readline, b""):
             text_log.write(line.rstrip().decode("utf-8"))
 
 
-
 def updater():
-	global node_pid
-	global demosNode
-	global loop
-	global writer_thread
-	demosNode = subprocess.Popen(["git", "pull"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-	node_pid = demosNode.pid
- 
-	writer_thread = Thread(target=writer)
-	writer_thread.start()
-	
-    
+    global node_pid
+    global demosNode
+    global loop
+    global writer_thread
+    demosNode = subprocess.Popen(
+        ["git", "pull"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+    )
+    node_pid = demosNode.pid
+
+    writer_thread = Thread(target=writer)
+    writer_thread.start()
+
+
 # INFO Starting the node and logging the output
 def starter():
-	global node_pid
-	global demosNode
-	global loop
-	global writer_thread
-	demosNode = subprocess.Popen(["yarn", "start"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-	node_pid = demosNode.pid
- 
-	writer_thread = Thread(target=writer)
-	writer_thread.start()
- 
- 
-	#loop.run_forever()
-	#while True:
-		# Use read1() instead of read() or Popen.communicate() as both blocks until EOF
-		# https://docs.python.org/3/library/io.html#io.BufferedIOBase.read1
-	#	output = demosNode.stdout.read1().decode("utf-8")
-	#	text_log.write(output)
+    global node_pid
+    global demosNode
+    global loop
+    global writer_thread
+    demosNode = subprocess.Popen(
+        ["yarn", "start"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+    )
+    node_pid = demosNode.pid
+
+    writer_thread = Thread(target=writer)
+    writer_thread.start()
+
+    # loop.run_forever()
+    # while True:
+    # Use read1() instead of read() or Popen.communicate() as both blocks until EOF
+    # https://docs.python.org/3/library/io.html#io.BufferedIOBase.read1
+    # 	output = demosNode.stdout.read1().decode("utf-8")
+    # 	text_log.write(output)
 
 
 def stopper():
@@ -127,7 +124,8 @@ def stopper():
     demosNode.terminate()
     stop_force = True
     writer_thread.join()
- 
+
+
 if __name__ == "__main__":
     app = DemosTUI()
     print(app.run())
