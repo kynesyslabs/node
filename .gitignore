@@ -1,36 +1,17 @@
-MVP_Notes.md
-demos/package-lock.json
-.parcel-cache
-dist
-kyntainer.tar
-node_modules
-.vscode
-evm/node_modules
-common/node_modules
-requirements/geth
-demos/node_modules
-demos/libs/node_modules
-common/libs/node_modules
-demos/our_peers
-demos/.demos_identity
-common/.demos_identity
-demos/yarn.lock
-demos/yarn-error.log
-evm/node/data
-demos_old
+#Demos files
+.demos_identity
 demos_peers
-demos/demos_peers
-demos/.demos_peers	
-demos/demos_identity
-demos/demos_old
-demos/src/dapps/yarn-error.log
-demos/src/dapps/block_explorer/.parcel-cache
-demos/src/dapps/block_explorer/node_modules
-demos/src/dapps/block_explorer_2/yarn.lock
-demos/src/dapps/block_explorer_2/.*
-demos/src/management/dist
-.DS_Storedemos_peers_local
-demos/demos_peers_local
-../demos_peers_local
 
+#OSX files
+.DS_Store
+
+#Build files
+dist
+
+#Reporting
 megalinter-reports/
+
+#Package manager files
+node_modules
+yarn-error.log
+
