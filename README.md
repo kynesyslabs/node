@@ -2,27 +2,27 @@
 
 ## By KyneSys Labs
 
-WIP - Things will break
+### Run DEMOS
 
-## Introduction
+    cd demos
+    yarn install
+    yarn server
 
-The code you are looking at is a work in progress.
-The only official Morph repositori is: <https://github.com/tcsenpai/morph-js>
-Which was ported from the INACTIVE original: <https://github.com/thecookingsenpai/morph-ks>
+or
 
-The following paragraphs explain the code structure and how to use it.
+    cd demos
+    bun install
+    bun server
 
-## Linters, formatting and guidelines
+NOTE: The bun implementation is still in progress and, at the moment, leverage just a few of bun capabilities. In the future, the bun implementation will be improved. Excluding performances, anyways, the two options are the very same.
 
-In this repository are actively used the following linters and formatters to keep the code consistent:
+### License
 
-- trunk check (<https://docs.trunk.io/check>)
-- mega-linter by OX Security (<https://megalinter.io/>)
-- eslint + prettier (pretty standard)
-- prettier
+LICENSE
 
-Please double check the related configuration files and documentation if needed.
+© 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
 
-## Typescript Engine
+Full license text: <https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode>
+Human readable license: <https://creativecommons.org/licenses/by-nc-nd/4.0/>
 
-While we support actively executing this code
+KyneSys Labs: <https://www.kynesys.xyz/>

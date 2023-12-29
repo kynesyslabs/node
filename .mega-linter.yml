@@ -14,9 +14,9 @@ APPLY_FIXES: all
 # default
 # ENABLE_LINTERS:
 
-DISABLE:
-  # - COPYPASTE # Uncomment to disable checks of excessive copy-pastes
-  - SPELL # Comment to enable checks of spelling mistakes
+# DISABLE:
+# - COPYPASTE # Uncomment to disable checks of excessive copy-pastes
+# - SPELL # Uncomment to disable checks of spelling mistakes
 
 SHOW_ELAPSED_TIME: true
 
