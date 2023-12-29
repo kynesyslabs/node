@@ -1,5 +1,5 @@
 // TODO Export all in one place
-/* INFO 
+/* INFO
  * General usage information
  *
  * Every chain has to be instantiated using the static create() method.
@@ -8,7 +8,7 @@
  * We can then use the chain object to interact with the network.
  * For example:
  * console.log(ripple_chain.provider)
- * 
+ *
  * For transactions that need to be signed, we can use the
  * prepare methods to obtain a signed payload (transaction)
  * that we will send together with the XM transaction.
@@ -18,10 +18,8 @@
  *  let xm_transaction = demos.crosschain.transaction
  *  xm_transaction.signedPayloads.push(signed_transfer)
  * And we can proceed to build the rest of the request.
- * 
+ *
 */
 
 export { default as XRPL } from './chains/xrpl'
 export { default as EVM } from './chains/evm'
-
-

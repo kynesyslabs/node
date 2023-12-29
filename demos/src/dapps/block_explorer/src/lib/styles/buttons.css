@@ -1,9 +1,8 @@
 button{
     background: none;
     color: var(--color);
-    display: block;
     text-align: left;
-    font-family: 'SourceCodePro', sans-serif;
+    font-family: SourceCodePro, sans-serif;
     font-weight: bold;
     font-size: 1rem;
     display: flex;
@@ -20,7 +19,6 @@ button.primary {
     border: 1px solid var(--color2);
     background: var(--color2);
     padding: 16.2px 47px;
-    text-align: center;
     color: var(--background2); 
     text-decoration: unset;
     text-align: center;
@@ -33,13 +31,11 @@ button.primary:disabled{
 }
 
 button.secondary {
-    font-weight: 500;
     line-height: 1.4444;
     letter-spacing: 0.311px;
     border: 1px solid var(--background3);
     background: transparent;
     padding: 16.2px 47px;
-    text-align: center;
     color: var(--color2); 
     text-decoration: unset;
     text-align: center;
@@ -68,7 +64,7 @@ button.shallow{
     text-decoration: underline;
 }
 
-@media (max-width: 1399px) {
+@media (width <= 1399px) {
     button.primary {
         padding: 15px 44px;
     }
@@ -78,7 +74,7 @@ button.shallow{
     }
 }
 
-@media (max-width: 1199px) {
+@media (width <= 1199px) {
     button.primary {
         padding: 15px 40px;
     }
@@ -88,7 +84,7 @@ button.shallow{
     }
 }
 
-@media (max-width: 991px) {
+@media (width <= 991px) {
     button.primary {
         padding: 14px 32px;
     }
@@ -98,7 +94,7 @@ button.shallow{
     }
 }
 
-@media (max-width: 767px) {
+@media (width <= 767px) {
     button.primary {
         line-height: 1.3;
         padding: 12px 25px;

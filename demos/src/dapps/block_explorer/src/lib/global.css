@@ -1,6 +1,5 @@
 :root{
     --input-padding: 16.2px;
-
     --lgray:#A8ACAF;
 }
 
@@ -62,49 +61,52 @@
     filter: var(--filter);
 }
 
-@media (max-width: 1399px) {
+@media (width <= 1399px) {
     :root{
         --input-padding: 15px;
     }
 }
 
-@media (max-width: 1199px) {
+@media (width <= 1199px) {
     :root{
         --input-padding: 15px;
     }
 }
 
-@media (max-width: 991px) {
+@media (width <= 991px) {
     :root{
         --input-padding: 14px;
     }
 }
 
-@media (max-width: 767px) {
+@media (width <= 767px) {
     :root{
         --input-padding:12px;
     }
 }
 
-/*ELEMENTS*/
+/* ELEMENTS */
 
 a{
     color: var(--color2);
 }
+
 a.nounderline{
     text-decoration: none;
 }
+
 html {
     box-sizing: border-box;
   }
-  *, *:before, *:after {
+
+  *, *::before, *::after {
     box-sizing: inherit;
   }
 
 body{
     background-color: var(--background);
     color: var(--color);
-    font-family: 'SourceCodePro', sans-serif;
+    font-family: SourceCodePro, sans-serif;
     margin: 0;
     height: 100%;
     font-weight: 400;
@@ -115,16 +117,18 @@ button{
     cursor: pointer;
 }
 
-/* ATTRIBUTES*/
+/* ATTRIBUTES */
 .fake-link{
     color: var(--color);
     text-decoration: underline;
 }
+
 .ellipsis{
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
 .color-transition{
     transition: background-color .2s ease-in-out, color .2s ease-in-out;
 }
@@ -140,12 +144,10 @@ button{
 /* COMPONENTS */
 
 .grid-card{
-    margin: 0 0 32px;
     border-radius: 14px;
-    background: rgba(255, 255, 255, 0.08);
+    background: rgb(255 255 255 / 8%);
     backdrop-filter: blur(15px);
-    -webkit-backdrop-filter: blur(15px);
-    border: .5px solid rgba(255, 255, 255, 0.08);
+    border: .5px solid rgb(255 255 255 / 8%);
     max-width: 1250px;
     margin: auto;
 }
@@ -179,6 +181,7 @@ button{
         width: 0%;
         left: 0;
     }
+
     100%{
         width: 100%;
         left: 0;
@@ -191,6 +194,7 @@ button{
         right: 0;
         width: 100%;
     }
+
     100%{
         width: 0%;
         right: 0;
@@ -200,12 +204,15 @@ button{
 .delayed1::after{
     animation-delay: .1s!important;
 }
+
 .delayed2::after{
     animation-delay: .15s!important;
 }
+
 .delayed3::after{
     animation-delay: .2s!important;
 }
+
 .delayed4::after{
     animation-delay: .3s!important;
 }

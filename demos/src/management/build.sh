@@ -1,1 +1,1 @@
-npx parcel build src/index.html 
+npx parcel build src/index.html

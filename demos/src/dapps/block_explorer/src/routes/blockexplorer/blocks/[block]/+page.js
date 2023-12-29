@@ -1,6 +1,5 @@
-export async function load ({params})
-{
-    return {
-        blocknumber: params.block,
-    }
+export async function load ({ params }) {
+  return {
+    blocknumber: params.block
+  }
 }

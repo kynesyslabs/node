@@ -5,12 +5,12 @@
  * @param {*} uint8array
  * @returns {{ type: string; data: {}; }}
  */
-function bufferize(uint8array) {
-    let buffer = {type: "Buffer", data: []}
-    for (let i = 0; i < uint8array.length; i++) {
-        buffer.data.push(uint8array[i])
-    }
-    return buffer
+function bufferize (uint8array) {
+  const buffer = { type: 'Buffer', data: [] }
+  for (let i = 0; i < uint8array.length; i++) {
+    buffer.data.push(uint8array[i])
+  }
+  return buffer
 }
 
 export default bufferize

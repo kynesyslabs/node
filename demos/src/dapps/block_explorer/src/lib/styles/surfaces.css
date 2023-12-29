@@ -1,6 +1,5 @@
 .card{
     border-radius: 0;
-    border: none;
     padding: 0;
     margin: 0 auto;
     border: 1px solid var(--background3);
@@ -10,7 +9,6 @@
 
 .card2{
     border-radius: 0;
-    border: none;
     margin: 0 auto;
     border: 1px solid var(--background3);
     box-shadow: 2px 2px 0 0 var(--background3);
@@ -32,7 +30,6 @@
     color: var(--color);
     text-align: center;
     padding: 5px 0;
-
     position: absolute;
     z-index: 1;
     bottom: calc(100% + 8px);
@@ -47,7 +44,7 @@
     font-size: .9rem;
 }
 
-/* IL TRIANGOLINO*/
+/* IL TRIANGOLINO */
 .tooltip .tooltiptext::before {
     content: " ";
     position: absolute;
@@ -70,7 +67,7 @@
     border-color: var(--background) transparent transparent transparent;
   }
 
-/*LEFT TOOLTIP!!!!!!!*/
+/* LEFT TOOLTIP!!!!!!! */
     
 /* Tooltip text */
 .tooltipleft .tooltiptextleft {
@@ -91,7 +88,7 @@
 
 }
 
-/*IL TRIANGOLINO*/
+/* IL TRIANGOLINO */
 
 .tooltipleft .tooltiptextleft::before {
     content: " ";
@@ -120,6 +117,7 @@
 .tooltip:hover .tooltiptext {
     opacity: 1;
 }
+
 .tooltipleft:hover .tooltiptextleft {
     opacity: 1;
 }
