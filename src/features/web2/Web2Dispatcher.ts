@@ -69,8 +69,8 @@ export default async function handleWeb2(
             web2interface.request.signature = signedAttestations
         } catch (error) {
             // Catching errors before the return
-            console.log("[web2Dispatcher] Error: " + error.message)
-            return [false, error]
+            console.log("[web2Dispatcher] Error: " +  JSON.stringify(error))
+            return [false, JSON.stringify(error)]
         }
     }
     // ANCHOR Subsequent handling of the attestations
