@@ -1,24 +1,18 @@
 {
-    "name": "blockexplorer",
+    "name": "demos",
     "version": "0.0.1",
-    "description": "Morph",
-    "author": "Morth Team",
+    "description": "Demos Node",
+    "author": "Morph Team",
     "license": "none",
     "private": true,
     "main": "src/index.ts",
     "scripts": {
-        "build": "cd src/webapps/block_explorer && vite build",
         "lint": "prettier --plugin-search-dir . --check . && eslint .",
         "lint:fix": "eslint . --fix --ext .ts",
         "prettier-format": "prettier --config .prettierrc.json modules/**/*.ts --write",
-        "start": "bun -r tsconfig-paths/register src/index.ts",
-        "tsx": "tsx -r tsconfig-paths/register src/index.ts",
-        "dev": "cd src/webapps/block_explorer && vite dev",
-        "preview": "cd src/webapps/block_explorer && vite preview",
-        "test": "npm run test:integration && npm run test:unit",
-        "format": "prettier --plugin-search-dir . --write .",
-        "test:integration": "playwright test",
-        "test:unit": "vitest"
+        "start:bun": "bun -r tsconfig-paths/register src/index.ts",
+        "start": "tsx -r tsconfig-paths/register src/index.ts",
+        "format": "prettier --plugin-search-dir . --write ."
     },
     "devDependencies": {
         "@babel/eslint-parser": "^7.22.11",
