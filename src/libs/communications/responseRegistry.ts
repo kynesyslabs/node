@@ -335,16 +335,16 @@ export default class ResponseRegistry {
         }
         console.log("[ResponseRegistry] Instance retrieved")
 
-        while (!this.list[muid].response.message) {
+        while (!this.list[muid]?.response?.message) {
             await sleep(100)
             timeout += 100
             if (timeout > 2000) {
-                return [false, this.list[muid].response]
+                return [false, this.list[muid]?.response]
             }
         }
         console.log(
             "[RESPONSES] " +
-                this.list[muid].response.connection_string +
+                this.list[muid]?.response?.connection_string +
                 " replied to " +
                 muid,
         )
