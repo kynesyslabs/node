@@ -13,7 +13,7 @@
 }
 "connect": {
 	"chain": "xrpl",
-	"subchain": "testnet",
+	"subchain": "asdasdad",
 	"is_evm": false,
 	"conditional": false,
 	"rpc": "https://s.altnet.rippletest.net",
@@ -86,7 +86,7 @@
 
     "ripple_payment": {
         "chain": "xrpl",
-		"subchain": "testnet",
+		"subchain": "dsadasdasd",
 		"is_evm": false,
 		"conditional": true,
 		"task": {

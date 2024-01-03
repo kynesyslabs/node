@@ -143,6 +143,7 @@ export default class ServerHandlers {
         console.log("[XMChain] Handling XM Chain Operation...")
         // REVIEW Remember that crosschain operations can be in chainscript syntax
         // INFO Use the src/features/multichain/chainscript/chainscript.chs for the specs
+        console.log(content.data)
         let response = await multichainDispatcher.digest(content.data)
         // TODO
         return { extra, require_reply, response }

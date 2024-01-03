@@ -19,7 +19,6 @@ import required from "src/utilities/required"
 import { sign } from "crypto"
 import { evmProviders } from "./configs/evmProviders"
 
-
 export default class EVM extends DefaultChain implements IEVM {
     // A singleton for each chain_id
     private static instances: Map<number, EVM> = new Map<number, EVM>()
@@ -40,10 +39,12 @@ export default class EVM extends DefaultChain implements IEVM {
         this.name = "evm"
     }
 
-    connect(rpc_url: string): boolean{
+    connect(rpc_url: string): boolean {
+        console.log("Connecting EVM RPC provider: " + rpc_url)
         this.provider = new JsonRpcProvider(rpc_url)
         // TODO Check network connectivity and id
         this.connected = true
+        console.log(this.provider)
         return true
     }
 
@@ -51,9 +52,7 @@ export default class EVM extends DefaultChain implements IEVM {
         // TODO
     }
 
-    createWallet(): any {
-        
-    }
+    createWallet(): any {}
 
     // INFO Connect a wallet to the EVM provider using a private key
     connectWallet(privateKey: string): Wallet {
@@ -63,7 +62,7 @@ export default class EVM extends DefaultChain implements IEVM {
     }
 
     // INFO Getting a balance for an address
-    async getBalance (address: string): Promise<string> {
+    async getBalance(address: string): Promise<string> {
         const balance = await this.provider.getBalance(address)
         return balance.toString()
     }
@@ -91,7 +90,10 @@ export default class EVM extends DefaultChain implements IEVM {
     }
 
     async getContractInstance(address: string, abi: string): Promise<Contract> {
-        required(this.provider)
+        console.log(this)
+        if (!this.provider) {
+            throw new Error("Provider not connected")
+        }
         let contract = new Contract(address, abi, this.provider)
         return contract
     }
@@ -108,42 +110,62 @@ export default class EVM extends DefaultChain implements IEVM {
 
     // INFO If the wallet is connected, send a transaction
     // ANCHOR MVP
-    async sendTransaction (transaction: TransactionRequest): Promise<string> {
-        if (!this.wallet) { throw new Error("Wallet not connected") }
+    async sendTransaction(transaction: TransactionRequest): Promise<string> {
+        if (!this.wallet) {
+            throw new Error("Wallet not connected")
+        }
         const txResponse = await this.wallet.sendTransaction(transaction) // NOTE It will be signed automatically
         return txResponse.hash
     }
 
-    async sendRawTransaction (raw_transaction: string): Promise<string> {
+    async sendRawTransaction(raw_transaction: string): Promise<string> {
         // TODO
         return ""
     }
 
-    async sendSignedTransaction (signed_transaction: string): Promise<any> {
+    async sendSignedTransaction(signed_transaction: string): Promise<any> {
         // TODO
-        if (!this.provider) { throw new Error("Provider not connected") }
+        if (!this.provider) {
+            throw new Error("Provider not connected")
+        }
         return await this.provider.sendTransaction(signed_transaction)
     }
 
-    async waitForReceipt (tx_hash: string): Promise<ethers.ethers.providers.TransactionReceipt> {
+    async waitForReceipt(
+        tx_hash: string,
+    ): Promise<ethers.ethers.providers.TransactionReceipt> {
         return await this.provider.getTransactionReceipt(tx_hash)
     }
 
     // REVIEW Reader for contracts
     // ANCHOR MVP
-    async readFromContract(contract_instance: Contract, function_name: string, args: any): Promise<any> {
+    async readFromContract(
+        contract_instance: Contract,
+        function_name: string,
+        args: any,
+    ): Promise<any> {
         return await contract_instance[function_name](...args)
     }
 
     // REVIEW Writer for contracts
-    async writeToContract(contract_instance: Contract, function_name: string, args: any): Promise<any> {
+    async writeToContract(
+        contract_instance: Contract,
+        function_name: string,
+        args: any,
+    ): Promise<any> {
         required(this.wallet)
         return await contract_instance[function_name](...args) // NOTE Ensure it is writeable i guess
     }
 
     // SECTION Event listener
-    async listenForEvent(event: string, contract: string, abi: any[]): Promise<any> {
-        required(this.provider)
+    async listenForEvent(
+        event: string,
+        contract: string,
+        abi: any[],
+    ): Promise<any> {
+        if (!this.provider) {
+            throw new Error("Provider not connected")
+        }
         let contractInstance = new ethers.Contract(contract, abi, this.provider)
         // REVIEW THis could work
         return contractInstance.on(event, (data: any) => {
@@ -153,7 +175,9 @@ export default class EVM extends DefaultChain implements IEVM {
     }
 
     async listenForAllEvents(contract: string, abi: any[]): Promise<any> {
-        required(this.provider)
+        if (!this.provider) {
+            throw new Error("Provider not connected")
+        }
         let contractInstance = new ethers.Contract(contract, abi, this.provider)
         // REVIEW 99% Won't work
         return contractInstance.on("*", (data: any) => {
@@ -185,6 +209,4 @@ export default class EVM extends DefaultChain implements IEVM {
         }
         return EVM.instances[chain_id]
     }
-
-
 }

@@ -95,7 +95,7 @@ class XMParser {
         let chainID = 0
         if (operation.is_evm) {
             // Choosing the right chain ID
-            if (operation.chain == "ethereum") {
+            if (operation.chain == "eth") {
                 if (operation.subchain == "mainnet") {
                     chainID = 1
                 } else if (operation.subchain == "ropsten") {
@@ -117,12 +117,13 @@ class XMParser {
                 } else if (operation.subchain == "mumbai") {
                     chainID = 80001
                 }
-            }
-            // Fallback on direct chain id
-            else {
+            } else {
+                // Fallback on direct chain id
                 // Subchain must be a number
-                chainID = parseInt(operation.subchain)
+                chainID = parseInt(operation.subchain, 10)
                 if (isNaN(chainID)) {
+                    console.log(operation.chain)
+                    console.log(operation.subchain)
                     console.log("Invalid subchain")
                     return { result: "error", error: "Invalid subchain" }
                 }
@@ -136,8 +137,6 @@ class XMParser {
         // NOTE Deciding the operations
 
         // TODO Checking if we have a conditional operation
-
-        // REVOEW Here is maybe to rewrite with modules (see if it is more efficient)
 
         // ANCHOR MVP
         /* SECTION Write tasks */
@@ -203,42 +202,57 @@ class XMParser {
 
         // ANCHOR MVP
         // INFO Read contract task
-        else if (operation.task?.type == "readContract") {
+        else if (operation.task?.type == "contract_read") {
             // Mainly EVM but let's let it open for weird chains
             // Workflow: loading the provider url in our configuration, creating an instance, parsing the request
             // and sending back the chain response as it is
             if (operation.is_evm) {
+                console.log(evmProviders)
                 let providerUrl =
                     evmProviders[operation.chain][operation.subchain] // REVIEW Error handling
-                let evmInstance = multichain.EVM.createInstance(
+                let evmInstance = await multichain.EVM.createInstance(
                     chainID,
                     providerUrl,
                 ) // REVIEW We should be connected
-                let params = JSON.parse(operation.task.params) // REVIEW Error handling
+                await evmInstance.connect(providerUrl)
+                console.log("params: \n")
+                console.log(operation.task.params)
+                console.log("\n end params: \n")
+                let params = operation.task.params // REVIEW Error handling
+                console.log("parsed params: " + params)
                 if (!params.address) {
+                    console.log("Missing address")
                     return {
                         result: "error",
-                        error: "Absent contract address",
+                        error: "Missing contract address",
                     }
                 }
                 if (!params.abi) {
+                    console.log("Missing ABI")
                     return {
                         result: "error",
-                        error: "Absent contract ABI",
+                        error: "Missing contract ABI",
                     }
                 }
                 if (!params.method) {
+                    console.log("Missing contract method")
                     return {
                         result: "error",
-                        error: "Absent contract method",
+                        error: "Missing contract method",
                     }
                 }
                 // Getting a contract instance using the evm library
+                console.log("getting contract instance")
                 let contractInstance = await evmInstance.getContractInstance(
                     params.address,
                     params.abi,
                 )
-                result = await contractInstance[params.method](...params.params) // REVIEW Big IF
+                console.log("calling SC method: " + params.method)
+                console.log("calling SC with args: " + params.params)
+                console.log("params.params length:", params.params.length)
+                console.log("params.params contents:", params.params)
+                // result = await contractInstance[params.method](...params.params) // REVIEW Big IF
+                result = await contractInstance[params.method]() // REVIEW Big IF
                 return {
                     result: result,
                     status: true,
@@ -246,7 +260,7 @@ class XMParser {
             } else {
                 return {
                     result: "error",
-                    error: "Not implemented yet: readContract on non-EVM chains",
+                    error: "Not implemented yet: contract_read on non-EVM chains",
                 }
             }
         }
