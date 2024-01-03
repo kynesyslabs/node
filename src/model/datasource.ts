@@ -44,7 +44,7 @@ class Datasource {
                 Validators,
             ],
             synchronize: true, // set this to false in production
-            logging: true,
+            logging: false,
         })
     }
 
