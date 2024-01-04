@@ -254,7 +254,6 @@ class XMParser {
                 console.log("params.params contents:", methodParams)
                 // Convert the object values into an array
                 const argsArray = Object.values(methodParams)
-
                 result = await contractInstance[params.method](...argsArray) // REVIEW Big IF
                 console.log("result from EVM read call")
                 console.log(result.toString())
