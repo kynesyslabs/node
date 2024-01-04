@@ -4,6 +4,7 @@ import * as fs from "fs"
 import required from "src/utilities/required"
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
+import { BigNumber } from "ethers"
 
 // NOTE We define multichain into global so that we can use it later
 global.multichain = multichain
@@ -247,12 +248,17 @@ class XMParser {
                     params.address,
                     params.abi,
                 )
+                const methodParams = JSON.parse(params.params)
                 console.log("calling SC method: " + params.method)
                 console.log("calling SC with args: " + params.params)
-                console.log("params.params length:", params.params.length)
-                console.log("params.params contents:", params.params)
-                // result = await contractInstance[params.method](...params.params) // REVIEW Big IF
-                result = await contractInstance[params.method]() // REVIEW Big IF
+                console.log("params.params contents:", methodParams)
+                // Convert the object values into an array
+                const argsArray = Object.values(methodParams)
+
+                result = await contractInstance[params.method](...argsArray) // REVIEW Big IF
+                console.log("result from EVM read call")
+                console.log(result.toString())
+                console.log("end result")
                 return {
                     result: result,
                     status: true,
