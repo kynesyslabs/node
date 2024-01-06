@@ -12,6 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import forge from "node-forge"
 import { promises as fs } from "fs"
 import { Identity } from "../identity"
+import { HexToForge, ForgeToHex } from "./forgeUtils"
 
 import terminalkit from "terminal-kit"
 var term = terminalkit.terminal
@@ -139,6 +140,12 @@ export default class Cryptography {
         message: string,
         privateKey: forge.pki.ed25519.BinaryBuffer | any,
     ) {
+        // REVIEW Test HexToForge support
+        if (privateKey.type == "string") {
+            console.log("[HexToForge] Deriving a buffer from privateKey...")
+            privateKey = HexToForge(privateKey)
+        }
+
         return forge.pki.ed25519.sign({
             message,
             encoding: "utf8",
@@ -151,7 +158,17 @@ export default class Cryptography {
         signature: any | forge.pki.ed25519.BinaryBuffer,
         publicKey: any | forge.pki.ed25519.BinaryBuffer,
     ) {
-        // REVIEW
+        // REVIEW Test HexToForge support
+        if (signature.type == "string") {
+            console.log("[HexToForge] Deriving a buffer from signature...")
+            signature = HexToForge(signature)
+        }
+        if (publicKey.type == "string") {
+            console.log("[HexToForge] Deriving a buffer from publicKey...")
+            publicKey = HexToForge(publicKey)
+        }
+
+        // Also, we have to sanitize buffers so that they are forge compatible
         if (signature.type == "Buffer") {
             console.log("[*] Normalizing signature...")
             signature = Buffer.from(signature)
@@ -161,21 +178,11 @@ export default class Cryptography {
             publicKey = Buffer.from(publicKey)
         }
 
-        //console.log("\n\nSigned: \n")
-        //console.log(signed + " is a " + typeof(signed))
-        //console.log("\n\nSignature: \n")
-        //console.log(signature)
-        //console.log(" is a " + typeof(signature))
-        //console.log("\n\nPublic Key:\n")
-        //console.log(publicKey)
-        //console.log(" is a " + typeof(publicKey))
-        //console.log("\n")
         console.log("[*] Verifying the signature...")
         return forge.pki.ed25519.verify({
             message: signed,
             encoding: "utf8",
             signature: signature,
-            // eslint-disable-next-line comma-dangle
             publicKey: publicKey,
         })
     }
