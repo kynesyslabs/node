@@ -35,6 +35,7 @@ export interface IMMessage {
         data: any, // REVIEW should this be a string?
         timestamp: number, // Unix timestamp
         isEncrypted: boolean, // If true (default), the message is encrypted with the receiver's public key
+        from: string, // Hex representation of the sender's public key
     }
     signature: string, // Hex representation of the signed message as sent by the sender
 

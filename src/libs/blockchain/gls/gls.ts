@@ -479,6 +479,21 @@ export default class GLS {
         return result
     }
 
+    // INFO Assigning a IMPData hash to an address or to the L1 itself
+    static async addToGLSIMPData(address: string,
+                                 IMPDataHash: string): Promise<OperationResult> {
+
+        let result: OperationResult = {
+            success: false,
+            message: "",
+        }
+        // TODO Add stuff after loading the IMPData
+        if (address == "demos") {
+            // TODO Assigning to the blockchain
+        }
+        return result
+    }
+
     static async setGLSNativeBalance(
         address: string,
         native: number,
