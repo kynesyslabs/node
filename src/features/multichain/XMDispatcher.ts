@@ -28,9 +28,9 @@ export default class multichainDispatcher {
         console.log("\n===== END OF ANALYSIS ===== \n")
         console.log("[XMChain Digestion] Proceeding: execution phase")
         // REVIEW Execute
-        let result = multichainDispatcher.execute(data)
+        let result = await multichainDispatcher.execute(data)
         // TODO Implement a response schema
-        return "Not yet implemented" // await multichainDispatcher.execute(data)
+        return JSON.stringify(result) // await multichainDispatcher.execute(data)
     }
 
     // INFO Check syntax of xM Script
@@ -42,17 +42,31 @@ export default class multichainDispatcher {
     // INFO Executes a xM Script
     static async execute(script: XMScript): Promise<any> {
         let results = await XMParser.execute(script)
+
+        console.log("[XM EXECUTE] Successfully executed: result is")
+        console.log(results)
+
         // Inserting in mempool the results
-        let derivedOperation = multichainDispatcher.deriveMempoolOperation(
+        let derivedOperation = await multichainDispatcher.deriveMempoolOperation(
             script,
             results,
             true,
         )
+
+        console.log("[XM EXECUTE] Derived Operation is:")
+        console.log(derivedOperation)
+
         let overallResult = {
             results: results,
-            derivedOperation: derivedOperation,
+            derivedOperation: derivedOperation, // FIXME It does not contain the result
         }
-        return overallResult // REVIEW is this ok?
+
+        
+        console.log("[XM EXECUTE] Result to send back:")
+        console.log(overallResult)
+        
+        return overallResult
+
     }
 
     static async deriveMempoolOperation(

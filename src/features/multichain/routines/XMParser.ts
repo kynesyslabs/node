@@ -85,6 +85,7 @@ class XMParser {
             operation = fullscript.multichain_operation[name]
             results[name] = await XMParser.executeOperation(operation)
         }
+        return results // REVIEW Is the type ok?
     }
 
     // INFO Only executes one operation
@@ -96,6 +97,7 @@ class XMParser {
         let chainID = 0
         if (operation.is_evm) {
             // Choosing the right chain ID
+            // TODO Use online resources to get the chain ID infos
             if (operation.chain == "eth") {
                 if (operation.subchain == "mainnet") {
                     chainID = 1
