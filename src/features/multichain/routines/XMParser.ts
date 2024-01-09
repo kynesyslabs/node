@@ -11,7 +11,7 @@ global.multichain = multichain
 
 export interface ITask {
     type: string
-    params: string // We want them stringified
+    params: any // TODO Define a decent type for this and use it everywhere
     // TODO AND NOTE
     // Here the client should send
     // the signed transactions that it requires
