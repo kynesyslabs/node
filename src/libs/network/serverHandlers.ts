@@ -97,7 +97,7 @@ export default class ServerHandlers {
         } catch (e) {
             term.red.bold("[TX VALIDATION ERROR] 💀 : ")
             term.red(e)
-            validatedTx = [false, e.message]
+            validatedTx = [false, JSON.stringify(e)]
         }
 
         // Returning an appropriate response

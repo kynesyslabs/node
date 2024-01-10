@@ -18,7 +18,6 @@ import * as fs from "fs"
 import "reflect-metadata"
 import express from "express"
 import * as http from "http"
-import { Server } from "socket.io"
 
 import mainLoop from "./utilities/mainLoop"
 import sharedState from "./utilities/sharedState"
@@ -30,6 +29,10 @@ dotenv.config()
 
 import { Identity } from "./libs/identity"
 import { PeerManager } from "./libs/peer"
+
+import { Server } from "socket.io"
+// import * as eiows from 'eiows';
+
 import { server as networkServer } from "./libs/network"
 
 // import commandLine from "./utilities/commandLine"
@@ -79,9 +82,10 @@ const s_server = https.createServer(ssl_options, app) // REVIEW Use tHIS instead
 // !SECTION REVIEW ZONE
 
 const server = http.createServer(app)
-//import { eiows } from "eiows"
+
+//import { Server as HttpServer } from 'http';
 const io_server = new Server(server, {
-    //wsEngine: eiows.Server, // TODO REVIEW Comment this line to use the standard ws engine
+    //wsEngine: eiows.Server, // REVIEW Comment this line to use the standard ws engine
     perMessageDeflate: {
         threshold: 32768,
     },

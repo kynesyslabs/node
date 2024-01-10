@@ -12,6 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import ComLink from "./comlink"
 import sharedState from "src/utilities/sharedState"
 import sizeOf from "src/utilities/sizeOf"
+import { json } from "stream/consumers"
 
 import terminalkit from "terminal-kit"
 var term = terminalkit.terminal
@@ -57,7 +58,7 @@ export default class ComLinkUtils {
                 _comlink_request.chain.current.currentMessage.bundle.content
                     .type
         } catch (e) {
-            term.red("[COMLINK VALIDATION ERROR] " + e + "\n")
+            term.red("[COMLINK VALIDATION ERROR 1] " + e + "\n")
             peerSocket.emit("comlink", {
                 status: "error",
                 message: e,
@@ -72,7 +73,7 @@ export default class ComLinkUtils {
                 valid = [false, e.toString()]
             }
             if (!valid[0]) {
-                term.red("[COMLINK VALIDATION ERROR] " + valid[1] + "\n")
+                term.red("[COMLINK VALIDATION ERROR 2] " + valid[1] + "\n")
                 peerSocket.emit("comlink", {
                     status: "error",
                     message: valid[1],
