@@ -129,7 +129,7 @@ export default class ServerHandlers {
     }
 
     // INFO Handling XM Transaction
-    static async handleXMChainOperation(content: any): Promise<any> {
+    static async handleXMChainOperation(xmscript: any): Promise<any> {
         /* NOTE This workflow goeas as:
          * The XM Operation is validated, executed and verified
          * when applicable.
@@ -144,7 +144,7 @@ export default class ServerHandlers {
         // REVIEW Remember that crosschain operations can be in chainscript syntax
         // INFO Use the src/features/multichain/chainscript/chainscript.chs for the specs
         //console.log(content.data)
-        let response = await multichainDispatcher.digest(content.data)
+        let response = await multichainDispatcher.digest(xmscript)
         // TODO
         return { extra, require_reply, response }
     }

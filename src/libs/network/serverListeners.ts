@@ -105,6 +105,10 @@ export default class ServerListeners {
 
             let extra: any, require_reply: any, response: any
 
+            let content_data = content.data
+            console.log("[DATA INCLUDED IN THE COMLINK]")
+            console.log(content_data)
+
             // NOTE And here we have the real deal
             switch (content.type) {
                 case "proofOfConsensus":
@@ -179,10 +183,10 @@ export default class ServerListeners {
                     //     },
                     //     extra: null,
                     // }
-                    console.log("[Included XM Chainscript]" + JSON.stringify(content.data) + "\n\n")
+                    console.log("[Included XM Chainscript]" + JSON.stringify(content.message) + "\n\n")
 
                     ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleXMChainOperation(content))
+                        await ServerHandlers.handleXMChainOperation(content.message))
                     break
 
                 case "web2Request":
