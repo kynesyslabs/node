@@ -186,7 +186,7 @@ async function main() {
 
     // INFO Setting the common variables and propagating them
     term.yellow("[BOOTSTRAP] 🌐 Bootstrapping peers...\n")
-    console.log(PEER_LIST)
+    //console.log(PEER_LIST)
     const peerList = await peerBootstrap(PEER_LIST)
     for (const peer of peerList) {
         peerManager.addPeer(peer)

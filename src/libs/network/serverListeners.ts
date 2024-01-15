@@ -241,8 +241,8 @@ export default class ServerListeners {
             }
 
             console.log("content.type: " + content.type)
-            console.log("content.message: " + content.message)
-            console.log("content.message.action: " + content.message.action)
+            //console.log("content.message: " + content.message)
+            //console.log("content.message.action: " + content.message.action)
 
             // ANCHOR Reply logic
             // REVIEW unless specified, we now send back the updated comlink as a response
@@ -307,7 +307,7 @@ export default class ServerListeners {
 
     // INFO Register or update a peer identity and connection string
     async authReplyListener() {
-        // FIXME Auth reply listener should not add a client to the peerlist if is read only
+        // REVIEW Auth reply listener should not add a client to the peerlist if is read only
         this.peer.socket.on("auth_reply", async data => {
             let identity = await cryptography.load("./.demos_identity")
             term.yellow("[SERVER] Received auth reply")

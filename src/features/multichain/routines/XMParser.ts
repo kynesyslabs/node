@@ -146,7 +146,7 @@ class XMParser {
         // NOTE For the following tasks we need to check the signed payloads against checkSignedPayloads()
 
         // INFO Pay task
-        console.log(JSON.stringify(operation))
+        // console.log(JSON.stringify(operation))
         if (operation.task?.type == "pay") {
             console.log(
                 "[XMScript Parser] Pay task. Examining payloads (require 1)...",
@@ -210,7 +210,7 @@ class XMParser {
             // Workflow: loading the provider url in our configuration, creating an instance, parsing the request
             // and sending back the chain response as it is
             if (operation.is_evm) {
-                console.log(evmProviders)
+                // console.log(evmProviders)
                 let providerUrl =
                     evmProviders[operation.chain][operation.subchain] // REVIEW Error handling
                 let evmInstance = await multichain.EVM.createInstance(
@@ -257,9 +257,9 @@ class XMParser {
                 // Convert the object values into an array
                 const argsArray = Object.values(methodParams)
                 result = await contractInstance[params.method](...argsArray) // REVIEW Big IF
-                console.log("result from EVM read call")
-                console.log(result.toString())
-                console.log("end result")
+                console.log("result from EVM read call received")
+                //console.log(result.toString())
+                //console.log("end result")
                 return {
                     result: result,
                     status: true,

@@ -43,8 +43,8 @@ export default class multichainDispatcher {
     static async execute(script: XMScript): Promise<any> {
         let results = await XMParser.execute(script)
 
-        console.log("[XM EXECUTE] Successfully executed: result is")
-        console.log(results)
+        console.log("[XM EXECUTE] Successfully executed")
+        //console.log(results)
 
         // Inserting in mempool the results
         let derivedOperation = await multichainDispatcher.deriveMempoolOperation(
@@ -53,8 +53,8 @@ export default class multichainDispatcher {
             true,
         )
 
-        console.log("[XM EXECUTE] Derived Operation is:")
-        console.log(derivedOperation)
+        console.log("[XM EXECUTE] Derived Operation completed successfully")
+        //console.log(derivedOperation)
 
         let overallResult = {
             results: results,
@@ -62,10 +62,10 @@ export default class multichainDispatcher {
         }
 
         
-        console.log("[XM EXECUTE] Result to send back:")
-        console.log(overallResult)
+        console.log("[XM EXECUTE] Sending back the result")
+        //console.log(overallResult)
         
-        return overallResult
+        return results
 
     }
 
@@ -82,7 +82,7 @@ export default class multichainDispatcher {
             results: results,
         }
 
-        console.log(jsonNote)
+        //console.log(jsonNote)
 
         return await deriveMempoolOperation(jsonNote as any, insert)
     }

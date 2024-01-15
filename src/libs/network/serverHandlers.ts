@@ -113,9 +113,9 @@ export default class ServerHandlers {
                     We have no idea of its state validity and thus won't modify the GLS, but
                     it can go into the mempool to be further processed if its cryptographically valid.
                 */
-            term.green.bold(fname + "Valid transaction: ")
-            console.log(validatedTx[1])
-            //console.log(fname + "Adding transaction to mempool...")
+            term.green.bold(fname + "Valid transaction! ")
+            //console.log(validatedTx[1])
+            console.log(fname + "Adding transaction to mempool...")
             // Adding the valid tx to the mempool
             Mempool.addTransaction(validatedTx[1]) // Works by writing the registry
             extra = validatedTx[1].hash
@@ -143,7 +143,7 @@ export default class ServerHandlers {
         console.log("[XMChain] Handling XM Chain Operation...")
         // REVIEW Remember that crosschain operations can be in chainscript syntax
         // INFO Use the src/features/multichain/chainscript/chainscript.chs for the specs
-        console.log(content.data)
+        //console.log(content.data)
         let response = await multichainDispatcher.digest(content.data)
         // TODO
         return { extra, require_reply, response }
@@ -209,8 +209,8 @@ export default class ServerHandlers {
         let response: any
 
         console.log("[SERVER] Received consensus request")
-        console.log("[SERVER] Peer identity information:")
-        console.log(senderIdentity)
+        console.log("[SERVER] Peer identity information received")
+        //console.log(senderIdentity)
         if (!sharedState.getInstance().consensusMode) {
             return {
                 extra,
@@ -232,7 +232,7 @@ export default class ServerHandlers {
             }
         }
         console.log("[SERVERHANDLER] Shard found in shared state")
-        console.log(shard)
+        //console.log(shard)
 
         const peerList = await shard.getPeers()
 

@@ -47,7 +47,8 @@ export default async function executeOperations(
     operations: Operation[],
     block: Block = null,
 ): Promise<Map<string, Actor>> {
-    console.log("executeOperations", operations)
+    console.log("Executing operations")
+    //console.log("executeOperations", operations)
     let results = new Map<string, Actor>()
     // First of all we divide the operations into groups of addresses
     let groups: Map<string, Operation[]> = new Map()

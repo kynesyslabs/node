@@ -49,7 +49,7 @@ export default async function handleWeb2(
         try {
             /* TODO Activate in production */
             // Ensuring we reach the quorum if we are the original rpc that received the request
-            //required(await Web2API(instanceName).awaitQuorum(), "Not enough attestations to reach quorum")
+            //required(await Web2API(instanceName).awaitQuorum(), "Not enough attestations to reach quorum") // SWITCH
 
             // Hashing and signing the request
             console.log("[web2Dispatcher] Hashing and signing the request...")
