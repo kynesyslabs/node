@@ -11,6 +11,7 @@ import {
 export default class multichainDispatcher {
     // INFO Digesting the request from the server
     static async digest(data: XMScript): Promise<any> {
+        console.log(data)
         console.log("[XMChain Digestion] Processing operation")
         console.log(data.multichain_operation)
         console.log("\n===== FUNCTIONS ===== \n")
