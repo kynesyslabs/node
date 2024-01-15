@@ -17,6 +17,8 @@ export default class multichainDispatcher {
         console.log("\n\n")
         console.log("[XMChain Digestion] Processing operation")
         console.log(data.multichain_operation)
+        console.log("[XMChain Digestion] Having:")
+        console.log(Object.keys(data.multichain_operation).length)
         console.log("\n===== FUNCTIONS ===== \n")
         for (
             let i = 0;
