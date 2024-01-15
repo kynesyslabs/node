@@ -207,6 +207,7 @@ class XMParser {
         // ANCHOR MVP
         // INFO Read contract task
         else if (operation.task?.type == "contract_read") {
+            console.log("[XM Method] Read contract")
             // Mainly EVM but let's let it open for weird chains
             // Workflow: loading the provider url in our configuration, creating an instance, parsing the request
             // and sending back the chain response as it is
