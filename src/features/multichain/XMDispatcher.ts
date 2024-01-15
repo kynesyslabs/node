@@ -44,7 +44,7 @@ export default class multichainDispatcher {
         let results = await XMParser.execute(script)
 
         console.log("[XM EXECUTE] Successfully executed")
-        //console.log(results)
+        console.log(results)
 
         // Inserting in mempool the results
         let derivedOperation = await multichainDispatcher.deriveMempoolOperation(
@@ -65,7 +65,7 @@ export default class multichainDispatcher {
         console.log("[XM EXECUTE] Sending back the result")
         //console.log(overallResult)
         
-        return results
+        return overallResult
 
     }
 
