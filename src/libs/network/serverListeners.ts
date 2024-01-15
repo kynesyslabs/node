@@ -179,6 +179,7 @@ export default class ServerListeners {
                     //     },
                     //     extra: null,
                     // }
+                    console.log("\n\n" + JSON.stringify(content) + "\n\n")
                     ;({ extra, require_reply, response } =
                         await ServerHandlers.handleXMChainOperation(content))
                     break
