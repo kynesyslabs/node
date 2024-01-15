@@ -84,6 +84,7 @@ class XMParser {
             name = Object.keys(fullscript.multichain_operation)[id]
             operation = fullscript.multichain_operation[name]
             results[name] = await XMParser.executeOperation(operation)
+            console.log("[RESULT]: " + results[name])
         }
         return results // REVIEW Is the type ok?
     }
