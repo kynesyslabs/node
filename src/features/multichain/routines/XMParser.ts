@@ -76,15 +76,22 @@ class XMParser {
         let results = {}
         let name: string, operation: IOperation
         // Iterating over the operations
+        // TODO Enforce order
         for (
             let id = 0;
-            id < Object.keys(fullscript.multichain_operation).length;
+            id < Object.keys(fullscript.multichain_operation.operations).length;
             id++
         ) {
-            name = Object.keys(fullscript.multichain_operation)[id]
-            operation = fullscript.multichain_operation[name]
-            results[name] = await XMParser.executeOperation(operation)
-            console.log("[RESULT]: " + results[name])
+            try {
+                name = Object.keys(fullscript.multichain_operation.operations)[id]
+                console.log("[" + name + "] " )
+                operation = fullscript.multichain_operation.operations[name]
+                results[name] = await XMParser.executeOperation(operation)
+                console.log("[RESULT]: " + results[name])
+            } catch (e) {
+                console.log("[XM EXECUTE] Error: " + e)
+                results[name] = { result: "error", error: e }
+            }
         }
         return results // REVIEW Is the type ok?
     }

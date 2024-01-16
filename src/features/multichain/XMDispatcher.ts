@@ -15,20 +15,23 @@ export default class multichainDispatcher {
         console.log("[XM Script full digest]")
         console.log(data)
         console.log("\n\n")
-        console.log("[XMChain Digestion] Processing operation")
+        console.log("[XMChain Digestion] Processing multichain operation")
         console.log(data.multichain_operation)
-        console.log("[XMChain Digestion] Having:")
-        console.log(Object.keys(data.multichain_operation).length)
+        console.log("\n[XMChain Digestion] Having:")
+        console.log(Object.keys(data.multichain_operation.operations).length)
+        console.log("operations")
+
+        console.log("\n===== ANALYSIS ===== \n")
         console.log("\n===== FUNCTIONS ===== \n")
         for (
             let i = 0;
-            i < Object.keys(data.multichain_operation).length;
+            i < Object.keys(data.multichain_operation.operations).length;
             i++
         ) {
             // Named function
             console.log(
                 "[XMChain Digestion] Found: " +
-                    Object.keys(data.multichain_operation)[i],
+                    Object.keys(data.multichain_operation.operations)[i],
             )
         }
         console.log("\n===== END OF ANALYSIS ===== \n")
@@ -47,8 +50,8 @@ export default class multichainDispatcher {
 
     // INFO Executes a xM Script
     static async execute(script: XMScript): Promise<any> {
-        let results = await XMParser.execute(script)
-
+        let results = []
+        results = await XMParser.execute(script)
         console.log("[XM EXECUTE] Successfully executed")
         console.log(results)
 
