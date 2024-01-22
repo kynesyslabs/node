@@ -200,6 +200,26 @@ class XMParser {
                         "[XMScript Parser] Ripple Pay: trying to send the payload as a signed transaction...",
                     ) // REVIEW Simulations?
                     let xrplInstance = new multichain.XRPL(rpc_url)
+
+                    // REVIEW 3 seconds timeout for connected
+                    let timer = 0
+                    while (!xrplInstance.connected) {
+                        await new Promise((resolve) => setTimeout(resolve, 300))
+                        timer += 300
+                        if (timer > 3000) {
+                            console.log(
+                                "[XMScript Parser] Ripple Pay: timeout",
+                            )
+                            return {
+                                result: "error",
+                                error: "Timeout in connecting to the XRP network",
+                            }
+                        }
+                    }
+                    console.log(
+                        "[XMScript Parser] Ripple Pay: connected to the XRP network",
+                    )
+
                     try {
                         result = await xrplInstance.sendTransaction(
                             operation.task.signedPayloads[0],
@@ -288,9 +308,6 @@ class XMParser {
                 }
             }
         }
-
-        // Returning the result from the above methods
-        return result
     }
 }
 
