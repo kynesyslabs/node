@@ -44,9 +44,7 @@ export default class XRPL  extends DefaultChain {
     private async _connect(rpc: string) {
         this.provider = new xrpl.Client(rpc)
         await this.provider.connect()
-        if (this.provider.isConnected()) {
-            this.connected = true
-        }
+        this.connected = true
         return this.provider
     }
 
