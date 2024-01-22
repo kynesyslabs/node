@@ -190,20 +190,23 @@ class XMParser {
                     console.log("[XMScript Parser] Ripple Pay")
                     // Testnet support
                     let rpc_url = chainProviders.ripple.mainnet
-                    rpc_url = chainProviders.ripple[operation.subchain]
+                    rpc_url = chainProviders.ripple.testnet
                     console.log(
                         "[XMScript Parser] Ripple Pay: we will use " +
                             rpc_url +
-                            " to connect to " +
-                            operation.subchain,
+                            " to connect to testnet",
                     )
                     console.log(
                         "[XMScript Parser] Ripple Pay: trying to send the payload as a signed transaction...",
                     ) // REVIEW Simulations?
                     let xrplInstance = new multichain.XRPL(rpc_url)
-                    result = await xrplInstance.sendTransaction(
-                        operation.task.signedPayloads[0],
-                    )
+                    try {
+                        result = await xrplInstance.sendTransaction(
+                            operation.task.signedPayloads[0],
+                        )
+                    } catch (error) {
+                        result = JSON.stringify(error)
+                    }
                 }
             }
         }

@@ -25,7 +25,7 @@ export default class XRPL  extends DefaultChain {
     wallet: xrpl.Wallet = null
     
     constructor(rpc_url: string) {
-        super(chainProviders.ripple.testnet) // overwrote -> (rpc_url) 
+        super(rpc_url) // overwrote -> (rpc_url)
         this.name = "xrpl"
     }
 
