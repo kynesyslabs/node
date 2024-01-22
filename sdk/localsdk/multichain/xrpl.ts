@@ -44,12 +44,16 @@ export default class XRPL  extends DefaultChain {
     private async _connect(rpc: string) {
         this.provider = new xrpl.Client(rpc)
         await this.provider.connect()
+        if (this.provider.isConnected()) {
+            this.connected = true
+        }
         return this.provider
     }
 
     // INFO Manages a clean exit
     disconnect() {
         this.provider.disconnect()
+        this.connected = false
     }
 
     // INFO Connects to a wallet on XRPL
