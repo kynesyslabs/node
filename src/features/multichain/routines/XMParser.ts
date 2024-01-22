@@ -204,11 +204,16 @@ class XMParser {
                         result = await xrplInstance.sendTransaction(
                             operation.task.signedPayloads[0],
                         )
+                        console.log("[XMScript Parser] Ripple Pay: result: ")
+                        console.log(result)
                     } catch (error) {
-                        result = JSON.stringify(error)
+                        console.log("[XMScript Parser] Ripple Pay: error: ")
+                        console.log(error)
+                        result = error
                     }
                 }
             }
+            return result // REVIEW is this ok here?
         }
 
         /* SECTION Read only tasks */
