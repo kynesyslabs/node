@@ -107,6 +107,8 @@ export default class XRPL  extends DefaultChain {
 		console.log("Transaction cost:", xrpl.dropsToXrp(prepared.Fee), "XRP")
 		console.log("Transaction expires after ledger:", max_ledger) */
         if (send) {
+            console.log("Sending transaction...")
+            console.log(prepared)
             return await this.sendTransaction(prepared)
         } else {
             // Just signing the tx
