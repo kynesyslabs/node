@@ -67,7 +67,7 @@ export default class multichainDispatcher {
 
         let overallResult = {
             results: results,
-            derivedOperation: derivedOperation, // FIXME It does not contain the result
+            derivedOperation: derivedOperation, // FIXME Implement this above
         }
 
         

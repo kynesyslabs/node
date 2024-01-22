@@ -13,6 +13,7 @@ import * as xrpl from "xrpl"
 // import WebSocket from "ws" // NOTE tsx compatibility
 import DefaultChain from "./types/defaultChain"
 import { chainProviders } from "./configs/chainProviders"
+import chain from 'src/libs/blockchain/chain';
 
 // LINK https://js.xrpl.org/
 
@@ -24,7 +25,7 @@ export default class XRPL  extends DefaultChain {
     wallet: xrpl.Wallet = null
     
     constructor(rpc_url: string) {
-        super(rpc_url)
+        super(chainProviders.ripple.testnet) // overwrote -> (rpc_url) 
         this.name = "xrpl"
     }
 
