@@ -25,6 +25,8 @@ export default async function deriveBlock(
         mempoolData.transactions,
     )
     derivedBlock.content.ordered_transactions = ordered_transactions
+    // FIXME We have to register only the hash in the block
+    // FIXME We also have to write the txs in the transactions table with the hash as reference
     // REVIEW Derive hashes per address
     let transactions_per_address = await assignTxs(mempoolData.transactions)
     derivedBlock.content.per_address_transactions = transactions_per_address
@@ -34,10 +36,10 @@ export default async function deriveBlock(
     // Taking the previous hash from the blockchain
     let previousBlock = await Chain.getLastBlock()
     let previousBlockHash = previousBlock.hash
+    console.log("Deriving block...")
     derivedBlock.content.previousHash = previousBlockHash
     let sContent = JSON.stringify(derivedBlock.content)
     derivedBlock.hash = Hashing.sha256(sContent)
-    console.log("Deriving block...")
     //console.log(derivedBlock.content)
     //console.log(sContent)
     // process.exit(0)
