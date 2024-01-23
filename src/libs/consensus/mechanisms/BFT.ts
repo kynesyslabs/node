@@ -136,10 +136,10 @@ export default class QBFT {
         }
         const mempool = await Mempool.getMempool()
         const proposedBlock = await deriveBlock(mempool, medianTimestamp)
+        // FIXME We also have to write the txs hash in the transactions table with the corresponding block number
 
         let forgedProposedHash = proposedBlock.hash
 
-        console.log("IS IT NULL")
        //console.log(forgedProposedHash)
 
         const pocList = []

@@ -25,8 +25,6 @@ export default async function deriveBlock(
         mempoolData.transactions,
     )
     derivedBlock.content.ordered_transactions = ordered_transactions
-    // FIXME We have to register only the hash in the block
-    // FIXME We also have to write the txs in the transactions table with the hash as reference
     // REVIEW Derive hashes per address
     let transactions_per_address = await assignTxs(mempoolData.transactions)
     derivedBlock.content.per_address_transactions = transactions_per_address
