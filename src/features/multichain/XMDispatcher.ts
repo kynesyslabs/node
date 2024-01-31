@@ -56,11 +56,12 @@ export default class multichainDispatcher {
         console.log(results)
 
         // Inserting in mempool the results
-        let derivedOperation = await multichainDispatcher.deriveMempoolOperation(
-            script,
-            results,
-            true,
-        )
+        let derivedOperation =
+            await multichainDispatcher.deriveMempoolOperation(
+                script,
+                results,
+                true,
+            )
 
         console.log("[XM EXECUTE] Derived Operation completed successfully")
         //console.log(derivedOperation)
@@ -70,12 +71,10 @@ export default class multichainDispatcher {
             derivedOperation: derivedOperation, // FIXME Implement this above
         }
 
-        
         console.log("[XM EXECUTE] Sending back the result")
-        //console.log(overallResult)
-        
-        return overallResult
+        console.log(overallResult)
 
+        return overallResult
     }
 
     static async deriveMempoolOperation(

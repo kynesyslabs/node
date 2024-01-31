@@ -13,22 +13,20 @@ import * as xrpl from "xrpl"
 // import WebSocket from "ws" // NOTE tsx compatibility
 import DefaultChain from "./types/defaultChain"
 import { chainProviders } from "./configs/chainProviders"
-import chain from 'src/libs/blockchain/chain';
+import chain from "src/libs/blockchain/chain"
 
 // LINK https://js.xrpl.org/
 
 // TODO https://xrpl.org/monitor-incoming-payments-with-websocket.html
 
-export default class XRPL  extends DefaultChain {
-    
+export default class XRPL extends DefaultChain {
     provider: xrpl.Client = null
     wallet: xrpl.Wallet = null
-    
+
     constructor(rpc_url: string) {
         super(rpc_url) // overwrote -> (rpc_url)
         this.name = "xrpl"
     }
-
 
     // SECTION Initializations
 
@@ -94,13 +92,17 @@ export default class XRPL  extends DefaultChain {
 
     // INFO Sending XRP to an address
     // ANCHOR MVP
-    async pay(receiver: string, amount: string, send: boolean = true): Promise<any> {
+    async pay(
+        receiver: string,
+        amount: string,
+        send: boolean = true,
+    ): Promise<any> {
         // Preparing a payment tx
         const prepared = await this.provider.autofill({
-            "TransactionType": "Payment",
-            "Account": this.wallet.address,
-            "Amount": xrpl.xrpToDrops(amount),
-            "Destination": receiver,
+            TransactionType: "Payment",
+            Account: this.wallet.address,
+            Amount: xrpl.xrpToDrops(amount),
+            Destination: receiver,
         })
 
         // FIXME See below
@@ -133,10 +135,13 @@ export default class XRPL  extends DefaultChain {
         return signed
     }
 
-
     // INFO Generic sign, send and await (if not specified) a tx
-    async sendTransaction(signed: any, wait:boolean=true): Promise<xrpl.TxResponse> {
+    async sendTransaction(
+        signed: any,
+        wait: boolean = true,
+    ): Promise<xrpl.TxResponse> {
         // Sending the tx
+        console.log("[xrpl] sendtransaction")
         let tx_promise = this.provider.submitAndWait(signed.tx_blob)
         if (wait) {
             return await tx_promise
@@ -146,5 +151,4 @@ export default class XRPL  extends DefaultChain {
     }
 
     // !SECTION Writes
-
 }

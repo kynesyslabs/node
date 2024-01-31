@@ -1,10 +1,10 @@
+import { chain } from "src/libs/blockchain/chain"
 // INFO In this module is offloaded the parsing of XM requests
 import * as multichain from "sdk/localsdk/multichain"
 import * as fs from "fs"
 import required from "src/utilities/required"
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
-import { BigNumber } from "ethers"
 
 // NOTE We define multichain into global so that we can use it later
 global.multichain = multichain
@@ -179,7 +179,17 @@ class XMParser {
                 console.log(
                     "[XMScript Parser] EVM Pay: trying to send the payload as a signed transaction...",
                 ) // REVIEW Simulations?
-                // TODO Add check and instance creation on the fly
+                console.log(chainID)
+
+                const evmInstance = await multichain.EVM.getInstance(chainID)
+
+                if (!evmInstance) {
+                    await multichain.EVM.createInstance(
+                        chainID,
+                        chainProviders[operation.chain][operation.subchain],
+                    )
+                }
+
                 result = await multichain.EVM.getInstance(
                     chainID,
                 ).sendSignedTransaction(operation.task.signedPayloads[0])
@@ -222,6 +232,9 @@ class XMParser {
                     )
 
                     try {
+                        console.log("[XMScript Parser]: debugging operation")
+                        console.log(operation.task)
+                        console.log(JSON.stringify(operation.task))
                         result = await xrplInstance.sendTransaction(
                             operation.task.signedPayloads[0],
                         )
@@ -255,6 +268,10 @@ class XMParser {
                     chainID,
                     providerUrl,
                 ) // REVIEW We should be connected
+                console.log(
+                    `[XM Method] operation.chain: ${operation.chain}, operation.subchain: ${operation.subchain}`,
+                )
+                console.log(`[XM Method]: providerUrl: ${providerUrl}`)
                 await evmInstance.connect(providerUrl)
                 console.log("params: \n")
                 console.log(operation.task.params)
