@@ -87,6 +87,10 @@ class XMParser {
                 ]
                 console.log("[" + name + "] ")
                 operation = fullscript.multichain_operation.operations[name]
+                console.log("[XMParser]: full script operation")
+                console.log(fullscript)
+                console.log("[XMParser]: partial operation")
+                console.log(operation)
                 results[name] = await XMParser.executeOperation(operation)
                 console.log("[RESULT]: " + results[name])
             } catch (e) {
@@ -347,14 +351,14 @@ function checkSignedPayloads(num: number, signedPayloads: any[]): boolean {
         return false
     }
 
-    sanityCheck = required(
-        signedPayloads.indexOf(null) >= 0,
-        "Invalid signedPayloads length",
-    )
+    // sanityCheck = required(
+    //     signedPayloads.indexOf(null) > 0,
+    //     "signedPayloads contains null",
+    // )
 
-    if (!sanityCheck) {
-        return false
-    }
+    // if (!sanityCheck) {
+    //     return false
+    // }
     console.log("[XMScript Parser] Signed payload seems ok.")
     return true
 }

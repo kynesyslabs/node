@@ -14,6 +14,7 @@ export default class multichainDispatcher {
         console.log("\n\n")
         console.log("[XM Script full digest]")
         console.log(data)
+        console.log(JSON.stringify(data))
         console.log("\n\n")
         console.log("[XMChain Digestion] Processing multichain operation")
         console.log(data.multichain_operation)
@@ -51,6 +52,8 @@ export default class multichainDispatcher {
     // INFO Executes a xM Script
     static async execute(script: XMScript): Promise<any> {
         let results = []
+        console.log("[XM EXECUTE]: Script")
+        console.log(JSON.stringify(script))
         results = await XMParser.execute(script)
         console.log("[XM EXECUTE] Successfully executed")
         console.log(results)
