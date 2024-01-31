@@ -1,4 +1,3 @@
-import { chain } from "src/libs/blockchain/chain"
 // INFO In this module is offloaded the parsing of XM requests
 import * as multichain from "sdk/localsdk/multichain"
 import * as fs from "fs"
@@ -181,12 +180,19 @@ class XMParser {
                 ) // REVIEW Simulations?
                 console.log(chainID)
 
-                const evmInstance = await multichain.EVM.getInstance(chainID)
+                console.log(operation.task.signedPayloads)
+
+                console.log(operation.task.signedPayloads[0])
+
+                let evmInstance = await multichain.EVM.getInstance(chainID)
 
                 if (!evmInstance) {
-                    await multichain.EVM.createInstance(
+                    evmInstance = await multichain.EVM.createInstance(
                         chainID,
-                        chainProviders[operation.chain][operation.subchain],
+                        evmProviders[operation.chain][operation.subchain],
+                    )
+                    await evmInstance.connect(
+                        evmProviders[operation.chain][operation.subchain],
                     )
                 }
 
@@ -336,6 +342,16 @@ function checkSignedPayloads(num: number, signedPayloads: any[]): boolean {
         signedPayloads.length == num,
         "Invalid signedPayloads length",
     )
+
+    if (!sanityCheck) {
+        return false
+    }
+
+    sanityCheck = required(
+        signedPayloads.indexOf(null) >= 0,
+        "Invalid signedPayloads length",
+    )
+
     if (!sanityCheck) {
         return false
     }
