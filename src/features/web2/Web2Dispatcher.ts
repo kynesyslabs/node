@@ -26,7 +26,6 @@ export default async function handleWeb2(
     //console.log(payload)
     //process.exit(0)
 
-
     let request: IWeb2Request = payload.message
     console.log("[REQUEST FOR WEB2] ")
     //console.log(request)
@@ -36,8 +35,8 @@ export default async function handleWeb2(
     uuid = uuid + Date.now().toString()
     let nameHash = Hashing.sha256(uuid)
 
-    // TODO Add a destructor (?) to avoid OOM 
-    let web2interface = Web2API(nameHash, senderSocket, payload) // NOTE null is important here
+    // TODO Add a destructor (?) to avoid OOM
+    let web2interface = Web2API(null, nameHash, senderSocket, payload) // NOTE null is important here
     // NOTE We want to wait for the request to be digested before proceeding
     await web2interface.digestedPromise
     // Now result is in web2request.request.result
@@ -57,7 +56,7 @@ export default async function handleWeb2(
         try {
             /* TODO Activate in production */
             // Ensuring we reach the quorum if we are the original rpc that received the request
-            //required(await Web2API(instanceName).awaitQuorum(), "Not enough attestations to reach quorum") // SWITCH
+            //required(await Web2API(null, instanceName).awaitQuorum(), "Not enough attestations to reach quorum") // SWITCH
 
             // Hashing and signing the request
             console.log("[web2Dispatcher] Hashing and signing the request...")
@@ -77,7 +76,7 @@ export default async function handleWeb2(
             web2interface.request.signature = signedAttestations
         } catch (error) {
             // Catching errors before the return
-            console.log("[web2Dispatcher] Error: " +  JSON.stringify(error))
+            console.log("[web2Dispatcher] Error: " + JSON.stringify(error))
             return [false, JSON.stringify(error)]
         }
     }
@@ -101,12 +100,14 @@ export default async function handleWeb2(
     )
     let derivedTx = await toMempool(instanceName)
     console.log("[web2Dispatcher] Transaction derived.")
+
+    Web2API("remove", nameHash, senderSocket)
+
     //console.log(derivedTx)
     // Sending back the result
     // REVIEW Maybe is more efficient somewhere else
     //console.log("[WEB2 DEBUG]")
-   // console.log(JSON.stringify(web2interface.request))
-
+    // console.log(JSON.stringify(web2interface.request))
 
     return [true, JSON.stringify(web2interface.request)]
 }
@@ -118,7 +119,7 @@ async function toMempool(instanceName: string, insert: boolean = true) {
     // NOTE If all the attestations are valid we can create the transaction, insert it and give back the result
     // Deriving an operation and a tx from the web2 request
     derivedOperation = await deriveMempoolOperation(
-        Web2API(instanceName).request as any,
+        Web2API(null, instanceName).request as any,
         insert,
     )
     return derivedOperation

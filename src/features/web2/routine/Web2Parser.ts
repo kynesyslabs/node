@@ -76,10 +76,17 @@ export interface IWeb2Attestation {
 
 // INFO Simply handles the singleton stuff
 export default function Web2API(
+    command: string = null,
     named: string = null,
     sendSock: any = null,
     req: IWeb2Payload = null,
 ): Web2APIClass {
+    if (command === "remove" && typeof sendSock === "string") {
+        const instanceNameToRemove = sendSock
+        Web2APIClass.removeInstance(instanceNameToRemove)
+        return
+    }
+
     let apiInstance: Web2APIClass = Web2APIClass.getInstance(
         named,
         sendSock,
@@ -148,6 +155,15 @@ export class Web2APIClass {
         // REVIEW Should be ok anyway
         // NOTE Not awaiting cause we need to let devs decide when to await with awaitQuorum
         this.digestedPromise = this.digest()
+    }
+
+    static removeInstance(named: string): void {
+        if (Web2APIClass.requests.has(named)) {
+            Web2APIClass.requests.delete(named)
+            console.log(`Instance named ${named} removed successfully.`)
+        } else {
+            console.log(`No instance found with the name ${named}.`)
+        }
     }
 
     // INFO Getting the digest of the request

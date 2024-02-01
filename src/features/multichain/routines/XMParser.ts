@@ -351,14 +351,6 @@ function checkSignedPayloads(num: number, signedPayloads: any[]): boolean {
         return false
     }
 
-    // sanityCheck = required(
-    //     signedPayloads.indexOf(null) > 0,
-    //     "signedPayloads contains null",
-    // )
-
-    // if (!sanityCheck) {
-    //     return false
-    // }
     console.log("[XMScript Parser] Signed payload seems ok.")
     return true
 }
