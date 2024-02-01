@@ -188,7 +188,13 @@ export default class ServerHandlers {
         // We get our connection string
         // const currentPeerString = Identity.getInstance().getConnectionString()
         // NOTE Switched to the new class
+
+        //console.log("[WEB2 CONTENT DUMP]")
+        //console.log(content)
         let fullResponse = await handleWeb2(content, senderSocket)
+        //console.log("[WEB2 CONTENT RESPONSE DUMP]")
+        //console.log(fullResponse)
+
         // Managing the results
         if (fullResponse[0]) {
             response = fullResponse[1]

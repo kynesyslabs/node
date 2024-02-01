@@ -12,7 +12,7 @@ import { deriveMempoolOperation } from "src/libs/utils/demostdlib/deriveMempoolO
 // need to attest and handle the other attestations (if we
 // are either first or not last of the chain), and then
 // send back to the client or to the origin rpc the
-// transaction that will be granted as web2 result
+// transaction that will b  e granted as web2 result
 export default async function handleWeb2(
     payload: IWeb2Payload,
     senderSocket: any,
@@ -24,12 +24,20 @@ export default async function handleWeb2(
 
     console.log("[PAYLOAD FOR WEB2] ")
     //console.log(payload)
+    //process.exit(0)
+
+
     let request: IWeb2Request = payload.message
     console.log("[REQUEST FOR WEB2] ")
     //console.log(request)
     //process.exit(0)
 
-    let web2interface = Web2API(null, senderSocket, payload) // NOTE null is important here
+    let uuid = JSON.stringify(payload)
+    uuid = uuid + Date.now().toString()
+    let nameHash = Hashing.sha256(uuid)
+
+    // TODO Add a destructor (?) to avoid OOM 
+    let web2interface = Web2API(nameHash, senderSocket, payload) // NOTE null is important here
     // NOTE We want to wait for the request to be digested before proceeding
     await web2interface.digestedPromise
     // Now result is in web2request.request.result
@@ -96,6 +104,10 @@ export default async function handleWeb2(
     //console.log(derivedTx)
     // Sending back the result
     // REVIEW Maybe is more efficient somewhere else
+    //console.log("[WEB2 DEBUG]")
+   // console.log(JSON.stringify(web2interface.request))
+
+
     return [true, JSON.stringify(web2interface.request)]
 }
 
