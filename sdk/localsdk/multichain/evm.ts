@@ -26,6 +26,7 @@ export default class EVM extends DefaultChain implements IEVM {
     provider: JsonRpcProvider = null
     wallet: Wallet = null
     empty_transaction: TransactionRequest
+    isEIP1559: boolean = true
     // Specific EVM properties
     contracts: Map<string, ethers.Contract> // Will store all the contracts instances as address: ethers.Contract}
 
@@ -34,9 +35,10 @@ export default class EVM extends DefaultChain implements IEVM {
      * construction calls with the `new` operator.
      */
 
-    private constructor(chain_id: number, rpc_url: string) {
+    private constructor(chain_id: number, rpc_url: string, isEIP1559: boolean = true) {
         super(rpc_url)
         this.name = "evm"
+        this.isEIP1559 = isEIP1559
     }
 
     connect(rpc_url: string): boolean {

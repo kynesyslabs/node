@@ -62,6 +62,7 @@ export default abstract class DefaultChain implements IDefaultChain {
 // TODO Fill it more
 export interface IEVM {
 	contracts: Map<string, ethers.Contract>
+	isEIP1559: boolean,
 	getContractInstance: (address: string, abi: string) => Promise<Contract>
 	createRawTransaction: (tx_data: any) => Promise<any>
 	readFromContract: (contract: any, method: string, args: any) => Promise<any>
