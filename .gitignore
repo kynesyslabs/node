@@ -15,3 +15,4 @@ megalinter-reports/
 node_modules
 yarn-error.log
 
+data/chain.db
