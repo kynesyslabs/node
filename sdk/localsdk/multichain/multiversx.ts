@@ -8,14 +8,16 @@ Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
 KyneSys Labs: https://www.kynesys.xyz/
 
 */
-import { ProxyNetworkProvider } from "@multiversx/sdk-network-providers"
 import { Mnemonic, UserWallet } from "@multiversx/sdk-wallet"
+import { ProxyNetworkProvider } from "@multiversx/sdk-network-providers"
 import { INetworkProvider } from "@multiversx/sdk-network-providers/out/interface"
 
+import required from "src/utilities/required"
 import DefaultChainAsync from "./types/defaultChainAsync"
 
 export default class MULTIVERSX extends DefaultChainAsync {
     declare provider: INetworkProvider
+    declare wallet: UserWallet
 
     constructor(rpcURL: string) {
         super(rpcURL)
@@ -39,13 +41,14 @@ export default class MULTIVERSX extends DefaultChainAsync {
         throw new Error("Method not implemented.")
     }
 
-    createWallet(password: string, addressIndex: number = 0): any {
+    createWallet(password: string, addressIndex: number = 0) {
+        required(password, "Password is required to encrypt the key file")
+
         const mnemonics = Mnemonic.generate()
 
         console.log("GENERATED MNEMONICS:")
         const words = mnemonics.getWords()
-
-        console.log(words)
+        const words_with_index = words.map((word, index) => index + ". " + word)
 
         const secretKey = mnemonics.deriveKey(addressIndex, password)
         const wallet = UserWallet.fromSecretKey({ secretKey, password })
@@ -55,26 +58,28 @@ export default class MULTIVERSX extends DefaultChainAsync {
 
         const jsonWallet = wallet.toJSON()
 
-        // const wa = UserWallet.decryptSe?cretKey(jsonWallet, password)
-        // console.log("DECRYPTED WALLET ADDRESS:")
-        // console.log(wa.generatePublicKey().toAddress().bech32())
-
         // NOTE: .bech32 is the address property
         const walletAddress = jsonWallet.bech32
 
         // TODO Return downloadable mnemonics & json files
         return {
             mnemonics: words,
-            mnemonics_txt: words
-                .map((word, index) => index + " " + word + "\n")
-                .join(""),
             address: walletAddress,
+            mnemonics_txt: words_with_index.join(""),
             wallet_keyfile: JSON.stringify(jsonWallet, null, 2),
         }
     }
 
-    connectWallet(privateKey: string) {
-        throw new Error("Method not implemented.")
+    connectWallet(privateKey: string, password: string) {
+        required(privateKey, "Key file is required to connect to the wallet.")
+        required(password, "Password is required to decrypt the key file.")
+
+        const keyfile = JSON.parse(privateKey)
+
+        const secretKey = UserWallet.decryptSecretKey(keyfile, password)
+        this.wallet = UserWallet.fromSecretKey({ secretKey, password })
+
+        return this.wallet
     }
     getBalance(address: string): Promise<string> {
         throw new Error("Method not implemented.")
