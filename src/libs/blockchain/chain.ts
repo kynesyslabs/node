@@ -365,6 +365,19 @@ export default class Chain {
     static async getGenesisUniqueBlock() {
         // TODO
     }
+
+    // INFO Insert a transaction into the database
+    static async insertTransaction(
+        txhash: string,
+        block_number: number,
+    ): Promise<any> {
+        const db = await Datasource.getInstance()
+        const transactionRepository = db
+            .getDataSource()
+            .getRepository(Transactions)
+        // FIXME We only need to insert the hash and the block number (edit the table)
+        // TODO Save the transaction in the database
+    }
     // !SECTION Setters
 
     // SECTION Specific operations
