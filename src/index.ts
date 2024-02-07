@@ -41,7 +41,7 @@ import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import * as bitcoin from "bitcoinjs-lib"
 
-import testMultiversx from "sdk/localsdk/multichain/multiversx/test"
+// REVIEW Delete when tested properly // import testMultiversx from "sdk/localsdk/multichain/multiversx/test"
 
 let enough_peers = true
 // INFO Loading the known peers
@@ -218,7 +218,7 @@ async function main() {
     }
 }
 
-// digestArguments()
-// main()
+digestArguments()
+main()
 
-testMultiversx()
+// REVIEW Delete when tested properly // testMultiversx()

@@ -46,7 +46,7 @@ export default abstract class DefaultChainAsync implements IDefaultChainAsync {
 	abstract pay(receiver: string, amount: string): Promise<any>;
 	abstract info(...args: any): Promise<string>;
 	// ANCHOR Write methods
-	abstract createWallet(): any;
+	abstract createWallet(password?: string): any;
 	abstract connectWallet(privateKey: string): any;
 	abstract signTransaction(raw_transaction: any): Promise<any>
 	abstract sendTransaction(signed_transaction: any): any;
@@ -56,4 +56,21 @@ export default abstract class DefaultChainAsync implements IDefaultChainAsync {
 	    this.rpc_url = rpcURL
 		this.connected = false
 	}
+}
+
+
+// INFO This interface is exclusive for the EVM networks
+// TODO Fill it more
+export interface IEVM {
+	contracts: Map<string, ethers.Contract>
+	isEIP1559: boolean,
+	getContractInstance: (address: string, abi: string) => Promise<Contract>
+	createRawTransaction: (tx_data: any) => Promise<any>
+	readFromContract: (contract: any, method: string, args: any) => Promise<any>
+	writeToContract: (contract: any, method: string, args: any) => Promise<any>
+	listenForEvent: (event: string, contract: string, abi: any[]) => Promise<any>
+	listenForAllEvents: (contract: string, abi: any[]) => Promise<any>
+	waitForReceipt: (tx_hash: string) => Promise<ethers.providers.TransactionReceipt>
+	// The following methods are to be redirected to defaultChain methods (see evm implementation)
+	transfer: any
 }

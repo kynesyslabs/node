@@ -13,13 +13,13 @@ import { JsonRpcProvider } from "@ethersproject/providers"
 import { Wallet } from "@ethersproject/wallet"
 import { TransactionRequest } from "@ethersproject/providers"
 import { Contract } from "ethers"
-import DefaultChain from "./types/defaultChain"
-import { IEVM } from "./types/defaultChain"
+import defaultChainAsync from "./types/defaultChainAsync"
+import { IEVM } from "./types/defaultChainAsync"
 import required from "src/utilities/required"
 import { sign } from "crypto"
 import { evmProviders } from "./configs/evmProviders"
 
-export default class EVM extends DefaultChain implements IEVM {
+export default class EVM extends defaultChainAsync implements IEVM {
     // A singleton for each chain_id
     private static instances: Map<number, EVM> = new Map<number, EVM>()
     // Chain properties
@@ -41,7 +41,7 @@ export default class EVM extends DefaultChain implements IEVM {
         this.isEIP1559 = isEIP1559
     }
 
-    connect(rpc_url: string): boolean {
+    async connect(rpc_url: string): Promise<boolean> {
         console.log("Connecting EVM RPC provider: " + rpc_url)
         this.provider = new JsonRpcProvider(rpc_url)
         // TODO Check network connectivity and id
@@ -50,7 +50,7 @@ export default class EVM extends DefaultChain implements IEVM {
         return true
     }
 
-    disconnect() {
+    async disconnect() {
         // TODO
     }
 

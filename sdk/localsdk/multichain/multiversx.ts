@@ -12,7 +12,6 @@ import { ProxyNetworkProvider } from "@multiversx/sdk-network-providers"
 import { Mnemonic, UserWallet } from "@multiversx/sdk-wallet"
 import { INetworkProvider } from "@multiversx/sdk-network-providers/out/interface"
 
-import DefaultChain from "./types/defaultChain"
 import DefaultChainAsync from "./types/defaultChainAsync"
 
 export default class MULTIVERSX extends DefaultChainAsync {

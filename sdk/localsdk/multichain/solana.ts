@@ -1,5 +1,5 @@
 import * as solanaWeb3 from "@solana/web3.js"
-import DefaultChain from "./types/defaultChain"
+import defaultChainAsync from "./types/defaultChainAsync"
 import required from "src/utilities/required"
 
 /* LICENSE
@@ -16,7 +16,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 // LINK https://docs.solana.com/developing/clients/javascript-api
 
-export default class SOLANA  extends DefaultChain  {
+export default class SOLANA  extends defaultChainAsync  {
     private static instance: SOLANA
 
     wallet: solanaWeb3.Keypair = null
@@ -27,13 +27,13 @@ export default class SOLANA  extends DefaultChain  {
         this.name = "solana"
     }
 
-    connect(rpc_url: string): boolean {
+    async connect(rpc_url: string): Promise<boolean> {
         this.provider = new solanaWeb3.Connection(rpc_url)
         // TODO Check connectivity
         return true
     }
 
-    disconnect(): void {
+    async disconnect(): Promise<any> {
         this.provider = null
         // TODO If something is to do, do it here
     }

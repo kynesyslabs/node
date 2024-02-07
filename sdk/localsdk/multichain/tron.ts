@@ -1,12 +1,12 @@
 // INFO Support for the Tron network
 
 import required from "src/utilities/required"
-import DefaultChain from "./types/defaultChain"
+import defaultChainAsync from "./types/defaultChainAsync"
 import TronWeb from "tronweb"
 
 // LINK to the testnet https://api.shasta.trongrid.io
 
-export default class TRON extends DefaultChain {
+export default class TRON extends defaultChainAsync {
     // LINK https://github.com/tronprotocol/tronweb
     // NOTE As Tron supports solidity contracts, we need to study for it quite a lot
     // TODO See TVM and EVM
@@ -17,13 +17,14 @@ export default class TRON extends DefaultChain {
     }
 
     // INFO Connecting to a provider
-    connect(rpc_url: string): boolean {
+    async connect(rpc_url: string): Promise<boolean> {
         this.provider = new TronWeb({
             fullHost: rpc_url,
         })
         return true
     }
-    disconnect(): void {
+    
+    async disconnect(): Promise<any> {
         throw new Error("Method not implemented.")
     }
     getBalance(address: string): Promise<string> {

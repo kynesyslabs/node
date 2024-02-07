@@ -11,7 +11,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import * as xrpl from "xrpl"
 // import WebSocket from "ws" // NOTE tsx compatibility
-import DefaultChain from "./types/defaultChain"
+import DefaultChainAsync from "./types/defaultChainAsync"
 import { chainProviders } from "./configs/chainProviders"
 import chain from "src/libs/blockchain/chain"
 
@@ -19,7 +19,7 @@ import chain from "src/libs/blockchain/chain"
 
 // TODO https://xrpl.org/monitor-incoming-payments-with-websocket.html
 
-export default class XRPL extends DefaultChain {
+export default class XRPL extends DefaultChainAsync {
     provider: xrpl.Client = null
     wallet: xrpl.Wallet = null
 
@@ -31,15 +31,7 @@ export default class XRPL extends DefaultChain {
     // SECTION Initializations
 
     // INFO Connects to a XRP rpc server
-    public connect(rpc: string): any {
-        this._connect(rpc).then(res => {
-            // TODO something
-            //console.log(res)
-            // TODO Check if connected
-            return true
-        })
-    }
-    private async _connect(rpc: string) {
+    public async connect(rpc: string): Promise<any> {
         this.provider = new xrpl.Client(rpc)
         await this.provider.connect()
         this.connected = true
@@ -47,9 +39,10 @@ export default class XRPL extends DefaultChain {
     }
 
     // INFO Manages a clean exit
-    disconnect() {
-        this.provider.disconnect()
+    public async disconnect(): Promise<any> {
+        await this.provider.disconnect()
         this.connected = false
+        return true
     }
 
     // INFO Connects to a wallet on XRPL

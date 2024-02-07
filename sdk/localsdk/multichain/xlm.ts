@@ -12,23 +12,24 @@ KyneSys Labs: https://www.kynesys.xyz/
 // LINK https://github.com/stellar/js-stellar-sdk/tree/master/docs/reference
 
 import required from "src/utilities/required"
-import DefaultChain from "./types/defaultChain"
+import defaultChainAsync from "./types/defaultChainAsync"
 import * as StellarSdk from "stellar-sdk"
+import Server from '../../../src/libs/network/server';
 
 // TODO Find a way to make things in the next link much more unified
 // LINK https://github.com/stellar/js-stellar-base/blob/master/docs/reference/building-transactions.md
-export default class XLM extends DefaultChain {
+export default class XLM extends defaultChainAsync {
     constructor(rpcURL: string) {
         super(rpcURL) 
         this.name = "xlm"
     }
 
-    public connect(rpcURL: string): boolean {
-        this.provider = new StellarSdk.Server(rpcURL) // 'https://horizon-testnet.stellar.org'
+    public async connect(rpcURL: string): Promise<boolean> {
+        this.provider = new StellarSdk(rpcURL) // 'https://horizon-testnet.stellar.org' // FIXME
         return true
     }
 
-    disconnect(): void {
+    public async disconnect(): Promise<any> {
         throw new Error("Method not implemented.")
     }
 

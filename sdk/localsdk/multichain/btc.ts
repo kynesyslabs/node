@@ -1,5 +1,5 @@
 import * as bitcoin from "bitcoinjs-lib"
-import DefaultChain from "./types/defaultChain"
+import defaultChainAsync from "./types/defaultChainAsync"
 import BIP32Factory, { BIP32Interface } from "bip32"
 import * as ecc from "tiny-secp256k1"
 import * as bip39 from "bip39"
@@ -9,17 +9,17 @@ const bip32 = BIP32Factory(ecc)
 // NOTE BIP32 implementation follows:
 // LINK https://github.com/bitcoinjs/bitcoinjs-lib/blob/master/test/integration/bip32.spec.ts
 
-export default class BTC extends DefaultChain {
+export default class BTC extends defaultChainAsync {
 
     constructor(rpc_url: string) {
         super(rpc_url)
         this.name = "BTC"
     }
 	
-    connect(rpc_url: string): boolean {
+    async connect(rpc_url: string): Promise<boolean> {
         throw new Error("Method not implemented.")
     }
-    disconnect(): void {
+    async disconnect(): Promise<any> {
         throw new Error("Method not implemented.")
     }
     async getBalance(address: string): Promise<string> {
