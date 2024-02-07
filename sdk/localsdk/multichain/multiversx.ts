@@ -9,6 +9,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 import { ProxyNetworkProvider } from "@multiversx/sdk-network-providers"
+import { Mnemonic, UserWallet } from "@multiversx/sdk-wallet"
 import { INetworkProvider } from "@multiversx/sdk-network-providers/out/interface"
 
 import DefaultChain from "./types/defaultChain"
@@ -36,7 +37,39 @@ export default class MULTIVERSX extends DefaultChain {
         throw new Error("Method not implemented.")
     }
 
-    createWallet(): any {}
+    createWallet(password: string, addressIndex: number = 0): any {
+        const mnemonics = Mnemonic.generate()
+
+        console.log("GENERATED MNEMONICS:")
+        const words = mnemonics.getWords()
+
+        console.log(words)
+
+        const secretKey = mnemonics.deriveKey(addressIndex, password)
+        const wallet = UserWallet.fromSecretKey({ secretKey, password })
+
+        console.log("WALLET AS JSON:")
+        console.log(wallet.toJSON())
+
+        const jsonWallet = wallet.toJSON()
+
+        // const wa = UserWallet.decryptSe?cretKey(jsonWallet, password)
+        // console.log("DECRYPTED WALLET ADDRESS:")
+        // console.log(wa.generatePublicKey().toAddress().bech32())
+
+        // NOTE: .bech32 is the address property
+        const walletAddress = jsonWallet.bech32
+
+        // TODO Return downloadable mnemonics & json files
+        return {
+            mnemonics: words,
+            mnemonics_txt: words
+                .map((word, index) => index + " " + word + "\n")
+                .join(""),
+            address: walletAddress,
+            wallet_keyfile: JSON.stringify(jsonWallet, null, 2),
+        }
+    }
 
     connectWallet(privateKey: string) {
         throw new Error("Method not implemented.")
