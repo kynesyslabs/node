@@ -4,7 +4,11 @@ const TESTNET_URL = "https://testnet-api.multiversx.com"
 
 export default async function testMultiversx() {
     const multiversx = new MULTIVERSX(TESTNET_URL)
-    // console.log(multiversx)
+
+    // Connecting to the network
+    console.log("starting connection")
+    await multiversx.connect()
+    console.log(multiversx)
 
     // Generating a wallet
     const wallet = multiversx.createWallet("password")

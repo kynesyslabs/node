@@ -13,8 +13,9 @@ import { Mnemonic, UserWallet } from "@multiversx/sdk-wallet"
 import { INetworkProvider } from "@multiversx/sdk-network-providers/out/interface"
 
 import DefaultChain from "./types/defaultChain"
+import DefaultChainAsync from "./types/defaultChainAsync"
 
-export default class MULTIVERSX extends DefaultChain {
+export default class MULTIVERSX extends DefaultChainAsync {
     declare provider: INetworkProvider
 
     constructor(rpcURL: string) {
@@ -22,18 +23,20 @@ export default class MULTIVERSX extends DefaultChain {
         this.name = "multiversx"
     }
 
-    connect(rpc_url: string): boolean {
-        this.provider = new ProxyNetworkProvider(rpc_url)
+    async connect(rpc_url: string = this.rpc_url) {
+        // NOTE We might not need to pass the rpc_url to the provider as it's already set in the constructor
 
-        // INFO To check for connectivity, we need to await the networkConfig (but that would need rewriting the interface and how it is used)
+        this.provider = new ProxyNetworkProvider(this.rpc_url)
 
-        // const networkConfig = await this.provider.getNetworkConfig()
-        // this.connected = networkConfig.ChainID !== undefined
+        console.log("Connecting to MULTIVERSX network")
+        const networkConfig = await this.provider.getNetworkConfig()
+        this.connected = networkConfig.ChainID !== undefined
 
-        return true
+        console.log("Connected to MULTIVERSX network")
+        return this.connected
     }
 
-    disconnect(): void {
+    async disconnect() {
         throw new Error("Method not implemented.")
     }
 
