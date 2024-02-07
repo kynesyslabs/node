@@ -4,6 +4,8 @@ import MULTIVERSX from "../multiversx"
 
 const term = termkit.terminal
 const TESTNET_URL = "https://testnet-api.multiversx.com"
+const VALID_TESTNET_ADDRESS =
+    "erd1fsac7hpfzyhzs2ls894579kctfzp8n3hyp6gt5n0ccnd6hp9dpkqd6hg6w"
 
 export default async function testMultiversx() {
     const WALLET_PASSWORD = "password"
@@ -25,4 +27,8 @@ export default async function testMultiversx() {
     const is_same_wallet = multiversx.wallet.toJSON().bech32 === address
 
     term.bgCyan("Wallet created and connected: " + is_same_wallet + "\n")
+
+    // Getting the balance
+    const balance = await multiversx.getBalance(VALID_TESTNET_ADDRESS)
+    console.log("Balance: " + balance)
 }

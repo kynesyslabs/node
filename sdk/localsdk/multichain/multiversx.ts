@@ -8,8 +8,11 @@ Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
 KyneSys Labs: https://www.kynesys.xyz/
 
 */
+
 import { Mnemonic, UserWallet } from "@multiversx/sdk-wallet"
 import { ProxyNetworkProvider } from "@multiversx/sdk-network-providers"
+
+import { UserAddress } from "@multiversx/sdk-wallet/out/userAddress"
 import { INetworkProvider } from "@multiversx/sdk-network-providers/out/interface"
 
 import required from "src/utilities/required"
@@ -29,15 +32,14 @@ export default class MULTIVERSX extends DefaultChainAsync {
 
         this.provider = new ProxyNetworkProvider(this.rpc_url)
 
-        console.log("Connecting to MULTIVERSX network")
         const networkConfig = await this.provider.getNetworkConfig()
         this.connected = networkConfig.ChainID !== undefined
 
-        console.log("Connected to MULTIVERSX network")
         return this.connected
     }
 
     async disconnect() {
+        // TODO: implement this
         throw new Error("Method not implemented.")
     }
 
@@ -46,20 +48,18 @@ export default class MULTIVERSX extends DefaultChainAsync {
 
         const mnemonics = Mnemonic.generate()
 
-        console.log("GENERATED MNEMONICS:")
         const words = mnemonics.getWords()
         const words_with_index = words.map((word, index) => index + ". " + word)
 
         const secretKey = mnemonics.deriveKey(addressIndex, password)
         const wallet = UserWallet.fromSecretKey({ secretKey, password })
 
-        console.log("WALLET AS JSON:")
         console.log(wallet.toJSON())
 
         const jsonWallet = wallet.toJSON()
 
         // NOTE: .bech32 is the address property
-        const walletAddress = jsonWallet.bech32
+        const walletAddress: string = jsonWallet.bech32
 
         // TODO Return downloadable mnemonics & json files
         return {
@@ -71,6 +71,9 @@ export default class MULTIVERSX extends DefaultChainAsync {
     }
 
     connectWallet(privateKey: string, password: string) {
+        // NOTE: privateKey is the keyfile in a JSON string format
+        // NOTE: the password param is not defined in DefaultChainAsync
+
         required(privateKey, "Key file is required to connect to the wallet.")
         required(password, "Password is required to decrypt the key file.")
 
@@ -81,9 +84,16 @@ export default class MULTIVERSX extends DefaultChainAsync {
 
         return this.wallet
     }
-    getBalance(address: string): Promise<string> {
-        throw new Error("Method not implemented.")
+
+    async getBalance(address: string): Promise<string> {
+        required(address, "address is required to get the balance")
+
+        const Iaddress = UserAddress.fromBech32(address)
+        const account = await this.provider.getAccount(Iaddress)
+
+        return account.balance.toString()
     }
+
     pay(receiver: string, amount: string): Promise<any> {
         throw new Error("Method not implemented.")
     }

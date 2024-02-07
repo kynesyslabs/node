@@ -219,8 +219,8 @@ async function main() {
     }
 }
 
-// digestArguments()
-// main()
+digestArguments()
+main()
 
 // REVIEW Delete when tested properly 
 // testMultiversx()
