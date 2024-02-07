@@ -8,10 +8,13 @@ Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
 KyneSys Labs: https://www.kynesys.xyz/
 
 */
+import { ProxyNetworkProvider } from "@multiversx/sdk-network-providers"
+import { INetworkProvider } from "@multiversx/sdk-network-providers/out/interface"
 
 import DefaultChain from "./types/defaultChain"
 
 export default class MULTIVERSX extends DefaultChain {
+    declare provider: INetworkProvider
 
     constructor(rpcURL: string) {
         super(rpcURL)
@@ -19,16 +22,22 @@ export default class MULTIVERSX extends DefaultChain {
     }
 
     connect(rpc_url: string): boolean {
-        throw new Error("Method not implemented.")
+        this.provider = new ProxyNetworkProvider(rpc_url)
+
+        // INFO To check for connectivity, we need to await the networkConfig (but that would need rewriting the interface and how it is used)
+
+        // const networkConfig = await this.provider.getNetworkConfig()
+        // this.connected = networkConfig.ChainID !== undefined
+
+        return true
     }
+
     disconnect(): void {
         throw new Error("Method not implemented.")
     }
 
-    createWallet(): any {
-        
-    }
-    
+    createWallet(): any {}
+
     connectWallet(privateKey: string) {
         throw new Error("Method not implemented.")
     }
@@ -45,9 +54,8 @@ export default class MULTIVERSX extends DefaultChain {
     async signTransaction(raw_transaction: any): Promise<any> {
         // TODO
     }
-	
+
     sendTransaction(transactions: any) {
         throw new Error("Method not implemented.")
     }
-	
 }
