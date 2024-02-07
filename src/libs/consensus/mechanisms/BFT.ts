@@ -3,6 +3,7 @@ import Mempool, { MempoolData } from "src/libs/blockchain/mempool"
 import Block from "src/libs/blockchain/block"
 import PeerManager from "src/libs/peer/PeerManager"
 import Peer from "src/libs/peer/Peer"
+import Chain from "src/libs/blockchain/chain"
 import { ProofOfRepresentation } from "./PoR"
 import { demostdlib } from "src/libs/utils"
 import deriveBlock from "../routines/deriveBlock"
@@ -136,7 +137,6 @@ export default class QBFT {
         }
         const mempool = await Mempool.getMempool()
         const proposedBlock = await deriveBlock(mempool, medianTimestamp)
-        // FIXME We also have to write the txs hash in the transactions table with the corresponding block number
 
         let forgedProposedHash = proposedBlock.hash
 
@@ -187,6 +187,16 @@ export default class QBFT {
             forgedProposedHash,
             medianTimestamp,
         )
+        
+        if (finalResult) {
+            let ordered_txs = proposedBlock.content.ordered_transactions
+            for (let i = 0; i < ordered_txs.length; i++) {
+                let tx = ordered_txs[i]
+                // FIXME Insert each transaction in the transactions table with the block number and the tx hash
+                await Chain.insertTransaction(tx.hash, proposedBlock.number)
+            }
+        }
+
         return [finalResult, proposedBlock]
     }
 
