@@ -16,8 +16,8 @@ export interface IDefaultChainAsync {
 	rpc_url: string
 	connected: boolean;
 
-	connect: (url: string) => Promise<boolean>;
-	disconnect: () => void;
+	connect: (url: string) => Promise<any>;
+	disconnect: () => Promise<any>;
 	createWallet: () => any;
 	connectWallet: (privateKey: string)=> any;
 	getBalance: (address: string) => Promise<string>
@@ -39,8 +39,8 @@ export default abstract class DefaultChainAsync implements IDefaultChainAsync {
     connected: boolean
 
 	// ANCHOR Base methods
-	abstract connect(rpc_url: string): Promise<boolean>;
-	abstract disconnect(): void;
+	abstract connect(rpc_url: string): Promise<any>;
+	abstract disconnect(): Promise<any>;
 	// ANCHOR Read methods
 	abstract getBalance(address: string): Promise<string>;
 	abstract pay(receiver: string, amount: string): Promise<any>;
