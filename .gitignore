@@ -17,3 +17,5 @@ yarn-error.log
 
 data/chain.db
 chain.db
+keyfile.json
+keyfile_password.txt
