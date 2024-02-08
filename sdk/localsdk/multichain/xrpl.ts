@@ -144,7 +144,6 @@ export default class XRPL extends DefaultChainAsync {
             return tx_promise
         }
     }
-    ok
 
     // !SECTION Writes
 }
