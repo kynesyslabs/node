@@ -48,7 +48,7 @@ export default async function testMultiversx() {
     const balance = await multiversx.getBalance(VALID_TESTNET_ADDRESS)
     console.log("Balance: " + balance)
 
-    // INFO: ESDT Transfer
+    // INFO: EGLD Transfer
     const tx = await multiversx.pay(address, "1.5")
     console.log(tx)
 }
