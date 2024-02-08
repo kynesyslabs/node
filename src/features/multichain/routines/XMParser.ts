@@ -209,14 +209,14 @@ class XMParser {
                 console.log("[XMScript Parser] Non-EVM PAY")
                 // ANCHOR Ripple
                 if (operation.chain == "xrpl") {
-                    console.log("[XMScript Parser] Ripple Pay")
-                    // Testnet support
-                    let rpc_url = chainProviders.ripple.mainnet
-                    rpc_url = chainProviders.ripple.testnet
                     console.log(
-                        "[XMScript Parser] Ripple Pay: we will use " +
-                            rpc_url +
-                            " to connect to testnet",
+                        `[XMScript Parser] Ripple Pay: ${operation.chain} on ${operation.subchain}`,
+                    )
+                    // Testnet support
+                    let rpc_url =
+                        chainProviders[operation.chain][operation.subchain]
+                    console.log(
+                        `[XMScript Parser] Ripple Pay: we will use ${rpc_url} to connect to ${operation.chain} on ${operation.subchain}`,
                     )
                     console.log(
                         "[XMScript Parser] Ripple Pay: trying to send the payload as a signed transaction...",
@@ -224,12 +224,12 @@ class XMParser {
                     let xrplInstance = new multichain.XRPL(rpc_url)
                     xrplInstance.connect(rpc_url)
 
-                    // REVIEW 3 seconds timeout for connected
+                    // REVIEW 10 seconds timeout for connection
                     let timer = 0
                     while (!xrplInstance.connected) {
                         await new Promise(resolve => setTimeout(resolve, 300))
                         timer += 300
-                        if (timer > 3000) {
+                        if (timer > 10000) {
                             console.log("[XMScript Parser] Ripple Pay: timeout")
                             return {
                                 result: "error",

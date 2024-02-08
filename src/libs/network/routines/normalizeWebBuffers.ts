@@ -1,4 +1,3 @@
-
 export function normalizeWebBuffers(webBuffer: any): [Buffer, string] {
     try {
         // In case is a string we need to convert it to an object
@@ -26,6 +25,6 @@ export function normalizeWebBuffers(webBuffer: any): [Buffer, string] {
             return [Buffer.from(bufferized.data), null]
         }
     } catch (e) {
-        return [null, e.message]
+        return [null, e["message"]]
     }
 }

@@ -54,7 +54,7 @@ export default class Wallet {
                     this.create()
                     console.log("Wallet created successfully")
                 } catch (e) {
-                    console.log(e.message)
+                    console.log(e["message"])
                 }
                 break
             // NOTE Loading from an hex private key
@@ -67,7 +67,7 @@ export default class Wallet {
                     this.load(divided_input[2])
                     console.log("Wallet loaded successfully")
                 } catch (e) {
-                    console.log(e.message)
+                    console.log(e["message"])
                 }
                 break
             // NOTE Saving the wallet to a file
@@ -84,7 +84,7 @@ export default class Wallet {
                     this.save(filename)
                     console.log("Wallet saved successfully")
                 } catch (e) {
-                    console.log(e.message)
+                    console.log(e["message"])
                 }
                 break
             // NOTE Reading from a file
@@ -103,7 +103,7 @@ export default class Wallet {
                     this.read(load_filename)
                     console.log("Wallet read successfully")
                 } catch (e) {
-                    console.log(e.message)
+                    console.log(e["message"])
                 }
                 break
             // NOTE Showing the wallet

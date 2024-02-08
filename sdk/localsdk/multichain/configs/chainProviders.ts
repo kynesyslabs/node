@@ -1,5 +1,5 @@
 export const chainProviders = {
-    ripple: {
+    xrpl: {
         mainnet: "wss://s1.ripple.com:51234/",
         testnet: "wss://s.altnet.rippletest.net:51233/",
     },

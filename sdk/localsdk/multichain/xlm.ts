@@ -19,12 +19,13 @@ import * as StellarSdk from "stellar-sdk"
 // LINK https://github.com/stellar/js-stellar-base/blob/master/docs/reference/building-transactions.md
 export default class XLM extends DefaultChain {
     constructor(rpcURL: string) {
-        super(rpcURL) 
+        super(rpcURL)
         this.name = "xlm"
     }
 
     public connect(rpcURL: string): boolean {
-        this.provider = new StellarSdk.Server(rpcURL) // 'https://horizon-testnet.stellar.org'
+        throw new Error("fix the SDK implementation")
+        // this.provider = new StellarSdk.Server(rpcURL) // 'https://horizon-testnet.stellar.org'
         return true
     }
 
@@ -32,13 +33,11 @@ export default class XLM extends DefaultChain {
         throw new Error("Method not implemented.")
     }
 
-    createWallet(): any {
-        
-    }
+    createWallet(): any {}
 
     // INFO Loading a keypair from a private key string
     connectWallet(privateKey: string) {
-        this.wallet =  StellarSdk.Keypair.fromSecret(privateKey)
+        this.wallet = StellarSdk.Keypair.fromSecret(privateKey)
     }
     getBalance(address: string): Promise<string> {
         throw new Error("Method not implemented.")
