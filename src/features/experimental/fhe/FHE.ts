@@ -24,7 +24,6 @@ export default class FHE {
     public parms: EncryptionParameters
     public context: Context
 
-
     public keyGenerator: KeyGenerator
     public publicKey: PublicKey
     public secretKey: SecretKey
@@ -112,9 +111,12 @@ export default class FHE {
         const plainText = this.encoder.encode(Int32Array.from([num]))
 
         // Encrypt the PlainText
-        const cipherText = this.encryptor.encrypt(plainText)
+        if (plainText) {
+            const cipherText = this.encryptor.encrypt(plainText)
+            return cipherText
+        }
 
-        return cipherText
+        return
     }
 
     // NOTE Decrypt a number
@@ -123,16 +125,16 @@ export default class FHE {
         const decryptedPlainText = this.decryptor.decrypt(cipherText)
 
         // Decode the PlainText
-        const decodedArray = this.encoder.decode(decryptedPlainText)
+        if (decryptedPlainText) {
+            const decodedArray = this.encoder.decode(decryptedPlainText)
+            return decodedArray[0]
+        }
 
-        return decodedArray[0]
+        return
     }
 
     // NOTE Add two numbers
-    public async addNumbers(
-        cipherText1: any,
-        cipherText2: any,
-    ): Promise<any> {
+    public async addNumbers(cipherText1: any, cipherText2: any): Promise<any> {
         // Add the CipherText to itself and store it in the destination parameter (itself)
         this.evaluator.add(cipherText1, cipherText2, cipherText1) // Op (A), Op (B), Op (Dest)
 
@@ -151,29 +153,20 @@ export default class FHE {
     }
 
     // NOTE Boolean operations
-    public async negate(
-        cipherText1: any,
-        cipherText2: any,
-    ): Promise<any> {
+    public async negate(cipherText1: any, cipherText2: any): Promise<any> {
         let res = this.evaluator.negate(cipherText1, cipherText2) // Op (A), Op (Dest)
         return res
     }
 
     // NOTE Fallback to plain call
-    public async call(
-        methodName: string,
-        [cipherText1, cipherText2]: any[],
-    ) {
+    public async call(methodName: string, [cipherText1, cipherText2]: any[]) {
         try {
             return await this.evaluator[methodName](cipherText1, cipherText2)
         } catch (error) {
             console.log("[FHE] Error: " + JSON.stringify(error))
             return null
         }
-    
     }
-
-
 }
 
 /*

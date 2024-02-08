@@ -14,13 +14,13 @@ KyneSys Labs: https://www.kynesys.xyz/
 import required from "src/utilities/required"
 import defaultChainAsync from "./types/defaultChainAsync"
 import * as StellarSdk from "stellar-sdk"
-import Server from '../../../src/libs/network/server';
+import Server from "../../../src/libs/network/server"
 
 // TODO Find a way to make things in the next link much more unified
 // LINK https://github.com/stellar/js-stellar-base/blob/master/docs/reference/building-transactions.md
 export default class XLM extends defaultChainAsync {
     constructor(rpcURL: string) {
-        super(rpcURL) 
+        super(rpcURL)
         this.name = "xlm"
     }
 
@@ -33,13 +33,11 @@ export default class XLM extends defaultChainAsync {
         throw new Error("Method not implemented.")
     }
 
-    createWallet(): any {
-        
-    }
+    createWallet(): any {}
 
     // INFO Loading a keypair from a private key string
     connectWallet(privateKey: string) {
-        this.wallet =  StellarSdk.Keypair.fromSecret(privateKey)
+        this.wallet = StellarSdk.Keypair.fromSecret(privateKey)
     }
     getBalance(address: string): Promise<string> {
         throw new Error("Method not implemented.")
