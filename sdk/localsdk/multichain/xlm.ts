@@ -25,7 +25,9 @@ export default class XLM extends defaultChainAsync {
     }
 
     public async connect(rpcURL: string): Promise<boolean> {
-        this.provider = new StellarSdk(rpcURL) // 'https://horizon-testnet.stellar.org' // FIXME
+        console.log("stellar not yet implemented. check the code")
+        process.exit(0)
+        // this.provider = new StellarSdk(rpcURL) // 'https://horizon-testnet.stellar.org' // FIXME
         return true
     }
 
