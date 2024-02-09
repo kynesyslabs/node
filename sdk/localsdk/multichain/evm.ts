@@ -35,7 +35,11 @@ export default class EVM extends defaultChainAsync implements IEVM {
      * construction calls with the `new` operator.
      */
 
-    private constructor(chain_id: number, rpc_url: string, isEIP1559: boolean = true) {
+    private constructor(
+        chain_id: number,
+        rpc_url: string,
+        isEIP1559: boolean = true,
+    ) {
         super(rpc_url)
         this.name = "evm"
         this.isEIP1559 = isEIP1559

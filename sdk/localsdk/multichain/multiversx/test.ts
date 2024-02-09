@@ -51,4 +51,14 @@ export default async function testMultiversx() {
     // INFO: EGLD Transfer
     const tx = await multiversx.pay(address, "1.5")
     console.log(tx)
+
+    // INFO: Signing a transaction
+    const signedTx = await multiversx.signTransaction(tx)
+    console.log(signedTx)
+
+    // INFO: Sending a transaction
+    const txHash = await multiversx.sendTransaction(signedTx)
+
+    console.log('SENT TX HASH')
+    console.log(txHash)
 }
