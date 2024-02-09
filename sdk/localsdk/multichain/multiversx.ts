@@ -12,14 +12,12 @@ import {
     Account,
     Address,
     Transaction,
+    GasEstimator,
     TokenTransfer,
+    TransferTransactionsFactory,
 } from "@multiversx/sdk-core"
 
-import {
-    Mnemonic,
-    UserSigner,
-    UserWallet,
-} from "@multiversx/sdk-wallet"
+import { Mnemonic, UserSigner, UserWallet } from "@multiversx/sdk-wallet"
 
 import { ProxyNetworkProvider } from "@multiversx/sdk-network-providers"
 import { INetworkProvider } from "@multiversx/sdk-network-providers/out/interface"
@@ -118,17 +116,16 @@ export default class MULTIVERSX extends DefaultChainAsync {
 
         const receiverAdress = new Address(receiver)
 
-        const transfer = TokenTransfer.egldFromAmount(amount)
+        const gas = new GasEstimator()
+        const factory = new TransferTransactionsFactory(gas)
 
-        const tx = new Transaction({
-            // data: new TransactionPayload(""),
-            gasLimit: 80000,
+        const transfer = TokenTransfer.egldFromAmount(amount)
+        const tx = factory.createEGLDTransfer({
             sender: senderAdress,
             receiver: receiverAdress,
             value: transfer,
             chainID: this.chainID,
         })
-
 
         tx.setNonce(senderAccount.getNonceThenIncrement())
 
