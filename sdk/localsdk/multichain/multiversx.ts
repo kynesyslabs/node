@@ -17,9 +17,8 @@ import {
     TransferTransactionsFactory,
 } from "@multiversx/sdk-core"
 
-import { Mnemonic, UserSigner, UserWallet } from "@multiversx/sdk-wallet"
-
 import { ProxyNetworkProvider } from "@multiversx/sdk-network-providers"
+import { Mnemonic, UserSigner, UserWallet } from "@multiversx/sdk-wallet"
 import { INetworkProvider } from "@multiversx/sdk-network-providers/out/interface"
 
 import required from "src/utilities/required"
@@ -53,11 +52,15 @@ export default class MULTIVERSX extends DefaultChainAsync {
     }
 
     async disconnect() {
-        // TODO: implement this
-        throw new Error("Method not implemented.")
+        this.wallet = null
+        this.provider = null
+
+        this.rpc_url = ""
+        this.chainID = null
+        this.connected = false
     }
 
-    createWallet(password: string, addressIndex: number = 0) {
+    createWallet(password: string, addressIndex: number = undefined) {
         required(password, "Password is required to encrypt the key file")
 
         const mnemonics = Mnemonic.generate()
@@ -129,7 +132,8 @@ export default class MULTIVERSX extends DefaultChainAsync {
 
         tx.setNonce(senderAccount.getNonceThenIncrement())
 
-        // INFO: Return for signing and broadcast
+        // INFO: tx is an unsigned transaction
+        // INFO: Return it for signing and broadcast
         return tx
     }
 

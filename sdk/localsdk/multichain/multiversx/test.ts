@@ -59,6 +59,10 @@ export default async function testMultiversx() {
     // INFO: Sending a transaction
     const txHash = await multiversx.sendTransaction(signedTx)
 
-    console.log('SENT TX HASH')
+    console.log("SENT TX HASH")
     console.log(txHash)
+    console.log("chain ID before disconnect: ", multiversx.chainID)
+
+    await multiversx.disconnect()
+    console.log("chaid ID after disconnect: " + multiversx.chainID)
 }
