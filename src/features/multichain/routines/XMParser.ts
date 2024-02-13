@@ -4,6 +4,7 @@ import * as fs from "fs"
 import required from "src/utilities/required"
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
+import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 
 // NOTE We define multichain into global so that we can use it later
 global.multichain = multichain
@@ -111,37 +112,15 @@ class XMParser {
         if (operation.is_evm) {
             // Choosing the right chain ID
             // TODO Use online resources to get the chain ID infos
-            if (operation.chain == "eth") {
-                if (operation.subchain == "mainnet") {
-                    chainID = 1
-                } else if (operation.subchain == "ropsten") {
-                    chainID = 3
-                } else if (operation.subchain == "rinkeby") {
-                    chainID = 4
-                } else if (operation.subchain == "goerli") {
-                    chainID = 5
-                }
-            } else if (operation.chain == "bsc") {
-                if (operation.subchain == "mainnet") {
-                    chainID = 56
-                } else if (operation.subchain == "testnet") {
-                    chainID = 97
-                }
-            } else if (operation.chain == "polygon") {
-                if (operation.subchain == "mainnet") {
-                    chainID = 137
-                } else if (operation.subchain == "mumbai") {
-                    chainID = 80001
-                }
-            } else {
-                // Fallback on direct chain id
-                // Subchain must be a number
-                chainID = parseInt(operation.subchain, 10)
+
+            chainID = parseInt(operation.subchain, 10)
+            if (isNaN(chainID)) {
+                chainID = chainIds[operation.chain][operation.subchain]
                 if (isNaN(chainID)) {
-                    console.log(operation.chain)
-                    console.log(operation.subchain)
-                    console.log("Invalid subchain")
-                    return { result: "error", error: "Invalid subchain" }
+                    return {
+                        result: "error",
+                        error: "Invalid chain or subchain",
+                    }
                 }
             }
         }
@@ -160,7 +139,7 @@ class XMParser {
 
         // INFO Pay task
         // console.log(JSON.stringify(operation))
-        if (operation.task?.type == "pay") {
+        if (operation.task?.type === "pay") {
             console.log(
                 "[XMScript Parser] Pay task. Examining payloads (require 1)...",
             )
