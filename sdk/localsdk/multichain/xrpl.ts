@@ -33,8 +33,33 @@ export default class XRPL extends DefaultChainAsync {
     // INFO Connects to a XRP rpc server
     public async connect(rpc: string): Promise<any> {
         this.provider = new xrpl.Client(rpc)
+
+        // Listen for connection events
+        this.provider.on("connected", () => {
+            console.log("Successfully connected to XRPL.")
+            this.connected = true
+        })
+
+        // Handle disconnection events
+        this.provider.on("disconnected", async code => {
+            // Handle the disconnection event (e.g., attempt to reconnect)
+            console.log(
+                `Disconnected from XRPL with code: ${code}, attempting to reconnect...`,
+            )
+            this.connected = false
+
+            await this.provider.connect()
+            this.connected = true
+        })
+
+        // Handle errors
+        this.provider.on("error", (errorCode, errorMessage, data) => {
+            console.log(`XRPL Client Error: ${errorCode}, ${errorMessage}`)
+            // Handle the error based on errorCode and errorMessage
+        })
+
+        // Finally, connect to the provider
         await this.provider.connect()
-        this.connected = true
         return this.provider
     }
 
