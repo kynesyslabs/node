@@ -14,6 +14,7 @@ import {
     Transaction,
     GasEstimator,
     TokenTransfer,
+    IPlainTransactionObject,
     TransferTransactionsFactory,
 } from "@multiversx/sdk-core"
 
@@ -36,8 +37,12 @@ export default class MULTIVERSX extends DefaultChainAsync {
         this.name = "multiversx"
     }
 
-    async connect(rpc_url: string = this.rpc_url) {
+    async connect(rpc_url?: string) {
         // NOTE We might not need to pass the rpc_url to the provider as it's already set in the constructor
+
+        if (rpc_url) {
+            this.rpc_url = rpc_url
+        }
 
         this.provider = new ProxyNetworkProvider(this.rpc_url)
 
@@ -151,10 +156,21 @@ export default class MULTIVERSX extends DefaultChainAsync {
         return transaction
     }
 
-    async sendTransaction(signed_tx: Transaction) {
+    /**
+     * @returns The transaction hash
+     */
+    async sendTransaction(raw_tx: Transaction | IPlainTransactionObject) {
         required(this.provider, "Provider not connected")
+        let signed_tx = raw_tx
 
-        const tx_hash = await this.provider.sendTransaction(signed_tx)
+        // INFO: raw_tx is a plain object when it comes from the frontend
+        if (!(raw_tx instanceof Transaction)) {
+            signed_tx = Transaction.fromPlainObject(raw_tx)
+        }
+
+        const tx_hash = await this.provider.sendTransaction(
+            signed_tx as Transaction,
+        )
         return tx_hash
     }
 }

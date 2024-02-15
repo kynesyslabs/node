@@ -235,7 +235,45 @@ class XMParser {
                         result = error
                     }
                 }
+
+                if (operation.chain == "egld") {
+                    console.log(
+                        `[XMScript Parser] EGLD Pay: ${operation.chain} on ${operation.subchain}`,
+                    )
+                    const rpc_url =
+                        chainProviders[operation.chain][operation.subchain]
+
+                    const mxInstance = new multichain.MULTIVERSX(rpc_url)
+
+                    try {
+                        // INFO: Connect and wait for the connection to be verified
+                        await mxInstance.connect()
+                    } catch (error) {
+                        return {
+                            result: "error",
+                            error: error,
+                        }
+                    }
+
+                    try {
+                        const signedTx = operation.task.signedPayloads[0]
+                        const txHash = await mxInstance.sendTransaction(
+                            signedTx,
+                        )
+                        console.log("[XMScript Parser] EGLD Pay: result: ")
+                        console.log(txHash)
+
+                        result = {
+                            tx_hash: txHash,
+                        }
+                    } catch (error) {
+                        console.log("[XMScript Parser] EGLD Pay: error: ")
+                        console.log(error)
+                        result = error
+                    }
+                }
             }
+
             return result // REVIEW is this ok here?
         }
 

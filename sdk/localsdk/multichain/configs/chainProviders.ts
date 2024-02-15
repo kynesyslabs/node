@@ -8,4 +8,8 @@ export const chainProviders = {
         calibration: "https://rpc.ankr.com/filecoin_testnet",
         testnet: "https://rpc.ankr.com/filecoin_testnet",
     },
+    egld: {
+        mainnet: "https://gateway.multiversx.com",
+        testnet: "https://testnet-gateway.multiversx.com",
+    },
 }
