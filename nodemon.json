@@ -1,5 +1,0 @@
-{
-    "execMap": {
-        "ts": "tsx -r tsconfig-paths/register"
-    }
-}
