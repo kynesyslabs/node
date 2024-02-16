@@ -480,9 +480,10 @@ export default class GLS {
     }
 
     // INFO Assigning a IMPData hash to an address or to the L1 itself
-    static async addToGLSIMPData(address: string,
-                                 IMPDataHash: string): Promise<OperationResult> {
-
+    static async addToGLSIMPData(
+        address: string,
+        IMPDataHash: string,
+    ): Promise<OperationResult> {
         let result: OperationResult = {
             success: false,
             message: "",

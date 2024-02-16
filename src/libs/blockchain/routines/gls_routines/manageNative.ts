@@ -4,24 +4,15 @@ import Genesis from "../../types/genesisTypes"
 import Chain from "../../chain"
 import Block from "../../block"
 
+async function transfer() {}
+async function add() {}
 
-async function transfer() {
+async function remove() {}
 
-}
-async function add() {
-
-}
-
-async function remove() {
-
-}
-
-async function balance() {
-
-}
+async function balance() {}
 
 let native = {
-	transfer: transfer,
+    transfer: transfer,
     add: add,
     remove: remove,
     balance: balance,

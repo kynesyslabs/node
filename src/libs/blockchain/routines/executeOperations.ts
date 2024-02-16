@@ -116,7 +116,7 @@ async function executeSequence(
                 result = await subOperations.removeAsset(operations[i])
                 results.operations.set(operations[i], result)
                 break
-            
+
             // REVIEW
             // TODO Harmonize with deriveMempoolOperation
             case "assign_xm":
@@ -124,7 +124,9 @@ async function executeSequence(
                 results.operations.set(operations[i], result)
                 break
             case "assign_web2":
-                result = await subOperations.glsRoutines.assignWeb2(operations[i])
+                result = await subOperations.glsRoutines.assignWeb2(
+                    operations[i],
+                )
                 results.operations.set(operations[i], result)
                 break
 

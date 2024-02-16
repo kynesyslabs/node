@@ -1,1 +1,1 @@
-import IMSession from "./types/IMSession";
+import IMSession from "./types/IMSession"

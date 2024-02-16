@@ -56,16 +56,15 @@ export interface IKeypair {
 // INFO Main class
 export default class Enigma {
     signingKeyPair: IKeypair = null
-	mcelieceKeypair: IKeypair = null
+    mcelieceKeypair: IKeypair = null
 
-	private kem: McEliece = new McEliece("mceliece8192128")
-
+    private kem: McEliece = new McEliece("mceliece8192128")
 
     constructor() {}
 
     async init() {
         this.signingKeyPair = await superDilithium.keyPair()
-		this.mcelieceKeypair = this.kem.keypair()
+        this.mcelieceKeypair = this.kem.keypair()
     }
 
     /* SECTION Signatures with superDilithium */
@@ -169,42 +168,54 @@ export default class Enigma {
         return verified
     }
 
-	async exportSigningKeys(passphrase: string = null): Promise<any> {
-		let storage: any 
-		if (passphrase) {
-            storage = await superDilithium.exportKeys(this.signingKeyPair, passphrase)
+    async exportSigningKeys(passphrase: string = null): Promise<any> {
+        let storage: any
+        if (passphrase) {
+            storage = await superDilithium.exportKeys(
+                this.signingKeyPair,
+                passphrase,
+            )
         } else {
             storage = await superDilithium.exportKeys(this.signingKeyPair)
         }
-		return storage
+        return storage
     }
 
-	async importSigningKeys(storage: any, passphrase: string = null): Promise<any> {
-		if (passphrase) {
-            this.signingKeyPair = await superDilithium.importKeys(storage, passphrase)
+    async importSigningKeys(
+        storage: any,
+        passphrase: string = null,
+    ): Promise<any> {
+        if (passphrase) {
+            this.signingKeyPair = await superDilithium.importKeys(
+                storage,
+                passphrase,
+            )
         } else {
             this.signingKeyPair = await superDilithium.importKeys(storage)
         }
         return this.signingKeyPair
-	}
+    }
 
-	/* SECTION Keys generation and incapsulation with McEliece */
+    /* SECTION Keys generation and incapsulation with McEliece */
 
     // Incapsulate a secret with a public key
-	async generateSecrets(peerPublicKey: any) {
-		let {key, encryptedKey} = await this.kem.generateKey(peerPublicKey)
+    async generateSecrets(peerPublicKey: any) {
+        let { key, encryptedKey } = await this.kem.generateKey(peerPublicKey)
         let normalizedResult = {
             secret: key,
             shared: encryptedKey,
         }
-		return normalizedResult
-	}
+        return normalizedResult
+    }
 
     // Decapsulate a secret from a shared secret
-	async deriveSharedSecret(shared: any) {
-		let secret = await this.kem.decryptKey(this.mcelieceKeypair.privateKey, shared)
-		return secret
-	}
+    async deriveSharedSecret(shared: any) {
+        let secret = await this.kem.decryptKey(
+            this.mcelieceKeypair.privateKey,
+            shared,
+        )
+        return secret
+    }
 
     /* SECTION Hashing with Argon2 */
 
@@ -229,15 +240,20 @@ export default class Enigma {
 
     /* SECTION Symmetric encryption and decryption with Rijndael */
 
-    async encrypt(input: string, key: string): Promise<Buffer> { // Key can be 16/24/32 bytes long (128/192/256 bit)
+    async encrypt(input: string, key: string): Promise<Buffer> {
+        // Key can be 16/24/32 bytes long (128/192/256 bit)
         let cipher = new Rijndael(key, "cbc")
-        let ciphertext = Buffer.from(cipher.encrypt(input, "256", "Ut enim ad minim veniam, quis no")) // TODO Custom iv same block size
+        let ciphertext = Buffer.from(
+            cipher.encrypt(input, "256", "Ut enim ad minim veniam, quis no"),
+        ) // TODO Custom iv same block size
         return ciphertext
     }
 
     async decrypt(input: Buffer, key: string): Promise<Buffer> {
         let cipher = new Rijndael(key, "cbc")
-        let plainbuffer = Buffer.from(cipher.decrypt(input, "256", "Ut enim ad minim veniam, quis no"))
+        let plainbuffer = Buffer.from(
+            cipher.decrypt(input, "256", "Ut enim ad minim veniam, quis no"),
+        )
         return plainbuffer
     }
 }

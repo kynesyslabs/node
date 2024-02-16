@@ -23,7 +23,7 @@ export default class TRON extends defaultChainAsync {
         })
         return true
     }
-    
+
     async disconnect(): Promise<any> {
         throw new Error("Method not implemented.")
     }

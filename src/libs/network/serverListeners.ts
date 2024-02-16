@@ -183,10 +183,15 @@ export default class ServerListeners {
                     //     },
                     //     extra: null,
                     // }
-                    console.log("[Included XM Chainscript]" + JSON.stringify(content.message) + "\n\n")
-
+                    console.log(
+                        "[Included XM Chainscript]" +
+                            JSON.stringify(content.message) +
+                            "\n\n",
+                    )
                     ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleXMChainOperation(content.message))
+                        await ServerHandlers.handleXMChainOperation(
+                            content.message,
+                        ))
                     break
 
                 case "web2Request":

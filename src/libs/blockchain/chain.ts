@@ -300,7 +300,7 @@ export default class Chain {
             // Insert a new block
             //console.log(block)
             let result = await blockRepository.save(block)
-           //console.log(result)
+            //console.log(result)
             return result
         }
     }

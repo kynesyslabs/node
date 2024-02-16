@@ -16,8 +16,6 @@ import { Socket } from "socket.io"
 import * as socket_client from "socket.io-client"
 import forge from "node-forge"
 
-
-
 export interface Response {
     message: string // TODO Add message type
     timestamp: number

@@ -257,9 +257,8 @@ class XMParser {
 
                     try {
                         const signedTx = operation.task.signedPayloads[0]
-                        const txHash = await mxInstance.sendTransaction(
-                            signedTx,
-                        )
+                        const txHash =
+                            await mxInstance.sendTransaction(signedTx)
                         console.log("[XMScript Parser] EGLD Pay: result: ")
                         console.log(txHash)
 

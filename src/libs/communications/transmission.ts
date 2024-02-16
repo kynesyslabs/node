@@ -21,7 +21,7 @@ export default class Transmission {
     receiver_peer: Peer // TODO Do peer interface
     privateKey: pki.ed25519.BinaryBuffer
 
-    constructor(privateKey=null) {
+    constructor(privateKey = null) {
         this.bundle = {
             content: {
                 type: null,
@@ -58,7 +58,8 @@ export default class Transmission {
         // Hash the content
         this.bundle.hash = Hashing.sha256(JSON.stringify(this.bundle.content)) // REVIEW is this ok?
         // Sign the hash if needed
-        if (this.privateKey!= null) { // NOTE: For things like nodeCall we dont need it necessarily
+        if (this.privateKey != null) {
+            // NOTE: For things like nodeCall we dont need it necessarily
             this.bundle.signature = await Cryptography.sign(
                 this.bundle.hash,
                 this.privateKey,

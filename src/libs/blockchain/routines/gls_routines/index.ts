@@ -3,9 +3,9 @@ import { assignXM } from "./assignXM"
 import native from "./manageNative"
 
 let glsRoutines = {
-	assignWeb2: assignWeb2,
-	assignXM: assignXM,
-	native: native,
+    assignWeb2: assignWeb2,
+    assignXM: assignXM,
+    native: native,
 }
 
 export default glsRoutines

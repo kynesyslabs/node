@@ -1,26 +1,25 @@
 export class NodeStorage {
-    private static instance: NodeStorage;
-    private storage: Map<string, any> = new Map<string, any>();
+    private static instance: NodeStorage
+    private storage: Map<string, any> = new Map<string, any>()
 
     constructor() {}
 
     public static getInstance(): NodeStorage {
         if (!NodeStorage.instance) {
-            NodeStorage.instance = new NodeStorage();
+            NodeStorage.instance = new NodeStorage()
         }
-        return NodeStorage.instance;
+        return NodeStorage.instance
     }
 
     public getItem(key: string): string | null {
         if (this.storage.has(key)) {
-            return this.storage.get(key);
+            return this.storage.get(key)
         } else {
-            return null;
+            return null
         }
     }
 
     public setItem(key: string, value: string): void {
-        this.storage.set(key, value);
+        this.storage.set(key, value)
     }
-
 }

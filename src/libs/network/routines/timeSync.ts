@@ -58,7 +58,7 @@ export default async function getPeerTime(
         comlink.muid,
     )
     console.log("[PEER TIMESYNC] Response received")
-   //console.log(response)
+    //console.log(response)
 
     // Response management
     if (response[0]) {
@@ -91,7 +91,9 @@ export const calculatePeerTimeOffset =
         const roundtrips = results.map(result => result.roundtrip)
         const limit = stat.median(roundtrips) + stat.std(roundtrips)
 
-        console.log(`[PEER TIMESYNC] latency median: ${stat.median(roundtrips)}`)
+        console.log(
+            `[PEER TIMESYNC] latency median: ${stat.median(roundtrips)}`,
+        )
         console.log(
             `[PEER TIMESYNC] latency standard deviation: ${stat.std(
                 roundtrips,

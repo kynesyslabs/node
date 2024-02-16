@@ -10,12 +10,11 @@ const bip32 = BIP32Factory(ecc)
 // LINK https://github.com/bitcoinjs/bitcoinjs-lib/blob/master/test/integration/bip32.spec.ts
 
 export default class BTC extends defaultChainAsync {
-
     constructor(rpc_url: string) {
         super(rpc_url)
         this.name = "BTC"
     }
-	
+
     async connect(rpc_url: string): Promise<boolean> {
         throw new Error("Method not implemented.")
     }
@@ -34,7 +33,9 @@ export default class BTC extends defaultChainAsync {
         throw new Error("Method not implemented.")
     }
     async info(account: BIP32Interface): Promise<string> {
-        let address = bitcoin.payments.p2pkh({ pubkey: account.publicKey }).address!
+        let address = bitcoin.payments.p2pkh({
+            pubkey: account.publicKey,
+        }).address!
         return JSON.stringify(address)
     }
 
@@ -67,5 +68,4 @@ export default class BTC extends defaultChainAsync {
     sendTransaction(signed_transaction: any) {
         throw new Error("Method not implemented.")
     }
-	
 }

@@ -140,9 +140,10 @@ export default async function mainLoop(id: Identity) {
             hasSentNodeOnlineTx = false // Reset it for the next cycle.
             sharedStateInstance.consensusMode = true
 
-            const shard = await RepresentativeShard.getInstance().getShard(
-                currentlyOnlinePeers,
-            )
+            const shard =
+                await RepresentativeShard.getInstance().getShard(
+                    currentlyOnlinePeers,
+                )
 
             sharedStateInstance.shard = shard
             console.log("[MAIN LOOP] Shard selected")

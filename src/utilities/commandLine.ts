@@ -5,16 +5,18 @@ const readline = require("readline")
 const NAME = "demos_client"
 const VERSION = "alpha"
 
-async function prompt(query=""): Promise<string> {
+async function prompt(query = ""): Promise<string> {
     const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
     })
 
-    return new Promise(resolve => rl.question(query, ans => {
-        rl.close()
-        resolve(ans)
-    }))
+    return new Promise(resolve =>
+        rl.question(query, ans => {
+            rl.close()
+            resolve(ans)
+        }),
+    )
 }
 
 export default async function commandLine(): Promise<any> {

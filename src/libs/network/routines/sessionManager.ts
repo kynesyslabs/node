@@ -5,38 +5,40 @@
     context of applications that usually rely on SSOs and similar.
 */
 
-
 import { normalizeWebBuffers } from "./normalizeWebBuffers"
 import Cryptography from "src/libs/crypto/cryptography"
 const SESSION_TIMEOUT = 1000 * 60 * 5 // 5 minutes
 
 function randomMessage() {
     let result = ""
-    const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    const characters =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
     const charactersLength = characters.length
     let counter = 0
     while (counter < 32) {
-        result += characters.charAt(Math.floor(Math.random() * charactersLength))
+        result += characters.charAt(
+            Math.floor(Math.random() * charactersLength),
+        )
         counter += 1
     }
     return result
 }
 
 export interface ISession {
-	start_timestamp: number;
-	last_timestamp: number;
-	end_timestamp: number;
-	current_status: boolean;
-	current_stage: string;
-	session_message: string;
-	session_signature: string;
-	session_token: string;
+    start_timestamp: number
+    last_timestamp: number
+    end_timestamp: number
+    current_status: boolean
+    current_stage: string
+    session_message: string
+    session_signature: string
+    session_token: string
 }
 
 export default class Sessions {
     private static _instance: Sessions
-	
-    registry: Map<string, ISession>// Where string is an address
+
+    registry: Map<string, ISession> // Where string is an address
 
     public static getInstance(): Sessions {
         if (!Sessions._instance) {
@@ -62,7 +64,8 @@ export default class Sessions {
             return false
         }
         // Checking the timestamps
-        if (session.last_timestamp + SESSION_TIMEOUT < Date.now()) { // Or should we use start_timestamp?
+        if (session.last_timestamp + SESSION_TIMEOUT < Date.now()) {
+            // Or should we use start_timestamp?
             return false
         }
     }
@@ -89,7 +92,7 @@ export default class Sessions {
     public validateSignature(s_address: string, s_signature: string): boolean {
         let session = this.registry.get(s_address)
         // If no session has been opened yet, return false
-        if (!session ||!session.current_status) {
+        if (!session || !session.current_status) {
             return false
         }
         // Normalizing the signature and the address
@@ -97,7 +100,7 @@ export default class Sessions {
         let res_signature = normalizeWebBuffers(s_signature)
         if (!res_signature[0]) {
             return false
-        } 
+        }
         let signature = res_signature[0]
         let res_address = normalizeWebBuffers(s_address)
         if (!res_address[0]) {
@@ -109,9 +112,5 @@ export default class Sessions {
         return valid
     }
 
-
-
     // TODO Send back, checks, security and so on
-
-
 }

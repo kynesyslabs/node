@@ -11,8 +11,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 // NOTE Each NFT has its own property
 interface singleNFTProperty {
-	name: string;
-	value: string;
+    name: string
+    value: string
 }
 
 // NOTE A single NFT of a collection

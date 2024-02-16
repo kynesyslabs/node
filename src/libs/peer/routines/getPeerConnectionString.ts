@@ -17,8 +17,10 @@ import Transmission from "../../communications/transmission"
 import ResponseRegistry from "../../communications/responseRegistry"
 import { Socket } from "socket.io"
 
-
-export default async function getPeerConnectionString(peer: Peer, id: any): Promise<Peer> {
+export default async function getPeerConnectionString(
+    peer: Peer,
+    id: any,
+): Promise<Peer> {
     // A peer object must have a valid socket
     if (!peer.socket) {
         return null
@@ -40,17 +42,15 @@ export default async function getPeerConnectionString(peer: Peer, id: any): Prom
     // Adding the response request
     ResponseRegistry.getInstance().requestResponse(comlink)
     // Broadcasting the request
-    await comlink.broadcastMessageToPeer(
-        peer,
-        identity_ask, 
-        id.privateKey,
-    )
+    await comlink.broadcastMessageToPeer(peer, identity_ask, id.privateKey)
     // Awaiting the response
-    let response = await ResponseRegistry.getInstance().checkResponse(comlink.muid)
+    let response = await ResponseRegistry.getInstance().checkResponse(
+        comlink.muid,
+    )
     // Response management
     if (response[0]) {
         console.log("[PEER CONNECTION] Received response")
-       //console.log(response[1])
+        //console.log(response[1])
         peer.connectionString = response[1].message
     } else {
         console.log("[PEER CONNECTION] No response received")

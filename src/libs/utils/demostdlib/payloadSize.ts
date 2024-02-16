@@ -15,8 +15,8 @@ export function payloadSize(
         | "comlink"
         | "transmission" = "object",
 ) {
-	return sizeOf(payload)
-	// TODO Implement remaining types
+    return sizeOf(payload)
+    // TODO Implement remaining types
 }
 
 function transactionSize(transaction) {}

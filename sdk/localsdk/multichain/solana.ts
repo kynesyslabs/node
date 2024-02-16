@@ -13,10 +13,9 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-
 // LINK https://docs.solana.com/developing/clients/javascript-api
 
-export default class SOLANA  extends defaultChainAsync  {
+export default class SOLANA extends defaultChainAsync {
     private static instance: SOLANA
 
     wallet: solanaWeb3.Keypair = null
@@ -38,16 +37,16 @@ export default class SOLANA  extends defaultChainAsync  {
         // TODO If something is to do, do it here
     }
 
-    createWallet(): any {
-        
-    }
+    createWallet(): any {}
 
     // ANCHOR Public methods
     connectWallet(privateKey: string) {
-        this.wallet = solanaWeb3.Keypair.fromSecretKey(Buffer.from(privateKey, "hex")) // REVIEW is this ok?
+        this.wallet = solanaWeb3.Keypair.fromSecretKey(
+            Buffer.from(privateKey, "hex"),
+        ) // REVIEW is this ok?
     }
 
-    async getBalance (address: string): Promise<string> {
+    async getBalance(address: string): Promise<string> {
         // TODO
         return ""
     }
@@ -79,7 +78,7 @@ export default class SOLANA  extends defaultChainAsync  {
     }
 
     // INFO Sending a transfer transaction on Solana network
-    sendTransaction({to, amount}) {
+    sendTransaction({ to, amount }) {
         required(this.wallet, "Wallet not connected")
         let tx = new solanaWeb3.Transaction()
         tx.add(
@@ -89,13 +88,15 @@ export default class SOLANA  extends defaultChainAsync  {
                 lamports: amount * solanaWeb3.LAMPORTS_PER_SOL,
             }),
         )
-        let result = solanaWeb3.sendAndConfirmTransaction(this.provider, tx, [this.wallet])
+        let result = solanaWeb3.sendAndConfirmTransaction(this.provider, tx, [
+            this.wallet,
+        ])
         return result
     }
 
     // ANCHOR Static singleton methods
 
-    static getInstance(): SOLANA|boolean {
+    static getInstance(): SOLANA | boolean {
         if (!SOLANA.instance) {
             return false
         }

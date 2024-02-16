@@ -17,7 +17,7 @@ const rl = readline.createInterface({
 // INFO Easy async based readline method
 async function ask(message: string): Promise<string> {
     return new Promise((resolve, reject) => {
-        rl.question(message, (answer) => {
+        rl.question(message, answer => {
             rl.close()
             resolve(answer)
         })
@@ -29,9 +29,13 @@ async function main() {
     // NOTE Constant prompting
     let exit_flag = false
     while (!exit_flag) {
-        let answer = await ask("DEMOS Client (Alpha)[" + 
-								client.STATUS_PROMPT + " | " + 
-								client.STATUS_FLAG + "] \n> ")
+        let answer = await ask(
+            "DEMOS Client (Alpha)[" +
+                client.STATUS_PROMPT +
+                " | " +
+                client.STATUS_FLAG +
+                "] \n> ",
+        )
         if (answer === "exit") {
             exit_flag = true
         } else {

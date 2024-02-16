@@ -5,6 +5,7 @@ chain.db
 keyfile.json
 keyfile_password.txt
 bin
+evmChains
 
 .vscode
 

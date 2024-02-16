@@ -8,7 +8,6 @@ import Block from "../block"
 // TODO Move everything there if possible
 import glsRoutines from "./gls_routines"
 
-
 // REVIEW Is this working?
 export default class subOperations {
     public static glsRoutines = glsRoutines

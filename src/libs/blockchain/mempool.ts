@@ -48,7 +48,7 @@ export default class Mempool {
 
         let results = await mempoolRepository.findBy({ current: 1 })
 
-       //console.log(results)
+        //console.log(results)
         // In case there is no current mempool, lets create it
         if (!results || results.length === 0) {
             console.log("[Mempool] No current mempool found, creating one...")
@@ -69,14 +69,14 @@ export default class Mempool {
             results = await mempoolRepository.findBy({ current: 1 })
         }
         console.log("[MEMPOOL MANAGER] Mempool query result:")
-       //console.log(results)
+        //console.log(results)
 
         const firstResult = results[0]
 
         // Else we take the object itself
 
         console.log("[MEMPOOL MANAGER] Normalized mempool query result:")
-       //console.log(firstResult)
+        //console.log(firstResult)
         // Serializing
         let result: MempoolData = {
             number: firstResult.number,
@@ -86,7 +86,7 @@ export default class Mempool {
             timestamp: new Date().getTime(),
         }
         console.log("Mempool retrieved:")
-       //console.log(result)
+        //console.log(result)
         return result
     }
 
@@ -297,9 +297,9 @@ export default class Mempool {
                 tx2.content.transaction_fee.rpc_fee
                     ? -1
                     : tx1.content.transaction_fee.rpc_fee <
-                      tx2.content.transaction_fee.rpc_fee
-                    ? 1
-                    : 0
+                        tx2.content.transaction_fee.rpc_fee
+                      ? 1
+                      : 0
             if (comparison) {
                 return -1
             } else {

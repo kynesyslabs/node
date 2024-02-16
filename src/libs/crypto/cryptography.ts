@@ -171,7 +171,7 @@ export default class Cryptography {
         // Also, we have to sanitize buffers so that they are forge compatible
         if (signature.type == "Buffer") {
             console.log("[*] Normalizing signature...")
-            console.log(typeof(signature))
+            console.log(typeof signature)
             signature = Buffer.from(signature) // REVIEW Does not work in bun
         }
         if (publicKey.type == "Buffer") {
