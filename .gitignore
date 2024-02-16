@@ -1,22 +1,17 @@
 #Demos files
 .demos_identity
 demos_peers
+chain.db
+keyfile.json
+keyfile_password.txt
+bin
+
+.vscode
 
 #OSX files
 .DS_Store
 
-#Build files
-dist
-
-#Reporting
-megalinter-reports/
 
 #Package manager files
 node_modules
 yarn-error.log
-
-chain.db
-keyfile.json
-keyfile_password.txt
-
-bin
