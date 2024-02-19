@@ -20,6 +20,7 @@ import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
 import { ISecurityReport } from "./securityModule"
 import * as Security from "./securityModule"
 
+// NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
 var term = terminalkit.terminal
 

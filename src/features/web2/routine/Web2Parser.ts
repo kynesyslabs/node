@@ -8,6 +8,7 @@ import { PeerManager } from "src/libs/peer"
 /* eslint-disable no-unused-vars */
 // This class represents a typical web2 data request
 
+// NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
 var term = terminalkit.terminal
 
@@ -168,6 +169,7 @@ export class Web2APIClass {
 
     // INFO Getting the digest of the request
     // NOTE This is where the Web2Request is processed and the answer is created
+    // NOTE The generated request.result needs to be attested
     private async digest(): Promise<IWeb2Request> {
         required(this.request, "Missing request")
         console.log("[ACTUAL REQUEST]")
@@ -208,6 +210,7 @@ export class Web2APIClass {
                 this.request.result = "Invalid action: " + action
                 break
         }
+        // SECTION Attestation process and requirements
         // Building our own attestation
         term.yellow("[Web2Parser] Digested:\n")
         console.log(this.request)
@@ -215,6 +218,7 @@ export class Web2APIClass {
         let hashedResult = Hashing.sha256(JSON.stringify(this.request.result))
         let ourIdentity = sharedState.getInstance().identity.ed25519.publicKey
         let signatureResult = Cryptography.sign(hashedResult, ourIdentity)
+        // NOTE Each attestation is the hash of the result signed by the node attesting
         let attestation: IWeb2Attestation = {
             hash: hashedResult,
             timestamp: Date.now(),

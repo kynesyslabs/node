@@ -28,6 +28,7 @@ import deriveBlock from "../consensus/routines/deriveBlock"
 import AddressInfo from "../blockchain/types/addressInfo"
 import GLS from "../blockchain/gls/gls"
 
+// NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
 var term = terminalkit.terminal
 

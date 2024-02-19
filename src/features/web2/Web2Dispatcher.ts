@@ -8,6 +8,10 @@ import sharedState from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import { deriveMempoolOperation } from "src/libs/utils/demostdlib/deriveMempoolOperation"
 
+// NOTE Terminal kit for useful logging
+import terminalkit from "terminal-kit"
+var term = terminalkit.terminal
+
 // INFO Upon receiving a request from a socket, we
 // need to attest and handle the other attestations (if we
 // are either first or not last of the chain), and then
