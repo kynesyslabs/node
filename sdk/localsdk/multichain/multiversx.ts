@@ -14,11 +14,12 @@ import {
     Transaction,
     GasEstimator,
     TokenTransfer,
+    TransactionWatcher,
     IPlainTransactionObject,
     TransferTransactionsFactory,
 } from "@multiversx/sdk-core"
 
-import { ProxyNetworkProvider } from "@multiversx/sdk-network-providers"
+import { ApiNetworkProvider } from "@multiversx/sdk-network-providers"
 import { Mnemonic, UserSigner, UserWallet } from "@multiversx/sdk-wallet"
 import { INetworkProvider } from "@multiversx/sdk-network-providers/out/interface"
 
@@ -44,7 +45,9 @@ export default class MULTIVERSX extends DefaultChainAsync {
             this.rpc_url = rpc_url
         }
 
-        this.provider = new ProxyNetworkProvider(this.rpc_url)
+        this.provider = new ApiNetworkProvider(this.rpc_url, {
+            timeout: 10000,
+        })
 
         const networkConfig = await this.provider.getNetworkConfig()
         const chainID = networkConfig.ChainID
@@ -90,6 +93,7 @@ export default class MULTIVERSX extends DefaultChainAsync {
         }
     }
 
+    // @ts-ignore
     connectWallet(privateKey: string, password: string) {
         // NOTE: privateKey is the keyFile in a JSON string format
         // NOTE: the password param is not yet defined in DefaultChainAsync
@@ -161,16 +165,25 @@ export default class MULTIVERSX extends DefaultChainAsync {
      */
     async sendTransaction(raw_tx: Transaction | IPlainTransactionObject) {
         required(this.provider, "Provider not connected")
-        let signed_tx = raw_tx
+        let signed_tx: Transaction
 
         // INFO: raw_tx is a plain object when it comes from the frontend
         if (!(raw_tx instanceof Transaction)) {
             signed_tx = Transaction.fromPlainObject(raw_tx)
+        } else {
+            signed_tx = raw_tx
         }
 
-        const tx_hash = await this.provider.sendTransaction(
-            signed_tx as Transaction,
-        )
-        return tx_hash
+        try {
+            await this.provider.sendTransaction(signed_tx as Transaction)
+
+            // INFO: We need to wait for the transaction to be mined
+            const watcher = new TransactionWatcher(this.provider)
+            const receipt = await watcher.awaitCompleted(signed_tx)
+
+            return receipt
+        } catch (error) {
+            return error
+        }
     }
 }
