@@ -9,7 +9,7 @@ export const chainProviders = {
         testnet: "https://rpc.ankr.com/filecoin_testnet",
     },
     egld: {
-        mainnet: "https://gateway.multiversx.com",
-        testnet: "https://testnet-gateway.multiversx.com",
+        mainnet: "https://api.multiversx.com",
+        testnet: "https://testnet-api.multiversx.com",
     },
 }
