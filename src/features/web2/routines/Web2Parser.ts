@@ -5,6 +5,13 @@ import Hashing from "src/libs/crypto/hashing"
 import required from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
 import { PeerManager } from "src/libs/peer"
+import {
+    IWeb2Request,
+    IWeb2Payload,
+    IParam,
+    IRawWeb2Request,
+    IWeb2Attestation,
+} from "../types/Web2Types"
 /* eslint-disable no-unused-vars */
 // This class represents a typical web2 data request
 
@@ -16,63 +23,6 @@ AbortSignal.timeout ??= function timemout(ms) {
     const ctrl = new AbortController()
     setTimeout(() => ctrl.abort(), ms)
     return ctrl.signal
-}
-
-export interface IParam {
-    name: string
-    value: any
-}
-
-// INFO Properties of a typical request as the client would send it
-// NOTE This should be the thing we receive from the handler as a request
-// NOTE Basically is the comlink message
-export interface IWeb2Payload {
-    type: "web2Request"
-    message: IWeb2Request
-    sender: any
-    receiver: any
-    timestamp: any
-    data: any
-    extra: any
-}
-
-// INFO A complete web2 request
-export interface IWeb2Request {
-    raw: IRawWeb2Request
-    result: any
-    attestations: {}
-    hash: string
-    signature?: forge.pki.ed25519.BinaryBuffer
-}
-
-// INFO A request without any attestations or identity data
-export interface IRawWeb2Request {
-    action: string
-    parameters: IParam[]
-    requestedParameters: [] | null
-    method: "POST" | "GET" | "PUT" | "DELETE" | "PATCH"
-    url: string
-    headers: any
-    minAttestations: number
-    // Handling the various stages of an IWeb2Request
-    stage: {
-        // The one that will handle the response too
-        origin: {
-            identity: forge.pki.ed25519.BinaryBuffer
-            connection_url: string
-        }
-        // Starting from 0, each attestation it is increased
-        hop_number: number
-    }
-}
-
-// ANCHOR Useful interfaces
-export interface IWeb2Attestation {
-    hash: string
-    timestamp: number
-    identity: forge.pki.PublicKey
-    signature: forge.pki.ed25519.BinaryBuffer
-    valid: boolean
 }
 
 // INFO Simply handles the singleton stuff

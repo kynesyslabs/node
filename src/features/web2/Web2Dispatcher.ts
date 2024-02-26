@@ -1,6 +1,6 @@
 // INFO Entry file for handling web2 requests
-import { IWeb2Request, IWeb2Payload } from "./routine/Web2Parser"
-import Web2API from "./routine/Web2Parser"
+import { IWeb2Request, IWeb2Payload } from "src/features/web2/types/Web2Types"
+import Web2API from "src/features/web2/routines/Web2Parser"
 import { Operation } from "src/libs/blockchain/routines/executeOperations"
 import required from "src/utilities/required"
 import Cryptography from "src/libs/crypto/cryptography"
