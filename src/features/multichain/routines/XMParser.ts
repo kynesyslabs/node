@@ -251,14 +251,15 @@ class XMParser {
                     } catch (error) {
                         return {
                             result: "error",
-                            error: error,
+                            error: error.toString(),
                         }
                     }
 
                     try {
                         const signedTx = operation.task.signedPayloads[0]
-                        const receipt =
-                            await mxInstance.sendTransaction(signedTx)
+                        const receipt = await mxInstance.sendTransaction(
+                            signedTx,
+                        )
                         console.log("[XMScript Parser] EGLD Pay: result: ")
                         console.log(receipt)
 
@@ -266,7 +267,10 @@ class XMParser {
                     } catch (error) {
                         console.log("[XMScript Parser] EGLD Pay: error: ")
                         console.log(error)
-                        result = error
+                        result = {
+                            result: "error",
+                            error: error.toString()
+                        }
                     }
                 }
             }

@@ -37,16 +37,63 @@ export default abstract class DefaultChainAsync implements IDefaultChainAsync {
     connected: boolean
 
     // ANCHOR Base methods
+
+    /**
+     * Connects to the RPC provider
+     * @param url The RPC URL of the chain
+     * @returns A promise that resolves to the provider object
+     */
     abstract connect(rpc_url: string): Promise<any>
+
+    /**
+     * Disconnects from the RPC provider.
+     */
     abstract disconnect(): Promise<any>
     // ANCHOR Read methods
+
+    /**
+     * Gets the balance of an address
+     * @param address The address to get the balance from
+     * @returns A promise that resolves to the balance of the address
+     */
     abstract getBalance(address: string): Promise<string>
+
+    /**
+     * Creates a transaction to send the default currency of the chain to an address
+     * @param receiver The address of the receiver
+     * @param amount The amount to send
+     * @returns A promise that resolves to the signed transaction
+     */
     abstract pay(receiver: string, amount: string): Promise<any>
     abstract info(...args: any): Promise<string>
     // ANCHOR Write methods
+
+    /**
+     * Creates a wallet
+     * @param password The password to encrypt the wallet
+     * @returns The wallet
+     */
     abstract createWallet(password?: string): any
+
+    /**
+     * Connects to a wallet for signing transactions using a private key
+     * @param privateKey The private key of the wallet
+     * @returns The signer object
+     */
     abstract connectWallet(privateKey: string): any
+
+    /**
+     * Signs a transaction
+     * @param raw_transaction The transaction to sign
+     * @returns A promise that resolves to the signed transaction
+     */
     abstract signTransaction(raw_transaction: any): Promise<any>
+
+    /**
+     * Broadcasts a signed transaction using the RPC provider
+     * @param signed_transaction The signed transaction
+     * @returns A promise that resolves to the transaction hash
+     */
     abstract sendTransaction(signed_transaction: any): any
 
     constructor(rpcURL: string) {

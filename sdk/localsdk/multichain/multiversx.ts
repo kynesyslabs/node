@@ -14,7 +14,6 @@ import {
     Transaction,
     GasEstimator,
     TokenTransfer,
-    TransactionWatcher,
     IPlainTransactionObject,
     TransferTransactionsFactory,
 } from "@multiversx/sdk-core"
@@ -160,9 +159,6 @@ export default class MULTIVERSX extends DefaultChainAsync {
         return transaction
     }
 
-    /**
-     * @returns The transaction hash
-     */
     async sendTransaction(raw_tx: Transaction | IPlainTransactionObject) {
         required(this.provider, "Provider not connected")
         let signed_tx: Transaction
@@ -174,16 +170,10 @@ export default class MULTIVERSX extends DefaultChainAsync {
             signed_tx = raw_tx
         }
 
-        try {
-            await this.provider.sendTransaction(signed_tx as Transaction)
+        const tx_hash = await this.provider.sendTransaction(
+            signed_tx as Transaction,
+        )
 
-            // INFO: We need to wait for the transaction to be mined
-            const watcher = new TransactionWatcher(this.provider)
-            const receipt = await watcher.awaitCompleted(signed_tx)
-
-            return receipt
-        } catch (error) {
-            return error
-        }
+        return tx_hash
     }
 }
