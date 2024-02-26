@@ -19,3 +19,5 @@ data/chain.db
 #Package manager files
 node_modules
 yarn-error.log
+yarn.lock
+package-lock.json
