@@ -10,6 +10,7 @@ export default async function determineGasForOperation(
     let base_gas = await calculateCurrentGas()
     // INFO The gas required for an operation is the base gas multiplied by the byte size
     let operation_gas = base_gas * byte_size
-    // TODO Calculations here
+    // TODO Enable when the function is ready
+    //return operation_gas
     return 0
 }
