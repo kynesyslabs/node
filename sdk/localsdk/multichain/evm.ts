@@ -8,27 +8,32 @@ Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
 KyneSys Labs: https://www.kynesys.xyz/
 
 */
-import * as ethers from "ethers"
-import { JsonRpcProvider } from "@ethersproject/providers"
-import { Wallet } from "@ethersproject/wallet"
-import { TransactionRequest } from "@ethersproject/providers"
+import {
+    Wallet,
+    parseEther,
+    JsonRpcProvider,
+    TransactionRequest,
+    TransactionReceipt,
+} from "ethers"
+
 import { Contract } from "ethers"
 import defaultChainAsync from "./types/defaultChainAsync"
 import { IEVM } from "./types/defaultChainAsync"
 import required from "src/utilities/required"
-import { sign } from "crypto"
 import { evmProviders } from "./configs/evmProviders"
 
 export default class EVM extends defaultChainAsync implements IEVM {
     // A singleton for each chain_id
     private static instances: Map<number, EVM> = new Map<number, EVM>()
+
     // Chain properties
     provider: JsonRpcProvider = null
     wallet: Wallet = null
     empty_transaction: TransactionRequest
     isEIP1559: boolean = true
+
     // Specific EVM properties
-    contracts: Map<string, ethers.Contract> // Will store all the contracts instances as address: ethers.Contract}
+    contracts: Map<string, Contract> // Will store all the contracts instances as address: ethers.Contract}
 
     /**
      * The Singleton's constructor should always be private to prevent direct
@@ -83,7 +88,7 @@ export default class EVM extends defaultChainAsync implements IEVM {
     // ANCHOR MVP
     async pay(address: string, amount: string): Promise<string> {
         required(this.wallet)
-        let tx = { to: address, value: ethers.utils.parseEther(amount) }
+        let tx = { to: address, value: parseEther(amount) }
         let tx_hashed = await this.sendTransaction(tx)
         console.log(tx_hashed)
         return tx_hashed
@@ -130,16 +135,13 @@ export default class EVM extends defaultChainAsync implements IEVM {
     }
 
     async sendSignedTransaction(signed_transaction: string): Promise<any> {
-        // TODO
         if (!this.provider) {
             throw new Error("Provider not connected")
         }
-        return await this.provider.sendTransaction(signed_transaction)
+        return await this.provider.broadcastTransaction(signed_transaction)
     }
 
-    async waitForReceipt(
-        tx_hash: string,
-    ): Promise<ethers.ethers.providers.TransactionReceipt> {
+    async waitForReceipt(tx_hash: string): Promise<TransactionReceipt> {
         return await this.provider.getTransactionReceipt(tx_hash)
     }
 
@@ -172,7 +174,7 @@ export default class EVM extends defaultChainAsync implements IEVM {
         if (!this.provider) {
             throw new Error("Provider not connected")
         }
-        let contractInstance = new ethers.Contract(contract, abi, this.provider)
+        let contractInstance = new Contract(contract, abi, this.provider)
         // REVIEW THis could work
         return contractInstance.on(event, (data: any) => {
             ////console.log(data)
@@ -184,7 +186,7 @@ export default class EVM extends defaultChainAsync implements IEVM {
         if (!this.provider) {
             throw new Error("Provider not connected")
         }
-        let contractInstance = new ethers.Contract(contract, abi, this.provider)
+        let contractInstance = new Contract(contract, abi, this.provider)
         // REVIEW 99% Won't work
         return contractInstance.on("*", (data: any) => {
             ////console.log(data)
