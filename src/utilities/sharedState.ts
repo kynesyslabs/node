@@ -38,7 +38,9 @@ export default class sharedState {
 
     // !SECTION shared state variables
 
-    constructor() {}
+    constructor() {
+        this.identity = Identity.getInstance()
+    }
 
     public static getInstance(): sharedState {
         if (!sharedState.instance) {
