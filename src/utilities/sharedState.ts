@@ -15,28 +15,23 @@ export default class sharedState {
 
     currentTimestamp: number = 0
     lastTimestamp: number = 0
-    identity: Identity
 
     // SECTION shared state variables
     runMainLoop: boolean = true
     mainLoopPaused: boolean = false
     consensusMode: boolean = false
     syncStatus: boolean = false
-
     shard: ProofOfRepresentation
-
-    serverPort: number = 53550
+    identity: Identity
     // !SECTION shared state variables
+
+    // SECTION Configuration
+    rpcFee: number = parseInt(process.env.RPC_FEE_PERCENT) // TODO Implement // Percentage of the fee to be charged for the rpc
+    serverPort: number = 53550
+    // !SECTION Configuration
 
     // TODO The following variables should be in the genesis
     maxMessageSize = parseInt(process.env.MAX_MESSAGE_SIZE) // 5 GB just for debug purpose
-
-    // SECTION shared useful variables
-    rpcFee: number = parseInt(process.env.RPC_FEE_PERCENT) // TODO Implement // Percentage of the fee to be charged for the rpc
-    publicKey: forge.pki.ed25519.BinaryBuffer // TODO Implement
-    privateKey: forge.pki.ed25519.BinaryBuffer // TODO Implement
-
-    // !SECTION shared state variables
 
     constructor() {
         this.identity = Identity.getInstance()

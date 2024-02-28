@@ -21,15 +21,9 @@ async function sleep(time: number) {
 let hasSentNodeOnlineTx = false
 const peerManager = PeerManager.getInstance()
 
-export default async function mainLoop(id: Identity) {
+export default async function mainLoop() {
     console.log("[MAIN LOOP] ✅ Started")
     var cycleTimestamp: number
-
-    sharedState.getInstance().privateKey = id.ed25519
-        .privateKey as unknown as pki.ed25519.BinaryBuffer
-
-    sharedState.getInstance().publicKey = id.ed25519
-        .publicKey as unknown as pki.ed25519.BinaryBuffer
 
     while (sharedState.getInstance().runMainLoop) {
         await sleep(500) // Sleep for 1 second
@@ -57,7 +51,7 @@ export default async function mainLoop(id: Identity) {
                 // TODO Specify the answer so that it has a type AND a message
                 "NODE_ONLINE",
                 JSON.stringify({}),
-                id.ed25519.publicKey,
+                sharedState.getInstance().identity.ed25519.publicKey,
                 "placeholder", // TODO Add the receiver, don't we already have it in the receiver object?
                 null,
                 {},
@@ -69,18 +63,20 @@ export default async function mainLoop(id: Identity) {
             comLink.properties.is_reply = false
 
             let peer = peerManager.getPeer(
-                id.ed25519.publicKey as unknown as string,
+                sharedState.getInstance().identity.ed25519
+                    .publicKey as unknown as string,
             )
 
             if (!peer) {
                 peer = new Peer()
-                peer.identity = id.ed25519.publicKey as pki.ed25519.BinaryBuffer
+                peer.identity = sharedState.getInstance().identity.ed25519
+                    .publicKey as pki.ed25519.BinaryBuffer
             }
 
             await comLink.broadcastMessageToPeer(
                 peer,
                 online_presence_message,
-                id.ed25519.privateKey as any,
+                sharedState.getInstance().identity.ed25519.privateKey as any,
             )
             console.log("[MAIN LOOP] 🐸 Peer is online")
 

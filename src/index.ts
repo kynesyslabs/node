@@ -212,10 +212,11 @@ async function main() {
             // commandLine() // While doing the rest of the stuff needed, a comand line interface is available
         }
         term.yellow("[MAIN] ✅ Starting the background loop\n")
-        mainLoop(id) // Is an async function so running without waiting send that to the background
+        mainLoop() // Is an async function so running without waiting send that to the background
     }
 }
 
+// INFO Starting the main routine
 digestArguments()
 main()
 
