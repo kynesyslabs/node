@@ -127,6 +127,7 @@ export default class MULTIVERSX extends DefaultChainAsync {
 
         const receiverAdress = new Address(receiver)
 
+        // INFO: Gas estimation
         const gas = new GasEstimator()
         const factory = new TransferTransactionsFactory(gas)
 
@@ -170,6 +171,7 @@ export default class MULTIVERSX extends DefaultChainAsync {
             signed_tx = raw_tx
         }
 
+        // INFO: The provider can also send a list of transactions
         const tx_hash = await this.provider.sendTransaction(
             signed_tx as Transaction,
         )
