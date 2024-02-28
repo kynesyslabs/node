@@ -10,6 +10,7 @@ export interface fileChunk {
     info: string
 }
 
+// INFO Primitive function to read a chunk of a file
 async function readFileChunk(
     startbyte: number,
     size: number,
