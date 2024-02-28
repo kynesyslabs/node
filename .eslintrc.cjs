@@ -20,7 +20,8 @@ module.exports = {
         quotes: ["error", "double"],
         semi: ["error", "never"],
         // "no-console": "warn",
-        "no-unused-vars": ["warn"],
+        // no-unused-vars is disabled
+        "no-unused-vars": ["off"],
         "switch-colon-spacing": ["error", { after: true, before: false }],
         "no-extra-semi": "error",
         "comma-dangle": ["error", "always-multiline"],
