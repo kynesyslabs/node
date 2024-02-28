@@ -234,7 +234,7 @@ export default class GLS {
         }
     }
 
-    static async getGLSGasMultiplier(): Promise<number> {
+    static async getGLSLastBlockBaseGas(): Promise<number> {
         // TODO Implement and make it dynamic
         /* let chainProperties = await GLS.getGLSChainProperties()
         return chainProperties.gas_multiplier */
