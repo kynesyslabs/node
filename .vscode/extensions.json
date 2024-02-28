@@ -1,5 +1,21 @@
 {
     "recommendations": [
-        "bentodaniel.vs-tab-groups"
+        "bentodaniel.vs-tab-groups",
+        "aljazsim.tsce",
+        "trunk.io",
+        "exodiusstudios.comment-anchors",
+        "dbaeumer.vscode-eslint",
+        "entuent.fira-code-nerd-font",
+        "oderwat.indent-rainbow",
+        "ms-vscode.vscode-typescript-next",
+        "kshetline.ligatures-limited",
+        "stringham.move-ts",
+        "ibm.output-colorizer",
+        "esbenp.prettier-vscode",
+        "rvest.vs-code-prettier-eslint",
+        "yoavbls.pretty-ts-errors",
+        "juanblanco.solidity",
+        "qwtel.sqlite-viewer",
+        "pmneo.tsimporter"
     ]
 }

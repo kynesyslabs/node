@@ -31,7 +31,7 @@ export default class sharedState {
     // !SECTION Configuration
 
     // TODO The following variables should be in the genesis
-    maxMessageSize = parseInt(process.env.MAX_MESSAGE_SIZE) // 5 GB just for debug purpose
+    maxMessageSize = parseInt(process.env.MAX_MESSAGE_SIZE) // TODO Implement // 5 GB just for debug purpose
 
     constructor() {
         this.identity = Identity.getInstance()
