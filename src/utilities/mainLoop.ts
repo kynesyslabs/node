@@ -51,7 +51,7 @@ export default async function mainLoop(id: Identity) {
 
         if (!hasSentNodeOnlineTx && !isConsensusTimeReached) {
             var online_presence_message = new Transmission(
-                Identity.getInstance().ed25519.privateKey,
+                sharedState.getInstance().identity.ed25519.privateKey,
             )
             online_presence_message.initialize(
                 // TODO Specify the answer so that it has a type AND a message

@@ -5,7 +5,8 @@ import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
 import ResponseRegistry from "../../communications/responseRegistry"
 import { Peer, PeerManager } from "src/libs/peer"
-import { Identity } from "src/libs/identity"
+
+import sharedState from "src/utilities/sharedState"
 
 const sleep = promisify(setTimeout)
 interface Offset {
@@ -74,7 +75,7 @@ export default async function getPeerTime(
 export const calculatePeerTimeOffset =
     async (): Promise<SynchronizationData> => {
         //FIXME: this should happen outside of here, in the part where the peers that will partecipate in block validation are selected
-        const id = Identity.getInstance()
+        const id = sharedState.getInstance().identity
         const peer = PeerManager.getInstance().getPeers()[0]
 
         const offsets = [] as Offset[]

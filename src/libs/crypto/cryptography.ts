@@ -11,8 +11,9 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import forge from "node-forge"
 import { promises as fs } from "fs"
-import { Identity } from "../identity"
 import { HexToForge, ForgeToHex } from "./forgeUtils"
+
+import sharedState from "src/utilities/sharedState"
 
 import terminalkit from "terminal-kit"
 var term = terminalkit.terminal
@@ -193,12 +194,16 @@ export default class Cryptography {
         // INFO Generating a new RSA keypair from our ecdsa private key
         derive: (): forge.pki.rsa.KeyPair => {
             let md = forge.md.sha256.create()
-            md.update(JSON.stringify(Identity.getInstance().ed25519.privateKey))
+            md.update(
+                JSON.stringify(
+                    sharedState.getInstance().identity.ed25519.privateKey,
+                ),
+            )
             let seed = md.digest().toHex()
             let pnrg = forge.random.createInstance()
             pnrg.seedFileSync = () => seed
             let keys = forge.pki.rsa.generateKeyPair({ bits: 4096, prng: pnrg })
-            Identity.getInstance().rsa = keys
+            sharedState.getInstance().identity.rsa = keys
             return keys
         },
 
@@ -241,7 +246,7 @@ export default class Cryptography {
                 term.yellow(
                     "[DECRYPTION] No private key provided, using our one...\n",
                 )
-                privateKey = Identity.getInstance().rsa.privateKey
+                privateKey = sharedState.getInstance().identity.rsa.privateKey
                 if (!privateKey) {
                     term.red("[DECRYPTION] No private key found\n")
                     return [false, "No private key found"]

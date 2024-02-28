@@ -5,7 +5,6 @@ import Transaction from "src/libs/blockchain/transaction"
 import Mempool from "src/libs/blockchain/mempool"
 import GLS from "src/libs/blockchain/gls/gls"
 import Chain from "src/libs/blockchain/chain"
-import { Identity } from "src/libs/identity"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import sharedState from "src/utilities/sharedState"
@@ -39,7 +38,7 @@ export default class testingEnvironment {
             PeerManager: PeerManager,
         },
         statics: {
-            Identity: Identity,
+            Identity: sharedState.getInstance().identity,
             Cryptography: Cryptography,
             Hashing: Hashing,
         },

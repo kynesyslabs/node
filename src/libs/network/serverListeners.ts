@@ -14,7 +14,6 @@ import ServerHandlers from "src/libs/network/serverHandlers"
 import { cryptography } from "src/libs/crypto"
 import { Peer } from "src/libs/peer"
 import { comlinkUtils } from "src/libs/communications"
-import { Identity } from "src/libs/identity"
 import Transmission from "src/libs/communications/transmission"
 import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
 import { ISecurityReport } from "./securityModule"
@@ -22,6 +21,7 @@ import * as Security from "./securityModule"
 
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
+import sharedState from "src/utilities/sharedState"
 var term = terminalkit.terminal
 
 export interface BrowserRequest {
@@ -81,9 +81,9 @@ export default class ServerListeners {
     async comlinkListener() {
         this.peer.socket.on("comlink", async request => {
             term.yellow("[SERVER] Received comlink\n")
-            const id_ed25519 = await cryptography.load("./.demos_identity")
+            const id_ed25519 = sharedState.getInstance().identity.ed25519
             const receiver = this.peer.socket
-            var parsed_comlink
+            var parsed_comlink: any // TODO Better typing
             // TODO This can be put into securityModule for consistency
             try {
                 // Parsing comlink
@@ -204,7 +204,7 @@ export default class ServerListeners {
             // TODO Use demostdlib
 
             var response_message = new Transmission(
-                Identity.getInstance().ed25519.privateKey,
+                sharedState.getInstance().identity.ed25519.privateKey,
             )
             response_message.initialize(
                 // TODO Specify the answer so that it has a type AND a message

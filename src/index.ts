@@ -27,7 +27,6 @@ import groundControl from "./libs/utils/demostdlib/groundControl"
 import * as dotenv from "dotenv"
 dotenv.config()
 
-import { Identity } from "./libs/identity"
 import { PeerManager } from "./libs/peer"
 
 import { Server } from "socket.io"
@@ -64,7 +63,6 @@ let PEER_LIST_FILE = "./demos_peers"
 
 let PEER_LIST: any
 
-const id = Identity.getInstance()
 const app = express()
 
 // TODO Put into .env
@@ -157,21 +155,20 @@ async function main() {
     //console.log(PEER_LIST)
 
     // NOTE The whole first part of main ensures the environment is ready to run
-    await id.ensureIdentity()
+    await sharedState.getInstance().identity.ensureIdentity()
+    const id = sharedState.getInstance().identity
     term.green("[BOOTSTRAP] Our identity is ready\n")
-    // Setting the shared state
-    sharedState.getInstance().identity = id
     // Log identity
     term.green(
         "\n[MAIN] 🔗 WE ARE " + id.ed25519.publicKey.toString("hex") + " 🔗 \n",
     )
 
     try {
-        await Identity.getInstance().getPublicIP()
-        term.green("IP: " + Identity.getInstance().publicIP + "\n")
+        await sharedState.getInstance().identity.getPublicIP()
+        term.green("IP: " + sharedState.getInstance().identity.publicIP + "\n")
     } catch (e) {
         console.log(e)
-        term.orange("[WARN] {OFFLINE?} Failed to get public IP\n")
+        term.yellow("[WARN] {OFFLINE?} Failed to get public IP\n")
     }
 
     // INFO We start the server

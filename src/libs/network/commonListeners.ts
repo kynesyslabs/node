@@ -11,11 +11,11 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { PeerManager } from "../peer"
-import { Identity } from "../identity"
 import { cryptography } from "../crypto"
 import ComLinkUtils from "../communications/comlinkUtils"
 import ResponseRegistry from "../communications/responseRegistry"
 import getRemoteIP from "../network/routines/getRemoteIP"
+
 import sharedState from "src/utilities/sharedState"
 
 import terminalkit from "terminal-kit"
@@ -50,13 +50,13 @@ export default class CommonListeners {
             // REVIEW Signing data.message with the private key
             let _signature = cryptography.sign(
                 data.message,
-                Identity.getInstance().ed25519.privateKey as any,
+                sharedState.getInstance().identity.ed25519.privateKey as any,
             )
             // REVIEW Sending the signature back along with the public key and the message
             let _sendBack = [
                 data.message,
                 _signature,
-                Identity.getInstance().ed25519.publicKey,
+                sharedState.getInstance().identity.ed25519.publicKey,
             ]
             this.peer.socket.emit("auth_reply", _sendBack)
         })
@@ -72,7 +72,7 @@ export default class CommonListeners {
             }
             //console.log(request.cmd) // TODO Create a type for the request format
             if (request === "public_ip") {
-                let ip = await Identity.getInstance().getPublicIP()
+                let ip = await sharedState.getInstance().identity.getPublicIP()
                 response.data = ip
             }
             // else if
