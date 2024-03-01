@@ -16,8 +16,8 @@ import BlockContent from "./types/blocks"
 export default class Block {
     number: number
     hash: string
+    content: BlockContent
     status: string
-    content: BlockContent // TODO
     proposer: pki.PublicKey | pki.ed25519.BinaryBuffer
     validation_data: any
 

@@ -11,7 +11,10 @@ import assignTxs from "./assignTxs"
 export default async function deriveBlock(
     mempoolData: MempoolData,
     timestamp: number,
-): Promise<Block> {
+): Promise<{
+    derivedBlock: Block
+    full_ordered_transactions: Transaction[]
+}> {
     // Deriving an empty block and setting the few properties we can use right now
     let derivedBlock: Block = new Block()
     derivedBlock.status = "derived"
@@ -21,10 +24,10 @@ export default async function deriveBlock(
     derivedBlock.proposer = proposer
     derivedBlock.content.timestamp = timestamp
     // REVIEW Order transactions
-    let ordered_transactions: Transaction[] = await orderTxs(
+    let full_ordered_transactions: Transaction[] = await orderTxs(
         mempoolData.transactions,
     )
-    derivedBlock.content.ordered_transactions = ordered_transactions
+
     // REVIEW Derive hashes per address
     let transactions_per_address = await assignTxs(mempoolData.transactions)
     derivedBlock.content.per_address_transactions = transactions_per_address
@@ -42,5 +45,5 @@ export default async function deriveBlock(
     //console.log(sContent)
     // process.exit(0)
 
-    return derivedBlock
+    return { derivedBlock, full_ordered_transactions }
 }

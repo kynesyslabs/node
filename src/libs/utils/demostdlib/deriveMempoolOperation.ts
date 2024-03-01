@@ -155,8 +155,8 @@ export async function createTransaction(data: any): Promise<Transaction> {
         },
         signature: null,
         hash: null,
-        confirmations: [],
         status: null,
+        blockNumber: null,
     }
     // Setting us as the sender
     transaction.content.from =

@@ -30,6 +30,7 @@ import GLS from "../blockchain/gls/gls"
 
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
+import Transaction from "../blockchain/transaction"
 var term = terminalkit.terminal
 
 export default class ServerHandlers {
@@ -67,8 +68,13 @@ export default class ServerHandlers {
         // Todo : compare the received response response with what we have locally, and return the vote result
         console.log("[SERVERHANDLER] handleVoteRequest")
         const mempool = await Mempool.getMempool()
-        const propsedBlock = await deriveBlock(mempool, timestamp)
-        let proposedBlockHash = propsedBlock.hash
+
+        const { derivedBlock, full_ordered_transactions } = await deriveBlock(
+            mempool,
+            timestamp,
+        )
+        const proposedBlock = derivedBlock
+        let proposedBlockHash = proposedBlock.hash
         return proposedBlockHash
     }
 
@@ -317,8 +323,8 @@ export default class ServerHandlers {
             | Peer[]
             | number
             | Blocks
-            | Transactions
-            | Transactions[]
+            | Transaction
+            | Transaction[]
             | AddressInfo
         let socketized_response: Peer[]
         let { data } = content

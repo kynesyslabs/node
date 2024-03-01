@@ -24,6 +24,7 @@ import { pki } from "node-forge"
 import { TransactionContent } from "./types/transactions"
 import Confirmation from "./types/confirmation"
 import { compressData, decompressData } from "../utils/demostdlib"
+import RawTransaction from "./types/rawTransaction"
 
 interface TransactionResponse {
     status: string
@@ -42,7 +43,7 @@ export default class Transaction {
     signature: Signature
     hash: string
     status: string
-    confirmations: Confirmation[]
+    blockNumber: number
 
     constructor() {
         this.content = {
@@ -61,7 +62,6 @@ export default class Transaction {
         }
         this.signature = null
         this.hash = null
-        this.confirmations = []
         this.status = null
     }
 
@@ -160,6 +160,59 @@ export default class Transaction {
         let _structured = true
         // TODO Do this
         return _structured
+    }
+
+    public static toRawTransaction(tx: Transaction): RawTransaction {
+        console.log("attempting to insert raw tx")
+        console.log(tx.signature.data.toString("hex"))
+        console.log(tx.content.to["data"]?.toString("hex"))
+        console.log(tx.content.from["data"]?.toString("hex"))
+        const rawTx = {
+            blockNumber: tx.blockNumber,
+            signature: tx.signature.data.toString("hex"),
+            status: tx.status,
+            hash: tx.hash,
+            content: JSON.stringify(tx.content),
+            type: tx.content.type,
+            to: tx.content.to["data"]?.toString("hex"),
+            from: tx.content.from["data"]?.toString("hex"),
+            amount: tx.content.amount,
+            nonce: tx.content.nonce,
+            timestamp: tx.content.timestamp,
+            networkFee: tx.content.transaction_fee.network_fee,
+            rpcFee: tx.content.transaction_fee.rpc_fee,
+            additionalFee: tx.content.transaction_fee.additional_fee,
+        }
+
+        return rawTx
+    }
+
+    public static fromRawTransaction(rawTx: RawTransaction): Transaction {
+        const tx = new Transaction()
+
+        tx.blockNumber = rawTx.blockNumber
+        tx.signature = {
+            type: "ed25519", // Assuming the signature type as ed25519; adjust accordingly
+            data: Buffer.from(rawTx.signature, "hex"),
+        }
+        tx.status = rawTx.status
+        tx.hash = rawTx.hash
+        tx.content = {
+            type: rawTx.type,
+            from: Buffer.from(rawTx.from, "hex"),
+            to: Buffer.from(rawTx.to, "hex"),
+            amount: rawTx.amount,
+            nonce: rawTx.nonce,
+            timestamp: rawTx.timestamp,
+            transaction_fee: {
+                network_fee: rawTx.networkFee,
+                rpc_fee: rawTx.rpcFee,
+                additional_fee: rawTx.additionalFee,
+            },
+
+            data: JSON.parse(rawTx.content).data,
+        }
+        return tx
     }
 
     // SECTION Compression support

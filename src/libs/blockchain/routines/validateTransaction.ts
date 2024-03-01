@@ -46,7 +46,6 @@ export default async function validateTransaction(
     console.log("Signature: ")
     console.log(tx.signature)
     tx.hash = request.tx.hash
-    tx.confirmations = request.tx.confirmations
     tx.content.transaction_fee = request.tx.content.transaction_fee
 
     console.log("[TX RECEIVED] Examining:\n")
@@ -113,8 +112,7 @@ export default async function validateTransaction(
     // NOTE Now we can save the gas operation as the tx is set to be executed
     // and the gas will be deducted anyway
     GLS.getInstance().operations.push(gas_operation)
-    // If the tx is valid and executable, we confirm it
-    tx.confirmations.push(verified)
+
     // Finally, we add all the derived operations to the GLS
     for (let i = 0; i < execution[2].length; i++) {
         console.log("[TX RECEIVED] Operation derived")

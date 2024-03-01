@@ -13,7 +13,8 @@ async function calculateComposedGas(): Promise<number> {
     return tx_fee
 }
 
-export default async function calculateCurrentGas(): Promise<number> {
+export default async function calculateCurrentGas(gas): Promise<number> {
+    console.log(gas)
     let composed_gas_price = await calculateComposedGas()
     return composed_gas_price
 }
