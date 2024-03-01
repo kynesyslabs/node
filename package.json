@@ -13,7 +13,7 @@
         "start:bun": "bun -r tsconfig-paths/register src/index.ts",
         "start": "tsx -r tsconfig-paths/register src/index.ts",
         "format": "prettier --plugin-search-dir . --write .",
-        "dev": "ts-node-dev --loader tsx --respawn --transpile-only src/index.ts"
+        "dev": "ts-node-dev --import tsx --respawn --transpile-only src/index.ts"
     },
     "devDependencies": {
         "@babel/eslint-parser": "^7.22.11",

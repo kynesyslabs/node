@@ -26,6 +26,8 @@ import StatusNativeType from "./types/statusNative"
 import AddressInfo from "./types/addressInfo"
 import StatusPropertiesType from "./types/statusProperties"
 import { MoreThan } from "typeorm"
+import { TransactionContent } from "./types/transactions"
+import transaction from "./transaction"
 
 export default class Chain {
     private static instance: Chain
@@ -61,15 +63,17 @@ export default class Chain {
     // SECTION Getters
 
     // INFO Returns a transaction by its hash
-    static async getTxByHash(hash: string): Promise<Transactions> {
+    static async getTxByHash(hash: string): Promise<Transaction> {
         const db = await Datasource.getInstance()
         const transactionRepository = db
             .getDataSource()
             .getRepository(Transactions)
 
-        return await transactionRepository.findOneBy({
-            hash,
-        })
+        return Transaction.fromRawTransaction(
+            await transactionRepository.findOneBy({
+                hash,
+            }),
+        )
     }
 
     // INFO Get the last block number
@@ -138,23 +142,26 @@ export default class Chain {
     }
 
     // INFO Get the current pending transactions pool
-    static async getPendingPool(): Promise<RawTransaction[]> {
+    static async getPendingPool(): Promise<Transaction[]> {
         const db = await Datasource.getInstance()
         const transactionRepository = db
             .getDataSource()
             .getRepository(Transactions)
-        return await transactionRepository.findBy({
+        const txList = await transactionRepository.findBy({
             status: "pending",
         })
+        return txList.map(rawTx => Transaction.fromRawTransaction(rawTx))
     }
 
     // ANCHOR Transactions
-    static async getTransactionFromHash(hash: string): Promise<RawTransaction> {
+    static async getTransactionFromHash(hash: string): Promise<Transaction> {
         const db = await Datasource.getInstance()
         const transactionRepository = db
             .getDataSource()
             .getRepository(Transactions)
-        return await transactionRepository.findOneBy({ hash })
+        return Transaction.fromRawTransaction(
+            await transactionRepository.findOneBy({ hash }),
+        )
     }
 
     // REVIEW Giving back all the properties of an address
@@ -216,29 +223,39 @@ export default class Chain {
         ])
 
         try {
-            return blocks.reduce(
-                (commonPeers, block) => {
-                    // Extract all data from transactions of type "NODE_ONLINE" in the block
-                    const onlinePeersInBlock =
-                        block.content.ordered_transactions
-                            .filter(
-                                transaction =>
-                                    transaction.content.type === "NODE_ONLINE",
-                            )
-                            .map(transaction => transaction.content.data)
+            const processedBlocks = await Promise.all(
+                blocks.map(async block => {
+                    const transactions = await Promise.all(
+                        block.content.ordered_transactions.map(txHash =>
+                            this.getTransactionFromHash(txHash),
+                        ),
+                    )
 
-                    // Return peers that are present in both commonPeers and onlinePeersInBlock
-                    return commonPeers.filter(peer =>
-                        onlinePeersInBlock.includes(peer),
-                    )
-                },
-                blocks[0].content.ordered_transactions
-                    .filter(
-                        transaction =>
-                            transaction.content.type === "NODE_ONLINE",
-                    )
-                    .map(transaction => transaction.content.data),
+                    // Filter NODE_ONLINE transactions and extract their data
+                    const onlinePeersInBlock = transactions
+                        .filter(
+                            transaction =>
+                                transaction?.content.type === "NODE_ONLINE",
+                        )
+                        .map(
+                            transaction =>
+                                (transaction?.content as TransactionContent)
+                                    .data,
+                        )
+
+                    return onlinePeersInBlock
+                }),
             )
+
+            // Find common peers across blocks
+            const commonPeers = processedBlocks.reduce(
+                (common, peersInBlock) => {
+                    return common.filter(peer => peersInBlock.includes(peer))
+                },
+                processedBlocks[0] || [],
+            )
+
+            return commonPeers
         } catch (e) {
             return []
         }
@@ -253,10 +270,38 @@ export default class Chain {
     static async insertBlock(
         block: Block,
         operations: Operation[] = [],
-        position: number = null,
+        position?: number,
     ): Promise<any> {
         const db = await Datasource.getInstance()
         const blockRepository = db.getDataSource().getRepository(Blocks)
+        const transactionRepository = db
+            .getDataSource()
+            .getRepository(Transactions)
+
+        const transactionEntities = await Promise.all(
+            block.content.ordered_transactions.map(async txHash =>
+                Transaction.fromRawTransaction(
+                    await transactionRepository.findOneBy({
+                        hash: txHash,
+                    }),
+                ),
+            ),
+        )
+
+        let newBlock = new Blocks()
+        // Set block properties here...
+        console.log("[CHAIN] reading hash")
+        console.log(transactionEntities)
+        console.log("[CHAIN] bork")
+        newBlock.hash = block.hash
+        newBlock.number = block.number
+        newBlock.proposer = block.proposer
+        newBlock.status = block.status
+        newBlock.validation_data = block.validation_data
+        newBlock.content = block.content
+        newBlock.content.ordered_transactions = transactionEntities.map(
+            tx => tx.hash,
+        )
 
         // Check if the position is provided and if a block with that position exists
         let existingBlock = null
@@ -265,8 +310,8 @@ export default class Chain {
                 position +
                 " already exists",
         )
-        if (position !== null) {
-            console.log("Block does not have null position")
+        if (position) {
+            console.log("Block has a position passed as arg")
             existingBlock = await blockRepository.findOneBy({
                 number: position,
             })
@@ -297,9 +342,7 @@ export default class Chain {
                     position +
                     " does not exist: inserting a new block",
             )
-            // Insert a new block
-            //console.log(block)
-            let result = await blockRepository.save(block)
+            let result = await blockRepository.save(newBlock)
             //console.log(result)
             return result
         }
@@ -308,24 +351,42 @@ export default class Chain {
     // INFO Generate the genesis block
     static async generateGenesisBlock(genesis_data: any): Promise<Block> {
         // TODO Add a type for the block json
-        //console.log(genesis_data)
         let genesis_block = new Block()
         genesis_block.number = 0
+
         // Define the genesis transaction
         let genesis_tx = new Transaction()
         genesis_tx.content.type = "genesis"
-        //console.log("genesis_tx.content.data")
-        //console.log(genesis_tx.content.data)
+        genesis_tx.blockNumber = 0
+        genesis_tx.content.to = {
+            type: "ed25519",
+            data: new Uint8Array(Buffer.from("0x0", "hex")),
+        }
+        genesis_tx.content.from = {
+            type: "ed25519",
+            data: new Uint8Array(Buffer.from("0x0", "hex")),
+        }
+        genesis_tx.signature = {
+            type: "ed25519",
+            data: new Uint8Array(Buffer.from("0x0", "hex")),
+        }
+        genesis_tx.status = "confirmed"
+
         genesis_tx.hash = Hashing.sha256(JSON.stringify(genesis_tx.content))
         if (!genesis_data.timestamp) {
             genesis_tx.content.timestamp = Date.now()
         } else {
             genesis_tx.content.timestamp = genesis_data.timestamp
         }
-        //console.log(genesis_tx)
+        genesis_tx.content.amount = 0
+        genesis_tx.content.nonce = 0
+        genesis_tx.content.transaction_fee.network_fee = 0
+        genesis_tx.content.transaction_fee.rpc_fee = 0
+        genesis_tx.content.transaction_fee.additional_fee = 0
+        console.log(genesis_tx)
         // Build a block containing the genesis tx
         genesis_block.content.timestamp = genesis_tx.content.timestamp
-        genesis_block.content.ordered_transactions.push(genesis_tx)
+        genesis_block.content.ordered_transactions.push(genesis_tx.hash)
         genesis_block.content.previousHash = "0x0"
         genesis_block.status = "confirmed"
         genesis_block.proposer = "0x000000000000000000000000"
@@ -351,7 +412,18 @@ export default class Chain {
         // Insert the genesis block into the database
         //console.log(genesis_block)
         console.log("[GENESIS] Block generated, ready to insert it")
-        return await this.insertBlock(genesis_block, [genesis_op])
+        console.log(genesis_block)
+        console.log("[GENESIS] inserting transaction")
+        console.log(genesis_tx)
+        await this.insertTransaction(genesis_tx)
+        console.log("[GENESIS] inserted transaction")
+        const genesisBlock = await this.insertBlock(
+            genesis_block,
+            [genesis_op],
+            0,
+        )
+
+        return await genesisBlock
     }
 
     // INFO Generates multiple genesis blocks from an array of genesis configurations and inserts them into the chain
@@ -367,16 +439,14 @@ export default class Chain {
     }
 
     // INFO Insert a transaction into the database
-    static async insertTransaction(
-        txhash: string,
-        block_number: number,
-    ): Promise<any> {
+    static async insertTransaction(transaction: Transaction): Promise<any> {
+        const rawTransaction = Transaction.toRawTransaction(transaction)
+
         const db = await Datasource.getInstance()
         const transactionRepository = db
             .getDataSource()
             .getRepository(Transactions)
-        // FIXME We only need to insert the hash and the block number (edit the table)
-        // TODO Save the transaction in the database
+        return await transactionRepository.save(rawTransaction)
     }
     // !SECTION Setters
 

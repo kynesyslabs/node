@@ -3,10 +3,12 @@ import GLS from "../gls/gls"
 import Genesis from "../types/genesisTypes"
 import Chain from "../chain"
 import Block from "../block"
+import Datasource from "src/model/datasource"
 
 // NOTE Due to the modularity of the code, many routines will be stored in their own modules
 // TODO Move everything there if possible
 import glsRoutines from "./gls_routines"
+import { Transactions } from "src/model/entities/Transactions"
 
 // REVIEW Is this working?
 export default class subOperations {
@@ -32,18 +34,30 @@ export default class subOperations {
         console.log(operation.params)
         let genesis_content: Genesis = operation.params
         // Let's extract the genesis transaction from the genesis block
-        let genesis_tx = genesis_block.content.ordered_transactions[0]
-        // NOTE Writing the tx to the chain tx table as it is the genesis one
-        await Chain.write(
-            "INSERT INTO transactions (hash, content, signature, confirmations, state_changes) VALUES ( \
-			'" +
-                genesis_tx.hash +
-                "', \
-			'" +
-                JSON.stringify(genesis_tx.content) +
-                "', \
-			'genesis', '0', '[]')",
+        let genesis_tx = await Chain.getTransactionFromHash(
+            genesis_block.content.ordered_transactions[0],
         )
+        // NOTE Writing the tx to the chain tx table as it is the genesis one
+        const db = await Datasource.getInstance()
+        const transactionRepository = db
+            .getDataSource()
+            .getRepository(Transactions)
+
+        // Assuming genesis_tx.content is an object that needs to be serialized as JSON
+        const transaction = new Transactions()
+        transaction.hash = genesis_tx.hash
+        transaction.content = genesis_tx.content
+        transaction.signature = "genesis"
+        transaction.status = "someStatus"
+        transaction.type = "genesis"
+        transaction.blockNumber = 0
+        transaction.amount = 0 // TODO: Maybe store the amount as defined in balances below here?
+        transaction.nonce = 0
+        transaction.timestamp = Date.now()
+
+        // Save the new transaction
+        await transactionRepository.save(transaction)
+
         // NOTE Balances
         let balances = genesis_content.balances
         for (let i = 0; i < balances.length; i++) {

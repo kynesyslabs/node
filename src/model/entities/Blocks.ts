@@ -6,14 +6,14 @@ export class Blocks {
     @PrimaryGeneratedColumn({ type: "integer", name: "id" })
     id: number
 
-    @Column("json", { name: "content" })
-    content: NonNullable<any>
-
     @Column("integer", { name: "number" })
     number: number
 
     @Column("varchar", { name: "hash" })
     hash: string
+
+    @Column("json", { name: "content" })
+    content: NonNullable<any>
 
     @Column("varchar", { name: "status" })
     status: string

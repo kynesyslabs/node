@@ -228,6 +228,10 @@ export default class Mempool {
                 "[MEMPOOL VERIFICATION] Signature: " +
                     signature.data.toString("hex"),
             )
+            console.log(
+                "[MEMPOOL VERIFICATION] Signature: " +
+                    signature.data.toString("hex"),
+            )
             let public_key = tx.content.from as any
             console.log(
                 "[MEMPOOL VERIFICATION] Public key: " +
@@ -297,9 +301,9 @@ export default class Mempool {
                 tx2.content.transaction_fee.rpc_fee
                     ? -1
                     : tx1.content.transaction_fee.rpc_fee <
-                        tx2.content.transaction_fee.rpc_fee
-                      ? 1
-                      : 0
+                      tx2.content.transaction_fee.rpc_fee
+                    ? 1
+                    : 0
             if (comparison) {
                 return -1
             } else {

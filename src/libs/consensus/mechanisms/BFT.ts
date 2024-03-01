@@ -136,7 +136,11 @@ export default class QBFT {
             return [false, null]
         }
         const mempool = await Mempool.getMempool()
-        const proposedBlock = await deriveBlock(mempool, medianTimestamp)
+        const { derivedBlock, full_ordered_transactions } = await deriveBlock(
+            mempool,
+            medianTimestamp,
+        )
+        const proposedBlock = derivedBlock
 
         let forgedProposedHash = proposedBlock.hash
 
@@ -189,11 +193,11 @@ export default class QBFT {
         )
 
         if (finalResult) {
-            let ordered_txs = proposedBlock.content.ordered_transactions
+            let ordered_txs = full_ordered_transactions
             for (let i = 0; i < ordered_txs.length; i++) {
                 let tx = ordered_txs[i]
                 // FIXME Insert each transaction in the transactions table with the block number and the tx hash
-                await Chain.insertTransaction(tx.hash, proposedBlock.number)
+                await Chain.insertTransaction(tx)
             }
         }
 
