@@ -28,6 +28,7 @@ import StatusPropertiesType from "./types/statusProperties"
 import { MoreThan } from "typeorm"
 import { TransactionContent } from "./types/transactions"
 import transaction from "./transaction"
+import manageNative from "./routines/gls_routines/manageNative"
 
 export default class Chain {
     private static instance: Chain
@@ -423,6 +424,18 @@ export default class Chain {
             0,
         )
 
+        // REVIEW Maybe this should be done prior to inserting the block
+        // NOTE Assigning balances from the genesis block
+        var allBalances = genesis_data.balances
+        for (let i = 0; i < allBalances.length; i++) {
+            let individualBalance = allBalances[i]
+            let address = individualBalance[0]
+            let balance = individualBalance[1]
+            let _balanceSuccess = await manageNative.balance.setBalance(
+                address,
+                balance,
+            )
+        }
         return await genesisBlock
     }
 

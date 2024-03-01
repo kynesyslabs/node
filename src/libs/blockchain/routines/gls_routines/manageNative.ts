@@ -3,19 +3,47 @@ import GLS from "../../gls/gls"
 import Genesis from "../../types/genesisTypes"
 import Chain from "../../chain"
 import Block from "../../block"
+import Datasource from "src/model/datasource"
+import { StatusNative } from "src/model/entities/StatusNative"
 
-async function transfer() {}
-async function add() {}
+// TODO Implement this for the new blockchain structure
 
-async function remove() {}
+// INFO Transfer a balance from one user to another
+async function transferBalance() {}
 
-async function balance() {}
+// INFO Add a balance to a user
+async function addBalance() {}
 
-let native = {
-    transfer: transfer,
-    add: add,
-    remove: remove,
-    balance: balance,
+// INFO Remove a balance from a user
+async function removeBalance() {}
+
+// INFO Arbitrary function to set the balance of a user
+async function setBalance(address: string, balance: number) {
+    const rawData = {
+        address: address,
+        balance: balance,
+        nonce: 0,
+        tx_list: "[]",
+    }
+
+    const db = await Datasource.getInstance()
+    const StatusNativeRepository = db
+        .getDataSource()
+        .getRepository(StatusNative)
+    return await StatusNativeRepository.save(rawData)
 }
 
-export default native
+// INFO Get the balance of a user
+async function balance() {}
+
+let manageNative = {
+    balance: {
+        transferBalance: transferBalance,
+        addBalance: addBalance,
+        removeBalance: removeBalance,
+        setBalance: setBalance,
+        balance: balance,
+    },
+}
+
+export default manageNative
