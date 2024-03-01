@@ -2,7 +2,7 @@
 /* eslint-disable no-mixed-spaces-and-tabs */
 import * as ethers from "ethers"
 import { Contract } from "ethers"
-import { TransactionResponse } from "./internal"
+import { TransactionResponse } from "./multichain"
 
 /*
  * INFO This class allows to create chains objects that await asynchronously for connections

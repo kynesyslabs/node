@@ -19,7 +19,7 @@ import {
 import { Contract } from "ethers"
 import required from "src/utilities/required"
 import defaultChainAsync, { IEVM } from "./types/defaultChainAsync"
-import { TransactionResponse } from "./types/internal"
+import { TransactionResponse } from "./types/multichain"
 
 export default class EVM extends defaultChainAsync implements IEVM {
     // A singleton for each chain_id

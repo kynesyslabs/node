@@ -12,8 +12,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 import * as xrpl from "xrpl"
 // import WebSocket from "ws" // NOTE tsx compatibility
 import DefaultChainAsync from "./types/defaultChainAsync"
-import { chainProviders } from "./configs/chainProviders"
-import chain from "src/libs/blockchain/chain"
 
 // LINK https://js.xrpl.org/
 
@@ -33,8 +31,19 @@ export default class XRPL extends DefaultChainAsync {
     // INFO Connects to a XRP rpc server
     public async connect(rpc: string): Promise<any> {
         this.provider = new xrpl.Client(rpc, {
-            timeout: 10000,
+            connectionTimeout: 10000,
         })
+
+        // INFO Connects to the provider with error handling
+        const connect = async () => {
+            try {
+                await this.provider.connect()
+            } catch (error) {
+                // REVIEW: What do we do here?
+                console.log("[XRPL] Error reconnecting to XRPL 🔥")
+                console.log(error)
+            }
+        }
 
         // Listen for connection events
         this.provider.on("connected", () => {
@@ -50,7 +59,7 @@ export default class XRPL extends DefaultChainAsync {
             )
             this.connected = false
 
-            await this.provider.connect()
+            await connect()
             this.connected = true
         })
 
@@ -61,7 +70,8 @@ export default class XRPL extends DefaultChainAsync {
         })
 
         // Finally, connect to the provider
-        await this.provider.connect()
+        await connect()
+
         return this.provider
     }
 
@@ -172,8 +182,14 @@ export default class XRPL extends DefaultChainAsync {
             const res = await this.provider.submit(signed.tx_blob)
 
             return {
-                result: "success",
+                result: res.result.accepted ? "success" : "error",
                 hash: res.result.tx_json.hash,
+                extra: {
+                    accepted: res.result.accepted,
+                    result: res.result.engine_result,
+                    result_code: res.result.engine_result_code,
+                    result_message: res.result.engine_result_message,
+                },
             }
         }
     }

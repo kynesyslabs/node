@@ -1,10 +1,10 @@
 // INFO In this module is offloaded the parsing of XM requests
-import * as multichain from "sdk/localsdk/multichain"
 import * as fs from "fs"
-import required from "src/utilities/required"
-import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
-import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
+
+import handlePayOperation from "./executors/pay"
+import * as multichain from "sdk/localsdk/multichain"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
+import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 
 // NOTE We define multichain into global so that we can use it later
 global.multichain = multichain
@@ -135,149 +135,15 @@ class XMParser {
 
         // ANCHOR MVP
         /* SECTION Write tasks */
-        // NOTE For the following tasks we need to check the signed payloads against checkSignedPayloads()
 
         // INFO Pay task
         // console.log(JSON.stringify(operation))
         if (operation.task?.type === "pay") {
-            console.log(
-                "[XMScript Parser] Pay task. Examining payloads (require 1)...",
-            )
-            // NOTE Generic sanity check on payloads
-            if (!checkSignedPayloads(1, operation.task.signedPayloads)) {
-                console.log(
-                    "[XMScript Parser] Pay task failed: Invalid payloads (require 1 has 0)",
-                )
-                return {
-                    result: "error",
-                    error: "Invalid signedPayloads length",
-                }
-            }
-            console.log(
-                "[XMScript Parser] Pay task payloads are ok: Valid payloads (require 1 has 1)",
-            )
-            // ANCHOR EVM (which is quite simple: send a signed transaction. Done.)
-            if (operation.is_evm) {
-                console.log(
-                    "[XMScript Parser] EVM Pay: trying to send the payload as a signed transaction...",
-                ) // REVIEW Simulations?
-                console.log(chainID)
+            const result = await handlePayOperation(operation, chainID)
 
-                console.log(operation.task.signedPayloads)
-
-                console.log(operation.task.signedPayloads[0])
-
-                let evmInstance = await multichain.EVM.getInstance(chainID)
-
-                if (!evmInstance) {
-                    evmInstance = await multichain.EVM.createInstance(
-                        chainID,
-                        evmProviders[operation.chain][operation.subchain],
-                    )
-                    await evmInstance.connect(
-                        evmProviders[operation.chain][operation.subchain],
-                    )
-                }
-
-                result = await multichain.EVM.getInstance(
-                    chainID,
-                ).sendSignedTransaction(operation.task.signedPayloads[0])
-            }
-            // Non EVM Section has more complexity
-            else {
-                console.log("[XMScript Parser] Non-EVM PAY")
-                // ANCHOR Ripple
-                if (operation.chain == "xrpl") {
-                    console.log(
-                        `[XMScript Parser] Ripple Pay: ${operation.chain} on ${operation.subchain}`,
-                    )
-                    // Testnet support
-                    let rpc_url =
-                        chainProviders[operation.chain][operation.subchain]
-                    console.log(
-                        `[XMScript Parser] Ripple Pay: we will use ${rpc_url} to connect to ${operation.chain} on ${operation.subchain}`,
-                    )
-                    console.log(
-                        "[XMScript Parser] Ripple Pay: trying to send the payload as a signed transaction...",
-                    ) // REVIEW Simulations?
-                    let xrplInstance = new multichain.XRPL(rpc_url)
-                    xrplInstance.connect(rpc_url)
-
-                    // REVIEW 10 seconds timeout for connection
-                    let timer = 0
-                    while (!xrplInstance.connected) {
-                        await new Promise(resolve => setTimeout(resolve, 300))
-                        timer += 300
-                        if (timer > 10000) {
-                            console.log("[XMScript Parser] Ripple Pay: timeout")
-                            return {
-                                result: "error",
-                                error: "Timeout in connecting to the XRP network",
-                            }
-                        }
-                    }
-                    console.log(
-                        "[XMScript Parser] Ripple Pay: connected to the XRP network",
-                    )
-
-                    try {
-                        console.log("[XMScript Parser]: debugging operation")
-                        console.log(operation.task)
-                        console.log(JSON.stringify(operation.task))
-                        result = await xrplInstance.sendTransaction(
-                            operation.task.signedPayloads[0],
-                        )
-                        console.log("[XMScript Parser] Ripple Pay: result: ")
-                        console.log(result)
-                    } catch (error) {
-                        console.log("[XMScript Parser] Ripple Pay: error: ")
-                        console.log(error)
-                        result = {
-                            result: "error",
-                            error: error,
-                        }
-                    }
-                }
-
-                if (operation.chain == "egld") {
-                    console.log(
-                        `[XMScript Parser] EGLD Pay: ${operation.chain} on ${operation.subchain}`,
-                    )
-                    const rpc_url =
-                        chainProviders[operation.chain][operation.subchain]
-
-                    const mxInstance = new multichain.MULTIVERSX(rpc_url)
-
-                    try {
-                        // INFO: Connect and wait for the connection to be verified
-                        await mxInstance.connect()
-                    } catch (error) {
-                        return {
-                            result: "error",
-                            error: error.toString(),
-                        }
-                    }
-
-                    try {
-                        const signedTx = operation.task.signedPayloads[0]
-                        const receipt =
-                            await mxInstance.sendTransaction(signedTx)
-                        console.log("[XMScript Parser] EGLD Pay: result: ")
-                        console.log(receipt)
-
-                        result = receipt
-                    } catch (error) {
-                        console.log("[XMScript Parser] EGLD Pay: error: ")
-                        console.log(error)
-                        result = {
-                            result: "error",
-                            error: error.toString(),
-                        }
-                    }
-                }
-            }
-
-            return result // REVIEW is this ok here?
+            // INFO: Adding chain info for debugging purposes
+            result.chain = `${operation.chain}.${operation.subchain}`
+            return result
         }
 
         /* SECTION Read only tasks */
@@ -357,22 +223,6 @@ class XMParser {
             }
         }
     }
-}
-
-// INFO Each non-read task has to be checked here
-function checkSignedPayloads(num: number, signedPayloads: any[]): boolean {
-    // NOTE Sanity check on the signedPayloads length
-    let sanityCheck = required(
-        signedPayloads.length == num,
-        "Invalid signedPayloads length",
-    )
-
-    if (!sanityCheck) {
-        return false
-    }
-
-    console.log("[XMScript Parser] Signed payload seems ok.")
-    return true
 }
 
 export default XMParser
