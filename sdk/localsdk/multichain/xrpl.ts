@@ -154,19 +154,14 @@ export default class XRPL extends DefaultChainAsync {
     }
 
     // INFO Generic sign, send and await (if not specified) a tx
-    async sendTransaction(
-        signed: any,
-        wait: boolean = true,
-    ): Promise<xrpl.TxResponse> {
+    async sendTransaction(signed: any, wait: boolean = false): Promise<any> {
         // Sending the tx
         console.log("[xrpl] sendtransaction")
-        let tx_promise = this.provider.submitAndWait(signed.tx_blob)
-        console.log("[xrpl] tx promise:")
-        console.log(tx_promise)
+
         if (wait) {
-            return await tx_promise
+            return await this.provider.submitAndWait(signed.tx_blob)
         } else {
-            return tx_promise
+            return await this.provider.submit(signed.tx_blob)
         }
     }
 
