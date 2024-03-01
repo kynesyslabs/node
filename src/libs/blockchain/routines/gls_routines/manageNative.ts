@@ -6,7 +6,9 @@ import Block from "../../block"
 import Datasource from "src/model/datasource"
 import { StatusNative } from "src/model/entities/StatusNative"
 
-// TODO Implement this for the new blockchain structure
+// TODO Implement other properties of the GLS object to be fetched and set from the database
+
+// SECTION Balance management
 
 // INFO Transfer a balance from one user to another
 async function transferBalance() {}
@@ -35,6 +37,8 @@ async function setBalance(address: string, balance: number) {
 
 // INFO Get the balance of a user
 async function balance() {}
+
+// !SECTION balance management
 
 let manageNative = {
     balance: {
