@@ -376,7 +376,7 @@ export default class Chain {
         if (!genesis_data.timestamp) {
             genesis_tx.content.timestamp = Date.now()
         } else {
-            genesis_tx.content.timestamp = genesis_data.timestamp
+            genesis_tx.content.timestamp = parseInt(genesis_data.timestamp)
         }
         genesis_tx.content.amount = 0
         genesis_tx.content.nonce = 0
