@@ -232,7 +232,10 @@ class XMParser {
                     } catch (error) {
                         console.log("[XMScript Parser] Ripple Pay: error: ")
                         console.log(error)
-                        result = error
+                        result = {
+                            result: "error",
+                            error: error,
+                        }
                     }
                 }
 

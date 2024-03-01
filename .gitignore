@@ -23,3 +23,6 @@ yarn.lock
 package-lock.json
 data/chain.db
 data/chain.db
+
+# User-specific files
+TODO.md

@@ -2,6 +2,7 @@
 /* eslint-disable no-mixed-spaces-and-tabs */
 import * as ethers from "ethers"
 import { Contract } from "ethers"
+import { TransactionResponse } from "./internal"
 
 /*
  * INFO This class allows to create chains objects that await asynchronously for connections
@@ -94,7 +95,9 @@ export default abstract class DefaultChainAsync implements IDefaultChainAsync {
      * @param signed_transaction The signed transaction
      * @returns A promise that resolves to the transaction hash
      */
-    abstract sendTransaction(signed_transaction: any): any
+    abstract sendTransaction(
+        signed_transaction: any,
+    ): Promise<TransactionResponse>
 
     constructor(rpcURL: string) {
         this.rpc_url = rpcURL
@@ -117,9 +120,7 @@ export interface IEVM {
         abi: any[],
     ) => Promise<any>
     listenForAllEvents: (contract: string, abi: any[]) => Promise<any>
-    waitForReceipt: (
-        tx_hash: string,
-    ) => Promise<ethers.providers.TransactionReceipt>
+    waitForReceipt: (tx_hash: string) => Promise<ethers.TransactionReceipt>
     // The following methods are to be redirected to defaultChain methods (see evm implementation)
     transfer: any
 }

@@ -17,10 +17,9 @@ import {
 } from "ethers"
 
 import { Contract } from "ethers"
-import defaultChainAsync from "./types/defaultChainAsync"
-import { IEVM } from "./types/defaultChainAsync"
 import required from "src/utilities/required"
-import { evmProviders } from "./configs/evmProviders"
+import defaultChainAsync, { IEVM } from "./types/defaultChainAsync"
+import { TransactionResponse } from "./types/internal"
 
 export default class EVM extends defaultChainAsync implements IEVM {
     // A singleton for each chain_id
@@ -86,7 +85,7 @@ export default class EVM extends defaultChainAsync implements IEVM {
     // INFO Simply sending an amount to an address
     // NOTE Returns the transaction hash as a string
     // ANCHOR MVP
-    async pay(address: string, amount: string): Promise<string> {
+    async pay(address: string, amount: string) {
         required(this.wallet)
         let tx = { to: address, value: parseEther(amount) }
         let tx_hashed = await this.sendTransaction(tx)
@@ -114,19 +113,22 @@ export default class EVM extends defaultChainAsync implements IEVM {
         return this.empty_transaction
     }
 
-    async signTransaction(raw_transaction: TransactionRequest): Promise<any> {
+    async signTransaction(raw_transaction: TransactionRequest) {
         required(this.wallet)
         return await this.wallet.signTransaction(raw_transaction)
     }
 
     // INFO If the wallet is connected, send a transaction
     // ANCHOR MVP
-    async sendTransaction(transaction: TransactionRequest): Promise<string> {
+    async sendTransaction(transaction: TransactionRequest) {
         if (!this.wallet) {
             throw new Error("Wallet not connected")
         }
         const txResponse = await this.wallet.sendTransaction(transaction) // NOTE It will be signed automatically
-        return txResponse.hash
+        return {
+            result: "success",
+            hash: txResponse.hash,
+        }
     }
 
     async sendRawTransaction(raw_transaction: string): Promise<string> {
@@ -134,11 +136,18 @@ export default class EVM extends defaultChainAsync implements IEVM {
         return ""
     }
 
-    async sendSignedTransaction(signed_transaction: string): Promise<any> {
+    async sendSignedTransaction(
+        signed_transaction: string,
+    ): Promise<TransactionResponse> {
         if (!this.provider) {
             throw new Error("Provider not connected")
         }
-        return await this.provider.broadcastTransaction(signed_transaction)
+        const res = await this.provider.broadcastTransaction(signed_transaction)
+
+        return {
+            result: "success",
+            hash: res.hash,
+        }
     }
 
     async waitForReceipt(tx_hash: string): Promise<TransactionReceipt> {

@@ -141,7 +141,7 @@ export default class MULTIVERSX extends DefaultChainAsync {
 
         tx.setNonce(senderAccount.getNonceThenIncrement())
 
-        // INFO: tx is an unsigned transaction
+        // INFO: tx is the unsigned transaction
         // INFO: Return it for signing and broadcast
         return tx
     }
@@ -176,6 +176,9 @@ export default class MULTIVERSX extends DefaultChainAsync {
             signed_tx as Transaction,
         )
 
-        return tx_hash
+        return {
+            result: "success",
+            hash: tx_hash,
+        }
     }
 }

@@ -32,7 +32,9 @@ export default class XRPL extends DefaultChainAsync {
 
     // INFO Connects to a XRP rpc server
     public async connect(rpc: string): Promise<any> {
-        this.provider = new xrpl.Client(rpc)
+        this.provider = new xrpl.Client(rpc, {
+            timeout: 10000,
+        })
 
         // Listen for connection events
         this.provider.on("connected", () => {
@@ -154,14 +156,25 @@ export default class XRPL extends DefaultChainAsync {
     }
 
     // INFO Generic sign, send and await (if not specified) a tx
-    async sendTransaction(signed: any, wait: boolean = false): Promise<any> {
+    async sendTransaction(signed: any, wait: boolean = false) {
         // Sending the tx
         console.log("[xrpl] sendtransaction")
 
         if (wait) {
-            return await this.provider.submitAndWait(signed.tx_blob)
+            const res = await this.provider.submitAndWait(signed.tx_blob)
+
+            // NOTE: The return type here might need to change
+            return {
+                result: "success",
+                hash: res.result.hash,
+            }
         } else {
-            return await this.provider.submit(signed.tx_blob)
+            const res = await this.provider.submit(signed.tx_blob)
+
+            return {
+                result: "success",
+                hash: res.result.tx_json.hash,
+            }
         }
     }
 
