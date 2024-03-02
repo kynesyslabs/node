@@ -196,7 +196,8 @@ export default class QBFT {
             let ordered_txs = full_ordered_transactions
             for (let i = 0; i < ordered_txs.length; i++) {
                 let tx = ordered_txs[i]
-                // FIXME Insert each transaction in the transactions table with the block number and the tx hash
+                // REVIEW Insert each transaction in the transactions table with the block number and the tx hash
+                tx.blockNumber = proposedBlock.number
                 await Chain.insertTransaction(tx)
             }
         }
