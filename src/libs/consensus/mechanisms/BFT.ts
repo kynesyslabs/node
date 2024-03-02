@@ -194,10 +194,20 @@ export default class QBFT {
 
         if (finalResult) {
             let ordered_txs = full_ordered_transactions
+            console.log(
+                "[sQBFT]: ordered_txs: " + ordered_txs.length.toString(),
+            )
+            console.log(
+                "[sQBFT]: Block number: " + proposedBlock.number.toString(),
+            )
             for (let i = 0; i < ordered_txs.length; i++) {
                 let tx = ordered_txs[i]
                 // REVIEW Insert each transaction in the transactions table with the block number and the tx hash
                 tx.blockNumber = proposedBlock.number
+                // REVIEW Sanitizing the tx too
+                if (!tx.content.to) {
+                    tx.content.to = "missing"
+                }
                 await Chain.insertTransaction(tx)
             }
         }

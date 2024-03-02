@@ -88,13 +88,24 @@ export default class multichainDispatcher {
         // We should have a valid, attested request: lets handle it
         // NOTE If all the attestations are valid we can create the transaction, insert it and give back the result
         // Creating a tx from the completed request if is possible
-        let jsonNote = {
-            script: script,
-            results: results,
+        let jsonNote: DerivableNative = {
+            from: "0x0", // FIXME Implement this
+            to: "multichain", // FIXME Implement this more in details
+            type: "xm",
+            data: {
+                script: script,
+                results: results,
+            },
+            timestamp: Date.now(),
+            fees: {
+                networkFee: 0,
+                rpcFee: 0,
+                additionalFee: 0,
+            }, // FIXME Implement this
         }
 
         //console.log(jsonNote)
 
-        return await deriveMempoolOperation(jsonNote as any, insert)
+        return await deriveMempoolOperation(jsonNote, insert)
     }
 }

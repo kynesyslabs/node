@@ -452,8 +452,11 @@ export default class Chain {
     }
 
     // INFO Insert a transaction into the database
-    static async insertTransaction(transaction: Transaction): Promise<any> {
-        const rawTransaction = Transaction.toRawTransaction(transaction)
+    static async insertTransaction(
+        transaction: Transaction,
+        status: string = "confirmed",
+    ): Promise<any> {
+        const rawTransaction = Transaction.toRawTransaction(transaction, status)
 
         const db = await Datasource.getInstance()
         const transactionRepository = db

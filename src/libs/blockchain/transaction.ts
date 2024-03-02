@@ -162,20 +162,39 @@ export default class Transaction {
         return _structured
     }
 
-    public static toRawTransaction(tx: Transaction): RawTransaction {
-        console.log("attempting to insert raw tx")
-        console.log(tx.signature.data.toString("hex"))
-        console.log(tx.content.to["data"]?.toString("hex"))
-        console.log(tx.content.from["data"]?.toString("hex"))
+    public static toRawTransaction(
+        tx: Transaction,
+        status: string = "confirmed",
+    ): RawTransaction {
+        console.log("[toRawTransaction] attempting to create a raw tx")
+        console.log(
+            "[toRawTransaction] Signature: " +
+                tx.signature.data.toString("hex"),
+        )
+        console.log("[toRawTransaction] Block number: " + tx.blockNumber)
+        console.log("[toRawTransaction] Status: " + status)
+        console.log("[toRawTransaction] Hash: " + tx.hash)
+        console.log("[toRawTransaction] Type: " + tx.content.type)
+
+        // NOTE From and To can be either a string or a Buffer
+        if (tx.content.to["data"]?.toString("hex")) {
+            tx.content.to = tx.content.to["data"]?.toString("hex")
+        }
+        if (tx.content.from["data"]?.toString("hex")) {
+            tx.content.from = tx.content.from["data"]?.toString("hex")
+        }
+
+        console.log("[toRawTransaction] From: " + tx.content.from)
+        console.log("[toRawTransaction] To: " + tx.content.to)
         const rawTx = {
             blockNumber: tx.blockNumber,
             signature: tx.signature.data.toString("hex"),
-            status: tx.status,
+            status: status,
             hash: tx.hash,
             content: JSON.stringify(tx.content),
             type: tx.content.type,
-            to: tx.content.to["data"]?.toString("hex"),
-            from: tx.content.from["data"]?.toString("hex"),
+            to: tx.content.to,
+            from: tx.content.from,
             amount: tx.content.amount,
             nonce: tx.content.nonce,
             timestamp: tx.content.timestamp,

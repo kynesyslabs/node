@@ -18,6 +18,9 @@ export default async function deriveBlock(
     // Deriving an empty block and setting the few properties we can use right now
     let derivedBlock: Block = new Block()
     derivedBlock.status = "derived"
+    // We can infer the block number from the last block
+    let lastBlockNumber = await Chain.getLastBlockNumber()
+    derivedBlock.number = lastBlockNumber + 1
     let proposer = sharedState
         .getInstance()
         .identity.ed25519.publicKey.toString("hex")

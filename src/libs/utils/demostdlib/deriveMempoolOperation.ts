@@ -8,9 +8,16 @@ import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 
 export interface DerivableNative {
-    address: string
+    from: string
+    to: string
     type: "web2" | "xm" | "native"
     data: any | string
+    timestamp: number
+    fees: {
+        networkFee: number
+        rpcFee: number
+        additionalFee: number
+    }
 }
 
 // REVIEW See if is fixed (should return something)
@@ -33,7 +40,7 @@ export async function deriveMempoolOperation(
     let derivedOperation: Operation
     // Deriving a transaction
     // TODO Replace with deriveTransaction(data) using data.type
-    derivedTx = await createTransaction(data.data) // A simple tx with web2 data inside
+    derivedTx = await createTransaction(data) // A simple tx with web2 data inside
     console.log("Derived tx:")
     //console.log(derivedTx)
     // Deriving an operation from the tx
@@ -137,7 +144,9 @@ async function createTransactionProxy(data: any): Promise<Transaction> {
     return await createTransaction(data)
 }
 
-export async function createTransaction(data: any): Promise<Transaction> {
+export async function createTransaction(
+    derivable: DerivableNative,
+): Promise<Transaction> {
     let transaction: Transaction = {
         content: {
             type: null,
@@ -158,16 +167,23 @@ export async function createTransaction(data: any): Promise<Transaction> {
         status: null,
         blockNumber: null,
     }
+    // Setting the type
+    transaction.content.type = derivable.type
+    // REVIEW Why? Should be done differently I guess
     // Setting us as the sender
     transaction.content.from =
         sharedState.getInstance().identity.ed25519.publicKey
-    transaction.content.to = "blockchain"
+    transaction.content.to = derivable.to
     transaction.content.amount = 0
     transaction.content.nonce = 0
     // TODO Fees
+    transaction.content.transaction_fee.network_fee = derivable.fees.networkFee
+    transaction.content.transaction_fee.rpc_fee = derivable.fees.rpcFee
+    transaction.content.transaction_fee.additional_fee =
+        derivable.fees.additionalFee
     // Adding data
-    transaction.content.data = data
-    transaction.content.timestamp = Date.now()
+    transaction.content.data = derivable.data
+    transaction.content.timestamp = derivable.timestamp
     // Hashing the content and signing the transaction
     transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
     let signature = Cryptography.sign(

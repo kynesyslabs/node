@@ -16,8 +16,8 @@ export default interface RawTransaction {
     hash: string
     content: NonNullable<string>
     type: string
-    from: string
-    to: string
+    from: any
+    to: any
     amount: number
     nonce: number
     timestamp: number

@@ -1,12 +1,15 @@
 // INFO Entry file for handling web2 requests
 import { IWeb2Request, IWeb2Payload } from "src/features/web2/types/Web2Types"
-import Web2API from "src/features/web2/routines/Web2Parser"
+import Web2API, { Web2APIClass } from "src/features/web2/routines/Web2Parser"
 import { Operation } from "src/libs/blockchain/routines/executeOperations"
 import required from "src/utilities/required"
 import Cryptography from "src/libs/crypto/cryptography"
 import sharedState from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
-import { deriveMempoolOperation } from "src/libs/utils/demostdlib/deriveMempoolOperation"
+import {
+    DerivableNative,
+    deriveMempoolOperation,
+} from "src/libs/utils/demostdlib/deriveMempoolOperation"
 
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
@@ -120,11 +123,21 @@ export default async function handleWeb2(
 async function toMempool(instanceName: string, insert: boolean = true) {
     // We should have a valid, attested request: lets handle it
     let derivedOperation: Operation
+    let web2Instance: Web2APIClass = Web2API(null, instanceName)
+    let derivable: DerivableNative = {
+        from: "web2module", // FIXME Implement this
+        to: "web2", // FIXME Implement this more in details
+        type: "web2",
+        data: web2Instance.request,
+        timestamp: Date.now(),
+        fees: {
+            networkFee: 0,
+            rpcFee: 0,
+            additionalFee: 0,
+        }, // FIXME Implement this
+    }
     // NOTE If all the attestations are valid we can create the transaction, insert it and give back the result
     // Deriving an operation and a tx from the web2 request
-    derivedOperation = await deriveMempoolOperation(
-        Web2API(null, instanceName).request as any,
-        insert,
-    )
+    derivedOperation = await deriveMempoolOperation(derivable, insert)
     return derivedOperation
 }
