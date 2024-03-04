@@ -49,13 +49,17 @@ export default class EVM extends defaultChainAsync implements IEVM {
         this.isEIP1559 = isEIP1559
     }
 
-    async connect(rpc_url: string): Promise<boolean> {
+    async connect(rpc_url: string) {
         console.log("Connecting EVM RPC provider: " + rpc_url)
         this.provider = new JsonRpcProvider(rpc_url)
-        // TODO Check network connectivity and id
-        this.connected = true
-        console.log(this.provider)
-        return true
+
+        // INFO: Fetch network data
+        const network = await this.provider.getNetwork()
+
+        // INFO: Check if network data is truthy
+        this.connected = Boolean(network.name)
+
+        return this.connected
     }
 
     async disconnect() {

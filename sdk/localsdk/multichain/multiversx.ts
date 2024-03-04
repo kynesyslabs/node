@@ -49,11 +49,9 @@ export default class MULTIVERSX extends DefaultChainAsync {
         })
 
         const networkConfig = await this.provider.getNetworkConfig()
-        const chainID = networkConfig.ChainID
-
         // NOTE: Chain ID is needed in this.pay()
-        this.connected = chainID !== undefined
-        this.chainID = chainID
+        this.chainID = networkConfig.ChainID
+        this.connected = Boolean(this.chainID)
 
         return this.connected
     }
