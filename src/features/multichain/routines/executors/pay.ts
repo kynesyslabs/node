@@ -115,7 +115,15 @@ async function handleXRPLPay(
         "[XMScript Parser] Ripple Pay: trying to send the payload as a signed transaction...",
     ) // REVIEW Simulations?
     let xrplInstance = new multichain.XRPL(rpc_url)
-    xrplInstance.connect(rpc_url)
+    const connected = await xrplInstance.connect(rpc_url)
+    console.log("CONNECT RETURNED: ", connected)
+
+    if (!connected) {
+        return {
+            result: "error",
+            error: `Failed to connect to the XRP network. RPC URL: "${rpc_url}" on ${operation.chain}.${operation.subchain} is not reachable`,
+        }
+    }
 
     // REVIEW 10 seconds timeout for connection
     let timer = 0

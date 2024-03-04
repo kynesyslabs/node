@@ -37,14 +37,19 @@ export default abstract class DefaultChainAsync implements IDefaultChainAsync {
     rpc_url: string
     connected: boolean
 
+    constructor(rpcURL: string) {
+        this.rpc_url = rpcURL
+        this.connected = false
+    }
+
     // ANCHOR Base methods
 
     /**
      * Connects to the RPC provider
      * @param url The RPC URL of the chain
-     * @returns A promise that resolves to the provider object
+     * @returns A boolean that resolves to true if the connection was successful
      */
-    abstract connect(rpc_url: string): Promise<any>
+    abstract connect(rpc_url: string): Promise<boolean>
 
     /**
      * Disconnects from the RPC provider.
@@ -98,11 +103,6 @@ export default abstract class DefaultChainAsync implements IDefaultChainAsync {
     abstract sendTransaction(
         signed_transaction: any,
     ): Promise<TransactionResponse>
-
-    constructor(rpcURL: string) {
-        this.rpc_url = rpcURL
-        this.connected = false
-    }
 }
 
 // INFO This interface is exclusive for the EVM networks

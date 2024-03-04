@@ -29,20 +29,44 @@ export default class XRPL extends DefaultChainAsync {
     // SECTION Initializations
 
     // INFO Connects to a XRP rpc server
-    public async connect(rpc: string): Promise<any> {
+    public async connect(rpc: string) {
         this.provider = new xrpl.Client(rpc, {
             connectionTimeout: 10000,
         })
 
         // INFO Connects to the provider with error handling
-        const connect = async () => {
+        let trial_index = 0
+        let maxTrials = 3
+
+        const providerConnect = async () => {
+            console.log(`[XRPL] ${maxTrials - trial_index} retries left`)
+
             try {
+                // throw new Error("Test error for retrying the connection")
+
                 await this.provider.connect()
+                console.log(
+                    `[XRPL] Connected to RPC on ${trial_index + 1}th trial`,
+                )
+
+                return true
             } catch (error) {
-                // REVIEW: What do we do here?
-                console.log("[XRPL] Error reconnecting to XRPL 🔥")
+                console.log("[XRPL] Error connecting to RPC")
                 console.log(error)
+
+                trial_index++
+                if (trial_index == maxTrials) {
+                    // INFO: Return false if we failed to connect
+                    console.log("[XRPL] Failed to connect to RPC")
+                    return false
+                }
+
+                // INFO: Retry for the Nth time
+                console.log("[XRPL] Retrying ...")
+                await providerConnect()
             }
+
+            return false
         }
 
         // Listen for connection events
@@ -59,8 +83,7 @@ export default class XRPL extends DefaultChainAsync {
             )
             this.connected = false
 
-            await connect()
-            this.connected = true
+            this.connected = await providerConnect()
         })
 
         // Handle errors
@@ -70,9 +93,8 @@ export default class XRPL extends DefaultChainAsync {
         })
 
         // Finally, connect to the provider
-        await connect()
-
-        return this.provider
+        this.connected = await providerConnect()
+        return this.connected
     }
 
     // INFO Manages a clean exit
