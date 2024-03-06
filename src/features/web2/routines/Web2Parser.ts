@@ -63,15 +63,15 @@ export class Web2APIClass {
         }
         // Setting the name
         if (!Web2APIClass.requests.has(named)) {
-            term.yellow("Creating new Web2API instance\n")
+            term.yellow("[Web2APIClass] Creating new Web2API instance\n")
             //console.log("Using the following parameters:")
             //console.log("\n{Name}")
             //console.log(named)
             //console.log("\n{Request}")
             //console.log(req)
-            term.yellow("Proceeding\n")
-            required(sendSock, "Missing sender socket")
-            required(req, "Missing request")
+            //term.yellow("Proceeding\n")
+            required(sendSock, "[Web2APIClass] Missing sender socket")
+            required(req, "[Web2APIClass] Missing request")
             Web2APIClass.requests.set(
                 named,
                 new Web2APIClass(named, sendSock, req),
@@ -95,8 +95,9 @@ export class Web2APIClass {
         this.name = name
         this.senderSocket = sendSock
         if (!payload.message) {
-            console.log("[Web2API] No request attached. Is this right?")
+            term.yellow.bold("[Web2API] No request attached. Is this right?")
             //console.log(payload)
+            // TODO Specify this as a parameter that users can set
             this.request.raw.minAttestations = 10
             this.request.raw.stage.hop_number = 0
         } else {

@@ -29,22 +29,36 @@ export default async function handleWeb2(
     // NOTE From now on, Web2API will reply to instanceName with the same instance
     // NOTE Also note that Web2API automatically starts the request validation
 
-    console.log("[PAYLOAD FOR WEB2] ")
+    console.log("[PAYLOAD FOR WEB2] [*] Received a Web2 Payload.")
+    console.log("[PAYLOAD FOR WEB2] [*] Beginning sanitization checks...")
     //console.log(payload)
     //process.exit(0)
 
     let request: IWeb2Request = payload.message
-    console.log("[REQUEST FOR WEB2] ")
+    console.log(
+        "[REQUEST FOR WEB2] [+] Found and loaded payload.message as expected...",
+    )
     //console.log(request)
     //process.exit(0)
+
+    // TODO A little more of sanitiazion
 
     let uuid = JSON.stringify(payload)
     uuid = uuid + Date.now().toString()
     let nameHash = Hashing.sha256(uuid)
 
-    // TODO Add a destructor (?) to avoid OOM
-    let web2interface = Web2API(null, nameHash, senderSocket, payload) // NOTE null is important here
-    // NOTE We want to wait for the request to be digested before proceeding
+    // NOTE Web2API instantiates and creates a proper Web2APIClass with its methods and a clean state
+    /*
+     * As it can be noted by following the class definition, the Web2API class works as a unique set of
+     * singletons. In Web2API constructor, the .digestedPromise propriety contains a promise from the
+     * .digest() method which is resolved once the attestation path (the Instant Chain of Trust) is completed
+     * or the request times out.
+     *
+     * An attestation is automatically added by the .digest() method, attesting its result
+     * TODO Implement timeouts properly
+     */
+    let web2interface = Web2API(null, nameHash, senderSocket, payload)
+    // NOTE We want to wait for the request to be digested before proceeding (see above paragraph)
     await web2interface.digestedPromise
     // Now result is in web2request.request.result
     console.log(
@@ -52,6 +66,10 @@ export default async function handleWeb2(
     )
     let instanceName = web2interface.name // Numeric and progressive
     // Checking if we are the original rpc that received the request
+    /* NOTE The attestations are enforced by being part of the payload itself,
+     * hence being verified by the signature of the payload itself.
+     * This way, the agnostic chain of trust can be maintained with minimal overhead.
+     */
     let nOfAttestations = Object.keys(request.attestations).length
     let originalFlag = nOfAttestations === 1 // REVIEW Remember: we attested during the initialization
     console.log("[web2Dispatcher] Number of attestations: " + nOfAttestations)
@@ -59,14 +77,21 @@ export default async function handleWeb2(
     // NOTE If we are the original rpc and this is the original request, we need to validate the request
     // and wait for the attestations to arrive
     if (originalFlag) {
-        console.log("[web2Dispatcher] This is the original rpc.")
+        console.log(
+            "[web2Dispatcher] This is the original rpc. We will wait for attestations.",
+        )
         try {
             /* TODO Activate in production */
             // Ensuring we reach the quorum if we are the original rpc that received the request
+            term.yellow(
+                "[web2Dispatcher] [*] Waiting for the required quorum for this chain of trust...",
+            )
             //required(await Web2API(null, instanceName).awaitQuorum(), "Not enough attestations to reach quorum") // SWITCH
-
+            term.green("[web2Dispatcher] [+] Quorum reached!")
             // Hashing and signing the request
-            console.log("[web2Dispatcher] Hashing and signing the request...")
+            term.green(
+                "[web2Dispatcher] [*] Hashing and signing the request's attestations...",
+            )
             let hashedAttestations = Hashing.sha256(
                 JSON.stringify(web2interface.request.attestations),
             )
@@ -76,8 +101,8 @@ export default async function handleWeb2(
                 ourPk,
             )
             // Compiling and certifying the result
-            console.log(
-                "[web2Dispatcher] Compiling and certifying the result on our side...",
+            term.green(
+                "[web2Dispatcher] [*] Compiling and certifying the result on our side...",
             )
             web2interface.request.hash = hashedAttestations
             web2interface.request.signature = signedAttestations
@@ -103,10 +128,10 @@ export default async function handleWeb2(
         "[web2Dispatcher] Done! Sending the response back to the client...",
     )
     console.log(
-        "[web2Dispatcher] Attestations validated. Deriving a transaction...",
+        "[web2Dispatcher] Attestations validated. Deriving a transaction + operation...",
     )
-    let derivedTx = await toMempool(instanceName)
-    console.log("[web2Dispatcher] Transaction derived.")
+    let derivedResult = await toMempool(instanceName)
+    console.log("[web2Dispatcher] Transaction + operation derived.")
 
     Web2API("remove", nameHash, senderSocket)
 
@@ -116,13 +141,17 @@ export default async function handleWeb2(
     //console.log("[WEB2 DEBUG]")
     // console.log(JSON.stringify(web2interface.request))
 
-    return [true, JSON.stringify(web2interface.request)]
+    // TODO Maybe we should also return derivedResult somehow
+    return [true, JSON.stringify(web2interface.request)] // , derivedResult
 }
 
-// INFO Derive a valid DEMOS tx and GLS operation from a web2 request
-async function toMempool(instanceName: string, insert: boolean = true) {
+// INFO Derive a valid DEMOS tx and GLS operation from a compatible request
+async function toMempool(
+    instanceName: string,
+    insert: boolean = true,
+): Promise<[string, Operation]> {
     // We should have a valid, attested request: lets handle it
-    let derivedOperation: Operation
+    let derivedResults: [string, Operation]
     let web2Instance: Web2APIClass = Web2API(null, instanceName)
     let derivable: DerivableNative = {
         from: "web2module", // FIXME Implement this
@@ -138,6 +167,6 @@ async function toMempool(instanceName: string, insert: boolean = true) {
     }
     // NOTE If all the attestations are valid we can create the transaction, insert it and give back the result
     // Deriving an operation and a tx from the web2 request
-    derivedOperation = await deriveMempoolOperation(derivable, insert)
-    return derivedOperation
+    derivedResults = await deriveMempoolOperation(derivable, insert)
+    return derivedResults
 }

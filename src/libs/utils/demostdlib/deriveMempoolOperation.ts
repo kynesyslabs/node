@@ -40,21 +40,21 @@ export async function deriveMempoolOperation(
     let derivedOperation: Operation
     // Deriving a transaction
     // TODO Replace with deriveTransaction(data) using data.type
-    derivedTx = await createTransaction(data) // A simple tx with web2 data inside
+    derivedTx = await createTransaction(data) // A simple tx with data inside
     console.log("Derived tx:")
     //console.log(derivedTx)
     // Deriving an operation from the tx
-    derivedOperation = await createOperation(derivedTx) // An operation witnessing the validity of the web2 request
+    derivedOperation = await createOperation(derivedTx) // An operation witnessing the validity of the data requested
     console.log("Derived operation:")
     //console.log(derivedOperation)
     if (insert) {
-        // Inserting the operation in the next mempool session with the proper data
+        // ANCHOR Inserting the operation in the next mempool session with the proper data
         Mempool.addTransaction(derivedTx)
-        // And we do the same for the derived operation in the GLS
+        // ANCHOR And we do the same for the derived operation, inserting it in the GLS
         GLS.getInstance().operations.push(derivedOperation)
     }
     // TODO Size limit?
-    return derivedOperation
+    return [derivedTx.hash, derivedOperation] // REVIEW Is this ok?
 }
 
 /* TODO Plan for the future
