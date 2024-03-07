@@ -40,14 +40,9 @@ export default class multichainDispatcher {
         // REVIEW Execute
         let result = await multichainDispatcher.execute(data)
         // TODO Implement a response schema
-        try {
-            return JSON.stringify(result) // await multichainDispatcher.execute(data)
-        } catch (error) {
-            // FIXME Narrow it to "TypeError: Do not know how to serialize a BigInt"
-            let convertedBigInt = Number.parseInt(result.toString())
-            result = convertedBigInt ?? this.toString()
-            return JSON.stringify(result)
-        }
+        return JSON.stringify(result, (_, v) =>
+            typeof v === "bigint" ? v.toString() : v,
+        ) // await multichainDispatcher.execute(data)
     }
 
     // INFO Check syntax of xM Script
