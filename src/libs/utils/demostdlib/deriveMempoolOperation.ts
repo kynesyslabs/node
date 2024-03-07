@@ -29,7 +29,9 @@ export async function deriveMempoolOperation(
     // Sanity check
     if (typeof data.data !== "string") {
         try {
-            data.data = JSON.stringify(data.data)
+            data.data = JSON.stringify(data.data, (_, v) =>
+                typeof v === "bigint" ? v.toString() : v,
+            )
         } catch (e) {
             console.log(e)
             return false
