@@ -216,8 +216,11 @@ export default class ResponseRegistry {
                 connection_string: null,
             },
         }
-        console.log("[CREATED RESPONSE REQUEST]")
-        console.log(this.list[comlink.muid])
+        console.log(
+            "[ResponseRegistry] Created response request for muid " +
+                comlink.muid,
+        )
+        //console.log(this.list[comlink.muid])
         return [true, this.list[comlink.muid]]
     }
 

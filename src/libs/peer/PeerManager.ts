@@ -52,7 +52,7 @@ export default class PeerManager {
         const actorList: Peer[] = []
         const connectedList: Peer[] = []
         const authenticatedList: Peer[] = []
-        console.log(this.peerList)
+        //console.log(this.peerList)
         for (const peer in this.peerList) {
             console.log("[PeerManager] Getting peer " + peer)
             let _peer = this.peerList[peer]

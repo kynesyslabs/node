@@ -13,8 +13,8 @@ async function calculateComposedGas(): Promise<number> {
     return tx_fee
 }
 
-export default async function calculateCurrentGas(gas): Promise<number> {
-    console.log(gas)
+// REVIEW Why is this just a nested call
+export default async function calculateCurrentGas(): Promise<number> {
     let composed_gas_price = await calculateComposedGas()
     return composed_gas_price
 }
