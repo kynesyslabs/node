@@ -9,6 +9,7 @@ data/evmChains/
 data/evmChains
 data/evmChains/*.json
 data/chain.db
+docker/node
 
 .vscode
 
@@ -26,3 +27,4 @@ data/chain.db
 
 # User-specific files
 TODO.md
+src/features/experimental/fhe/fhe_test.ts
