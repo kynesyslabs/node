@@ -32,6 +32,8 @@ import getPreviousHashFromBlockNumber from "./routines/nodecalls/getPreviousHash
 import { normalizeWebBuffers } from "./routines/normalizeWebBuffers"
 import Sessions from "./routines/sessionManager"
 import { BrowserRequest } from "./serverListeners"
+import getPeerlist from "./routines/nodecalls/getPeerlist"
+import getPreviousHashFromBlockHash from "./routines/nodecalls/getPreviousHashFromBlockHash"
 
 var term = terminalkit.terminal
 
@@ -329,6 +331,7 @@ export default class ServerHandlers {
             | Transaction
             | Transaction[]
             | AddressInfo
+        let result: any // Storage for the result
         let socketized_response: Peer[]
         let { data } = content
         //console.log(typeof data)
@@ -340,34 +343,18 @@ export default class ServerHandlers {
                 response = await ServerHandlers.handleXMChainOperation(content)
                 break // REVIEW Here or in comlinks?
             case "getPeerlist":
-                console.log("[SERVER] Received getPeerlist")
-                // Getting our current peerlist
-                socketized_response = PeerManager.getInstance().getPeers()
-                response = [] as Peer[]
-                // Filling response with peers without socket objects
-                for (let peer of socketized_response) {
-                    peer.socket = null
-                    response.push(peer)
-                }
+                response = await getPeerlist()
                 break
             // REVIEW Both below for getting the last hash (untested yet)
             case "getPreviousHashFromBlockNumber":
-                var res = await getPreviousHashFromBlockNumber(data)
-                response = res.response
-                extra = res.extra
+                result = await getPreviousHashFromBlockNumber(data)
+                response = result.response
+                extra = result.extra
                 break
             case "getPreviousHashFromBlockHash":
-                console.log("[SERVER] Received getPreviousHashFromBlockNumber")
-                if (data.blockHash === undefined || data.blockHash === "") {
-                    response = "error"
-                    extra = "Block hash is not valid"
-                    break
-                }
-                response = await chain.getBlockByHash(data.blockHash)
-                console.log(
-                    "[CHAIN.ts] Received reply from the database: got a block",
-                )
-                response = response.content.previousHash
+                result = await getPreviousHashFromBlockHash(data)
+                response = result.response
+                extra = result.extra
                 break
             // REVIEW (untested) Headers instead of full blocks
             case "getBlockHeaderByNumber":
