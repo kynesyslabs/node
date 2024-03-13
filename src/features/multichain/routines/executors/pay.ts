@@ -1,10 +1,10 @@
-import { IOperation } from "../XMParser"
 import { multichain } from "sdk/localsdk"
-import { TransactionResponse } from "sdk/localsdk/multichain/types/multichain"
-
-import checkSignedPayloads from "src/utilities/checkSignedPayloads"
-import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
+import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
+import { TransactionResponse } from "sdk/localsdk/multichain/types/multichain"
+import checkSignedPayloads from "src/utilities/checkSignedPayloads"
+
+import { IOperation } from "../XMParser"
 
 /**
  * Executes a XM pay operation and returns

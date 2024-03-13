@@ -1,6 +1,8 @@
-import * as solanaWeb3 from "@solana/web3.js"
-import defaultChainAsync from "./types/defaultChainAsync"
 import required from "src/utilities/required"
+
+import * as solanaWeb3 from "@solana/web3.js"
+
+import defaultChainAsync from "./types/defaultChainAsync"
 
 /* LICENSE
 

@@ -1,6 +1,6 @@
-import zlib from "zlib"
 import Transaction from "src/libs/blockchain/transaction"
 import required from "src/utilities/required"
+import zlib from "zlib"
 
 export function compressData(tx: Transaction): Transaction {
     let stringified_content_data = JSON.stringify(tx.content.data)

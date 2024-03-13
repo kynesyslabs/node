@@ -12,9 +12,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 // LINK https://github.com/stellar/js-stellar-sdk/tree/master/docs/reference
 
 import required from "src/utilities/required"
-import defaultChainAsync from "./types/defaultChainAsync"
 import * as StellarSdk from "stellar-sdk"
+
 import Server from "../../../src/libs/network/server"
+import defaultChainAsync from "./types/defaultChainAsync"
 
 // TODO Find a way to make things in the next link much more unified
 // LINK https://github.com/stellar/js-stellar-base/blob/master/docs/reference/building-transactions.md

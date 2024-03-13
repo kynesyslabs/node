@@ -1,8 +1,9 @@
 // INFO Basic extensible fungible token implementation. Can be extended in custom applications but must be used as a base class.
 
+import forge from "node-forge"
+
 import { hashing } from "../crypto"
 import Cryptography from "../crypto/cryptography"
-import forge from "node-forge"
 
 export default class fungibleToken {
     public metadata: {

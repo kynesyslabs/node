@@ -1,8 +1,9 @@
 // INFO This class exposes methods and types relative to the entrance and management of validators on chain
 
-import Transaction from "../transaction"
 import forge from "node-forge"
+
 import GLS from "../gls/gls"
+import Transaction from "../transaction"
 
 let MIN_TO_STAKE = 10000000000000000000000000 // TODO Defined in genesis
 

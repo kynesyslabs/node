@@ -1,12 +1,12 @@
+import { Peer, PeerManager } from "src/libs/peer"
+import sharedState from "src/utilities/sharedState"
+import { promisify } from "util"
+
+import ComLink from "../../communications/comlink"
+import ResponseRegistry from "../../communications/responseRegistry"
+import Transmission from "../../communications/transmission"
 /* eslint-disable indent */
 import * as stat from "./timeSyncUtils"
-import { promisify } from "util"
-import ComLink from "../../communications/comlink"
-import Transmission from "../../communications/transmission"
-import ResponseRegistry from "../../communications/responseRegistry"
-import { Peer, PeerManager } from "src/libs/peer"
-
-import sharedState from "src/utilities/sharedState"
 
 const sleep = promisify(setTimeout)
 interface Offset {

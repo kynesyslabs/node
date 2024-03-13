@@ -1,12 +1,13 @@
+import Block from "src/libs/blockchain/block"
+import Chain from "src/libs/blockchain/chain"
 // INFO Module to derive a block from a Mempool data type
 import { MempoolData } from "src/libs/blockchain/mempool"
-import Chain from "src/libs/blockchain/chain"
-import Block from "src/libs/blockchain/block"
-import sharedState from "src/utilities/sharedState"
 import Transaction from "src/libs/blockchain/transaction"
-import orderTxs from "./orderTxs"
 import Hashing from "src/libs/crypto/hashing"
+import sharedState from "src/utilities/sharedState"
+
 import assignTxs from "./assignTxs"
+import orderTxs from "./orderTxs"
 
 export default async function deriveBlock(
     mempoolData: MempoolData,

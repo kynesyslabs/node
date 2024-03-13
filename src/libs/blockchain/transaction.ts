@@ -18,13 +18,14 @@ NOTE: The fee is locked by the node and released when the block itself is confir
 
 */
 
+import { pki } from "node-forge"
+
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
-import { pki } from "node-forge"
-import { TransactionContent } from "./types/transactions"
-import Confirmation from "./types/confirmation"
 import { compressData, decompressData } from "../utils/demostdlib"
+import Confirmation from "./types/confirmation"
 import RawTransaction from "./types/rawTransaction"
+import { TransactionContent } from "./types/transactions"
 
 interface TransactionResponse {
     status: string

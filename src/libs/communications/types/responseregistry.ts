@@ -1,3 +1,6 @@
+import forge from "node-forge"
+import { Socket } from "socket.io"
+import * as socket_client from "socket.io-client"
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
@@ -12,9 +15,6 @@ import Datasource from "src/model/datasource"
 
 import ComLink from "../comlink"
 import Transmission from "../transmission"
-import { Socket } from "socket.io"
-import * as socket_client from "socket.io-client"
-import forge from "node-forge"
 
 export interface Response {
     message: string // TODO Add message type

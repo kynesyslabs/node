@@ -10,35 +10,38 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import terminalkit from "terminal-kit"
-var term = terminalkit.terminal
+import "reflect-metadata"
 
+import * as bitcoin from "bitcoinjs-lib"
+import * as dotenv from "dotenv"
+import express from "express"
 //import process from "node:process"
 import * as fs from "fs"
-import "reflect-metadata"
-import express from "express"
 import * as http from "http"
+// TODO Put into .env
+// groundControl.init(10250, "0.0.0.0", "http", {
+//     key: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.key",
+//     cert: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.crt",
+//     ca: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.ca",
+// })
+// SECTION REVIEW ZONE
+import * as https from "https"
+import { Server } from "socket.io"
+import terminalkit from "terminal-kit"
 
+import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
+// import * as eiows from 'eiows';
+import { server as networkServer } from "./libs/network"
+import { PeerManager } from "./libs/peer"
+// import commandLine from "./utilities/commandLine"
+import peerBootstrap from "./libs/peer/routines/peerBootstrap"
+import groundControl from "./libs/utils/demostdlib/groundControl"
 import mainLoop from "./utilities/mainLoop"
 import sharedState from "./utilities/sharedState"
 
-import groundControl from "./libs/utils/demostdlib/groundControl"
+var term = terminalkit.terminal
 
-import * as dotenv from "dotenv"
 dotenv.config()
-
-import { PeerManager } from "./libs/peer"
-
-import { Server } from "socket.io"
-// import * as eiows from 'eiows';
-
-import { server as networkServer } from "./libs/network"
-
-// import commandLine from "./utilities/commandLine"
-
-import peerBootstrap from "./libs/peer/routines/peerBootstrap"
-import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
-import * as bitcoin from "bitcoinjs-lib"
 
 // REVIEW Delete when tested properly
 // import testMultiversx from "sdk/localsdk/multichain/multiversx/test"
@@ -65,15 +68,6 @@ let PEER_LIST: any
 
 const app = express()
 
-// TODO Put into .env
-// groundControl.init(10250, "0.0.0.0", "http", {
-//     key: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.key",
-//     cert: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.crt",
-//     ca: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.ca",
-// })
-
-// SECTION REVIEW ZONE
-import * as https from "https"
 var ssl_options = {
     key: fs.readFileSync("src/ssl/server.key"),
     cert: fs.readFileSync("src/ssl/server.crt"),

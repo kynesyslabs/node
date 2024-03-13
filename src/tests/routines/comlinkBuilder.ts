@@ -1,7 +1,7 @@
-import ComLink from "src/libs/communications/comlink"
-import Hashing from "src/libs/crypto/hashing"
-import Cryptography from "src/libs/crypto/cryptography"
 import forge from "node-forge"
+import ComLink from "src/libs/communications/comlink"
+import Cryptography from "src/libs/crypto/cryptography"
+import Hashing from "src/libs/crypto/hashing"
 
 export default class ComLinkUtils {
     static comlink: ComLink = new ComLink()

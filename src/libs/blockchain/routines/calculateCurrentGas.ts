@@ -1,8 +1,9 @@
-import Transaction from "../transaction"
+import sharedState from "src/utilities/sharedState"
+import sizeOf from "src/utilities/sizeOf"
+
 import Chain from "../chain"
 import GLS from "../gls/gls"
-import sizeOf from "src/utilities/sizeOf"
-import sharedState from "src/utilities/sharedState"
+import Transaction from "../transaction"
 
 // INFO Calculating transaction fees based on the size of the transaction and the status of the chain
 async function calculateComposedGas(): Promise<number> {

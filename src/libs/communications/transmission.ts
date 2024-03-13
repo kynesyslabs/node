@@ -9,12 +9,13 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+import forge, { pki } from "node-forge"
+
+import Cryptography from "../crypto/cryptography"
 // INFO This module exposes methods designed to have an unified way of communicate in DEMOS
 import Hashing from "../crypto/hashing"
-import Cryptography from "../crypto/cryptography"
-import forge, { pki } from "node-forge"
-import { Bundle } from "./types/transmit"
 import { Peer } from "../peer"
+import { Bundle } from "./types/transmit"
 
 export default class Transmission {
     bundle: Bundle

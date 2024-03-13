@@ -1,9 +1,8 @@
+import sizeOf from "object-sizeof"
+import Block from "src/libs/blockchain/block"
 import Transaction from "src/libs/blockchain/transaction"
 import ComLink from "src/libs/communications/comlink"
-import Block from "src/libs/blockchain/block"
 import Transmission from "src/libs/communications/transmission"
-
-import sizeOf from "object-sizeof"
 
 export function payloadSize(
     payload: any,

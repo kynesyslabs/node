@@ -9,15 +9,15 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 import {
-    Wallet,
-    parseEther,
+    Contract,
     JsonRpcProvider,
-    TransactionRequest,
+    parseEther,
     TransactionReceipt,
+    TransactionRequest,
+    Wallet,
 } from "ethers"
-
-import { Contract } from "ethers"
 import required from "src/utilities/required"
+
 import defaultChainAsync, { IEVM } from "./types/defaultChainAsync"
 import { TransactionResponse } from "./types/multichain"
 

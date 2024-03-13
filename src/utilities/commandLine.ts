@@ -1,5 +1,6 @@
-import Wallet from "./cli_libraries/wallet"
 import Cryptography from "./cli_libraries/cryptography"
+import Wallet from "./cli_libraries/wallet"
+
 const readline = require("readline")
 
 const NAME = "demos_client"

@@ -10,9 +10,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+import terminalkit from "terminal-kit"
+
 import { PeerManager } from "../peer"
 
-import terminalkit from "terminal-kit"
 var term = terminalkit.terminal
 
 export default class ClientListeners {

@@ -1,8 +1,9 @@
 // INFO Support for the Tron network
 
 import required from "src/utilities/required"
-import defaultChainAsync from "./types/defaultChainAsync"
 import TronWeb from "tronweb"
+
+import defaultChainAsync from "./types/defaultChainAsync"
 
 // LINK to the testnet https://api.shasta.trongrid.io
 

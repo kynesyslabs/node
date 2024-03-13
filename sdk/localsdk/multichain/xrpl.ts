@@ -10,6 +10,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import * as xrpl from "xrpl"
+
 // import WebSocket from "ws" // NOTE tsx compatibility
 import DefaultChainAsync from "./types/defaultChainAsync"
 

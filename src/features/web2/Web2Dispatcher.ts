@@ -1,18 +1,18 @@
 // INFO Entry file for handling web2 requests
-import { IWeb2Request, IWeb2Payload } from "src/features/web2/types/Web2Types"
 import Web2API, { Web2APIClass } from "src/features/web2/routines/Web2Parser"
+import { IWeb2Payload, IWeb2Request } from "src/features/web2/types/Web2Types"
 import { Operation } from "src/libs/blockchain/routines/executeOperations"
-import required from "src/utilities/required"
 import Cryptography from "src/libs/crypto/cryptography"
-import sharedState from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import {
     DerivableNative,
     deriveMempoolOperation,
 } from "src/libs/utils/demostdlib/deriveMempoolOperation"
-
+import required from "src/utilities/required"
+import sharedState from "src/utilities/sharedState"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
+
 var term = terminalkit.terminal
 
 // INFO Upon receiving a request from a socket, we
@@ -81,12 +81,17 @@ export default async function handleWeb2(
             "[web2Dispatcher] This is the original rpc. We will wait for attestations.",
         )
         try {
-            /* TODO Activate in production */
+            /* FIXME DEVEL Activate in production */
             // Ensuring we reach the quorum if we are the original rpc that received the request
             term.yellow(
                 "[web2Dispatcher] [*] Waiting for the required quorum for this chain of trust...",
             )
-            //required(await Web2API(null, instanceName).awaitQuorum(), "Not enough attestations to reach quorum") // SWITCH
+            if (sharedState.getInstance().PROD) {
+                required(
+                    await Web2API(null, instanceName).awaitQuorum(),
+                    "Not enough attestations to reach quorum",
+                ) // SWITCH
+            }
             term.green("[web2Dispatcher] [+] Quorum reached!")
             // Hashing and signing the request
             term.green(

@@ -1,18 +1,17 @@
-import { Context } from "node-seal/implementation/context"
+import { Hash } from "crypto"
 import SEAL from "node-seal"
+import { BatchEncoder } from "node-seal/implementation/batch-encoder"
+import { CipherText } from "node-seal/implementation/cipher-text"
+import { Context } from "node-seal/implementation/context"
+import { Decryptor } from "node-seal/implementation/decryptor"
 import { EncryptionParameters } from "node-seal/implementation/encryption-parameters"
-import { SEALLibrary } from "node-seal/implementation/seal"
+import { Encryptor } from "node-seal/implementation/encryptor"
+import { Evaluator } from "node-seal/implementation/evaluator"
 import { KeyGenerator } from "node-seal/implementation/key-generator"
 import { PublicKey } from "node-seal/implementation/public-key"
+import { SEALLibrary } from "node-seal/implementation/seal"
 import { SecretKey } from "node-seal/implementation/secret-key"
-import { BatchEncoder } from "node-seal/implementation/batch-encoder"
-import { Encryptor } from "node-seal/implementation/encryptor"
-import { Decryptor } from "node-seal/implementation/decryptor"
-import { Evaluator } from "node-seal/implementation/evaluator"
-import { CipherText } from "node-seal/implementation/cipher-text"
-
 import Hashing from "src/libs/crypto/hashing"
-import { Hash } from "crypto"
 
 export default class FHE {
     public static instance: FHE

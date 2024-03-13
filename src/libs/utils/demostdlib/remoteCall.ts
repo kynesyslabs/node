@@ -1,8 +1,9 @@
-import ComLink from "../../communications/comlink"
-import { Peer } from "../../peer"
-import Transmission from "../../communications/transmission"
 import sharedState from "src/utilities/sharedState"
+
+import ComLink from "../../communications/comlink"
 import ResponseRegistry from "../../communications/responseRegistry"
+import Transmission from "../../communications/transmission"
+import { Peer } from "../../peer"
 
 // INFO Compose, sign and send a signed comlink chain easily
 export async function remoteCall(

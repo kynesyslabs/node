@@ -1,14 +1,14 @@
 // INFO This module implements Proof of Representation (PoR)
 
+import forge from "node-forge"
+import seedrandom from "seedrandom"
+import required from "src/utilities/required"
+
 import Chain from "../../blockchain/chain"
 import GLS from "../../blockchain/gls/gls"
-import forge from "node-forge"
+import Mempool from "../../blockchain/mempool"
 import Hashing from "../../crypto/hashing"
 import Peer from "../../peer/Peer"
-import required from "src/utilities/required"
-import seedrandom from "seedrandom"
-
-import Mempool from "../../blockchain/mempool"
 
 /* INFO
 	This class is very strict about what you can and what you cannot do with it. This is by design to avoid

@@ -1,8 +1,9 @@
-import * as bitcoin from "bitcoinjs-lib"
-import defaultChainAsync from "./types/defaultChainAsync"
 import BIP32Factory, { BIP32Interface } from "bip32"
-import * as ecc from "tiny-secp256k1"
 import * as bip39 from "bip39"
+import * as bitcoin from "bitcoinjs-lib"
+import * as ecc from "tiny-secp256k1"
+
+import defaultChainAsync from "./types/defaultChainAsync"
 
 const bip32 = BIP32Factory(ecc)
 

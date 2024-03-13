@@ -10,13 +10,13 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { cryptography } from "src/libs/crypto"
-import Transaction from "../transaction"
-import executeTransaction from "./executeTransaction"
-import GLS from "../gls/gls"
-import { Operation } from "../gls/gls"
-import calculateCurrentGas from "./calculateCurrentGas"
-
 import terminalkit from "terminal-kit"
+
+import GLS, { Operation } from "../gls/gls"
+import Transaction from "../transaction"
+import calculateCurrentGas from "./calculateCurrentGas"
+import executeTransaction from "./executeTransaction"
+
 var term = terminalkit.terminal
 
 // INFO Cryptographically validate a transaction, calculate gas and see if the execution is valid

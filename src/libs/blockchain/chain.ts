@@ -10,25 +10,24 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import Block from "./block"
-import Transaction from "./transaction"
-import Hashing from "../crypto/hashing"
 import Datasource from "src/model/datasource"
-import { Operation } from "./gls/gls"
-
 import { Blocks } from "src/model/entities/Blocks"
-import { Transactions } from "src/model/entities/Transactions"
-import RawTransaction from "./types/rawTransaction"
+import { StatusHashes } from "src/model/entities/StatusHashes"
 import { StatusNative } from "src/model/entities/StatusNative"
 import { StatusProperties } from "src/model/entities/StatusProperties"
-import { StatusHashes } from "src/model/entities/StatusHashes"
-import StatusNativeType from "./types/statusNative"
-import AddressInfo from "./types/addressInfo"
-import StatusPropertiesType from "./types/statusProperties"
+import { Transactions } from "src/model/entities/Transactions"
 import { MoreThan } from "typeorm"
-import { TransactionContent } from "./types/transactions"
-import transaction from "./transaction"
+
+import Hashing from "../crypto/hashing"
+import Block from "./block"
+import { Operation } from "./gls/gls"
 import manageNative from "./routines/gls_routines/manageNative"
+import Transaction from "./transaction"
+import AddressInfo from "./types/addressInfo"
+import RawTransaction from "./types/rawTransaction"
+import StatusNativeType from "./types/statusNative"
+import StatusPropertiesType from "./types/statusProperties"
+import { TransactionContent } from "./types/transactions"
 
 export default class Chain {
     private static instance: Chain

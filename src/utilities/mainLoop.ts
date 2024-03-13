@@ -1,18 +1,17 @@
+import { pki } from "node-forge"
+import Chain from "src/libs/blockchain/chain"
+import Mempool from "src/libs/blockchain/mempool"
+import { fastSync } from "src/libs/blockchain/routines/Sync"
+import ComLink from "src/libs/communications/comlink"
+import Transmission from "src/libs/communications/transmission"
+import QBFT from "src/libs/consensus/mechanisms/BFT"
+import RepresentativeShard from "src/libs/consensus/mechanisms/PoR"
+import { Identity } from "src/libs/identity"
+import { Peer, PeerManager } from "src/libs/peer"
+
+import * as consensusTime from "../libs/consensus/routines/consensusTime"
 // INFO The main loop executed in background by index.ts
 import sharedState from "./sharedState"
-import * as consensusTime from "../libs/consensus/routines/consensusTime"
-import { fastSync } from "src/libs/blockchain/routines/Sync"
-import { Identity } from "src/libs/identity"
-
-import { Peer, PeerManager } from "src/libs/peer"
-import Chain from "src/libs/blockchain/chain"
-import Transmission from "src/libs/communications/transmission"
-import ComLink from "src/libs/communications/comlink"
-import { pki } from "node-forge"
-import RepresentativeShard from "src/libs/consensus/mechanisms/PoR"
-import QBFT from "src/libs/consensus/mechanisms/BFT"
-import chain from "src/libs/blockchain/chain"
-import Mempool from "src/libs/blockchain/mempool"
 
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
@@ -153,9 +152,9 @@ export default async function mainLoop() {
             )
 
             if (consensus[0]) {
-                const prevBlockNumber = (await chain.getLastBlock()).number
+                const prevBlockNumber = (await Chain.getLastBlock()).number
                 consensus[1].number = prevBlockNumber + 1
-                await chain.insertBlock(consensus[1])
+                await Chain.insertBlock(consensus[1])
 
                 // Next mempool
                 await Mempool.nextMempool()

@@ -43,21 +43,20 @@ KyneSys Labs: https://www.kynesys.xyz/
 // TODO insert it in the gls automatically so that the parameters of the
 // TODO chain are both immutable and editable at the same time
 
-import Chain from "../chain"
-import { TxFee } from "../types/transactions"
-import executeOperations from "../routines/executeOperations"
-import { Actor } from "../routines/executeOperations"
 import * as fs from "fs"
-import Datasource from "src/model/datasource"
-
-import terminalkit from "terminal-kit"
-var term = terminalkit.terminal
-
 import Hashing from "src/libs/crypto/hashing"
-import { LessThanOrEqual } from "typeorm"
+import Datasource from "src/model/datasource"
 import { StatusNative } from "src/model/entities/StatusNative"
-import { Validators } from "src/model/entities/Validators"
 import { StatusProperties } from "src/model/entities/StatusProperties"
+import { Validators } from "src/model/entities/Validators"
+import terminalkit from "terminal-kit"
+import { LessThanOrEqual } from "typeorm"
+
+import Chain from "../chain"
+import executeOperations, { Actor } from "../routines/executeOperations"
+import { TxFee } from "../types/transactions"
+
+var term = terminalkit.terminal
 
 export interface OperationResult {
     success: boolean

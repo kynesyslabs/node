@@ -1,7 +1,8 @@
 import forge from "node-forge"
-import Network from "./network"
 import * as socket from "socket.io"
 import * as socket_client from "socket.io-client"
+
+import Network from "./network"
 
 export default class Client {
     private static instance: Client

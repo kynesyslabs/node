@@ -10,10 +10,11 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { Server as ServerType } from "socket.io"
+import terminalkit from "terminal-kit"
+
 import { Peer } from "../peer"
 import ServerListeners from "./serverListeners"
 
-import terminalkit from "terminal-kit"
 var term = terminalkit.terminal
 
 export default class Server {

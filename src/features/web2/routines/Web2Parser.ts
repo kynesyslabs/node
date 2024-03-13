@@ -1,22 +1,25 @@
-import forge from "node-forge"
 import axios from "axios"
+/* eslint-disable no-unused-vars */
+import forge from "node-forge"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
+import { PeerManager } from "src/libs/peer"
 import required from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
-import { PeerManager } from "src/libs/peer"
+// NOTE Terminal kit for useful logging
+import terminalkit from "terminal-kit"
+
 import {
-    IWeb2Request,
-    IWeb2Payload,
     IParam,
     IRawWeb2Request,
     IWeb2Attestation,
+    IWeb2Payload,
+    IWeb2Request,
+    IWeb2Result,
 } from "../types/Web2Types"
-/* eslint-disable no-unused-vars */
-// This class represents a typical web2 data request
+import post from "./operations/Web2Post"
+import retrieve from "./operations/Web2Retrieve"
 
-// NOTE Terminal kit for useful logging
-import terminalkit from "terminal-kit"
 var term = terminalkit.terminal
 
 AbortSignal.timeout ??= function timemout(ms) {
@@ -90,6 +93,8 @@ export class Web2APIClass {
 
     digestedPromise: Promise<any> = null
 
+    // SECTION Control methods
+
     // INFO Creating a named instance and bootstrapping it
     constructor(name: string, sendSock: any, payload: IWeb2Payload = null) {
         this.name = name
@@ -118,7 +123,10 @@ export class Web2APIClass {
         }
     }
 
-    // INFO Getting the digest of the request
+    // SECTION Processing methods
+
+    // INFO Processing the request
+    // ANCHOR Main method for Web2 workflow
     // NOTE This is where the Web2Request is processed and the answer is created
     // NOTE The generated request.result needs to be attested
     private async digest(): Promise<IWeb2Request> {
@@ -129,15 +137,16 @@ export class Web2APIClass {
         let params = this.request.raw.parameters
         // NOTE Dispatching the request to the appropriate handler
         term.yellow("Action: " + action + "\n")
+        // Preparing the result variable
+        let raw_result: IWeb2Result
         switch (action) {
             case "GET": // Handling everything that we can handle with fetch
-                console.log("HTTP(S) ACTION")
-                // NOTE The following try/catch statement is most likely not needed in production
-                this.request.result = await this.retrieve(this.request.raw)
+                console.log("HTTP(S) GET ACTION")
+                raw_result = await this.retrieve(this.request.raw)
                 break
             case "POST":
-                term.red("[ERROR] Not implemented yet")
-                this.request.result = "Not implemented yet: POST"
+                console.log("HTTP(S) POST ACTION")
+                raw_result = await this.post(this.request.raw)
                 break
             case "PUT":
                 term.red("[ERROR] Not implemented yet")
@@ -161,130 +170,33 @@ export class Web2APIClass {
                 this.request.result = "Invalid action: " + action
                 break
         }
-        // SECTION Attestation process and requirements
-        // Building our own attestation
+        // NOTE Validating the result and adding the attestation
+        // Also note that the result is modified within the object in this.validate(raw_result)
+        term.yellow(
+            "[Web2Parser] Building our attestation and adding it to request\n",
+        )
+        let validationSuccess = await this.validate(raw_result)
+        term.yellow.bold("[Web2Parser] Attested: " + validationSuccess + "\n")
+        // Now we can return the class result as the request is processed on our side
         term.yellow("[Web2Parser] Digested:\n")
         console.log(this.request)
-        term.yellow("[Web2Parser] Building attestation\n")
-        let hashedResult = Hashing.sha256(JSON.stringify(this.request.result))
-        let ourIdentity = sharedState.getInstance().identity.ed25519.publicKey
-        let signatureResult = Cryptography.sign(hashedResult, ourIdentity)
-        // NOTE Each attestation is the hash of the result signed by the node attesting
-        let attestation: IWeb2Attestation = {
-            hash: hashedResult,
-            timestamp: Date.now(),
-            identity: ourIdentity,
-            signature: signatureResult,
-            valid: true,
-        }
-        // Adding the attestation to the request
-        // NOTE This does not overwrite the original properties of the request
-        //console.log(this.request)
-        this.request.attestations[ourIdentity.toString("hex")] = attestation
-        term.yellow("[Web2Parser] Adding attestation to request\n")
         this.request.raw.stage.hop_number += 1 // REVIEW If this is ok
         return this.request
     }
 
-    // INFO Experimental a new approach to requests
-    private async retrieve(raw_request: IRawWeb2Request): Promise<any> {
-        // TODO Next line is for debug purposes
-        raw_request.headers = {}
+    // INFO Retrieving the resource from the raw request
+    retrieve: (raw_request: IRawWeb2Request) => Promise<IWeb2Result> = retrieve
+    post: (raw_request: IRawWeb2Request) => Promise<IWeb2Result> = post
 
-        term.green("[Web2Parser] Retrieving resource from raw request...\n")
-        //console.log(raw_request)
-        let params: IParam[] = raw_request.parameters
-        let { url } = raw_request
-        // Url normalization
-        if (url.includes("?")) {
-            url = url.split("?")[0]
-        }
-        /* 
-        if (!(url.endsWith("/"))) {
-            url += "/"
-        } */
-        // If we have parameters, add them to the request
-        if (params.length > 1) {
-            // 1 is due to the fact that theoretically we should have at least the url
-            let param_string = params
-                .map(param => param.name + "=" + param.value)
-                .join("&")
-            url += "?" + param_string
-        }
-        // NOTE We should have a normalized url, so we can make the request
-        term.yellow.bold("[Web2Parser] Retrieving derived url: " + url + "\n")
-        let payload = {
-            headers: raw_request.headers, //FIXME on budino
-            // NOTE The following line selectively sets the body to null if the method is not POST
-            // and look for the "data" parameter in the parameters array if the method is POST
-            // TODO Handle the case where the method is POST but no "data" parameter is present
-            url: url,
-        }
-        // NOTE Now we should have a normalized url, so we can make the request
-        let fetched: any
-        try {
-            fetched = await axios.get(payload.url, { headers: payload.headers })
-        } catch (error) {
-            console.log(error)
-            term.red.bold(
-                "[Web2Parser] Error retrieving resource: " + error + "\n",
-            )
-            fetched = { status: 500, statusText: "Axios Error", data: error }
-            return fetched
-        }
-        term.yellow("[Web2Parser] Retrieved: " + payload.url + "\n")
-        let data_result = fetched.data
-        term.bold("[Web2Parser] Data result:\n")
-        //console.log(data_result)
-        let sanitizedResult = {
-            status: fetched.status,
-            statusText: fetched.statusText,
-            data: data_result,
-        }
-        term.yellow.bold("\nResult to validate:\n")
-        //console.log(sanitizedResult)
+    // SECTION Validation and verification methods
+
+    // INFO This method inserts self validation data into the request
+    async validate(content: IWeb2Result): Promise<boolean> {
         term.yellow.bold("[Web2Parser] Validating...\n")
-        // Using the fetched result to build (or to continue) the Web2Request
-        await this.validate(JSON.stringify(sanitizedResult))
-        // TODO (Also in validate) manage the case where we are not the first hop
-        return sanitizedResult
-    }
-
-    // INFO Fetching (via different methods) an url and attesting it in this.request
-    private async _retrieve(
-        raw_request: IRawWeb2Request,
-        body: any = null,
-        headers: any = {},
-    ) {
-        // TODO Scope with special params
-        // TODO Implement body params on POST
-        // TODO Implement headers
-        let params: IParam[] = raw_request.parameters
-        // REVIEW Test the fix to the mempool.ts related error (?)
-        let fetched: any
-        let timeout = 5000 // REVIEW Make it customizable
-        //  REVIEW fetch the url better with more customization if possible
-        fetched = await fetch(this.request.raw.url, {
-            method: this.request.raw.method,
-            body: body, // For POST stuff
-            headers: headers, // like { 'Content-Type': 'application/json' }
-            signal: AbortSignal.timeout(timeout),
-        })
-        return fetched // "Not implemented yet"
-        // REVIEW How to handle timeouts?
-        // Stamping the result
-        //await this.validate(JSON.stringify(fetched.json))
-    }
-
-    // INFO This method inserts validation data into the request
-    async validate(content: string): Promise<void> {
-        term.yellow.bold("[Web2Parser] Validating...\n")
-        if (!(typeof content === "string")) {
-            content = JSON.stringify(content)
-        }
+        let stringed_content = JSON.stringify(content)
         // REVIEW This is not the best way to do it
         // Hashing and signing the result
-        let hashed_result = Hashing.sha256(content)
+        let hashed_result = Hashing.sha256(stringed_content)
         this.request.hash = hashed_result
         term.bold("[Web2Parser] Result:\n")
         console.log(hashed_result)
@@ -325,10 +237,12 @@ export class Web2APIClass {
         if (this.request.result === undefined) {
             this.request.result = content
         }
-        //this.request.result = content
+        // REVIEW This cant be false tho
+        return true
     }
 
     // INFO Verifying this.request based on the attestations
+    // TLDR Checking attestations (one by one) and returning the result of the verification
     async verify(): Promise<boolean> {
         required(this.request, "Missing request")
         let valid = true
@@ -348,6 +262,12 @@ export class Web2APIClass {
             // Noting the result of the verification in the attestation array
             let isValid = hash_valid && signature_valid
             attestation.valid = isValid
+            // If the attestation is not valid, the whole request is not valid and while
+            // we continue to cycle through the attestations, we can already set the
+            // request as not valid
+            if (!isValid) {
+                valid = false
+            }
             this.request.attestations[key] = attestation
         }
         return valid

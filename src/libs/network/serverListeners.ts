@@ -9,19 +9,19 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-/* eslint-disable no-extra-semi */
-import ServerHandlers from "src/libs/network/serverHandlers"
-import { cryptography } from "src/libs/crypto"
-import { Peer } from "src/libs/peer"
 import { comlinkUtils } from "src/libs/communications"
 import Transmission from "src/libs/communications/transmission"
-import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
-import { ISecurityReport } from "./securityModule"
-import * as Security from "./securityModule"
-
+import { cryptography } from "src/libs/crypto"
+/* eslint-disable no-extra-semi */
+import ServerHandlers from "src/libs/network/serverHandlers"
+import { Peer } from "src/libs/peer"
+import sharedState from "src/utilities/sharedState"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
-import sharedState from "src/utilities/sharedState"
+
+import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
+import * as Security from "./securityModule"
+
 var term = terminalkit.terminal
 
 export interface BrowserRequest {
@@ -228,7 +228,7 @@ export default class ServerListeners {
             let secDisabled = false
             if (!secDisabled) {
                 let ts = new Date().getTime()
-                let securityInterceptor: ISecurityReport =
+                let securityInterceptor: Security.ISecurityReport =
                     await Security.modules.communications.comlink.checkRateLimits(
                         ts,
                     )

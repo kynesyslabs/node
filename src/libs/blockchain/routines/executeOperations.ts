@@ -16,9 +16,9 @@ KyneSys Labs: https://www.kynesys.xyz/
 	executeSequence is called for each address to execute the operations contained.
 */
 
+import Block from "../block"
 import { TxFee } from "../types/transactions"
 import subOperations from "./subOperations"
-import Block from "../block"
 
 export interface OperationResult {
     success: boolean

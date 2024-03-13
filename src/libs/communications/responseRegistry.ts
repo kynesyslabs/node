@@ -9,16 +9,17 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import ComLink from "./comlink"
-import { ResponseRegistryElement, Response } from "./types/responseregistry"
-import Transmission from "./transmission"
 import { Socket } from "socket.io"
 import * as socket_client from "socket.io-client"
-import * as Security from "../network/securityModule"
 import Datasource from "src/model/datasource"
 import { ResponseRegistry as ResponseRegistryModel } from "src/model/entities/ResponseRegistry"
-
 import terminalkit from "terminal-kit"
+
+import * as Security from "../network/securityModule"
+import ComLink from "./comlink"
+import Transmission from "./transmission"
+import { Response, ResponseRegistryElement } from "./types/responseregistry"
+
 var term = terminalkit.terminal
 
 async function sleep(ms) {

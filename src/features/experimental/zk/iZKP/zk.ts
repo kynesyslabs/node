@@ -1,5 +1,6 @@
-import generateLargePrime from "./zkPrimer"
 import bigInt from "big-integer"
+
+import generateLargePrime from "./zkPrimer"
 
 export class Prover {
     private secret: bigInt.BigInteger

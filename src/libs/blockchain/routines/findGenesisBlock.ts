@@ -9,8 +9,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import Chain from "src/libs/blockchain/chain"
 import * as fs from "fs"
+import Chain from "src/libs/blockchain/chain"
 
 export default async function findGenesisBlock() {
     console.log("[GENESIS] Looking for the genesis block...")

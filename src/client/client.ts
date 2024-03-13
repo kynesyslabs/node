@@ -1,8 +1,9 @@
 // INFO This is the main client for any user that want to interact with DEMOS with the command line
 
+import * as readline from "readline"
 import * as socket from "socket.io"
 import * as socket_client from "socket.io-client"
-import * as readline from "readline"
+
 import Client from "./libs/client_class"
 
 // NOTE Initializing client

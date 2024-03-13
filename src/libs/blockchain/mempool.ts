@@ -12,15 +12,15 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 // TODO Test the db instance of mempool and check if all the tables are ok
 
-// INFO Singleton Mempool class
-import Transaction from "./transaction"
-import PeerManager from "../peer/PeerManager"
-import Block from "./block"
-import Hashing from "../crypto/hashing"
-import Cryptography from "../crypto/cryptography"
-
 import Datasource from "src/model/datasource"
 import { Mempool as MempoolEntity } from "src/model/entities/Mempool"
+
+import Cryptography from "../crypto/cryptography"
+import Hashing from "../crypto/hashing"
+import PeerManager from "../peer/PeerManager"
+import Block from "./block"
+// INFO Singleton Mempool class
+import Transaction from "./transaction"
 
 export interface MempoolData {
     number: number
@@ -301,9 +301,9 @@ export default class Mempool {
                 tx2.content.transaction_fee.rpc_fee
                     ? -1
                     : tx1.content.transaction_fee.rpc_fee <
-                      tx2.content.transaction_fee.rpc_fee
-                    ? 1
-                    : 0
+                        tx2.content.transaction_fee.rpc_fee
+                      ? 1
+                      : 0
             if (comparison) {
                 return -1
             } else {

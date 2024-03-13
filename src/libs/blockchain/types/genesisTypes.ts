@@ -1,6 +1,8 @@
+import { Blocks } from "src/model/entities/Blocks"
+
 // INFO Defining the structure of a valid Genesis block
 import Chain from "../chain"
-import { Blocks } from "src/model/entities/Blocks"
+
 /* INFO
  *
  * block, and are not present in the following ones.

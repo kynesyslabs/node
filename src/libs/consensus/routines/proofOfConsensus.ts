@@ -1,7 +1,7 @@
-import sharedState from "src/utilities/sharedState"
 import Cryptography from "src/libs/crypto/cryptography"
-import { demostdlib } from "src/libs/utils"
 import { Peer } from "src/libs/peer"
+import { demostdlib } from "src/libs/utils"
+import sharedState from "src/utilities/sharedState"
 
 export async function proofConsensus(hash: string): Promise<[string, string]> {
     let poc: [string, string] = [hash, null]

@@ -11,11 +11,12 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 // TODO Do the same but with connectionString
 
-import Peer from "../Peer"
-import ComLink from "../../communications/comlink"
-import Transmission from "../../communications/transmission"
-import ResponseRegistry from "../../communications/responseRegistry"
 import { Socket } from "socket.io"
+
+import ComLink from "../../communications/comlink"
+import ResponseRegistry from "../../communications/responseRegistry"
+import Transmission from "../../communications/transmission"
+import Peer from "../Peer"
 
 export default async function getPeerConnectionString(
     peer: Peer,

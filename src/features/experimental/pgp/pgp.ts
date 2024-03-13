@@ -1,7 +1,7 @@
-import * as openpgp from "openpgp"
 import forge from "node-forge"
-import { PgpKeyServer } from "src/model/entities/PgpKeyServer"
+import * as openpgp from "openpgp"
 import Datasource from "src/model/datasource"
+import { PgpKeyServer } from "src/model/entities/PgpKeyServer"
 
 class PGPClass {
     private static instance: PGPClass

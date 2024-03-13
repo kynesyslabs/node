@@ -1,6 +1,7 @@
+import * as express from "express"
+
 import { ActivityPubStorage } from "./fedistore"
 
-import * as express from "express"
 const app = express()
 
 var connected = false

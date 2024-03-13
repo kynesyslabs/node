@@ -1,7 +1,9 @@
-import testingEnvironment from "./types/testingEnvironment"
-import Transaction from "src/libs/blockchain/transaction"
 import forge from "node-forge"
+import Transaction from "src/libs/blockchain/transaction"
+
 import Identity from "../libs/identity/identity"
+import testingEnvironment from "./types/testingEnvironment"
+
 const term = require("terminal-kit").terminal
 
 async function main() {

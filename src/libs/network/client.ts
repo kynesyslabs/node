@@ -10,11 +10,12 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { io } from "socket.io-client"
-import Peer from "../peer/Peer"
-import CommonListeners from "./commonListeners"
-import ClientListeners from "./clientListeners"
-
 import terminalkit from "terminal-kit"
+
+import Peer from "../peer/Peer"
+import ClientListeners from "./clientListeners"
+import CommonListeners from "./commonListeners"
+
 var term = terminalkit.terminal
 
 // NOTE Sleep function

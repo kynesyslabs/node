@@ -9,10 +9,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import Peer from "../Peer"
 import ComLink from "../../communications/comlink"
-import Transmission from "../../communications/transmission"
 import ResponseRegistry from "../../communications/responseRegistry"
+import Transmission from "../../communications/transmission"
+import Peer from "../Peer"
 
 export default async function getPeerIdentity(
     peer: Peer,

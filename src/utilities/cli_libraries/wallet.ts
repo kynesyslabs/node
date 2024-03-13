@@ -1,6 +1,6 @@
+import * as fs from "fs"
 // INFO Singleton managing the wallet in a cli environment
 import forge from "node-forge"
-import * as fs from "fs"
 
 export interface Identity {
     privateKey: forge.pki.ed25519.BinaryBuffer

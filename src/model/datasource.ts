@@ -12,14 +12,14 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { DataSource } from "typeorm"
 
 import { Blocks } from "./entities/Blocks"
-import { Transactions } from "./entities/Transactions"
-import { Mempool } from "./entities/Mempool"
 import { Consensus } from "./entities/Consensus"
+import { Mempool } from "./entities/Mempool"
 import { PgpKeyServer } from "./entities/PgpKeyServer"
 import { ResponseRegistry } from "./entities/ResponseRegistry"
 import { StatusHashes } from "./entities/StatusHashes"
-import { StatusProperties } from "./entities/StatusProperties"
 import { StatusNative } from "./entities/StatusNative"
+import { StatusProperties } from "./entities/StatusProperties"
+import { Transactions } from "./entities/Transactions"
 import { Validators } from "./entities/Validators"
 
 class Datasource {

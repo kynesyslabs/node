@@ -9,8 +9,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import PeerManager from "../PeerManager"
 import Peer from "../Peer"
+import PeerManager from "../PeerManager"
 
 // INFO Checking if a peer is already in the peerlist
 export default function isPeerInList(peer: Peer) {

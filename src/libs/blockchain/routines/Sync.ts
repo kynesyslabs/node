@@ -12,22 +12,22 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 // REVIEW Conflict handling between peers (longest chain)
 
-import Chain from "../chain"
-import PeerManager from "../../peer/PeerManager"
+import ResponseRegistry from "src/libs/communications/responseRegistry"
+import { demostdlib } from "src/libs/utils"
+import sharedState from "src/utilities/sharedState"
+import terminalkit from "terminal-kit"
+
 import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
+import { Response } from "../../communications/types/responseregistry"
 import Peer from "../../peer/Peer"
-import { demostdlib } from "src/libs/utils"
+import PeerManager from "../../peer/PeerManager"
+import Block from "../block"
+import Chain from "../chain"
 
-import terminalkit from "terminal-kit"
 var term = terminalkit.terminal
 
 const peerManager = PeerManager.getInstance()
-import { Response } from "../../communications/types/responseregistry"
-import ResponseRegistry from "src/libs/communications/responseRegistry"
-import Block from "../block"
-import sharedState from "src/utilities/sharedState"
-
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
 }

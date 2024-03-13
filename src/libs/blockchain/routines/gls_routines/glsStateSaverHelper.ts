@@ -1,11 +1,12 @@
 // INFO At the end of each block forging (aka at the end of the consensus mechanism), each node operator will be able to get this GLS state hash
+import { Hash } from "crypto"
+import Hashing from "src/libs/crypto/hashing"
+import Datasource from "src/model/datasource"
+import { StatusHashes } from "src/model/entities/StatusHashes"
+
 // which is set by the validators during the consensus and is an hash of all the applicable operations for that block.
 import Chain from "../../chain"
-import { StatusHashes } from "src/model/entities/StatusHashes"
-import Datasource from "src/model/datasource"
-import Hashing from "src/libs/crypto/hashing"
 import { Operation } from "../executeOperations"
-import { Hash } from "crypto"
 
 // REVIEW This could be avoided probably, by using inline hashes instead of hashing the whole table
 // TODO Expand the operation registry (if any) to support inlining of hashes into GLS states.

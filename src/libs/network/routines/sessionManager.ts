@@ -5,8 +5,10 @@
     context of applications that usually rely on SSOs and similar.
 */
 
-import { normalizeWebBuffers } from "./normalizeWebBuffers"
 import Cryptography from "src/libs/crypto/cryptography"
+
+import { normalizeWebBuffers } from "./normalizeWebBuffers"
+
 const SESSION_TIMEOUT = 1000 * 60 * 5 // 5 minutes
 
 function randomMessage() {

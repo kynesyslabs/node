@@ -9,12 +9,13 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import ComLink from "./comlink"
 import sharedState from "src/utilities/sharedState"
 import sizeOf from "src/utilities/sizeOf"
 import { json } from "stream/consumers"
-
 import terminalkit from "terminal-kit"
+
+import ComLink from "./comlink"
+
 var term = terminalkit.terminal
 
 export default class ComLinkUtils {

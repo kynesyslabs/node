@@ -4,12 +4,13 @@
 // The logic remains the same: each user has a inbox and an outbox.
 // By posting to the inbox, the user sends a message to the other user.
 // By posting to the outbox, the user publishes the reply so that the other user can read it.
+import Cryptography from "src/libs/crypto/cryptography"
+import { HexToForge } from "src/libs/crypto/forgeUtils"
+import { demostdlib } from "src/libs/utils"
+
+import { outbox } from "../../activitypub/feditypes"
 // Using RSA and ED25519, privacy and authenticity are guaranteed even in a public decentralized context.
 import { IMMessage } from "./IMSession"
-import { HexToForge } from "src/libs/crypto/forgeUtils"
-import Cryptography from "src/libs/crypto/cryptography"
-import { demostdlib } from "src/libs/utils"
-import { outbox } from "../../activitypub/feditypes"
 
 export interface IMStorage {
     inbox: IMMessage[]

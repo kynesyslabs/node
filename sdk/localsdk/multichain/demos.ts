@@ -9,12 +9,11 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+import * as socket_client from "socket.io-client"
 import ComLink from "src/libs/communications/comlink"
 import Transmission from "src/libs/communications/transmission"
-import * as socket_client from "socket.io-client"
-import { io } from "socket.io-client"
-
 import terminalkit from "terminal-kit"
+
 var term = terminalkit.terminal
 
 export default class Demos {
@@ -30,7 +29,7 @@ export default class Demos {
         server: string = "localhost",
         port: number = 53550,
     ): Promise<boolean> {
-        this.socket = io(protocol + "://" + server + ":" + port)
+        this.socket = socket_client.io(protocol + "://" + server + ":" + port)
         this.setSocket()
         let timer = 0
         if (!this.socket.connected) {

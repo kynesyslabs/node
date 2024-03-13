@@ -1,5 +1,5 @@
-import path from "path"
 import fs from "node:fs/promises"
+import path from "path"
 import { fileURLToPath } from "url"
 
 import MULTIVERSX from "../multiversx"

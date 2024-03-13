@@ -1,22 +1,20 @@
 // INFO Import everything
 
-import Block from "src/libs/blockchain/block"
-import Transaction from "src/libs/blockchain/transaction"
-import Mempool from "src/libs/blockchain/mempool"
-import GLS from "src/libs/blockchain/gls/gls"
-import Chain from "src/libs/blockchain/chain"
-import Cryptography from "src/libs/crypto/cryptography"
-import Hashing from "src/libs/crypto/hashing"
-import sharedState from "src/utilities/sharedState"
-import { PeerManager } from "src/libs/peer"
-import { Peer } from "src/libs/peer"
-
-require("dotenv").config()
-const term = require("terminal-kit").terminal
-
 // Connectivitiy
 import socket from "socket.io"
 import io from "socket.io-client"
+import Block from "src/libs/blockchain/block"
+import Chain from "src/libs/blockchain/chain"
+import GLS from "src/libs/blockchain/gls/gls"
+import Mempool from "src/libs/blockchain/mempool"
+import Transaction from "src/libs/blockchain/transaction"
+import Cryptography from "src/libs/crypto/cryptography"
+import Hashing from "src/libs/crypto/hashing"
+import { Peer, PeerManager } from "src/libs/peer"
+import sharedState from "src/utilities/sharedState"
+
+require("dotenv").config()
+const term = require("terminal-kit").terminal
 
 export default class testingEnvironment {
     private static instance: testingEnvironment = null

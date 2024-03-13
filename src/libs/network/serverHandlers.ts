@@ -10,27 +10,28 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import { Peer, PeerManager } from "src/libs/peer"
-import Mempool from "src/libs/blockchain/mempool"
-import chain from "src/libs/blockchain/chain"
-import handleWeb2 from "src/features/web2/Web2Dispatcher"
-import validateTransaction from "../blockchain/routines/validateTransaction"
-import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
-import sharedState from "src/utilities/sharedState"
-import { BrowserRequest } from "./serverListeners"
-import { normalizeWebBuffers } from "./routines/normalizeWebBuffers"
-import Sessions from "./routines/sessionManager"
+import multichainDispatcher from "src/features/multichain/XMDispatcher"
+import handleWeb2 from "src/features/web2/Web2Dispatcher"
+import chain from "src/libs/blockchain/chain"
+import Mempool from "src/libs/blockchain/mempool"
+import { Peer, PeerManager } from "src/libs/peer"
 import { Blocks } from "src/model/entities/Blocks"
 import { Transactions } from "src/model/entities/Transactions"
-import eggs from "./routines/eggs"
-import deriveBlock from "../consensus/routines/deriveBlock"
-import AddressInfo from "../blockchain/types/addressInfo"
-import GLS from "../blockchain/gls/gls"
-
+import sharedState from "src/utilities/sharedState"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
+
+import GLS from "../blockchain/gls/gls"
+import validateTransaction from "../blockchain/routines/validateTransaction"
 import Transaction from "../blockchain/transaction"
+import AddressInfo from "../blockchain/types/addressInfo"
+import deriveBlock from "../consensus/routines/deriveBlock"
+import eggs from "./routines/eggs"
+import { normalizeWebBuffers } from "./routines/normalizeWebBuffers"
+import Sessions from "./routines/sessionManager"
+import { BrowserRequest } from "./serverListeners"
+
 var term = terminalkit.terminal
 
 export default class ServerHandlers {

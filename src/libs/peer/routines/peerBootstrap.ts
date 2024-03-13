@@ -9,11 +9,12 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import PeerManager from "../PeerManager"
-import Client from "../../network/client"
-import getPeerIdentity from "./getPeerIdentity"
 import { cryptography } from "src/libs/crypto"
+
+import Client from "../../network/client"
 import Peer from "../Peer"
+import PeerManager from "../PeerManager"
+import getPeerIdentity from "./getPeerIdentity"
 
 const peerManager = PeerManager.getInstance()
 

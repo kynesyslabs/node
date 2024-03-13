@@ -41,10 +41,11 @@
 
 */
 import argon2 from "argon2"
-import Rijndael from "rijndael-js"
-import { superDilithium } from "superdilithium"
 // import { superSphincs } from "supersphincs" // Same as above, just replace the two strings
 import { McEliece } from "mceliece-nist"
+import Rijndael from "rijndael-js"
+import { superDilithium } from "superdilithium"
+
 // import {ntru} from "ntru" // Interchangeable with McEliece
 
 // INFO Interface to happily work with almost any keypair

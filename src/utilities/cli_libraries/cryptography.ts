@@ -1,4 +1,5 @@
 import forge from "node-forge"
+
 import Wallet from "./wallet"
 
 // INFO Using wallet identity properties this class enables crypto operations

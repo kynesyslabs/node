@@ -1,7 +1,7 @@
 /* eslint-disable no-unused-vars */
 import { Server as HttpServer } from "http"
-import { Socket as ServerSocket, Server as IOServer } from "socket.io"
-import { Socket as ClientSocket, io as IOClient } from "socket.io-client"
+import { Server as IOServer, Socket as ServerSocket } from "socket.io"
+import { io as IOClient, Socket as ClientSocket } from "socket.io-client"
 
 class Server {
     private server: HttpServer

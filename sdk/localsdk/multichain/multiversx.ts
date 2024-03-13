@@ -1,3 +1,5 @@
+import required from "src/utilities/required"
+
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
@@ -11,18 +13,16 @@ KyneSys Labs: https://www.kynesys.xyz/
 import {
     Account,
     Address,
-    Transaction,
     GasEstimator,
-    TokenTransfer,
     IPlainTransactionObject,
+    TokenTransfer,
+    Transaction,
     TransferTransactionsFactory,
 } from "@multiversx/sdk-core"
-
 import { ApiNetworkProvider } from "@multiversx/sdk-network-providers"
-import { Mnemonic, UserSigner, UserWallet } from "@multiversx/sdk-wallet"
 import { INetworkProvider } from "@multiversx/sdk-network-providers/out/interface"
+import { Mnemonic, UserSigner, UserWallet } from "@multiversx/sdk-wallet"
 
-import required from "src/utilities/required"
 import DefaultChainAsync from "./types/defaultChainAsync"
 
 export default class MULTIVERSX extends DefaultChainAsync {

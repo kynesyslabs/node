@@ -1,7 +1,10 @@
 import forge from "node-forge"
 
+// NOTE
+// In case of POST requests, the data is the only parameter thus 'name' is ignored
+// In case of GET requests, we can have multiple parameters, thus 'name' is used to identify them
 export interface IParam {
-    name: string
+    name: string // Ignored in POST requests
     value: any
 }
 
@@ -16,6 +19,13 @@ export interface IWeb2Payload {
     timestamp: any
     data: any
     extra: any
+}
+
+// INFO A web2 result interface
+export interface IWeb2Result {
+    status: number
+    statusText: string
+    data: any
 }
 
 // INFO A complete web2 request

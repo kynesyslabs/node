@@ -9,19 +9,18 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import Hashing from "../crypto/hashing"
-import Cryptography from "../crypto/cryptography"
-import { pki } from "node-forge"
-import forge from "node-forge"
+import forge, { pki } from "node-forge"
+import { type } from "os"
 import { Socket } from "socket.io-client"
-import Transmission from "./transmission"
+import sharedState from "src/utilities/sharedState"
+
+import Cryptography from "../crypto/cryptography"
+import Hashing from "../crypto/hashing"
+import getRemoteIP from "../network/routines/getRemoteIP"
 import Peer from "../peer/Peer"
+import Transmission from "./transmission"
 
 import type { Current, Properties } from "./types/comlink"
-import getRemoteIP from "../network/routines/getRemoteIP"
-import sharedState from "src/utilities/sharedState"
-import { type } from "os"
-
 export default class ComLink {
     private static instances: Map<string, ComLink> = new Map()
 

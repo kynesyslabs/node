@@ -1,5 +1,5 @@
-import { Operation, OperationResult } from "../executeOperations"
 import GLS from "../../gls/gls"
+import { Operation, OperationResult } from "../executeOperations"
 
 export async function assignXM(operation: Operation): Promise<OperationResult> {
     let { address, xm_hash } = operation.params

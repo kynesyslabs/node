@@ -1,12 +1,12 @@
 /* eslint-disable no-unused-vars */
-// INFO Entry point for multichain requests
-import { json } from "stream/consumers"
-import XMParser from "./routines/XMParser"
-import { XMScript } from "./routines/XMParser"
 import {
     DerivableNative,
     deriveMempoolOperation,
 } from "src/libs/utils/demostdlib/deriveMempoolOperation"
+// INFO Entry point for multichain requests
+import { json } from "stream/consumers"
+
+import XMParser, { XMScript } from "./routines/XMParser"
 
 export default class multichainDispatcher {
     // INFO Digesting the request from the server

@@ -1,8 +1,9 @@
 import dotenv from "dotenv"
-dotenv.config()
-
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
+
+dotenv.config()
+
 var term = terminalkit.terminal
 
 export default class log {

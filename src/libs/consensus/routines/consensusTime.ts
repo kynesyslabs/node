@@ -1,6 +1,6 @@
 import sharedState from "src/utilities/sharedState"
-
 import terminalkit from "terminal-kit"
+
 var term = terminalkit.terminal
 
 export async function checkConsensusTime(): Promise<boolean> {

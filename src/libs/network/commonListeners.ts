@@ -10,15 +10,15 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import { PeerManager } from "../peer"
-import { cryptography } from "../crypto"
+import sharedState from "src/utilities/sharedState"
+import terminalkit from "terminal-kit"
+
 import ComLinkUtils from "../communications/comlinkUtils"
 import ResponseRegistry from "../communications/responseRegistry"
+import { cryptography } from "../crypto"
 import getRemoteIP from "../network/routines/getRemoteIP"
+import { PeerManager } from "../peer"
 
-import sharedState from "src/utilities/sharedState"
-
-import terminalkit from "terminal-kit"
 var term = terminalkit.terminal
 
 export default class CommonListeners {

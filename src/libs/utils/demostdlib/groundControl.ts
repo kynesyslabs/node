@@ -10,9 +10,9 @@
 import * as fs from "fs"
 import http from "node:http"
 import https from "node:https"
+import { PeerManager } from "src/libs/peer"
 import required, { requiredOutcome } from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
-import { PeerManager } from "src/libs/peer"
 
 export default class groundControl {
     static host: string

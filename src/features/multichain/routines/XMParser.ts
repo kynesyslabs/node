@@ -1,10 +1,10 @@
 // INFO In this module is offloaded the parsing of XM requests
 import * as fs from "fs"
-
-import handlePayOperation from "./executors/pay"
 import * as multichain from "sdk/localsdk/multichain"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
+
+import handlePayOperation from "./executors/pay"
 
 // NOTE We define multichain into global so that we can use it later
 global.multichain = multichain

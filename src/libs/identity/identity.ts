@@ -10,11 +10,12 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import * as fs from "fs"
-import { cryptography } from "../crypto"
 import { pki } from "node-forge"
+import terminalkit from "terminal-kit"
+
+import { cryptography } from "../crypto"
 import getRemoteIP from "../network/routines/getRemoteIP"
 
-import terminalkit from "terminal-kit"
 var term = terminalkit.terminal
 
 export default class Identity {

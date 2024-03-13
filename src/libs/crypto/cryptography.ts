@@ -9,16 +9,16 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import forge from "node-forge"
+import * as crypto from "crypto"
 import { promises as fs } from "fs"
-import { HexToForge, ForgeToHex } from "./forgeUtils"
-
+import forge from "node-forge"
 import sharedState from "src/utilities/sharedState"
-
 import terminalkit from "terminal-kit"
+
+import { ForgeToHex, HexToForge } from "./forgeUtils"
+
 var term = terminalkit.terminal
 
-import * as crypto from "crypto"
 const algorithm = "aes-256-cbc"
 
 export default class Cryptography {
