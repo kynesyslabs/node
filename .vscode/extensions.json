@@ -16,6 +16,7 @@
         "yoavbls.pretty-ts-errors",
         "juanblanco.solidity",
         "qwtel.sqlite-viewer",
-        "pmneo.tsimporter"
+        "pmneo.tsimporter",
+        "mylesmurphy.prettify-ts"
     ]
 }

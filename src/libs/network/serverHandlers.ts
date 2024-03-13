@@ -13,7 +13,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import handleWeb2 from "src/features/web2/Web2Dispatcher"
-import chain from "src/libs/blockchain/chain"
+import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool"
 import { Peer, PeerManager } from "src/libs/peer"
 import { Blocks } from "src/model/entities/Blocks"
@@ -367,7 +367,7 @@ export default class ServerHandlers {
                     extra = "Block number is not valid"
                     break
                 }
-                response = await chain.getBlockByNumber(data.blockNumber)
+                response = await Chain.getBlockByNumber(data.blockNumber)
                 console.log(
                     "[CHAIN.ts] Received reply from the database: extracting header",
                 )
@@ -381,7 +381,7 @@ export default class ServerHandlers {
                     extra = "Block hash is not valid"
                     break
                 }
-                response = await chain.getBlockByHash(data.blockHash)
+                response = await Chain.getBlockByHash(data.blockHash)
                 console.log(
                     "[CHAIN.ts] Received reply from the database: extracting header",
                 )
@@ -392,12 +392,12 @@ export default class ServerHandlers {
 
             case "getLastBlockNumber":
                 console.log("[SERVER] Received getLastBlockNumber")
-                response = await chain.getLastBlockNumber()
+                response = await Chain.getLastBlockNumber()
                 console.log("[CHAIN.ts] Received reply from the database") // REVIEW Debug
                 //console.log(response)
                 break
             case "getLastBlockHash":
-                response = await chain.getLastBlockHash()
+                response = await Chain.getLastBlockHash()
                 break
             case "getBlockByNumber":
                 if (
@@ -415,7 +415,7 @@ export default class ServerHandlers {
                         "[SERVER] Received getBlockByNumber: " +
                             data.blockNumber,
                     )
-                    response = await chain.getBlockByNumber(data.blockNumber)
+                    response = await Chain.getBlockByNumber(data.blockNumber)
 
                     // REVIEW Debug lines
                     //console.log(response)
@@ -430,7 +430,7 @@ export default class ServerHandlers {
                     })
                 }
                 console.log("[SERVER] Received getBlockByHash: " + data.hash)
-                response = await chain.getBlockByHash(data.hash)
+                response = await Chain.getBlockByHash(data.hash)
 
                 // REVIEW Debug lines
                 //console.log(response)
@@ -444,10 +444,10 @@ export default class ServerHandlers {
                         error: "No tx specified",
                     })
                 }
-                response = await chain.getTxByHash(data.hash)
+                response = await Chain.getTxByHash(data.hash)
                 break
             case "getMempool":
-                response = await chain.getPendingPool()
+                response = await Chain.getPendingPool()
                 break
             // INFO Authentication listener
             case "getPeerIdentity":

@@ -21,9 +21,9 @@ runtimes:
 # This is the section where you manage your linters. (https://docs.trunk.io/check/configuration)
 lint:
     disabled:
-        - checkov
         - osv-scanner
     enabled:
+        - checkov
         - trivy@0.49.1
         - yamllint@1.35.1
         - dotenv-linter@3.3.0
@@ -47,6 +47,6 @@ lint:
 actions:
     enabled:
         - trunk-announce
-        - trunk-check-pre-push
-        - trunk-fmt-pre-commit
+        #- trunk-check-pre-push
+        #- trunk-fmt-pre-commit
         - trunk-upgrade-available

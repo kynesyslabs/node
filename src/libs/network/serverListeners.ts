@@ -22,7 +22,7 @@ import terminalkit from "terminal-kit"
 import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
 import * as Security from "./securityModule"
 
-var term = terminalkit.terminal
+let term = terminalkit.terminal
 
 export interface BrowserRequest {
     message: string
