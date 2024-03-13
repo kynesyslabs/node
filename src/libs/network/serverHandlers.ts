@@ -28,6 +28,7 @@ import Transaction from "../blockchain/transaction"
 import AddressInfo from "../blockchain/types/addressInfo"
 import deriveBlock from "../consensus/routines/deriveBlock"
 import eggs from "./routines/eggs"
+import getPreviousHashFromBlockNumber from "./routines/nodecalls/getPreviousHashFromBlockNumber"
 import { normalizeWebBuffers } from "./routines/normalizeWebBuffers"
 import Sessions from "./routines/sessionManager"
 import { BrowserRequest } from "./serverListeners"
@@ -310,6 +311,7 @@ export default class ServerHandlers {
         return { extra, require_reply, response }
     }
 
+    // TODO Make this modular ffs
     static async handleNodeAPI(
         content: any,
         receiver: any,
@@ -350,17 +352,9 @@ export default class ServerHandlers {
                 break
             // REVIEW Both below for getting the last hash (untested yet)
             case "getPreviousHashFromBlockNumber":
-                console.log("[SERVER] Received getPreviousHashFromBlockNumber")
-                if (data.blockNumber === undefined || data.blockNumber < 0) {
-                    response = "error"
-                    extra = "Block number is not valid"
-                    break
-                }
-                response = await chain.getBlockByNumber(data.blockNumber)
-                console.log(
-                    "[CHAIN.ts] Received reply from the database: got a block",
-                )
-                response = response.content.previousHash
+                var res = await getPreviousHashFromBlockNumber(data)
+                response = res.response
+                extra = res.extra
                 break
             case "getPreviousHashFromBlockHash":
                 console.log("[SERVER] Received getPreviousHashFromBlockNumber")
