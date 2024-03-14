@@ -19,7 +19,7 @@ import { cryptography } from "../crypto"
 import getRemoteIP from "../network/routines/getRemoteIP"
 import { PeerManager } from "../peer"
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 export default class CommonListeners {
     private peer: any

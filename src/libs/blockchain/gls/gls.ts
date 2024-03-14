@@ -56,7 +56,7 @@ import Chain from "../chain"
 import executeOperations, { Actor } from "../routines/executeOperations"
 import { TxFee } from "../types/transactions"
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 export interface OperationResult {
     success: boolean

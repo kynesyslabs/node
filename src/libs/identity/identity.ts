@@ -16,7 +16,7 @@ import terminalkit from "terminal-kit"
 import { cryptography } from "../crypto"
 import getRemoteIP from "../network/routines/getRemoteIP"
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 export default class Identity {
     private static instance: Identity

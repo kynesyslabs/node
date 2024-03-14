@@ -17,7 +17,7 @@ import Transaction from "../transaction"
 import calculateCurrentGas from "./calculateCurrentGas"
 import executeTransaction from "./executeTransaction"
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 // INFO Cryptographically validate a transaction, calculate gas and see if the execution is valid
 // REVIEW is it overkill to write an interface for the return value?

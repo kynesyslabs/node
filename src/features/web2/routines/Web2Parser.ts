@@ -20,7 +20,7 @@ import {
 import post from "./operations/Web2Post"
 import retrieve from "./operations/Web2Retrieve"
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 AbortSignal.timeout ??= function timemout(ms) {
     const ctrl = new AbortController()

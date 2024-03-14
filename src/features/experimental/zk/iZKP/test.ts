@@ -4,7 +4,7 @@ import terminalkit from "terminal-kit"
 import { Prover, Verifier } from "./zk"
 import generateLargePrime from "./zkPrimer"
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 // EXAMPLE
 

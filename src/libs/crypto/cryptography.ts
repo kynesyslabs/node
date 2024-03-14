@@ -17,7 +17,7 @@ import terminalkit from "terminal-kit"
 
 import { ForgeToHex, HexToForge } from "./forgeUtils"
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 const algorithm = "aes-256-cbc"
 

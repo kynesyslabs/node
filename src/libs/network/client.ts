@@ -16,7 +16,7 @@ import Peer from "../peer/Peer"
 import ClientListeners from "./clientListeners"
 import CommonListeners from "./commonListeners"
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 // NOTE Sleep function
 async function sleep(ms) {

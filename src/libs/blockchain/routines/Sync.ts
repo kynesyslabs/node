@@ -25,7 +25,7 @@ import PeerManager from "../../peer/PeerManager"
 import Block from "../block"
 import Chain from "../chain"
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 const peerManager = PeerManager.getInstance()
 async function sleep(time: number) {

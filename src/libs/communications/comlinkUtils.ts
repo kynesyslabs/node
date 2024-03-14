@@ -16,7 +16,7 @@ import terminalkit from "terminal-kit"
 
 import ComLink from "./comlink"
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 export default class ComLinkUtils {
     // INFO common comlink digestor

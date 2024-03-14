@@ -15,7 +15,7 @@ import terminalkit from "terminal-kit"
 import { Peer } from "../peer"
 import ServerListeners from "./serverListeners"
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 export default class Server {
     static setupListeners = async function (server: ServerType) {

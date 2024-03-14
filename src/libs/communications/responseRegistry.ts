@@ -20,7 +20,7 @@ import ComLink from "./comlink"
 import Transmission from "./transmission"
 import { Response, ResponseRegistryElement } from "./types/responseregistry"
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 async function sleep(ms) {
     return new Promise(resolve => {

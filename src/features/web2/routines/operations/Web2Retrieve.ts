@@ -4,7 +4,7 @@ import terminalkit from "terminal-kit"
 // INFO This module is used to retrieve a resource from a raw request
 import { IParam, IRawWeb2Request, IWeb2Result } from "../../types/Web2Types"
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 // INFO Experimental a new approach to requests
 export default async function retrieve(

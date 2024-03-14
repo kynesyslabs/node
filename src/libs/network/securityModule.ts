@@ -18,7 +18,7 @@ interface SIComlink {
     checkRateLimits: Function
 }
 
-export let modules = {
+export const modules = {
     // SECTION Modules
     // TODO Make some properties configurable
     communications: {
@@ -56,8 +56,8 @@ async function checkRateLimits(
     let rate_limit_size = modules.communications.comlink.rate_limit_size
     let rate_limit_time = modules.communications.comlink.rate_limit_time
     let rate_limit_bin = modules.communications.comlink.rate_limit_bin
-    let rate_limit_timestamp =
-        modules.communications.comlink.rate_limit_timestamp
+    //let rate_limit_timestamp =
+    //    modules.communications.comlink.rate_limit_timestamp
     // Checking how many comlinks are currently in the bin compared to our limit
     if (rate_limit_size > 0 && rate_limit_bin > rate_limit_size) {
         report.code = "429"
@@ -69,7 +69,7 @@ async function checkRateLimits(
             " seconds"
         report.state = false
     } else {
-        rate_limit_bin += 1
+        //rate_limit_bin += 1
         report.code = "200"
         report.message = "ok"
         report.state = true

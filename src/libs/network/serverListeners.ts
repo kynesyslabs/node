@@ -21,6 +21,7 @@ import terminalkit from "terminal-kit"
 
 import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
 import * as Security from "./securityModule"
+import { ISession } from "./routines/sessionManager"
 
 let term = terminalkit.terminal
 
@@ -37,9 +38,6 @@ export default class ServerListeners {
     }
 
     async runListeners() {
-        // await this.authReplyListener()
-        // await this.authAskEmit()
-
         await this.comlinkListener()
         await this.browserRequestListener()
         await this.voteRequestListener()
@@ -54,7 +52,7 @@ export default class ServerListeners {
             // NOTE request MUST be a string conforming to BrowserRequest interface
             let req: BrowserRequest = JSON.parse(request)
             let browserResponse: [boolean, any]
-            var res
+            let res: ISession | (string | boolean)[]
             switch (req.message) {
                 case "login_request":
                     res = await ServerHandlers.handleLoginRequest(req)
@@ -83,7 +81,7 @@ export default class ServerListeners {
             term.yellow("[SERVER] Received comlink\n")
             const id_ed25519 = sharedState.getInstance().identity.ed25519
             const receiver = this.peer.socket
-            var parsed_comlink: any // TODO Better typing
+            let parsed_comlink: any // TODO Better typing
             // TODO This can be put into securityModule for consistency
             try {
                 // Parsing comlink
@@ -203,7 +201,7 @@ export default class ServerListeners {
             // Building a message to send back in the comlink
             // TODO Use demostdlib
 
-            var response_message = new Transmission(
+            let response_message = new Transmission(
                 sharedState.getInstance().identity.ed25519.privateKey,
             )
             response_message.initialize(
@@ -265,7 +263,7 @@ export default class ServerListeners {
         this.peer.socket.on("auth_reply", async data => {
             let identity = await cryptography.load("./.demos_identity")
             term.yellow("[SERVER] Received auth reply")
-            if (!(data === "readonly")) {
+            if (data !== "readonly") {
                 let _verification = await cryptography.verify(
                     data[0],
                     data[1],
@@ -300,7 +298,7 @@ export default class ServerListeners {
             term.yellow("[SERVER] Received vote request\n")
             //console.log(request)
             let voteResponse: string
-            var res: string
+            let res: string
 
             console.log("request")
             //console.log(request)

@@ -14,7 +14,7 @@ import terminalkit from "terminal-kit"
 
 import { PeerManager } from "../peer"
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 export default class ClientListeners {
     private peer: any

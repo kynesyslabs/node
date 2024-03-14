@@ -15,9 +15,8 @@ import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import handleWeb2 from "src/features/web2/Web2Dispatcher"
 import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool"
-import { Peer, PeerManager } from "src/libs/peer"
+import { Peer } from "src/libs/peer"
 import { Blocks } from "src/model/entities/Blocks"
-import { Transactions } from "src/model/entities/Transactions"
 import sharedState from "src/utilities/sharedState"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
@@ -35,7 +34,7 @@ import { BrowserRequest } from "./serverListeners"
 import getPeerlist from "./routines/nodecalls/getPeerlist"
 import getPreviousHashFromBlockHash from "./routines/nodecalls/getPreviousHashFromBlockHash"
 
-var term = terminalkit.terminal
+let term = terminalkit.terminal
 
 export default class ServerHandlers {
     // ANCHOR BrowserRequest
@@ -73,7 +72,7 @@ export default class ServerHandlers {
         console.log("[SERVERHANDLER] handleVoteRequest")
         const mempool = await Mempool.getMempool()
 
-        const { derivedBlock, full_ordered_transactions } = await deriveBlock(
+        const { derivedBlock } = await deriveBlock(
             mempool,
             timestamp,
         )
@@ -119,7 +118,7 @@ export default class ServerHandlers {
             extra = "InvalidTransaction 💀: " + validatedTx[1]
             response = false
         } else {
-            /* NOTE 
+            /* NOTE
                     We just processed the cryptographic validity of the transaction.
                     We have no idea of its state validity and thus won't modify the GLS, but
                     it can go into the mempool to be further processed if its cryptographically valid.
@@ -332,6 +331,7 @@ export default class ServerHandlers {
             | Transaction[]
             | AddressInfo
         let result: any // Storage for the result
+        let nStat: any // Storage for the native status
         let socketized_response: Peer[]
         let { data } = content
         //console.log(typeof data)
@@ -371,7 +371,7 @@ export default class ServerHandlers {
                 console.log(
                     "[CHAIN.ts] Received reply from the database: extracting header",
                 )
-                // Fixme: we now have a raw block, and have to instantiate a block from that.
+                // FIXME: we now have a raw block, and have to instantiate a block from that.
                 // response = response.getHeader()
                 //console.log(response)
                 break
@@ -385,7 +385,6 @@ export default class ServerHandlers {
                 console.log(
                     "[CHAIN.ts] Received reply from the database: extracting header",
                 )
-                // Fixme: we now have a raw block, and have to instantiate a block from that.
                 // response = response.getHeader()
                 //console.log(response)
                 break
@@ -463,7 +462,7 @@ export default class ServerHandlers {
                         error: "No address specified",
                     })
                 }
-                var nStat = await GLS.getGLSNativeStatus(data.address)
+                nStat = await GLS.getGLSNativeStatus(data.address)
                 response = nStat.toString() // REVIEW It works ?
                 break
             case "getPeerTime":

@@ -4,7 +4,7 @@ import terminalkit from "terminal-kit"
 
 dotenv.config()
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 export default class log {
     constructor() {}

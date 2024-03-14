@@ -39,7 +39,7 @@ import groundControl from "./libs/utils/demostdlib/groundControl"
 import mainLoop from "./utilities/mainLoop"
 import sharedState from "./utilities/sharedState"
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 dotenv.config()
 

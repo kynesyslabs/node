@@ -14,7 +14,7 @@ import ComLink from "src/libs/communications/comlink"
 import Transmission from "src/libs/communications/transmission"
 import terminalkit from "terminal-kit"
 
-var term = terminalkit.terminal
+const term = terminalkit.terminal
 
 export default class Demos {
     socket: socket_client.Socket
