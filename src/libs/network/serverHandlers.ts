@@ -33,6 +33,10 @@ import Sessions from "./routines/sessionManager"
 import { BrowserRequest } from "./serverListeners"
 import getPeerlist from "./routines/nodecalls/getPeerlist"
 import getPreviousHashFromBlockHash from "./routines/nodecalls/getPreviousHashFromBlockHash"
+import getBlockHeaderByHash from "./routines/nodecalls/getBlockHeaderByHash"
+import getBlockHeaderByNumber from "./routines/nodecalls/getBlockHeaderByNumber"
+import getBlockByNumber from "./routines/nodecalls/getBlockByNumber"
+import getBlockByHash from "./routines/nodecalls/getBlockByHash"
 
 let term = terminalkit.terminal
 
@@ -72,10 +76,7 @@ export default class ServerHandlers {
         console.log("[SERVERHANDLER] handleVoteRequest")
         const mempool = await Mempool.getMempool()
 
-        const { derivedBlock } = await deriveBlock(
-            mempool,
-            timestamp,
-        )
+        const { derivedBlock } = await deriveBlock(mempool, timestamp)
         const proposedBlock = derivedBlock
         let proposedBlockHash = proposedBlock.hash
         return proposedBlockHash
@@ -358,37 +359,15 @@ export default class ServerHandlers {
                 break
             // REVIEW (untested) Headers instead of full blocks
             case "getBlockHeaderByNumber":
-                if (
-                    data.blockNumber === undefined ||
-                    data.blockNumber < 0 ||
-                    data.blockNumber === ""
-                ) {
-                    response = "error"
-                    extra = "Block number is not valid"
-                    break
-                }
-                response = await Chain.getBlockByNumber(data.blockNumber)
-                console.log(
-                    "[CHAIN.ts] Received reply from the database: extracting header",
-                )
-                // FIXME: we now have a raw block, and have to instantiate a block from that.
-                // response = response.getHeader()
-                //console.log(response)
+                result = await getBlockHeaderByNumber(data)
+                response = result.response
+                extra = result.extra
                 break
             case "getBlockHeaderByHash":
-                if (data.blockHash === undefined || data.blockHash === "") {
-                    response = "error"
-                    extra = "Block hash is not valid"
-                    break
-                }
-                response = await Chain.getBlockByHash(data.blockHash)
-                console.log(
-                    "[CHAIN.ts] Received reply from the database: extracting header",
-                )
-                // response = response.getHeader()
-                //console.log(response)
+                result = await getBlockHeaderByHash(data)
+                response = result.response
+                extra = result.extra
                 break
-
             case "getLastBlockNumber":
                 console.log("[SERVER] Received getLastBlockNumber")
                 response = await Chain.getLastBlockNumber()
@@ -399,43 +378,14 @@ export default class ServerHandlers {
                 response = await Chain.getLastBlockHash()
                 break
             case "getBlockByNumber":
-                if (
-                    data.blockNumber === undefined ||
-                    data.blockNumber === null
-                ) {
-                    console.log("[SERVER ERROR] Missing blockNumber 💀")
-                    //console.log(data)
-                    receiver.emit("error", {
-                        error: "No block specified",
-                        muid: content.muid,
-                    })
-                } else {
-                    console.log(
-                        "[SERVER] Received getBlockByNumber: " +
-                            data.blockNumber,
-                    )
-                    response = await Chain.getBlockByNumber(data.blockNumber)
-
-                    // REVIEW Debug lines
-                    //console.log(response)
-                    response = JSON.stringify(response)
-                    //console.log(response)
-                }
+                result = await getBlockByNumber(data)
+                response = result.response
+                extra = result.extra
                 break
             case "getBlockByHash":
-                if (!data.hash) {
-                    receiver.emit("public", {
-                        error: "No block specified",
-                    })
-                }
-                console.log("[SERVER] Received getBlockByHash: " + data.hash)
-                response = await Chain.getBlockByHash(data.hash)
-
-                // REVIEW Debug lines
-                //console.log(response)
-                response = JSON.stringify(response)
-                //console.log(response)
-
+                result = getBlockByHash(data)
+                response = result.response
+                extra = result.extra
                 break
             case "getTxByHash":
                 if (!data.hash) {
@@ -481,6 +431,15 @@ export default class ServerHandlers {
                 response = '{ error: "Unknown message"}'
                 break
         }
+
+        // REVIEW Unified error handling
+        if (response === "error") {
+            receiver.emit("error", {
+                error: extra,
+                muid: content.muid,
+            })
+        }
+        // REVIEW Is this ok? Follow back and see
         return { extra, require_reply, response }
     }
 }
