@@ -5,9 +5,9 @@ import type { JestConfigWithTsJest } from "ts-jest"
 const jestConfig: JestConfigWithTsJest = {
 	moduleNameMapper: pathsToModuleNameMapper({
 		// SEE: tsconfig.json > compilerOptions > paths
-        // INFO: When you define paths in tsconfig, also define here
-        // TODO: Find a way to avoid the double work
+        // INFO: When you define paths in tsconfig, also define here, eg:
 		// "$lib/*": ["src/lib/*"],
+        // TODO: Find a way to avoid the double work
 	}),
 	preset: "ts-jest",
 	roots: ["<rootDir>"],
