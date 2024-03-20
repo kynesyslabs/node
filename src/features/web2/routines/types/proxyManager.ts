@@ -1,5 +1,3 @@
-import https from "https"
-
 // LINK https://stackoverflow.com/questions/46412934/forward-https-traffic-thru-nginx-without-ssl-certificate
 // LINK https://github.com/http-party/node-http-proxy
 // LINK https://github.com/http-party/node-http-proxy?tab=readme-ov-file#https---https
@@ -8,6 +6,7 @@ import fs from "fs"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import sharedState from "src/utilities/sharedState"
+import required from "src/utilities/required"
 
 export interface IHTTPSCerts {
     key: string
@@ -85,7 +84,20 @@ export default class proxyManager {
         )
         // Informing everyone that we are listening
         this.isOn = true
+        // Activate listeners
+        this.listenersForProxy()
         return this.internal_proxy
+    }
+
+    private listenersForProxy() {
+        required(this.isOn, "Proxy is not running")
+        // TODO Add listeners for the proxy based on this blurbprint
+        this.internal_proxy.on("error", (err) => {
+            console.log("Proxy server error: " + err)
+        })
+        this.internal_proxy.on("proxyReq", (proxyReq, req, res, options) => {
+            console.log("Proxy request")
+        })
     }
 
     // NOTE Stop the proxy
