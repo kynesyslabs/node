@@ -156,6 +156,8 @@ async function main() {
     term.green(
         "\n[MAIN] 🔗 WE ARE " + id.ed25519.publicKey.toString("hex") + " 🔗 \n",
     )
+    // And saves the public key file
+    fs.writeFileSync("publickey", id.ed25519.publicKey.toString("hex") + "\n")
 
     try {
         await sharedState.getInstance().identity.getPublicIP()
