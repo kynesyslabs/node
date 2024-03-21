@@ -30,4 +30,3 @@ data/chain.db
 TODO.md
 src/features/experimental/fhe/fhe_test.ts
 yarn.lock
-package.json
