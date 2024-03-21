@@ -14,7 +14,7 @@
         "inlineSources": true,
         "outDir": "./dist",
         "baseUrl": "./",
-        "types": ["node"],
+        "types": ["jest", "node"],
         "incremental": true,
         "strictNullChecks": false,
         "noImplicitAny": false,
