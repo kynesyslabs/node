@@ -21,6 +21,7 @@ docker/node
 node_modules
 yarn-error.log
 yarn.lock
+node/yarn.lock
 package-lock.json
 data/chain.db
 data/chain.db
@@ -28,3 +29,4 @@ data/chain.db
 # User-specific files
 TODO.md
 src/features/experimental/fhe/fhe_test.ts
+yarn.lock
