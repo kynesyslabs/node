@@ -3,11 +3,11 @@ name: Chain tests
 # INFO: This workflow can't push to the repository
 permissions: read-all
 
-# INFO: Run workflow on push to main branch
+# INFO: Run workflow on changes to the sdks
 on:
   push:
-    branches:
-      - main
+    paths:
+      - 'sdk/localsdk/multichain/**'
 
 jobs:
   test:
