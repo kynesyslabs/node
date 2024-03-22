@@ -15,7 +15,6 @@ import * as xrpl from "xrpl"
 import DefaultChainAsync from "./types/defaultChainAsync"
 
 // LINK https://js.xrpl.org/
-
 // TODO https://xrpl.org/monitor-incoming-payments-with-websocket.html
 
 export default class XRPL extends DefaultChainAsync {
@@ -43,8 +42,6 @@ export default class XRPL extends DefaultChainAsync {
             console.log(`[XRPL] ${maxTrials - trial_index} retries left`)
 
             try {
-                // throw new Error("Test error for retrying the connection")
-
                 await this.provider.connect()
                 console.log(
                     `[XRPL] Connected to RPC on ${trial_index + 1}th trial`,
@@ -180,12 +177,16 @@ export default class XRPL extends DefaultChainAsync {
         return info
     }
 
-    async signTransaction(raw_transaction: any): Promise<any> {
+    async signTransaction(raw_tx: any): Promise<any> {
         // Signing the tx
-        let signed = this.wallet.sign(raw_transaction)
+        let signed = this.wallet.sign(raw_tx)
         console.log("Hash: " + signed.hash)
         console.log("Blob: " + signed.tx_blob)
         return signed
+    }
+
+    async signTransactions(raw_tx: any[], options?: {}): Promise<any> {
+        throw new Error("Method not implemented.")
     }
 
     // INFO Generic sign, send and await (if not specified) a tx

@@ -57,12 +57,8 @@ export default class MULTIVERSX extends DefaultChainAsync {
     }
 
     async disconnect() {
-        this.wallet = null
-        this.provider = null
-
-        this.rpc_url = ""
+        this.resetLocals();
         this.chainID = null
-        this.connected = false
     }
 
     createWallet(password: string, addressIndex: number = undefined) {
@@ -178,5 +174,9 @@ export default class MULTIVERSX extends DefaultChainAsync {
             result: "success",
             hash: tx_hash,
         }
+    }
+
+    async signTransactions(raw_tx: any[], options?: {}): Promise<any> {
+        throw new Error("Method not implemented.")
     }
 }

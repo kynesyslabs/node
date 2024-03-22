@@ -24,7 +24,7 @@ export interface IDefaultChainAsync {
     getBalance: (address: string) => Promise<string>
     pay: (receiver: string, amount: string) => Promise<any>
     info: () => Promise<string>
-    signTransaction: (raw_transaction: any) => Promise<any>
+    signTransaction: (raw_tx: any) => Promise<any>
     sendTransaction: (transactions: any) => any
 }
 
@@ -39,6 +39,16 @@ export default abstract class DefaultChainAsync implements IDefaultChainAsync {
 
     constructor(rpcURL: string) {
         this.rpc_url = rpcURL
+        this.connected = false
+    }
+
+    /**
+	 * Resets the provider, wallet and .connected status
+	 */
+    resetLocals(){
+        this.provider = null
+        this.wallet = null
+        this.signer = null
         this.connected = false
     }
 
@@ -62,7 +72,7 @@ export default abstract class DefaultChainAsync implements IDefaultChainAsync {
      * @param address The address to get the balance from
      * @returns A promise that resolves to the balance of the address
      */
-    abstract getBalance(address: string): Promise<string>
+    abstract getBalance(address: string, options?: {}): Promise<string>
 
     /**
      * Creates a transaction to send the default currency of the chain to an address
@@ -70,7 +80,7 @@ export default abstract class DefaultChainAsync implements IDefaultChainAsync {
      * @param amount The amount to send
      * @returns A promise that resolves to the signed transaction
      */
-    abstract pay(receiver: string, amount: string): Promise<any>
+    abstract pay(receiver: string, amount: string, options?: {}): Promise<any>
     abstract info(...args: any): Promise<string>
     // ANCHOR Write methods
 
@@ -86,23 +96,31 @@ export default abstract class DefaultChainAsync implements IDefaultChainAsync {
      * @param privateKey The private key of the wallet
      * @returns The signer object
      */
-    abstract connectWallet(privateKey: string): any
+    abstract connectWallet(privateKey: string, options?: {}): any
 
     /**
      * Signs a transaction
-     * @param raw_transaction The transaction to sign
+     * @param raw_tx The transaction to sign
      * @returns A promise that resolves to the signed transaction
      */
-    abstract signTransaction(raw_transaction: any): Promise<any>
+    abstract signTransaction(raw_tx: any, options?: {}): Promise<any>
+
+    /**
+     * Signs a list of transactions
+     * @param raw_tx The transactions to sign
+     * @returns A promise that resolves to the signed transactions
+     */
+        abstract signTransactions(raw_tx: any[], options?: {}): Promise<any>
 
     /**
      * Broadcasts a signed transaction using the RPC provider
-     * @param signed_transaction The signed transaction
+     * @param signed_tx The signed transaction
      * @returns A promise that resolves to the transaction hash
      */
     abstract sendTransaction(
-        signed_transaction: any,
+        signed_tx: any,
     ): Promise<TransactionResponse>
+
 }
 
 // INFO This interface is exclusive for the EVM networks

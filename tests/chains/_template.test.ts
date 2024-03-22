@@ -1,6 +1,6 @@
 // INFO: Duplicate and rename this file to add a new XM test
-import chainProviders from "$lib/chainProviders"
-// import { CHAIN } from '$lib/demos_libs/xmlibs/multichain';
+// import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
+// import { CHAIN } from "sdk/localsdk/multichain"
 
 describe("<CHAIN_NAME> CHAIN TESTS", () => {
 	// TODO: Set correct instance type

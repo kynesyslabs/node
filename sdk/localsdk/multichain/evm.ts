@@ -122,12 +122,14 @@ export default class EVM extends defaultChainAsync implements IEVM {
         return await this.wallet.signTransaction(raw_transaction)
     }
 
+    async signTransactions(raw_tx: any[], options?: {}): Promise<any> {
+        throw new Error("Method not implemented.")
+    }
+
     // INFO If the wallet is connected, send a transaction
     // ANCHOR MVP
     async sendTransaction(transaction: TransactionRequest) {
-        if (!this.wallet) {
-            throw new Error("Wallet not connected")
-        }
+        required(this.wallet, "Wallet not connected")
         const txResponse = await this.wallet.sendTransaction(transaction) // NOTE It will be signed automatically
         return {
             result: "success",
@@ -136,8 +138,7 @@ export default class EVM extends defaultChainAsync implements IEVM {
     }
 
     async sendRawTransaction(raw_transaction: string): Promise<string> {
-        // TODO
-        return ""
+        throw new Error("Method not implemented.")
     }
 
     async sendSignedTransaction(

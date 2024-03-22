@@ -43,9 +43,6 @@ const term = terminalkit.terminal
 
 dotenv.config()
 
-// REVIEW Delete when tested properly
-// import testMultiversx from "sdk/localsdk/multichain/multiversx/test"
-
 let enough_peers = true
 // INFO Loading the known peers
 if (!fs.existsSync("./demos_peers")) {
@@ -213,6 +210,3 @@ async function main() {
 // INFO Starting the main routine
 digestArguments()
 main()
-
-// REVIEW Delete when tested properly
-// testMultiversx()
