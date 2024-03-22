@@ -9,13 +9,15 @@ import Transaction from "../transaction"
 async function calculateComposedGas(): Promise<number> {
     let lastblock_basegas: number = await GLS.getGLSLastBlockBaseGas()
     // TODO Add something to check congestion
-    let tx_fee = lastblock_basegas + sharedState.getInstance().rpcFee
+    let composed_gas = lastblock_basegas + sharedState.getInstance().rpcFee
     // TODO Add dApp fees
-    return tx_fee
+    return composed_gas
 }
 
 // REVIEW Why is this just a nested call
-export default async function calculateCurrentGas(): Promise<number> {
+export default async function calculateCurrentGas(payload: any): Promise<number> {
+    let payload_size = sizeOf(payload)
     let composed_gas_price = await calculateComposedGas()
-    return composed_gas_price
+    let transaction_fee = payload_size * composed_gas_price
+    return transaction_fee
 }
