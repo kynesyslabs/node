@@ -10,8 +10,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { comlinkUtils } from "src/libs/communications"
-import Transmission from "src/libs/communications/transmission"
 import { cryptography } from "src/libs/crypto"
+import { demostdlib } from "../utils"
 /* eslint-disable no-extra-semi */
 import ServerHandlers from "src/libs/network/serverHandlers"
 import { Peer } from "src/libs/peer"
@@ -20,8 +20,8 @@ import sharedState from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 
 import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
-import * as Security from "./securityModule"
 import { ISession } from "./routines/sessionManager"
+import * as Security from "./securityModule"
 
 let term = terminalkit.terminal
 
@@ -98,17 +98,19 @@ export default class ServerListeners {
                 return // TODO Better error handling
             }
             let _comlink_request = parsed_comlink[0]
-            console.log("comlink request")
+            console.log("[serverListeners] ComLink request received and parsed correctly")
             //console.log(_comlink_request)
             let content = parsed_comlink[1]
+            console.log("[serverListeners] Received comlink content")
 
             let extra: any, require_reply: any, response: any
 
-            let content_data = content.data
-            console.log("[DATA INCLUDED IN THE COMLINK]")
-            console.log(content_data)
+            //let content_data = content.data
+            //console.log("[DATA INCLUDED IN THE COMLINK]")
+            //console.log(content_data)
 
             // NOTE And here we have the real deal
+            console.log("[serverListeners] content.type: " + content.type)
             switch (content.type) {
                 // TODO We need to calculate the gas cost for operations that require it
                 case "proofOfConsensus":
@@ -191,35 +193,16 @@ export default class ServerListeners {
                     )
                     break
             }
-
-            console.log("content.type: " + content.type)
             //console.log("content.message: " + content.message)
             //console.log("content.message.action: " + content.message.action)
 
             // ANCHOR Reply logic
-            // REVIEW unless specified, we now send back the updated comlink as a response
-            // Building a message to send back in the comlink
-            // TODO Use demostdlib
-
-            let response_message = new Transmission(
-                sharedState.getInstance().identity.ed25519.privateKey,
-            )
-            response_message.initialize(
-                // TODO Specify the answer so that it has a type AND a message
-                "reply",
-                JSON.stringify(response),
-                id_ed25519.publicKey,
-                "placeholder", // TODO Add the receiver, don't we already have it in the receiver object?
-                null,
+            // NOTE unless specified, we now send back the updated comlink as a response
+            await demostdlib.reply(
+                _comlink_request,
+                response,
+                require_reply,
                 extra,
-            )
-            await response_message.finalize()
-            // Populating the comlink
-            _comlink_request.properties.is_reply = true // Setting the reply flag as we are replying
-            _comlink_request.properties.require_reply = require_reply // Setting the require_reply flag as provided above
-            await _comlink_request.replyToMessage(
-                response_message,
-                id_ed25519.privateKey,
             )
 
             // TODO & REVIEW Call security module for send limiting messages
