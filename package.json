@@ -107,7 +107,6 @@
         "superdilithium": "^2.0.6",
         "supersphincs": "^8.0.6",
         "terminal-kit": "^3.0.0",
-        "tronweb": "^5.3.0",
         "tsx": "^3.12.8",
         "tweetnacl": "^1.0.3",
         "typeorm": "^0.3.17",
