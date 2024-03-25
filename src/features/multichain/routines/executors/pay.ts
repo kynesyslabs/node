@@ -5,6 +5,8 @@ import { TransactionResponse } from "sdk/localsdk/multichain/types/multichain"
 import checkSignedPayloads from "src/utilities/checkSignedPayloads"
 
 import { IOperation } from "../XMParser"
+import { IBC, MULTIVERSX } from "sdk/localsdk/multichain"
+import DefaultChainAsync from "sdk/localsdk/multichain/types/defaultChainAsync"
 
 /**
  * Executes a XM pay operation and returns
@@ -44,14 +46,25 @@ export default async function handlePayOperation(
     console.log("[XMScript Parser] Non-EVM PAY")
 
     // ANCHOR Ripple
-    const rpc_url = chainProviders[operation.chain][operation.subchain]
+    const rpc_url = operation.rpc || chainProviders[operation.chain][operation.subchain]
+    if (!rpc_url) {
+        return {
+            result: "error",
+            error: `RPC URL not found for ${operation.chain}.${operation.subchain}`,
+        }
+    }
+
     switch (operation.chain) {
         case "xrpl":
             result = await handleXRPLPay(rpc_url, operation)
             break
 
         case "egld":
-            result = await handleEGLDPay(rpc_url, operation)
+            result = await genericJsonRpcPay(MULTIVERSX, rpc_url, operation)
+            break
+
+        case "ibc":
+            result = await genericJsonRpcPay(IBC, rpc_url, operation)
             break
 
         default:
@@ -68,6 +81,48 @@ export default async function handlePayOperation(
     return result
 }
 
+/**
+ * Executes a JSON RPC Pay operation for a JSON RPC sdk and returns the result
+ * @param rpc_url The RPC URL for the chain
+ * @param operation The operation to be executed
+ */
+async function genericJsonRpcPay(
+    sdk: typeof DefaultChainAsync,
+    rpc_url: string,
+    operation: IOperation,
+) {
+    console.log([
+        `[XMScript Parser] Generic JSON RPC Pay on: ${operation.chain}.${operation.subchain}`,
+    ])
+    let instance: DefaultChainAsync
+
+    try {
+        instance = await sdk.create(rpc_url)
+    } catch (error) {
+        return {
+            result: "error",
+            error: error.toString(),
+        }
+    }
+
+    try {
+        const signedTx = operation.task.signedPayloads[0]
+
+        // INFO: Send payload and return the result
+        const result = await instance.sendTransaction(signedTx)
+        console.log("[XMScript Parser] Generic JSON RPC Pay: result: ")
+        console.log(result)
+
+        return result
+    } catch (error) {
+        console.log("[XMScript Parser] Generic JSON RPC Pay: error: ")
+        console.log(error)
+        return {
+            result: "error",
+            error: error.toString(),
+        }
+    }
+}
 /**
  * Executes an EVM Pay operation and returns the result
  */
@@ -161,44 +216,3 @@ async function handleXRPLPay(
     }
 }
 
-/**
- * Executes an EGLD Pay operation and returns the result
- */
-async function handleEGLDPay(
-    rpc_url: string,
-    operation: IOperation,
-): Promise<TransactionResponse> {
-    console.log(
-        `[XMScript Parser] EGLD Pay: ${operation.chain} on ${operation.subchain}`,
-    )
-    // INFO: Create a new chain instance
-    const mxInstance = new multichain.MULTIVERSX(rpc_url)
-
-    try {
-        // INFO: Connect and wait for the connection to be verified
-        await mxInstance.connect()
-    } catch (error) {
-        return {
-            result: "error",
-            error: error.toString(),
-        }
-    }
-
-    try {
-        const signedTx = operation.task.signedPayloads[0]
-
-        // INFO: Send payload and return the result
-        const result = await mxInstance.sendTransaction(signedTx)
-        console.log("[XMScript Parser] EGLD Pay: result: ")
-        console.log(result)
-
-        return result
-    } catch (error) {
-        console.log("[XMScript Parser] EGLD Pay: error: ")
-        console.log(error)
-        return {
-            result: "error",
-            error: error.toString(),
-        }
-    }
-}

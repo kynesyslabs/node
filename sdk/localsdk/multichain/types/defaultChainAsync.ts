@@ -43,15 +43,18 @@ export default abstract class DefaultChainAsync implements IDefaultChainAsync {
     }
 
     /**
-	 * Resets the provider, wallet and .connected status
-	 */
-    resetLocals(){
+     * Resets the provider, wallet and .connected status
+     */
+    resetLocals() {
         this.provider = null
         this.wallet = null
         this.signer = null
         this.connected = false
     }
 
+    static async create(rpc_url?: string): Promise<DefaultChainAsync> {
+        throw new Error("Method not implemented.")
+    }
     // ANCHOR Base methods
 
     /**
@@ -110,17 +113,14 @@ export default abstract class DefaultChainAsync implements IDefaultChainAsync {
      * @param raw_tx The transactions to sign
      * @returns A promise that resolves to the signed transactions
      */
-        abstract signTransactions(raw_tx: any[], options?: {}): Promise<any>
+    abstract signTransactions(raw_tx: any[], options?: {}): Promise<any>
 
     /**
      * Broadcasts a signed transaction using the RPC provider
      * @param signed_tx The signed transaction
      * @returns A promise that resolves to the transaction hash
      */
-    abstract sendTransaction(
-        signed_tx: any,
-    ): Promise<TransactionResponse>
-
+    abstract sendTransaction(signed_tx: any): Promise<TransactionResponse>
 }
 
 // INFO This interface is exclusive for the EVM networks

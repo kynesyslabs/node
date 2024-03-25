@@ -56,8 +56,19 @@ export default class MULTIVERSX extends DefaultChainAsync {
         return this.connected
     }
 
+    static async create(rpc_url?: string) {
+        const instance = new MULTIVERSX(rpc_url)
+
+        if (!rpc_url) {
+            return instance
+        }
+
+        await instance.connect()
+        return instance
+    }
+
     async disconnect() {
-        this.resetLocals();
+        this.resetLocals()
         this.chainID = null
     }
 
