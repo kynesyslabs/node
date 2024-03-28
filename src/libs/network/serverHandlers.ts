@@ -186,7 +186,7 @@ export default class ServerHandlers {
             case "multichain_operation":
                 console.log(
                     "[Included XM Chainscript]" +
-                        JSON.stringify(tx.content.data) +
+                        JSON.stringify(tx.content.data[1]) +
                         "\n\n",
                 )
                 // TODO Better types on answers
