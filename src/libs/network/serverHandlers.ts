@@ -25,7 +25,7 @@ import GLS from "../blockchain/gls/gls"
 import {
     ValidityData,
     validateTransaction,
-    executeVerifiedTransaction,
+    executeVerifiedNativeTransaction,
 } from "../blockchain/routines/validateTransaction"
 import Transaction from "../blockchain/transaction"
 import AddressInfo from "../blockchain/types/addressInfo"
@@ -45,8 +45,16 @@ import Hashing from "../crypto/hashing"
 import Cryptography from "../crypto/cryptography"
 import required from "src/utilities/required"
 import { Operation } from "../blockchain/gls/gls"
+import { IWeb2Payload } from "src/features/web2/types/Web2Types"
 
 let term = terminalkit.terminal
+
+interface ExecutionResult {
+    response: any
+    extra: any
+    require_reply: boolean
+    operations?: Operation[]
+}
 
 export default class ServerHandlers {
     // ANCHOR BrowserRequest
@@ -93,7 +101,9 @@ export default class ServerHandlers {
     // !SECTION Login On Chain
 
     // ANCHOR Comlinks
-    static async handleTransaction(content: any): Promise<ValidityData> {
+    static async handleValidateTransaction(
+        tx: Transaction,
+    ): Promise<ValidityData> {
         term.yellow("[handleTransactions] Handling a DEMOS tx...\n")
         let fname = "[handleTransactions] "
         term.yellow(fname + "Handling transaction...")
@@ -107,10 +117,7 @@ export default class ServerHandlers {
              * The validation data can be used by the client to effectively execute the tx
              */
             //console.log(fname + "Validating transaction...")
-            validatedTx = await validateTransaction(
-                content.type,
-                content.message,
-            )
+            validatedTx = await validateTransaction(tx)
             //console.log(fname + "Fetching result...")
         } catch (e) {
             term.red.bold("[TX VALIDATION ERROR] 💀 : ")
@@ -141,21 +148,28 @@ export default class ServerHandlers {
         return validatedTx
     }
 
+    // NOTE This method is used to handle the execution of a transaction
     // TODO Better typing for content (must contain validity data, hashing and signature as shown below)
     static async handleExecuteTransaction(
-        content: any,
-    ): Promise<[boolean, string, Operation[]?]> {
+        validatedData: ValidityData,
+        senderSocket: any,
+    ): Promise<ExecutionResult> {
         let fname = "[handleExecuteTransaction] "
-        let validatedTx: ValidityData = content.data.validityData
-        required(content.data.execute, "No execute flag provided")
+        let result: ExecutionResult = {
+            response: null,
+            extra: null,
+            require_reply: false,
+        }
         // NOTE Content should contain validity data and signature to proceed
         // FIXME Add signature + public key checks
         // Returning an appropriate response
-        if (!validatedTx.data.valid) {
+        if (!validatedData.data.valid) {
             // An invalid transaction won't even be added to the mempool
             term.yellow.bold(fname + "Invalid transaction 💀 : ")
-            console.log(validatedTx.data.message)
-            return [false, validatedTx.data.message, null]
+            console.log(validatedData.data.message)
+            result.response = false
+            result.extra = validatedData.data.message
+            return result
         }
 
         /* NOTE
@@ -163,21 +177,49 @@ export default class ServerHandlers {
                     We will now try to execute it obtaining valid Operations.
                 */
         term.green.bold(fname + "Valid transaction! ")
-        //console.log(validatedTx[1])
-        let execution = executeVerifiedTransaction(validatedTx)
-        // NOTE We add the Transaction to the mempool as it looks valid
-        if (execution[0]) {
-            console.log(fname + "Adding transaction to mempool...")
-            // Adding the valid tx to the mempool
-            // REVIEW is this done here or by executing the transaction above?
-            Mempool.addTransaction(validatedTx.data.transaction) // Works by writing the registry
-            //process.exit(0) /* TODO Eliminate this debug line */
+        // REVIEW Switch case for different types of transactions
+        let tx = validatedData.data.transaction
+        // TODO Decide if the toMempool and Mempool.addTransaction should be here or in their dispatchers
+        // TODO Preferably here, unified, with the dispatchers having standard replies
+        switch (tx.content.type) {
+            case "crosschain_operation":
+            case "multichain_operation":
+                console.log(
+                    "[Included XM Chainscript]" +
+                        JSON.stringify(tx.content.data) +
+                        "\n\n",
+                )
+                // TODO Better types on answers
+                var xm_result = await ServerHandlers.handleXMChainOperation(
+                    tx.content.data[1],
+                )
+                result.response = xm_result
+                break
+            case "web2Request":
+                // TODO Better types on answers
+                var web2_result = await ServerHandlers.handleWeb2Request(
+                    JSON.parse(tx.content.data[1]) as IWeb2Payload,
+                    senderSocket,
+                )
+                result.response = web2_result
+                break
+            case "native":
+                var native_result = executeVerifiedNativeTransaction(validatedData)
+                // NOTE We add the Transaction to the mempool as it looks valid
+                if (native_result[0]) {
+                    console.log(fname + "Adding transaction to mempool...")
+                    // Adding the valid tx to the mempool
+                    // REVIEW is this done here or by executing the transaction above?
+                    Mempool.addTransaction(validatedData.data.transaction) // Works by writing the registry
+                    //process.exit(0) /* TODO Eliminate this debug line */
+                }
+                // REVIEW Check if this is ok with types
+                result.response = native_result
         }
-
         // TODO Broadcast the tx to the other peers
         // Response is then sent back automatically as a reply (with our validation)
         // Returning the state of the transaction including operations
-        return execution
+        return result
     }
 
     // INFO Handling XM Transaction
@@ -219,8 +261,7 @@ export default class ServerHandlers {
     // NOTE Theoretically, content should be IWeb2Request compliant
     // LINK "../../features/web2/types/Web2Request";
     static async handleWeb2Request(
-        request: any,
-        content: any,
+        content: IWeb2Payload,
         senderSocket: any,
     ): Promise<any> {
         /* NOTE This workflow goeas as:

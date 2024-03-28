@@ -22,6 +22,11 @@ import terminalkit from "terminal-kit"
 import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
 import { ISession } from "./routines/sessionManager"
 import * as Security from "./securityModule"
+import ComLink from "../communications/comlink"
+import { BundleContent } from "../communications/types/transmit"
+import { ValidityData } from "../blockchain/routines/validateTransaction"
+import Transaction from "../blockchain/transaction"
+import Chain from "src/libs/blockchain/chain"
 
 let term = terminalkit.terminal
 
@@ -75,21 +80,27 @@ export default class ServerListeners {
         })
     }
 
-    // NOTE ComLinks are managed "centrally" here so apply securityModule stuff here
+    // REVIEW ComLinks are managed "centrally" here so apply securityModule stuff here
+    /* NOTE ComLink and Transactions
+     Once a comlink is received, we need to parse it and check if it is a transaction or a message.
+     Basically, a transaction needs gas calculation and validation, then it is sent back to the client that can
+     either execute it or discard it.
+     A message is just a message, so it is handled by its type.
+    */
     async comlinkListener() {
         this.peer.socket.on("comlink", async request => {
             term.yellow("[SERVER] Received comlink\n")
             const id_ed25519 = sharedState.getInstance().identity.ed25519
             const receiver = this.peer.socket
-            let parsed_comlink: any // TODO Better typing
+            let _comlink_request: ComLink
             // TODO This can be put into securityModule for consistency
             try {
                 // Parsing comlink
-                parsed_comlink = await comlinkUtils.parseComlink(
+                _comlink_request = await comlinkUtils.parseComlink(
                     request,
                     this.peer.socket,
                 )
-                if (!parsed_comlink) {
+                if (!_comlink_request) {
                     return // TODO Better error handling
                 }
             } catch (error) {
@@ -97,112 +108,95 @@ export default class ServerListeners {
                 console.log("Returning")
                 return // TODO Better error handling
             }
-            let _comlink_request = parsed_comlink[0]
+            // We can now extract the comlink and the content to be used in the handlers
             console.log("[serverListeners] ComLink request received and parsed correctly")
             //console.log(_comlink_request)
-            let content = parsed_comlink[1]
+            let content: BundleContent = _comlink_request.chain.current.currentMessage.bundle.content
             console.log("[serverListeners] Received comlink content")
 
             let extra: any, require_reply: any, response: any
 
-            //let content_data = content.data
-            //console.log("[DATA INCLUDED IN THE COMLINK]")
-            //console.log(content_data)
-
-            // NOTE And here we have the real deal
             console.log("[serverListeners] content.type: " + content.type)
-            switch (content.type) {
-                /* FIXME We need to calculate the gas cost for operations that require it
-                 * To implement the above, all the non-system operations must be grouped into the
-                 * validateTx and executeTx types. The Transaction object must be compliant to support
-                 * XM, Web2 and possibly other operations.
-                 * This way, using the validity + execute cases, we can efficiently pre-check and compute
-                 * the gas cost for the operation and its validity.
-                */
-                // NOTE To execute a native tx, the client needs to first confirm it
+            // REVIEW We use the 'extra' field to see if it is a validateTx request (prior to execution)
+            // or an executeTx request (to execute the transaction after gas cost is calculated).
+            // Transactions are either gas consuming or not, so we need to check if the transaction
+            // needs to be validated,executed or treated as a message.
+            switch (content.extra) {
+                // ANCHOR Gas consuming transactions
+                // Validating a tx means that we calculate gas and check if the transaction is valid
+                // Then we send the validation data to the client that can use it to execute the tx
                 case "validateTx":
                     term.yellow.bold("[SERVER] Received validateTx\n")
-                    var validityData = await ServerHandlers.handleTransaction(content)
-                    response = validityData.data.valid
-                    extra = validityData.data.message
+                    var validityData = await ServerHandlers.handleValidateTransaction(content.data as Transaction)
+                    response = validityData
+                    extra = ""
                     require_reply = false
                     break
-                // NOTE Taking validity data and executing the transaction
+                // Executing a tx means that we execute the transaction and send back the result
+                // to the client. We first need to check if the tx is actually valid.
                 case "executeTx":
                     term.yellow.bold("[SERVER] Received executeTx\n")
-                    response = await ServerHandlers.handleExecuteTransaction(content)
+                    // REVIEW This method needs to actually verify if the transaction is valid
+                    response = await ServerHandlers.handleExecuteTransaction(content.data as ValidityData, this.peer.socket)
                     break
-
-                case "crosschain_operation":
-                case "multichain_operation":
-                    console.log(
-                        "[Included XM Chainscript]" +
-                            JSON.stringify(content.message) +
-                            "\n\n",
-                    )
-                    ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleXMChainOperation(
-                            content.message,
-                        ))
-                    break
-                case "web2Request":
-                    ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleWeb2Request(
-                            request,
-                            content,
-                            this.peer.socket,
-                        ))
-                    break
-
-                case "proofOfConsensus":
-                    ;({ extra, require_reply, response } =
-                        await proofConsensusHandler(content))
-                    break
-                case "consensus":
-                    console.log(
-                        "[SERVER LISTENER HANDLER]: received consensus request",
-                    )
-                    console.log(
-                        parsed_comlink[0].chain.current.currentMessage.bundle
-                            .content.sender,
-                    )
-                    ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleConsensusRequest(
-                            request,
-                            content,
-                            parsed_comlink[0].chain.current.currentMessage
-                                .bundle.content.sender,
-                        ))
-                    break
-
-                case "messages":
-                    ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleMessage(content))
-                    break
-
-                case "storage":
-                    ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleStorage())
-                    break
-
-                case "mempool":
-                    ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleMempool(content))
-                    break
-
-                case "nodeCall":
-                    ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleNodeAPI(
-                            content,
-                            receiver,
-                            id_ed25519,
-                        ))
-                    break
-
+                // ANCHOR Messages
+                // All the rest of the comlink types do not require extra validation or gas calculation
+                // They are treated as messages and are handled by their types themselves
+                // TODO Avoid double switch pls
                 default:
-                    term.red(
-                        `[COMLINK INVALID] No known type: ${content.type}\n`,
-                    )
+                    switch (content.type) {
+
+                        case "proofOfConsensus":
+                            ;({ extra, require_reply, response } =
+                                await proofConsensusHandler(content))
+                            break
+                        case "consensus":
+                            console.log(
+                                "[SERVER LISTENER HANDLER]: received consensus request",
+                            )
+                            console.log(
+                                _comlink_request.chain.current.currentMessage.bundle
+                                    .content.sender,
+                            )
+                            ;({ extra, require_reply, response } =
+                                await ServerHandlers.handleConsensusRequest(
+                                    request,
+                                    content,
+                                    _comlink_request.chain.current.currentMessage
+                                        .bundle.content.sender,
+                                ))
+                            break
+
+                        case "messages":
+                            ;({ extra, require_reply, response } =
+                                await ServerHandlers.handleMessage(content))
+                            break
+
+                        case "storage":
+                            ;({ extra, require_reply, response } =
+                                await ServerHandlers.handleStorage())
+                            break
+
+                        case "mempool":
+                            ;({ extra, require_reply, response } =
+                                await ServerHandlers.handleMempool(content))
+                            break
+
+                        case "nodeCall":
+                            ;({ extra, require_reply, response } =
+                                await ServerHandlers.handleNodeAPI(
+                                    content,
+                                    receiver,
+                                    id_ed25519,
+                                ))
+                            break
+
+                        default:
+                            term.red(
+                                `[COMLINK INVALID] No known type: ${content.type}\n`,
+                            )
+                            break
+                    }
                     break
             }
             //console.log("content.message: " + content.message)
@@ -243,6 +237,7 @@ export default class ServerListeners {
                     }
                 }
             }
+
 
             // Sending back the response
             console.log("[SERVER] Sending back comlink")
