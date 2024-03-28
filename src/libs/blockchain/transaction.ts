@@ -34,14 +34,14 @@ interface TransactionResponse {
     data: {}
 }
 
-interface Signature {
+interface ISignature {
     type: string
     data: pki.ed25519.BinaryBuffer
 }
 
 export default class Transaction {
     content: TransactionContent
-    signature: Signature
+    signature: ISignature
     hash: string
     status: string
     blockNumber: number

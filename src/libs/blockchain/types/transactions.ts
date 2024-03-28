@@ -17,20 +17,15 @@ export interface TxFee {
     additional_fee: number
 }
 
-export interface fromSignature {
-    type: string
-    data: pki.ed25519.BinaryBuffer
-}
-
-export interface toSignature {
+export interface ISignature {
     type: string
     data: pki.ed25519.BinaryBuffer
 }
 
 export interface TransactionContent {
     type: string
-    from: forge.pki.ed25519.BinaryBuffer | forge.pki.PublicKey | fromSignature
-    to: forge.pki.ed25519.BinaryBuffer | forge.pki.PrivateKey | toSignature
+    from: forge.pki.ed25519.BinaryBuffer | forge.pki.PublicKey | ISignature
+    to: forge.pki.ed25519.BinaryBuffer | forge.pki.PrivateKey | ISignature
     amount: number
     data: [string, string] // type as string and content in hex string
     nonce: number // Increments every time a transaction is sent from the same account
