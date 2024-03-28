@@ -16,20 +16,12 @@ import terminalkit from "terminal-kit"
 import GLS, { Operation } from "../gls/gls"
 import Transaction from "../transaction"
 import calculateCurrentGas from "./calculateCurrentGas"
-import executeTransaction from "./executeTransaction"
+import executeNativeTransaction from "./executeNativeTransaction"
 import { pki } from "node-forge"
 
 import Chain from "../chain"
 
 const term = terminalkit.terminal
-
-// NOTE This interface allows us to better work with transactions
-// It implies that the request object must contain a tx property being a Transaction object
-export interface ValidRequest {
-    tx: Transaction
-    // Accepting anything else
-    [x: string | number | symbol]: unknown
-}
 
 export interface ValidityData {
     data: {
@@ -43,11 +35,10 @@ export interface ValidityData {
     rpc_public_key: pki.ed25519.BinaryBuffer
 }
 
-// INFO Cryptographically validate a transaction, calculate gas and see if the execution is valid
+// INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
 export async function validateTransaction(
-    type: string,
-    request: ValidRequest, // Must contain a tx property being a Transaction object
+    tx: Transaction, // Must contain a tx property being a Transaction object
 ): Promise<ValidityData> {
     term.yellow("[Native Tx Validation] Validating transaction...\n")
     // Getting the current block number
@@ -57,25 +48,10 @@ export async function validateTransaction(
     let publicKey = Buffer.from(id_ed25519.publicKey.toString("hex"))
     let privateKey = Buffer.from(id_ed25519.privateKey.toString("hex"))
     // REVIEW This should work just fine
-    let tx = request.tx
-    /* TODO Remove if deprecated
-    // Ingesting a transaction so that we have all the methods we need
-    let tx = new Transaction()
-    tx.content = request.tx.content
-    tx.signature = request.tx.signature
-    // As usual converting buffers to nodejs buffers
-    if (
-        typeof tx.signature === "object" &&
-        request.tx.signature.type === "Buffer"
-    ) {
-        tx.signature = Buffer.from(request.tx.signature) as any
-        console.log("Normalized signature")
-    }
-    */
     console.log("Signature: ")
     console.log(tx.signature)
 
-    console.log("[Native Tx Validation] Examining it\n")
+    console.log("[Tx Validation] Examining it\n")
     console.log(tx)
 
     let validityData: ValidityData = {
@@ -183,14 +159,14 @@ export async function validateTransaction(
 }
 
 // TODO a verified transaction should be signed by the same rpc that verified it and should be only valid for the current consensus round
-export async function executeVerifiedTransaction(
+export async function executeVerifiedNativeTransaction(
     validityData: ValidityData,
 ): Promise<[boolean, string, Operation[]?]> {
     // REVIEW Execute or Revert the transaction
     // NOTE executeTransaction returns an array of [success, message, operations]
     // The operations are the Operation objects that are executed in the GLS after the consensus
     // has confirmed the transaction in the block.
-    let execution = await executeTransaction(validityData.data.transaction)
+    let execution = await executeNativeTransaction(validityData.data.transaction)
     if (!execution[0]) {
         return [false, "Execution failed: " + execution[1]]
     }
