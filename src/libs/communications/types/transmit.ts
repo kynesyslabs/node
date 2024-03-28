@@ -17,8 +17,8 @@ export interface BundleContent {
     sender: any // TODO improve interface
     receiver: any // TODO improve interface
     timestamp: number
-    data: Buffer
-    extra: Buffer
+    data: any // NOTE Depends on the actual step
+    extra: string
 }
 
 export interface Bundle {
