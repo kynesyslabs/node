@@ -22,7 +22,11 @@ import sharedState from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 
 import GLS from "../blockchain/gls/gls"
-import validateTransaction from "../blockchain/routines/validateTransaction"
+import {
+    ValidityData,
+    validateTransaction,
+    executeVerifiedTransaction,
+} from "../blockchain/routines/validateTransaction"
 import Transaction from "../blockchain/transaction"
 import AddressInfo from "../blockchain/types/addressInfo"
 import deriveBlock from "../consensus/routines/deriveBlock"
@@ -37,6 +41,10 @@ import getBlockHeaderByHash from "./routines/nodecalls/getBlockHeaderByHash"
 import getBlockHeaderByNumber from "./routines/nodecalls/getBlockHeaderByNumber"
 import getBlockByNumber from "./routines/nodecalls/getBlockByNumber"
 import getBlockByHash from "./routines/nodecalls/getBlockByHash"
+import Hashing from "../crypto/hashing"
+import Cryptography from "../crypto/cryptography"
+import required from "src/utilities/required"
+import { Operation } from "../blockchain/gls/gls"
 
 let term = terminalkit.terminal
 
@@ -85,19 +93,18 @@ export default class ServerHandlers {
     // !SECTION Login On Chain
 
     // ANCHOR Comlinks
-    static async handleTransaction(content: any): Promise<any> {
-        term.yellow("[handleTransactions] Handling a native DEMOS tx...\n")
-        let require_reply = true // REVIEW Sure?
-        let extra: string, response: boolean
+    static async handleTransaction(content: any): Promise<ValidityData> {
+        term.yellow("[handleTransactions] Handling a DEMOS tx...\n")
         let fname = "[handleTransactions] "
         term.yellow(fname + "Handling transaction...")
         // Verify and execute the transaction
-        let validatedTx: any[]
+        let validatedTx: ValidityData
         try {
             /* NOTE This workflow goeas as:
-             * The tx is validated, an operation is created and pushed in the GLS
-             * An operation for the gas is also pushed in the GLS
-             * The tx is pushed in the mempool if applicable
+             * The transaction is validated
+             * A gas operation is created and is sent back alongside the validation data
+             * TODO Add signatures to validation data
+             * The validation data can be used by the client to effectively execute the tx
              */
             //console.log(fname + "Validating transaction...")
             validatedTx = await validateTransaction(
@@ -108,35 +115,69 @@ export default class ServerHandlers {
         } catch (e) {
             term.red.bold("[TX VALIDATION ERROR] 💀 : ")
             term.red(e)
-            validatedTx = [false, JSON.stringify(e)]
+            validatedTx = {
+                data: {
+                    valid: false,
+                    reference_block: null,
+                    message:
+                        "An error occurred while validating the transaction",
+                    gas_operation: null,
+                    transaction: null,
+                },
+                signature: null,
+                rpc_public_key: null,
+            }
+            // Signing and hashing the validation data
+            let hashedValidationData = Hashing.sha256(
+                JSON.stringify(validatedTx.data),
+            )
+            validatedTx.signature = Cryptography.sign(
+                hashedValidationData,
+                sharedState.getInstance().identity.ed25519.privateKey,
+            )
         }
 
+        term.bold.white(fname + "Transaction handled.")
+        return validatedTx
+    }
+
+    // TODO Better typing for content (must contain validity data, hashing and signature as shown below)
+    static async handleExecuteTransaction(
+        content: any,
+    ): Promise<[boolean, string, Operation[]?]> {
+        let fname = "[handleExecuteTransaction] "
+        let validatedTx: ValidityData = content.data.validityData
+        required(content.data.execute, "No execute flag provided")
+        // NOTE Content should contain validity data and signature to proceed
+        // FIXME Add signature + public key checks
         // Returning an appropriate response
-        if (!validatedTx[0]) {
+        if (!validatedTx.data.valid) {
             // An invalid transaction won't even be added to the mempool
             term.yellow.bold(fname + "Invalid transaction 💀 : ")
-            console.log(validatedTx[1])
-            extra = "InvalidTransaction 💀: " + validatedTx[1]
-            response = false
-        } else {
-            /* NOTE
+            console.log(validatedTx.data.message)
+            return [false, validatedTx.data.message, null]
+        }
+
+        /* NOTE
                     We just processed the cryptographic validity of the transaction.
-                    We have no idea of its state validity and thus won't modify the GLS, but
-                    it can go into the mempool to be further processed if its cryptographically valid.
+                    We will now try to execute it obtaining valid Operations.
                 */
-            term.green.bold(fname + "Valid transaction! ")
-            //console.log(validatedTx[1])
+        term.green.bold(fname + "Valid transaction! ")
+        //console.log(validatedTx[1])
+        let execution = executeVerifiedTransaction(validatedTx)
+        // NOTE We add the Transaction to the mempool as it looks valid
+        if (execution[0]) {
             console.log(fname + "Adding transaction to mempool...")
             // Adding the valid tx to the mempool
-            Mempool.addTransaction(validatedTx[1]) // Works by writing the registry
-            extra = validatedTx[1].hash
-            response = true
+            // REVIEW is this done here or by executing the transaction above?
+            Mempool.addTransaction(validatedTx.data.transaction) // Works by writing the registry
             //process.exit(0) /* TODO Eliminate this debug line */
         }
+
         // TODO Broadcast the tx to the other peers
         // Response is then sent back automatically as a reply (with our validation)
-        term.bold.white(fname + "Transaction handled.")
-        return { extra, require_reply, response }
+        // Returning the state of the transaction including operations
+        return execution
     }
 
     // INFO Handling XM Transaction

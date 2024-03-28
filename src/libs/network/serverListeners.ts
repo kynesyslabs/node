@@ -112,16 +112,25 @@ export default class ServerListeners {
             // NOTE And here we have the real deal
             console.log("[serverListeners] content.type: " + content.type)
             switch (content.type) {
-                // TODO We need to calculate the gas cost for operations that require it
-                case "proofOfConsensus":
-                    ;({ extra, require_reply, response } =
-                        await proofConsensusHandler(content))
+                /* FIXME We need to calculate the gas cost for operations that require it
+                 * To implement the above, all the non-system operations must be grouped into the
+                 * validateTx and executeTx types. The Transaction object must be compliant to support
+                 * XM, Web2 and possibly other operations.
+                 * This way, using the validity + execute cases, we can efficiently pre-check and compute
+                 * the gas cost for the operation and its validity.
+                */
+                // NOTE To execute a native tx, the client needs to first confirm it
+                case "validateTx":
+                    term.yellow.bold("[SERVER] Received validateTx\n")
+                    var validityData = await ServerHandlers.handleTransaction(content)
+                    response = validityData.data.valid
+                    extra = validityData.data.message
+                    require_reply = false
                     break
-
-                case "tx":
-                    term.yellow.bold("[SERVER] Received tx\n")
-                    ;({ extra, require_reply, response } =
-                        await ServerHandlers.handleTransaction(content))
+                // NOTE Taking validity data and executing the transaction
+                case "executeTx":
+                    term.yellow.bold("[SERVER] Received executeTx\n")
+                    response = await ServerHandlers.handleExecuteTransaction(content)
                     break
 
                 case "crosschain_operation":
@@ -136,7 +145,6 @@ export default class ServerListeners {
                             content.message,
                         ))
                     break
-
                 case "web2Request":
                     ;({ extra, require_reply, response } =
                         await ServerHandlers.handleWeb2Request(
@@ -146,6 +154,10 @@ export default class ServerListeners {
                         ))
                     break
 
+                case "proofOfConsensus":
+                    ;({ extra, require_reply, response } =
+                        await proofConsensusHandler(content))
+                    break
                 case "consensus":
                     console.log(
                         "[SERVER LISTENER HANDLER]: received consensus request",
