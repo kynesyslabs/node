@@ -160,9 +160,41 @@ export default class ServerHandlers {
             extra: null,
             require_reply: false,
         }
-        // NOTE Content should contain validity data and signature to proceed
-        // FIXME Add signature + public key checks
-        // Returning an appropriate response
+        // NOTE Content should contain validity data and our signature to proceed
+        // Integrity checks
+        let ourKey = sharedState.getInstance().identity.ed25519.publicKey
+        let dataKey = validatedData.rpc_public_key
+        let dataSignature = validatedData.signature
+        // We need to have issued the validity data
+        if (ourKey !== dataKey) {
+            term.red.bold(fname + "Invalid signature key (not us) 💀 : ")
+            result.response = false
+            result.extra = "Invalid signature key"
+            return result
+        }
+        // Also the signature must be valid
+        let hashedData = Hashing.sha256(JSON.stringify(validatedData.data))
+        let signatureValid = Cryptography.verify(
+            hashedData,
+            dataSignature,
+            dataKey,
+        )
+        if (!signatureValid) {
+            term.red.bold(fname + "Invalid signature 💀 : ")
+            result.response = false
+            result.extra = "Invalid signature"
+            return result
+        }
+        // Finally, the block number reference must be valid
+        let blockNumber = validatedData.data.reference_block
+        let lastBlockNumber = await Chain.getLastBlockNumber()
+        if (blockNumber != lastBlockNumber) {
+            term.red.bold(fname + "Invalid block reference 💀 : ")
+            result.response = false
+            result.extra = "Invalid block reference"
+            return result
+        }
+        // REVIEW Is this useful at this point?
         if (!validatedData.data.valid) {
             // An invalid transaction won't even be added to the mempool
             term.yellow.bold(fname + "Invalid transaction 💀 : ")
@@ -182,8 +214,8 @@ export default class ServerHandlers {
         // TODO Decide if the toMempool and Mempool.addTransaction should be here or in their dispatchers
         // TODO Preferably here, unified, with the dispatchers having standard replies
         switch (tx.content.type) {
-            case "crosschain_operation":
-            case "multichain_operation":
+            case "crosschainOperation":
+            case "multichainOperation":
                 console.log(
                     "[Included XM Chainscript]" +
                         JSON.stringify(tx.content.data[1]) +
