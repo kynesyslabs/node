@@ -23,38 +23,30 @@ import terminalkit from "terminal-kit"
 
 import GLS from "../blockchain/gls/gls"
 import {
-    ValidityData,
     validateTransaction,
     executeVerifiedNativeTransaction,
-} from "../blockchain/routines/validateTransaction"
-import Transaction from "../blockchain/transaction"
-import AddressInfo from "../blockchain/types/addressInfo"
-import deriveBlock from "../consensus/routines/deriveBlock"
-import eggs from "./routines/eggs"
-import getPreviousHashFromBlockNumber from "./routines/nodecalls/getPreviousHashFromBlockNumber"
-import { normalizeWebBuffers } from "./routines/normalizeWebBuffers"
-import Sessions from "./routines/sessionManager"
-import { BrowserRequest } from "./serverListeners"
-import getPeerlist from "./routines/nodecalls/getPeerlist"
-import getPreviousHashFromBlockHash from "./routines/nodecalls/getPreviousHashFromBlockHash"
-import getBlockHeaderByHash from "./routines/nodecalls/getBlockHeaderByHash"
-import getBlockHeaderByNumber from "./routines/nodecalls/getBlockHeaderByNumber"
-import getBlockByNumber from "./routines/nodecalls/getBlockByNumber"
-import getBlockByHash from "./routines/nodecalls/getBlockByHash"
-import Hashing from "../crypto/hashing"
-import Cryptography from "../crypto/cryptography"
-import required from "src/utilities/required"
-import { Operation } from "../blockchain/gls/gls"
+} from "src/libs/blockchain/routines/validateTransaction"
+import { ValidityData } from "src/libs/blockchain/types/ValidityData"
+import Transaction from "src/libs/blockchain/transaction"
+import AddressInfo from "src/libs/blockchain/types/addressInfo"
+import deriveBlock from "src/libs/consensus/routines/deriveBlock"
+import eggs from "src/libs/network/routines/eggs"
+import getPreviousHashFromBlockNumber from "src/libs/network/routines/nodecalls/getPreviousHashFromBlockNumber"
+import { normalizeWebBuffers } from "src/libs/network/routines/normalizeWebBuffers"
+import Sessions from "src/libs/network/routines/sessionManager"
+import { BrowserRequest } from "src/libs/network/serverListeners"
+import getPeerlist from "src/libs/network/routines/nodecalls/getPeerlist"
+import getPreviousHashFromBlockHash from "src/libs/network/routines/nodecalls/getPreviousHashFromBlockHash"
+import getBlockHeaderByHash from "src/libs/network/routines/nodecalls/getBlockHeaderByHash"
+import getBlockHeaderByNumber from "src/libs/network/routines/nodecalls/getBlockHeaderByNumber"
+import getBlockByNumber from "src/libs/network/routines/nodecalls/getBlockByNumber"
+import getBlockByHash from "src/libs/network/routines/nodecalls/getBlockByHash"
+import Hashing from "src/libs/crypto/hashing"
+import Cryptography from "src/libs/crypto/cryptography"
 import { IWeb2Payload } from "src/features/web2/types/Web2Types"
+import ExecutionResult from "src/libs/network/types/ExecutionResult"
 
 let term = terminalkit.terminal
-
-interface ExecutionResult {
-    response: any
-    extra: any
-    require_reply: boolean
-    operations?: Operation[]
-}
 
 export default class ServerHandlers {
     // ANCHOR BrowserRequest

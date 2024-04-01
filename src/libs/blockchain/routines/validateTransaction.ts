@@ -9,31 +9,20 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+import { pki } from "node-forge"
+import Chain from "src/libs/blockchain/chain"
+import GLS from "src/libs/blockchain/gls/gls"
+import { Operation } from "src/libs/blockchain/gls/types/Operations"
+import calculateCurrentGas from "src/libs/blockchain/routines/calculateCurrentGas"
+import executeNativeTransaction from "src/libs/blockchain/routines/executeNativeTransaction"
+import Transaction from "src/libs/blockchain/transaction"
+import { ValidityData } from "src/libs/blockchain/types/ValidityData"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import terminalkit from "terminal-kit"
 
-import GLS, { Operation } from "../gls/gls"
-import Transaction from "../transaction"
-import calculateCurrentGas from "./calculateCurrentGas"
-import executeNativeTransaction from "./executeNativeTransaction"
-import { pki } from "node-forge"
-
-import Chain from "../chain"
-
 const term = terminalkit.terminal
 
-export interface ValidityData {
-    data: {
-        valid: boolean
-        reference_block: number
-        message: string
-        gas_operation: Operation
-        transaction: Transaction
-    }
-    signature: pki.ed25519.BinaryBuffer
-    rpc_public_key: pki.ed25519.BinaryBuffer
-}
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?

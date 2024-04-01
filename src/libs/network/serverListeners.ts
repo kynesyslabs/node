@@ -9,25 +9,25 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+import Chain from "src/libs/blockchain/chain"
+import Transaction from "src/libs/blockchain/transaction"
+import { ValidityData } from "src/libs/blockchain/types/ValidityData"
 import { comlinkUtils } from "src/libs/communications"
+import ComLink from "src/libs/communications/comlink"
+import { BundleContent } from "src/libs/communications/types/transmit"
+import { proofConsensusHandler } from "src/libs/consensus/routines/proofOfConsensus"
 import { cryptography } from "src/libs/crypto"
-import { demostdlib } from "../utils"
+import manageMessages from "src/libs/network/routines/manageMessages"
+import { ISession } from "src/libs/network/routines/sessionManager"
+import * as Security from "src/libs/network/securityModule"
+import { ISecurityReport } from "src/libs/network/types/SecurityTypes"
 /* eslint-disable no-extra-semi */
 import ServerHandlers from "src/libs/network/serverHandlers"
 import { Peer } from "src/libs/peer"
+import { demostdlib } from "src/libs/utils"
 import sharedState from "src/utilities/sharedState"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
-
-import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
-import { ISession } from "./routines/sessionManager"
-import * as Security from "./securityModule"
-import ComLink from "../communications/comlink"
-import { BundleContent } from "../communications/types/transmit"
-import { ValidityData } from "../blockchain/routines/validateTransaction"
-import Transaction from "../blockchain/transaction"
-import Chain from "src/libs/blockchain/chain"
-import manageMessages from "./routines/manageMessages"
 
 let term = terminalkit.terminal
 
@@ -138,6 +138,7 @@ export default class ServerListeners {
         let extra: any, require_reply: any, response: any
 
         console.log("[serverListeners] content.type: " + content.type)
+        console.log("[serverListeners] content.extra: " + content.extra)
         // REVIEW We use the 'extra' field to see if it is a validateTx request (prior to execution)
         // or an executeTx request (to execute the transaction after gas cost is calculated).
         // Transactions are either gas consuming or not, so we need to check if the transaction
@@ -191,7 +192,7 @@ export default class ServerListeners {
         let secDisabled = false
         if (!secDisabled) {
             let ts = new Date().getTime()
-            let securityInterceptor: Security.ISecurityReport =
+            let securityInterceptor: ISecurityReport =
                 await Security.modules.communications.comlink.checkRateLimits(
                     ts,
                 )
