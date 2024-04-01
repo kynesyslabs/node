@@ -27,6 +27,7 @@ import { BundleContent } from "../communications/types/transmit"
 import { ValidityData } from "../blockchain/routines/validateTransaction"
 import Transaction from "../blockchain/transaction"
 import Chain from "src/libs/blockchain/chain"
+import manageMessages from "./routines/manageMessages"
 
 let term = terminalkit.terminal
 
@@ -89,162 +90,134 @@ export default class ServerListeners {
     */
     async comlinkListener() {
         this.peer.socket.on("comlink", async request => {
-            term.yellow("[SERVER] Received comlink\n")
-            const id_ed25519 = sharedState.getInstance().identity.ed25519
-            const receiver = this.peer.socket
-            let _comlink_request: ComLink
-            // TODO This can be put into securityModule for consistency
-            try {
-                // Parsing comlink
-                _comlink_request = await comlinkUtils.parseComlink(
-                    request,
-                    this.peer.socket,
-                )
-                if (!_comlink_request) {
-                    return // TODO Better error handling
-                }
-            } catch (error) {
-                term.red(error)
-                console.log("Returning")
-                return // TODO Better error handling
-            }
-            // We can now extract the comlink and the content to be used in the handlers
-            console.log("[serverListeners] ComLink request received and parsed correctly")
-            //console.log(_comlink_request)
-            let content: BundleContent = _comlink_request.chain.current.currentMessage.bundle.content
-            console.log("[serverListeners] Received comlink content")
-
-            let extra: any, require_reply: any, response: any
-
-            console.log("[serverListeners] content.type: " + content.type)
-            // REVIEW We use the 'extra' field to see if it is a validateTx request (prior to execution)
-            // or an executeTx request (to execute the transaction after gas cost is calculated).
-            // Transactions are either gas consuming or not, so we need to check if the transaction
-            // needs to be validated,executed or treated as a message.
-            switch (content.extra) {
-                // ANCHOR Gas consuming transactions
-                // Validating a tx means that we calculate gas and check if the transaction is valid
-                // Then we send the validation data to the client that can use it to execute the tx
-                case "validateTx":
-                    term.yellow.bold("[SERVER] Received validateTx\n")
-                    var validityData = await ServerHandlers.handleValidateTransaction(content.data as Transaction)
-                    response = validityData
-                    extra = ""
-                    require_reply = false
-                    break
-                // Executing a tx means that we execute the transaction and send back the result
-                // to the client. We first need to check if the tx is actually valid.
-                case "executeTx":
-                    term.yellow.bold("[SERVER] Received executeTx\n")
-                    // REVIEW This method needs to actually verify if the transaction is valid
-                    response = await ServerHandlers.handleExecuteTransaction(content.data as ValidityData, this.peer.socket)
-                    break
-                // ANCHOR Messages
-                // All the rest of the comlink types do not require extra validation or gas calculation
-                // They are treated as messages and are handled by their types themselves
-                // TODO Avoid double switch pls
-                default:
-                    switch (content.type) {
-
-                        case "proofOfConsensus":
-                            ;({ extra, require_reply, response } =
-                                await proofConsensusHandler(content))
-                            break
-                        case "consensus":
-                            console.log(
-                                "[SERVER LISTENER HANDLER]: received consensus request",
-                            )
-                            console.log(
-                                _comlink_request.chain.current.currentMessage.bundle
-                                    .content.sender,
-                            )
-                            ;({ extra, require_reply, response } =
-                                await ServerHandlers.handleConsensusRequest(
-                                    request,
-                                    content,
-                                    _comlink_request.chain.current.currentMessage
-                                        .bundle.content.sender,
-                                ))
-                            break
-
-                        case "messages":
-                            ;({ extra, require_reply, response } =
-                                await ServerHandlers.handleMessage(content))
-                            break
-
-                        case "storage":
-                            ;({ extra, require_reply, response } =
-                                await ServerHandlers.handleStorage())
-                            break
-
-                        case "mempool":
-                            ;({ extra, require_reply, response } =
-                                await ServerHandlers.handleMempool(content))
-                            break
-
-                        case "nodeCall":
-                            ;({ extra, require_reply, response } =
-                                await ServerHandlers.handleNodeAPI(
-                                    content,
-                                    receiver,
-                                    id_ed25519,
-                                ))
-                            break
-
-                        default:
-                            term.red(
-                                `[COMLINK INVALID] No known type: ${content.type}\n`,
-                            )
-                            break
-                    }
-                    break
-            }
-            //console.log("content.message: " + content.message)
-            //console.log("content.message.action: " + content.message.action)
-
-            // ANCHOR Reply logic
-            // NOTE unless specified, we now send back the updated comlink as a response
-            await demostdlib.reply(
-                _comlink_request,
-                response,
-                require_reply,
-                extra,
-            )
-
-            // TODO & REVIEW Call security module for send limiting messages
-            let secDisabled = false
-            if (!secDisabled) {
-                let ts = new Date().getTime()
-                let securityInterceptor: Security.ISecurityReport =
-                    await Security.modules.communications.comlink.checkRateLimits(
-                        ts,
-                    )
-                if (!securityInterceptor.state) {
-                    switch (securityInterceptor.code) {
-                        case "429":
-                            break
-
-                        default:
-                            term.red.bold(
-                                "[COMLINK] [SECURITY INTERCEPTOR] Unknown error: " +
-                                    securityInterceptor.code.toString(),
-                            )
-                            term.red.bold(
-                                "[COMLINK] [SECURITY INTERCEPTOR] Reported:",
-                            )
-                            console.log(securityInterceptor.message)
-                            break
-                    }
-                }
-            }
-
-
-            // Sending back the response
-            console.log("[SERVER] Sending back comlink")
-            //console.log(JSON.stringify(_comlink_request))
-            receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
+            await this.manageComLink(request)
         })
         // TODO See in communications.js and find the best way to validate, check and digest the request
+    }
+
+    // This method is used to check the comlink before processing it
+    async preflightComLinkChecks(request: any): Promise<any> {
+        term.yellow("[SERVER] Received comlink\n")
+        const id_ed25519 = sharedState.getInstance().identity.ed25519
+        const receiver = this.peer.socket
+        let _comlink_request: ComLink
+        // TODO This can be put into securityModule for consistency
+        try {
+            // Parsing comlink
+            _comlink_request = await comlinkUtils.parseComlink(
+                request,
+                this.peer.socket,
+            )
+            if (!_comlink_request) {
+                return // TODO Better error handling
+            }
+        } catch (error) {
+            term.red(error)
+            console.log("Returning")
+            return // TODO Better error handling
+        }
+        // We can now extract the comlink and the content to be used in the handlers
+        console.log(
+            "[serverListeners] ComLink request received and parsed correctly",
+        )
+
+        let content: BundleContent =
+            _comlink_request.chain.current.currentMessage.bundle.content
+        return { _comlink_request, content, id_ed25519, receiver }
+    }
+
+    // Here, we manage the comlink and its content
+    async manageComLink(request: any) {
+        // Security and sanity checks
+        let { _comlink_request, content, id_ed25519, receiver } =
+            await this.preflightComLinkChecks(request)
+        //console.log(_comlink_request)
+        // NOTE Now we have a valid ComLink and we can work with it
+        console.log("[serverListeners] Received comlink content")
+
+        let extra: any, require_reply: any, response: any
+
+        console.log("[serverListeners] content.type: " + content.type)
+        // REVIEW We use the 'extra' field to see if it is a validateTx request (prior to execution)
+        // or an executeTx request (to execute the transaction after gas cost is calculated).
+        // Transactions are either gas consuming or not, so we need to check if the transaction
+        // needs to be validated,executed or treated as a message.
+        switch (content.extra) {
+            // ANCHOR Gas consuming transactions
+            // Validating a tx means that we calculate gas and check if the transaction is valid
+            // Then we send the validation data to the client that can use it to execute the tx
+            case "validateTx":
+                term.yellow.bold("[SERVER] Received validateTx\n")
+                var validityData =
+                    await ServerHandlers.handleValidateTransaction(
+                        content.data as Transaction,
+                    )
+                response = validityData
+                extra = ""
+                require_reply = false
+                break
+            // Executing a tx means that we execute the transaction and send back the result
+            // to the client. We first need to check if the tx is actually valid.
+            case "executeTx":
+                term.yellow.bold("[SERVER] Received executeTx\n")
+                // REVIEW This method needs to actually verify if the transaction is valid
+                response = await ServerHandlers.handleExecuteTransaction(
+                    content.data as ValidityData,
+                    this.peer.socket,
+                )
+                break
+            // ANCHOR Messages
+            // All the rest of the comlink types do not require extra validation or gas calculation
+            // They are treated as messages and are handled by their types themselves
+            // For readability, we call an external function to manage the messages
+            default:
+                ;({ extra, require_reply, response } = await manageMessages(
+                    content,
+                    _comlink_request,
+                    request,
+                    id_ed25519,
+                    receiver,
+                ))
+                break
+        }
+        //console.log("content.message: " + content.message)
+        //console.log("content.message.action: " + content.message.action)
+
+        // ANCHOR Reply logic
+        // NOTE unless specified, we now send back the updated comlink as a response
+        await demostdlib.reply(_comlink_request, response, require_reply, extra)
+
+        // TODO & REVIEW Call security module for send limiting messages
+        let secDisabled = false
+        if (!secDisabled) {
+            let ts = new Date().getTime()
+            let securityInterceptor: Security.ISecurityReport =
+                await Security.modules.communications.comlink.checkRateLimits(
+                    ts,
+                )
+            if (!securityInterceptor.state) {
+                switch (securityInterceptor.code) {
+                    case "429":
+                        break
+
+                    default:
+                        term.red.bold(
+                            "[COMLINK] [SECURITY INTERCEPTOR] Unknown error: " +
+                                securityInterceptor.code.toString(),
+                        )
+                        term.red.bold(
+                            "[COMLINK] [SECURITY INTERCEPTOR] Reported:",
+                        )
+                        console.log(securityInterceptor.message)
+                        break
+                }
+            }
+        }
+
+        // Sending back the response
+        console.log("[SERVER] Sending back comlink")
+        //console.log(JSON.stringify(_comlink_request))
+        receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
     }
 
     // INFO Register or update a peer identity and connection string
