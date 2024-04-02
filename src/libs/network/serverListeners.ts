@@ -1,21 +1,8 @@
-/* LICENSE
-
-© 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
-
-Full license text: https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode
-Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
-
-KyneSys Labs: https://www.kynesys.xyz/
-
-*/
-
-import Chain from "src/libs/blockchain/chain"
 import Transaction from "src/libs/blockchain/transaction"
 import { ValidityData } from "src/libs/blockchain/types/ValidityData"
 import { comlinkUtils } from "src/libs/communications"
 import ComLink from "src/libs/communications/comlink"
 import { BundleContent } from "src/libs/communications/types/transmit"
-import { proofConsensusHandler } from "src/libs/consensus/routines/proofOfConsensus"
 import { cryptography } from "src/libs/crypto"
 import manageMessages from "src/libs/network/routines/manageMessages"
 import { ISession } from "src/libs/network/routines/sessionManager"

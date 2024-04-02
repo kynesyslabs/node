@@ -33,3 +33,4 @@ yarn.lock
 publickey
 publickey
 documentation/schemas/.$*
+appmap.yml
