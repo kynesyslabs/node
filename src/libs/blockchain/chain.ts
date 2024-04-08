@@ -20,7 +20,7 @@ import { MoreThan } from "typeorm"
 
 import Hashing from "../crypto/hashing"
 import Block from "./block"
-import { Operation } from "./gls/gls"
+import { Operation } from "./gls/types/Operations"
 import manageNative from "./routines/gls_routines/manageNative"
 import Transaction from "./transaction"
 import AddressInfo from "./types/addressInfo"

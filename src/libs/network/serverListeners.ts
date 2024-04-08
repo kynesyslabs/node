@@ -126,16 +126,16 @@ export default class ServerListeners {
 
         console.log("[serverListeners] content.type: " + content.type)
         console.log("[serverListeners] content.extra: " + content.extra)
-        // REVIEW We use the 'extra' field to see if it is a validateTx request (prior to execution)
-        // or an executeTx request (to execute the transaction after gas cost is calculated).
+        // REVIEW We use the 'extra' field to see if it is a confirmTx request (prior to execution)
+        // or an broadcastTx request (to execute the transaction after gas cost is calculated).
         // Transactions are either gas consuming or not, so we need to check if the transaction
         // needs to be validated,executed or treated as a message.
         switch (content.extra) {
             // ANCHOR Gas consuming transactions
             // Validating a tx means that we calculate gas and check if the transaction is valid
             // Then we send the validation data to the client that can use it to execute the tx
-            case "validateTx":
-                term.yellow.bold("[SERVER] Received validateTx\n")
+            case "confirmTx":
+                term.yellow.bold("[SERVER] Received confirmTx\n")
                 var validityData =
                     await ServerHandlers.handleValidateTransaction(
                         content.data as Transaction,
@@ -146,8 +146,8 @@ export default class ServerListeners {
                 break
             // Executing a tx means that we execute the transaction and send back the result
             // to the client. We first need to check if the tx is actually valid.
-            case "executeTx":
-                term.yellow.bold("[SERVER] Received executeTx\n")
+            case "broadcastTx":
+                term.yellow.bold("[SERVER] Received broadcastTx\n")
                 // REVIEW This method needs to actually verify if the transaction is valid
                 response = await ServerHandlers.handleExecuteTransaction(
                     content.data as ValidityData,

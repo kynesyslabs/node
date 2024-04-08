@@ -26,7 +26,7 @@ const term = terminalkit.terminal
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
-export async function validateTransaction(
+export async function confirmTransaction(
     tx: Transaction, // Must contain a tx property being a Transaction object
 ): Promise<ValidityData> {
     term.yellow("[Native Tx Validation] Validating transaction...\n")
@@ -148,7 +148,7 @@ export async function validateTransaction(
 }
 
 // TODO a verified transaction should be signed by the same rpc that verified it and should be only valid for the current consensus round
-export async function executeVerifiedNativeTransaction(
+export async function broadcastVerifiedNativeTransaction(
     validityData: ValidityData,
 ): Promise<[boolean, string, Operation[]?]> {
     // REVIEW Execute or Revert the transaction
@@ -164,6 +164,7 @@ export async function executeVerifiedNativeTransaction(
 
     // NOTE Now we can save the gas operation as the tx is set to be executed
     // and the gas will be deducted anyway
+    console.log("[TX RECEIVED] Gas Operation added to the GLS\n")
     GLS.getInstance().operations.push(validityData.data.gas_operation)
 
     // Finally, we add all the derived operations to the GLS

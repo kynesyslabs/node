@@ -23,8 +23,8 @@ import terminalkit from "terminal-kit"
 
 import GLS from "../blockchain/gls/gls"
 import {
-    validateTransaction,
-    executeVerifiedNativeTransaction,
+    confirmTransaction,
+    broadcastVerifiedNativeTransaction,
 } from "src/libs/blockchain/routines/validateTransaction"
 import { ValidityData } from "src/libs/blockchain/types/ValidityData"
 import Transaction from "src/libs/blockchain/transaction"
@@ -109,7 +109,7 @@ export default class ServerHandlers {
              * The validation data can be used by the client to effectively execute the tx
              */
             //console.log(fname + "Validating transaction...")
-            validatedTx = await validateTransaction(tx)
+            validatedTx = await confirmTransaction(tx)
             //console.log(fname + "Fetching result...")
         } catch (e) {
             term.red.bold("[TX VALIDATION ERROR] 💀 : ")
@@ -228,7 +228,7 @@ export default class ServerHandlers {
                 result.response = web2_result
                 break
             case "native":
-                var native_result = executeVerifiedNativeTransaction(validatedData)
+                var native_result = broadcastVerifiedNativeTransaction(validatedData)
                 // NOTE We add the Transaction to the mempool as it looks valid
                 if (native_result[0]) {
                     console.log(fname + "Adding transaction to mempool...")
