@@ -146,8 +146,7 @@ export default class ServerListeners {
                 extra = ""
                 require_reply = false
 
-                console.log(response)
-                //process.exit(0)
+                // console.log(response)
 
                 break
             // Executing a tx means that we execute the transaction and send back the result

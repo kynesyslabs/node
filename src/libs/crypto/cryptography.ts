@@ -180,7 +180,11 @@ export default class Cryptography {
             publicKey = Buffer.from(publicKey) // REVIEW Does not work in bun
         }
 
-        console.log("[*] Verifying the signature...")
+        console.log("[*] Verifying the signature of: " + signed + "\n")
+        console.log("[*] Using the signature: ")
+        console.log(signature)
+        console.log("[*] And the public key: ")
+        console.log(publicKey)
         return forge.pki.ed25519.verify({
             message: signed,
             encoding: "utf8",

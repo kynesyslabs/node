@@ -18,7 +18,7 @@ NOTE: The fee is locked by the node and released when the block itself is confir
 
 */
 
-import { pki } from "node-forge"
+import forge from "node-forge"
 
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
@@ -36,7 +36,7 @@ interface TransactionResponse {
 
 interface ISignature {
     type: string
-    data: pki.ed25519.BinaryBuffer
+    data: forge.pki.ed25519.BinaryBuffer
 }
 
 export default class Transaction {
@@ -69,7 +69,7 @@ export default class Transaction {
     // INFO Given a transaction, sign it with the private key of the sender
     public static sign(
         tx: Transaction,
-        privateKey: pki.ed25519.BinaryBuffer,
+        privateKey: forge.pki.ed25519.BinaryBuffer,
     ): any[] {
         // Check sanity of the structure of the tx object
         if (!tx.content) {
@@ -119,8 +119,8 @@ export default class Transaction {
     // INFO Compile a verification for a transaction and spit out the resulting tx
     static confirmTx(
         tx: Transaction,
-        publicKey: pki.ed25519.BinaryBuffer,
-        privateKey: pki.ed25519.BinaryBuffer,
+        publicKey: forge.pki.ed25519.BinaryBuffer,
+        privateKey: forge.pki.ed25519.BinaryBuffer,
     ) {
         console.log(publicKey)
         console.log(privateKey)
@@ -143,9 +143,10 @@ export default class Transaction {
 
     // INFO Checks the integrity of a transaction
     public static sanityCheck(tx: Transaction) {
-        console.log("[sanityCheck] Checking the sanity of the tx")
+        console.log("[sanityCheck] Checking the sanity of the tx with hash: " + tx.hash)
+        //let tx_content_hash = Hashing.sha256(JSON.stringify(tx.content))
         let _result = Cryptography.verify(
-            JSON.stringify(tx.content),
+            tx.hash,
             tx.signature.data,
             tx.content.from,
         )
@@ -156,8 +157,11 @@ export default class Transaction {
     // INFO Checking if the tx is coherent to the current state of the blockchain (and the txs pending before it)
     public static isCoherent(tx: Transaction) {
         let _result = true
+        console.log("[isCoherent] Checking the coherence of the tx with hash: " + tx.hash)
         let _derived_hash = Hashing.sha256(JSON.stringify(tx.content))
-        _result = _derived_hash !== tx.hash
+        console.log("[isCoherent] Derived hash: " + _derived_hash)
+        _result = (_derived_hash == tx.hash)
+        console.log("[isCoherent] Coherence: " + _result)
         return _result
     }
 

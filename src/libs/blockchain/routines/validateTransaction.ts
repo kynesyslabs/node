@@ -151,6 +151,7 @@ export async function confirmTransaction(
         validityData.signature = Cryptography.sign(hash, privateKey)
         return validityData
     }
+    console.log("[Native Tx Validation] Transaction validity verified, compiling ValidityData\n")
 
     // Now that we verified the transaction, we can return its validity data
     // TODO Add the relevant info
@@ -162,6 +163,8 @@ export async function confirmTransaction(
     let hash = Hashing.sha256(JSON.stringify(validityData.data))
     // Sign the hash
     validityData.signature = Cryptography.sign(hash, privateKey)
+
+    console.log("[Native Tx Validation] Transaction validity data compiled\n")
     return validityData
 }
 
