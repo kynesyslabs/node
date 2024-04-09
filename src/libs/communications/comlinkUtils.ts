@@ -116,9 +116,9 @@ export default class ComLinkUtils {
         }
         console.log("[COMLINK PARSING] Content parsed")
         //console.log(content)
-        if (!content.message) {
+        if (!content.message && !content.data) {
             console.log(
-                "[COMLINK PARSING] No message specified. Erroring back.",
+                "[COMLINK PARSING] No message or data specified. Erroring back.",
                 //console.log(content),
             )
             peerSocket.emit("error", {

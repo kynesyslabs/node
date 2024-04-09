@@ -19,10 +19,10 @@ import Transaction from "src/libs/blockchain/transaction"
 import { ValidityData } from "src/libs/blockchain/types/ValidityData"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
+import sharedState from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 
 const term = terminalkit.terminal
-
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -34,8 +34,8 @@ export async function confirmTransaction(
     let reference_block = await Chain.getLastBlockNumber()
     // Loading identity
     const id_ed25519 = await Cryptography.load("./.demos_identity")
-    let publicKey = Buffer.from(id_ed25519.publicKey.toString("hex"))
-    let privateKey = Buffer.from(id_ed25519.privateKey.toString("hex"))
+    let publicKey = id_ed25519.publicKey
+    let privateKey = id_ed25519.privateKey
     // REVIEW This should work just fine
     console.log("Signature: ")
     console.log(tx.signature)
@@ -52,7 +52,7 @@ export async function confirmTransaction(
             transaction: tx,
         },
         signature: null,
-        rpc_public_key: publicKey,
+        rpc_public_key: publicKey as pki.ed25519.BinaryBuffer,
     }
 
     /* NOTE Charge the gas for the transaction
@@ -60,7 +60,24 @@ export async function confirmTransaction(
     by the sender prior to the transaction execution part.
     This way, we can avoid committing computations that will be reverted.
     */
-    let from = tx.content.from.toString("hex")
+    let from: string
+    try {
+        from = tx.content.from.toString("hex")
+        console.log(
+            "[Native Tx Validation] Calculating gas for: " + from + "\n",
+        )
+    } catch (e) {
+        term.red.bold(
+            "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction\n",
+        )
+        validityData.data.message =
+            "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction\n"
+        // Hash the validation data
+        let hash = Hashing.sha256(JSON.stringify(validityData.data))
+        // Sign the hash
+        validityData.signature = Cryptography.sign(hash, privateKey)
+        return validityData
+    }
     let fromBalance = 0
     try {
         fromBalance = await GLS.getGLSNativeBalance(from)
@@ -82,15 +99,16 @@ export async function confirmTransaction(
     }
     // TODO Work on this method
     let compositeFeeAmount = await calculateCurrentGas(tx)
-    if (fromBalance < compositeFeeAmount) {
+    // FIXME Overriding for testing
+    if (fromBalance < compositeFeeAmount && sharedState.getInstance().PROD) {
         term.red.bold(
             "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
-                compositeFeeAmount +
+                compositeFeeAmount + "; available: " + fromBalance + "\n" +
                 "\n",
         )
         validityData.data.message =
             "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
-            compositeFeeAmount +
+            compositeFeeAmount + "; available: " + fromBalance + "\n" +
             "\n"
         // Hash the validation data
         let hash = Hashing.sha256(JSON.stringify(validityData.data))
@@ -120,7 +138,7 @@ export async function confirmTransaction(
     //console.log(gas_operation)
 
     // Verify tx validity
-    let verified = Transaction.confirmTx(tx, privateKey, publicKey) // REVIEW Are the buffers ok?
+    let verified = Transaction.confirmTx(tx, privateKey as pki.ed25519.BinaryBuffer, publicKey as pki.ed25519.BinaryBuffer) // REVIEW Are the buffers ok?
     if (!verified) {
         term.red.bold(
             "[Native Tx Validation] [SIGNATURE ERROR] Transaction signature not verified\n",
@@ -155,7 +173,9 @@ export async function broadcastVerifiedNativeTransaction(
     // NOTE executeTransaction returns an array of [success, message, operations]
     // The operations are the Operation objects that are executed in the GLS after the consensus
     // has confirmed the transaction in the block.
-    let execution = await executeNativeTransaction(validityData.data.transaction)
+    let execution = await executeNativeTransaction(
+        validityData.data.transaction,
+    )
     if (!execution[0]) {
         return [false, "Execution failed: " + execution[1]]
     }

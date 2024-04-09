@@ -122,6 +122,9 @@ export default class Transaction {
         publicKey: pki.ed25519.BinaryBuffer,
         privateKey: pki.ed25519.BinaryBuffer,
     ) {
+        console.log(publicKey)
+        console.log(privateKey)
+        console.log(tx.signature)
         let confirmed =
             this.sanityCheck(tx) && this.isCoherent(tx) && this.structured(tx)
         if (confirmed) {
@@ -140,11 +143,13 @@ export default class Transaction {
 
     // INFO Checks the integrity of a transaction
     public static sanityCheck(tx: Transaction) {
+        console.log("[sanityCheck] Checking the sanity of the tx")
         let _result = Cryptography.verify(
             JSON.stringify(tx.content),
-            tx.signature,
+            tx.signature.data,
             tx.content.from,
         )
+        console.log("[sanityCheck] Sanity: " + _result)
         return _result
     }
 

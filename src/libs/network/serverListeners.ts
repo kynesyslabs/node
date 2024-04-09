@@ -85,6 +85,7 @@ export default class ServerListeners {
     // This method is used to check the comlink before processing it
     async preflightComLinkChecks(request: any): Promise<any> {
         term.yellow("[SERVER] Received comlink\n")
+        console.log(request)
         const id_ed25519 = sharedState.getInstance().identity.ed25519
         const receiver = this.peer.socket
         let _comlink_request: ComLink
@@ -126,6 +127,7 @@ export default class ServerListeners {
 
         console.log("[serverListeners] content.type: " + content.type)
         console.log("[serverListeners] content.extra: " + content.extra)
+
         // REVIEW We use the 'extra' field to see if it is a confirmTx request (prior to execution)
         // or an broadcastTx request (to execute the transaction after gas cost is calculated).
         // Transactions are either gas consuming or not, so we need to check if the transaction
@@ -143,6 +145,10 @@ export default class ServerListeners {
                 response = validityData
                 extra = ""
                 require_reply = false
+
+                console.log(response)
+                //process.exit(0)
+
                 break
             // Executing a tx means that we execute the transaction and send back the result
             // to the client. We first need to check if the tx is actually valid.
