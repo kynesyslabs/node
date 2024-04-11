@@ -176,6 +176,7 @@ export async function broadcastVerifiedNativeTransaction(
     // NOTE executeTransaction returns an array of [success, message, operations]
     // The operations are the Operation objects that are executed in the GLS after the consensus
     // has confirmed the transaction in the block.
+
     let execution = await executeNativeTransaction(
         validityData.data.transaction,
     )

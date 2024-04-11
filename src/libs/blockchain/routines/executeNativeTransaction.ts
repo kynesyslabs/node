@@ -14,7 +14,8 @@ KyneSys Labs: https://www.kynesys.xyz/
     consensus has confirmed the transaction in the block.
 */
 
-import GLS, { Operation } from "../gls/gls"
+import GLS from "../gls/gls"
+import { Operation } from "./executeOperations"
 import Transaction from "../transaction"
 
 /* NOTE 

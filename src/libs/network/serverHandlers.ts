@@ -146,6 +146,7 @@ export default class ServerHandlers {
         validatedData: ValidityData,
         senderSocket: any,
     ): Promise<ExecutionResult> {
+
         let fname = "[handleExecuteTransaction] "
         let result: ExecutionResult = {
             response: null,
@@ -155,14 +156,18 @@ export default class ServerHandlers {
         // NOTE Content should contain validity data and our signature to proceed
         // Integrity checks
         let ourKey = sharedState.getInstance().identity.ed25519.publicKey
+        let hexOurKey = ourKey.toString("hex")
         let dataKey = validatedData.rpc_public_key
+        let hexDataKey = Buffer.from(dataKey as Buffer).toString("hex")
         let dataSignature = validatedData.signature
         // We need to have issued the validity data
-        if (ourKey !== dataKey) {
+        if (hexDataKey !== hexOurKey) {
             term.red.bold(fname + "Invalid signature key (not us) 💀 : ")
+
             result.response = false
             result.extra = "Invalid signature key"
             return result
+
         }
         // Also the signature must be valid
         let hashedData = Hashing.sha256(JSON.stringify(validatedData.data))
@@ -200,7 +205,7 @@ export default class ServerHandlers {
                     We just processed the cryptographic validity of the transaction.
                     We will now try to execute it obtaining valid Operations.
                 */
-        term.green.bold(fname + "Valid transaction! ")
+        term.green.bold(fname + "Valid transaction! \n")
         // REVIEW Switch case for different types of transactions
         let tx = validatedData.data.transaction
         // TODO Decide if the toMempool and Mempool.addTransaction should be here or in their dispatchers
@@ -209,10 +214,8 @@ export default class ServerHandlers {
             case "crosschainOperation":
             case "multichainOperation":
                 console.log(
-                    "[Included XM Chainscript]" +
-                        JSON.stringify(tx.content.data[1]) +
-                        "\n\n",
-                )
+                    "[Included XM Chainscript]")
+                console.log(tx.content.data[1])
                 // TODO Better types on answers
                 var xm_result = await ServerHandlers.handleXMChainOperation(
                     tx.content.data[1],

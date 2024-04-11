@@ -39,7 +39,8 @@ export interface old_XMScript {
 }
 
 export interface XMScript {
-    multichain_operation: { [key: string]: IOperation }
+    operations: { [key: string]: IOperation },
+    operations_order: string[]
 }
 
 class XMParser {
@@ -79,15 +80,15 @@ class XMParser {
         // TODO Enforce order
         for (
             let id = 0;
-            id < Object.keys(fullscript.multichain_operation.operations).length;
+            id < Object.keys(fullscript.operations).length;
             id++
         ) {
             try {
-                name = Object.keys(fullscript.multichain_operation.operations)[
+                name = Object.keys(fullscript.operations)[
                     id
                 ]
                 console.log("[" + name + "] ")
-                operation = fullscript.multichain_operation.operations[name]
+                operation = fullscript.operations[name]
                 console.log("[XMParser]: full script operation")
                 console.log(fullscript)
                 console.log("[XMParser]: partial operation")

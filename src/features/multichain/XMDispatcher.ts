@@ -14,25 +14,26 @@ export default class multichainDispatcher {
         console.log("\n\n")
         console.log("[XM Script full digest]")
         console.log(data)
+        console.log("Stringed to:")
         console.log(JSON.stringify(data))
         console.log("\n\n")
         console.log("[XMChain Digestion] Processing multichain operation")
-        console.log(data.multichain_operation)
+        console.log(data.operations)
         console.log("\n[XMChain Digestion] Having:")
-        console.log(Object.keys(data.multichain_operation.operations).length)
+        console.log(Object.keys(data.operations).length)
         console.log("operations")
 
         console.log("\n===== ANALYSIS ===== \n")
         console.log("\n===== FUNCTIONS ===== \n")
         for (
             let i = 0;
-            i < Object.keys(data.multichain_operation.operations).length;
+            i < Object.keys(data.operations).length;
             i++
         ) {
             // Named function
             console.log(
                 "[XMChain Digestion] Found: " +
-                    Object.keys(data.multichain_operation.operations)[i],
+                    Object.keys(data.operations)[i],
             )
         }
         console.log("\n===== END OF ANALYSIS ===== \n")
