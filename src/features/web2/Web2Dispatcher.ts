@@ -21,7 +21,7 @@ const term = terminalkit.terminal
 // send back to the client or to the origin rpc the
 // transaction that will b  e granted as web2 result
 export default async function handleWeb2(
-    payload: IWeb2Payload,
+    payload: IWeb2Request,
     senderSocket: any,
 ): Promise<[boolean, string]> {
     // Creating the workable interface
@@ -34,7 +34,7 @@ export default async function handleWeb2(
     //console.log(payload)
     //process.exit(0)
 
-    let request: IWeb2Request = payload.message
+    let request: IWeb2Request = payload
     console.log(
         "[REQUEST FOR WEB2] [+] Found and loaded payload.message as expected...",
     )

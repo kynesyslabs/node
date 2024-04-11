@@ -43,7 +43,7 @@ import getBlockByNumber from "src/libs/network/routines/nodecalls/getBlockByNumb
 import getBlockByHash from "src/libs/network/routines/nodecalls/getBlockByHash"
 import Hashing from "src/libs/crypto/hashing"
 import Cryptography from "src/libs/crypto/cryptography"
-import { IWeb2Payload } from "src/features/web2/types/Web2Types"
+import { IWeb2Payload, IWeb2Request } from "src/features/web2/types/Web2Types"
 import ExecutionResult from "src/libs/network/types/ExecutionResult"
 
 let term = terminalkit.terminal
@@ -225,7 +225,7 @@ export default class ServerHandlers {
             case "web2Request":
                 // TODO Better types on answers
                 var web2_result = await ServerHandlers.handleWeb2Request(
-                    JSON.parse(tx.content.data[1]) as IWeb2Payload,
+                    JSON.parse(tx.content.data[1]) as IWeb2Request,
                     senderSocket,
                 )
                 result.response = web2_result
@@ -288,7 +288,7 @@ export default class ServerHandlers {
     // NOTE Theoretically, content should be IWeb2Request compliant
     // LINK "../../features/web2/types/Web2Request";
     static async handleWeb2Request(
-        content: IWeb2Payload,
+        content: IWeb2Request,
         senderSocket: any,
     ): Promise<any> {
         /* NOTE This workflow goeas as:

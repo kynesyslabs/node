@@ -33,7 +33,7 @@ export default function Web2API(
     command: string = null,
     named: string = null,
     sendSock: any = null,
-    req: IWeb2Payload = null,
+    req: IWeb2Request = null,
 ): Web2APIClass {
     if (command === "remove" && typeof sendSock === "string") {
         const instanceNameToRemove = sendSock
@@ -58,7 +58,7 @@ export class Web2APIClass {
     static getInstance(
         named: string = null,
         sendSock: any = null,
-        req: IWeb2Payload = null,
+        req: IWeb2Request = null,
     ): Web2APIClass {
         if (!named) {
             named = String(Web2APIClass.progressive)
@@ -84,7 +84,6 @@ export class Web2APIClass {
     }
 
     // NOTE Storing the request here
-    payload: IWeb2Payload = null
     request: IWeb2Request = null
     // NOTE Storing the sender's socket here
     senderSocket: null
@@ -96,18 +95,18 @@ export class Web2APIClass {
     // SECTION Control methods
 
     // INFO Creating a named instance and bootstrapping it
-    constructor(name: string, sendSock: any, payload: IWeb2Payload = null) {
+    constructor(name: string, sendSock: any, payload: IWeb2Request = null) {
         this.name = name
         this.senderSocket = sendSock
-        if (!payload.message) {
-            term.yellow.bold("[Web2API] No request attached. Is this right?")
+        console.log(payload)
+        if (!payload.raw) {
+            term.yellow.bold("[Web2API] No raw request attached. Is this right?")
             //console.log(payload)
             // TODO Specify this as a parameter that users can set
             this.request.raw.minAttestations = 10
             this.request.raw.stage.hop_number = 0
         } else {
-            this.payload = payload
-            this.request = payload.message
+            this.request = payload
         }
         // REVIEW Should be ok anyway
         // NOTE Not awaiting cause we need to let devs decide when to await with awaitQuorum
