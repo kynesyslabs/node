@@ -243,7 +243,7 @@ export default class ServerHandlers {
                 // REVIEW Check if this is ok with types
                 result.response = native_result
         }
-        // TODO Broadcast the tx to the other peers
+        // TODO Broadcast the tx to the other peers (or maybe not, consensus should take care of it)
         // Response is then sent back automatically as a reply (with our validation)
         // Returning the state of the transaction including operations
         return result
@@ -302,9 +302,9 @@ export default class ServerHandlers {
         console.log("[SERVER] Received web2Request")
         //console.log(JSON.stringify(request))
 
-        let extra: any,
+        let extra: string,
             require_reply = false
-        let response: unknown
+        let response: IWeb2Request
         // We get our connection string
         // const currentPeerString = Identity.getInstance().getConnectionString()
         // NOTE Switched to the new class
@@ -317,10 +317,10 @@ export default class ServerHandlers {
 
         // Managing the results
         if (fullResponse[0]) {
-            response = fullResponse[1]
+            response = fullResponse[1] as IWeb2Request
         } else {
-            response = "error"
-            extra = fullResponse[1]
+            response = null
+            extra = fullResponse[1] as string
         }
         return { extra, require_reply, response }
     }

@@ -144,7 +144,7 @@ export default class ServerListeners {
                     )
                 response = validityData
                 extra = ""
-                require_reply = false
+                require_reply = false // REVIEW Should we require a reply here?
 
                 // console.log(response)
 
@@ -154,10 +154,12 @@ export default class ServerListeners {
             case "broadcastTx":
                 term.yellow.bold("[SERVER] Received broadcastTx\n")
                 // REVIEW This method needs to actually verify if the transaction is valid
-                response = await ServerHandlers.handleExecuteTransaction(
+                var result = await ServerHandlers.handleExecuteTransaction(
                     content.data as ValidityData,
                     this.peer.socket,
                 )
+                // Destructuring the result to get the extra, require_reply and response
+                ;({ extra, require_reply, response } = result)
                 break
             // ANCHOR Messages
             // All the rest of the comlink types do not require extra validation or gas calculation

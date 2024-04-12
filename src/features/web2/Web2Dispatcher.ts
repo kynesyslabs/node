@@ -23,7 +23,7 @@ const term = terminalkit.terminal
 export default async function handleWeb2(
     payload: IWeb2Request,
     senderSocket: any,
-): Promise<[boolean, string]> {
+): Promise<[boolean, string | IWeb2Request]> {
     // Creating the workable interface
     // TODO Remember that web2 could need to be signed and could need a fee
     // NOTE From now on, Web2API will reply to instanceName with the same instance
@@ -135,6 +135,7 @@ export default async function handleWeb2(
     console.log(
         "[web2Dispatcher] Attestations validated. Deriving a transaction + operation...",
     )
+    // REVIEW Should we return this too?
     let derivedResult = await toMempool(instanceName)
     console.log("[web2Dispatcher] Transaction + operation derived.")
 
@@ -147,7 +148,7 @@ export default async function handleWeb2(
     // console.log(JSON.stringify(web2interface.request))
 
     // TODO Maybe we should also return derivedResult somehow
-    return [true, JSON.stringify(web2interface.request)] // , derivedResult
+    return [true, web2interface.request] // , derivedResult
 }
 
 // INFO Derive a valid DEMOS tx and GLS operation from a compatible request
