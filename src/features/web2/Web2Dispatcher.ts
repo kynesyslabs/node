@@ -1,17 +1,16 @@
 // INFO Entry file for handling web2 requests
 import Web2API, { Web2APIClass } from "src/features/web2/routines/Web2Parser"
-import { IWeb2Payload, IWeb2Request } from "@kynesyslabs/demosdk/types"
-import { Operation } from "@kynesyslabs/demosdk/types"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import {
-    DerivableNative,
-    deriveMempoolOperation,
+    DerivableNative, deriveMempoolOperation,
 } from "src/libs/utils/demostdlib/deriveMempoolOperation"
 import required from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
+
+import { IWeb2Payload, IWeb2Request, Operation } from "@kynesyslabs/demosdk/types"
 
 const term = terminalkit.terminal
 

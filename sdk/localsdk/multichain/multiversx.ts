@@ -11,12 +11,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 import {
-    Account,
-    Address,
-    GasEstimator,
-    IPlainTransactionObject,
-    TokenTransfer,
-    Transaction,
+    Account, Address, GasEstimator, IPlainTransactionObject, TokenTransfer, Transaction,
     TransferTransactionsFactory,
 } from "@multiversx/sdk-core"
 import { ApiNetworkProvider } from "@multiversx/sdk-network-providers"

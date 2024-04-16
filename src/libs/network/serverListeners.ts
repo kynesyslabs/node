@@ -1,13 +1,10 @@
 import Transaction from "src/libs/blockchain/transaction"
-import { ValidityData } from "@kynesyslabs/demosdk/types"
 import { comlinkUtils } from "src/libs/communications"
 import ComLink from "src/libs/communications/comlink"
-import { BundleContent } from "@kynesyslabs/demosdk/types"
 import { cryptography } from "src/libs/crypto"
 import manageMessages from "src/libs/network/routines/manageMessages"
 import { ISession } from "src/libs/network/routines/sessionManager"
 import * as Security from "src/libs/network/securityModule"
-import { ISecurityReport } from "@kynesyslabs/demosdk/types"
 /* eslint-disable no-extra-semi */
 import ServerHandlers from "src/libs/network/serverHandlers"
 import { Peer } from "src/libs/peer"
@@ -15,6 +12,8 @@ import { demostdlib } from "src/libs/utils"
 import sharedState from "src/utilities/sharedState"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
+
+import { BundleContent, ISecurityReport, ValidityData } from "@kynesyslabs/demosdk/types"
 
 let term = terminalkit.terminal
 

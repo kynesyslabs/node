@@ -9,12 +9,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 import {
-    Contract,
-    JsonRpcProvider,
-    parseEther,
-    TransactionReceipt,
-    TransactionRequest,
-    Wallet,
+    Contract, JsonRpcProvider, parseEther, TransactionReceipt, TransactionRequest, Wallet,
 } from "ethers"
 import required from "src/utilities/required"
 

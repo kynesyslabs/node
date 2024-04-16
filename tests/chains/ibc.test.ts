@@ -1,8 +1,9 @@
-import { defaultRegistryTypes, GasPrice } from "@cosmjs/stargate"
-import { decodeTxRaw, Registry } from "@cosmjs/proto-signing"
-
-import ibcProviders from "sdk/localsdk/multichain/configs/ibcProviders"
 import { IBC } from "sdk/localsdk/multichain"
+import ibcProviders from "sdk/localsdk/multichain/configs/ibcProviders"
+
+import { decodeTxRaw, Registry } from "@cosmjs/proto-signing"
+import { defaultRegistryTypes, GasPrice } from "@cosmjs/stargate"
+
 import { getSampleTranfers, verifyNumberOrder } from "../utils"
 import { wallets } from "../utils/wallets"
 

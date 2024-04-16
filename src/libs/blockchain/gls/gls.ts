@@ -52,10 +52,10 @@ import { Validators } from "src/model/entities/Validators"
 import terminalkit from "terminal-kit"
 import { LessThanOrEqual } from "typeorm"
 
+import { Operation, OperationRegistrySlot, OperationResult } from "@kynesyslabs/demosdk/types"
+
 import Chain from "../chain"
 import executeOperations, { Actor } from "../routines/executeOperations"
-import { Operation } from "@kynesyslabs/demosdk/types"
-import { OperationRegistrySlot, OperationResult } from "@kynesyslabs/demosdk/types"
 
 const term = terminalkit.terminal
 

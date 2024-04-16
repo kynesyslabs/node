@@ -1,5 +1,6 @@
-import GLS from "../../gls/gls"
 import { Operation, OperationResult } from "@kynesyslabs/demosdk/types"
+
+import GLS from "../../gls/gls"
 
 export async function assignXM(operation: Operation): Promise<OperationResult> {
     // @ts-expect-error

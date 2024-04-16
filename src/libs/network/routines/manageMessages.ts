@@ -1,12 +1,15 @@
-// INFO This module manages gasless calls (such as rpc calls, consensus, etc.)
-import ComLink from "src/libs/communications/comlink"
-import { BundleContent } from "@kynesyslabs/demosdk/types"
-import { proofConsensusHandler } from "src/libs/consensus/routines/proofOfConsensus"
-import ServerHandlers from "../serverHandlers"
 import { pki } from "node-forge"
 import { Socket } from "socket.io-client"
+// INFO This module manages gasless calls (such as rpc calls, consensus, etc.)
+import ComLink from "src/libs/communications/comlink"
+import { proofConsensusHandler } from "src/libs/consensus/routines/proofOfConsensus"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
+
+import { BundleContent } from "@kynesyslabs/demosdk/types"
+
+import ServerHandlers from "../serverHandlers"
+
 const term = terminalkit.terminal
 
 export default async function manageMessages(

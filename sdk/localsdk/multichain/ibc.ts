@@ -1,17 +1,11 @@
 import { TxRaw } from "cosmjs-types/cosmos/tx/v1beta1/tx"
-import {
-    DirectSecp256k1HdWallet,
-    DirectSecp256k1Wallet,
-} from "@cosmjs/proto-signing"
-import {
-    SigningStargateClient,
-    StargateClient,
-    calculateFee,
-} from "@cosmjs/stargate"
-
-import { IBCTransaction, IPayOptions } from "./types/transfers"
-import DefaultChainAsync from "./types/defaultChainAsync"
 import required from "src/utilities/required"
+
+import { DirectSecp256k1HdWallet, DirectSecp256k1Wallet } from "@cosmjs/proto-signing"
+import { calculateFee, SigningStargateClient, StargateClient } from "@cosmjs/stargate"
+
+import DefaultChainAsync from "./types/defaultChainAsync"
+import { IBCTransaction, IPayOptions } from "./types/transfers"
 
 interface IBCConnectWalletOptions {
     /**

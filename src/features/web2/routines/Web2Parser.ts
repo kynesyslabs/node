@@ -10,13 +10,9 @@ import sharedState from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 
 import {
-    IParam,
-    IRawWeb2Request,
-    IWeb2Attestation,
-    IWeb2Payload,
-    IWeb2Request,
-    IWeb2Result,
+    IParam, IRawWeb2Request, IWeb2Attestation, IWeb2Payload, IWeb2Request, IWeb2Result,
 } from "@kynesyslabs/demosdk/types"
+
 import post from "./operations/Web2Post"
 import retrieve from "./operations/Web2Retrieve"
 

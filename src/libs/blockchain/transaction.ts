@@ -20,14 +20,14 @@ NOTE: The fee is locked by the node and released when the block itself is confir
 
 import forge from "node-forge"
 
+import {
+    ISignature, RawTransaction, Transaction as ITransaction, TransactionContent,
+} from "@kynesyslabs/demosdk/types"
+
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import { compressData, decompressData } from "../utils/demostdlib"
 import Confirmation from "./types/confirmation"
-
-import {Transaction as ITransaction} from "@kynesyslabs/demosdk/types"
-import {ISignature, RawTransaction} from "@kynesyslabs/demosdk/types"
-import { TransactionContent } from "@kynesyslabs/demosdk/types"
 
 interface TransactionResponse {
     status: string

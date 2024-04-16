@@ -1,8 +1,9 @@
 import { Blocks } from "src/model/entities/Blocks"
 
+import { GenesisArtifact } from "@kynesyslabs/demosdk/types"
+
 // INFO Defining the structure of a valid Genesis block
 import Chain from "../chain"
-import { GenesisArtifact } from "@kynesyslabs/demosdk/types"
 
 /* INFO
  *

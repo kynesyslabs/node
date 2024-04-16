@@ -9,14 +9,15 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+import { Socket } from "socket.io-client"
 import sharedState from "src/utilities/sharedState"
 import sizeOf from "src/utilities/sizeOf"
 import { json } from "stream/consumers"
 import terminalkit from "terminal-kit"
 
-import ComLink from "./comlink"
 import { DefaultEventsMap } from "@socket.io/component-emitter"
-import { Socket } from "socket.io-client"
+
+import ComLink from "./comlink"
 
 const term = terminalkit.terminal
 

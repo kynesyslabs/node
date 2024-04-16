@@ -1,7 +1,6 @@
 /* eslint-disable no-unused-vars */
 import {
-    DerivableNative,
-    deriveMempoolOperation,
+    DerivableNative, deriveMempoolOperation,
 } from "src/libs/utils/demostdlib/deriveMempoolOperation"
 // INFO Entry point for multichain requests
 import { json } from "stream/consumers"

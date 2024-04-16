@@ -15,8 +15,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import GLS from "../gls/gls"
-import { Operation } from "./executeOperations"
 import Transaction from "../transaction"
+import { Operation } from "./executeOperations"
 
 /* NOTE 
 

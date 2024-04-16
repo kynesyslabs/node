@@ -15,37 +15,35 @@ import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import handleWeb2 from "src/features/web2/Web2Dispatcher"
 import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool"
+import {
+    broadcastVerifiedNativeTransaction, confirmTransaction,
+} from "src/libs/blockchain/routines/validateTransaction"
+import Transaction from "src/libs/blockchain/transaction"
+import deriveBlock from "src/libs/consensus/routines/deriveBlock"
+import Cryptography from "src/libs/crypto/cryptography"
+import Hashing from "src/libs/crypto/hashing"
+import eggs from "src/libs/network/routines/eggs"
+import getBlockByHash from "src/libs/network/routines/nodecalls/getBlockByHash"
+import getBlockByNumber from "src/libs/network/routines/nodecalls/getBlockByNumber"
+import getBlockHeaderByHash from "src/libs/network/routines/nodecalls/getBlockHeaderByHash"
+import getBlockHeaderByNumber from "src/libs/network/routines/nodecalls/getBlockHeaderByNumber"
+import getPeerlist from "src/libs/network/routines/nodecalls/getPeerlist"
+import getPreviousHashFromBlockHash from "src/libs/network/routines/nodecalls/getPreviousHashFromBlockHash"
+import getPreviousHashFromBlockNumber from "src/libs/network/routines/nodecalls/getPreviousHashFromBlockNumber"
+import { normalizeWebBuffers } from "src/libs/network/routines/normalizeWebBuffers"
+import Sessions from "src/libs/network/routines/sessionManager"
+import { BrowserRequest } from "src/libs/network/serverListeners"
 import { Peer } from "src/libs/peer"
 import { Blocks } from "src/model/entities/Blocks"
 import sharedState from "src/utilities/sharedState"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
 
-import GLS from "../blockchain/gls/gls"
 import {
-    confirmTransaction,
-    broadcastVerifiedNativeTransaction,
-} from "src/libs/blockchain/routines/validateTransaction"
-import Transaction from "src/libs/blockchain/transaction"
-import deriveBlock from "src/libs/consensus/routines/deriveBlock"
-import eggs from "src/libs/network/routines/eggs"
-import getPreviousHashFromBlockNumber from "src/libs/network/routines/nodecalls/getPreviousHashFromBlockNumber"
-import { normalizeWebBuffers } from "src/libs/network/routines/normalizeWebBuffers"
-import Sessions from "src/libs/network/routines/sessionManager"
-import { BrowserRequest } from "src/libs/network/serverListeners"
-import getPeerlist from "src/libs/network/routines/nodecalls/getPeerlist"
-import getPreviousHashFromBlockHash from "src/libs/network/routines/nodecalls/getPreviousHashFromBlockHash"
-import getBlockHeaderByHash from "src/libs/network/routines/nodecalls/getBlockHeaderByHash"
-import getBlockHeaderByNumber from "src/libs/network/routines/nodecalls/getBlockHeaderByNumber"
-import getBlockByNumber from "src/libs/network/routines/nodecalls/getBlockByNumber"
-import getBlockByHash from "src/libs/network/routines/nodecalls/getBlockByHash"
-import Hashing from "src/libs/crypto/hashing"
-import Cryptography from "src/libs/crypto/cryptography"
+    AddressInfo, ExecutionResult, IWeb2Payload, IWeb2Request, ValidityData,
+} from "@kynesyslabs/demosdk/types"
 
-import { ValidityData } from "@kynesyslabs/demosdk/types"
-import { AddressInfo } from "@kynesyslabs/demosdk/types"
-import { ExecutionResult } from "@kynesyslabs/demosdk/types"
-import { IWeb2Payload, IWeb2Request } from "@kynesyslabs/demosdk/types"
+import GLS from "../blockchain/gls/gls"
 
 let term = terminalkit.terminal
 

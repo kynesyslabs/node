@@ -1,12 +1,12 @@
 import { multichain } from "sdk/localsdk"
+import { IBC, MULTIVERSX } from "sdk/localsdk/multichain"
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
+import DefaultChainAsync from "sdk/localsdk/multichain/types/defaultChainAsync"
 import { TransactionResponse } from "sdk/localsdk/multichain/types/multichain"
 import checkSignedPayloads from "src/utilities/checkSignedPayloads"
 
 import { IOperation } from "../XMParser"
-import { IBC, MULTIVERSX } from "sdk/localsdk/multichain"
-import DefaultChainAsync from "sdk/localsdk/multichain/types/defaultChainAsync"
 
 /**
  * Executes a XM pay operation and returns

@@ -15,12 +15,12 @@ import GLS from "src/libs/blockchain/gls/gls"
 import calculateCurrentGas from "src/libs/blockchain/routines/calculateCurrentGas"
 import executeNativeTransaction from "src/libs/blockchain/routines/executeNativeTransaction"
 import Transaction from "src/libs/blockchain/transaction"
-import { Operation } from "@kynesyslabs/demosdk/types"
-import {ValidityData} from "@kynesyslabs/demosdk/types"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import sharedState from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
+
+import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 
 const term = terminalkit.terminal
 

@@ -1,6 +1,7 @@
+import { pki } from "node-forge"
+
 // import { Operation } from "src/libs/blockchain/gls/types/Operations"
 import Transaction from "../transaction"
-import { pki } from "node-forge"
 
 // export interface ValidityData {
 //     data: {

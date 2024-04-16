@@ -1,5 +1,6 @@
-import GLS from "../../gls/gls"
 import { Operation, OperationResult } from "@kynesyslabs/demosdk/types"
+
+import GLS from "../../gls/gls"
 
 export async function assignWeb2(
     operation: Operation,

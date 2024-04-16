@@ -1,4 +1,4 @@
-import { IPayOptions } from "sdk/localsdk/multichain/types/transfers";
+import { IPayOptions } from "sdk/localsdk/multichain/types/transfers"
 
 /**
  * Verify that keys in a list of items appear in ascending order
@@ -9,10 +9,10 @@ import { IPayOptions } from "sdk/localsdk/multichain/types/transfers";
 export function verifyNumberOrder(items: any[], key: string) {
 	// INFO: Verify that each number is greater than the previous one
 	return items.every((num, i) => {
-		const current = Number(num[key]);
-		const prev = Number(items[i - 1]?.[key]);
-		return i === 0 || current > prev;
-	});
+		const current = Number(num[key])
+		const prev = Number(items[i - 1]?.[key])
+		return i === 0 || current > prev
+	})
 }
 
 /**
@@ -25,7 +25,7 @@ export function getSampleTranfers(address: string, length: number = 10): IPayOpt
 		return {
 			address,
 			// INFO: Amount is passed to preparePays as a string
-			amount: `${i + 1}`
-		};
-	});
+			amount: `${i + 1}`,
+		}
+	})
 }
