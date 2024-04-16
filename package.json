@@ -10,11 +10,11 @@
         "lint": "prettier --plugin-search-dir . --check . && eslint .",
         "lint:fix": "eslint . --fix --ext .ts",
         "prettier-format": "prettier --config .prettierrc.json modules/**/*.ts --write",
-        "start:bun": "bun -r tsconfig-paths/register src/index.ts",
+        "format": "prettier --plugin-search-dir . --write .",
         "start": "tsx -r tsconfig-paths/register src/index.ts",
+        "start:bun": "bun -r tsconfig-paths/register src/index.ts",
         "start:clean": "rm -rf data/chain.db && tsx -r tsconfig-paths/register src/index.ts",
         "start:purge": "rm -rf .demos_identity && rm -rf data/chain.db && tsx -r tsconfig-paths/register src/index.ts",
-        "format": "prettier --plugin-search-dir . --write .",
         "dev": "ts-node-dev --import tsx --respawn --transpile-only src/index.ts",
         "test:chains": "jest --testMatch '**/tests/**/*.ts' --testPathIgnorePatterns src/* tests/utils/* tests/**/_template*  --verbose"
     },
