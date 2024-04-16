@@ -2,7 +2,7 @@ import axios from "axios"
 import terminalkit from "terminal-kit"
 
 // INFO This module is used to retrieve a resource from a raw request
-import { IParam, IRawWeb2Request, IWeb2Result } from "../../types/Web2Types"
+import { IParam, IRawWeb2Request, IWeb2Result } from "@kynesyslabs/demosdk/types"
 
 const term = terminalkit.terminal
 

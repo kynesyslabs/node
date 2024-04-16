@@ -26,9 +26,7 @@ import {
     confirmTransaction,
     broadcastVerifiedNativeTransaction,
 } from "src/libs/blockchain/routines/validateTransaction"
-import { ValidityData } from "src/libs/blockchain/types/ValidityData"
 import Transaction from "src/libs/blockchain/transaction"
-import AddressInfo from "src/libs/blockchain/types/addressInfo"
 import deriveBlock from "src/libs/consensus/routines/deriveBlock"
 import eggs from "src/libs/network/routines/eggs"
 import getPreviousHashFromBlockNumber from "src/libs/network/routines/nodecalls/getPreviousHashFromBlockNumber"
@@ -43,8 +41,11 @@ import getBlockByNumber from "src/libs/network/routines/nodecalls/getBlockByNumb
 import getBlockByHash from "src/libs/network/routines/nodecalls/getBlockByHash"
 import Hashing from "src/libs/crypto/hashing"
 import Cryptography from "src/libs/crypto/cryptography"
-import { IWeb2Payload, IWeb2Request } from "src/features/web2/types/Web2Types"
-import ExecutionResult from "src/libs/network/types/ExecutionResult"
+
+import { ValidityData } from "@kynesyslabs/demosdk/types"
+import { AddressInfo } from "@kynesyslabs/demosdk/types"
+import { ExecutionResult } from "@kynesyslabs/demosdk/types"
+import { IWeb2Payload, IWeb2Request } from "@kynesyslabs/demosdk/types"
 
 let term = terminalkit.terminal
 

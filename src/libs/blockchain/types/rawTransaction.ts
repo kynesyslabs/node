@@ -9,19 +9,19 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-export default interface RawTransaction {
-    blockNumber: number
-    signature: string
-    status: string
-    hash: string
-    content: NonNullable<string>
-    type: string
-    from: any
-    to: any
-    amount: number
-    nonce: number
-    timestamp: number
-    networkFee: number
-    rpcFee: number
-    additionalFee: number
-}
+// export default interface RawTransaction {
+//     blockNumber: number
+//     signature: string
+//     status: string
+//     hash: string
+//     content: NonNullable<string>
+//     type: string
+//     from: any
+//     to: any
+//     amount: number
+//     nonce: number
+//     timestamp: number
+//     networkFee: number
+//     rpcFee: number
+//     additionalFee: number
+// }

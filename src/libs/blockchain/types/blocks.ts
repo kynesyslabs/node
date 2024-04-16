@@ -11,10 +11,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import Transactions from "../transaction"
 
-export default interface BlockContent {
-    ordered_transactions: string[]
-    per_address_transactions: Map<string, string[]>
-    web2data: {} // TODO Add Web2 class
-    previousHash: string
-    timestamp: number
-}
+// export default interface BlockContent {
+//     ordered_transactions: string[]
+//     per_address_transactions: Map<string, string[]>
+//     web2data: {} // TODO Add Web2 class
+//     previousHash: string
+//     timestamp: number
+// }

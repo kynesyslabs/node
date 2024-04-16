@@ -24,8 +24,10 @@ import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import { compressData, decompressData } from "../utils/demostdlib"
 import Confirmation from "./types/confirmation"
-import RawTransaction from "./types/rawTransaction"
-import { TransactionContent } from "./types/transactions"
+
+import {Transaction as ITransaction} from "@kynesyslabs/demosdk/types"
+import {ISignature, RawTransaction} from "@kynesyslabs/demosdk/types"
+import { TransactionContent } from "@kynesyslabs/demosdk/types"
 
 interface TransactionResponse {
     status: string
@@ -34,12 +36,7 @@ interface TransactionResponse {
     data: {}
 }
 
-interface ISignature {
-    type: string
-    data: forge.pki.ed25519.BinaryBuffer
-}
-
-export default class Transaction {
+export default class Transaction implements ITransaction {
     content: TransactionContent
     signature: ISignature
     hash: string

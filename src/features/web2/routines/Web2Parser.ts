@@ -16,7 +16,7 @@ import {
     IWeb2Payload,
     IWeb2Request,
     IWeb2Result,
-} from "../types/Web2Types"
+} from "@kynesyslabs/demosdk/types"
 import post from "./operations/Web2Post"
 import retrieve from "./operations/Web2Retrieve"
 

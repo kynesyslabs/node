@@ -1,7 +1,7 @@
 // INFO Entry file for handling web2 requests
 import Web2API, { Web2APIClass } from "src/features/web2/routines/Web2Parser"
-import { IWeb2Payload, IWeb2Request } from "src/features/web2/types/Web2Types"
-import { Operation } from "src/libs/blockchain/routines/executeOperations"
+import { IWeb2Payload, IWeb2Request } from "@kynesyslabs/demosdk/types"
+import { Operation } from "@kynesyslabs/demosdk/types"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import {

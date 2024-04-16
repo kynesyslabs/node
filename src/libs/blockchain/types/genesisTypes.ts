@@ -2,6 +2,7 @@ import { Blocks } from "src/model/entities/Blocks"
 
 // INFO Defining the structure of a valid Genesis block
 import Chain from "../chain"
+import { GenesisArtifact } from "@kynesyslabs/demosdk/types"
 
 /* INFO
  *
@@ -11,43 +12,43 @@ import Chain from "../chain"
 
 // SECTION Primitives
 
-export interface GenesisImmutableProperties {
-    id: number
-    name: string
-    currency: string
-}
+// export interface GenesisImmutableProperties {
+//     id: number
+//     name: string
+//     currency: string
+// }
 
-export interface GenesisMutableProperties {
-    minBlocksForValidationOnlineStatus: number
-}
+// export interface GenesisMutableProperties {
+//     minBlocksForValidationOnlineStatus: number
+// }
 
-export interface GenesisArtifact {
-    properties: GenesisImmutableProperties
-    mutables: GenesisMutableProperties
-    balances: [[address: string, amount: string]]
-    timestamp: number
-    previous_genesis_hash: string
-    previous_block_hash: string
-    signature: string
-    hash: string
-    number: number
-}
+// export interface GenesisArtifact {
+//     properties: GenesisImmutableProperties
+//     mutables: GenesisMutableProperties
+//     balances: [[address: string, amount: string]]
+//     timestamp: number
+//     previous_genesis_hash: string
+//     previous_block_hash: string
+//     signature: string
+//     hash: string
+//     number: number
+// }
 
-// !SECTION Primitives
+// // !SECTION Primitives
 
-// SECTION Components
+// // SECTION Components
 
-export interface StandardGenesis {
-    properties: GenesisImmutableProperties
-    mutables: GenesisMutableProperties
-    balances: [[address: string, amount: string]]
-    timestamp: number
-}
+// export interface StandardGenesis {
+//     properties: GenesisImmutableProperties
+//     mutables: GenesisMutableProperties
+//     balances: [[address: string, amount: string]]
+//     timestamp: number
+// }
 
-export interface forkGenesis extends StandardGenesis {
-    previous_genesis_hash: string
-    previous_block_hash: string
-}
+// export interface forkGenesis extends StandardGenesis {
+//     previous_genesis_hash: string
+//     previous_block_hash: string
+// }
 
 // !SECTION Components
 

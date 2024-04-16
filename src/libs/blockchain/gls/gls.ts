@@ -54,8 +54,8 @@ import { LessThanOrEqual } from "typeorm"
 
 import Chain from "../chain"
 import executeOperations, { Actor } from "../routines/executeOperations"
-import { TxFee } from "../types/transactions"
-import { Operation, OperationRegistrySlot, OperationResult } from "./types/Operations"
+import { Operation } from "@kynesyslabs/demosdk/types"
+import { OperationRegistrySlot, OperationResult } from "@kynesyslabs/demosdk/types"
 
 const term = terminalkit.terminal
 

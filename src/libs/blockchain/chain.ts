@@ -20,14 +20,14 @@ import { MoreThan } from "typeorm"
 
 import Hashing from "../crypto/hashing"
 import Block from "./block"
-import { Operation } from "./gls/types/Operations"
 import manageNative from "./routines/gls_routines/manageNative"
 import Transaction from "./transaction"
-import AddressInfo from "./types/addressInfo"
-import RawTransaction from "./types/rawTransaction"
-import StatusNativeType from "./types/statusNative"
-import StatusPropertiesType from "./types/statusProperties"
-import { TransactionContent } from "./types/transactions"
+
+import { AddressInfo } from "@kynesyslabs/demosdk/types"
+import { Operation } from "@kynesyslabs/demosdk/types"
+import { StatusNative as StatusNativeType } from "@kynesyslabs/demosdk/types"
+import {StatusProperties as StatusPropertiesType} from "@kynesyslabs/demosdk/types"
+import { TransactionContent } from "@kynesyslabs/demosdk/types"
 
 export default class Chain {
     private static instance: Chain

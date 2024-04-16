@@ -1,6 +1,6 @@
 // INFO This module manages gasless calls (such as rpc calls, consensus, etc.)
 import ComLink from "src/libs/communications/comlink"
-import { BundleContent } from "src/libs/communications/types/transmit"
+import { BundleContent } from "@kynesyslabs/demosdk/types"
 import { proofConsensusHandler } from "src/libs/consensus/routines/proofOfConsensus"
 import ServerHandlers from "../serverHandlers"
 import { pki } from "node-forge"

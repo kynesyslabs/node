@@ -9,20 +9,20 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import forge, { pki } from "node-forge"
+// import forge, { pki } from "node-forge"
 
-export interface BundleContent {
-    type: string
-    message: string
-    sender: any // TODO improve interface
-    receiver: any // TODO improve interface
-    timestamp: number
-    data: any // NOTE Depends on the actual step
-    extra: string
-}
+// export interface BundleContent {
+//     type: string
+//     message: string
+//     sender: any // TODO improve interface
+//     receiver: any // TODO improve interface
+//     timestamp: number
+//     data: any // NOTE Depends on the actual step
+//     extra: string
+// }
 
-export interface Bundle {
-    content: BundleContent
-    hash: string
-    signature: any // TODO improve interface
-}
+// export interface Bundle {
+//     content: BundleContent
+//     hash: string
+//     signature: any // TODO improve interface
+// }

@@ -15,7 +15,7 @@ import Cryptography from "../crypto/cryptography"
 // INFO This module exposes methods designed to have an unified way of communicate in DEMOS
 import Hashing from "../crypto/hashing"
 import { Peer } from "../peer"
-import { Bundle } from "./types/transmit"
+import { Bundle } from "@kynesyslabs/demosdk/types"
 
 export default class Transmission {
     bundle: Bundle
