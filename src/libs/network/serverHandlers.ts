@@ -41,9 +41,11 @@ import terminalkit from "terminal-kit"
 
 import {
     AddressInfo, ExecutionResult, IWeb2Payload, IWeb2Request, ValidityData,
+    XMScript,
 } from "@kynesyslabs/demosdk/types"
 
 import GLS from "../blockchain/gls/gls"
+import { NativePayload, StringifiedPayload, Web2Payload, XMPayload } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/Transaction"
 
 let term = terminalkit.terminal
 
@@ -209,27 +211,32 @@ export default class ServerHandlers {
         let tx = validatedData.data.transaction
         // TODO Decide if the toMempool and Mempool.addTransaction should be here or in their dispatchers
         // TODO Preferably here, unified, with the dispatchers having standard replies
+        // Using a payload variable to be able to check types immediately
+        let payload: XMPayload | Web2Payload | NativePayload | StringifiedPayload
         switch (tx.content.type) {
             case "crosschainOperation":
             case "multichainOperation":
+                payload = tx.content.data as XMPayload
                 console.log(
                     "[Included XM Chainscript]")
-                console.log(tx.content.data[1])
+                console.log(payload[1])
                 // TODO Better types on answers
                 var xm_result = await ServerHandlers.handleXMChainOperation(
-                    tx.content.data[1],
+                    payload[1] as XMScript,
                 )
                 result.response = xm_result
                 break
             case "web2Request":
                 // TODO Better types on answers
+                payload = tx.content.data as Web2Payload
                 var web2_result = await ServerHandlers.handleWeb2Request(
-                    JSON.parse(tx.content.data[1]) as IWeb2Request,
+                    payload[1] as IWeb2Request,
                     senderSocket,
                 )
                 result.response = web2_result
                 break
             case "native":
+                // REVIEW This still works with the new tx system?
                 var native_result = broadcastVerifiedNativeTransaction(validatedData)
                 // NOTE We add the Transaction to the mempool as it looks valid
                 if (native_result[0]) {
@@ -249,7 +256,7 @@ export default class ServerHandlers {
     }
 
     // INFO Handling XM Transaction
-    static async handleXMChainOperation(xmscript: any): Promise<any> {
+    static async handleXMChainOperation(xmscript: XMScript): Promise<any> {
         /* NOTE This workflow goeas as:
          * The XM Operation is validated, executed and verified
          * when applicable.
@@ -271,7 +278,7 @@ export default class ServerHandlers {
 
     // INFO This method is used to allow signed data exchanges between peers and clients
     static async handleXMChainSignedPayload(content: any): Promise<any> {
-        // TODO Probably to take it out
+        // TODO Probably to take out
     }
 
     static async handleXMChainStatus(): Promise<any> {
@@ -446,11 +453,12 @@ export default class ServerHandlers {
         //console.log(typeof data)
         //console.log(JSON.stringify(content))
         switch (content.message) {
-            case "crosschain_operation":
+            // NOTE The following commented block of code is vestigial
+            /*case "crosschain_operation":
             case "multichain_operation":
                 term.yellow.bold("[SERVER] Received crosschain_operation\n")
                 response = await ServerHandlers.handleXMChainOperation(content)
-                break // REVIEW Here or in comlinks?
+                break // REVIEW Here or in comlinks? */
             case "getPeerlist":
                 response = await getPeerlist()
                 break

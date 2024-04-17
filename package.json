@@ -49,7 +49,7 @@
         "@esbuild-plugins/node-globals-polyfill": "^0.2.3",
         "@fortawesome/free-brands-svg-icons": "^6.4.2",
         "@fortawesome/free-solid-svg-icons": "^6.4.2",
-        "@kynesyslabs/demosdk": "^1.0.7",
+        "@kynesyslabs/demosdk": "latest",
         "@multiversx/sdk-core": "^12.18.0",
         "@multiversx/sdk-network-providers": "^2.2.1",
         "@multiversx/sdk-wallet": "^4.3.0",
