@@ -1,6 +1,6 @@
 // INFO In this module is offloaded the parsing of XM requests
 import * as fs from "fs"
-import * as multichain from "sdk/localsdk/multichain"
+import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 
@@ -143,7 +143,7 @@ class XMParser {
             const result = await handlePayOperation(operation, chainID)
 
             // INFO: Adding chain info for debugging purposes
-            result.chain = `${operation.chain}.${operation.subchain}`
+            result['chain'] = `${operation.chain}.${operation.subchain}`
             return result
         }
 
@@ -161,7 +161,7 @@ class XMParser {
                 // console.log(evmProviders)
                 let providerUrl =
                     evmProviders[operation.chain][operation.subchain] // REVIEW Error handling
-                let evmInstance = await multichain.EVM.createInstance(
+                let evmInstance = multichain.EVM.createInstance(
                     chainID,
                     providerUrl,
                 ) // REVIEW We should be connected
@@ -169,7 +169,7 @@ class XMParser {
                     `[XM Method] operation.chain: ${operation.chain}, operation.subchain: ${operation.subchain}`,
                 )
                 console.log(`[XM Method]: providerUrl: ${providerUrl}`)
-                await evmInstance.connect(providerUrl)
+                await evmInstance.connect()
                 console.log("params: \n")
                 console.log(operation.task.params)
                 console.log("\n end params: \n")

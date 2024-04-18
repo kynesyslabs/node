@@ -1,8 +1,7 @@
-import { multichain } from "sdk/localsdk"
-import { IBC, MULTIVERSX } from "sdk/localsdk/multichain"
+import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
+
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
-import DefaultChainAsync from "sdk/localsdk/multichain/types/defaultChainAsync"
 import { TransactionResponse } from "sdk/localsdk/multichain/types/multichain"
 import checkSignedPayloads from "src/utilities/checkSignedPayloads"
 
@@ -60,11 +59,11 @@ export default async function handlePayOperation(
             break
 
         case "egld":
-            result = await genericJsonRpcPay(MULTIVERSX, rpc_url, operation)
+            result = await genericJsonRpcPay(multichain.MULTIVERSX, rpc_url, operation)
             break
 
         case "ibc":
-            result = await genericJsonRpcPay(IBC, rpc_url, operation)
+            result = await genericJsonRpcPay(multichain.IBC, rpc_url, operation)
             break
 
         default:
@@ -87,16 +86,17 @@ export default async function handlePayOperation(
  * @param operation The operation to be executed
  */
 async function genericJsonRpcPay(
-    sdk: typeof DefaultChainAsync,
+    sdk: typeof multichain.IBC | typeof multichain.MULTIVERSX,
     rpc_url: string,
     operation: IOperation,
 ) {
     console.log([
         `[XMScript Parser] Generic JSON RPC Pay on: ${operation.chain}.${operation.subchain}`,
     ])
-    let instance: DefaultChainAsync
+    let instance: multichain.IBC | multichain.MULTIVERSX
 
     try {
+        // @ts-expect-error
         instance = await sdk.create(rpc_url)
     } catch (error) {
         return {
@@ -139,13 +139,9 @@ async function handleEVMPay(chainID: number, operation: IOperation) {
     let evmInstance = multichain.EVM.getInstance(chainID)
 
     if (!evmInstance) {
-        evmInstance = multichain.EVM.createInstance(
-            chainID,
-            evmProviders[operation.chain][operation.subchain],
-        )
-        await evmInstance.connect(
-            evmProviders[operation.chain][operation.subchain],
-        )
+        const rpc_url = evmProviders[operation.chain][operation.subchain]
+        evmInstance = multichain.EVM.createInstance(chainID,rpc_url)
+        await evmInstance.connect()
     }
 
     return await multichain.EVM.getInstance(chainID).sendSignedTransaction(
@@ -170,7 +166,7 @@ async function handleXRPLPay(
         "[XMScript Parser] Ripple Pay: trying to send the payload as a signed transaction...",
     ) // REVIEW Simulations?
     let xrplInstance = new multichain.XRPL(rpc_url)
-    const connected = await xrplInstance.connect(rpc_url)
+    const connected = await xrplInstance.connect()
     console.log("CONNECT RETURNED: ", connected)
 
     if (!connected) {
