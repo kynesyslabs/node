@@ -9,9 +9,7 @@ import XMParser, { XMScript } from "./routines/XMParser"
 
 export default class multichainDispatcher {
     // INFO Digesting the request from the server
-    static async digest(data_str: string): Promise<any> {
-        const data = JSON.parse(data_str) as XMScript
-
+    static async digest(data: XMScript): Promise<any> {
         console.log("\n\n")
         console.log("[XM Script full digest]")
         console.log(data)
