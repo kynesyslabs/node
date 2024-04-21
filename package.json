@@ -16,6 +16,7 @@
         "start:clean": "rm -rf data/chain.db && tsx -r tsconfig-paths/register src/index.ts",
         "start:purge": "rm -rf .demos_identity && rm -rf data/chain.db && tsx -r tsconfig-paths/register src/index.ts",
         "dev": "ts-node-dev --import tsx --respawn --transpile-only src/index.ts",
+        "upgrade_sdk": "yarn upgrade @kynesyslabs/demosdk --latest",
         "upgrade_deps": "yarn upgrade-interactive --latest",
         "upgrade_deps:force": "ncu -u && yarn",
         "test:chains": "jest --testMatch '**/tests/**/*.ts' --testPathIgnorePatterns src/* tests/utils/* tests/**/_template*  --verbose"
