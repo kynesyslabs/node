@@ -150,6 +150,7 @@ export default class ServerHandlers {
 
         let fname = "[handleExecuteTransaction] "
         let result: ExecutionResult = {
+            success: true,
             response: null,
             extra: null,
             require_reply: false,
@@ -165,6 +166,7 @@ export default class ServerHandlers {
         if (hexDataKey !== hexOurKey) {
             term.red.bold(fname + "Invalid signature key (not us) 💀 : ")
 
+            result.success = false
             result.response = false
             result.extra = "Invalid signature key"
             return result
@@ -179,6 +181,7 @@ export default class ServerHandlers {
         )
         if (!signatureValid) {
             term.red.bold(fname + "Invalid signature 💀 : ")
+            result.success = false
             result.response = false
             result.extra = "Invalid signature"
             return result
@@ -188,6 +191,7 @@ export default class ServerHandlers {
         let lastBlockNumber = await Chain.getLastBlockNumber()
         if (blockNumber != lastBlockNumber) {
             term.red.bold(fname + "Invalid block reference 💀 : ")
+            result.success = false
             result.response = false
             result.extra = "Invalid block reference"
             return result
@@ -197,6 +201,7 @@ export default class ServerHandlers {
             // An invalid transaction won't even be added to the mempool
             term.yellow.bold(fname + "Invalid transaction 💀 : ")
             console.log(validatedData.data.message)
+            result.success = false
             result.response = false
             result.extra = validatedData.data.message
             return result
@@ -209,8 +214,6 @@ export default class ServerHandlers {
         term.green.bold(fname + "Valid transaction! \n")
         // REVIEW Switch case for different types of transactions
         let tx = validatedData.data.transaction
-        // TODO Decide if the toMempool and Mempool.addTransaction should be here or in their dispatchers
-        // TODO Preferably here, unified, with the dispatchers having standard replies
         // Using a payload variable to be able to check types immediately
         let payload: XMPayload | Web2Payload | NativePayload | StringifiedPayload
         switch (tx.content.type) {
@@ -224,6 +227,7 @@ export default class ServerHandlers {
                 var xm_result = await ServerHandlers.handleXMChainOperation(
                     payload[1] as XMScript,
                 )
+                // TODO Add result.success handling
                 result.response = xm_result
                 break
             case "web2Request":
@@ -233,6 +237,7 @@ export default class ServerHandlers {
                     payload[1] as IWeb2Request,
                     senderSocket,
                 )
+                // TODO Add result.success handling
                 result.response = web2_result
                 break
             case "native":
@@ -240,14 +245,16 @@ export default class ServerHandlers {
                 var native_result = broadcastVerifiedNativeTransaction(validatedData)
                 // NOTE We add the Transaction to the mempool as it looks valid
                 if (native_result[0]) {
-                    console.log(fname + "Adding transaction to mempool...")
-                    // Adding the valid tx to the mempool
-                    // REVIEW is this done here or by executing the transaction above?
-                    Mempool.addTransaction(validatedData.data.transaction) // Works by writing the registry
-                    //process.exit(0) /* TODO Eliminate this debug line */
+                    result.success = true
                 }
                 // REVIEW Check if this is ok with types
                 result.response = native_result
+        }
+        // Only if the transaction is valid we add it to the mempool
+        if (result.success) {
+            // REVIEW We add the transaction to the mempool
+            Mempool.addTransaction(validatedData.data.transaction)
+            // TODO Check if Operation(s) are added to the GLS too
         }
         // TODO Broadcast the tx to the other peers (or maybe not, consensus should take care of it)
         // Response is then sent back automatically as a reply (with our validation)
