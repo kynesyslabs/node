@@ -60,53 +60,13 @@ export default class multichainDispatcher {
         console.log("[XM EXECUTE] Successfully executed")
         console.log(results)
 
-        // Inserting in mempool the results
-        let derivedResults = await multichainDispatcher.toMempool(
-            script,
-            results,
-            true,
-        )
 
         console.log("[XM EXECUTE] Derived Operation completed successfully")
         //console.log(derivedOperation)
 
-        let overallResult = {
-            results: results,
-            derivedOperation: derivedResults[0], // TODO We will want to return the demos tx hash too prolly
-        }
-
         console.log("[XM EXECUTE] Sending back the result")
-        console.log(overallResult)
+        console.log(results)
 
-        return overallResult
-    }
-
-    static async toMempool(
-        script: XMScript,
-        results: any[],
-        insert: boolean = true,
-    ): Promise<any> {
-        // We should have a valid, attested request: lets handle it
-        // NOTE If all the attestations are valid we can create the transaction, insert it and give back the result
-        // Creating a tx from the completed request if is possible
-        let jsonNote: DerivableNative = {
-            from: "0x0", // FIXME Implement this
-            to: "multichain", // FIXME Implement this more in details
-            type: "xm",
-            data: {
-                script: script,
-                results: results,
-            },
-            timestamp: Date.now(),
-            fees: {
-                networkFee: 0,
-                rpcFee: 0,
-                additionalFee: 0,
-            }, // FIXME Implement this
-        }
-
-        //console.log(jsonNote)
-
-        return await deriveMempoolOperation(jsonNote, insert)
+        return results
     }
 }

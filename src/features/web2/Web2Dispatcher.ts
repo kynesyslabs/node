@@ -134,9 +134,6 @@ export default async function handleWeb2(
     console.log(
         "[web2Dispatcher] Attestations validated. Deriving a transaction + operation...",
     )
-    // REVIEW Should we return this too?
-    let derivedResult = await toMempool(instanceName)
-    console.log("[web2Dispatcher] Transaction + operation derived.")
 
     Web2API("remove", nameHash, senderSocket)
 
@@ -148,30 +145,4 @@ export default async function handleWeb2(
 
     // TODO Maybe we should also return derivedResult somehow
     return [true, web2interface.request] // , derivedResult
-}
-
-// INFO Derive a valid DEMOS tx and GLS operation from a compatible request
-async function toMempool(
-    instanceName: string,
-    insert: boolean = true,
-): Promise<[string, Operation]> {
-    // We should have a valid, attested request: lets handle it
-    let derivedResults: [string, Operation]
-    let web2Instance: Web2APIClass = Web2API(null, instanceName)
-    let derivable: DerivableNative = {
-        from: "web2module", // FIXME Implement this
-        to: "web2", // FIXME Implement this more in details
-        type: "web2",
-        data: web2Instance.request,
-        timestamp: Date.now(),
-        fees: {
-            networkFee: 0,
-            rpcFee: 0,
-            additionalFee: 0,
-        }, // FIXME Implement this
-    }
-    // NOTE If all the attestations are valid we can create the transaction, insert it and give back the result
-    // Deriving an operation and a tx from the web2 request
-    derivedResults = await deriveMempoolOperation(derivable, insert)
-    return derivedResults
 }

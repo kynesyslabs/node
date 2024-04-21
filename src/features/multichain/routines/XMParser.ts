@@ -143,7 +143,7 @@ class XMParser {
             const result = await handlePayOperation(operation, chainID)
 
             // INFO: Adding chain info for debugging purposes
-            result['chain'] = `${operation.chain}.${operation.subchain}`
+            result["chain"] = `${operation.chain}.${operation.subchain}`
             return result
         }
 
