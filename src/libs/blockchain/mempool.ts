@@ -21,6 +21,7 @@ import PeerManager from "../peer/PeerManager"
 import Block from "./block"
 // INFO Singleton Mempool class
 import Transaction from "./transaction"
+import { ISignature } from "@kynesyslabs/demosdk/types"
 
 export interface MempoolData {
     number: number
@@ -223,11 +224,20 @@ export default class Mempool {
             )
             // NOTE Verifying the signature against the verified hash using from as public key
             console.log("[MEMPOOL VERIFICATION] Verifying the signature")
-            let { signature } = tx
-            console.log(
-                "[MEMPOOL VERIFICATION] Signature: " +
-                    signature.data.toString("hex"),
-            )
+            let signature = tx.signature // FIXME Sometimes there is a nested type / data structure
+
+            // REVIEW Ugly patch for the above FIXME
+            try {
+                let signature_data = signature.data as unknown as ISignature
+                if (!signature_data.data || !signature_data.type) {
+                    throw new Error("[*] Signature fix failed successfully!")
+                }
+                console.log("[+] Signature fixed successfully!")
+                signature = signature_data
+            } catch (error) {
+                console.log("[+] [MEMPOOL VERIFICATION] Signature did not need to be fixed")
+            }
+
             console.log(
                 "[MEMPOOL VERIFICATION] Signature: " +
                     signature.data.toString("hex"),

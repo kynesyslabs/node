@@ -143,6 +143,7 @@ export default class ServerHandlers {
 
     // NOTE This method is used to handle the execution of a transaction
     // TODO Better typing for content (must contain validity data, hashing and signature as shown below)
+    // TODO Either put this into a module or do something to make it more modular
     static async handleExecuteTransaction(
         validatedData: ValidityData,
         senderSocket: any,
