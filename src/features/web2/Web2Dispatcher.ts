@@ -59,6 +59,7 @@ export default async function handleWeb2(
     let web2interface = Web2API(null, nameHash, senderSocket, payload)
     // NOTE We want to wait for the request to be digested before proceeding (see above paragraph)
     await web2interface.digestedPromise
+    console.log(web2interface.request.result)
     // Now result is in web2request.request.result
     console.log(
         "[web2Dispatcher] Request digested and promise solved. Registering the instance...",

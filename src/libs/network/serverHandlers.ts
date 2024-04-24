@@ -101,7 +101,7 @@ export default class ServerHandlers {
         let fname = "[handleTransactions] "
         term.yellow(fname + "Handling transaction...")
         // Verify and execute the transaction
-        let validatedTx: ValidityData
+        let validationData: ValidityData
         try {
             /* NOTE This workflow goeas as:
              * The transaction is validated
@@ -110,12 +110,12 @@ export default class ServerHandlers {
              * The validation data can be used by the client to effectively execute the tx
              */
             //console.log(fname + "Validating transaction...")
-            validatedTx = await confirmTransaction(tx)
+            validationData = await confirmTransaction(tx)
             //console.log(fname + "Fetching result...")
         } catch (e) {
             term.red.bold("[TX VALIDATION ERROR] 💀 : ")
             term.red(e)
-            validatedTx = {
+            validationData = {
                 data: {
                     valid: false,
                     reference_block: null,
@@ -129,16 +129,16 @@ export default class ServerHandlers {
             }
             // Signing and hashing the validation data
             let hashedValidationData = Hashing.sha256(
-                JSON.stringify(validatedTx.data),
+                JSON.stringify(validationData.data),
             )
-            validatedTx.signature = Cryptography.sign(
+            validationData.signature = Cryptography.sign(
                 hashedValidationData,
                 sharedState.getInstance().identity.ed25519.privateKey,
             )
         }
 
         term.bold.white(fname + "Transaction handled.")
-        return validatedTx
+        return validationData
     }
 
     // NOTE This method is used to handle the execution of a transaction
@@ -163,9 +163,12 @@ export default class ServerHandlers {
         let dataKey = validatedData.rpc_public_key
         let hexDataKey = Buffer.from(dataKey as Buffer).toString("hex")
         let dataSignature = validatedData.signature
+        let queriedTx = validatedData.data.transaction
+        console.log("[SERVER] Received transaction for execution: " + queriedTx.hash)
+
         // We need to have issued the validity data
         if (hexDataKey !== hexOurKey) {
-            term.red.bold(fname + "Invalid signature key (not us) 💀 : ")
+            term.red.bold(fname + "Invalid validityData signature key (not us) 💀 : ")
 
             result.success = false
             result.response = false
@@ -181,7 +184,7 @@ export default class ServerHandlers {
             dataKey,
         )
         if (!signatureValid) {
-            term.red.bold(fname + "Invalid signature 💀 : ")
+            term.red.bold(fname + "Invalid validityData signature 💀 : ")
             result.success = false
             result.response = false
             result.extra = "Invalid signature"
@@ -191,7 +194,7 @@ export default class ServerHandlers {
         let blockNumber = validatedData.data.reference_block
         let lastBlockNumber = await Chain.getLastBlockNumber()
         if (blockNumber != lastBlockNumber) {
-            term.red.bold(fname + "Invalid block reference 💀 : ")
+            term.red.bold(fname + "Invalid validityData block reference 💀 : ")
             result.success = false
             result.response = false
             result.extra = "Invalid block reference"
@@ -200,7 +203,7 @@ export default class ServerHandlers {
         // REVIEW Is this useful at this point?
         if (!validatedData.data.valid) {
             // An invalid transaction won't even be added to the mempool
-            term.yellow.bold(fname + "Invalid transaction 💀 : ")
+            term.yellow.bold(fname + "Invalid validityData 💀 : ")
             console.log(validatedData.data.message)
             result.success = false
             result.response = false
@@ -212,7 +215,7 @@ export default class ServerHandlers {
                     We just processed the cryptographic validity of the transaction.
                     We will now try to execute it obtaining valid Operations.
                 */
-        term.green.bold(fname + "Valid transaction! \n")
+        term.green.bold(fname + "Valid validityData! \n")
         // REVIEW Switch case for different types of transactions
         let tx = validatedData.data.transaction
         // Using a payload variable to be able to check types immediately
@@ -243,7 +246,7 @@ export default class ServerHandlers {
                 break
             case "native":
                 // REVIEW This still works with the new tx system?
-                var native_result = broadcastVerifiedNativeTransaction(validatedData)
+                var native_result = await broadcastVerifiedNativeTransaction(validatedData)
                 // NOTE We add the Transaction to the mempool as it looks valid
                 if (native_result[0]) {
                     result.success = true
@@ -254,7 +257,10 @@ export default class ServerHandlers {
         // Only if the transaction is valid we add it to the mempool
         if (result.success) {
             // REVIEW We add the transaction to the mempool
-            Mempool.addTransaction(validatedData.data.transaction)
+            Mempool.addTransaction(queriedTx) // FIXME queriedTx hash mismatch with the expected hash? WHY
+            /* TODO for the above FIXME
+                * queriedTx should be identical to above but here is not coherent anymore
+            */
             // TODO Check if Operation(s) are added to the GLS too
         }
         // TODO Broadcast the tx to the other peers (or maybe not, consensus should take care of it)

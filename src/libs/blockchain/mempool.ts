@@ -92,7 +92,7 @@ export default class Mempool {
     }
 
     // INFO Writing a transaction to the mempool
-    /* NOTE 
+    /* NOTE
         Here we should already have cryptographically valid data: adding the transaction to the mempool is the way
         to flag it for verification and execution at consensus.
     */
@@ -100,7 +100,15 @@ export default class Mempool {
         transaction: Transaction,
     ): Promise<void> {
         let mempool = await this.getMempool()
-        console.log("adding transaction, found this mempool:")
+        console.log("adding transaction with hash " + transaction.hash + " to the mempool")
+
+        // FIXME Debug to remove
+        let is_coherent = Transaction.isCoherent(transaction)
+        if (!is_coherent) {
+            console.error("Transaction in mempool is not coherent")
+            process.exit(1)
+        }
+
         //console.log(mempool)
         mempool.transactions.push(transaction) // REVIEW What if it is empty?
 
@@ -212,7 +220,11 @@ export default class Mempool {
                 "[MEMPOOL VERIFICATION] Verifying the hash of the transaction: " +
                     tx_hash,
             )
+            console.log(JSON.stringify(tx.content))
             let calculated_hash = Hashing.sha256(JSON.stringify(tx.content))
+            console.log(
+                "[MEMPOOL VERIFICATION] Calculated hash: " + calculated_hash,
+            )
             if (calculated_hash != tx_hash) {
                 console.log(
                     "[X] [MEMPOOL VERIFICATION] The hash of the transaction is invalid",
@@ -224,9 +236,9 @@ export default class Mempool {
             )
             // NOTE Verifying the signature against the verified hash using from as public key
             console.log("[MEMPOOL VERIFICATION] Verifying the signature")
-            let signature = tx.signature // FIXME Sometimes there is a nested type / data structure
 
-            // REVIEW Ugly patch for the above FIXME
+            let signature = tx.signature // TODO Sometimes there is a nested type / data structure (see below)
+            // REVIEW Ugly patch for the above TODO
             try {
                 let signature_data = signature.data as unknown as ISignature
                 if (!signature_data.data || !signature_data.type) {
