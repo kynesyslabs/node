@@ -17,4 +17,12 @@ export default class Confirmation {
         tx_hash_validated: string
     }
     signature: forge.pki.ed25519.BinaryBuffer
+
+    constructor() {
+        this.data = {
+            validator: null,
+            tx_hash_validated: null,
+        }
+        this.signature = null
+    }
 }

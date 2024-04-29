@@ -18,16 +18,15 @@ import { StatusProperties } from "src/model/entities/StatusProperties"
 import { Transactions } from "src/model/entities/Transactions"
 import { MoreThan } from "typeorm"
 
+import {
+    AddressInfo, Operation, StatusNative as StatusNativeType,
+    StatusProperties as StatusPropertiesType, TransactionContent,
+} from "@kynesyslabs/demosdk/types"
+
 import Hashing from "../crypto/hashing"
 import Block from "./block"
-import { Operation } from "./gls/gls"
 import manageNative from "./routines/gls_routines/manageNative"
 import Transaction from "./transaction"
-import AddressInfo from "./types/addressInfo"
-import RawTransaction from "./types/rawTransaction"
-import StatusNativeType from "./types/statusNative"
-import StatusPropertiesType from "./types/statusProperties"
-import { TransactionContent } from "./types/transactions"
 
 export default class Chain {
     private static instance: Chain

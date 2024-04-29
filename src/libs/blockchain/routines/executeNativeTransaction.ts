@@ -14,8 +14,9 @@ KyneSys Labs: https://www.kynesys.xyz/
     consensus has confirmed the transaction in the block.
 */
 
-import GLS, { Operation } from "../gls/gls"
+import GLS from "../gls/gls"
 import Transaction from "../transaction"
+import { Operation } from "./executeOperations"
 
 /* NOTE 
 
@@ -29,7 +30,7 @@ Each block, the nodes execute the Operation objects ordering them by their times
 */
 
 // INFO Given a transaction, use GLS to see if it is executable and return a result
-export default async function executeTransaction(
+export default async function executeNativeTransaction(
     transaction: Transaction,
 ): Promise<[boolean, string, Operation[]?]> {
     let success: boolean = true

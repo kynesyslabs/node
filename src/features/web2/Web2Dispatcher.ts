@@ -1,17 +1,16 @@
 // INFO Entry file for handling web2 requests
 import Web2API, { Web2APIClass } from "src/features/web2/routines/Web2Parser"
-import { IWeb2Payload, IWeb2Request } from "src/features/web2/types/Web2Types"
-import { Operation } from "src/libs/blockchain/routines/executeOperations"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import {
-    DerivableNative,
-    deriveMempoolOperation,
+    DerivableNative, deriveMempoolOperation,
 } from "src/libs/utils/demostdlib/deriveMempoolOperation"
 import required from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
+
+import { IWeb2Payload, IWeb2Request, Operation } from "@kynesyslabs/demosdk/types"
 
 const term = terminalkit.terminal
 
@@ -21,9 +20,9 @@ const term = terminalkit.terminal
 // send back to the client or to the origin rpc the
 // transaction that will b  e granted as web2 result
 export default async function handleWeb2(
-    payload: IWeb2Payload,
+    payload: IWeb2Request,
     senderSocket: any,
-): Promise<[boolean, string]> {
+): Promise<[boolean, string | IWeb2Request]> {
     // Creating the workable interface
     // TODO Remember that web2 could need to be signed and could need a fee
     // NOTE From now on, Web2API will reply to instanceName with the same instance
@@ -34,7 +33,7 @@ export default async function handleWeb2(
     //console.log(payload)
     //process.exit(0)
 
-    let request: IWeb2Request = payload.message
+    let request: IWeb2Request = payload
     console.log(
         "[REQUEST FOR WEB2] [+] Found and loaded payload.message as expected...",
     )
@@ -60,6 +59,7 @@ export default async function handleWeb2(
     let web2interface = Web2API(null, nameHash, senderSocket, payload)
     // NOTE We want to wait for the request to be digested before proceeding (see above paragraph)
     await web2interface.digestedPromise
+    console.log(web2interface.request.result)
     // Now result is in web2request.request.result
     console.log(
         "[web2Dispatcher] Request digested and promise solved. Registering the instance...",
@@ -135,8 +135,6 @@ export default async function handleWeb2(
     console.log(
         "[web2Dispatcher] Attestations validated. Deriving a transaction + operation...",
     )
-    let derivedResult = await toMempool(instanceName)
-    console.log("[web2Dispatcher] Transaction + operation derived.")
 
     Web2API("remove", nameHash, senderSocket)
 
@@ -147,31 +145,5 @@ export default async function handleWeb2(
     // console.log(JSON.stringify(web2interface.request))
 
     // TODO Maybe we should also return derivedResult somehow
-    return [true, JSON.stringify(web2interface.request)] // , derivedResult
-}
-
-// INFO Derive a valid DEMOS tx and GLS operation from a compatible request
-async function toMempool(
-    instanceName: string,
-    insert: boolean = true,
-): Promise<[string, Operation]> {
-    // We should have a valid, attested request: lets handle it
-    let derivedResults: [string, Operation]
-    let web2Instance: Web2APIClass = Web2API(null, instanceName)
-    let derivable: DerivableNative = {
-        from: "web2module", // FIXME Implement this
-        to: "web2", // FIXME Implement this more in details
-        type: "web2",
-        data: web2Instance.request,
-        timestamp: Date.now(),
-        fees: {
-            networkFee: 0,
-            rpcFee: 0,
-            additionalFee: 0,
-        }, // FIXME Implement this
-    }
-    // NOTE If all the attestations are valid we can create the transaction, insert it and give back the result
-    // Deriving an operation and a tx from the web2 request
-    derivedResults = await deriveMempoolOperation(derivable, insert)
-    return derivedResults
+    return [true, web2interface.request] // , derivedResult
 }

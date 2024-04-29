@@ -1,4 +1,4 @@
-import { MsgSendEncodeObject, StdFee } from '@cosmjs/stargate';
+import { MsgSendEncodeObject, StdFee } from "@cosmjs/stargate"
 
 /**
  * `preparePay` parameters

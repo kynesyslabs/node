@@ -10,10 +10,9 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { Server as ServerType } from "socket.io"
+import ServerListeners from "src/libs/network/serverListeners"
+import { Peer } from "src/libs/peer"
 import terminalkit from "terminal-kit"
-
-import { Peer } from "../peer"
-import ServerListeners from "./serverListeners"
 
 const term = terminalkit.terminal
 

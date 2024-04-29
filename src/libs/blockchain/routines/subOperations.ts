@@ -1,11 +1,12 @@
 import Datasource from "src/model/datasource"
 import { Transactions } from "src/model/entities/Transactions"
 
+import { Operation, OperationResult } from "@kynesyslabs/demosdk/types"
+
 import Block from "../block"
 import Chain from "../chain"
 import GLS from "../gls/gls"
 import Genesis from "../types/genesisTypes"
-import { Operation, OperationResult } from "./executeOperations"
 // NOTE Due to the modularity of the code, many routines will be stored in their own modules
 // TODO Move everything there if possible
 import glsRoutines from "./gls_routines"

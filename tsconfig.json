@@ -1,29 +1,31 @@
 {
-    "compilerOptions": {
-        "target": "ESNext",
-        "module": "ESNext",
-        "esModuleInterop": true,
-        "moduleResolution": "node",
-        "declaration": true,
-        "removeComments": true,
-        "emitDecoratorMetadata": true,
-        "experimentalDecorators": true,
-        "allowSyntheticDefaultImports": true,
-        "sourceMap": true,
-        "sourceRoot": "/",
-        "inlineSources": true,
-        "outDir": "./dist",
-        "baseUrl": "./",
-        "types": ["jest", "node"],
-        "incremental": true,
-        "strictNullChecks": false,
-        "noImplicitAny": false,
-        "strictBindCallApply": false,
-
-        /* Linting */
-        "skipLibCheck": true,
-        "strict": true,
-        "noFallthroughCasesInSwitch": true,
-        "forceConsistentCasingInFileNames": true
-    }
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "esModuleInterop": true,
+    "moduleResolution": "Bundler",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "sourceMap": true,
+    "sourceRoot": "/",
+    "inlineSources": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "types": [
+      "jest",
+      "node"
+    ],
+    "incremental": true,
+    "strictNullChecks": false,
+    "noImplicitAny": false,
+    "strictBindCallApply": false,
+    /* Linting */
+    "skipLibCheck": true,
+    "strict": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true
+  }
 }
