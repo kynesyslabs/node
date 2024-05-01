@@ -119,6 +119,7 @@ export default class Transaction implements ITransaction {
         publicKey: forge.pki.ed25519.BinaryBuffer,
         privateKey: forge.pki.ed25519.BinaryBuffer,
     ) {
+        console.log("[TRANSACTION]: confirmTx")
         console.log(publicKey)
         console.log(privateKey)
         console.log(tx.signature)
@@ -131,7 +132,7 @@ export default class Transaction implements ITransaction {
             confirmation.signature = Cryptography.sign(
                 JSON.stringify(confirmation.data),
                 privateKey,
-            )
+            ).toString()
             return confirmation
         } else {
             return null
