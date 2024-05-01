@@ -42,7 +42,10 @@ export default async function mainLoop() {
         // TODO Check if we have to forge the block now
         let isConsensusTimeReached = await consensusTime.checkConsensusTime()
 
+        console.log("[MAINLOOP]: about to check if its time for consensus")
+        
         if (!hasSentNodeOnlineTx && !isConsensusTimeReached) {
+            console.log("[MAINLOOP]: is not consensus time and no online node tx")
             var online_presence_message = new Transmission(
                 sharedState.getInstance().identity.ed25519.privateKey,
             )
@@ -83,6 +86,7 @@ export default async function mainLoop() {
         }
 
         // every block write online list
+        console.log("[MAINLOOP]: getting online peers")
         const onlinePeers = await peerManager.getOnlinePeers()
 
         // check if online peers have been online for 3 blocks
@@ -92,6 +96,7 @@ export default async function mainLoop() {
 
         let currentlyOnlinePeers
 
+        console.log("[MAINLOOP]: getting online peers for last three blocks")
         const peersOnlineForLastThreeBlocks =
             await Chain.getOnlinePeersForLastThreeBlocks()
 
@@ -142,7 +147,7 @@ export default async function mainLoop() {
 
             sharedStateInstance.shard = shard
             console.log("[MAIN LOOP] Shard selected")
-            // console.log(shard)
+            console.log(shard)
 
             const consensus = await QBFT.representationAssembly(shard)
             console.log(
@@ -154,6 +159,7 @@ export default async function mainLoop() {
             if (consensus[0]) {
                 const prevBlockNumber = (await Chain.getLastBlock()).number
                 consensus[1].number = prevBlockNumber + 1
+
                 await Chain.insertBlock(consensus[1])
 
                 // Next mempool

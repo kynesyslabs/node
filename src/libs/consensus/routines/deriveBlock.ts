@@ -32,10 +32,9 @@ export default async function deriveBlock(
         mempoolData.transactions,
     )
 
-    // REVIEW Derive hashes per address
-    let transactions_per_address = await assignTxs(mempoolData.transactions)
-    derivedBlock.content.per_address_transactions = transactions_per_address
-    // TODO Look for web2data into the mempool
+    let ordered_transactions_hashes = full_ordered_transactions.map((tx) => tx.hash)
+    derivedBlock.content.ordered_transactions = ordered_transactions_hashes
+    // TODO Look for web2data in the mempool
     let web2data = {}
     derivedBlock.content.web2data = web2data
     // Taking the previous hash from the blockchain

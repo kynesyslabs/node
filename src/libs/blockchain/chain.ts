@@ -361,11 +361,12 @@ export default class Chain {
         genesis_tx.content.to = {
             type: "ed25519",
             data: new Uint8Array(Buffer.from("0x0", "hex")),
-        }
+        }.data.toString()
         genesis_tx.content.from = {
             type: "ed25519",
             data: new Uint8Array(Buffer.from("0x0", "hex")),
-        }
+        }.data.toString()
+        
         genesis_tx.signature = {
             type: "ed25519",
             data: new Uint8Array(Buffer.from("0x0", "hex")),

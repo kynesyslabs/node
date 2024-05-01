@@ -30,12 +30,7 @@ export default class QBFT {
             tot_validators: peersNumber,
             results: new Map<string, boolean>(), // Where string is the hex public key and boolean is the result
         }
-        // Starting
-        console.log("[BFT] Getting mempool")
-        // Fixme: this does nothing ATM
-        let our_mempool = await Mempool.getMempool()
-        console.log("[BFT] Got mempool")
-        let merged_mempool = our_mempool
+        
         let pro = 0
         let con = 0
 
@@ -67,7 +62,7 @@ export default class QBFT {
                 true,
             )
             console.log("[BFT] Received Remote Mempool Response")
-            //console.log(remotePoolResponse)
+            console.log(remotePoolResponse)
 
             // Check the response
             if (remotePoolResponse[0] !== true) {
@@ -91,14 +86,17 @@ export default class QBFT {
             mempoolList.push(remotePool)
 
             // Merging with the remote pool as it is compatible
-            let mergedResult = await Mempool.merge(remotePool)
-            if (!mergedResult) {
+            let mergeSuccess = await Mempool.merge(remotePool)
+            if (!mergeSuccess) {
                 console.log("Mempool merge failed")
                 return [false, null]
             }
 
+            console.log("Merged Mempool Result: ")
+            console.log(JSON.stringify(mergeSuccess))
+
             // We now have the merged mempool in Mempool.getInstance()(for ex. the .transactions property)
-            let compatible = true
+            let compatible = mergeSuccess
             consensusTracking.results.set(
                 peerInstance.identity.toString("hex"),
                 compatible,
@@ -137,10 +135,20 @@ export default class QBFT {
             return [false, null]
         }
         const mempool = await Mempool.getMempool()
+        console.log("[BFT]: Retrieved Mempool: ")
+        console.log(mempool)
         const { derivedBlock, full_ordered_transactions } = await deriveBlock(
             mempool,
             medianTimestamp,
         )
+
+        console.log("[BFT]: full ordered transactions for current iteration: ")
+        console.log(full_ordered_transactions)
+
+        console.log("[BFT]: derived block for current iteration: ")
+        console.log(derivedBlock)
+
+
         const proposedBlock = derivedBlock
 
         let forgedProposedHash = proposedBlock.hash
@@ -164,7 +172,7 @@ export default class QBFT {
         console.log("[BFT]: pocList")
         console.log(pocList)
 
-        var errored
+        let errored
         pocList.forEach(pocItem => {
             if (pocItem === null) {
                 errored = true
@@ -172,8 +180,6 @@ export default class QBFT {
                 //console.log(mempool)
                 console.log(proposedBlock)
                 //console.log(forgedProposedHash)
-                // eslint-disable-next-line no-debugger
-                debugger
             }
         })
         if (errored === true) {
@@ -284,8 +290,14 @@ export default class QBFT {
         console.log(
             `[BFT] Checking consensus. Got ${pro} pro and ${con} against votes}, got ${total} votes`,
         )
-        // let twothirdPlus1 = (total * 2) / 3 + 1 // REVIEW Is this correct?
-        let twothirdPlus1 = 1
+        let twothirdPlus1
+        
+        if (total === 1) {
+            twothirdPlus1 = 1
+        } else {
+            twothirdPlus1 = (total * 2) / 3 + 1 
+        }
+
         if (pro >= twothirdPlus1) {
             console.info("[sQBFT] We have a theoric consensus!\n")
             return true

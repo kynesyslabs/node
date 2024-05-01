@@ -210,6 +210,8 @@ export default class Transaction {
     public static fromRawTransaction(rawTx: RawTransaction): Transaction {
         const tx = new Transaction()
 
+        console.log(rawTx)
+
         tx.blockNumber = rawTx.blockNumber
         tx.signature = {
             type: "ed25519", // Assuming the signature type as ed25519; adjust accordingly

@@ -86,7 +86,7 @@ export default class Mempool {
             timestamp: new Date().getTime(),
         }
         console.log("Mempool retrieved:")
-        //console.log(result)
+        console.log(result)
         return result
     }
 
@@ -280,6 +280,9 @@ export default class Mempool {
         const mempoolRepository = db
             .getDataSource()
             .getRepository(MempoolEntity)
+
+        console.log("[MEMPOOL]: Updating transactions in mempool: ")
+        console.log(JSON.stringify(mempool.transactions))
 
         try {
             await mempoolRepository.update(

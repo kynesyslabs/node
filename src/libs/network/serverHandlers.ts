@@ -333,10 +333,9 @@ export default class ServerHandlers {
             | AddressInfo
         let result: any // Storage for the result
         let nStat: any // Storage for the native status
-        let socketized_response: Peer[]
         let { data } = content
         //console.log(typeof data)
-        //console.log(JSON.stringify(content))
+        console.log(JSON.stringify(content))
         switch (content.message) {
             case "crosschain_operation":
             case "multichain_operation":
@@ -378,11 +377,13 @@ export default class ServerHandlers {
                 response = await Chain.getLastBlockHash()
                 break
             case "getBlockByNumber":
+                console.log(`get block by number ${data.blockNumber}`)
                 result = await getBlockByNumber(data)
                 response = result.response
                 extra = result.extra
                 break
             case "getBlockByHash":
+                console.log(`get block by hash ${data.hash}`)
                 result = getBlockByHash(data)
                 response = result.response
                 extra = result.extra
@@ -393,6 +394,7 @@ export default class ServerHandlers {
                         error: "No tx specified",
                     })
                 }
+                console.log(`getting tx with hash ${data.hash}`)
                 response = await Chain.getTxByHash(data.hash)
                 break
             case "getMempool":
