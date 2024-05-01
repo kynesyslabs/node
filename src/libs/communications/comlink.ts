@@ -172,11 +172,14 @@ export default class ComLink {
     // INFO Generic comlink validation function
     async validateComlink() {
         var _currentMessage = this.chain.current.currentMessage
+        console.log(_currentMessage)
         console.log("[COMLINK VALIDATION 2] Stringifying...")
         // Check if the current message hash matches the message
         let stringifiedMessage = JSON.stringify(_currentMessage.bundle.content)
+        console.log(_currentMessage.bundle.hash)
         console.log("[COMLINK VALIDATION 2] Hashing...")
         let _derivedMessageHash = Hashing.sha256(stringifiedMessage)
+        console.log(_derivedMessageHash)
         if (!(_derivedMessageHash === _currentMessage.bundle.hash)) {
             //console.log(_currentMessage)
             //console.log(stringifiedMessage)

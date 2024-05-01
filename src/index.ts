@@ -12,7 +12,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import "reflect-metadata"
 
-import * as bitcoin from "bitcoinjs-lib"
 import * as dotenv from "dotenv"
 import express from "express"
 //import process from "node:process"

@@ -16,26 +16,27 @@ KyneSys Labs: https://www.kynesys.xyz/
 	executeSequence is called for each address to execute the operations contained.
 */
 
+import { Operation, OperationResult } from "@kynesyslabs/demosdk/types"
+
 import Block from "../block"
-import { TxFee } from "../types/transactions"
 import subOperations from "./subOperations"
 
-export interface OperationResult {
-    success: boolean
-    message: string
-}
+// export interface OperationResult {
+//     success: boolean
+//     message: string
+// }
 
-export interface Operation {
-    // TODO Add parameters as a property
-    operator: string
-    actor: string
-    params: any
-    hash: string
-    nonce: number
-    timestamp: number
-    status: boolean | "pending"
-    fees: TxFee
-}
+// export interface Operation {
+//     // TODO Add parameters as a property
+//     operator: string
+//     actor: string
+//     params: any
+//     hash: string
+//     nonce: number
+//     timestamp: number
+//     status: boolean | "pending"
+//     fees: TxFee
+// }
 
 // NOTE The Actor object is designed to represent a single operator and the status of its operations
 export interface Actor {

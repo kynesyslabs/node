@@ -1,6 +1,6 @@
 // INFO In this module is offloaded the parsing of XM requests
 import * as fs from "fs"
-import * as multichain from "sdk/localsdk/multichain"
+import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 
@@ -39,7 +39,8 @@ export interface old_XMScript {
 }
 
 export interface XMScript {
-    multichain_operation: { [key: string]: IOperation }
+    operations: { [key: string]: IOperation },
+    operations_order: string[]
 }
 
 class XMParser {
@@ -79,15 +80,15 @@ class XMParser {
         // TODO Enforce order
         for (
             let id = 0;
-            id < Object.keys(fullscript.multichain_operation.operations).length;
+            id < Object.keys(fullscript.operations).length;
             id++
         ) {
             try {
-                name = Object.keys(fullscript.multichain_operation.operations)[
+                name = Object.keys(fullscript.operations)[
                     id
                 ]
                 console.log("[" + name + "] ")
-                operation = fullscript.multichain_operation.operations[name]
+                operation = fullscript.operations[name]
                 console.log("[XMParser]: full script operation")
                 console.log(fullscript)
                 console.log("[XMParser]: partial operation")
@@ -142,7 +143,7 @@ class XMParser {
             const result = await handlePayOperation(operation, chainID)
 
             // INFO: Adding chain info for debugging purposes
-            result.chain = `${operation.chain}.${operation.subchain}`
+            result["chain"] = `${operation.chain}.${operation.subchain}`
             return result
         }
 
@@ -160,7 +161,7 @@ class XMParser {
                 // console.log(evmProviders)
                 let providerUrl =
                     evmProviders[operation.chain][operation.subchain] // REVIEW Error handling
-                let evmInstance = await multichain.EVM.createInstance(
+                let evmInstance = multichain.EVM.createInstance(
                     chainID,
                     providerUrl,
                 ) // REVIEW We should be connected
@@ -168,7 +169,7 @@ class XMParser {
                     `[XM Method] operation.chain: ${operation.chain}, operation.subchain: ${operation.subchain}`,
                 )
                 console.log(`[XM Method]: providerUrl: ${providerUrl}`)
-                await evmInstance.connect(providerUrl)
+                await evmInstance.connect()
                 console.log("params: \n")
                 console.log(operation.task.params)
                 console.log("\n end params: \n")

@@ -32,3 +32,5 @@ src/features/experimental/fhe/fhe_test.ts
 yarn.lock
 publickey
 publickey
+documentation/schemas/.$*
+appmap.yml

@@ -15,28 +15,37 @@ import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import handleWeb2 from "src/features/web2/Web2Dispatcher"
 import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool"
+import {
+    broadcastVerifiedNativeTransaction, confirmTransaction,
+} from "src/libs/blockchain/routines/validateTransaction"
+import Transaction from "src/libs/blockchain/transaction"
+import deriveBlock from "src/libs/consensus/routines/deriveBlock"
+import Cryptography from "src/libs/crypto/cryptography"
+import Hashing from "src/libs/crypto/hashing"
+import eggs from "src/libs/network/routines/eggs"
+import getBlockByHash from "src/libs/network/routines/nodecalls/getBlockByHash"
+import getBlockByNumber from "src/libs/network/routines/nodecalls/getBlockByNumber"
+import getBlockHeaderByHash from "src/libs/network/routines/nodecalls/getBlockHeaderByHash"
+import getBlockHeaderByNumber from "src/libs/network/routines/nodecalls/getBlockHeaderByNumber"
+import getPeerlist from "src/libs/network/routines/nodecalls/getPeerlist"
+import getPreviousHashFromBlockHash from "src/libs/network/routines/nodecalls/getPreviousHashFromBlockHash"
+import getPreviousHashFromBlockNumber from "src/libs/network/routines/nodecalls/getPreviousHashFromBlockNumber"
+import { normalizeWebBuffers } from "src/libs/network/routines/normalizeWebBuffers"
+import Sessions from "src/libs/network/routines/sessionManager"
+import { BrowserRequest } from "src/libs/network/serverListeners"
 import { Peer } from "src/libs/peer"
 import { Blocks } from "src/model/entities/Blocks"
 import sharedState from "src/utilities/sharedState"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
 
+import {
+    AddressInfo, ExecutionResult, IWeb2Payload, IWeb2Request, ValidityData,
+    XMScript,
+} from "@kynesyslabs/demosdk/types"
+
 import GLS from "../blockchain/gls/gls"
-import validateTransaction from "../blockchain/routines/validateTransaction"
-import Transaction from "../blockchain/transaction"
-import AddressInfo from "../blockchain/types/addressInfo"
-import deriveBlock from "../consensus/routines/deriveBlock"
-import eggs from "./routines/eggs"
-import getPreviousHashFromBlockNumber from "./routines/nodecalls/getPreviousHashFromBlockNumber"
-import { normalizeWebBuffers } from "./routines/normalizeWebBuffers"
-import Sessions from "./routines/sessionManager"
-import { BrowserRequest } from "./serverListeners"
-import getPeerlist from "./routines/nodecalls/getPeerlist"
-import getPreviousHashFromBlockHash from "./routines/nodecalls/getPreviousHashFromBlockHash"
-import getBlockHeaderByHash from "./routines/nodecalls/getBlockHeaderByHash"
-import getBlockHeaderByNumber from "./routines/nodecalls/getBlockHeaderByNumber"
-import getBlockByNumber from "./routines/nodecalls/getBlockByNumber"
-import getBlockByHash from "./routines/nodecalls/getBlockByHash"
+import { NativePayload, StringifiedPayload, Web2Payload, XMPayload } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/Transaction"
 
 let term = terminalkit.terminal
 
@@ -85,62 +94,183 @@ export default class ServerHandlers {
     // !SECTION Login On Chain
 
     // ANCHOR Comlinks
-    static async handleTransaction(content: any): Promise<any> {
-        term.yellow("[handleTransactions] Handling a native DEMOS tx...\n")
-        let require_reply = true // REVIEW Sure?
-        let extra: string, response: boolean
+    static async handleValidateTransaction(
+        tx: Transaction,
+    ): Promise<ValidityData> {
+        term.yellow("[handleTransactions] Handling a DEMOS tx...\n")
         let fname = "[handleTransactions] "
         term.yellow(fname + "Handling transaction...")
         // Verify and execute the transaction
-        let validatedTx: any[]
+        let validationData: ValidityData
         try {
             /* NOTE This workflow goeas as:
-             * The tx is validated, an operation is created and pushed in the GLS
-             * An operation for the gas is also pushed in the GLS
-             * The tx is pushed in the mempool if applicable
+             * The transaction is validated
+             * A gas operation is created and is sent back alongside the validation data
+             * TODO Add signatures to validation data
+             * The validation data can be used by the client to effectively execute the tx
              */
             //console.log(fname + "Validating transaction...")
-            validatedTx = await validateTransaction(
-                content.type,
-                content.message,
-            )
+            validationData = await confirmTransaction(tx)
             //console.log(fname + "Fetching result...")
         } catch (e) {
             term.red.bold("[TX VALIDATION ERROR] 💀 : ")
             term.red(e)
-            validatedTx = [false, JSON.stringify(e)]
+            validationData = {
+                data: {
+                    valid: false,
+                    reference_block: null,
+                    message:
+                        "An error occurred while validating the transaction",
+                    gas_operation: null,
+                    transaction: null,
+                },
+                signature: null,
+                rpc_public_key: null,
+            }
+            // Signing and hashing the validation data
+            let hashedValidationData = Hashing.sha256(
+                JSON.stringify(validationData.data),
+            )
+            validationData.signature = Cryptography.sign(
+                hashedValidationData,
+                sharedState.getInstance().identity.ed25519.privateKey,
+            )
         }
 
-        // Returning an appropriate response
-        if (!validatedTx[0]) {
-            // An invalid transaction won't even be added to the mempool
-            term.yellow.bold(fname + "Invalid transaction 💀 : ")
-            console.log(validatedTx[1])
-            extra = "InvalidTransaction 💀: " + validatedTx[1]
-            response = false
-        } else {
-            /* NOTE
-                    We just processed the cryptographic validity of the transaction.
-                    We have no idea of its state validity and thus won't modify the GLS, but
-                    it can go into the mempool to be further processed if its cryptographically valid.
-                */
-            term.green.bold(fname + "Valid transaction! ")
-            //console.log(validatedTx[1])
-            console.log(fname + "Adding transaction to mempool...")
-            // Adding the valid tx to the mempool
-            Mempool.addTransaction(validatedTx[1]) // Works by writing the registry
-            extra = validatedTx[1].hash
-            response = true
-            //process.exit(0) /* TODO Eliminate this debug line */
-        }
-        // TODO Broadcast the tx to the other peers
-        // Response is then sent back automatically as a reply (with our validation)
         term.bold.white(fname + "Transaction handled.")
-        return { extra, require_reply, response }
+        return validationData
+    }
+
+    // NOTE This method is used to handle the execution of a transaction
+    // TODO Better typing for content (must contain validity data, hashing and signature as shown below)
+    // TODO Either put this into a module or do something to make it more modular
+    static async handleExecuteTransaction(
+        validatedData: ValidityData,
+        senderSocket: any,
+    ): Promise<ExecutionResult> {
+
+        let fname = "[handleExecuteTransaction] "
+        let result: ExecutionResult = {
+            success: true,
+            response: null,
+            extra: null,
+            require_reply: false,
+        }
+        // NOTE Content should contain validity data and our signature to proceed
+        // Integrity checks
+        let ourKey = sharedState.getInstance().identity.ed25519.publicKey
+        let hexOurKey = ourKey.toString("hex")
+        let dataKey = validatedData.rpc_public_key
+        let hexDataKey = Buffer.from(dataKey as Buffer).toString("hex")
+        let dataSignature = validatedData.signature
+        let queriedTx = validatedData.data.transaction
+        console.log("[SERVER] Received transaction for execution: " + queriedTx.hash)
+
+        // We need to have issued the validity data
+        if (hexDataKey !== hexOurKey) {
+            term.red.bold(fname + "Invalid validityData signature key (not us) 💀 : ")
+
+            result.success = false
+            result.response = false
+            result.extra = "Invalid signature key"
+            return result
+
+        }
+        // Also the signature must be valid
+        let hashedData = Hashing.sha256(JSON.stringify(validatedData.data))
+        let signatureValid = Cryptography.verify(
+            hashedData,
+            dataSignature,
+            dataKey,
+        )
+        if (!signatureValid) {
+            term.red.bold(fname + "Invalid validityData signature 💀 : ")
+            result.success = false
+            result.response = false
+            result.extra = "Invalid signature"
+            return result
+        }
+        // Finally, the block number reference must be valid
+        let blockNumber = validatedData.data.reference_block
+        let lastBlockNumber = await Chain.getLastBlockNumber()
+        if (blockNumber != lastBlockNumber) {
+            term.red.bold(fname + "Invalid validityData block reference 💀 : ")
+            result.success = false
+            result.response = false
+            result.extra = "Invalid block reference"
+            return result
+        }
+        // REVIEW Is this useful at this point?
+        if (!validatedData.data.valid) {
+            // An invalid transaction won't even be added to the mempool
+            term.yellow.bold(fname + "Invalid validityData 💀 : ")
+            console.log(validatedData.data.message)
+            result.success = false
+            result.response = false
+            result.extra = validatedData.data.message
+            return result
+        }
+
+        /* NOTE
+                    We just processed the cryptographic validity of the transaction.
+                    We will now try to execute it obtaining valid Operations.
+                */
+        term.green.bold(fname + "Valid validityData! \n")
+        // REVIEW Switch case for different types of transactions
+        let tx = validatedData.data.transaction
+        // Using a payload variable to be able to check types immediately
+        let payload: XMPayload | Web2Payload | NativePayload | StringifiedPayload
+        switch (tx.content.type) {
+            case "crosschainOperation":
+            case "multichainOperation":
+                payload = tx.content.data as XMPayload
+                console.log(
+                    "[Included XM Chainscript]")
+                console.log(payload[1])
+                // TODO Better types on answers
+                var xm_result = await ServerHandlers.handleXMChainOperation(
+                    payload[1] as XMScript,
+                )
+                // TODO Add result.success handling
+                result.response = xm_result
+                break
+            case "web2Request":
+                // TODO Better types on answers
+                payload = tx.content.data as Web2Payload
+                var web2_result = await ServerHandlers.handleWeb2Request(
+                    payload[1] as IWeb2Request,
+                    senderSocket,
+                )
+                // TODO Add result.success handling
+                result.response = web2_result
+                break
+            case "native":
+                // REVIEW This still works with the new tx system?
+                var native_result = await broadcastVerifiedNativeTransaction(validatedData)
+                // NOTE We add the Transaction to the mempool as it looks valid
+                if (native_result[0]) {
+                    result.success = true
+                }
+                // REVIEW Check if this is ok with types
+                result.response = native_result
+        }
+        // Only if the transaction is valid we add it to the mempool
+        if (result.success) {
+            // REVIEW We add the transaction to the mempool
+            Mempool.addTransaction(queriedTx) // FIXME queriedTx hash mismatch with the expected hash? WHY
+            /* TODO for the above FIXME
+                * queriedTx should be identical to above but here is not coherent anymore
+            */
+            // TODO Check if Operation(s) are added to the GLS too
+        }
+        // TODO Broadcast the tx to the other peers (or maybe not, consensus should take care of it)
+        // Response is then sent back automatically as a reply (with our validation)
+        // Returning the state of the transaction including operations
+        return result
     }
 
     // INFO Handling XM Transaction
-    static async handleXMChainOperation(xmscript: any): Promise<any> {
+    static async handleXMChainOperation(xmscript: XMScript): Promise<any> {
         /* NOTE This workflow goeas as:
          * The XM Operation is validated, executed and verified
          * when applicable.
@@ -162,7 +292,7 @@ export default class ServerHandlers {
 
     // INFO This method is used to allow signed data exchanges between peers and clients
     static async handleXMChainSignedPayload(content: any): Promise<any> {
-        // TODO Probably to take it out
+        // TODO Probably to take out
     }
 
     static async handleXMChainStatus(): Promise<any> {
@@ -178,8 +308,7 @@ export default class ServerHandlers {
     // NOTE Theoretically, content should be IWeb2Request compliant
     // LINK "../../features/web2/types/Web2Request";
     static async handleWeb2Request(
-        request: any,
-        content: any,
+        content: IWeb2Request,
         senderSocket: any,
     ): Promise<any> {
         /* NOTE This workflow goeas as:
@@ -193,9 +322,9 @@ export default class ServerHandlers {
         console.log("[SERVER] Received web2Request")
         //console.log(JSON.stringify(request))
 
-        let extra: any,
+        let extra: string,
             require_reply = false
-        let response: unknown
+        let response: IWeb2Request
         // We get our connection string
         // const currentPeerString = Identity.getInstance().getConnectionString()
         // NOTE Switched to the new class
@@ -208,10 +337,10 @@ export default class ServerHandlers {
 
         // Managing the results
         if (fullResponse[0]) {
-            response = fullResponse[1]
+            response = fullResponse[1] as IWeb2Request
         } else {
-            response = "error"
-            extra = fullResponse[1]
+            response = null
+            extra = fullResponse[1] as string
         }
         return { extra, require_reply, response }
     }
@@ -337,11 +466,12 @@ export default class ServerHandlers {
         //console.log(typeof data)
         console.log(JSON.stringify(content))
         switch (content.message) {
-            case "crosschain_operation":
+            // NOTE The following commented block of code is vestigial
+            /*case "crosschain_operation":
             case "multichain_operation":
                 term.yellow.bold("[SERVER] Received crosschain_operation\n")
                 response = await ServerHandlers.handleXMChainOperation(content)
-                break // REVIEW Here or in comlinks?
+                break // REVIEW Here or in comlinks? */
             case "getPeerlist":
                 response = await getPeerlist()
                 break

@@ -9,100 +9,177 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import { cryptography } from "src/libs/crypto"
+import { pki } from "node-forge"
+import Chain from "src/libs/blockchain/chain"
+import GLS from "src/libs/blockchain/gls/gls"
+import calculateCurrentGas from "src/libs/blockchain/routines/calculateCurrentGas"
+import executeNativeTransaction from "src/libs/blockchain/routines/executeNativeTransaction"
+import Transaction from "src/libs/blockchain/transaction"
+import Cryptography from "src/libs/crypto/cryptography"
+import Hashing from "src/libs/crypto/hashing"
+import sharedState from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 
-import GLS, { Operation } from "../gls/gls"
-import Transaction from "../transaction"
-import calculateCurrentGas from "./calculateCurrentGas"
-import executeTransaction from "./executeTransaction"
+import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 
 const term = terminalkit.terminal
 
-// INFO Cryptographically validate a transaction, calculate gas and see if the execution is valid
+// INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
-export default async function validateTransaction(
-    type: string,
-    request: any, // Must contain a tx property being a Transaction object
-): Promise<[boolean, any]> {
-    term.yellow("Validating transaction...\n")
-
+export async function confirmTransaction(
+    tx: Transaction, // Must contain a tx property being a Transaction object
+): Promise<ValidityData> {
+    term.yellow("[Native Tx Validation] Validating transaction...\n")
+    // Getting the current block number
+    let reference_block = await Chain.getLastBlockNumber()
     // Loading identity
-    const id_ed25519 = await cryptography.load("./.demos_identity")
-    let publicKey = Buffer.from(id_ed25519.publicKey.toString("hex"))
-    let privateKey = Buffer.from(id_ed25519.privateKey.toString("hex"))
-    // Ingesting a transaction so that we have all the methods we need
-    let tx = new Transaction()
-    tx.content = request.tx.content
-    tx.signature = request.tx.signature
-    // As usual converting buffers to nodejs buffers
-    if (
-        typeof tx.signature === "object" &&
-        request.tx.signature.type === "Buffer"
-    ) {
-        tx.signature = Buffer.from(request.tx.signature) as any
-        console.log("Normalized signature")
-    }
+    const id_ed25519 = await Cryptography.load("./.demos_identity")
+    let publicKey = id_ed25519.publicKey
+    let privateKey = id_ed25519.privateKey
+    // REVIEW This should work just fine
     console.log("Signature: ")
     console.log(tx.signature)
-    tx.hash = request.tx.hash
-    tx.content.transaction_fee = request.tx.content.transaction_fee
 
-    console.log("[TX RECEIVED] Examining:\n")
+    console.log("[Tx Validation] Examining it\n")
     console.log(tx)
 
-    // NOTE Charge the gas for the transaction
-    let from = tx.content.from.toString("hex")
+    let validityData: ValidityData = {
+        data: {
+            valid: false,
+            reference_block: reference_block,
+            message: "",
+            gas_operation: null,
+            transaction: tx,
+        },
+        signature: null,
+        rpc_public_key: publicKey as pki.ed25519.BinaryBuffer,
+    }
+
+    /* NOTE Charge the gas for the transaction
+    This includes a check to see if the transaction gas can be paid
+    by the sender prior to the transaction execution part.
+    This way, we can avoid committing computations that will be reverted.
+    */
+    let from: string
+    try {
+        from = tx.content.from.toString("hex")
+        console.log(
+            "[Native Tx Validation] Calculating gas for: " + from + "\n",
+        )
+    } catch (e) {
+        term.red.bold(
+            "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction\n",
+        )
+        validityData.data.message =
+            "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction\n"
+        // Hash the validation data
+        let hash = Hashing.sha256(JSON.stringify(validityData.data))
+        // Sign the hash
+        validityData.signature = Cryptography.sign(hash, privateKey)
+        return validityData
+    }
     let fromBalance = 0
     try {
         fromBalance = await GLS.getGLSNativeBalance(from)
     } catch (e) {
         term.red.bold(
-            "[NATIVE TX] [BALANCE ERROR] No balance found for this address: " +
+            "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " +
                 from +
                 "\n",
         )
-        return [
-            false,
-            "[NATIVE TX] [BALANCE ERROR] No balance found for this address: " +
-                from +
-                "\n",
-        ]
+        validityData.data.message =
+            "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " +
+            from +
+            "\n"
+        // Hash the validation data
+        let hash = Hashing.sha256(JSON.stringify(validityData.data))
+        // Sign the hash
+        validityData.signature = Cryptography.sign(hash, privateKey)
+        return validityData
     }
     // TODO Work on this method
-    let gasAmount = await calculateCurrentGas(tx)
-    if (fromBalance < gasAmount) {
-        return [
-            false,
-            "[NATIVE TX] [BALANCE ERROR] Insufficient balance for gas; required: " +
-                gasAmount +
+    let compositeFeeAmount = await calculateCurrentGas(tx)
+    // FIXME Overriding for testing
+    if (fromBalance < compositeFeeAmount && sharedState.getInstance().PROD) {
+        term.red.bold(
+            "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
+                compositeFeeAmount + "; available: " + fromBalance + "\n" +
                 "\n",
-        ]
+        )
+        validityData.data.message =
+            "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
+            compositeFeeAmount + "; available: " + fromBalance + "\n" +
+            "\n"
+        // Hash the validation data
+        let hash = Hashing.sha256(JSON.stringify(validityData.data))
+        // Sign the hash
+        validityData.signature = Cryptography.sign(hash, privateKey)
+        return validityData
     }
+
+    // TODO Move gas operation creator to a separate module
     // NOTE Deducting the gas from the account and assigning the operation to be executed
     // as child of this transaction
     let gas_operation: Operation = {
         operator: "pay_gas",
         actor: from,
-        params: { amount: gasAmount.toString() },
+        params: { amount: compositeFeeAmount.toString() },
         hash: tx.hash,
         nonce: tx.content.nonce,
         timestamp: tx.content.timestamp,
         status: "pending",
-        fees: tx.content.transaction_fee,
+        fees: {
+            network_fee: 0,
+            rpc_fee: 0,
+            additional_fee: 0,
+        }, // This is the gas operation so it doesn't have additional fees
     }
-    console.log("[TX RECEIVED] Gas Operation derived\n")
+    console.log("[Native Tx Validation] Gas Operation derived\n")
     //console.log(gas_operation)
+
     // Verify tx validity
-    let verified = Transaction.confirmTx(tx, privateKey, publicKey) // REVIEW Are the buffers ok?
+    let verified = Transaction.confirmTx(tx, privateKey as pki.ed25519.BinaryBuffer, publicKey as pki.ed25519.BinaryBuffer) // REVIEW Are the buffers ok?
     if (!verified) {
-        return [false, "Transaction not verified: " + tx.hash]
+        term.red.bold(
+            "[Native Tx Validation] [SIGNATURE ERROR] Transaction signature not verified\n",
+        )
+        validityData.data.message =
+            "[Native Tx Validation] [SIGNATURE ERROR] Transaction signature not verified\n"
+        // Hash the validation data
+        let hash = Hashing.sha256(JSON.stringify(validityData.data))
+        // Sign the hash
+        validityData.signature = Cryptography.sign(hash, privateKey)
+        return validityData
     }
+    console.log("[Native Tx Validation] Transaction validity verified, compiling ValidityData\n")
+
+    // Now that we verified the transaction, we can return its validity data
+    // TODO Add the relevant info
+    validityData.data.valid = true
+    validityData.data.message =
+        "Transaction verified and ready to be executed\n"
+    validityData.data.gas_operation = gas_operation
+    // Hash the validation data
+    let hash = Hashing.sha256(JSON.stringify(validityData.data))
+    // Sign the hash
+    validityData.signature = Cryptography.sign(hash, privateKey)
+
+    console.log("[Native Tx Validation] Transaction validity data compiled\n")
+    return validityData
+}
+
+// TODO a verified transaction should be signed by the same rpc that verified it and should be only valid for the current consensus round
+export async function broadcastVerifiedNativeTransaction(
+    validityData: ValidityData,
+): Promise<[boolean, string, Operation[]?]> {
     // REVIEW Execute or Revert the transaction
     // NOTE executeTransaction returns an array of [success, message, operations]
     // The operations are the Operation objects that are executed in the GLS after the consensus
     // has confirmed the transaction in the block.
-    let execution = await executeTransaction(tx)
+
+    let execution = await executeNativeTransaction(
+        validityData.data.transaction,
+    )
     if (!execution[0]) {
         return [false, "Execution failed: " + execution[1]]
     }
@@ -111,7 +188,8 @@ export default async function validateTransaction(
 
     // NOTE Now we can save the gas operation as the tx is set to be executed
     // and the gas will be deducted anyway
-    GLS.getInstance().operations.push(gas_operation)
+    console.log("[TX RECEIVED] Gas Operation added to the GLS\n")
+    GLS.getInstance().operations.push(validityData.data.gas_operation)
 
     // Finally, we add all the derived operations to the GLS
     for (let i = 0; i < execution[2].length; i++) {
@@ -120,5 +198,5 @@ export default async function validateTransaction(
         GLS.getInstance().operations.push(execution[2][i])
         console.log("[TX RECEIVED] Operation added to the GLS\n")
     }
-    return [true, tx]
+    return execution
 }

@@ -9,10 +9,13 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+import { Socket } from "socket.io-client"
 import sharedState from "src/utilities/sharedState"
 import sizeOf from "src/utilities/sizeOf"
 import { json } from "stream/consumers"
 import terminalkit from "terminal-kit"
+
+import { DefaultEventsMap } from "@socket.io/component-emitter"
 
 import ComLink from "./comlink"
 
@@ -21,9 +24,9 @@ const term = terminalkit.terminal
 export default class ComLinkUtils {
     // INFO common comlink digestor
     static async parseComlink(
-        request,
-        peerSocket,
-    ): Promise<[ComLink, any] | boolean> {
+        request: ComLink,
+        peerSocket: Socket<DefaultEventsMap, DefaultEventsMap>,
+    ): Promise<ComLink> {
         // We need to check if the message request is valid (is a ComLink object)
         term.yellow("[COMLINKUTILS] Received comlink\n")
         // GIving the request the comlink methods
@@ -53,7 +56,7 @@ export default class ComLinkUtils {
             "The request has a current message that is a: " +
                 typeof _comlink_request.chain.current.currentMessage,
         )
-        let type_of_call
+        let type_of_call: string
         try {
             type_of_call =
                 _comlink_request.chain.current.currentMessage.bundle.content
@@ -64,7 +67,7 @@ export default class ComLinkUtils {
                 status: "error",
                 message: e,
             })
-            return false
+            return null
         }
         if (!(type_of_call === "nodeCall")) {
             let valid: any[]
@@ -79,7 +82,7 @@ export default class ComLinkUtils {
                     status: "error",
                     message: valid[1],
                 })
-                return false
+                return null
             }
         } else {
             term.green("[COMLINK] nodeCall received (no auth required)\n")
@@ -92,17 +95,16 @@ export default class ComLinkUtils {
                 muid: null,
                 message: "No muid specified",
             })
-            return false
+            return null
         }
         console.log("[COMLINK PARSING] MUID: " + request.muid)
         // Taking the message part
-        let content
-        if (!(typeof request.chain.current.currentMessage === "object")) {
+        /*if (!(typeof request.chain.current.currentMessage === "object")) {
             content = JSON.parse(request.chain.current.currentMessage).bundle
                 .content
-        } else {
-            content = request.chain.current.currentMessage.bundle.content
-        }
+        } else { */
+        let content = request.chain.current.currentMessage.bundle.content
+        //}
         if (!content) {
             console.log(
                 "[COMLINK PARSING] Eww, no content specified. Erroring back.",
@@ -115,18 +117,18 @@ export default class ComLinkUtils {
         }
         console.log("[COMLINK PARSING] Content parsed")
         //console.log(content)
-        if (!content.message) {
+        if (!content.message && !content.data) {
             console.log(
-                "[COMLINK PARSING] No message specified. Erroring back.",
+                "[COMLINK PARSING] No message or data specified. Erroring back.",
                 //console.log(content),
             )
             peerSocket.emit("error", {
                 muid: request.muid,
                 message: "Eww...no message specified",
             })
-            return false
+            return null
         }
         console.log("[COMLINK PARSING] Message parsed")
-        return [_comlink_request, content]
+        return _comlink_request
     }
 }

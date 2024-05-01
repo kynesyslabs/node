@@ -11,7 +11,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { pki } from "node-forge"
 
-import BlockContent from "./types/blocks"
+import { BlockContent } from "@kynesyslabs/demosdk/types"
 
 // NOTE Block class
 export default class Block {
