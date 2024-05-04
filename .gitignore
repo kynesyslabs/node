@@ -34,3 +34,11 @@ publickey
 publickey
 documentation/schemas/.$*
 appmap.yml
+docker/attach.sh
+docker/pre_public_dev.sh
+docker/pre_public_local.sh
+docker/rebuild_rerun.sh
+docker/remove.sh
+docker/reset_rerun.sh
+docker/run_cmd.sh
+docker/stop.sh

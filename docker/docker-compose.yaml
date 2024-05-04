@@ -1,0 +1,11 @@
+version: "3.7"
+services:
+    kyntainer:
+        image: kyntainer
+        build:
+            context: .
+            dockerfile: Dockerfile
+        ports:
+            # trunk-ignore(yamllint/quoted-strings)
+            - "53551:53550"
+        command: yarn start
