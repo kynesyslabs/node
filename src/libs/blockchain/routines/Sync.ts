@@ -111,7 +111,8 @@ export async function fastSync(
     for (let i = 0; i < blockNumberDifference; i++) {
         // sourcery skip: use-braces
         // NOTE Debug flags
-        if (sharedState.getInstance().PROD) blocktoAsk++
+        // if (sharedState.getInstance().PROD)
+        blocktoAsk++
 
         console.log("[SYNC] Asking the first peer for block " + blocktoAsk)
         // Effectively asking the first peer for the block
@@ -128,12 +129,17 @@ export async function fastSync(
         )
 
         console.log("[SYNC] Block response: " + blockResponse[0])
-        let parsedBlock: Block = JSON.parse(blockResponse[1].message)  // FIXME Undefined?
+        let parsedBlock: Block = JSON.parse(JSON.parse(blockResponse[1].message)) // TODO Why has to be like this?
 
         console.log("[SYNC DEBUG] Parsed block:")
         console.log(parsedBlock)
+        console.log("[SYNC DEBUG] Type of parsed block:")
+        console.log(typeof(parsedBlock))
+
         console.log("[SYNC] Block hash:")
         console.log(parsedBlock.hash)
+        console.log("[SYNC] Previous hash:")
+        console.log(parsedBlock.content.previousHash)
 
         console.log("[SYNC] Expecting: " + previousHash)
         // Checking if the hash of the previous block is the same of our block
