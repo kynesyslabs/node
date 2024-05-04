@@ -28,8 +28,8 @@ RUN npm install -g yarn@latest tsx@latest
 # REVIEW Clone the repository when will be public
 # RUN git clone https://github.com/kynesyslabs/node
 # TODO The copy below is thus temporary
-RUN mkdir /node
-COPY ./node /node
+#RUN mkdir /node
+#COPY ./node/ /node
 WORKDIR /node
 RUN yarn
 

@@ -12,6 +12,7 @@
         "prettier-format": "prettier --config .prettierrc.json modules/**/*.ts --write",
         "format": "prettier --plugin-search-dir . --write .",
         "start": "tsx -r tsconfig-paths/register src/index.ts",
+        "start:up": "yarn install && tsx -r tsconfig-paths/register src/index.ts",
         "start:bun": "bun -r tsconfig-paths/register src/index.ts",
         "start:clean": "rm -rf data/chain.db && tsx -r tsconfig-paths/register src/index.ts",
         "start:purge": "rm -rf .demos_identity && rm -rf data/chain.db && tsx -r tsconfig-paths/register src/index.ts",

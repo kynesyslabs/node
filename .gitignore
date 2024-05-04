@@ -9,7 +9,7 @@ data/evmChains/
 data/evmChains
 data/evmChains/*.json
 data/chain.db
-docker/node
+docker/node_*
 
 .vscode
 

@@ -1,17 +1,5 @@
 version: "3.7"
 services:
-    kyntainer-1:
-        image: kyntainer
-        build:
-            context: .
-            dockerfile: Dockerfile
-        volumes:
-            - ./node_1:/node
-            - ./resources/peerlist:/node/demos_peers
-        ports:
-            # trunk-ignore(yamllint/quoted-strings)
-            - "53551:53550"
-        command: yarn run start:up
     kyntainer-2:
         image: kyntainer
         build:
