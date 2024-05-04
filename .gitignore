@@ -42,3 +42,5 @@ docker/remove.sh
 docker/reset_rerun.sh
 docker/run_cmd.sh
 docker/stop.sh
+docker/node_1/data/chain.db
+docker/node_2/data/chain.db
