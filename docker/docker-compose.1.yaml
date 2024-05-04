@@ -6,7 +6,10 @@ services:
             context: .
             dockerfile: Dockerfile
         volumes:
-            - ./node_1:/node
+            - ./node_base:/node
+            - ./node_1/.demos_identity:/node/.demos_identity
+            - ./node_1/data/chain.db:/node/data/chain.db
+            - ./node_1/pubkey:/node/pubkey
             - ./resources/peerlist:/node/demos_peers
         ports:
             # trunk-ignore(yamllint/quoted-strings)

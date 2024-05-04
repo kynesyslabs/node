@@ -6,7 +6,9 @@ services:
             context: .
             dockerfile: Dockerfile
         volumes:
-            - ./node_1:/node
+            - ./node_base:/node
+            - ./node_1/.demos_identity:/node/.demos_identity
+            - ./node_1/data/chain.db:/node/data/chain.db
             - ./resources/peerlist:/node/demos_peers
         ports:
             # trunk-ignore(yamllint/quoted-strings)
@@ -18,7 +20,9 @@ services:
             context: .
             dockerfile: Dockerfile
         volumes:
-            - ./node_2:/node
+            - ./node_base:/node
+            - ./node_2/.demos_identity:/node/.demos_identity
+            - ./node_2/data/chain.db:/node/data/chain.db
             - ./resources/peerlist:/node/demos_peers
         ports:
             # trunk-ignore(yamllint/quoted-strings)
