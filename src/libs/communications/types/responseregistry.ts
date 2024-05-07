@@ -11,10 +11,7 @@ Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
 KyneSys Labs: https://www.kynesys.xyz/
 
 */
-import Datasource from "src/model/datasource"
-
 import ComLink from "../comlink"
-import Transmission from "../transmission"
 
 export interface Response {
     message: string // TODO Add message type
