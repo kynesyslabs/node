@@ -23,10 +23,13 @@ import {
     StatusProperties as StatusPropertiesType, TransactionContent,
 } from "@kynesyslabs/demosdk/types"
 
-import Hashing from "../crypto/hashing"
+import { encryption } from "@kynesyslabs/demosdk"
+const Hashing = encryption.Hashing.default
+
 import Block from "./block"
 import manageNative from "./routines/gls_routines/manageNative"
 import Transaction from "./transaction"
+
 
 export default class Chain {
     private static instance: Chain

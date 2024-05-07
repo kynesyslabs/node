@@ -10,5 +10,3 @@ export default async function getRemoteIP() {
         return "127.0.0.1"
     }
 }
-
-getRemoteIP()
