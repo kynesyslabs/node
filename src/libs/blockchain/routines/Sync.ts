@@ -109,6 +109,8 @@ export async function fastSync(
     // REVIEW This is a very naive way of doing this; we should use a better algorithm
     // REVIEW (the AI says so, it wrote the comment above)
     for (let i = 0; i < blockNumberDifference; i++) {
+        // We need to ask blocks so we force the sync loop flag
+        sharedState.getInstance().inSyncLoop = true
         // sourcery skip: use-braces
         // NOTE Debug flags
         // if (sharedState.getInstance().PROD)
@@ -164,6 +166,7 @@ export async function fastSync(
 
     console.log("✅ [ Syncing with the network completed successfully ] ✅")
     sharedState.getInstance().syncStatus = true
+    sharedState.getInstance().inSyncLoop = false
     //process.exit(0)
 }
 

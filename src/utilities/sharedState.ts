@@ -19,6 +19,11 @@ export default class sharedState {
     lastTimestamp: number = 0
 
     // SECTION shared state variables
+    // Modes
+    inMainLoop: boolean = false
+    inConsensusLoop: boolean = false
+    inSyncLoop: boolean = false
+    // States
     runMainLoop: boolean = true
     mainLoopPaused: boolean = false
     consensusMode: boolean = false
