@@ -29,6 +29,8 @@ export default async function mainLoop() {
         if (sharedState.getInstance().mainLoopPaused) {
             continue // Check if the main loop is paused
         }
+        // If it is not in pause, we set (or force set) the mainLoop flag to be on
+        sharedState.getInstance().inMainLoop = true
         // NOTE Syncing the blockchain
         await fastSync() // REVIEW Test here
         console.log("[MAIN LOOP] Synced! 🟢 ")
@@ -134,18 +136,18 @@ export default async function mainLoop() {
         // !SECTION Todo list for a typical consensus operation
 
         if (isConsensusTimeReached) {
-            const sharedStateInstance = sharedState.getInstance()
             console.log("[MAIN LOOP] Consensus time reached")
-            sharedStateInstance.mainLoopPaused = true // Pause the main loop
+            sharedState.getInstance().mainLoopPaused = true // Pause the main loop
             hasSentNodeOnlineTx = false // Reset it for the next cycle.
-            sharedStateInstance.consensusMode = true
+            sharedState.getInstance().consensusMode = true
+            sharedState.getInstance().inConsensusLoop = true
 
             const shard =
                 await RepresentativeShard.getInstance().getShard(
                     currentlyOnlinePeers,
                 )
 
-            sharedStateInstance.shard = shard
+            sharedState.getInstance().shard = shard
             console.log("[MAIN LOOP] Shard selected")
             console.log(shard)
 
@@ -168,9 +170,10 @@ export default async function mainLoop() {
 
             // At the end of the consensus period, the main loop should start again
 
-            delete sharedStateInstance.shard
-            sharedStateInstance.consensusMode = false
-            sharedStateInstance.mainLoopPaused = false // Pause the main loop
+            delete sharedState.getInstance().shard
+            sharedState.getInstance().consensusMode = false
+            sharedState.getInstance().inConsensusLoop = false
+            sharedState.getInstance().mainLoopPaused = false // Pause the main loop
         }
     }
 }
