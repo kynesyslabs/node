@@ -1,11 +1,10 @@
+import { IOperation } from "@kynesyslabs/demosdk/types"
 import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 import { TransactionResponse } from "sdk/localsdk/multichain/types/multichain"
 import checkSignedPayloads from "src/utilities/checkSignedPayloads"
-
-import { IOperation } from "../XMParser"
 
 /**
  * Executes a XM pay operation and returns
