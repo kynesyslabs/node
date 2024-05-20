@@ -138,6 +138,7 @@ export class Web2APIClass {
             case "GET": // Handling everything that we can handle with fetch
                 console.log("HTTP(S) GET ACTION")
                 raw_result = await this.retrieve(this.request.raw)
+                this.request.result = raw_result
                 break
             case "POST":
                 console.log("HTTP(S) POST ACTION")
