@@ -36,6 +36,8 @@ import { BrowserRequest } from "src/libs/network/serverListeners"
 import { Peer } from "src/libs/peer"
 import { Blocks } from "src/model/entities/Blocks"
 import sharedState from "src/utilities/sharedState"
+import { dataManipulation } from "node_modules/@kynesyslabs/demosdk/build/utils"
+import _ from "lodash"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
 
@@ -46,6 +48,7 @@ import {
 
 import GLS from "../blockchain/gls/gls"
 import { NativePayload, StringifiedPayload, Web2Payload, XMPayload } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/Transaction"
+import { StatusNative } from "src/model/entities/StatusNative"
 
 let term = terminalkit.terminal
 
@@ -163,7 +166,7 @@ export default class ServerHandlers {
         let dataKey = validatedData.rpc_public_key
         let hexDataKey = Buffer.from(dataKey as Buffer).toString("hex")
         let dataSignature = validatedData.signature
-        let queriedTx = JSON.parse(JSON.stringify(validatedData.data.transaction))
+        let queriedTx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
 
         // queriedTx.content.from = queriedTx?.content?.from?.toString()
         // queriedTx.content.from = queriedTx?.content?.to?.toString()
@@ -225,7 +228,7 @@ export default class ServerHandlers {
                 */
         term.green.bold(fname + "Valid validityData! \n")
         // REVIEW Switch case for different types of transactions
-        let tx = validatedData.data.transaction
+        let tx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
         // Using a payload variable to be able to check types immediately
         let payload: XMPayload | Web2Payload | NativePayload | StringifiedPayload
         switch (tx.content.type) {
@@ -266,12 +269,9 @@ export default class ServerHandlers {
         // Only if the transaction is valid we add it to the mempool
         if (result.success) {
             // REVIEW We add the transaction to the mempool
-            Mempool.addTransaction(queriedTx) 
-            // FIXME queriedTx hash mismatch with the expected hash? WHY
-            /* TODO for the above FIXME
-                * queriedTx should be identical to above but here is not coherent anymore
-            */
+            Mempool.addTransaction(queriedTx)
             // TODO Check if Operation(s) are added to the GLS too
+            // FIXME Add an operation for the nonce or anyway a way to manage the nonce
         }
         // TODO Broadcast the tx to the other peers (or maybe not, consensus should take care of it)
         // Response is then sent back automatically as a reply (with our validation)
@@ -453,6 +453,9 @@ export default class ServerHandlers {
     }
 
     // TODO Make this modular ffs
+    // FIXME Pls modularize me! Don't leave me alone!
+    // REVIEW The method is scared: please modularize it!
+    // NOTE As you can see, this method is a mess. Please modularize it.
     static async handleNodeAPI(
         content: any,
         receiver: any,
@@ -554,8 +557,17 @@ export default class ServerHandlers {
                         error: "No address specified",
                     })
                 }
-                nStat = await GLS.getGLSNativeStatus(data.address)
+                nStat = await GLS.getGLSNativeStatus(data.address) as StatusNative
                 response = nStat.toString() // REVIEW It works ?
+                break
+            case "getAddressNonce":
+                if (!data.address) {
+                    receiver.emit("public", {
+                        error: "No address specified",
+                    })
+                }
+                nStat = await GLS.getGLSNativeStatus(data.address) as StatusNative
+                response = nStat.nonce
                 break
             case "getPeerTime":
                 response = new Date().getTime()
