@@ -149,7 +149,7 @@ export default class ServerHandlers {
         senderSocket: any,
     ): Promise<ExecutionResult> {
 
-        let fname = "[handleExecuteTransaction] "
+        let fname =     "[handleExecuteTransaction] "
         let result: ExecutionResult = {
             success: true,
             response: null,
@@ -163,7 +163,11 @@ export default class ServerHandlers {
         let dataKey = validatedData.rpc_public_key
         let hexDataKey = Buffer.from(dataKey as Buffer).toString("hex")
         let dataSignature = validatedData.signature
-        let queriedTx = validatedData.data.transaction
+        let queriedTx = JSON.parse(JSON.stringify(validatedData.data.transaction))
+
+        // queriedTx.content.from = queriedTx?.content?.from?.toString()
+        // queriedTx.content.from = queriedTx?.content?.to?.toString()
+
         console.log("[SERVER] Received transaction for execution: " + queriedTx.hash)
 
         // We need to have issued the validity data
@@ -178,6 +182,10 @@ export default class ServerHandlers {
         }
         // Also the signature must be valid
         let hashedData = Hashing.sha256(JSON.stringify(validatedData.data))
+        console.log(JSON.stringify(validatedData))
+        console.log("Backend - Hash:", hashedData)
+        console.log("Backend - Data Signature:", Buffer.from(dataSignature as Buffer).toString("hex"))
+        console.log("Backend - Data Key:", Buffer.from(dataKey as Buffer).toString("hex"))
         let signatureValid = Cryptography.verify(
             hashedData,
             dataSignature,
@@ -241,6 +249,7 @@ export default class ServerHandlers {
                     payload[1] as IWeb2Request,
                     senderSocket,
                 )
+                
                 // TODO Add result.success handling
                 result.response = web2_result
                 break
@@ -257,7 +266,8 @@ export default class ServerHandlers {
         // Only if the transaction is valid we add it to the mempool
         if (result.success) {
             // REVIEW We add the transaction to the mempool
-            Mempool.addTransaction(queriedTx) // FIXME queriedTx hash mismatch with the expected hash? WHY
+            Mempool.addTransaction(queriedTx) 
+            // FIXME queriedTx hash mismatch with the expected hash? WHY
             /* TODO for the above FIXME
                 * queriedTx should be identical to above but here is not coherent anymore
             */
