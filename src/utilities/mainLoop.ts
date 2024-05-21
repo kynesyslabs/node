@@ -45,9 +45,11 @@ export default async function mainLoop() {
         let isConsensusTimeReached = await consensusTime.checkConsensusTime()
 
         console.log("[MAINLOOP]: about to check if its time for consensus")
-        
+
         if (!hasSentNodeOnlineTx && !isConsensusTimeReached) {
-            console.log("[MAINLOOP]: is not consensus time and no online node tx")
+            console.log(
+                "[MAINLOOP]: is not consensus time and no online node tx",
+            )
             var online_presence_message = new Transmission(
                 sharedState.getInstance().identity.ed25519.privateKey,
             )
@@ -134,7 +136,7 @@ export default async function mainLoop() {
         // throw new Error("pruned")
 
         // !SECTION Todo list for a typical consensus operation
-
+        // TODO Separate the consensus loop from the main loop
         if (isConsensusTimeReached) {
             console.log("[MAIN LOOP] Consensus time reached")
             sharedState.getInstance().mainLoopPaused = true // Pause the main loop
