@@ -19,8 +19,7 @@ import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import sharedState from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
-
-import { Operation, ValidityData, CValidityData } from "@kynesyslabs/demosdk/types"
+import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import required from "src/utilities/required"
 const term = terminalkit.terminal
 
@@ -43,11 +42,17 @@ export async function confirmTransaction(
     console.log("[Tx Validation] Examining it\n")
     console.log(tx)
     // REVIEW Below: if this does not work, use ValidityData interface and fill manually
-    let validityData = new CValidityData(
-        tx,
-        publicKey as pki.ed25519.BinaryBuffer,
-        reference_block,
-    )
+    let validityData: ValidityData = {
+        data: {
+            valid: false,
+            reference_block: reference_block,
+            message: "[Native Tx Validation] [NOT PROCESSED] Transaction yet to be processed\n",
+            gas_operation: null,
+            transaction: tx,
+        },
+        signature: null,
+        rpc_public_key: sharedState.getInstance().identity.ed25519.publicKey as pki.ed25519.BinaryBuffer,
+    }
     let gas_operation: Operation
     let gas_calculus = await defineGas(tx, validityData, privateKey)
     // If we receive an Operation, we can continue
@@ -56,23 +61,20 @@ export async function confirmTransaction(
     try {
         gas_operation = gas_calculus as Operation
         required(gas_operation.hash)
+        validityData.data.gas_operation = gas_operation
     } catch (e) {
-        validityData = gas_calculus as ValidityData
-        return CValidityData.compile(
-            validityData,
-            validityData.data.message,
-            privateKey as pki.ed25519.BinaryBuffer,
-            false,
-        )
+        let gas_invalid_data = gas_calculus as ValidityData
+        validityData.data.message = gas_invalid_data.data.message
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
     }
     let hasNonce = await assignNonce(tx)
     if (!hasNonce) {
-        return CValidityData.compile(
-            validityData,
-            "[Native Tx Validation] [NONCE ERROR] Nonce not assigned to the transaction\n",
-            privateKey as pki.ed25519.BinaryBuffer,
-            false,
-        )
+        validityData.data.message = "[Native Tx Validation] [NONCE ERROR] Nonce not assigned\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
     }
     // Verify tx validity
     let verified = Transaction.confirmTx(
@@ -81,22 +83,25 @@ export async function confirmTransaction(
         publicKey as pki.ed25519.BinaryBuffer,
     ) // REVIEW Are the buffers ok?
     if (!verified) {
-        return CValidityData.compile(
-            validityData,
-            "[Native Tx Validation] [SIGNATURE ERROR] Transaction signature not verified\n",
-            privateKey as pki.ed25519.BinaryBuffer,
-            false,
-        )
+        validityData.data.message = "[Native Tx Validation] [SIGNATURE ERROR] Transaction signature not verified\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
     }
     console.log(
         "[Native Tx Validation] Transaction validity verified, compiling ValidityData\n",
     )
-    return CValidityData.compile(
-        validityData,
-        "[Native Tx Validation] Transaction validity verified",
-        privateKey as pki.ed25519.BinaryBuffer,
-        true,
-    )
+    validityData.data.message = "[Native Tx Validation] Transaction signature verified\n"
+    validityData.data.valid = true
+    validityData = await signValidityData(validityData)
+    return validityData
+}
+
+async function signValidityData(data: ValidityData): Promise<ValidityData> {
+    let privateKey = sharedState.getInstance().identity.ed25519.privateKey
+    let hash = Hashing.sha256(JSON.stringify(data.data))
+    data.signature = Cryptography.sign(hash, privateKey)
+    return data
 }
 
 // This method is responsible for calculating the gas for a transaction and checking
