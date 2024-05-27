@@ -36,7 +36,6 @@ import { BrowserRequest } from "src/libs/network/serverListeners"
 import { Peer } from "src/libs/peer"
 import { Blocks } from "src/model/entities/Blocks"
 import sharedState from "src/utilities/sharedState"
-import { dataManipulation } from "node_modules/@kynesyslabs/demosdk/build/utils"
 import _ from "lodash"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
