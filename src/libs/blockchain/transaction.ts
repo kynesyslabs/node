@@ -196,7 +196,7 @@ export default class Transaction implements ITransaction {
         console.log("[toRawTransaction] To: " + tx.content.to)
         const rawTx = {
             blockNumber: tx.blockNumber,
-            signature: tx.signature.data.toString("hex"),
+            signature: Buffer.from(tx.signature.data as Buffer).toString("hex"),
             status: status,
             hash: tx.hash,
             content: JSON.stringify(tx.content),

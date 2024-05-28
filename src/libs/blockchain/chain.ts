@@ -23,8 +23,8 @@ import {
     StatusProperties as StatusPropertiesType, TransactionContent,
 } from "@kynesyslabs/demosdk/types"
 
-import { encryption } from "@kynesyslabs/demosdk"
-const Hashing = encryption.Hashing.default
+import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
+
 
 import Block from "./block"
 import manageNative from "./routines/gls_routines/manageNative"

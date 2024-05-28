@@ -19,9 +19,8 @@ import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import sharedState from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
-
 import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
-
+import required from "src/utilities/required"
 const term = terminalkit.terminal
 
 // INFO Cryptographically validate a transaction and calculate gas
@@ -42,19 +41,76 @@ export async function confirmTransaction(
 
     console.log("[Tx Validation] Examining it\n")
     console.log(tx)
-
+    // REVIEW Below: if this does not work, use ValidityData interface and fill manually
     let validityData: ValidityData = {
         data: {
             valid: false,
             reference_block: reference_block,
-            message: "",
+            message: "[Native Tx Validation] [NOT PROCESSED] Transaction yet to be processed\n",
             gas_operation: null,
             transaction: tx,
         },
         signature: null,
-        rpc_public_key: publicKey as pki.ed25519.BinaryBuffer,
+        rpc_public_key: sharedState.getInstance().identity.ed25519.publicKey as pki.ed25519.BinaryBuffer,
     }
+    let gas_operation: Operation
+    let gas_calculus = await defineGas(tx, validityData, privateKey)
+    // If we receive an Operation, we can continue
+    // Else, we return the validity data with its error message
+    // REVIEW We are checking against a known property to ensure we have either an Operation or a ValidityData
+    try {
+        gas_operation = gas_calculus as Operation
+        required(gas_operation.hash)
+        validityData.data.gas_operation = gas_operation
+    } catch (e) {
+        let gas_invalid_data = gas_calculus as ValidityData
+        validityData.data.message = gas_invalid_data.data.message
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+    let hasNonce = await assignNonce(tx)
+    if (!hasNonce) {
+        validityData.data.message = "[Native Tx Validation] [NONCE ERROR] Nonce not assigned\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+    // Verify tx validity
+    let verified = Transaction.confirmTx(
+        tx,
+        privateKey as pki.ed25519.BinaryBuffer,
+        publicKey as pki.ed25519.BinaryBuffer,
+    ) // REVIEW Are the buffers ok?
+    if (!verified) {
+        validityData.data.message = "[Native Tx Validation] [SIGNATURE ERROR] Transaction signature not verified\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+    console.log(
+        "[Native Tx Validation] Transaction validity verified, compiling ValidityData\n",
+    )
+    validityData.data.message = "[Native Tx Validation] Transaction signature verified\n"
+    validityData.data.valid = true
+    validityData = await signValidityData(validityData)
+    return validityData
+}
 
+async function signValidityData(data: ValidityData): Promise<ValidityData> {
+    let privateKey = sharedState.getInstance().identity.ed25519.privateKey
+    let hash = Hashing.sha256(JSON.stringify(data.data))
+    data.signature = Cryptography.sign(hash, privateKey)
+    return data
+}
+
+// This method is responsible for calculating the gas for a transaction and checking
+// if the sender can afford it
+async function defineGas(
+    tx: Transaction,
+    validityData: ValidityData,
+    privateKey: pki.PrivateKey,
+): Promise<Operation | ValidityData> {
     /* NOTE Charge the gas for the transaction
     This includes a check to see if the transaction gas can be paid
     by the sender prior to the transaction execution part.
@@ -103,12 +159,18 @@ export async function confirmTransaction(
     if (fromBalance < compositeFeeAmount && sharedState.getInstance().PROD) {
         term.red.bold(
             "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
-                compositeFeeAmount + "; available: " + fromBalance + "\n" +
+                compositeFeeAmount +
+                "; available: " +
+                fromBalance +
+                "\n" +
                 "\n",
         )
         validityData.data.message =
             "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
-            compositeFeeAmount + "; available: " + fromBalance + "\n" +
+            compositeFeeAmount +
+            "; available: " +
+            fromBalance +
+            "\n" +
             "\n"
         // Hash the validation data
         let hash = Hashing.sha256(JSON.stringify(validityData.data))
@@ -136,36 +198,13 @@ export async function confirmTransaction(
     }
     console.log("[Native Tx Validation] Gas Operation derived\n")
     //console.log(gas_operation)
+}
 
-    // Verify tx validity
-    let verified = Transaction.confirmTx(tx, privateKey as pki.ed25519.BinaryBuffer, publicKey as pki.ed25519.BinaryBuffer) // REVIEW Are the buffers ok?
-    if (!verified) {
-        term.red.bold(
-            "[Native Tx Validation] [SIGNATURE ERROR] Transaction signature not verified\n",
-        )
-        validityData.data.message =
-            "[Native Tx Validation] [SIGNATURE ERROR] Transaction signature not verified\n"
-        // Hash the validation data
-        let hash = Hashing.sha256(JSON.stringify(validityData.data))
-        // Sign the hash
-        validityData.signature = Cryptography.sign(hash, privateKey)
-        return validityData
-    }
-    console.log("[Native Tx Validation] Transaction validity verified, compiling ValidityData\n")
-
-    // Now that we verified the transaction, we can return its validity data
-    // TODO Add the relevant info
-    validityData.data.valid = true
-    validityData.data.message =
-        "Transaction verified and ready to be executed\n"
-    validityData.data.gas_operation = gas_operation
-    // Hash the validation data
-    let hash = Hashing.sha256(JSON.stringify(validityData.data))
-    // Sign the hash
-    validityData.signature = Cryptography.sign(hash, privateKey)
-
-    console.log("[Native Tx Validation] Transaction validity data compiled\n")
-    return validityData
+export async function assignNonce(tx: Transaction): Promise<Boolean> {
+    let validNonce = true // TODO Override for testing
+    // TODO Get, check and increment the nonce of the transaction
+    // while returning either true or false
+    return validNonce
 }
 
 // TODO a verified transaction should be signed by the same rpc that verified it and should be only valid for the current consensus round

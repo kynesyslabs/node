@@ -1,11 +1,10 @@
+import { IOperation } from "@kynesyslabs/demosdk/types"
 import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 import { TransactionResponse } from "sdk/localsdk/multichain/types/multichain"
 import checkSignedPayloads from "src/utilities/checkSignedPayloads"
-
-import { IOperation } from "../XMParser"
 
 /**
  * Executes a XM pay operation and returns
@@ -66,6 +65,10 @@ export default async function handlePayOperation(
             result = await genericJsonRpcPay(multichain.IBC, rpc_url, operation)
             break
 
+        case "solana":
+            result = await genericJsonRpcPay(multichain.SOLANA, rpc_url, operation)
+            break
+
         default:
             result = {
                 result: "error",
@@ -86,17 +89,16 @@ export default async function handlePayOperation(
  * @param operation The operation to be executed
  */
 async function genericJsonRpcPay(
-    sdk: typeof multichain.IBC | typeof multichain.MULTIVERSX,
+    sdk: any,
     rpc_url: string,
     operation: IOperation,
 ) {
     console.log([
         `[XMScript Parser] Generic JSON RPC Pay on: ${operation.chain}.${operation.subchain}`,
     ])
-    let instance: multichain.IBC | multichain.MULTIVERSX
+    let instance: multichain.IBC
 
     try {
-        // @ts-expect-error
         instance = await sdk.create(rpc_url)
     } catch (error) {
         return {

@@ -5,7 +5,8 @@ import {
 // INFO Entry point for multichain requests
 import { json } from "stream/consumers"
 
-import XMParser, { XMScript } from "./routines/XMParser"
+import XMParser from "./routines/XMParser"
+import { XMScript } from "@kynesyslabs/demosdk/types"
 
 export default class multichainDispatcher {
     // INFO Digesting the request from the server
