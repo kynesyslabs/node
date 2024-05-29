@@ -58,14 +58,11 @@ export async function confirmTransaction(
     // If we receive an Operation, we can continue
     // Else, we return the validity data with its error message
     // REVIEW We are checking against a known property to ensure we have either an Operation or a ValidityData
-    try {
-        gas_operation = gas_calculus as Operation
-        required(gas_operation.hash)
+    if (gas_calculus[0]) {
+        gas_operation = gas_calculus[1] as Operation
         validityData.data.gas_operation = gas_operation
-    } catch (e) {
-        let gas_invalid_data = gas_calculus as ValidityData
-        validityData.data.message = gas_invalid_data.data.message
-        validityData.data.valid = false
+    } else {
+        validityData = gas_calculus[1] as ValidityData
         validityData = await signValidityData(validityData)
         return validityData
     }
@@ -110,7 +107,7 @@ async function defineGas(
     tx: Transaction,
     validityData: ValidityData,
     privateKey: pki.PrivateKey,
-): Promise<Operation | ValidityData> {
+): Promise<[boolean, Operation | ValidityData]> {
     /* NOTE Charge the gas for the transaction
     This includes a check to see if the transaction gas can be paid
     by the sender prior to the transaction execution part.
@@ -132,7 +129,7 @@ async function defineGas(
         let hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
         validityData.signature = Cryptography.sign(hash, privateKey)
-        return validityData
+        return [false, validityData]
     }
     let fromBalance = 0
     try {
@@ -151,7 +148,7 @@ async function defineGas(
         let hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
         validityData.signature = Cryptography.sign(hash, privateKey)
-        return validityData
+        return [false, validityData]
     }
     // TODO Work on this method
     let compositeFeeAmount = await calculateCurrentGas(tx)
@@ -176,7 +173,7 @@ async function defineGas(
         let hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
         validityData.signature = Cryptography.sign(hash, privateKey)
-        return validityData
+        return [false, validityData]
     }
 
     // TODO Move gas operation creator to a separate module
@@ -198,6 +195,7 @@ async function defineGas(
     }
     console.log("[Native Tx Validation] Gas Operation derived\n")
     //console.log(gas_operation)
+    return [true, gas_operation]
 }
 
 export async function assignNonce(tx: Transaction): Promise<Boolean> {
