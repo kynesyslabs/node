@@ -5,7 +5,7 @@ import { fastSync } from "src/libs/blockchain/routines/Sync"
 import ComLink from "src/libs/communications/comlink"
 import Transmission from "src/libs/communications/transmission"
 import QBFT from "src/libs/consensus/mechanisms/BFT"
-import RepresentativeShard from "src/libs/consensus/mechanisms/PoR"
+import RepresentativeShard from "src/libs/consensus/mechanisms/types/RepresentativeShard"
 import { Identity } from "src/libs/identity"
 import { Peer, PeerManager } from "src/libs/peer"
 
@@ -98,7 +98,7 @@ export default async function mainLoop() {
         // if its the first block ever or we are doing a regenesis, we might want to skip this check, but we still need a list of reliable nodes.
         // In the "3 block online" the history of online peers is validated by the blockchain AND by the consensus so it can be relied on.
 
-        let currentlyOnlinePeers
+        let currentlyOnlinePeers: any // ! typize
 
         console.log("[MAINLOOP]: getting online peers for last three blocks")
         const peersOnlineForLastThreeBlocks =
@@ -135,9 +135,10 @@ export default async function mainLoop() {
         // chain.nukeGenesis()
         // throw new Error("pruned")
 
-        // !SECTION Todo list for a typical consensus operation
         // TODO Separate the consensus loop from the main loop
-        if (isConsensusTimeReached) {
+        // NOTE We need both the consensus time and the sync status to be true, to avoid
+        // conflicts with the sync loop that would lead to a failure in the consensus mechanism.
+        if (isConsensusTimeReached && sharedState.getInstance().syncStatus) {
             console.log("[MAIN LOOP] Consensus time reached")
             sharedState.getInstance().mainLoopPaused = true // Pause the main loop
             hasSentNodeOnlineTx = false // Reset it for the next cycle.
@@ -176,6 +177,8 @@ export default async function mainLoop() {
             sharedState.getInstance().consensusMode = false
             sharedState.getInstance().inConsensusLoop = false
             sharedState.getInstance().mainLoopPaused = false // Pause the main loop
+        } else if (!sharedState.getInstance().syncStatus) { // ? This is a bit redundant, isn't it?
+            console.log("[MAIN LOOP] Cannot start consensus, not in sync. Sync loop should start automatically")
         }
     }
 }
