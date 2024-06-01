@@ -1,81 +1,20 @@
-// INFO This module implements Proof of Representation (PoR)
-
-import forge from "node-forge"
 import seedrandom from "seedrandom"
+import Chain from "src/libs/blockchain/chain"
+import GLS from "src/libs/blockchain/gls/gls"
+import Hashing from "src/libs/crypto/hashing"
+import { Peer } from "src/libs/peer"
 import required from "src/utilities/required"
+import { IValidator } from "./types/IValidator"
 
-import Chain from "../../blockchain/chain"
-import GLS from "../../blockchain/gls/gls"
-import Mempool from "../../blockchain/mempool"
-import Hashing from "../../crypto/hashing"
-import Peer from "../../peer/Peer"
-
-/* INFO
-	This class is very strict about what you can and what you cannot do with it. This is by design to avoid
-	errors, malicious behavior, and security risks.
-	By instantiating this class, you will just obtain an empty possible PoR instance. The only public
-	methods that you can use are:
-	- getSeed()
-		Which returns or create the seed for the PoR instance and ensures that the seed and the peer list are
-		both immutable
-	- getPeers()
-		Which returns the peer list for the PoR instance
-	- selectRepresentativeShard()
-		Which operates on the peer list and returns a representative shard for the PoR instance
-	
-	- NOTE that instance.validators.headers always contains the "fingerprint" of the PoR instance for verification
-*/
-
-// INFO This class take ProofOfRepresentation and implements the PoR/QBFT methods needed for it to work correctly
-export default class RepresentativeShard {
-    static instance: RepresentativeShard = null
-
-    // NOTE This will be filled once PoR is executed
-    private shard: ProofOfRepresentation = null
-
-    // Singleton getter
-    static getInstance(): RepresentativeShard {
-        if (RepresentativeShard.instance == null) {
-            RepresentativeShard.instance = new RepresentativeShard()
-        }
-        return RepresentativeShard.instance
-    }
-
-    // INFO We avoid to expose .shard directly so it can't be edited by mistake
-    public async getShard(peerList: Peer[]): Promise<ProofOfRepresentation> {
-        let shard = this.shard
-        if (!shard) {
-            return await this.generateShard(peerList)
-        }
-        return shard
-    }
-
-    // INFO Generating the shard if needed
-    private async generateShard(peerList): Promise<ProofOfRepresentation> {
-        let shard = new ProofOfRepresentation()
-        await shard.getSeed(undefined, peerList)
-        shard.selectRepresentativeShard()
-        this.shard = shard
-        return shard
-    }
-
-    // TODO Define methods for using the shard
-}
-
-export interface IValidator {
-    connectionURL: string
-    publicKey_string: string
-    publicKey?: forge.pki.ed25519.BinaryBuffer
-}
 export class ProofOfRepresentation {
     private common_seed: string = null
     private peers: Peer[] // Populated by createSeed
-    private validators: { [key: string]: IValidator | {} } = {}
+    private validators: { [key: string]: IValidator | {}; } = {}
     private onBlock: number = 0
     // Immutable flag to indicate that the PoR instance has been already initialized and cannot be changed anymore
     private immutable: boolean = false
 
-    constructor() {}
+    constructor() { }
 
     // INFO Creating the immutable common seed for this specific proof of representation session
     private async createSeed(on_block: number, onlinePeers): Promise<string> {
@@ -125,12 +64,13 @@ export class ProofOfRepresentation {
     // INFO The selection algorithm
     async selectRepresentativeShard(
         block_n: number = null,
-    ): Promise<{ [key: string]: IValidator }> {
+    ): Promise<{ [key: string]: IValidator; }> {
         required(this.common_seed, "Common seed is not initialized")
         required(this.peers, "Peers are not initialized")
         if (!block_n) {
             block_n = this.onBlock
         } // REVIEW Fix sanity check here ^ to catch NaN errors
+
         // For safety reasons we need to enforce the immutable flag
         if (!this.immutable) {
             await this.createSeed(block_n, this.peers) // REVIEW: make sure these are the correct peers
@@ -139,6 +79,7 @@ export class ProofOfRepresentation {
         // Allocating the empty validator list
         let generatedList = {}
         let SHARD_SIZE = 10 // TODO Put in Configuration
+
         // Getting the base seed
         let baseSeed = await this.getSeed(block_n, this.peers) // REVIEW: make sure these are the correct peers
         for (let i = 0; i < SHARD_SIZE; i++) {
@@ -173,7 +114,7 @@ export class ProofOfRepresentation {
 
     async verifyRepresentativeShard(
         block_n: number,
-        shard: { [key: string]: IValidator },
+        shard: { [key: string]: IValidator; },
     ): Promise<boolean> {
         let valid = true
         // TODO Verify that the validator list for a given block is valid
