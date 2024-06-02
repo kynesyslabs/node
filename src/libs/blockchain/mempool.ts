@@ -103,11 +103,11 @@ export default class Mempool {
         console.log("adding transaction with hash " + transaction.hash + " to the mempool")
 
         // FIXME Debug to remove
-    /*     let is_coherent = Transaction.isCoherent(transaction)
+        let is_coherent = Transaction.isCoherent(transaction)
         if (!is_coherent) {
             console.error("Transaction in mempool is not coherent")
             process.exit(1)
-        } */
+        }
 
         //console.log(mempool)
         mempool.transactions.push(transaction) // REVIEW What if it is empty?
