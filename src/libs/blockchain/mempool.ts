@@ -100,7 +100,11 @@ export default class Mempool {
         transaction: Transaction,
     ): Promise<void> {
         let mempool = await this.getMempool()
-        console.log("adding transaction with hash " + transaction.hash + " to the mempool")
+        console.log(
+            "adding transaction with hash " +
+                transaction.hash +
+                " to the mempool",
+        )
 
         // FIXME Debug to remove
         let is_coherent = Transaction.isCoherent(transaction)
@@ -208,7 +212,12 @@ export default class Mempool {
         // Basic features that must be identical to us
         let local_mempool = await Mempool.getMempool()
         // We need to have the same forecasted block number, of course
+        console.log("local mempool:")
+        console.log(local_mempool)
+        console.log("remote mempool:")
+        console.log(mempool)
         if (local_mempool.number != mempool.number) {
+            console.log("[MEMPOOL VERIFICATION] The block numbers do not match")
             return false
         }
         // Checking all the txs one by one for the signatures
@@ -247,7 +256,9 @@ export default class Mempool {
                 console.log("[+] Signature fixed successfully!")
                 signature = signature_data
             } catch (error) {
-                console.log("[+] [MEMPOOL VERIFICATION] Signature did not need to be fixed")
+                console.log(
+                    "[+] [MEMPOOL VERIFICATION] Signature did not need to be fixed",
+                )
             }
 
             console.log(
@@ -326,9 +337,9 @@ export default class Mempool {
                 tx2.content.transaction_fee.rpc_fee
                     ? -1
                     : tx1.content.transaction_fee.rpc_fee <
-                        tx2.content.transaction_fee.rpc_fee
-                      ? 1
-                      : 0
+                      tx2.content.transaction_fee.rpc_fee
+                    ? 1
+                    : 0
             if (comparison) {
                 return -1
             } else {

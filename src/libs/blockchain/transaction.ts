@@ -21,7 +21,10 @@ NOTE: The fee is locked by the node and released when the block itself is confir
 import forge from "node-forge"
 
 import {
-    ISignature, RawTransaction, Transaction as ITransaction, TransactionContent,
+    ISignature,
+    RawTransaction,
+    Transaction as ITransaction,
+    TransactionContent,
 } from "@kynesyslabs/demosdk/types"
 
 import Cryptography from "../crypto/cryptography"
@@ -141,7 +144,9 @@ export default class Transaction implements ITransaction {
 
     // INFO Checks the integrity of a transaction
     public static sanityCheck(tx: Transaction) {
-        console.log("[sanityCheck] Checking the sanity of the tx with hash: " + tx.hash)
+        console.log(
+            "[sanityCheck] Checking the sanity of the tx with hash: " + tx.hash,
+        )
         //let tx_content_hash = Hashing.sha256(JSON.stringify(tx.content))
         let _result = Cryptography.verify(
             tx.hash,
@@ -155,10 +160,13 @@ export default class Transaction implements ITransaction {
     // INFO Checking if the tx is coherent to the current state of the blockchain (and the txs pending before it)
     public static isCoherent(tx: Transaction) {
         let _result = true
-        console.log("[isCoherent] Checking the coherence of the tx with hash: " + tx.hash)
+        console.log(
+            "[isCoherent] Checking the coherence of the tx with hash: " +
+                tx.hash,
+        )
         let _derived_hash = Hashing.sha256(JSON.stringify(tx.content))
         console.log("[isCoherent] Derived hash: " + _derived_hash)
-        _result = (_derived_hash == tx.hash)
+        _result = _derived_hash == tx.hash
         console.log("[isCoherent] Coherence: " + _result)
         return _result
     }

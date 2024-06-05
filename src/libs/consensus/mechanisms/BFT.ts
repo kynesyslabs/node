@@ -30,7 +30,7 @@ export default class QBFT {
             tot_validators: peersNumber,
             results: new Map<string, boolean>(), // Where string is the hex public key and boolean is the result
         }
-        
+
         let pro = 0
         let con = 0
 
@@ -44,9 +44,19 @@ export default class QBFT {
         for (let i = 0; i < peersNumber; i++) {
             let currentPeer = peers[i]
 
+            console.log("[BFT] Peer: " + currentPeer.identity.toString("hex"))
+
             let peerInstance = peerManager.getPeer(
                 currentPeer.identity.toString("hex"),
             )
+
+            if (!peerInstance) {
+                console.warn(
+                    "[BFT] Peer not found in the peer manager: " +
+                        currentPeer.identity.toString("hex"),
+                )
+                throw new Error("Peer not found in the peer manager")
+            }
 
             let remotePool: MempoolData
 
@@ -73,7 +83,7 @@ export default class QBFT {
             remotePool = JSON.parse(remotePoolResponse[1].message)
 
             console.log("[BFT] Received Remote Mempool")
-            //console.log(remotePool)
+            console.log(remotePool)
 
             console.log("[BFT] Receiving Mempool")
             // Fast validity check is done by the Mempool module above
@@ -147,7 +157,6 @@ export default class QBFT {
 
         console.log("[BFT]: derived block for current iteration: ")
         console.log(derivedBlock)
-
 
         const proposedBlock = derivedBlock
 
@@ -262,6 +271,7 @@ export default class QBFT {
             } else {
                 numericResult.pro++
             }
+            numericResult.total++
         }
         console.warn(
             "[sQBFT Voting] \nParameter: " +
@@ -291,11 +301,11 @@ export default class QBFT {
             `[BFT] Checking consensus. Got ${pro} pro and ${con} against votes}, got ${total} votes`,
         )
         let twothirdPlus1
-        
+
         if (total === 1) {
             twothirdPlus1 = 1
         } else {
-            twothirdPlus1 = (total * 2) / 3 + 1 
+            twothirdPlus1 = (total * 2) / 3 + 1
         }
 
         if (pro >= twothirdPlus1) {

@@ -16,7 +16,8 @@ import handleWeb2 from "src/features/web2/Web2Dispatcher"
 import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool"
 import {
-    broadcastVerifiedNativeTransaction, confirmTransaction,
+    broadcastVerifiedNativeTransaction,
+    confirmTransaction,
 } from "src/libs/blockchain/routines/validateTransaction"
 import Transaction from "src/libs/blockchain/transaction"
 import deriveBlock from "src/libs/consensus/routines/deriveBlock"
@@ -41,12 +42,21 @@ import _ from "lodash"
 import terminalkit from "terminal-kit"
 
 import {
-    AddressInfo, ExecutionResult, IWeb2Payload, IWeb2Request, ValidityData,
+    AddressInfo,
+    ExecutionResult,
+    IWeb2Payload,
+    IWeb2Request,
+    ValidityData,
     XMScript,
 } from "@kynesyslabs/demosdk/types"
 
 import GLS from "../blockchain/gls/gls"
-import { NativePayload, StringifiedPayload, Web2Payload, XMPayload } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/Transaction"
+import {
+    NativePayload,
+    StringifiedPayload,
+    Web2Payload,
+    XMPayload,
+} from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/Transaction"
 import { StatusNative } from "src/model/entities/StatusNative"
 
 let term = terminalkit.terminal
@@ -150,8 +160,7 @@ export default class ServerHandlers {
         validatedData: ValidityData,
         senderSocket: any,
     ): Promise<ExecutionResult> {
-
-        let fname =     "[handleExecuteTransaction] "
+        let fname = "[handleExecuteTransaction] "
         let result: ExecutionResult = {
             success: true,
             response: null,
@@ -170,24 +179,33 @@ export default class ServerHandlers {
         // queriedTx.content.from = queriedTx?.content?.from?.toString()
         // queriedTx.content.from = queriedTx?.content?.to?.toString()
 
-        console.log("[SERVER] Received transaction for execution: " + queriedTx.hash)
+        console.log(
+            "[SERVER] Received transaction for execution: " + queriedTx.hash,
+        )
 
         // We need to have issued the validity data
         if (hexDataKey !== hexOurKey) {
-            term.red.bold(fname + "Invalid validityData signature key (not us) 💀 : ")
+            term.red.bold(
+                fname + "Invalid validityData signature key (not us) 💀 : ",
+            )
 
             result.success = false
             result.response = false
             result.extra = "Invalid signature key"
             return result
-
         }
         // Also the signature must be valid
         let hashedData = Hashing.sha256(JSON.stringify(validatedData.data))
         console.log(JSON.stringify(validatedData))
         console.log("Backend - Hash:", hashedData)
-        console.log("Backend - Data Signature:", Buffer.from(dataSignature as Buffer).toString("hex"))
-        console.log("Backend - Data Key:", Buffer.from(dataKey as Buffer).toString("hex"))
+        console.log(
+            "Backend - Data Signature:",
+            Buffer.from(dataSignature as Buffer).toString("hex"),
+        )
+        console.log(
+            "Backend - Data Key:",
+            Buffer.from(dataKey as Buffer).toString("hex"),
+        )
         let signatureValid = Cryptography.verify(
             hashedData,
             dataSignature,
@@ -229,13 +247,16 @@ export default class ServerHandlers {
         // REVIEW Switch case for different types of transactions
         let tx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
         // Using a payload variable to be able to check types immediately
-        let payload: XMPayload | Web2Payload | NativePayload | StringifiedPayload
+        let payload:
+            | XMPayload
+            | Web2Payload
+            | NativePayload
+            | StringifiedPayload
         switch (tx.content.type) {
             case "crosschainOperation":
             case "multichainOperation":
                 payload = tx.content.data as XMPayload
-                console.log(
-                    "[Included XM Chainscript]")
+                console.log("[Included XM Chainscript]")
                 console.log(payload[1])
                 // TODO Better types on answers
                 var xm_result = await ServerHandlers.handleXMChainOperation(
@@ -251,13 +272,15 @@ export default class ServerHandlers {
                     payload[1] as IWeb2Request,
                     senderSocket,
                 )
-                
+
                 // TODO Add result.success handling
                 result.response = web2_result
                 break
             case "native":
                 // REVIEW This still works with the new tx system?
-                var native_result = await broadcastVerifiedNativeTransaction(validatedData)
+                var native_result = await broadcastVerifiedNativeTransaction(
+                    validatedData,
+                )
                 // NOTE We add the Transaction to the mempool as it looks valid
                 if (native_result[0]) {
                     result.success = true
@@ -365,7 +388,7 @@ export default class ServerHandlers {
 
         console.log("[SERVER] Received consensus request")
         console.log("[SERVER] Peer identity information received")
-        //console.log(senderIdentity)
+        console.log(senderIdentity)
         if (!sharedState.getInstance().consensusMode) {
             return {
                 extra,
@@ -373,6 +396,8 @@ export default class ServerHandlers {
                 response: { error: "We are not in consensus mode" },
             }
         }
+
+        console.log("we are in consensus mode")
 
         let authorized = false
         let senderPublicKey = senderIdentity.toString("hex")
@@ -556,7 +581,9 @@ export default class ServerHandlers {
                         error: "No address specified",
                     })
                 }
-                nStat = await GLS.getGLSNativeStatus(data.address) as StatusNative
+                nStat = (await GLS.getGLSNativeStatus(
+                    data.address,
+                )) as StatusNative
                 response = nStat.toString() // REVIEW It works ?
                 break
             case "getAddressNonce":
@@ -565,7 +592,9 @@ export default class ServerHandlers {
                         error: "No address specified",
                     })
                 }
-                nStat = await GLS.getGLSNativeStatus(data.address) as StatusNative
+                nStat = (await GLS.getGLSNativeStatus(
+                    data.address,
+                )) as StatusNative
                 response = nStat.nonce
                 break
             case "getPeerTime":
