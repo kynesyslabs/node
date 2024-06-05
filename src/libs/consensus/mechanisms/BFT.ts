@@ -150,6 +150,7 @@ export default class QBFT {
         const { derivedBlock, full_ordered_transactions } = await deriveBlock(
             mempool,
             medianTimestamp,
+            shard,
         )
 
         console.log("[BFT]: full ordered transactions for current iteration: ")

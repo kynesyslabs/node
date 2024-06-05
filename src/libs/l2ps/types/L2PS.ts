@@ -16,7 +16,7 @@ import { decrypt } from "dotenv"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 
 /* TODOs and ideas
-    * Should we have a mechanism for key rotation? // TODO
+    ? Should we have a mechanism for key rotation?
 */
 
 export default class L2PS {

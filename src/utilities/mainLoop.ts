@@ -145,6 +145,9 @@ export default async function mainLoop() {
             sharedState.getInstance().consensusMode = true
             sharedState.getInstance().inConsensusLoop = true
 
+            // REVIEW We have to proceed with the next mempool here, to avoid queued transactions to be included in the current immutable consensus round
+            // await Mempool.nextMempool() // ? What if consensus fails? Should we rollback the mempool?
+
             const shard =
                 await RepresentativeShard.getInstance().getShard(
                     currentlyOnlinePeers,
