@@ -8,10 +8,12 @@ import sharedState from "src/utilities/sharedState"
 
 import assignTxs from "./assignTxs"
 import orderTxs from "./orderTxs"
+import { ProofOfRepresentation } from "../mechanisms/PoR"
 
 export default async function deriveBlock(
     mempoolData: MempoolData,
     timestamp: number,
+    shard: ProofOfRepresentation,
 ): Promise<{
     derivedBlock: Block
     full_ordered_transactions: Transaction[]
@@ -22,9 +24,10 @@ export default async function deriveBlock(
     // We can infer the block number from the last block
     let lastBlockNumber = await Chain.getLastBlockNumber()
     derivedBlock.number = lastBlockNumber + 1
-    let proposer = sharedState
+    let proposer = Hashing.sha256(JSON.stringify(await shard.getPeers()))
+    /*sharedState
         .getInstance()
-        .identity.ed25519.publicKey.toString("hex")
+        .identity.ed25519.publicKey.toString("hex") */
     derivedBlock.proposer = proposer
     derivedBlock.content.timestamp = timestamp
     // REVIEW Order transactions

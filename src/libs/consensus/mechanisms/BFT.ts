@@ -140,6 +140,7 @@ export default class QBFT {
         const { derivedBlock, full_ordered_transactions } = await deriveBlock(
             mempool,
             medianTimestamp,
+            shard,
         )
 
         console.log("[BFT]: full ordered transactions for current iteration: ")
@@ -290,12 +291,12 @@ export default class QBFT {
         console.log(
             `[BFT] Checking consensus. Got ${pro} pro and ${con} against votes}, got ${total} votes`,
         )
-        let twothirdPlus1
+        let twothirdPlus1: number
         
         if (total === 1) {
             twothirdPlus1 = 1
         } else {
-            twothirdPlus1 = (total * 2) / 3 + 1 
+            twothirdPlus1 = (total * 2) / 3 + 1 // ((total*2)/3)+1
         }
 
         if (pro >= twothirdPlus1) {
