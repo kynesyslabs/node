@@ -4,5 +4,5 @@
 
 ### Run DEMOS
 
-    bun install
-    bun start
+    yarn
+    yarn start
