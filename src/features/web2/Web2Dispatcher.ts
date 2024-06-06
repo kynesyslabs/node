@@ -1,50 +1,50 @@
 // INFO Entry file for handling web2 requests
-import Web2API, { Web2APIClass } from "src/features/web2/routines/Web2Parser"
+import Web2API from "src/features/web2/routines/Web2Parser"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
-import {
-    DerivableNative, deriveMempoolOperation,
-} from "src/libs/utils/demostdlib/deriveMempoolOperation"
 import required from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
-// NOTE Terminal kit for useful logging
-import terminalkit from "terminal-kit"
+import terminalKit from "terminal-kit"
 
-import { IWeb2Payload, IWeb2Request, Operation } from "@kynesyslabs/demosdk/types"
+import { IWeb2Request } from "@kynesyslabs/demosdk/types"
 
-const term = terminalkit.terminal
+const term = terminalKit.terminal
 
-// INFO Upon receiving a request from a socket, we
-// need to attest and handle the other attestations (if we
-// are either first or not last of the chain), and then
-// send back to the client or to the origin rpc the
-// transaction that will b  e granted as web2 result
+/**
+ * Handles a Web2 request.
+ *
+ * This function receives a request from a socket, attests and handles other attestations,
+ * and then sends back to the client or to the origin rpc the transaction that will be granted as web2 result.
+ *
+ * @param {IWeb2Request} payload - The Web2 request to handle.
+ * @param {any} senderSocket - The socket that sent the request.
+ *
+ * @returns {Promise<[boolean, string | IWeb2Request]>} - Returns a promise that resolves to a tuple.
+ * The first element of the tuple is a boolean indicating whether the operation was successful.
+ * The second element is either a string containing an error message, or the processed Web2 request.
+ *
+ * @throws Will throw an error if the operation fails.
+ */
 export default async function handleWeb2(
     payload: IWeb2Request,
     senderSocket: any,
 ): Promise<[boolean, string | IWeb2Request]> {
     // Creating the workable interface
     // TODO Remember that web2 could need to be signed and could need a fee
-    // NOTE From now on, Web2API will reply to instanceName with the same instance
-    // NOTE Also note that Web2API automatically starts the request validation
 
     console.log("[PAYLOAD FOR WEB2] [*] Received a Web2 Payload.")
     console.log("[PAYLOAD FOR WEB2] [*] Beginning sanitization checks...")
-    //console.log(payload)
-    //process.exit(0)
 
-    let request: IWeb2Request = payload
+    const request: IWeb2Request = payload
     console.log(
         "[REQUEST FOR WEB2] [+] Found and loaded payload.message as expected...",
     )
-    //console.log(request)
-    //process.exit(0)
 
     // TODO A little more of sanitiazion
 
     let uuid = JSON.stringify(payload)
     uuid = uuid + Date.now().toString()
-    let nameHash = Hashing.sha256(uuid)
+    const nameHash = Hashing.sha256(uuid)
 
     // NOTE Web2API instantiates and creates a proper Web2APIClass with its methods and a clean state
     /*
@@ -56,22 +56,21 @@ export default async function handleWeb2(
      * An attestation is automatically added by the .digest() method, attesting its result
      * TODO Implement timeouts properly
      */
-    let web2interface = Web2API(null, nameHash, senderSocket, payload)
+    const web2interface = Web2API(null, nameHash, senderSocket, payload)
     // NOTE We want to wait for the request to be digested before proceeding (see above paragraph)
     await web2interface.digestedPromise
-    console.log(web2interface.request.result)
     // Now result is in web2request.request.result
     console.log(
         "[web2Dispatcher] Request digested and promise solved. Registering the instance...",
     )
-    let instanceName = web2interface.name // Numeric and progressive
+    const instanceName = web2interface.name // Numeric and progressive
     // Checking if we are the original rpc that received the request
     /* NOTE The attestations are enforced by being part of the payload itself,
      * hence being verified by the signature of the payload itself.
      * This way, the agnostic chain of trust can be maintained with minimal overhead.
      */
-    let nOfAttestations = Object.keys(request.attestations).length
-    let originalFlag = nOfAttestations === 1 // REVIEW Remember: we attested during the initialization
+    const nOfAttestations = Object.keys(request.attestations).length
+    const originalFlag = nOfAttestations === 1 // REVIEW Remember: we attested during the initialization
     console.log("[web2Dispatcher] Number of attestations: " + nOfAttestations)
     // ANCHOR Original RPC logic
     // NOTE If we are the original rpc and this is the original request, we need to validate the request
@@ -97,11 +96,11 @@ export default async function handleWeb2(
             term.green(
                 "[web2Dispatcher] [*] Hashing and signing the request's attestations...",
             )
-            let hashedAttestations = Hashing.sha256(
+            const hashedAttestations = Hashing.sha256(
                 JSON.stringify(web2interface.request.attestations),
             )
-            let ourPk = sharedState.getInstance().identity.ed25519.privateKey
-            let signedAttestations = Cryptography.sign(
+            const ourPk = sharedState.getInstance().identity.ed25519.privateKey
+            const signedAttestations = Cryptography.sign(
                 hashedAttestations,
                 ourPk,
             )
@@ -137,12 +136,6 @@ export default async function handleWeb2(
     )
 
     Web2API("remove", nameHash, senderSocket)
-
-    //console.log(derivedTx)
-    // Sending back the result
-    // REVIEW Maybe is more efficient somewhere else
-    //console.log("[WEB2 DEBUG]")
-    // console.log(JSON.stringify(web2interface.request))
 
     // TODO Maybe we should also return derivedResult somehow
     return [true, web2interface.request] // , derivedResult

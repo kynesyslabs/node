@@ -1,27 +1,27 @@
 import axios from "axios"
-import terminalkit from "terminal-kit"
+import terminalKit from "terminal-kit"
 
 // INFO This module is used to retrieve a resource from a raw request
 import { IParam, IRawWeb2Request, IWeb2Result } from "@kynesyslabs/demosdk/types"
 
-const term = terminalkit.terminal
+const term = terminalKit.terminal
 
 // INFO Experimental a new approach to requests
 export default async function post(
-    raw_request: IRawWeb2Request,
+    rawRequest: IRawWeb2Request,
 ): Promise<IWeb2Result> {
     // TODO Next line is for debug purposes
-    raw_request.headers = {}
+    rawRequest.headers = {}
 
     term.green("[Web2Parser] Retrieving data from raw request...\n")
-    //console.log(raw_request)
-    let { url } = raw_request
+    //console.log(rawRequest)
+    let { url } = rawRequest
     // Url normalization
     if (url.includes("?")) {
         url = url.split("?")[0]
     }
     // For POSTs we need exactly one parameter, the data
-    let params: IParam[] = raw_request.parameters
+    let params: IParam[] = rawRequest.parameters
     if (params.length !== 1) {
         term.red.bold(
             "[Web2Parser] Error retrieving resource: " +
@@ -52,7 +52,7 @@ export default async function post(
     // NOTE We should have a normalized url, so we can make the request
     term.yellow.bold("[Web2Parser] Retrieving derived url: " + url + "\n")
     let payload = {
-        headers: raw_request.headers, //FIXME on budino
+        headers: rawRequest.headers, //FIXME on budino
         url: url,
         data: data,
     }
