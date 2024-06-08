@@ -23,11 +23,13 @@ export default class sharedState {
     inMainLoop: boolean = false
     inConsensusLoop: boolean = false
     inSyncLoop: boolean = false
+    inPeerRecheckLoop: boolean = false
     // States
     runMainLoop: boolean = true
     mainLoopPaused: boolean = false
     consensusMode: boolean = false
     syncStatus: boolean = false
+    // SECTION shared state variables
     shard: ProofOfRepresentation
     identity: Identity
     // !SECTION shared state variables
