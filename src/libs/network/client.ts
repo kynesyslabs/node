@@ -26,10 +26,24 @@ async function sleep(ms) {
 }
 
 export default class Client {
+
+    static async connectToPeerObject(peer: Peer): Promise<[boolean, Peer | null]> {
+        // Just a wrapper around the connectToPeer function
+        const address = peer.connectionString.split(">")[0]
+        const port = parseInt(peer.connectionString.split(">")[1])
+        const connectedPeer = await this.connectToPeer(address, port)
+        if (!connectedPeer) {
+            return [false, null]
+        } else {
+            return [true, connectedPeer]
+        }
+    }
+
+    // ! Refactor to accept a Peer object (made with PeerManager.extractPeerFromString)
     static async connectToPeer(
         address: string = "localhost",
         port: number = 53550,
-    ) {
+    ): Promise<Peer> {
         address = this.addHttpToUrl(address)
         console.log("[CLIENT] Connecting to peer at " + address + ":" + port)
 
