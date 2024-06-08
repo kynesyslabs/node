@@ -12,6 +12,8 @@ import { Peer, PeerManager } from "src/libs/peer"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
 // INFO The main loop executed in background by index.ts
 import sharedState from "./sharedState"
+import Client from "src/libs/network/client"
+import checkOfflinePeers from "src/libs/peer/routines/checkOfflinePeers"
 
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
@@ -88,6 +90,9 @@ export default async function mainLoop() {
 
             hasSentNodeOnlineTx = true
         }
+
+        // REVIEW Re check offline peers asynchronously
+        checkOfflinePeers()
 
         // every block write online list
         console.log("[MAINLOOP]: getting online peers")

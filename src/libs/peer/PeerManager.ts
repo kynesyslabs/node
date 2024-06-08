@@ -14,9 +14,11 @@ import Peer from "./Peer"
 export default class PeerManager {
     private static instance: PeerManager
     private peerList: Record<string, Peer> // Storing all the connections, will be filtered once the request is done
+    private offlinePeers: string[] // Storing all the offline peers to be retried later
 
     private constructor() {
         this.peerList = {}
+        this.offlinePeers = []
     }
 
     static getInstance(): PeerManager {
@@ -44,6 +46,12 @@ export default class PeerManager {
     getAll(): Peer[] {
         return this._getActors(true, true)
     }
+
+
+    getOfflinePeers(): string[] {
+        return this.offlinePeers
+    }
+
 
     private _getActors(peers: boolean, connections: boolean): Peer[] {
         console.log("[PeerManager] Getting all peers...")
@@ -82,6 +90,7 @@ export default class PeerManager {
         )
         return actorList
     }
+
 
     getPeer(identity: string): Peer {
         return this.peerList[identity]
@@ -127,4 +136,37 @@ export default class PeerManager {
             delete this.peerList[peer.identity.toString("hex")]
         }
     }
+
+    addOfflinePeer(peerString: string) {
+        if (this.offlinePeers.indexOf(peerString) === -1) {
+            this.offlinePeers.push(peerString)
+        }
+    }
+
+    removeOfflinePeer(peerString: string) {
+        this.offlinePeers = this.offlinePeers.filter((peer) => peer !== peerString)
+    }
+
+    // REVIEW this should replace much of the client.ts and peerBootstrap.ts logic
+    // for creating a Peer from a string, thus making it easier to work with a peer
+    static extractPeerFromString(peerString: string): Peer {
+        // If there is a : in the url, we assume it's a address + port
+        let currentPeerAddress: string
+        let currentPeerPort: number
+        let currentPublicKey: string
+        if (peerString.includes(">")) {
+            currentPeerAddress = peerString.split(">")[0]
+            currentPeerPort = parseInt(peerString.split(">")[1])
+            currentPublicKey = peerString.split(">")[2]
+        } else {
+            currentPeerAddress = peerString
+            currentPeerPort = 53550
+        }
+        const peer = new Peer()
+        peer.identity = Buffer.from(currentPublicKey, "hex")
+        peer.connectionString = currentPeerAddress + ">" + currentPeerPort
+        // NOTE peer.socket = null
+        return peer
+    }
+
 }

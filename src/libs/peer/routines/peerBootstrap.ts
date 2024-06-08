@@ -28,12 +28,12 @@ export default async function peerBootstrap(
         console.log("[PEER BOOTSTRAP] Checking peer " + local_list[i])
         let _currentPeerURL = local_list[i] // The url of the peer
         // If there is a : in the url, we assume it's a address + port
-        let currentPeerAddress
-        let currentPeerPort
-        let currentPublicKey
+        let currentPeerAddress: string
+        let currentPeerPort: number
+        let currentPublicKey: string
         if (_currentPeerURL.includes(">")) {
             currentPeerAddress = _currentPeerURL.split(">")[0]
-            currentPeerPort = _currentPeerURL.split(">")[1]
+            currentPeerPort = parseInt(_currentPeerURL.split(">")[1])
             currentPublicKey = _currentPeerURL.split(">")[2]
         } else {
             currentPeerAddress = _currentPeerURL
@@ -49,6 +49,8 @@ export default async function peerBootstrap(
         )
         // REVIEW Connection test and add to valid_peers
         // Trying to connect and retrieve the socket for the given peer using Peer class
+        let _currentTestingPeer = PeerManager.extractPeerFromString(_currentPeerURL)
+        // TODO See PeerManager.extractPeerFromString and Client.connectToPeer comments
         let _currentPeerObject = await Client.connectToPeer(
             currentPeerAddress,
             currentPeerPort,
@@ -97,16 +99,20 @@ export default async function peerBootstrap(
                             currentPeerAddress +
                             " as it is not connected",
                     )
+                    // Adding the peer string to the list of offline peers so it can be tried later
+                    PeerManager.getInstance().addOfflinePeer(_currentPeerURL)
                 }
             }
         } else {
             console.log(
-                "[BOOTSTRAP] ERROR: Invalid peer " +
+                "[BOOTSTRAP] ERROR: Cannot connect to peer: " +
                     currentPeerAddress +
                     ":" +
                     currentPeerPort +
-                    "\n",
+                    " (will retry) \n",
             )
+            // Adding the peer string to the list of offline peers so it can be tried later
+            PeerManager.getInstance().addOfflinePeer(_currentPeerURL)
         }
     }
     // Dying if there are no valid peers
