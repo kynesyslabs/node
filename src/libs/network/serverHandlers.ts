@@ -97,7 +97,10 @@ export default class ServerHandlers {
         console.log("[SERVERHANDLER] handleVoteRequest")
         const mempool = await Mempool.getMempool()
 
-        const { derivedBlock } = await deriveBlock(mempool, timestamp)
+        // REVIEW Is this the right way to get the shard?
+        const { shard } = sharedState.getInstance()
+
+        const { derivedBlock } = await deriveBlock(mempool, timestamp, shard)
         const proposedBlock = derivedBlock
         let proposedBlockHash = proposedBlock.hash
         return proposedBlockHash

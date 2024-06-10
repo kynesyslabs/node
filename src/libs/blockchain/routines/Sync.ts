@@ -24,6 +24,7 @@ import Peer from "../../peer/Peer"
 import PeerManager from "../../peer/PeerManager"
 import Block from "../block"
 import Chain from "../chain"
+import required from "src/utilities/required"
 
 const term = terminalkit.terminal
 
@@ -172,29 +173,111 @@ export async function fastSync(
 
 /* WARNING - Experimental Ahead */
 
-// INFO Syncing with the network using majority vote as legitimate check
-// REVIEW Reimplement a smart way to sync the blockchain between two or more peers
-export async function _Sync(id: any) {
-    // Our data is stored locally for convenience
-    console.log("[SYNC] Syncing with the network...")
-    console.log("[SYNC] Getting our last block number and hash...")
-    let ourLastBlockNumber = await Chain.getLastBlockNumber()
-    let ourLastBlockHash = await Chain.getLastBlockHash()
-    console.log(
-        "[SYNC] Our last block number is " +
-            ourLastBlockNumber +
-            " and our last block hash is " +
-            ourLastBlockHash,
-        "\n",
+// TODO Sync reimplementation
+export async function Sync(peer: Peer): Promise<boolean> {
+    if (!peer.socket) {
+        console.log("[SYNC] Peer has no socket: " + peer.connectionString)
+        return false
+    }
+    if(!peer.socket.connected) {
+        console.log("[SYNC] Peer socket is not connected: " + peer.connectionString)
+        return false
+    }
+    // Getting our last block number and hash
+    let lastSyncedBlockResponse = await Chain.getBlockByNumber(lastBlockNumber)
+    if (!lastSyncedBlockResponse[0]) {
+        console.log("[SYNC] We cannot retrieve our last block!")
+        return false
+    }
+    let lastSyncedBlock: Block = lastSyncedBlockResponse[1] as Block
+    var lastBlockNumber = lastSyncedBlock.number
+    var lastBlockHash = lastSyncedBlock.hash
+    // Asking the peer for the last block number
+    var peerLastBlockNumber = await askLastBlockNumber(peer)
+    // Compute the block number difference
+    var blockNumberDifference = peerLastBlockNumber - lastBlockNumber
+    console.log("[SYNC] Block number difference is " + blockNumberDifference)
+    if (blockNumberDifference > 0) {
+        console.log("[SYNC] We need to sync " + blockNumberDifference + " blocks")
+    } else {
+        console.log("[SYNC] We are already synced with this peer")
+        return true
+    }
+    // Verifying if the hash of the last block we have is coherent with the one of the peer
+    var peerSyncedBlock = await askBlockByNumber(peer, lastBlockNumber)
+    if (peerSyncedBlock.hash!== lastBlockHash) {
+        console.log("[SYNC] Hash is not coherent for block: ", peerSyncedBlock.number)
+        console.log("Peer hash: ", peerSyncedBlock.hash)
+        console.log("Our hash: ", lastBlockHash)
+        console.log("[SYNC] We cannot sync with this peer")
+        return false
+    }
+    console.log("[SYNC] Hash is coherent for block: ", peerSyncedBlock.number)
+    console.log("[SYNC] We can sync with this peer")
+    // Syncing the blocks one by one
+    for (let i = 0; i < blockNumberDifference; i++) {
+        // Calculating the next block number to ask
+        let block_to_ask = lastBlockNumber + i
+        // Asking the peer for the block
+        let blockResponse = await askBlockByNumber(peer, block_to_ask)
+        // Response handling
+        if (!blockResponse[0]) {
+            console.log("[SYNC] We cannot sync with this peer for block: ", block_to_ask)
+            return false
+        }
+        console.log("[SYNC] Block response: " + blockResponse[1])
+        let currentSyncingBlock = blockResponse[1] as Block
+        // Coherence checking
+        if (!(currentSyncingBlock.content.previousHash === lastBlockHash)) {
+            console.log("[SYNC] Hash is not coherent for block: ", currentSyncingBlock.number)
+            console.log("Peer hash: ", currentSyncingBlock.content.previousHash)
+            console.log("Our hash: ", lastBlockHash)
+            console.log("[SYNC] We cannot sync with this peer")
+            return false
+        }
+        console.log("[SYNC] Hash is coherent for block: ", currentSyncingBlock.number)
+        console.log("[SYNC] Inserting block: ", currentSyncingBlock.number)
+        // TODO Insert the block in the chain
+        // Now updating the last block we have
+        lastSyncedBlock = currentSyncingBlock
+        lastBlockNumber = currentSyncingBlock.number
+        lastBlockHash = currentSyncingBlock.hash
+    }
+    // REVIEW the above logic
+}
+
+async function askLastBlockNumber(peer: Peer): Promise<number> {
+    let blockNumberResponse = await demostdlib.remoteCall(
+        peer.connectionString,
+        peer,
+        "getLastBlockNumber",
+        "nodeCall",
+        true,
+        false,
+        "",
     )
-    // Let's also store the actual peerlist
-    console.log("[SYNC] Getting the peerlist...")
-    let peerlist = peerManager.getPeers()
-    console.log("[SYNC] Peerlist has length: " + peerlist.length)
-    let peerLastInfo: Map<string, IPeerLastInfo> = new Map()
-    // To determine which peers we should sync with, we need to know the last block number and hash of each peer
-    console.log("[SYNC] Iterating over the peerlist...")
-    // TODO Complete this method
-    console.log("[SYNC] { DEBUG } Returning sync anyway")
-    return true
+    if (blockNumberResponse[0]) {
+        return blockNumberResponse[1].message as number
+    } else {
+        console.log("[SYNC] Peer does not have the last block number")
+        return 0
+    }
+}
+
+async function askBlockByNumber(peer: Peer, blockNumber: number): Promise<Block> {
+    let blockResponse = await demostdlib.remoteCall(
+        peer.connectionString,
+        peer,
+        "getBlockByNumber",
+        "nodeCall",
+        true,
+        false,
+        { blockNumber: blockNumber.toString() },
+    )
+    if (blockResponse[0]) {
+        return JSON.parse(JSON.parse(blockResponse[1].message)) as Block
+    } else {
+        console.log("[SYNC] Peer does not have the block " + blockNumber)
+        return null
+    }
 }

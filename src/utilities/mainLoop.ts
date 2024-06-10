@@ -92,7 +92,7 @@ export default async function mainLoop() {
         }
 
         // REVIEW Re check offline peers asynchronously
-        checkOfflinePeers()
+        checkOfflinePeers() // NOTE This is an async method that will be executed in the background
 
         // every block write online list
         console.log("[MAINLOOP]: getting online peers")
@@ -161,8 +161,14 @@ export default async function mainLoop() {
             sharedState.getInstance().shard = shard
             console.log("[MAIN LOOP] Shard selected")
             console.log(shard)
-
-            const consensus = await QBFT.representationAssembly(shard)
+            
+            let consensus = null
+            try {
+                consensus = await QBFT.representationAssembly(shard)
+            } catch (e) {
+                console.log(e)
+                throw e
+            }
             console.log(
                 `[MAIN LOOP] Consensus: ${
                     consensus[0]

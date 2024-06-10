@@ -45,6 +45,7 @@ export async function proofConsensusHandler(raw_content: any): Promise<any> {
 }
 
 export async function askPoC(hash: string, peer: Peer): Promise<any> {
+    // FIXME If peer has no socket, it will crash (shouldn't exist btw)
     let response = await demostdlib.remoteCall(
         "any",
         peer,

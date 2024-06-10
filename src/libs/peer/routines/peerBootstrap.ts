@@ -55,6 +55,7 @@ export default async function peerBootstrap(
             currentPeerAddress,
             currentPeerPort,
         ) // Returns the Peer object
+        console.log("[BOOTSTRAP] _currentPeerObject has a socket id: " + _currentPeerObject.socket.id)
         if (_currentPeerObject) {
             // Adding identity if any
             console.log(
@@ -93,7 +94,9 @@ export default async function peerBootstrap(
                         "[PEERBOOTSTRAP] Could not add peer to peerlist (see above)",
                     )
                     // peerlist.push(_currentPeerObject)
-                } else {
+                }
+            }
+            else {
                     console.log(
                         "[PEERBOOTSTRAP] Refusing to add peer " +
                             currentPeerAddress +
@@ -101,7 +104,6 @@ export default async function peerBootstrap(
                     )
                     // Adding the peer string to the list of offline peers so it can be tried later
                     PeerManager.getInstance().addOfflinePeer(_currentPeerURL)
-                }
             }
         } else {
             console.log(
