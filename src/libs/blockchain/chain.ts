@@ -257,7 +257,7 @@ export default class Chain {
                 processedBlocks[0] || [],
             )
 
-            return commonPeers
+            return commonPeers as [string, string][]
         } catch (e) {
             return []
         }
