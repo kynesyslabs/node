@@ -153,6 +153,8 @@ export default class QBFT {
             shard,
         )
 
+        // REVIEW Should we do something for derivedBlock.content.encrypted_transactions too?
+
         console.log("[BFT]: full ordered transactions for current iteration: ")
         console.log(full_ordered_transactions)
 

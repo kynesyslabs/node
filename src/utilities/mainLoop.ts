@@ -153,15 +153,14 @@ export default async function mainLoop() {
             // REVIEW We have to proceed with the next mempool here, to avoid queued transactions to be included in the current immutable consensus round
             // await Mempool.nextMempool() // ? What if consensus fails? Should we rollback the mempool?
 
-            const shard =
-                await RepresentativeShard.getInstance().getShard(
-                    currentlyOnlinePeers,
-                )
+            const shard = await RepresentativeShard.getInstance().getShard(
+                currentlyOnlinePeers,
+            )
 
             sharedState.getInstance().shard = shard
             console.log("[MAIN LOOP] Shard selected")
             console.log(shard)
-            
+
             let consensus = null
             try {
                 consensus = await QBFT.representationAssembly(shard)
@@ -191,8 +190,11 @@ export default async function mainLoop() {
             sharedState.getInstance().consensusMode = false
             sharedState.getInstance().inConsensusLoop = false
             sharedState.getInstance().mainLoopPaused = false // Pause the main loop
-        } else if (!sharedState.getInstance().syncStatus) { // ? This is a bit redundant, isn't it?
-            console.log("[MAIN LOOP] Cannot start consensus, not in sync. Sync loop should start automatically")
+        } else if (!sharedState.getInstance().syncStatus) {
+            // ? This is a bit redundant, isn't it?
+            console.log(
+                "[MAIN LOOP] Cannot start consensus, not in sync. Sync loop should start automatically",
+            )
         }
     }
 }
