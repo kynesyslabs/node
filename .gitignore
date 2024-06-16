@@ -46,3 +46,4 @@ docker/node_1/data/chain.db
 docker/node_2/data/chain.db
 .trunk/tools
 .vscode/settings.json
+documentation/schemas/.*
