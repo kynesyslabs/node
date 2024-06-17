@@ -13,7 +13,11 @@ import sharedState from "src/utilities/sharedState"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
 
-import { BundleContent, ISecurityReport, ValidityData } from "@kynesyslabs/demosdk/types"
+import {
+    BundleContent,
+    ISecurityReport,
+    ValidityData,
+} from "@kynesyslabs/demosdk/types"
 
 let term = terminalkit.terminal
 
@@ -127,6 +131,43 @@ export default class ServerListeners {
         console.log("[serverListeners] content.type: " + content.type)
         console.log("[serverListeners] content.extra: " + content.extra)
 
+        // NOTE Intercepts the comlink and checks if it is a L2PS request
+        if (content.type === "l2ps") {
+            ;({ response, require_reply, extra } = await ServerHandlers.handleL2PS(content))
+            if (!response) {
+                term.red.bold(
+                    "[SERVER] Error while handling L2PS request, aborting",
+                )
+            }
+            // Sending back the response
+            console.log("[SERVER] Sending back comlink")
+            await demostdlib.reply(
+                _comlink_request,
+                response,
+                require_reply,
+                extra,
+            )
+            receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
+            return
+        }
+
+        // NOTE If we are here, we have a transaction or we error out
+        if (content.type !== "transaction") {
+            term.red.bold(
+                "[SERVER] Received a non recognized comlink, aborting",
+            )
+            console.log(content.type)
+            await demostdlib.reply(
+                _comlink_request,
+                false,
+                false,
+                "invalid comlink type",
+            )
+            receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
+            return
+        }
+
+        // TODO Better to modularize this
         // REVIEW We use the 'extra' field to see if it is a confirmTx request (prior to execution)
         // or an broadcastTx request (to execute the transaction after gas cost is calculated).
         // Transactions are either gas consuming or not, so we need to check if the transaction

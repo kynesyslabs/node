@@ -37,7 +37,7 @@ import { BrowserRequest } from "src/libs/network/serverListeners"
 import { Peer } from "src/libs/peer"
 import { Blocks } from "src/model/entities/Blocks"
 import sharedState from "src/utilities/sharedState"
-import _ from "lodash"
+import _, { chain } from "lodash"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
 
@@ -58,6 +58,8 @@ import {
     XMPayload,
 } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/Transaction"
 import { StatusNative } from "src/model/entities/StatusNative"
+import Block from "../blockchain/block"
+import { BlockContent } from "../../../../sdks/src/types/blockchain/blocks"
 
 let term = terminalkit.terminal
 
@@ -305,7 +307,9 @@ export default class ServerHandlers {
     }
 
     // INFO Handling XM Transaction
-    static async handleXMChainOperation(xmscript: XMScript): Promise<any> {
+    static async handleXMChainOperation(
+        xmscript: XMScript,
+    ): Promise<{ response: any; require_reply: boolean; extra: any }> {
         /* NOTE This workflow goeas as:
          * The XM Operation is validated, executed and verified
          * when applicable.
@@ -345,7 +349,7 @@ export default class ServerHandlers {
     static async handleWeb2Request(
         content: IWeb2Request,
         senderSocket: any,
-    ): Promise<any> {
+    ): Promise<{ response: any; require_reply: boolean; extra: any }> {
         /* NOTE This workflow goeas as:
          * The Web2 Operation is validated, executed and verified
          * when applicable. Is then sent back once attested.
@@ -378,6 +382,34 @@ export default class ServerHandlers {
             extra = fullResponse[1] as string
         }
         return { extra, require_reply, response }
+    }
+
+    // ! Try to modularize this (and the others) methods in a better way
+    static async handleL2PS(
+        content: any,
+    ): Promise<{ response: any; require_reply: boolean; extra: any }> {
+        // ! TODO Handle this
+        let data = content.data
+        switch (content.extra) {
+            case "retrieve":
+                // TODO
+                break
+            case "retrieveAll":
+                var block = await Chain.getBlockByNumber(data.blockNumber)
+                var blockContent: BlockContent = JSON.parse(block.content)
+                var encryptedTransactions = blockContent.encrypted_transactions
+                return {
+                    response: encryptedTransactions,
+                    require_reply: true,
+                    extra: "",
+                }
+            case "registerTx":
+                // TODO
+                break
+            default:
+                // TODO
+                break
+        }
     }
 
     static async handleConsensusRequest(
