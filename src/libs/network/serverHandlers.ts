@@ -12,7 +12,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
-import handleWeb2 from "src/features/web2/Web2Dispatcher"
 import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool"
 import {
@@ -31,6 +30,7 @@ import getBlockHeaderByNumber from "src/libs/network/routines/nodecalls/getBlock
 import getPeerlist from "src/libs/network/routines/nodecalls/getPeerlist"
 import getPreviousHashFromBlockHash from "src/libs/network/routines/nodecalls/getPreviousHashFromBlockHash"
 import getPreviousHashFromBlockNumber from "src/libs/network/routines/nodecalls/getPreviousHashFromBlockNumber"
+import handleL2PS from "./routines/transactions/handleL2PS"
 import { normalizeWebBuffers } from "src/libs/network/routines/normalizeWebBuffers"
 import Sessions from "src/libs/network/routines/sessionManager"
 import { BrowserRequest } from "src/libs/network/serverListeners"
@@ -60,6 +60,7 @@ import {
 import { StatusNative } from "src/model/entities/StatusNative"
 import Block from "../blockchain/block"
 import { BlockContent } from "../../../../sdks/src/types/blockchain/blocks"
+import handleWeb2Request from "./routines/transactions/handleWeb2Request"
 
 let term = terminalkit.terminal
 
@@ -343,73 +344,17 @@ export default class ServerHandlers {
         return { extra, require_reply, response }
     }
 
-    // INFO Handling Web2 Transaction
-    // NOTE Theoretically, content should be IWeb2Request compliant
-    // LINK "../../features/web2/types/Web2Request";
+    // Proxy method for handleWeb2Request
     static async handleWeb2Request(
         content: IWeb2Request,
         senderSocket: any,
     ): Promise<{ response: any; require_reply: boolean; extra: any }> {
-        /* NOTE This workflow goeas as:
-         * The Web2 Operation is validated, executed and verified
-         * when applicable. Is then sent back once attested.
-         * A transaction is derived from the executed web2 operation.
-         * An operation is then created and pushed in the GLS.
-         * An operation for the gas is also pushed in the GLS.
-         * The tx is pushed in the mempool if applicable.
-         */
-        console.log("[SERVER] Received web2Request")
-        //console.log(JSON.stringify(request))
-
-        let extra: string,
-            require_reply = false
-        let response: IWeb2Request
-        // We get our connection string
-        // const currentPeerString = Identity.getInstance().getConnectionString()
-        // NOTE Switched to the new class
-
-        //console.log("[WEB2 CONTENT DUMP]")
-        //console.log(content)
-        let fullResponse = await handleWeb2(content, senderSocket)
-        //console.log("[WEB2 CONTENT RESPONSE DUMP]")
-        //console.log(fullResponse)
-
-        // Managing the results
-        if (fullResponse[0]) {
-            response = fullResponse[1] as IWeb2Request
-        } else {
-            response = null
-            extra = fullResponse[1] as string
-        }
-        return { extra, require_reply, response }
+        return handleWeb2Request(content, senderSocket)
     }
 
-    // ! Try to modularize this (and the others) methods in a better way
-    static async handleL2PS(
-        content: any,
-    ): Promise<{ response: any; require_reply: boolean; extra: any }> {
-        // ! TODO Handle this
-        let data = content.data
-        switch (content.extra) {
-            case "retrieve":
-                // TODO
-                break
-            case "retrieveAll":
-                var block = await Chain.getBlockByNumber(data.blockNumber)
-                var blockContent: BlockContent = JSON.parse(block.content)
-                var encryptedTransactions = blockContent.encrypted_transactions
-                return {
-                    response: encryptedTransactions,
-                    require_reply: true,
-                    extra: "",
-                }
-            case "registerTx":
-                // TODO
-                break
-            default:
-                // TODO
-                break
-        }
+    // Proxy method for handleL2PS
+    static async handleL2PS(content: any): Promise<{ response: any; require_reply: boolean; extra: any }> {
+        return handleL2PS(content)
     }
 
     static async handleConsensusRequest(
