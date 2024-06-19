@@ -438,6 +438,9 @@ export default class Chain {
                 balance,
             )
         }
+
+        // Adding an empty encrypted transactions list
+        genesisBlock.content.encrypted_transactions = []
         return await genesisBlock
     }
 

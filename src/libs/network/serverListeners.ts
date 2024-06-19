@@ -151,7 +151,7 @@ export default class ServerListeners {
             return
         }
 
-        // NOTE If we are here, we have a transaction or we error out
+        /* NOTE If we are here, we have a transaction or we error out
         if (content.type !== "transaction") {
             term.red.bold(
                 "[SERVER] Received a non recognized comlink, aborting",
@@ -165,7 +165,7 @@ export default class ServerListeners {
             )
             receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
             return
-        }
+        } */
 
         // TODO Better to modularize this
         // REVIEW We use the 'extra' field to see if it is a confirmTx request (prior to execution)
