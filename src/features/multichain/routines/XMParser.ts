@@ -110,7 +110,7 @@ class XMParser {
         /* SECTION Write tasks */
         switch (operation.task?.type) {
             case "pay":
-                const result = await handlePayOperation(operation, chainID)
+                var result = await handlePayOperation(operation, chainID)
 
                 // INFO: Adding chain info for debugging
                 result["chain"] = `${operation.chain}.${operation.subchain}`
