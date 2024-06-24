@@ -100,12 +100,13 @@ export default class ServerListeners {
                 this.peer.socket,
             )
             if (!_comlink_request) {
-                return // TODO Better error handling
+                let error = "Error while parsing comlink request\n"
+                return error// TODO Better error handling
             }
         } catch (error) {
             term.red(error)
             console.log("Returning")
-            return // TODO Better error handling
+            return error // TODO Better error handling
         }
         // We can now extract the comlink and the content to be used in the handlers
         console.log(
