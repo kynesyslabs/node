@@ -542,7 +542,13 @@ export default class ServerHandlers {
                     })
                 }
                 console.log(`getting tx with hash ${data.hash}`)
-                response = await Chain.getTxByHash(data.hash)
+                try {
+                    response = await Chain.getTxByHash(data.hash)
+                } catch (e) {
+                    console.log(e)
+                    response = "error"
+                    extra = e
+                }
                 break
             case "getMempool":
                 response = await Chain.getPendingPool()

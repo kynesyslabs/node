@@ -70,12 +70,17 @@ export default class Chain {
         const transactionRepository = db
             .getDataSource()
             .getRepository(Transactions)
-
-        return Transaction.fromRawTransaction(
-            await transactionRepository.findOneBy({
-                hash,
-            }),
-        )
+        try {
+            return Transaction.fromRawTransaction(
+                await transactionRepository.findOneBy({
+                    hash,
+                }),
+            )
+        } catch (error) {
+            console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(error))
+            console.error(error)
+            throw error
+        }
     }
 
     // INFO Get the last block number
