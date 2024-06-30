@@ -1,5 +1,5 @@
 // INFO Entry file for handling web2 requests
-import Web2API from "src/features/web2/routines/Web2Parser"
+import { DAHRManager } from "src/features/web2/routines/DAHRManager"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import required from "src/utilities/required"
@@ -40,38 +40,29 @@ export default async function handleWeb2(
         "[REQUEST FOR WEB2] [+] Found and loaded payload.message as expected...",
     )
 
-    // TODO A little more of sanitiazion
+    // TODO A little more of sanitization checks
 
     let uuid = JSON.stringify(payload)
     uuid = uuid + Date.now().toString()
     const nameHash = Hashing.sha256(uuid)
 
-    // NOTE Web2API instantiates and creates a proper Web2APIClass with its methods and a clean state
-    /*
-     * As it can be noted by following the class definition, the Web2API class works as a unique set of
-     * singletons. In Web2API constructor, the .digestedPromise propriety contains a promise from the
-     * .digest() method which is resolved once the attestation path (the Instant Chain of Trust) is completed
-     * or the request times out.
-     *
-     * An attestation is automatically added by the .digest() method, attesting its result
-     * TODO Implement timeouts properly
-     */
-    const web2interface = Web2API(null, nameHash, senderSocket, payload)
-    // NOTE We want to wait for the request to be digested before proceeding (see above paragraph)
-    await web2interface.digestedPromise
-    // Now result is in web2request.request.result
+    // TODO Implement timeouts properly
+    // Creating the interface
+    const dahrManagerInstance = DAHRManager.getInstance()
+    const dahr = dahrManagerInstance.getDAHR(nameHash)
+
     console.log(
-        "[web2Dispatcher] Request digested and promise solved. Registering the instance...",
+        "[web2Dispatcher] dahr instance created.",
     )
-    const instanceName = web2interface.name // Numeric and progressive
+    const instanceName = web2interface.name// Numeric and progressive
     // Checking if we are the original rpc that received the request
     /* NOTE The attestations are enforced by being part of the payload itself,
      * hence being verified by the signature of the payload itself.
      * This way, the agnostic chain of trust can be maintained with minimal overhead.
      */
-    const nOfAttestations = Object.keys(request.attestations).length
-    const originalFlag = nOfAttestations === 1 // REVIEW Remember: we attested during the initialization
-    console.log("[web2Dispatcher] Number of attestations: " + nOfAttestations)
+    const numOfAttestations = Object.keys(request.attestations).length
+    const originalFlag = numOfAttestations === 1 // REVIEW Remember: we attested during the initialization
+    console.log("[web2Dispatcher] Number of attestations: " + numOfAttestations)
     // ANCHOR Original RPC logic
     // NOTE If we are the original rpc and this is the original request, we need to validate the request
     // and wait for the attestations to arrive
@@ -87,7 +78,7 @@ export default async function handleWeb2(
             )
             if (sharedState.getInstance().PROD) {
                 required(
-                    await Web2API(null, instanceName).awaitQuorum(),
+                    await DAHRManager(null, instanceName).awaitQuorum(),
                     "Not enough attestations to reach quorum",
                 ) // SWITCH
             }
@@ -134,8 +125,6 @@ export default async function handleWeb2(
     console.log(
         "[web2Dispatcher] Attestations validated. Deriving a transaction + operation...",
     )
-
-    Web2API("remove", nameHash, senderSocket)
 
     // TODO Maybe we should also return derivedResult somehow
     return [true, web2interface.request] // , derivedResult
