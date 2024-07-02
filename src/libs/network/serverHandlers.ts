@@ -563,14 +563,19 @@ export default class ServerHandlers {
             // INFO Address info endpoint
             case "getAddressInfo":
                 if (!data.address) {
-                    receiver.emit("public", {
-                        error: "No address specified",
-                    })
+                    response = "error"
+                    extra = "No address specified"
+                    break
                 }
-                nStat = (await GLS.getGLSNativeStatus(
-                    data.address,
-                )) as StatusNative
-                response = nStat.toString() // REVIEW It works ?
+                try {
+                    nStat = (await GLS.getGLSNativeStatus(
+                        data.address,
+                    )) as StatusNative
+                    response = nStat.toString() // REVIEW It works ?
+                } catch (error) {
+                    response = "error"
+                    extra = error
+                }
                 break
             case "getAddressNonce":
                 if (!data.address) {
