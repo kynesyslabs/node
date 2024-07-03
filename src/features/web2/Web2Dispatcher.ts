@@ -1,5 +1,5 @@
 // INFO Entry file for handling web2 requests
-import { DAHRManager } from "src/features/web2/routines/DAHRManager"
+import { DAHRManager } from "src/features/web2/dahr/DAHRManager"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import required from "src/utilities/required"
@@ -7,6 +7,7 @@ import sharedState from "src/utilities/sharedState"
 import terminalKit from "terminal-kit"
 
 import { IWeb2Request } from "@kynesyslabs/demosdk/types"
+import { Web2RequestManager } from "./Web2RequestManager"
 
 const term = terminalKit.terminal
 
@@ -29,7 +30,6 @@ export default async function handleWeb2(
     payload: IWeb2Request,
     senderSocket: any,
 ): Promise<[boolean, string | IWeb2Request]> {
-    // Creating the workable interface
     // TODO Remember that web2 could need to be signed and could need a fee
 
     console.log("[PAYLOAD FOR WEB2] [*] Received a Web2 Payload.")
@@ -48,13 +48,13 @@ export default async function handleWeb2(
 
     // TODO Implement timeouts properly
     // Creating the interface
-    const dahrManagerInstance = DAHRManager.getInstance()
-    const dahr = dahrManagerInstance.getDAHR(nameHash)
+    const DAHRManagerInstance = DAHRManager.instance
+    const DAHR = DAHRManagerInstance.getDAHR(nameHash, payload)
 
     console.log(
         "[web2Dispatcher] dahr instance created.",
     )
-    const instanceName = web2interface.name// Numeric and progressive
+    const DAHRInstanceName = nameHash // Numeric and progressive
     // Checking if we are the original rpc that received the request
     /* NOTE The attestations are enforced by being part of the payload itself,
      * hence being verified by the signature of the payload itself.
@@ -78,7 +78,7 @@ export default async function handleWeb2(
             )
             if (sharedState.getInstance().PROD) {
                 required(
-                    await DAHRManager(null, instanceName).awaitQuorum(),
+                    await new Web2RequestManager(DAHR).quorumIsReached(),
                     "Not enough attestations to reach quorum",
                 ) // SWITCH
             }
@@ -88,7 +88,7 @@ export default async function handleWeb2(
                 "[web2Dispatcher] [*] Hashing and signing the request's attestations...",
             )
             const hashedAttestations = Hashing.sha256(
-                JSON.stringify(web2interface.request.attestations),
+                JSON.stringify(DAHR.web2Request.attestations),
             )
             const ourPk = sharedState.getInstance().identity.ed25519.privateKey
             const signedAttestations = Cryptography.sign(
@@ -99,8 +99,8 @@ export default async function handleWeb2(
             term.green(
                 "[web2Dispatcher] [*] Compiling and certifying the result on our side...",
             )
-            web2interface.request.hash = hashedAttestations
-            web2interface.request.signature = signedAttestations
+            DAHR.web2Request.hash = hashedAttestations
+            DAHR.web2Request.signature = signedAttestations
         } catch (error) {
             // Catching errors before the return
             console.log("[web2Dispatcher] Error: " + JSON.stringify(error))
@@ -126,6 +126,6 @@ export default async function handleWeb2(
         "[web2Dispatcher] Attestations validated. Deriving a transaction + operation...",
     )
 
-    // TODO Maybe we should also return derivedResult somehow
-    return [true, web2interface.request] // , derivedResult
+    // TODO Figure out what to return here. We want to return a DAHR instance and let the client handle the rest
+    /* return [true, dahr.initializeDAHR] */
 }
