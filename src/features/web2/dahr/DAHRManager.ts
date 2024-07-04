@@ -10,16 +10,7 @@ const term = terminalKit.terminal
  * DAHRManager is a singleton class that manages DAHR instances.
  */
 export class DAHRManager {
-    /**
-     * A static DAHRManager instance.
-     * @type {DAHRManager}
-     */
     private static _instance: DAHRManager
-    
-    /**
-     * A map of DAHRs with DAHR name and DAHR instance.
-     * @type {DAHRManager}
-     */
     private static dahrs: Map<string, DAHR>
 
     /**
@@ -35,10 +26,6 @@ export class DAHRManager {
         DAHRManager.dahrs = new Map()
     }
   
-    /**
-     * Get the singleton instance of DAHRManager.
-     * @returns {DAHRManager} The singleton instance of DAHRManager.
-     */
     static get instance(): DAHRManager {
         if (!DAHRManager._instance) {
             term.yellow("[DAHRManager] Creating new DAHRManager instance\n")
@@ -53,7 +40,7 @@ export class DAHRManager {
      * @param {string} sessionId - The session ID.
      * @returns {DAHR} The DAHR instance.
      */
-    getDAHR(sessionId: string = null, payload: IWeb2Request): DAHR {
+    getDAHR(sessionId: string, payload: IWeb2Request): DAHR {
         if (!sessionId) {
             sessionId = String(DAHRManager.progressive)
             DAHRManager.progressive += 1
@@ -68,10 +55,6 @@ export class DAHRManager {
         return DAHRManager.dahrs.get(sessionId)
     }
 
-    /**
-     * Delete a DAHR instance by sessionId.
-     * @param {string} sessionId - The session ID.
-     */
     deleteDAHR(sessionId: string): void {
         if (DAHRManager.dahrs.has(sessionId)) {
             DAHRManager.dahrs.delete(sessionId)
@@ -81,10 +64,6 @@ export class DAHRManager {
         }
     }
   
-    /**
-     * Get all DAHR instances.
-     * @returns {Array<[string, DAHR]>} An array of DAHR instances.
-     */
     getAllDAHRs(): Array<[string, DAHR]> {
       return Array.from(DAHRManager.dahrs)
     }

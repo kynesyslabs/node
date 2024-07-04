@@ -6,8 +6,8 @@ import terminalKit from "terminal-kit"
 import {
     IWeb2Request,
 } from "@kynesyslabs/demosdk/types"
-
 import { EnumWeb2Methods } from "node_modules/@kynesyslabs/demosdk/build/types/web2"
+
 import { DAHR } from "./DAHR"
 
 const term = terminalKit.terminal
@@ -19,38 +19,42 @@ export class Proxy {
    */
   private proxyServer: httpProxy
 
-  /**
-   * Creates a new instance of the Proxy class.
-   *
-   * @param {string} source - The source address that the proxy server will listen on.
-   * @param {string} target - The target address that the proxy server will forward requests to.
-   * @param {DAHR} dahr - An instance of the DAHR class. This parameter is required.
-   * @throws {Error} Will throw an error if the `dahr` parameter is not provided.
-   */
-  constructor(source: string, private target: string, private dahr: DAHR) {
+  constructor(private dahr: DAHR) {
       required(this.dahr, "Missing DAHR instance")
-      this.proxyServer = httpProxy.createProxyServer({target: this.target})
-
-      https.createServer((req, res) => {
-          this.proxyServer.web(req, res)
-      }).listen(source)
   }
 
+  private createProxyServer(source: string, target: string): void {
+    term.yellow.bold(
+        "[Web2API] Creating a proxy server with source " + source + " and target " + target,
+    )
+
+    this.proxyServer = httpProxy.createProxyServer({target})
+
+    https.createServer((req, res) => {
+        this.proxyServer.web(req, res)
+    }).listen(source)
+  }
+    
   /**
-   * Send a request.
-   * @param {IWeb2Request["raw"] | null} body - The potential request body.
+   * Send a HTTP request.
+   * @param {string} source - The source where the proxy server will listen for incoming requests.
+   * @param {string} target - The target URL where the HTTP request will be sent.
    * @param {string} path - The path.
    * @param {string} method - The HTTP method that the proxy should call.
-   * @returns {Promise<any>, IWeb2Request} An object with the web2 response and requests.
+   * @returns {Promise<any>} A HTTP promise.
    */
-  send(
-      body: IWeb2Request["raw"] | null, 
-      path: string, 
+  sendHTTPRequest(
+      source: string, 
+      target: IWeb2Request,
+      path: string = "/", 
       method: EnumWeb2Methods = EnumWeb2Methods.GET,
       // TODO Need to type web2Result somehow
   ): Promise<any> {
+          const targetBody = target.raw
+          const targetUrl = target.raw.url
+          this.createProxyServer(source, targetUrl)
           // TODO Will need to take into consideration the case where the method is "GET" on the first hop.
-          if (!body && !(method === "GET")) {
+          if (!targetBody && !(method === "GET")) {
               term.yellow.bold(
                   "[Web2API] No raw request attached. Is this right?",
               )
@@ -58,18 +62,18 @@ export class Proxy {
               this.dahr.web2Request.raw.minAttestations = 10
               this.dahr.web2Request.raw.stage.hopNumber = 0
           } else {
-            this.dahr.web2Request.raw = body
+            this.dahr.web2Request.raw = targetBody
           }
 
-          return new Promise((resolve, reject) => {
+          const httpPromise = new Promise((resolve, reject) => {
               const options = {
-                  hostname: this.target,
+                  hostname: targetUrl,
                   port: 80,
                   path: path,
                   method: method,
                   headers: {
                       "Content-Type": "application/json",
-                      "Content-Length": Buffer.byteLength(JSON.stringify(body)),
+                      "Content-Length": Buffer.byteLength(JSON.stringify(targetBody)),
                   },
               }
 
@@ -95,12 +99,11 @@ export class Proxy {
 
               req.end()
           })
+
+          return httpPromise
   }
 
-  /**
-   * Stop the proxy server.
-   */
-  stop() {
+  stopProxy(): void {
       console.log("Stopping proxy server with target " + this.target)
       this.proxyServer.close()
   }

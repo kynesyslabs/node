@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
-import handleWeb2 from "src/features/web2/Web2Dispatcher"
+import handleWeb2 from "src/features/web2/handleWeb2"
 import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool"
 import {
@@ -58,6 +58,7 @@ import {
     XMPayload,
 } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/Transaction"
 import { StatusNative } from "src/model/entities/StatusNative"
+import { DAHR } from "src/features/web2/dahr/DAHR"
 
 let term = terminalkit.terminal
 
@@ -359,25 +360,25 @@ export default class ServerHandlers {
 
         let extra: string,
             require_reply = false
-        let response: IWeb2Request
+        let response: DAHR
         // We get our connection string
         // const currentPeerString = Identity.getInstance().getConnectionString()
         // NOTE Switched to the new class
 
         //console.log("[WEB2 CONTENT DUMP]")
         //console.log(content)
-        let fullResponse = await handleWeb2(content, senderSocket)
-        //console.log("[WEB2 CONTENT RESPONSE DUMP]")
-        //console.log(fullResponse)
+        let fullResponse = await handleWeb2(content)
+        console.log("[WEB2 CONTENT RESPONSE DUMP]")
+        console.log(fullResponse)
 
         // Managing the results
-        if (fullResponse[0]) {
-            response = fullResponse[1] as IWeb2Request
+       /*  if (fullResponse[0]) {
+            response = fullResponse[1] as DAHR
         } else {
             response = null
             extra = fullResponse[1] as string
-        }
-        return { extra, require_reply, response }
+        } */
+        /* return { extra, require_reply, response } */
     }
 
     static async handleConsensusRequest(
