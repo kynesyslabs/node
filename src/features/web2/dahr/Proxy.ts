@@ -1,4 +1,5 @@
 import https from "https"
+import http from "http"
 import httpProxy from "http-proxy"
 import required from "src/utilities/required"
 import terminalKit from "terminal-kit"
@@ -18,6 +19,11 @@ export class Proxy {
    * @type {httpProxy}
    */
   private proxyServer: httpProxy
+  /**
+   * The target URL where the HTTP request will be sent.
+   * @type {string}
+   */
+  private target: string
 
   constructor(private dahr: DAHR) {
       required(this.dahr, "Missing DAHR instance")
@@ -30,9 +36,24 @@ export class Proxy {
 
     this.proxyServer = httpProxy.createProxyServer({target})
 
-    https.createServer((req, res) => {
-        this.proxyServer.web(req, res)
-    }).listen(source)
+    // Parse the source URL to get the protocol, hostname, and port
+    const url = new URL(source)
+    const hostname = url.hostname
+    const port = Number(url.port)
+    const protocol = url.protocol
+
+    // Create an HTTP or HTTPS proxy server based on the protocol
+    if (protocol === "http:") {
+      http.createServer((req, res) => {
+          this.proxyServer.web(req, res)
+      }).listen(port, hostname)
+    } else if (protocol === "https:") {
+        https.createServer((req, res) => {
+            this.proxyServer.web(req, res)
+        }).listen(port, hostname)
+    } else {
+        console.error("Unsupported protocol: " + protocol)
+    }
   }
     
   /**
@@ -51,8 +72,8 @@ export class Proxy {
       // TODO Need to type web2Result somehow
   ): Promise<any> {
           const targetBody = target.raw
-          const targetUrl = target.raw.url
-          this.createProxyServer(source, targetUrl)
+          this.target = target.raw.url
+          this.createProxyServer(source, this.target)
           // TODO Will need to take into consideration the case where the method is "GET" on the first hop.
           if (!targetBody && !(method === "GET")) {
               term.yellow.bold(
@@ -67,7 +88,7 @@ export class Proxy {
 
           const httpPromise = new Promise((resolve, reject) => {
               const options = {
-                  hostname: targetUrl,
+                  hostname: this.target,
                   port: 80,
                   path: path,
                   method: method,
@@ -94,7 +115,7 @@ export class Proxy {
                   method === "PUT" ||
                   method === "PATCH" || 
                   method === "DELETE") {
-                  req.write(JSON.stringify(body))
+                  req.write(JSON.stringify(targetBody))
               }
 
               req.end()
@@ -104,7 +125,9 @@ export class Proxy {
   }
 
   stopProxy(): void {
-      console.log("Stopping proxy server with target " + this.target)
+      required(this.proxyServer, "Proxy server has not been started.")
+      term.yellow.bold("[Web2API] Stopping proxy server with target " + this.target)
+     
       this.proxyServer.close()
   }
 }

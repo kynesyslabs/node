@@ -50,7 +50,7 @@ export default async function handleWeb2(
     const DAHRManagerInstance = DAHRManager.instance
     const DAHR = DAHRManagerInstance.getDAHR(nameHash, payload)
     const web2RequestManager = new Web2RequestManager(DAHR)
-    const localProxySource = "http://localhost:8000"
+    const localProxySource = "localhost:8000"
 
     console.log(
         "[web2Dispatcher] DAHR instance created.",
