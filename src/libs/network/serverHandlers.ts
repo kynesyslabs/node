@@ -571,7 +571,7 @@ export default class ServerHandlers {
                     nStat = (await GLS.getGLSNativeStatus(
                         data.address,
                     )) as StatusNative
-                    response = nStat.toString() // REVIEW It works ?
+                    response = nStat //.toString() // REVIEW It works ?
                 } catch (error) {
                     response = "error"
                     extra = error
