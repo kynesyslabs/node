@@ -1,5 +1,3 @@
-import { IWeb2Request } from "@kynesyslabs/demosdk/types"
-
 import { DAHR } from "src/features/web2/dahr/DAHR"
 
 import terminalKit from "terminal-kit"
@@ -40,7 +38,7 @@ export class DAHRManager {
      * @param {string} sessionId - The session ID.
      * @returns {DAHR} The DAHR instance.
      */
-    getDAHR(sessionId: string, payload: IWeb2Request): DAHR {
+    getDAHR(sessionId: string): DAHR {
         if (!sessionId) {
             sessionId = String(DAHRManager.progressive)
             DAHRManager.progressive += 1
@@ -49,7 +47,7 @@ export class DAHRManager {
         if (!DAHRManager.dahrs.has(sessionId)) {
             term.yellow("[DAHRManager] Creating new DAHR instance\n")
 
-            DAHRManager.dahrs.set(sessionId, new DAHR(payload))
+            DAHRManager.dahrs.set(sessionId, new DAHR())
         }
 
         return DAHRManager.dahrs.get(sessionId)

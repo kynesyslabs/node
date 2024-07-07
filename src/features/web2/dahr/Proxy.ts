@@ -2,7 +2,6 @@ import https from "https"
 import http from "http"
 import httpProxy from "http-proxy"
 import required from "src/utilities/required"
-import terminalKit from "terminal-kit"
 
 import {
     IWeb2Request,
@@ -11,123 +10,148 @@ import { EnumWeb2Methods } from "node_modules/@kynesyslabs/demosdk/build/types/w
 
 import { DAHR } from "./DAHR"
 
+import terminalKit from "terminal-kit"
+
 const term = terminalKit.terminal
 
 export class Proxy {
-  /**
-   * The proxy server used to forward HTTP requests.
-   * @type {httpProxy}
-   */
-  private proxyServer: httpProxy
-  /**
-   * The target URL where the HTTP request will be sent.
-   * @type {string}
-   */
-  private target: string
-
-  constructor(private dahr: DAHR) {
-      required(this.dahr, "Missing DAHR instance")
-  }
-
-  private createProxyServer(source: string, target: string): void {
-    term.yellow.bold(
-        "[Web2API] Creating a proxy server with source " + source + " and target " + target,
-    )
-
-    this.proxyServer = httpProxy.createProxyServer({target})
-
-    // Parse the source URL to get the protocol, hostname, and port
-    const url = new URL(source)
-    const hostname = url.hostname
-    const port = Number(url.port)
-    const protocol = url.protocol
-
-    // Create an HTTP or HTTPS proxy server based on the protocol
-    if (protocol === "http:") {
-      http.createServer((req, res) => {
-          this.proxyServer.web(req, res)
-      }).listen(port, hostname)
-    } else if (protocol === "https:") {
-        https.createServer((req, res) => {
-            this.proxyServer.web(req, res)
-        }).listen(port, hostname)
-    } else {
-        console.error("Unsupported protocol: " + protocol)
+    constructor(private dahr: DAHR) {
+        required(this.dahr, "Missing DAHR instance")
     }
-  }
+
+    /**
+     * The proxy server used to forward HTTP requests.
+     * @type {httpProxy}
+     */
+    private proxyServer: httpProxy
+    /**
+     * The target URL where the HTTP request will be sent.
+     * @type {string}
+     */
+    private target: string
+    private targetProtocol: string
+    private targetHostname: string
+    private targetPort: number
+
+    private createProxyServer(source: string, target: string): void {
+        term.yellow.bold(
+            "[Web2API] Creating a proxy server with source " + source + " and target " + target + "...\n",
+        )
+
+        // Parse the target URL to get the protocol, hostname, and port
+        const { protocol, hostname, port } = parseUrl(target)
+        this.targetProtocol = protocol
+        this.targetHostname = hostname
+        this.targetPort = port
+
+        this.proxyServer = httpProxy.createProxyServer({
+            target: {
+                protocol: this.targetProtocol,
+                host: this.targetHostname,
+                port: this.targetPort,
+            },
+        })
+
+        term.yellow.bold("[Web2API] Proxy server created. \n")
+        console.log(this.proxyServer)
+
+        // Parse the source URL to get the protocol, hostname, and port
+        const { protocol: hostProtocol, hostname: sourceHostname, port: sourcePort } = parseUrl(source)
+
+        // Create an HTTP or HTTPS proxy server based on the hostProtocol
+        if (hostProtocol === "http:") {
+            http.createServer((req, res) => {
+                this.proxyServer.web(req, res)
+            }).listen(sourcePort, sourceHostname)
+        } else if (hostProtocol === "https:") {
+            https.createServer((req, res) => {
+                this.proxyServer.web(req, res)
+            }).listen(sourcePort, sourceHostname)
+        } else {
+            console.error("Unsupported hostProtocol: " + hostProtocol)
+        }
+    }
     
-  /**
-   * Send a HTTP request.
-   * @param {string} source - The source where the proxy server will listen for incoming requests.
-   * @param {string} target - The target URL where the HTTP request will be sent.
-   * @param {string} path - The path.
-   * @param {string} method - The HTTP method that the proxy should call.
-   * @returns {Promise<any>} A HTTP promise.
-   */
-  sendHTTPRequest(
-      source: string, 
-      target: IWeb2Request,
-      path: string = "/", 
-      method: EnumWeb2Methods = EnumWeb2Methods.GET,
-      // TODO Need to type web2Result somehow
-  ): Promise<any> {
-          const targetBody = target.raw
-          this.target = target.raw.url
-          this.createProxyServer(source, this.target)
-          // TODO Will need to take into consideration the case where the method is "GET" on the first hop.
-          if (!targetBody && !(method === "GET")) {
-              term.yellow.bold(
-                  "[Web2API] No raw request attached. Is this right?",
-              )
-              // TODO Specify this as a parameter that users can set
-              this.dahr.web2Request.raw.minAttestations = 10
-              this.dahr.web2Request.raw.stage.hopNumber = 0
-          } else {
+    /**
+     * Send a HTTP request.
+     * @param {string} source - The source where the proxy server will listen for incoming requests.
+     * @param {string} web2Request - Contains the target URL where the HTTP request will be sent.
+     * @param {string} path - The path.
+     * @param {string} method - The HTTP method that the proxy should call.
+     * @returns {Promise<any>} A HTTP promise.
+     */
+    sendHTTPRequest(
+        source: string, 
+        web2Request: IWeb2Request,
+        path: string = "/", 
+        method: EnumWeb2Methods = EnumWeb2Methods.GET,
+        // TODO Need to type web2Result somehow
+    ): Promise<any> {
+        const targetBody = web2Request.raw
+        this.target = web2Request.raw.url
+        this.createProxyServer(source, this.target)
+        // TODO Will need to take into consideration the case where the method is "GET" on the first hop.
+        if (!targetBody && !(method === "GET")) {
+            term.yellow.bold(
+                "[Web2API] No raw request attached. Is this right? \n",
+            )
+            // TODO Specify this as a parameter that users can set
+            this.dahr.web2Request.raw.minAttestations = 10
+            this.dahr.web2Request.raw.stage.hopNumber = 0
+        } else {
             this.dahr.web2Request.raw = targetBody
-          }
+        }
 
-          const httpPromise = new Promise((resolve, reject) => {
-              const options = {
-                  hostname: this.target,
-                  port: 80,
-                  path: path,
-                  method: method,
-                  headers: {
-                      "Content-Type": "application/json",
-                      "Content-Length": Buffer.byteLength(JSON.stringify(targetBody)),
-                  },
-              }
+        return new Promise((resolve, reject) => {
+            const options = {
+                hostname: this.targetHostname,
+                // TODO Need to pass targetPort as a parameter
+                port: this.targetPort || (this.targetProtocol === "https:" ? 443 : 80),
+                path: path,
+                method: method,
+                headers: {
+                    "Content-Type": "application/json",
+                    "Content-Length": Buffer.byteLength(JSON.stringify(targetBody)),
+                },
+            }
 
-              const req = https.request(options, (res) => {
-                  res.setEncoding("utf8")
-                  let rawData = ""
-                  res.on("data", (chunk) => { rawData += chunk })
-                  res.on("end", () => {
-                      resolve(JSON.parse(rawData))
-                  })
-              })
+            const req = https.request(options, (res) => {
+                res.setEncoding("utf8")
+                let rawData = ""
+                res.on("data", (chunk) => { rawData += chunk })
+                res.on("end", () => {
+                    resolve(JSON.parse(rawData))
+                })
+            })
 
-              req.on("error", (error) => {
-                  reject(error)
-              })
+            req.on("error", (error) => {
+                reject(error)
+            })
 
-              if (method === "POST" || 
-                  method === "PUT" ||
-                  method === "PATCH" || 
-                  method === "DELETE") {
-                  req.write(JSON.stringify(targetBody))
-              }
+            if (method === "POST" || 
+                method === "PUT" ||
+                method === "PATCH" || 
+                method === "DELETE") {
+                req.write(JSON.stringify(targetBody))
+            }
 
-              req.end()
-          })
+            req.end()
+        })
+    }
 
-          return httpPromise
-  }
+    stopProxy(): void {
+        required(this.proxyServer, "Proxy server has not been started.")
+        term.yellow.bold("[Web2API] Stopping proxy server with target " + this.target)
 
-  stopProxy(): void {
-      required(this.proxyServer, "Proxy server has not been started.")
-      term.yellow.bold("[Web2API] Stopping proxy server with target " + this.target)
-     
-      this.proxyServer.close()
-  }
+        this.proxyServer.close()
+    }
+}
+
+function parseUrl(url: string) {
+    const parsedUrl = new URL(url)
+    const hostname = parsedUrl.hostname
+    const port = Number(parsedUrl.port)
+    const protocol = parsedUrl.protocol
+
+    return { protocol, hostname, port }
 }

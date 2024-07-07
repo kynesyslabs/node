@@ -11,8 +11,7 @@ export class DAHR {
     private proxy: Proxy
     private _web2Request: IWeb2Request
 
-    constructor(web2Request: IWeb2Request) {
-        this._web2Request = web2Request
+    constructor() {
         this.proxy = new Proxy(this)
     }
 
@@ -22,13 +21,14 @@ export class DAHR {
 
     async talkWithTarget(
         source: string, 
-        target: IWeb2Request,
+        web2Request: IWeb2Request,
         path: string, 
         method: IRawWeb2Request["method"]): Promise<IWeb2Attestation> {
+            this._web2Request = web2Request
+            
             const web2RequestManager = new Web2RequestManager(this)
-            const getWeb2Attestation = web2RequestManager.getAttestation
-            const web2Promise = this.proxy.sendHTTPRequest(source, target, path, method)
-            const attestedPromise = getWeb2Attestation(web2Promise)
+            const web2Promise = this.proxy.sendHTTPRequest(source, web2Request, path, method)
+            const attestedPromise = web2RequestManager.getAttestation(web2Promise)
 
             return attestedPromise
     }

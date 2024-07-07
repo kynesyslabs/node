@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
-import handleWeb2 from "src/features/web2/handleWeb2"
+import { handleWeb2 } from "src/features/web2/handleWeb2"
 import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool"
 import {
@@ -42,13 +42,13 @@ import _ from "lodash"
 import terminalkit from "terminal-kit"
 
 import {
-    AddressInfo,
     ExecutionResult,
-    IWeb2Payload,
+    IWeb2Attestation,
     IWeb2Request,
     ValidityData,
     XMScript,
 } from "@kynesyslabs/demosdk/types"
+import { EnumWeb2Methods } from "node_modules/@kynesyslabs/demosdk/build/types/web2"
 
 import GLS from "../blockchain/gls/gls"
 import {
@@ -358,27 +358,36 @@ export default class ServerHandlers {
         console.log("[SERVER] Received web2Request")
         //console.log(JSON.stringify(request))
 
-        let extra: string,
+        let extra: string | null = null,
             require_reply = false
-        let response: DAHR
+        let response: Promise<IWeb2Attestation> | null
         // We get our connection string
         // const currentPeerString = Identity.getInstance().getConnectionString()
         // NOTE Switched to the new class
 
         //console.log("[WEB2 CONTENT DUMP]")
         //console.log(content)
-        let fullResponse = await handleWeb2(content)
+        const fullResponse = await handleWeb2(content)
         console.log("[WEB2 CONTENT RESPONSE DUMP]")
         console.log(fullResponse)
 
         // Managing the results
-       /*  if (fullResponse[0]) {
-            response = fullResponse[1] as DAHR
+        if (fullResponse[0]) {
+            console.log("YES")
+            const DAHR = fullResponse[1] as DAHR
+            const localProxySource = "localhost:8000"
+            // TODO FE needs to receive a DAHR instance and call this method somehow
+            // TODO Create a interface to use as argument for the talkWithTarget method
+            response = DAHR.talkWithTarget(localProxySource, content, "/", EnumWeb2Methods.GET)
+
+            console.log("[handleWeb2] web2Promise:")
+            console.log(await response)
         } else {
+            console.log("NO")
             response = null
             extra = fullResponse[1] as string
-        } */
-        /* return { extra, require_reply, response } */
+        } 
+        return { extra, require_reply, response }
     }
 
     static async handleConsensusRequest(

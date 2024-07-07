@@ -5,7 +5,6 @@ import required from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
 
 import {
-    IWeb2Attestation,
     IWeb2Request,
   } from "@kynesyslabs/demosdk/types"
 
@@ -13,7 +12,7 @@ import { Web2RequestManager } from "./Web2RequestManager"
 import { DAHRManager } from "src/features/web2/dahr/DAHRManager"
 
 import terminalKit from "terminal-kit"
-import { EnumWeb2Methods } from "node_modules/@kynesyslabs/demosdk/build/types/web2"
+import { DAHR } from "./dahr/DAHR"
 
 const term = terminalKit.terminal
 
@@ -21,17 +20,17 @@ const term = terminalKit.terminal
  * Handles a Web2 request.
  *
  * This function receives a request from a socket, attests and handles other attestations,
- * and then sends back to the client or to the origin rpc a DAHR instance.
+ * and then sends back to the client or to the origin rpc a DAHR instance promise.
  *
  * @param {IWeb2Request} payload - The Web2 request to handle.
  *
- * @returns {Promise<[boolean, string | Promise<IWeb2Attestation>]>} - Returns a promise that resolves to a tuple. The first element of the tuple is a boolean indicating whether the operation was successful. The second element is either a string containing an error message, or the processed Web2 request.
+ * @returns {Promise<[boolean, string | DAHR]>} - Returns a promise that resolves to a tuple. The first element of the tuple is a boolean indicating whether the operation was successful. The second element is either a string containing an error message, or a DAHR instance.
  *
  * @throws Will throw an error if the operation fails.
  */
-export default async function handleWeb2(
+export async function handleWeb2(
     payload: IWeb2Request,
-): Promise<[boolean, string | Promise<IWeb2Attestation>]> {
+): Promise<[boolean, string | DAHR]> {
     // TODO Remember that web2 could need to be signed and could need a fee
     console.log("[PAYLOAD FOR WEB2] [*] Received a Web2 Payload.")
     console.log("[PAYLOAD FOR WEB2] [*] Beginning sanitization checks...")
@@ -48,25 +47,30 @@ export default async function handleWeb2(
 
     // TODO Implement timeouts properly
     const DAHRManagerInstance = DAHRManager.instance
-    const DAHR = DAHRManagerInstance.getDAHR(nameHash, payload)
+    const DAHR = DAHRManagerInstance.getDAHR(nameHash)
     const web2RequestManager = new Web2RequestManager(DAHR)
-    const localProxySource = "localhost:8000"
 
     console.log(
-        "[web2Dispatcher] DAHR instance created.",
+        "[handleWeb2] DAHR instance created.",
     )
 
     const numOfAttestations = Object.keys(request.attestations).length
     const originalFlag = numOfAttestations === 1
-    console.log("[web2Dispatcher] Number of attestations: " + numOfAttestations)
+    console.log("[handleWeb2] Number of attestations: " + numOfAttestations)
 
+    /**
+     * Original RPC logic
+     *
+     * If we are the original rpc and this is the original request, we need to validate the request and wait for the attestations to arrive
+     *
+     */
     if (originalFlag) {
         console.log(
-            "[web2Dispatcher] This is the original rpc. We will wait for attestations.",
+            "[handleWeb2] This is the original rpc. We will wait for attestations.",
         )
         try {
             term.yellow(
-                "[web2Dispatcher] [*] Waiting for the required quorum for this chain of trust...",
+                "[handleWeb2] [*] Waiting for the required quorum for this chain of trust...",
             )
 
             /* FIXME DEVEL Activate in production */
@@ -77,9 +81,9 @@ export default async function handleWeb2(
                 )
             }
 
-            term.green("[web2Dispatcher] [+] Quorum reached!")
+            term.green("[handleWeb2] [+] Quorum reached!")
             term.green(
-                "[web2Dispatcher] [*] Hashing and signing the request's attestations...",
+                "[handleWeb2] [*] Hashing and signing the request's attestations...",
             )
 
             const hashedAttestations = Hashing.sha256(JSON.stringify(DAHR.web2Request.attestations))
@@ -90,13 +94,13 @@ export default async function handleWeb2(
             )
     
             term.green(
-                "[web2Dispatcher] [*] Compiling and certifying the result on our side...",
+                "[handleWeb2] [*] Compiling and certifying the result on our side...",
             )
 
             DAHR.web2Request.hash = hashedAttestations
             DAHR.web2Request.signature = signedAttestations
         } catch (error) {
-            console.log("[web2Dispatcher] Error: " + JSON.stringify(error))
+            console.log("[handleWeb2] Error: " + JSON.stringify(error))
             return [false, JSON.stringify(error)]
         }
     }
@@ -110,13 +114,11 @@ export default async function handleWeb2(
     }
 
     console.log(
-        "[web2Dispatcher] Done! Sending the response back to the client...",
+        "[handleWeb2] Done! Sending the response back to the client...",
     )
     console.log(
-        "[web2Dispatcher] Attestations validated. Deriving a transaction + operation...",
+        "[handleWeb2] Attestations validated. Deriving a transaction + operation...",
     )
 
-    const web2Promise = DAHR.talkWithTarget(localProxySource, request, "/", EnumWeb2Methods.GET)
-
-    return [true, web2Promise]
+    return [true, DAHR]
 }
