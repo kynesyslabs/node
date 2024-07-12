@@ -11,7 +11,7 @@ export class Mempool {
     @Column("integer", { name: "current" })
     current: number
 
-    @Column("integer", { name: "timestamp" })
+    @Column("bigint", { name: "timestamp" })
     timestamp: number
 
     @Column("text", { name: "transactions", nullable: true })
