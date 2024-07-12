@@ -48,3 +48,7 @@ docker/node_2/data/chain.db
 .vscode/settings.json
 documentation/schemas/.*
 pnpm-lock.yaml
+
+# DB Files
+postgres/data
+postgres/data/*
