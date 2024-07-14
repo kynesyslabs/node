@@ -360,7 +360,7 @@ export default class ServerHandlers {
 
         let extra: string | null = null,
             require_reply = false
-        let response: Promise<IWeb2Attestation> | null
+        let response: IWeb2Attestation | null
         // We get our connection string
         // const currentPeerString = Identity.getInstance().getConnectionString()
         // NOTE Switched to the new class
@@ -378,15 +378,20 @@ export default class ServerHandlers {
             const localProxySource = "localhost:8000"
             // TODO FE needs to receive a DAHR instance and call this method somehow
             // TODO Create a interface to use as argument for the talkWithTarget method
-            response = DAHR.talkWithTarget(localProxySource, content, "/", EnumWeb2Methods.GET)
+            response = await DAHR.talkWithTarget(localProxySource, content, "/", EnumWeb2Methods.GET)
+            const request = DAHR.web2Request
+
+            console.log("[handleWeb2] request:")
+            console.log(request)
 
             console.log("[handleWeb2] web2Promise:")
-            console.log(await response)
+            console.log(response)
         } else {
             console.log("NO")
             response = null
             extra = fullResponse[1] as string
         } 
+    
         return { extra, require_reply, response }
     }
 

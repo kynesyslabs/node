@@ -29,24 +29,25 @@ export class Web2RequestManager {
 
     /**
      * Increase hopNumber by one and return the web2 attestation promise.
-     * @param {Promise<any>} promise - The HTTP promise to validate.
+     * @param {Promise<any>} web2Promise - The HTTP promise to validate.
      * @returns {Promise<IWeb2Attestation>} The web2 attestation promise.
      */
-    getAttestation(promise: Promise<any>): Promise<IWeb2Attestation> {
-        const attestation = this.validateWeb2Promise(promise)
+    async getAttestedResult(web2Promise: Promise<any>): Promise<IWeb2Attestation> {
+        const attestedResult = this.validateWeb2Promise(web2Promise)
         this.dahr.web2Request.raw.stage.hopNumber += 1 
-        return attestation
+        return attestedResult
     }
 
     /**
      * Validate the web2 result.
-     * @param {Promise<any>} promise - The HTTP promise to validate.
-     * @returns {Promise<IWeb2Attestation>} The attestation.
+     * @param {Promise<any>} web2Promise - The HTTP promise to validate.
+     * @returns {Promise<IWeb2Attestation>} The web2 attestation promise.
      */
-    private async validateWeb2Promise(promise: Promise<any>): Promise<IWeb2Attestation> {
+    private async validateWeb2Promise(web2Promise: Promise<any>): Promise<IWeb2Attestation> {
         term.yellow.bold("[Web2Parser] Validating...\n")
-        const stringedResult = JSON.stringify(promise)
 
+        const web2Result = await web2Promise
+        const stringedResult = JSON.stringify(await web2Promise)
         const hashedResult = Hashing.sha256(stringedResult)
         this.dahr.web2Request.hash = hashedResult
         term.bold("[Web2Parser] Result:\n")
@@ -63,6 +64,7 @@ export class Web2RequestManager {
             identity: sharedState.getInstance().identity.ed25519.publicKey,
             signature: signature,
             valid: null,
+            result: web2Result,
         }
         term.bold("[Web2Parser] Attestation:\n")
         console.log(attestation)
@@ -74,7 +76,7 @@ export class Web2RequestManager {
         term.bold("[Web2Parser] Added attestation to web2Request\n")
 
         if (this.dahr.web2Request.result === undefined) {
-            this.dahr.web2Request.result = promise
+            this.dahr.web2Request.result = web2Result
         }
 
         return attestation

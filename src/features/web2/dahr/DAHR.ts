@@ -28,9 +28,10 @@ export class DAHR {
             
             const web2RequestManager = new Web2RequestManager(this)
             const web2Promise = this.proxy.sendHTTPRequest(source, web2Request, path, method)
-            const attestedPromise = web2RequestManager.getAttestation(web2Promise)
+            console.log("[DAHR] web2Promise: ", web2Promise)
+            const attestedResult = await web2RequestManager.getAttestedResult(web2Promise)
 
-            return attestedPromise
+            return attestedResult
     }
 
     stopTalkWithTarget(): void {

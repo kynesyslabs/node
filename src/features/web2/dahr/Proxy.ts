@@ -2,6 +2,7 @@ import https from "https"
 import http from "http"
 import httpProxy from "http-proxy"
 import required from "src/utilities/required"
+import axios from "axios"
 
 import {
     IWeb2Request,
@@ -76,22 +77,24 @@ export class Proxy {
      * Send a HTTP request.
      * @param {string} source - The source where the proxy server will listen for incoming requests.
      * @param {string} web2Request - Contains the target URL where the HTTP request will be sent.
-     * @param {string} path - The path.
-     * @param {string} method - The HTTP method that the proxy should call.
+     * @param {string} targetPath - The targetPath.
+     * @param {string} targetMethod - The HTTP method that the proxy should call.
      * @returns {Promise<any>} A HTTP promise.
      */
     sendHTTPRequest(
         source: string, 
         web2Request: IWeb2Request,
-        path: string = "/", 
-        method: EnumWeb2Methods = EnumWeb2Methods.GET,
+        targetPath: string = "/", 
+        targetMethod: EnumWeb2Methods = EnumWeb2Methods.GET,
         // TODO Need to type web2Result somehow
     ): Promise<any> {
+        console.log("sendHTTPRequest called") 
+
         const targetBody = web2Request.raw
         this.target = web2Request.raw.url
         this.createProxyServer(source, this.target)
         // TODO Will need to take into consideration the case where the method is "GET" on the first hop.
-        if (!targetBody && !(method === "GET")) {
+        if (!targetBody && !(targetMethod === "GET")) {
             term.yellow.bold(
                 "[Web2API] No raw request attached. Is this right? \n",
             )
@@ -102,41 +105,39 @@ export class Proxy {
             this.dahr.web2Request.raw = targetBody
         }
 
-        return new Promise((resolve, reject) => {
-            const options = {
-                hostname: this.targetHostname,
-                // TODO Need to pass targetPort as a parameter
-                port: this.targetPort || (this.targetProtocol === "https:" ? 443 : 80),
-                path: path,
-                method: method,
-                headers: {
-                    "Content-Type": "application/json",
-                    "Content-Length": Buffer.byteLength(JSON.stringify(targetBody)),
-                },
-            }
-
-            const req = https.request(options, (res) => {
-                res.setEncoding("utf8")
-                let rawData = ""
-                res.on("data", (chunk) => { rawData += chunk })
-                res.on("end", () => {
-                    resolve(JSON.parse(rawData))
-                })
+        try {
+            return new Promise((resolve, reject) => {
+                console.log("Promise started") 
+                const options = {
+                    hostname: this.targetHostname,
+                    baseURL: `${this.targetProtocol}//${this.targetHostname}`,
+                    // TODO Need to pass targetPort as a parameter
+                    /* port: this.targetPort || (this.targetProtocol === "https:" ? 443 : 80), */
+                    url: targetPath,
+                    method: targetMethod,
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Content-Length": Buffer.byteLength(JSON.stringify(targetBody)),
+                    },
+                    data: targetBody,
+                }     
+    
+                axios(options)
+                    .then((res) => {
+                        console.log("Response received")
+                        console.log("Response ended")
+                        resolve(res.data)
+                    })
+                    .catch((error) => {
+                        console.error("Request error", error)
+                        reject(error)
+                    })
+            }).catch((error) => {
+                console.error("Error in Promise", error)
             })
-
-            req.on("error", (error) => {
-                reject(error)
-            })
-
-            if (method === "POST" || 
-                method === "PUT" ||
-                method === "PATCH" || 
-                method === "DELETE") {
-                req.write(JSON.stringify(targetBody))
-            }
-
-            req.end()
-        })
+        } catch (error) {
+            console.error("Error in sendHTTPRequest", error)
+        }
     }
 
     stopProxy(): void {
