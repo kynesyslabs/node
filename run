@@ -1,4 +1,15 @@
 #!/bin/bash
+# trap ctrl-c and call ctrl_c()
+trap ctrl_c INT
+
+HAS_BEEN_INTERRUPTED=false
+
+function ctrl_c() {
+    HAS_BEEN_INTERRUPTED=true
+    cd postgres
+    docker compose down
+    cd ..
+}
 
 # First of all, ensuring dependencies are installed and checking node_modules
 if [ ! -d "node_modules" ]; then
@@ -51,8 +62,12 @@ done
 
 # Starting the node managing errors
 if ! yarn start; then
-    echo "Error: RPC failed to start or crashed"
-    exit_code=$?
+    if [ "$HAS_BEEN_INTERRUPTED" == "true" ]; then
+        echo "RPC exited successfully"
+    else
+        echo "Error: RPC failed to start or crashed"
+        exit_code=$?
+    fi
 else
     echo "RPC exited successfully"
     exit_code=0
