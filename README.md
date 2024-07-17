@@ -31,6 +31,15 @@ The included software follows the Demos Network specifications and can be used a
 - Docker and docker compose
 - Port 5332 free
 
+#### Tips for a correct installation
+
+- To ensure the Node.js version is correct, you can run the following command:
+
+```bash
+npm install -g n
+n 20
+```
+
 ## Usage
 
 Clone the repository and run the following command:
