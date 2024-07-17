@@ -35,7 +35,7 @@ export class Transactions {
     @Column("integer", { name: "nonce" })
     nonce: number
 
-    @Column("integer", { name: "timestamp" })
+    @Column("bigint", { name: "timestamp" })
     timestamp: number
 
     @Column("integer", { name: "networkFee" })

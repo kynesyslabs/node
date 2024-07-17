@@ -28,8 +28,12 @@ class Datasource {
 
     private constructor() {
         this.dataSource = new DataSource({
-            type: "sqlite",
-            database: "./data/chain.db",
+            type: "postgres",
+            host: "localhost",
+            port: 5332,
+            username: "demosuser",
+            password: "demospassword",
+            database: "demos",
             entities: [
                 Blocks,
                 Transactions,
