@@ -592,6 +592,11 @@ export default class ServerHandlers {
                 response = new Date().getTime()
                 break
 
+            case "getAllTxs":
+                var response_object = await Chain.getAllTxs()
+                response = JSON.stringify(response_object)
+                break
+
             // NOTE Don't look past here, go away
             // INFO For real, nothing here to be seen
             case "hots":

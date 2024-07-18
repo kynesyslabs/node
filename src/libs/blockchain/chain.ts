@@ -268,6 +268,14 @@ export default class Chain {
         }
     }
 
+    static async getAllTxs(): Promise<Transactions[]> {
+        const db = await Datasource.getInstance()
+        const transactionRepository = db
+            .getDataSource()
+            .getRepository(Transactions)
+        return await transactionRepository.find()
+    }
+
     // !SECTION Getters
 
     // SECTION  Setters
