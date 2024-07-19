@@ -30,7 +30,7 @@ class Datasource {
         this.dataSource = new DataSource({
             type: "postgres",
             host: "localhost",
-            port: 5332,
+            port: parseInt(process.env.PG_PORT) || 5332,
             username: "demosuser",
             password: "demospassword",
             database: "demos",

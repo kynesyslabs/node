@@ -55,10 +55,6 @@ let OVERRIDE_PEER_LIST_FILE = null
 let OVERRIDE_IS_TESTER = null
 let COMMANDLINE_MODE = null
 
-let RPC_FEE: number = 10 // parseInt(process.env.RPC_FEE) || 10
-
-let SERVER_PORT: number = 53550 // parseInt(process.env.SERVER_PORT, 10) || 53550
-let PEER_LIST_FILE = "./demos_peers"
 
 let PEER_LIST: any
 
@@ -69,8 +65,27 @@ var ssl_options = {
     cert: fs.readFileSync("src/ssl/server.crt"),
     ca: fs.readFileSync("src/ssl/ca.crt"),
 } // TODO Fill the right values
-const s_server = https.createServer(ssl_options, app) // REVIEW Use tHIS instead of http.createServer
+const s_server =    https.createServer(ssl_options, app) // REVIEW Use tHIS instead of http.createServer
 // !SECTION REVIEW ZONE
+
+/* Environment variables */
+let PG_PORT = process.env.PG_PORT || 5332 
+let RPC_FEE: number = parseInt(process.env.RPC_FEE) || 10
+let SERVER_PORT: number = parseInt(process.env.SERVER_PORT, 10) || 53550
+// Allow overriding server port through RPC_PORT
+let RPC_PORT: number = parseInt(process.env.RPC_PORT, 10) || 0
+if (RPC_PORT > 0) {
+    SERVER_PORT = RPC_PORT
+}
+let PEER_LIST_FILE = process.env.PEER_LIST_FILE || "./demos_peers"
+
+console.log("= Configuring environment variables = \n")
+console.log("PG_PORT: " + PG_PORT)
+console.log("RPC_FEE: " + RPC_FEE)
+console.log("SERVER_PORT: " + SERVER_PORT)
+console.log("PEER_LIST_FILE: " + PEER_LIST_FILE)
+console.log("= End of Configuration = \n")
+
 
 const server = http.createServer(app)
 
