@@ -51,4 +51,5 @@ pnpm-lock.yaml
 
 # DB Files
 postgres/data
-postgres/data/*
+postgres/data_*
+postgres_*
