@@ -49,10 +49,17 @@ yarn # To install the dependencies
 ./run # To both start the database and the node software
 ```
 
+### Arguments
+
+`./run -p <port> -d <postgres port>`
+
+***NOTE:*** Without arguments, the default port (and folder) for the postgres database is 5332.
+***NOTE:*** Without arguments, the default port for the node software is 53550.
+
 While the script should be able to manage both the database and the node software, in case of any issue you might want to stop the database manually once the node software is terminated:
 
 ```bash
-cd postgres
+cd postgres_(the port you chose)
 ./stop.sh
 ```
 
@@ -63,7 +70,7 @@ cd postgres
 If the node software is not starting, you can try to run the following command:
 
 ```bash
-cd postgres
+cd postgres_(the port you chose)
 ./start.sh
 cd ..
 yarn start
@@ -72,7 +79,7 @@ yarn start
 Remember to stop the database once the node software is terminated:
 
 ```bash
-cd postgres
+cd postgres_(the port you chose)
 ./stop.sh
 ```
 
@@ -81,7 +88,7 @@ cd postgres
 If you want to clean the database, you can run the following command:
 
 ```bash
-cd postgres
+cd postgres_(the port you chose)
 ./clean.sh
 ```
 
