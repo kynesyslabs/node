@@ -45,10 +45,12 @@ fi
 CLEAN=false
 PORT=53550
 
-while getopts "p:d:" opt; do
+# Getting arguments
+while getopts "p:d:c:" opt; do
     case $opt in
         p) PORT=$OPTARG;;
         d) PG_PORT=$OPTARG;;
+        c) CLEAN=true;;
         #...
     esac
 done
@@ -65,6 +67,12 @@ if [ ! -d "$PG_FOLDER" ]; then
     cp -r postgres $PG_FOLDER   
 fi
 cd $PG_FOLDER
+
+# If we are cleaning, we need to remove the database
+if [ "$CLEAN" == "true" ]; then
+    sudo rm -rf data_${PG_PORT}
+    mkdir data_${PG_PORT}
+fi
 
 # Suppressing errors if the database is not running
 docker compose down > /dev/null 2>&1

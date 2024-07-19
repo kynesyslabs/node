@@ -52,7 +52,11 @@ You must ensure that the port for the node software and the postgres database ar
 By default, the node software will run on port 53550 and the postgres database will run on port 5332.
 You can change the port for the node software and the postgres database by using the following arguments:
 
-`./run -p <port> -d <postgres port>`
+`./run -p <port> -d <postgres port> -c`
+
+- `-p <port>`: The port for the node software
+- `-d <postgres port>`: The port for the postgres database
+- `-c`: Cleans the database
 
 ***NOTE:*** Without arguments, the default port (and folder) for the postgres database is 5332.
 ***NOTE:*** Without arguments, the default port for the node software is 53550.

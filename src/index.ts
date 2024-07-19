@@ -23,7 +23,6 @@ import * as http from "http"
 //     cert: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.crt",
 //     ca: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.ca",
 // })
-// SECTION REVIEW ZONE
 import * as https from "https"
 import { Server } from "socket.io"
 import terminalkit from "terminal-kit"
@@ -42,7 +41,7 @@ const term = terminalkit.terminal
 
 dotenv.config()
 
-let enough_peers = true
+let enough_peers = true // ? Review this
 // INFO Loading the known peers
 if (!fs.existsSync("./demos_peers")) {
     enough_peers = false
@@ -66,24 +65,21 @@ var ssl_options = {
     ca: fs.readFileSync("src/ssl/ca.crt"),
 } // TODO Fill the right values
 const s_server =    https.createServer(ssl_options, app) // REVIEW Use tHIS instead of http.createServer
-// !SECTION REVIEW ZONE
 
-/* Environment variables */
-let PG_PORT = process.env.PG_PORT || 5332 
+/* SECTION Environment variables loading and configuration */
 let RPC_FEE: number = parseInt(process.env.RPC_FEE) || 10
-let SERVER_PORT: number = parseInt(process.env.SERVER_PORT, 10) || 53550
+// Allow overriding pg port through RPC_PG_PORT
+let PG_PORT: number = parseInt(process.env.RPC_PG_PORT, 10) || 5332
 // Allow overriding server port through RPC_PORT
-let RPC_PORT: number = parseInt(process.env.RPC_PORT, 10) || 0
-if (RPC_PORT > 0) {
-    SERVER_PORT = RPC_PORT
-}
+let SERVER_PORT: number = parseInt(process.env.RPC_PORT, 10) || 0
+if (SERVER_PORT == 0) {
+    SERVER_PORT = parseInt(process.env.SERVER_PORT, 10) || 53550
+}   
+// Allow overriding peer list file through RPC_PEER_LIST_FILE
 let PEER_LIST_FILE = process.env.PEER_LIST_FILE || "./demos_peers"
+/* !SECTION Environment variables loading and configuration */
 
-// REVIEW Preparing to add ourselves to the peer list
-let ourselves = "http://127.0.0.1>" + SERVER_PORT + ">"
-
-
-console.log("= Configuring environment variables = \n")
+console.log("= Configured environment variables = \n")
 console.log("PG_PORT: " + PG_PORT)
 console.log("RPC_FEE: " + RPC_FEE)
 console.log("SERVER_PORT: " + SERVER_PORT)
@@ -171,8 +167,8 @@ async function main() {
     term.green(
         "\n[MAIN] 🔗 WE ARE " + id.ed25519.publicKey.toString("hex") + " 🔗 \n",
     )
-    // Add it to ourselves
-    ourselves += id.ed25519.publicKey.toString("hex")
+    // Creating ourselves as a peer // ? Should this be removed in production?
+    let ourselves = "http://127.0.0.1>" + SERVER_PORT + ">" + id.ed25519.publicKey.toString("hex")
     // And saves the public key file
     fs.writeFileSync("publickey", id.ed25519.publicKey.toString("hex") + "\n")
 
