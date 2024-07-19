@@ -11,21 +11,21 @@ The included software follows the Demos Network specifications and can be used a
 
 #### Minimum
 
-- 6GB RAM
-- 4 modern CPU cores (min 2ghz)
+- 4GB RAM
+- 4 modern CPU cores (min 2ghz, physical cores or vcpu)
 - A modern SSD
 - 200mbit/s down/up internet connection
 
 #### Recommended
 
 - 8gb RAM
-- 6 modern CPU cores (min 2ghz)
+- 6 modern CPU cores (min 2ghz, physical cores)
 - A modern SSD
 - 1gbit/s down/up internet connection
 
 ### Software and System
 
-- Linux, MacOS or WSL2 on Windows
+- Linux, MacOS or WSL2 on Windows (Ubuntu LTS > 22.04 recommended)
 - Node.js 20.x or later (might work on other versions, but this is the only one that is guaranteed to work)
 - Yarn (npm might work, but yarn is recommended)
 - Docker and docker compose
@@ -48,8 +48,9 @@ Clone the repository and run the following command:
 yarn # To install the dependencies
 ./run # To both start the database and the node software
 ```
-
-### Arguments
+You must ensure that the port for the node software and the postgres database are free.
+By default, the node software will run on port 53550 and the postgres database will run on port 5332.
+You can change the port for the node software and the postgres database by using the following arguments:
 
 `./run -p <port> -d <postgres port>`
 

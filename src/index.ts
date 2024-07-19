@@ -79,6 +79,10 @@ if (RPC_PORT > 0) {
 }
 let PEER_LIST_FILE = process.env.PEER_LIST_FILE || "./demos_peers"
 
+// REVIEW Preparing to add ourselves to the peer list
+let ourselves = "http://127.0.0.1>" + SERVER_PORT + ">"
+
+
 console.log("= Configuring environment variables = \n")
 console.log("PG_PORT: " + PG_PORT)
 console.log("RPC_FEE: " + RPC_FEE)
@@ -160,13 +164,15 @@ async function main() {
     //console.log(PEER_LIST)
 
     // NOTE The whole first part of main ensures the environment is ready to run
-    await sharedState.getInstance().identity.ensureIdentity()
+    await sharedState.getInstance().identity.ensureIdentity() // ? Should we generate the identity option based too? (see SERVER_PORT and others    )
     const id = sharedState.getInstance().identity
     term.green("[BOOTSTRAP] Our identity is ready\n")
     // Log identity
     term.green(
         "\n[MAIN] 🔗 WE ARE " + id.ed25519.publicKey.toString("hex") + " 🔗 \n",
     )
+    // Add it to ourselves
+    ourselves += id.ed25519.publicKey.toString("hex")
     // And saves the public key file
     fs.writeFileSync("publickey", id.ed25519.publicKey.toString("hex") + "\n")
 
@@ -190,10 +196,11 @@ async function main() {
     term.green("[GENESIS] 🖥️ Found the genesis block\n")
 
     // Loading the peers
+    PEER_LIST.push(ourselves)
 
     // INFO Setting the common variables and propagating them
     term.yellow("[BOOTSTRAP] 🌐 Bootstrapping peers...\n")
-    //console.log(PEER_LIST)
+    console.log(PEER_LIST)
     const peerList = await peerBootstrap(PEER_LIST)
     for (const peer of peerList) {
         peerManager.addPeer(peer)

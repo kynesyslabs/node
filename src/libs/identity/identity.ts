@@ -18,6 +18,8 @@ import getRemoteIP from "../network/routines/getRemoteIP"
 
 const term = terminalkit.terminal
 
+export const IDENTITY_FILE = "./.demos_identity"
+
 export default class Identity {
     private static instance: Identity
     public ed25519: pki.KeyPair
@@ -49,15 +51,15 @@ export default class Identity {
     }
 
     async ensureIdentity(): Promise<void> {
-        if (fs.existsSync("./.demos_identity")) {
+        if (fs.existsSync(IDENTITY_FILE)) {
             // Loading the identity
             // TODO Add load with cryptography
-            this.ed25519 = await cryptography.load("./.demos_identity")
+            this.ed25519 = await cryptography.load(IDENTITY_FILE)
             term.yellow("Loaded ecdsa identity")
         } else {
             this.ed25519 = cryptography.new()
             // Writing the identity to disk in binary format
-            await cryptography.save(this.ed25519, "./.demos_identity")
+            await cryptography.save(this.ed25519, IDENTITY_FILE)
             term.yellow("Generated new identity")
         }
         // Stringifying to hex
