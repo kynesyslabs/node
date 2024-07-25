@@ -37,6 +37,7 @@ export default class sharedState {
     // SECTION Configuration
     rpcFee: number = parseInt(process.env.RPC_FEE_PERCENT) // TODO Implement // Percentage of the fee to be charged for the rpc
     serverPort: number = 53550
+    identityFile: string = process.env.IDENTITY_FILE || ".demos_identity"
     PROD: boolean = false
     // !SECTION Configuration
 

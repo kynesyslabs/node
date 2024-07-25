@@ -15,10 +15,9 @@ import terminalkit from "terminal-kit"
 
 import { cryptography } from "../crypto"
 import getRemoteIP from "../network/routines/getRemoteIP"
+import sharedState from "src/utilities/sharedState"
 
 const term = terminalkit.terminal
-
-export const IDENTITY_FILE = "./.demos_identity"
 
 export default class Identity {
     private static instance: Identity
@@ -51,15 +50,15 @@ export default class Identity {
     }
 
     async ensureIdentity(): Promise<void> {
-        if (fs.existsSync(IDENTITY_FILE)) {
+        if (fs.existsSync(sharedState.getInstance().identityFile)) {
             // Loading the identity
             // TODO Add load with cryptography
-            this.ed25519 = await cryptography.load(IDENTITY_FILE)
+            this.ed25519 = await cryptography.load(sharedState.getInstance().identityFile)
             term.yellow("Loaded ecdsa identity")
         } else {
             this.ed25519 = cryptography.new()
             // Writing the identity to disk in binary format
-            await cryptography.save(this.ed25519, IDENTITY_FILE)
+            await cryptography.save(this.ed25519, sharedState.getInstance().identityFile)
             term.yellow("Generated new identity")
         }
         // Stringifying to hex

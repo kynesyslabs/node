@@ -46,20 +46,23 @@ CLEAN=false
 PORT=53550
 
 # Getting arguments
-while getopts "p:d:c:" opt; do
+while getopts "p:d:c:i:" opt; do
     case $opt in
         p) PORT=$OPTARG;;
         d) PG_PORT=$OPTARG;;
         c) CLEAN=true;;
+        i) IDENTITY_FILE=$OPTARG;;
         #...
     esac
 done
 shift $((OPTIND -1))
 echo "PORT=$PORT"
 echo "PG_PORT=$PG_PORT"
+echo "IDENTITY_FILE=$IDENTITY_FILE"
 
-# PG_PORT is exported for both docker and yarn
+# PG_PORT and IDENTITY_FILE are exported for both docker and yarn
 export PG_PORT=$PG_PORT
+export IDENTITY_FILE=$IDENTITY_FILE
 
 # Database management with proper folder based on the port
 PG_FOLDER="postgres_${PG_PORT}"
@@ -98,7 +101,7 @@ while ! nc -z localhost $PG_PORT; do
 done
 
 # Starting the node managing errors
-if ! RPC_PORT=$PORT PG_PORT=$PG_PORT yarn start; then
+if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE yarn start; then
     if [ "$HAS_BEEN_INTERRUPTED" == "true" ]; then
         echo "RPC exited successfully"
     else

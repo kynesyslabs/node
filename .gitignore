@@ -1,5 +1,5 @@
 #Demos files
-/.demos_identity
+/.demos_id*
 demos_peers
 chain.db
 keyfile.json

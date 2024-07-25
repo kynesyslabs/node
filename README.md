@@ -50,16 +50,19 @@ yarn # To install the dependencies
 ```
 You must ensure that the port for the node software and the postgres database are free.
 By default, the node software will run on port 53550 and the postgres database will run on port 5332.
+By following the instructions below, you can run multiple nodes on the same machine for testing purposes too.
 You can change the port for the node software and the postgres database by using the following arguments:
 
-`./run -p <port> -d <postgres port> -c`
+`./run [-p <port> -d <postgres port> -i <identity file> -c]`
 
 - `-p <port>`: The port for the node software
 - `-d <postgres port>`: The port for the postgres database
+- `-i <identity file>`: The identity file to use
 - `-c`: Cleans the database
 
 ***NOTE:*** Without arguments, the default port (and folder) for the postgres database is 5332.
 ***NOTE:*** Without arguments, the default port for the node software is 53550.
+***NOTE:*** Without arguments, the default identity file is `.demos_identity`. If the file does not exist, it will be created.
 
 While the script should be able to manage both the database and the node software, in case of any issue you might want to stop the database manually once the node software is terminated:
 
