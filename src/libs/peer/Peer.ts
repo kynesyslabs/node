@@ -26,20 +26,23 @@ export default class Peer {
 
     // Methods
     // INFO Set the connection string of the peer
-    setConnectionString(connectionString) {
+    setConnectionString(connectionString: string) {
         this.connectionString = connectionString
     }
     // INFO Set the socket of the peer
-    setSocket(socket) {
+    setSocket(socket: Socket) {
         this.socket = socket
     }
     // INFO Set the identity of the peer
-    setIdentity(identity) {
+    setIdentity(identity: forge.pki.ed25519.BinaryBuffer) {
         this.identity = identity
     }
 
-    // INFO Getting the socket
-    getSocket() {
+    // INFO Getting the socket or die trying
+    getSocket(): Socket {
+        if (!this.socket) {
+            return null
+        }
         return this.socket
     }
 
