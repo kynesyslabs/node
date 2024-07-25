@@ -12,6 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import type { IPeerConfig } from "@kynesyslabs/demosdk/types"
 import forge from "node-forge"
 import { Socket } from "socket.io-client"
+import log from "src/utilities/logger"
 
 export default class Peer {
     connectionString: string

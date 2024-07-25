@@ -10,6 +10,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import Peer from "./Peer"
+import log from "src/utilities/logger"
+
 
 export default class PeerManager {
     private static instance: PeerManager

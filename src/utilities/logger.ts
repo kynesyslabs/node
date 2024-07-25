@@ -1,44 +1,50 @@
-import dotenv from "dotenv"
-// NOTE Terminal kit for useful logging
+// Defining a log class
+
+import fs from "fs"
 import terminalkit from "terminal-kit"
-
-dotenv.config()
-
 const term = terminalkit.terminal
 
-export default class log {
-    constructor() {}
 
-    static getVerbosity(): number {
-        try {
-            return parseInt(process.env.verbosity)
-        } catch (error) {
-            return 1
-        }
+export default class log {
+
+    static LOG_INFO_FILE = "logs/info.log"
+    static LOG_ERROR_FILE = "logs/error.log"
+    static LOG_DEBUG_FILE = "logs/debug.log"
+    static LOG_WARNING_FILE = "logs/warning.log"
+    static LOG_CRITICAL_FILE = "logs/critical.log"
+
+    private static getTimestamp(): string {
+        return new Date().toISOString()
     }
 
     static info(message: string) {
-        if (log.getVerbosity() == 0) {
-            console.log("[INFO] " + message)
-        }
-    }
-
-    static warn(message: string) {
-        if (log.getVerbosity() <= 1) {
-            term.yellow("[WARN] " + message + "\n")
-        }
+        const logEntry = `[${this.getTimestamp()}] [INFO] ${message}\n`
+        term.bold(logEntry.trim())
+        fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
     }
 
     static error(message: string) {
-        if (log.getVerbosity() <= 2) {
-            term.red("[ERROR] " + message + "\n")
-        }
+        const logEntry = `[${this.getTimestamp()}] [ERROR] ${message}\n`
+        term.red(logEntry.trim())
+        fs.appendFileSync(this.LOG_ERROR_FILE, logEntry)
     }
 
-    static fatal(message: string, error_code: number = -1) {
-        if (log.getVerbosity() <= 3) {
-            term.red("[FATAL] " + message + "\n")
-            process.exit(error_code)
-        }
+    static debug(message: string) {
+        const logEntry = `[${this.getTimestamp()}] [DEBUG] ${message}\n`
+        term.magenta(logEntry.trim())
+        fs.appendFileSync(this.LOG_DEBUG_FILE, logEntry)
     }
+
+    static warning(message: string) {
+        const logEntry = `[${this.getTimestamp()}] [WARNING] ${message}\n`
+        term.yellow(logEntry.trim())
+        fs.appendFileSync(this.LOG_WARNING_FILE, logEntry)
+    }
+
+    static critical(message: string) {
+        const logEntry = `[${this.getTimestamp()}] [CRITICAL] ${message}\n`
+        term.bold.red(logEntry.trim())
+        fs.appendFileSync(this.LOG_CRITICAL_FILE, logEntry)
+    }
+
 }

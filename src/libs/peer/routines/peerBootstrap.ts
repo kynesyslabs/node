@@ -15,6 +15,7 @@ import Client from "../../network/client"
 import Peer from "../Peer"
 import PeerManager from "../PeerManager"
 import getPeerIdentity from "./getPeerIdentity"
+import log from "src/utilities/logger"
 
 const peerManager = PeerManager.getInstance()
 

@@ -1,10 +1,11 @@
 import PeerManager from "../PeerManager"
 import Client from "src/libs/network/client"
 import sharedState from "src/utilities/sharedState"
+import log from "src/utilities/logger"
 
 // REVIEW Check offline peers asynchronously
 export default async function checkOfflinePeers(): Promise<void> {
-    // FIXME add a reentrancy check
+    // INFO add a reentrancy check
     if (sharedState.getInstance().inPeerRecheckLoop) {
         console.log("[MAIN LOOP] [PEER RECHECK] Reentrancy detected: we are already checking offline peers")
         return

@@ -53,3 +53,6 @@ pnpm-lock.yaml
 postgres/data
 postgres/data_*
 postgres_*
+
+# Logs
+logs/*.log

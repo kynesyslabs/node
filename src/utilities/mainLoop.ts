@@ -14,6 +14,7 @@ import * as consensusTime from "../libs/consensus/routines/consensusTime"
 import sharedState from "./sharedState"
 import Client from "src/libs/network/client"
 import checkOfflinePeers from "src/libs/peer/routines/checkOfflinePeers"
+import log from "src/utilities/logger"
 
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
@@ -23,7 +24,7 @@ let hasSentNodeOnlineTx = false
 const peerManager = PeerManager.getInstance()
 
 export default async function mainLoop() {
-    console.log("[MAIN LOOP] ✅ Started")
+    log.info("[MAIN LOOP] ✅ Started")
     var cycleTimestamp: number
 
     while (sharedState.getInstance().runMainLoop) {

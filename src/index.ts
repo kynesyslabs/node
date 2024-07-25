@@ -36,6 +36,7 @@ import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import groundControl from "./libs/utils/demostdlib/groundControl"
 import mainLoop from "./utilities/mainLoop"
 import sharedState from "./utilities/sharedState"
+import log from "src/utilities/logger"
 
 const term = terminalkit.terminal
 
