@@ -87,7 +87,7 @@ cd ..
 # Waiting for db port to be available
 echo -n "Waiting for the database to be available"
 COUNT=0
-while ! nc -z localhost $PG_PORT; do
+while ! nc -z localhost $PG_PORT; do 
     echo -n "."
     COUNT=$((COUNT+1))
     if [ $COUNT -gt 10 ]; then
