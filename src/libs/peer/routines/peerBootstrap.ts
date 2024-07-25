@@ -55,8 +55,8 @@ export default async function peerBootstrap(
             currentPeerAddress,
             currentPeerPort,
         ) // Returns the Peer object
-        console.log("[BOOTSTRAP] _currentPeerObject has a socket id: " + _currentPeerObject.socket.id)
         if (_currentPeerObject) {
+            console.log("[BOOTSTRAP] _currentPeerObject has a socket id: " + _currentPeerObject.socket.id)
             // Adding identity if any
             console.log(
                 "[BOOTSTRAP] Testing " + currentPeerAddress + " identity",

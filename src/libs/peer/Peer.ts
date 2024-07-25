@@ -47,7 +47,7 @@ export default class Peer {
     }
 
     // INFO Check online status for a peer
-    async checkOnlineStatus() {
+    async checkOnlineStatus() { // ! TODO: Implement
         return {
             identity: this.identity,
             status: "online",
