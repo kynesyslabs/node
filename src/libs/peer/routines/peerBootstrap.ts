@@ -79,6 +79,7 @@ export default async function peerBootstrap(
                     currentPeerPort +
                     "\n",
             )
+            log.info("[BOOTSTRAP] OK: Valid peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
 
             console.log("[BOOTSTRAP] _currentPeerObject", _currentPeerObject)
 
@@ -94,6 +95,7 @@ export default async function peerBootstrap(
                     console.log(
                         "[PEERBOOTSTRAP] Could not add peer to peerlist (see above)",
                     )
+                    log.info("[PEERBOOTSTRAP] Could not add peer to peerlist (see error)")
                     // peerlist.push(_currentPeerObject)
                 }
             }
@@ -103,6 +105,7 @@ export default async function peerBootstrap(
                             currentPeerAddress +
                             " as it is not connected",
                     )
+                    log.info("[PEERBOOTSTRAP] Refusing to add peer " + currentPeerAddress + " as it is not connected")
                     // Adding the peer string to the list of offline peers so it can be tried later
                     PeerManager.getInstance().addOfflinePeer(_currentPeerURL)
             }
@@ -114,6 +117,7 @@ export default async function peerBootstrap(
                     currentPeerPort +
                     " (will retry) \n",
             )
+            log.info("[BOOTSTRAP] ERROR: Cannot connect to peer: " + currentPeerAddress + ":" + currentPeerPort + " (will retry) \n")
             // Adding the peer string to the list of offline peers so it can be tried later
             PeerManager.getInstance().addOfflinePeer(_currentPeerURL)
         }

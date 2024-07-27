@@ -42,6 +42,8 @@ const term = terminalkit.terminal
 
 dotenv.config()
 
+log.info("[MAIN] Starting the node")
+
 let enough_peers = true // ? Review this
 // INFO Loading the known peers
 if (!fs.existsSync("./demos_peers")) {
@@ -170,8 +172,10 @@ async function main() {
     )
     // Creating ourselves as a peer // ? Should this be removed in production?
     let ourselves = "http://127.0.0.1>" + SERVER_PORT + ">" + id.ed25519.publicKey.toString("hex")
+    log.info("Our connection string is: " + ourselves)
     // And saves the public key file
     fs.writeFileSync("publickey", id.ed25519.publicKey.toString("hex") + "\n")
+    log.info("Our public key is: " + id.ed25519.publicKey.toString("hex"))
 
     try {
         await sharedState.getInstance().identity.getPublicIP()

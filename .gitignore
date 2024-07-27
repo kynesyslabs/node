@@ -55,4 +55,5 @@ postgres/data_*
 postgres_*
 
 # Logs
-logs/*.log
+logs_*/
+logs/
