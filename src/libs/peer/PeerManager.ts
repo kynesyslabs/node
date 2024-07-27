@@ -106,7 +106,7 @@ export default class PeerManager {
             peerInstance.connectionString = _peer.connectionString
             peerInstance.socket = _peer.socket
             const onlinePeerStatus = await peerInstance.checkOnlineStatus()
-            if (onlinePeerStatus.status === "online") {
+            if (onlinePeerStatus) {
                 onlinePeers.push(peerInstance)
             }
         }

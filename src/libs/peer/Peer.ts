@@ -48,10 +48,12 @@ export default class Peer {
     }
 
     // INFO Check online status for a peer
-    async checkOnlineStatus() { // ! TODO: Implement
-        return {
-            identity: this.identity,
-            status: "online",
+    async checkOnlineStatus() { // ? Review
+        const socket = this.getSocket()
+        if (!socket) {
+            return false
         }
+        // We have a socket, lets check if is connected
+        return socket.connected
     }
 }
