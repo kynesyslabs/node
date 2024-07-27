@@ -61,6 +61,7 @@ import { StatusNative } from "src/model/entities/StatusNative"
 import Block from "../blockchain/block"
 import { BlockContent } from "../../../../sdks/src/types/blockchain/blocks"
 import handleWeb2Request from "./routines/transactions/handleWeb2Request"
+import getPeerInfo from "./routines/nodecalls/getPeerInfo"
 
 let term = terminalkit.terminal
 
@@ -489,6 +490,9 @@ export default class ServerHandlers {
                 term.yellow.bold("[SERVER] Received crosschain_operation\n")
                 response = await ServerHandlers.handleXMChainOperation(content)
                 break // REVIEW Here or in comlinks? */
+            case "getPeerInfo":
+                response = await getPeerInfo()
+                break
             case "getPeerlist":
                 response = await getPeerlist()
                 break

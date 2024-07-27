@@ -32,6 +32,7 @@ export default class sharedState {
     // SECTION shared state variables
     shard: ProofOfRepresentation
     identity: Identity
+    connectionString: string = ""
     // !SECTION shared state variables
 
     // SECTION Configuration

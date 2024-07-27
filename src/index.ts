@@ -172,6 +172,7 @@ async function main() {
     )
     // Creating ourselves as a peer // ? Should this be removed in production?
     let ourselves = "http://127.0.0.1>" + SERVER_PORT + ">" + id.ed25519.publicKey.toString("hex")
+    sharedState.getInstance().connectionString = ourselves
     log.info("Our connection string is: " + ourselves)
     // And saves the public key file
     fs.writeFileSync("publickey", id.ed25519.publicKey.toString("hex") + "\n")

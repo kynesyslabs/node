@@ -120,6 +120,7 @@ export default class PeerManager {
             console.log(peer)
             return false
         }
+        // ! TODO check for duplicates
         const identity = peer.identity.toString("hex")
         this.peerList[identity] = peer
         console.log("[PEERMANAGER] Peer added")
