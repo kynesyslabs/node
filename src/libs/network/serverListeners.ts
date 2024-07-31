@@ -89,7 +89,7 @@ export default class ServerListeners {
     }
 
     // This method is used to check the comlink before processing it
-    async preflightComLinkChecks(request: any): Promise<any> {
+    async preflightComLinkChecks(request: any): Promise<{ _comlink_request: ComLink, content: BundleContent, id_ed25519: forge.pki.KeyPair, receiver: any } > {
         term.yellow("[SERVER] Received comlink\n")
         console.log(request)
         const id_ed25519 = sharedState.getInstance().identity.ed25519
@@ -104,12 +104,14 @@ export default class ServerListeners {
             )
             if (!_comlink_request) {
                 let error = "Error while parsing comlink request\n"
-                return error// TODO Better error handling
+                log.error(error)
+                return null// TODO Better error handling
             }
-        } catch (error) {
-            term.red(error)
+        } catch (e) {
+            let error = "Error while parsing comlink request: " + e
+            log.error(error)
             console.log("Returning")
-            return error // TODO Better error handling
+            return null // TODO Better error handling
         }
         // We can now extract the comlink and the content to be used in the handlers
         console.log(
@@ -135,7 +137,6 @@ export default class ServerListeners {
         console.log("[serverListeners] content.type: " + content.type)
         console.log("[serverListeners] content.extra: " + content.extra)
 
-        // NOTE Intercepts the comlink and checks if it is a L2PS request
         if (content.type === "l2ps") {
             ;({ response, require_reply, extra } = await ServerHandlers.handleL2PS(content))
             if (!response) {
@@ -155,21 +156,25 @@ export default class ServerListeners {
             return
         }
 
-        /* NOTE If we are here, we have a transaction or we error out
-        if (content.type !== "transaction") {
-            term.red.bold(
-                "[SERVER] Received a non recognized comlink, aborting",
-            )
-            console.log(content.type)
-            await demostdlib.reply(
-                _comlink_request,
-                false,
-                false,
-                "invalid comlink type",
-            )
-            receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
-            return
-        } */
+        // NOTE As first step, we check if this is a peer pairing request
+        /* This endpoint requires content to be:
+            content.message = connection_string
+            content.data.signature = signature of the connection_string
+            content.data.publicKey = public key of the peer signing the connection_string
+        */
+        // ? This is still unused (delete this line once it is used)
+        if (content.type === "hello_peer") {
+            ;({ response, require_reply, extra } = await ServerHandlers.handleHelloPeer(content))
+            if (!response) {
+                if (!extra) {
+                    extra = "Error while handling Hello Peer request: error not specified"
+                }
+                log.error("Error while handling Hello Peer request: " + extra)
+                response = false
+                extra = "Error while handling Hello Peer request: " + extra
+                require_reply = false
+            }
+        }
 
         // TODO Better to modularize this
         // REVIEW We use the 'extra' field to see if it is a confirmTx request (prior to execution)
