@@ -18,13 +18,14 @@ import ResponseRegistry from "../communications/responseRegistry"
 import { cryptography } from "../crypto"
 import getRemoteIP from "../network/routines/getRemoteIP"
 import { PeerManager } from "../peer"
+import { Peer } from "src/libs/peer"
 
 const term = terminalkit.terminal
 
 export default class CommonListeners {
-    private peer: any
+    private peer: Peer
 
-    constructor(peer: any) {
+    constructor(peer: Peer) {
         this.peer = peer
     }
 
@@ -37,7 +38,7 @@ export default class CommonListeners {
     }
 
     private disconnectListener = async () => {
-        this.peer.socket.on("disconnect", async () => {
+        this.peer.connection.socket.on("disconnect", async () => {
             // Removing the peer from the list if it was in
             term.yellow("[COMMON] Peer disconnected")
             PeerManager.getInstance().removePeer(this.peer)
@@ -48,7 +49,7 @@ export default class CommonListeners {
         // ? REVIEW Send the remote ip too
         let remote_ip = await getRemoteIP()
         let message = "Please authenticate me: " + remote_ip
-        this.peer.socket.on("auth_ask", async (data: { message: string }) => {
+        this.peer.connection.socket.on("auth_ask", async (data: { message: string }) => {
             //console.log(data)
             // REVIEW Signing data.message with the private key
             let _signature = cryptography.sign(
@@ -61,13 +62,13 @@ export default class CommonListeners {
                 _signature,
                 sharedState.getInstance().identity.ed25519.publicKey,
             ]
-            this.peer.socket.emit("auth_reply", _sendBack)
+            this.peer.connection.socket.emit("auth_reply", _sendBack)
         })
     }
 
     // INFO For non sensitive data
     private publicListener = async () => {
-        this.peer.socket.on("public", request => async () => {
+        this.peer.connection.socket.on("public", request => async () => {
             console.log("[PEER] Received")
             let response = {
                 muid: request.muid,
@@ -84,12 +85,12 @@ export default class CommonListeners {
             }
             // Once the response should be processed, we need to send it back
             // TODO Would be better to have requests with is_reply set to true or false instead of two listeners
-            this.peer.socket.emit("public_reply", response)
+            this.peer.connection.socket.emit("public_reply", response)
         })
     }
 
     private comlinkReplyListener = async () => {
-        this.peer.socket.on("comlink_reply", async request => {
+        this.peer.connection.socket.on("comlink_reply", async request => {
             // request is a ComLink object with the same structure as the comlink listener below
             console.log("[PEER] Received reply to " + request.muid)
             //console.log(JSON.stringify(request, null, 2))
@@ -109,7 +110,7 @@ export default class CommonListeners {
             // Parsing the comlink
             let parsed_comlink = await ComLinkUtils.parseComlink(
                 request,
-                this.peer.socket,
+                this.peer.connection.socket,
             )
             if (!parsed_comlink) {
                 return
@@ -126,14 +127,14 @@ export default class CommonListeners {
             ResponseRegistry.getInstance().registerResponse(
                 request.chain.current.currentMessage,
                 request.muid,
-                this.peer.socket,
+                this.peer.connection.socket,
                 connection_string,
             )
         })
     }
 
     private errorListener = async () => {
-        this.peer.socket.on("error", async request => {
+        this.peer.connection.socket.on("error", async request => {
             console.log("[PEER] Received error:")
             //console.log(request)
         })

@@ -50,14 +50,14 @@ export default async function peerBootstrap(
         )
         // REVIEW Connection test and add to valid_peers
         // Trying to connect and retrieve the socket for the given peer using Peer class
-        let _currentTestingPeer = PeerManager.extractPeerFromString(_currentPeerURL)
+        let _currentTestingPeer: Peer = PeerManager.extractPeerFromString(_currentPeerURL)
         // TODO See PeerManager.extractPeerFromString and Client.connectToPeer comments
         let _currentPeerObject = await Client.connectToPeer(
             currentPeerAddress,
             currentPeerPort,
         ) // Returns the Peer object
         if (_currentPeerObject) {
-            console.log("[BOOTSTRAP] _currentPeerObject has a socket id: " + _currentPeerObject.socket.id)
+            console.log("[BOOTSTRAP] _currentPeerObject has a socket id: " + _currentPeerObject.connection.socket.id)
             // Adding identity if any
             console.log(
                 "[BOOTSTRAP] Testing " + currentPeerAddress + " identity",
@@ -71,7 +71,15 @@ export default async function peerBootstrap(
             console.log(
                 "[BOOSTRAP: overriding connectionstring] " + _currentPeerURL,
             )
-            _currentPeerObject.connectionString = _currentPeerURL // Adding this step
+            console.log(_currentPeerObject)
+            // ! remove debug code
+            try {
+                _currentPeerObject.connection.string = _currentPeerURL // Adding this step
+            } catch (error) {
+                console.log("[PEERBOOTSTRAP] Error setting connection string: " + error)
+                log.critical("Error setting connection string: " + error)
+                process.exit(1)
+            }
             console.log(
                 "[BOOTSTRAP] OK: Valid peer " +
                     currentPeerAddress +
@@ -88,7 +96,7 @@ export default async function peerBootstrap(
 			} else */
             console.warn("[PEERBOOTSTRAP] Adding peer to peerlist")
             //console.warn(_currentPeerObject)
-            if (_currentPeerObject.socket.connected) {
+            if (_currentPeerObject.connection.socket.connected) {
                 let inserted =
                     PeerManager.getInstance().addPeer(_currentPeerObject)
                 if (!inserted) {

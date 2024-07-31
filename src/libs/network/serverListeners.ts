@@ -46,7 +46,7 @@ export default class ServerListeners {
     // INFO this set of listeners does not require authentication and
     // are not comlink as well, so they need to have their own listeners
     async browserRequestListener() {
-        this.peer.socket.on("browser_request", async request => {
+        this.peer.connection.socket.on("browser_request", async request => {
             term.yellow("[SERVER] Received browser request\n")
             // NOTE request MUST be a string conforming to BrowserRequest interface
             let req: BrowserRequest = JSON.parse(request)
@@ -67,7 +67,7 @@ export default class ServerListeners {
                     browserResponse = [false, "Invalid request"]
                     break
             }
-            this.peer.socket.emit(
+            this.peer.connection.socket.emit(
                 "browser_response",
                 JSON.stringify(browserResponse),
             )
@@ -82,7 +82,7 @@ export default class ServerListeners {
      A message is just a message, so it is handled by its type.
     */
     async comlinkListener() {
-        this.peer.socket.on("comlink", async request => {
+        this.peer.connection.socket.on("comlink", async request => {
             await this.manageComLink(request)
         })
         // TODO See in communications.js and find the best way to validate, check and digest the request
@@ -93,14 +93,14 @@ export default class ServerListeners {
         term.yellow("[SERVER] Received comlink\n")
         console.log(request)
         const id_ed25519 = sharedState.getInstance().identity.ed25519
-        const receiver = this.peer.socket
+        const receiver = this.peer.connection.socket
         let _comlink_request: ComLink
         // TODO This can be put into securityModule for consistency
         try {
             // Parsing comlink
             _comlink_request = await comlinkUtils.parseComlink(
                 request,
-                this.peer.socket,
+                this.peer.connection.socket,
             )
             if (!_comlink_request) {
                 let error = "Error while parsing comlink request\n"
@@ -200,7 +200,7 @@ export default class ServerListeners {
                 // REVIEW This method needs to actually verify if the transaction is valid
                 var result = await ServerHandlers.handleExecuteTransaction(
                     content.data as ValidityData,
-                    this.peer.socket,
+                    this.peer.connection.socket,
                 )
                 // Destructuring the result to get the extra, require_reply and response
                 ;({ extra, require_reply, response } = result)
@@ -262,7 +262,7 @@ export default class ServerListeners {
     // INFO Register or update a peer identity and connection string
     async authReplyListener() {
         // REVIEW Auth reply listener should not add a client to the peerlist if is read only   
-        this.peer.socket.on("auth_reply", async data => {
+        this.peer.connection.socket.on("auth_reply", async data => {
             let identity = await cryptography.load("./.demos_identity")
             term.yellow("[SERVER] Received auth reply")
             // Unpack the data for readability
@@ -279,17 +279,17 @@ export default class ServerListeners {
                 )
                 // Disconnect if the verification is false
                 if (!_verification) {
-                    this.peer.socket.emit("auth_fail")
-                    this.peer.socket.disconnect()
+                    this.peer.connection.socket.emit("auth_fail")
+                    this.peer.connection.socket.disconnect()
                 }
                 // Getting the public IP of the peer so we can add it to the peerlist
                 let remote_ip = original_message.split(":")[0].trim()
                 let connection_string = remote_ip + ">53550>" + original_identity // ! Allow dynamic ports
                 // ? REVIEW build the Peer object and add it to the peerlist (connection string missing atm)
                 let new_peer: Peer = new Peer()
-                new_peer.socket = this.peer.socket
+                new_peer.connection.socket = this.peer.connection.socket
                 new_peer.identity = original_identity
-                new_peer.connectionString = connection_string
+                new_peer.connection.string = connection_string
                 PeerManager.getInstance().addPeer(new_peer)
                 log.info("Peer added to the peerlist: " + connection_string)
             } else {
@@ -303,16 +303,16 @@ export default class ServerListeners {
                 signature: _signature,
                 identity: identity.publicKey,
             }
-            this.peer.socket.emit("auth_ok", _reply)
+            this.peer.connection.socket.emit("auth_ok", _reply)
         })
     }
 
     authAskEmit = async () => {
-        await this.peer.socket.emit("auth_ask", "sign this")
+        await this.peer.connection.socket.emit("auth_ask", "sign this")
     }
 
     voteRequestListener = async () => {
-        this.peer.socket.on("voteRequest", async (request, callback) => {
+        this.peer.connection.socket.on("voteRequest", async (request, callback) => {
             term.yellow("[SERVER] Received vote request\n")
             //console.log(request)
             let voteResponse: string

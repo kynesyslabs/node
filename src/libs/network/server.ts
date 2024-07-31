@@ -9,7 +9,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import { Server as ServerType } from "socket.io"
+import { Server as ServerType, Socket as ServerSocket } from "socket.io"
+import { Socket } from "socket.io-client"
 import ServerListeners from "src/libs/network/serverListeners"
 import { Peer } from "src/libs/peer"
 import terminalkit from "terminal-kit"
@@ -22,7 +23,8 @@ export default class Server {
             term.green("[SERVER] Peer connected\n")
 
             const newPeer = new Peer()
-            newPeer.setSocket(peerSocket)
+            newPeer.connection.serverSocket = peerSocket // ? is this useful?
+            newPeer.connection.socket = peerSocket as any as Socket // ? If it works, don't touch it
             //newPeer.setIdentity(identity.ed25519.publicKey)
             //PeerManager.getInstance().addPeer(newPeer)
             const serverListeners = new ServerListeners(newPeer)

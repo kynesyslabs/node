@@ -20,7 +20,7 @@ export default async function getPeerIdentity(
     expectedKey: string,
 ): Promise<Peer> {
     // A peer object must have a valid socket
-    if (!peer.socket) {
+    if (!peer.connection.socket) {
         return null
     }
 

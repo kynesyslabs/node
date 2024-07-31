@@ -13,13 +13,14 @@ KyneSys Labs: https://www.kynesys.xyz/
 import terminalkit from "terminal-kit"
 
 import { PeerManager } from "../peer"
+import { Peer } from "../peer"
 
 const term = terminalkit.terminal
 
 export default class ClientListeners {
-    private peer: any
+    private peer: Peer
 
-    constructor(peer: any) {
+    constructor(peer: Peer) {
         this.peer = peer
     }
 
@@ -28,7 +29,7 @@ export default class ClientListeners {
     }
 
     private connectListener = async () => {
-        this.peer.socket.on("connect", async connected_socket => {
+        this.peer.connection.socket.on("connect", async () => {
             term.green("[CLIENT] Connected to peer\n")
             PeerManager.getInstance().addPeer(this.peer)
         })

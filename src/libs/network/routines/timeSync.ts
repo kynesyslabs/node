@@ -24,7 +24,7 @@ export default async function getPeerTime(
     id: any,
 ): Promise<number> {
     // A peer object must have a valid socket
-    if (!peer.socket) {
+    if (!peer.connection.socket) {
         return null
     }
 

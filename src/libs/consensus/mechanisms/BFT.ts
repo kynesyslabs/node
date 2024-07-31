@@ -252,7 +252,7 @@ export default class QBFT {
             let peer = peerlist[i]
 
             const response = await new Promise(resolve => {
-                peer.socket.emit(
+                peer.connection.socket.emit(
                     "voteRequest",
                     {
                         parameter: parameter,
