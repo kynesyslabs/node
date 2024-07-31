@@ -120,7 +120,7 @@ export default async function mainLoop() {
             currentlyOnlinePeers = onlinePeers.map(peer => {
                 return {
                     identity: peer.identity,
-                    connectionString: peer.connectionString,
+                    connectionString: peer.connection.string,
                 }
             })
         }

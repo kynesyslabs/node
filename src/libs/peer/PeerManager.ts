@@ -103,8 +103,8 @@ export default class PeerManager {
         for await (const _peer of Object.values(this.peerList)) {
             const peerInstance = new Peer()
             peerInstance.identity = _peer.identity
-            peerInstance.connectionString = _peer.connectionString
-            peerInstance.socket = _peer.socket
+            peerInstance.connection.string = _peer.connection.string
+            peerInstance.connection.socket = _peer.connection.socket
             const onlinePeerStatus = await peerInstance.checkOnlineStatus()
             if (onlinePeerStatus) {
                 onlinePeers.push(peerInstance)
@@ -125,8 +125,8 @@ export default class PeerManager {
         this.peerList[identity] = peer
         console.log("[PEERMANAGER] Peer added")
         console.log("Identity: " + peer.identity.toString("hex"))
-        console.log("Connection string: " + peer.connectionString)
-        if (!peer.connectionString) {
+        console.log("Connection string: " + peer.connection.string)
+        if (!peer.connection.string) {
             console.log("[WARN] No connection string detected")
         }
         // FIXME Run the routine in peers to get it
@@ -167,8 +167,15 @@ export default class PeerManager {
         }
         const peer = new Peer()
         peer.identity = Buffer.from(currentPublicKey, "hex")
-        peer.connectionString = currentPeerAddress + ">" + currentPeerPort
-        // NOTE peer.socket = null
+        // ! Remove debug code
+        try {
+            peer.connection.string = currentPeerAddress + ">" + currentPeerPort
+        } catch (error) {
+            console.log("[PEERMANAGER] Error extracting peer from string: " + error)
+            log.critical("Error extracting peer from string: " + error)
+            process.exit(1)
+        }
+        // NOTE peer.connection.socket = null
         return peer
     }
 

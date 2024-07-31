@@ -22,33 +22,47 @@ export default class log {
         return new Date().toISOString()
     }
 
-    static info(message: string) {
+    static info(message: string, logToTerminal: boolean = true) {
         const logEntry = `[INFO] [${this.getTimestamp()}] ${message}\n`
-        term.bold(logEntry.trim())
+        if (logToTerminal) {
+            term.bold(logEntry.trim())
+        }
         fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
     }
 
-    static error(message: string) {
+    static error(message: string, logToTerminal: boolean = true) {
         const logEntry = `[ERROR] [${this.getTimestamp()}] ${message}\n`
-        term.red(logEntry.trim())
+        if (logToTerminal) {
+            term.red(logEntry.trim())
+        }
+        fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
         fs.appendFileSync(this.LOG_ERROR_FILE, logEntry)
     }
 
-    static debug(message: string) {
+    static debug(message: string, logToTerminal: boolean = true) {
         const logEntry = `[DEBUG] [${this.getTimestamp()}] ${message}\n`
-        term.magenta(logEntry.trim())
+        if (logToTerminal) {
+            term.magenta(logEntry.trim())
+        }
+        fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
         fs.appendFileSync(this.LOG_DEBUG_FILE, logEntry)
     }
 
-    static warning(message: string) {
+    static warning(message: string, logToTerminal: boolean = true) {
         const logEntry = `[WARNING] [${this.getTimestamp()}] ${message}\n`
-        term.yellow(logEntry.trim())
+        if (logToTerminal) {
+            term.yellow(logEntry.trim())
+        }
+        fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
         fs.appendFileSync(this.LOG_WARNING_FILE, logEntry)
     }
 
-    static critical(message: string) {
-                const logEntry = `[CRITICAL] [${this.getTimestamp()}] ${message}\n`
-        term.bold.red(logEntry.trim())
+    static critical(message: string, logToTerminal: boolean = true) {
+        const logEntry = `[CRITICAL] [${this.getTimestamp()}] ${message}\n`
+        if (logToTerminal) {
+            term.bold.red(logEntry.trim())
+        }
+        fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
         fs.appendFileSync(this.LOG_CRITICAL_FILE, logEntry)
     }
 

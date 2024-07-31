@@ -15,7 +15,7 @@ import terminalkit from "terminal-kit"
 import Peer from "../peer/Peer"
 import ClientListeners from "./clientListeners"
 import CommonListeners from "./commonListeners"
-
+import log from "src/utilities/logger"
 const term = terminalkit.terminal
 
 // NOTE Sleep function
@@ -26,20 +26,34 @@ async function sleep(ms) {
 }
 
 export default class Client {
-
-    static async connectToPeerObject(peer: Peer): Promise<[boolean, Peer | null]> {
-        // Just a wrapper around the connectToPeer function
-        const address = peer.connectionString.split(">")[0]
-        const port = parseInt(peer.connectionString.split(">")[1])
-        const connectedPeer = await this.connectToPeer(address, port)
-        if (!connectedPeer) {
+    static async connectToPeerObject(
+        peer: Peer,
+    ): Promise<[boolean, Peer | null]> {
+        // We can work with a connection string and it would be better to do so
+        if (peer.connection.string) {
+            log.info("[CLIENT] Peer has a connection string: trying to connect using it")
+            const address = peer.connection.string.split(">")[0]
+            const port = parseInt(peer.connection.string.split(">")[1])
+            const connectedPeer: Peer | null = await this.connectToPeer(address, port)
+            if (!connectedPeer) {
+                return [false, null]
+            } else {
+                return [true, connectedPeer]
+            }
+        }
+        // We can work with a simple socket anyway
+        else if (peer.connection.socket) {
+            log.info("[CLIENT] Peer has a socket but no connection string: trying to use it")
+            return [peer.connection.socket.connected, peer] // ? If it is not connected we should try to reconnect
+        }
+        // We can't work with a peer without a socket or a connection string
+        else {
+            log.error("[CLIENT] Peer has no socket or connection string: cannot connect")
             return [false, null]
-        } else {
-            return [true, connectedPeer]
         }
     }
 
-    // ! Refactor to accept a Peer object (made with PeerManager.extractPeerFromString)
+    // ? Refactor to accept a Peer object (made with PeerManager.extractPeerFromString)
     static async connectToPeer(
         address: string = "localhost",
         port: number = 53550,
@@ -52,12 +66,18 @@ export default class Client {
 
         const connectionSocket = io(address + ":" + port)
         connectionSocket.on("connect", async () => {
-            term.green(
+            term.yellow(
                 "[CLIENT] Connected to peer at " + address + ":" + port + "\n",
             )
+            log.info("[CLIENT] Connecting to peer at " + address + ":" + port)
             _peerForged.identity = "placeholder" // TODO Add identity filling and verification
-            _peerForged.socket = connectionSocket
-            _peerForged.connectionString = address + ">" + port
+            _peerForged.connection.socket = connectionSocket
+            _peerForged.connection.string = address + ">" + port
+            term.yellow(
+                "[CLIENT] Connection string set to " +
+                    _peerForged.connection.string +
+                    "\n",
+            )
             const commonListeners = new CommonListeners(_peerForged)
             const clientListeners = new ClientListeners(_peerForged)
             await commonListeners.runListeners()
@@ -69,12 +89,32 @@ export default class Client {
         //Timeout and timer for the connection (yes, a blocking one)
         while (timeout > 0) {
             if (connected) {
+                log.info(
+                    "[CLIENT] Connected to peer at " + address + ":" + port,
+                )
+                term.green(
+                    "[CLIENT] Connected to peer at " +
+                        address +
+                        ":" +
+                        port +
+                        "\n",
+                )
                 return _peerForged
             } else {
                 timeout -= 100
                 await sleep(100)
             }
         }
+        log.error(
+            "[CLIENT] Failed to connect to peer at " + address + ":" + port,
+        )
+        term.red(
+            "[CLIENT] Failed to connect to peer at " +
+                address +
+                ":" +
+                port +
+                "\n",
+        )
         return null
     }
 

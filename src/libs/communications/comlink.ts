@@ -99,9 +99,9 @@ export default class ComLink {
             console.log("[COMMUNICATIONS] Invalid message")
             return [false, "Invalid message"]
         }
-        if (peer.socket) {
+        if (peer.connection.socket) {
             console.log(
-                "[COMMUNICATIONS] Sending message to peer " + peer.socket.id,
+                "[COMMUNICATIONS] Sending message to peer " + peer.connection.socket.id,
             )
             // NOTE Removing privated key from message if present
             if (message.privateKey) {
@@ -149,7 +149,7 @@ export default class ComLink {
     }
     // INFO Broadcast a ComLink object to a peer (usually called by the above methods)
     async broadcastToPeer(peer: Peer) {
-        let _socket = peer.socket
+        let _socket = peer.connection.socket
         console.log("[COMMUNICATIONS] Broadcast message to peer")
         // NOTE Here we make sure that we dont have private data in the message
         if (this.chain.current.currentMessage.privateKey) {
@@ -165,7 +165,7 @@ export default class ComLink {
     // INFO Support for sending to a socket directly
     async broadcastToSocketPeer(socket: Socket) {
         let compatible_peer = new Peer()
-        compatible_peer.socket = socket
+        compatible_peer.connection.socket = socket
         await this.broadcastToPeer(compatible_peer)
     }
 

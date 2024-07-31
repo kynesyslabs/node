@@ -43,6 +43,7 @@ import terminalkit from "terminal-kit"
 
 import {
     AddressInfo,
+    BundleContent,
     ExecutionResult,
     IWeb2Payload,
     IWeb2Request,
@@ -62,11 +63,38 @@ import Block from "../blockchain/block"
 import { BlockContent } from "../../../../sdks/src/types/blockchain/blocks"
 import handleWeb2Request from "./routines/transactions/handleWeb2Request"
 import getPeerInfo from "./routines/nodecalls/getPeerInfo"
+import forge from "node-forge"
+import { PeerManager } from "docker/node_base/src/libs/peer"
 
 let term = terminalkit.terminal
 
 export default class ServerHandlers {
     // ANCHOR BrowserRequest
+
+    // SECTION Hello Peer
+    static async handleHelloPeer(content: BundleContent): Promise<{ response: any, require_reply: boolean, extra: any }> {
+        let connectionString = content.message as string // This is also the signed message to verify the peer
+        let signature = content.data.signature as forge.pki.ed25519.BinaryBuffer // REVIEW is this the right type?
+        let publicKey = content.data.publicKey as forge.pki.PublicKey
+        // Let's verify the peer
+        let verified = Cryptography.verify(connectionString, signature, publicKey)
+        if (!verified) {
+            return { response: false, require_reply: false, extra: "Invalid signature" }
+        }
+        // Creating a Peer object
+        let peer = new Peer()
+        peer.identity = publicKey as forge.pki.ed25519.BinaryBuffer
+        peer.connection.string = connectionString
+        let isConnected = await peer.connect()
+        if (!isConnected) {
+            return { response: false, require_reply: false, extra: "Could not connect to peer" }
+        }
+        let isAddedToPeerlist = PeerManager.getInstance().addPeer(peer)
+        if (!isAddedToPeerlist) {
+            return { response: false, require_reply: false, extra: "Could not add peer to peerlist" }
+        }
+        return { response: true, require_reply: false, extra: null }
+    }
 
     // SECTION Login On Chain
     static async handleLoginRequest(content: BrowserRequest) {

@@ -70,12 +70,12 @@ export async function fastSync(
         peerlist = [singlePeer]
     }
     // Selecting the first peer
-    let firstPeer = peerlist[0]
-    console.log("[SYNC] First peer is " + firstPeer.connectionString)
+    let firstPeer: Peer = peerlist[0]
+    console.log("[SYNC] First peer is " + firstPeer.connection.string)
 
     // Asking the first peer for the last block number
     let blockNumberResponse = await demostdlib.remoteCall(
-        firstPeer.connectionString,
+        firstPeer.connection.string,
         firstPeer,
         "getLastBlockNumber",
         "nodeCall",
@@ -122,7 +122,7 @@ export async function fastSync(
         // TODO Test if it is more logic to just download the headers and, once a chain has been estabilished, download the blocks
         // TODO And by test i mean we have to do it
         let blockResponse = await demostdlib.remoteCall(
-            firstPeer.connectionString,
+            firstPeer.connection.string,
             firstPeer,
             "getBlockByNumber",
             "nodeCall",
@@ -175,12 +175,12 @@ export async function fastSync(
 
 // TODO Sync reimplementation
 export async function Sync(peer: Peer): Promise<boolean> {
-    if (!peer.socket) {
-        console.log("[SYNC] Peer has no socket: " + peer.connectionString)
+    if (!peer.connection.socket) {
+        console.log("[SYNC] Peer has no socket: " + peer.connection.string)
         return false
     }
-    if(!peer.socket.connected) {
-        console.log("[SYNC] Peer socket is not connected: " + peer.connectionString)
+    if(!peer.connection.socket.connected) {
+        console.log("[SYNC] Peer socket is not connected: " + peer.connection.string)
         return false
     }
     // Getting our last block number and hash
@@ -248,7 +248,7 @@ export async function Sync(peer: Peer): Promise<boolean> {
 
 async function askLastBlockNumber(peer: Peer): Promise<number> {
     let blockNumberResponse = await demostdlib.remoteCall(
-        peer.connectionString,
+        peer.connection.string,
         peer,
         "getLastBlockNumber",
         "nodeCall",
@@ -266,7 +266,7 @@ async function askLastBlockNumber(peer: Peer): Promise<number> {
 
 async function askBlockByNumber(peer: Peer, blockNumber: number): Promise<Block> {
     let blockResponse = await demostdlib.remoteCall(
-        peer.connectionString,
+        peer.connection.string,
         peer,
         "getBlockByNumber",
         "nodeCall",
