@@ -45,16 +45,19 @@ export default class CommonListeners {
     }
 
     private authAskListener = async () => {
+        // ? REVIEW Send the remote ip too
+        let remote_ip = await getRemoteIP()
+        let message = "Please authenticate me: " + remote_ip
         this.peer.socket.on("auth_ask", async (data: { message: string }) => {
             //console.log(data)
             // REVIEW Signing data.message with the private key
             let _signature = cryptography.sign(
-                data.message,
+                message,
                 sharedState.getInstance().identity.ed25519.privateKey as any,
             )
             // REVIEW Sending the signature back along with the public key and the message
             let _sendBack = [
-                data.message,
+                message,
                 _signature,
                 sharedState.getInstance().identity.ed25519.publicKey,
             ]

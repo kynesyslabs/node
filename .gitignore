@@ -57,3 +57,7 @@ postgres_*
 # Logs
 logs_*/
 logs/
+
+# Test files
+start_two_nodes.sh
+node_*.sh

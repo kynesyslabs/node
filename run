@@ -42,7 +42,7 @@ if is_first_run; then
     touch .RUN
 fi
 
-CLEAN=false
+CLEAN="false"
 PORT=53550
 
 # Getting arguments
@@ -50,7 +50,7 @@ while getopts "p:d:c:i:" opt; do
     case $opt in
         p) PORT=$OPTARG;;
         d) PG_PORT=$OPTARG;;
-        c) CLEAN=true;;
+        c) CLEAN=$OPTARG;;
         i) IDENTITY_FILE=$OPTARG;;
         #...
     esac
@@ -73,7 +73,9 @@ cd $PG_FOLDER
 
 # If we are cleaning, we need to remove the database
 if [ "$CLEAN" == "true" ]; then
-    sudo rm -rf data_${PG_PORT}
+    echo "Cleaning the database"
+    sleep 1
+    sudo rm -rf data_*
     mkdir data_${PG_PORT}
 fi
 

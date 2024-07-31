@@ -5,19 +5,22 @@ import { cryptography } from "src/libs/crypto"
 import manageMessages from "src/libs/network/routines/manageMessages"
 import { ISession } from "src/libs/network/routines/sessionManager"
 import * as Security from "src/libs/network/securityModule"
+import forge from "node-forge"
 /* eslint-disable no-extra-semi */
 import ServerHandlers from "src/libs/network/serverHandlers"
-import { Peer } from "src/libs/peer"
 import { demostdlib } from "src/libs/utils"
 import sharedState from "src/utilities/sharedState"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
+import log from "src/utilities/logger"
 
 import {
     BundleContent,
     ISecurityReport,
     ValidityData,
 } from "@kynesyslabs/demosdk/types"
+import Peer from "src/libs/peer/Peer"
+import { PeerManager } from "src/libs/peer"
 
 let term = terminalkit.terminal
 
@@ -258,21 +261,37 @@ export default class ServerListeners {
 
     // INFO Register or update a peer identity and connection string
     async authReplyListener() {
-        // REVIEW Auth reply listener should not add a client to the peerlist if is read only
+        // REVIEW Auth reply listener should not add a client to the peerlist if is read only   
         this.peer.socket.on("auth_reply", async data => {
             let identity = await cryptography.load("./.demos_identity")
             term.yellow("[SERVER] Received auth reply")
+            // Unpack the data for readability
             if (data !== "readonly") {
+                term.yellow("[SERVER] Received auth reply: verifying")
+                log.info("Received auth reply: verifying")
+                let original_message = data[0] as string
+                let original_signature = data[1] as forge.pki.ed25519.NativeBuffer
+                let original_identity = data[2] as forge.pki.ed25519.BinaryBuffer
                 let _verification = await cryptography.verify(
-                    data[0],
-                    data[1],
-                    data[2],
+                    original_message, // The message that our peer should have signed
+                    original_signature, // The signature of the auth message as defined in commonListeners.ts
+                    original_identity, // The identity of the peer as a public key
                 )
                 // Disconnect if the verification is false
                 if (!_verification) {
                     this.peer.socket.emit("auth_fail")
                     this.peer.socket.disconnect()
                 }
+                // Getting the public IP of the peer so we can add it to the peerlist
+                let remote_ip = original_message.split(":")[0].trim()
+                let connection_string = remote_ip + ">53550>" + original_identity // ! Allow dynamic ports
+                // ? REVIEW build the Peer object and add it to the peerlist (connection string missing atm)
+                let new_peer: Peer = new Peer()
+                new_peer.socket = this.peer.socket
+                new_peer.identity = original_identity
+                new_peer.connectionString = connection_string
+                PeerManager.getInstance().addPeer(new_peer)
+                log.info("Peer added to the peerlist: " + connection_string)
             } else {
                 term.yellow(
                     "[SERVER] Client is read only: not asking for authentication",
