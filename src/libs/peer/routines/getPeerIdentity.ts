@@ -13,10 +13,17 @@ import ComLink from "../../communications/comlink"
 import ResponseRegistry from "../../communications/responseRegistry"
 import Transmission from "../../communications/transmission"
 import Peer from "../Peer"
+import sharedState from "src/utilities/sharedState"
 
+// proxy method
+export async function verifyPeer(peer: Peer, expectedKey: string): Promise<Peer> {
+    await getPeerIdentity(peer, expectedKey)
+    return peer
+}
+
+// Peer is verified and its status is updated
 export default async function getPeerIdentity(
     peer: Peer,
-    id: any,
     expectedKey: string,
 ): Promise<Peer> {
     // A peer object must have a valid socket
@@ -24,6 +31,9 @@ export default async function getPeerIdentity(
         return null
     }
 
+    // Getting our identity
+    let id = sharedState.getInstance().identity.ed25519
+    
     console.warn("[PEER AUTHENTICATION] Getting peer identity")
     console.log(peer)
     console.log(id)
@@ -80,9 +90,16 @@ export default async function getPeerIdentity(
             return null
         }
         // Adding the property to the peer
-        peer.identity = response[1].identity
+        peer.identity = response[1].identity // Identity is now known
+        peer.status.online = true // Peer is now online
+        peer.status.ready = true // Peer is now ready
+        peer.status.timestamp = new Date().getTime()
+        peer.verification.status = true // We verified the peer
+        peer.verification.message = "getPeerIdentity routine verified"      
+        peer.verification.timestamp = new Date().getTime()
     } else {
         console.log("[PEER AUTHENTICATION] No response received")
     }
+    // ? Should we add it to the peerList here instead of in the peerBootstrap routine / hello_peer routine?
     return peer
 }

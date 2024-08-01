@@ -22,7 +22,6 @@ const peerManager = PeerManager.getInstance()
 export default async function peerBootstrap(
     local_list: string[],
 ): Promise<Peer[]> {
-    const id_ed25519 = await cryptography.load("./.demos_identity")
     console.log("[PEER BOOTSTRAP] Loading peers...")
     // Validity check
     for (let i = 0; i < local_list.length; i++) {
@@ -62,10 +61,9 @@ export default async function peerBootstrap(
             console.log(
                 "[BOOTSTRAP] Testing " + currentPeerAddress + " identity",
             )
-
+            // After this, the peer object will have an identity and thus will be verified
             _currentPeerObject = await getPeerIdentity(
                 _currentPeerObject,
-                id_ed25519,
                 currentPublicKey,
             )
             console.log(
@@ -78,7 +76,7 @@ export default async function peerBootstrap(
             } catch (error) {
                 console.log("[PEERBOOTSTRAP] Error setting connection string: " + error)
                 log.critical("Error setting connection string: " + error)
-                process.exit(1)
+                continue
             }
             console.log(
                 "[BOOTSTRAP] OK: Valid peer " +

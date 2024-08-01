@@ -135,7 +135,7 @@ export default class PeerManager {
             if (onlinePeerStatus) {
                 // Saying hello to the peer if it is not ourself
                 if (peerInstance.identity.toString("hex") !== sharedState.getInstance().identity.ed25519.publicKey.toString("hex")) {
-                    await PeerManager.sayHelloToPeer(peerInstance) // ? does it work? Does it need a callback or a return value?
+                    await PeerManager.sayHelloToPeer(peerInstance) // ? Does it need a callback or a return value?
                 }
                 onlinePeers.push(peerInstance) // FIXME We should keep track of duplicates
             }
