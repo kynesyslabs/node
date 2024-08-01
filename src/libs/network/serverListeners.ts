@@ -315,6 +315,10 @@ export default class ServerListeners {
                 new_peer.connection.socket = this.peer.connection.socket
                 new_peer.identity = original_identity
                 new_peer.connection.string = connection_string
+                // Setting the verification status to true
+                new_peer.verification.status = true
+                new_peer.verification.message = original_message
+                new_peer.verification.timestamp = new Date().getTime()
                 PeerManager.getInstance().addPeer(new_peer)
                 log.info("Peer added to the peerlist: " + connection_string)
             } else {

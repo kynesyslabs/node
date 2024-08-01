@@ -28,7 +28,6 @@ function ForgeToHex(forgeBuffer: any) {
     return "0x" + forgeBuffer
 }
 
-
 export default class PeerManager {
     private static instance: PeerManager
     private peerList: Record<string, Peer> // Storing all the connections, will be filtered once the request is done
@@ -109,6 +108,20 @@ export default class PeerManager {
 
     getPeer(identity: string): Peer {
         return this.peerList[identity]
+    }
+
+    // Creating a JSON object with the peerlist and logging it
+    logPeerList() {
+        const json_peerlist = {}
+        for (const peer in this.peerList) {
+            json_peerlist[peer] = {
+                connection_string: this.peerList[peer].connection.string,
+                identity: this.peerList[peer].identity.toString("hex"),
+                is_authenticated: this.peerList[peer].verification.status,
+            }
+        }
+        // Flushing the log file and logging the peerlist
+        log.custom("peer_list", JSON.stringify(json_peerlist, null, 2), false, true)
     }
 
     async getOnlinePeers(): Promise<Peer[]> {
@@ -229,7 +242,7 @@ export default class PeerManager {
             {},
         )
         await transmission.finalize()
-        log.info("[Hello Peer] Transmission     created")
+        log.info("[Hello Peer] Transmission created")
         log.info("[Hello Peer] Transmission: " + JSON.stringify(transmission))
         // Sending the transmission
         const comlink = new ComLink()

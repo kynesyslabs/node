@@ -21,7 +21,6 @@ async function sleep(time: number) {
 }
 
 let hasSentNodeOnlineTx = false
-const peerManager = PeerManager.getInstance()
 
 export default async function mainLoop() {
     log.info("[MAIN LOOP] ✅ Started")
@@ -34,6 +33,8 @@ export default async function mainLoop() {
         }
         // If it is not in pause, we set (or force set) the mainLoop flag to be on
         sharedState.getInstance().inMainLoop = true
+        // Before continuing, we log the current peerlist
+        PeerManager.getInstance().logPeerList()
         // NOTE Syncing the blockchain
         await fastSync() // REVIEW Test here
         console.log("[MAIN LOOP] Synced! 🟢 ")
@@ -71,7 +72,7 @@ export default async function mainLoop() {
             comLink.properties.require_reply = true
             comLink.properties.is_reply = false
 
-            let peer = peerManager.getPeer(
+            let peer = PeerManager.getInstance().getPeer(
                 sharedState.getInstance().identity.ed25519
                     .publicKey as unknown as string,
             )
@@ -97,7 +98,7 @@ export default async function mainLoop() {
 
         // every block write online list
         console.log("[MAINLOOP]: getting online peers")
-        const onlinePeers = await peerManager.getOnlinePeers() // TODO // ! getOnlinePeers should use hello_peer for every peer so we are sure to have the latest online status and a synced peerlist
+        const onlinePeers = await PeerManager.getInstance().getOnlinePeers() // TODO // ! getOnlinePeers should use hello_peer for every peer so we are sure to have the latest online status and a synced peerlist
 
         // check if online peers have been online for 3 blocks
 

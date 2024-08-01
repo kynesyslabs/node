@@ -17,9 +17,21 @@ export default class log {
     static LOG_DEBUG_FILE = LOGS_DIR + "/debug.log"
     static LOG_WARNING_FILE = LOGS_DIR + "/warning.log"
     static LOG_CRITICAL_FILE = LOGS_DIR + "/critical.log"
+    static LOG_CUSTOM_PREFIX = LOGS_DIR + "/custom_"
 
     private static getTimestamp(): string {
         return new Date().toISOString()
+    }
+
+    static custom(logfile: string, message: string, logToTerminal: boolean = true, cleanFile: boolean = false) {
+        const logEntry = `[INFO] [${this.getTimestamp()}] ${message}\n`
+        if (logToTerminal) {
+            term.bold(logEntry.trim())
+        }
+        if (cleanFile) {
+            fs.writeFileSync(this.LOG_CUSTOM_PREFIX + logfile + ".log", "")
+        }
+        fs.appendFileSync(this.LOG_CUSTOM_PREFIX + logfile + ".log", logEntry)
     }
 
     static info(message: string, logToTerminal: boolean = true) {

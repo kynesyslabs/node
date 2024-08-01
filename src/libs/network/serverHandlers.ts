@@ -95,6 +95,8 @@ export default class ServerHandlers {
         if (!isConnected) {
             return { response: false, require_reply: false, extra: "Could not connect to peer" }
         }
+        // Add the peer as authenticated
+        peer.verification.status = true
         // TODO // ! Check somehow if the peer is already in the peerlist
         let isAddedToPeerlist = PeerManager.getInstance().addPeer(peer)
         if (!isAddedToPeerlist) {
