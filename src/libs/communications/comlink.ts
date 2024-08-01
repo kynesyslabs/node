@@ -10,7 +10,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import forge, { pki } from "node-forge"
-import { type } from "os"
 import { Socket } from "socket.io-client"
 import sharedState from "src/utilities/sharedState"
 
@@ -20,7 +19,7 @@ import getRemoteIP from "../network/routines/getRemoteIP"
 import Peer from "../peer/Peer"
 import Transmission from "./transmission"
 
-import type { Current, Properties } from "./types/comlink"
+import { Current, Properties } from "./types/comlink"
 export default class ComLink {
     private static instances: Map<string, ComLink> = new Map()
 
@@ -115,7 +114,11 @@ export default class ComLink {
             this.chain.current.currentMessage = message
             // Hashing the message for integrity
             this.chain.current.currentMessageHash = message.bundle.hash
+            // Hashing the current chain of messages
             await this.hashAndSignCurrent(privateKey)
+            console.log("[COMMUNICATIONS] Generated comlink:")
+            console.log(this)
+            console.log("[COMMUNICATIONS] About to send a Comlink with current hash: " + this.chain.comlinkCurrentHash)
             // Emitting the message
             let result = await this.broadcastToPeer(peer)
             console.log("[COMMUNICATIONS] Message sent")
@@ -188,13 +191,14 @@ export default class ComLink {
                 "comlink message hash mismatch: " + _derivedMessageHash,
             ]
         }
+        console.log("[COMLINK VALIDATION 2] Current message bundle hash matches comlink contained hash")
         // Check if current hash matches the current field
         console.log("[COMLINK VALIDATION 2] Stringify current...")
         let stringifiedCurrent = JSON.stringify(this.chain.current)
-        console.log("[COMLINK VALIDATION 2] Hasing current...")
+        console.log("[COMLINK VALIDATION 2] Hashing current stringified chain of messages...")
         let _derivedCurrentHash = Hashing.sha256(stringifiedCurrent)
         if (!(_derivedCurrentHash === this.chain.comlinkCurrentHash)) {
-            return [false, "current hash mismatch: " + _derivedCurrentHash]
+            return [false, "current hash mismatch:\nDerived: " + _derivedCurrentHash + "\nComlink: " + this.chain.comlinkCurrentHash]
         }
         // Check if the comlink signature matches the comlink sender
         console.log("[!] Extracting publicKey")
@@ -208,9 +212,14 @@ export default class ComLink {
         )
         if (!_signatureValidity)
             return [false, "invalid comlink current hash signature"]
+        console.log("[COMLINK VALIDATION] Signature validity: " + _signatureValidity)
         // Check if the message signature matches the sender too
         console.log("[!] Checking bundle.hash")
         //console.log(typeof(_currentMessage.bundle.hash))
+        // DEBUG LINES
+        console.log("[COMLINK VALIDATION] Bundle hash: " + _currentMessage.bundle.hash)
+        console.log("[COMLINK VALIDATION] Bundle signature: " + _currentMessage.bundle.signature)
+        console.log("[COMLINK VALIDATION] Public key: " + _publicKey)
         let _messageSignatureValidity = Cryptography.verify(
             _currentMessage.bundle.hash,
             _currentMessage.bundle.signature,

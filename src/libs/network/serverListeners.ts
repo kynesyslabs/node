@@ -103,7 +103,7 @@ export default class ServerListeners {
                 this.peer.connection.socket,
             )
             if (!_comlink_request) {
-                let error = "Error while parsing comlink request\n"
+                let error = "Error while parsing comlink request\nComlink: " + JSON.stringify(request)  
                 log.error(error)
                 return null// TODO Better error handling
             }
@@ -126,8 +126,17 @@ export default class ServerListeners {
     // Here, we manage the comlink and its content
     async manageComLink(request: any) {
         // Security and sanity checks
-        let { _comlink_request, content, id_ed25519, receiver } =
-            await this.preflightComLinkChecks(request)
+        let _comlink_request: ComLink
+        let content: BundleContent
+        let id_ed25519: forge.pki.KeyPair
+        let receiver: any
+        try {
+            ({ _comlink_request, content, id_ed25519, receiver } =
+                await this.preflightComLinkChecks(request))
+        } catch (e) {
+            log.error("Error while managing comlink: " + e)
+                return null
+        }
         //console.log(_comlink_request)
         // NOTE Now we have a valid ComLink and we can work with it
         console.log("[serverListeners] Received comlink content")
@@ -164,6 +173,7 @@ export default class ServerListeners {
         */
         // ? This is still unused (delete this line once it is used)
         if (content.type === "hello_peer") {
+            log.info("[Hello Peer Listener] Received hello peer request")
             ;({ response, require_reply, extra } = await ServerHandlers.handleHelloPeer(content))
             if (!response) {
                 if (!extra) {
@@ -174,6 +184,16 @@ export default class ServerListeners {
                 extra = "Error while handling Hello Peer request: " + extra
                 require_reply = false
             }
+            // Sending back the response
+            console.log("[Hello Peer Listener] Sending back comlink")
+            await demostdlib.reply(
+                _comlink_request,
+                response,
+                require_reply,
+                extra,
+            )
+            receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
+            return
         }
 
         // TODO Better to modularize this

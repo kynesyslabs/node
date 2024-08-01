@@ -72,10 +72,16 @@ export default class ServerHandlers {
     // ANCHOR BrowserRequest
 
     // SECTION Hello Peer
+    // ? REVIEW Should we move this to the PeerManager?
     static async handleHelloPeer(content: BundleContent): Promise<{ response: any, require_reply: boolean, extra: any }> {
         let connectionString = content.message as string // This is also the signed message to verify the peer
         let signature = content.data.signature as forge.pki.ed25519.BinaryBuffer // REVIEW is this the right type?
         let publicKey = content.data.publicKey as forge.pki.PublicKey
+        // Refusing to add ourselves
+        if (publicKey.toString("hex") === sharedState.getInstance().identity.ed25519.publicKey.toString("hex")) {
+            console.log("[Hello Peer Listener] Refusing to add ourselves, proceeding anyway")
+            return { response: true, require_reply: false, extra: "Cannot add ourselves: not blocking anyway" }
+        }
         // Let's verify the peer
         let verified = Cryptography.verify(connectionString, signature, publicKey)
         if (!verified) {
@@ -89,6 +95,7 @@ export default class ServerHandlers {
         if (!isConnected) {
             return { response: false, require_reply: false, extra: "Could not connect to peer" }
         }
+        // TODO // ! Check somehow if the peer is already in the peerlist
         let isAddedToPeerlist = PeerManager.getInstance().addPeer(peer)
         if (!isAddedToPeerlist) {
             return { response: false, require_reply: false, extra: "Could not add peer to peerlist" }

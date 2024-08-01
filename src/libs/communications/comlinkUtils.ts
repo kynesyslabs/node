@@ -18,6 +18,7 @@ import terminalkit from "terminal-kit"
 import { DefaultEventsMap } from "@socket.io/component-emitter"
 
 import ComLink from "./comlink"
+import log from "src/utilities/logger"
 
 const term = terminalkit.terminal
 
@@ -62,7 +63,8 @@ export default class ComLinkUtils {
                 _comlink_request.chain.current.currentMessage.bundle.content
                     .type
         } catch (e) {
-            term.red("[COMLINK VALIDATION ERROR 1] " + e + "\n")
+            log.error("[Comlink Validation Error 1] " + e)
+
             peerSocket.emit("comlink", {
                 status: "error",
                 message: e,
@@ -74,10 +76,10 @@ export default class ComLinkUtils {
             try {
                 valid = await _comlink_request.validateComlink()
             } catch (e) {
-                valid = [false, e.toString()]
+                valid = [false, "Exception during validateComlink" + e.toString()]
             }
             if (!valid[0]) {
-                term.red("[COMLINK VALIDATION ERROR 2] " + valid[1] + "\n")
+                log.error("[Comlink Validation Error 2] " + valid[1])
                 peerSocket.emit("comlink", {
                     status: "error",
                     message: valid[1],

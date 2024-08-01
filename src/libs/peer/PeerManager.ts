@@ -11,6 +11,22 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import Peer from "./Peer"
 import log from "src/utilities/logger"
+import ComLink from "../communications/comlink"
+import Transmission from "../communications/transmission"
+import Cryptography from "../crypto/cryptography"
+import Hashing from "../crypto/hashing"
+import sharedState from "src/utilities/sharedState"
+import forge from "node-forge"
+
+function ForgeToHex(forgeBuffer: any) {
+    console.log("[forge to string encoded]")
+    //console.log(forgeBuffer)
+    let rebuffer = Buffer.from(forgeBuffer)
+    forgeBuffer = rebuffer.toString("hex")
+    console.log("DECODED INTO:")
+    console.log("0x" + forgeBuffer)
+    return "0x" + forgeBuffer
+}
 
 
 export default class PeerManager {
@@ -49,11 +65,9 @@ export default class PeerManager {
         return this._getActors(true, true)
     }
 
-
     getOfflinePeers(): string[] {
         return this.offlinePeers
     }
-
 
     private _getActors(peers: boolean, connections: boolean): Peer[] {
         console.log("[PeerManager] Getting all peers...")
@@ -93,7 +107,6 @@ export default class PeerManager {
         return actorList
     }
 
-
     getPeer(identity: string): Peer {
         return this.peerList[identity]
     }
@@ -107,6 +120,8 @@ export default class PeerManager {
             peerInstance.connection.socket = _peer.connection.socket
             const onlinePeerStatus = await peerInstance.checkOnlineStatus()
             if (onlinePeerStatus) {
+                // Saying hello to the peer
+                await PeerManager.sayHelloToPeer(peerInstance) // ? does it work? Does it need a callback or a return value?
                 onlinePeers.push(peerInstance)
             }
         }
@@ -147,7 +162,9 @@ export default class PeerManager {
     }
 
     removeOfflinePeer(peerString: string) {
-        this.offlinePeers = this.offlinePeers.filter((peer) => peer !== peerString)
+        this.offlinePeers = this.offlinePeers.filter(
+            peer => peer !== peerString,
+        )
     }
 
     // REVIEW this should replace much of the client.ts and peerBootstrap.ts logic
@@ -171,7 +188,9 @@ export default class PeerManager {
         try {
             peer.connection.string = currentPeerAddress + ">" + currentPeerPort
         } catch (error) {
-            console.log("[PEERMANAGER] Error extracting peer from string: " + error)
+            console.log(
+                "[PEERMANAGER] Error extracting peer from string: " + error,
+            )
             log.critical("Error extracting peer from string: " + error)
             process.exit(1)
         }
@@ -179,4 +198,47 @@ export default class PeerManager {
         return peer
     }
 
+    // REVIEW This method should be tested and finalized
+    static async sayHelloToPeer(peer: Peer) {
+        // TODO test and finalize this method
+        log.info(
+            "[Hello Peer] Saying hello to peer " +
+                peer.identity.toString("hex"),
+        )
+        const our_id = sharedState.getInstance().identity.ed25519.publicKey
+        let connection_string = sharedState.getInstance().connectionString // ? Are we sure about this
+        let signed_connection_string = Cryptography.sign(
+            connection_string,
+            sharedState.getInstance().identity.ed25519.privateKey,
+        )
+        log.info("[Hello Peer] Signing connection string: " + connection_string)
+        log.info(
+            "[Hello Peer] Signed connection string: " +
+                ForgeToHex(signed_connection_string),
+        )
+        // Creating a hello transmission
+        const transmission = new Transmission(
+            sharedState.getInstance().identity.ed25519.privateKey,
+        )
+        transmission.initialize(
+            "hello_peer",
+            connection_string,
+            our_id,
+            peer.identity,
+            { signature: signed_connection_string, publicKey: our_id },
+            {},
+        )
+        await transmission.finalize()
+        log.info("[Hello Peer] Transmission     created")
+        log.info("[Hello Peer] Transmission: " + JSON.stringify(transmission))
+        // Sending the transmission
+        const comlink = new ComLink()
+        let hello_comlink_status = await comlink.broadcastMessageToPeer(
+            peer,
+            transmission,
+            sharedState.getInstance().identity.ed25519.privateKey,
+        ) // This should also hash and sign
+        log.info("[Hello Peer] Hello comlink status: " + hello_comlink_status)
+        // TODO Finish this after the above
+    }
 }

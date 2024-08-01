@@ -56,7 +56,11 @@ export default class Transmission {
     }
 
     // INFO Hash and sign a message
-    async finalize() {
+    async finalize(privateKey?: forge.pki.ed25519.BinaryBuffer) {
+        // Support for called private key
+        if (privateKey != null) {
+            this.privateKey = privateKey
+        }
         // Hash the content
         this.bundle.hash = Hashing.sha256(JSON.stringify(this.bundle.content)) // REVIEW is this ok?
         // Sign the hash if needed

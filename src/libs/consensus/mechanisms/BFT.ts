@@ -10,6 +10,7 @@ import { demostdlib } from "src/libs/utils"
 import deriveBlock from "../routines/deriveBlock"
 import { askPoC } from "../routines/proofOfConsensus"
 import { ProofOfRepresentation } from "./PoR"
+import log from "src/utilities/logger"
 
 export default class QBFT {
     constructor() {}
@@ -250,8 +251,11 @@ export default class QBFT {
         // Iterating over all the peers
         for (let i = 0; i < peerlist.length; i++) {
             let peer = peerlist[i]
-
-            const response = await new Promise(resolve => {
+            log.info(`[BFT] Voting on parameter ${parameter} for peer ${peer.identity.toString("hex")}`)
+            // ! remove the debug
+            var response = null
+            try {
+            response = await new Promise(resolve => {
                 peer.connection.socket.emit(
                     "voteRequest",
                     {
@@ -262,7 +266,11 @@ export default class QBFT {
                         resolve(response)
                     },
                 )
-            })
+                })
+            } catch (error) {
+                log.error(`[BFT] Error voting on parameter ${parameter} for peer ${peer.identity.toString("hex")}`+error)
+                response = null
+            }
 
             console.log("Voting will compare:\n")
             //console.log(response)

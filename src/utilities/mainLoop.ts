@@ -97,7 +97,7 @@ export default async function mainLoop() {
 
         // every block write online list
         console.log("[MAINLOOP]: getting online peers")
-        const onlinePeers = await peerManager.getOnlinePeers()
+        const onlinePeers = await peerManager.getOnlinePeers() // TODO // ! getOnlinePeers should use hello_peer for every peer so we are sure to have the latest online status and a synced peerlist
 
         // check if online peers have been online for 3 blocks
 
