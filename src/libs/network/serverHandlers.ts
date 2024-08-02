@@ -64,7 +64,9 @@ import { BlockContent } from "../../../../sdks/src/types/blockchain/blocks"
 import handleWeb2Request from "./routines/transactions/handleWeb2Request"
 import getPeerInfo from "./routines/nodecalls/getPeerInfo"
 import forge from "node-forge"
-import { PeerManager } from "docker/node_base/src/libs/peer"
+import PeerManager from "src/libs/peer/PeerManager"
+import log from "src/utilities/logger"
+import Client from "./client"
 
 let term = terminalkit.terminal
 
@@ -74,7 +76,13 @@ export default class ServerHandlers {
     // SECTION Hello Peer
     // ? REVIEW Should we move this to the PeerManager?
     static async handleHelloPeer(content: BundleContent): Promise<{ response: any, require_reply: boolean, extra: any }> {
-        let connectionString = content.message as string // This is also the signed message to verify the peer
+        // Prepare the response
+        let response = false
+        let require_reply = false
+        let extra = "not yet digested"
+
+        // Identify the peer // ? (is this even necessary?)
+        let peerString = content.message as string // This is also the signed message to verify the peer
         let signature = content.data.signature as forge.pki.ed25519.BinaryBuffer // REVIEW is this the right type?
         let publicKey = content.data.publicKey as forge.pki.PublicKey
         // Refusing to add ourselves
@@ -83,10 +91,11 @@ export default class ServerHandlers {
             return { response: true, require_reply: false, extra: "Cannot add ourselves: not blocking anyway" }
         }
         // Let's verify the peer
-        let verified = Cryptography.verify(connectionString, signature, publicKey)
+        let verified = Cryptography.verify(peerString, signature, publicKey)
         if (!verified) {
             return { response: false, require_reply: false, extra: "Invalid signature" }
-        }
+        } 
+        /*
         // Creating a Peer object
         let peer = new Peer()
         peer.identity = publicKey as forge.pki.ed25519.BinaryBuffer
@@ -94,11 +103,38 @@ export default class ServerHandlers {
         let isConnected = await peer.connect()
         if (!isConnected) {
             return { response: false, require_reply: false, extra: "Could not connect to peer" }
+        } */
+
+        // REVIEW This is an experimental hello peer management that uses the same mechanism as peerBootstrap
+            let peerObjectRaw = PeerManager.extractPeerFromString(peerString)
+        if (!peerObjectRaw) {
+            log.error("Error while extracting peer from string: " + peerString)
+            extra = "Error while extracting peer from string: " + peerString
+            return { response, require_reply, extra }
         }
+        // Destructuring the peer object once connected
+        let connectionResult = await Client.connectToPeerObject(peerObjectRaw)
+        if (!connectionResult[0]) {
+            log.error("Error while connecting to peer: " + peerString)
+            extra = "Error while connecting to peer: " + peerString
+            return { response, require_reply, extra }
+        }
+        let peerObject: Peer = connectionResult[1]
+        if (!peerObject) {
+            log.error("Error while connecting to peer: " + peerString)
+            extra = "Error while connecting to peer: " + peerString
+            return { response, require_reply, extra }
+        }
+
+        // If we are here, the peer is connected
+        response = true
+        require_reply = false
+        extra = "Peer connected"
+
         // Add the peer as authenticated
-        peer.verification.status = true
+        peerObject.verification.status = true
         // TODO // ! Check somehow if the peer is already in the peerlist
-        let isAddedToPeerlist = PeerManager.getInstance().addPeer(peer)
+        let isAddedToPeerlist = PeerManager.getInstance().addPeer(peerObject)
         if (!isAddedToPeerlist) {
             return { response: false, require_reply: false, extra: "Could not add peer to peerlist" }
         }

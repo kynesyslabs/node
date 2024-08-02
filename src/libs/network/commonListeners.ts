@@ -19,6 +19,8 @@ import { cryptography } from "../crypto"
 import getRemoteIP from "../network/routines/getRemoteIP"
 import { PeerManager } from "../peer"
 import { Peer } from "src/libs/peer"
+import ComLink from "src/libs/communications/comlink"
+import { Bundle } from "@kynesyslabs/demosdk/types"
 
 const term = terminalkit.terminal
 
@@ -115,8 +117,9 @@ export default class CommonListeners {
             if (!parsed_comlink) {
                 return
             }
-            let _comlink_request = parsed_comlink[0]
-            let content = parsed_comlink[1]
+            let _comlink_request: ComLink = parsed_comlink
+            // TODO // ! Add logging for the replies
+                    
             // Registering the response
             let connection_string: string = await getRemoteIP()
             connection_string =
