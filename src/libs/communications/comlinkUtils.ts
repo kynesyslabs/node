@@ -19,6 +19,7 @@ import { DefaultEventsMap } from "@socket.io/component-emitter"
 
 import ComLink from "./comlink"
 import log from "src/utilities/logger"
+import { demostdlib } from "../utils"
 
 const term = terminalkit.terminal
 
@@ -76,7 +77,10 @@ export default class ComLinkUtils {
             try {
                 valid = await _comlink_request.validateComlink()
             } catch (e) {
-                valid = [false, "Exception during validateComlink" + e.toString()]
+                valid = [
+                    false,
+                    "Exception during validateComlink" + e.toString(),
+                ]
             }
             if (!valid[0]) {
                 log.error("[Comlink Validation Error 2] " + valid[1])
@@ -132,5 +136,20 @@ export default class ComLinkUtils {
         }
         console.log("[COMLINK PARSING] Message parsed")
         return _comlink_request
+    }
+
+    // INFO reply to a comlink
+    static async replyToComlink(
+        comlink: ComLink,
+        receiver: Socket,
+        {
+            response,
+            require_reply,
+            extra,
+        }: { response: any; require_reply: boolean; extra: string },
+    ) {
+        await demostdlib.reply(comlink, response, require_reply, extra)
+        receiver.emit("comlink_reply", comlink)
+        // TODO add logging
     }
 }

@@ -21,6 +21,9 @@ import {
 } from "@kynesyslabs/demosdk/types"
 import Peer from "src/libs/peer/Peer"
 import { PeerManager } from "src/libs/peer"
+import Client from "./client"
+import { Socket } from "socket.io-client"
+import ComLinkUtils from "../communications/comlinkUtils"
 
 let term = terminalkit.terminal
 
@@ -89,11 +92,18 @@ export default class ServerListeners {
     }
 
     // This method is used to check the comlink before processing it
-    async preflightComLinkChecks(request: any): Promise<{ _comlink_request: ComLink, content: BundleContent, id_ed25519: forge.pki.KeyPair, receiver: any } > {
+    async preflightComLinkChecks(
+        request: any,
+    ): Promise<{
+        _comlink_request: ComLink
+        content: BundleContent
+        id_ed25519: forge.pki.KeyPair
+        receiver: any
+    }> {
         term.yellow("[SERVER] Received comlink\n")
         console.log(request)
         const id_ed25519 = sharedState.getInstance().identity.ed25519
-        const receiver = this.peer.connection.socket
+        const receiver: Socket = this.peer.connection.socket
         let _comlink_request: ComLink
         // TODO This can be put into securityModule for consistency
         try {
@@ -103,9 +113,11 @@ export default class ServerListeners {
                 this.peer.connection.socket,
             )
             if (!_comlink_request) {
-                let error = "Error while parsing comlink request\nComlink: " + JSON.stringify(request)  
+                let error =
+                    "Error while parsing comlink request\nComlink: " +
+                    JSON.stringify(request)
                 log.error(error)
-                return null// TODO Better error handling
+                return null // TODO Better error handling
             }
         } catch (e) {
             let error = "Error while parsing comlink request: " + e
@@ -129,13 +141,13 @@ export default class ServerListeners {
         let _comlink_request: ComLink
         let content: BundleContent
         let id_ed25519: forge.pki.KeyPair
-        let receiver: any
+        let receiver: Socket
         try {
-            ({ _comlink_request, content, id_ed25519, receiver } =
+            ;({ _comlink_request, content, id_ed25519, receiver } =
                 await this.preflightComLinkChecks(request))
         } catch (e) {
             log.error("Error while managing comlink: " + e)
-                return null
+            return null
         }
         //console.log(_comlink_request)
         // NOTE Now we have a valid ComLink and we can work with it
@@ -147,21 +159,19 @@ export default class ServerListeners {
         console.log("[serverListeners] content.extra: " + content.extra)
 
         if (content.type === "l2ps") {
-            ;({ response, require_reply, extra } = await ServerHandlers.handleL2PS(content))
+            ;({ response, require_reply, extra } =
+                await ServerHandlers.handleL2PS(content))
             if (!response) {
                 term.red.bold(
                     "[SERVER] Error while handling L2PS request, aborting",
                 )
             }
-            // Sending back the response
-            console.log("[SERVER] Sending back comlink")
-            await demostdlib.reply(
-                _comlink_request,
+            // Sending back the response // REVIEW Experimental
+            await ComLinkUtils.replyToComlink(_comlink_request, receiver, {
                 response,
                 require_reply,
                 extra,
-            )
-            receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
+            })
             return
         }
 
@@ -171,13 +181,23 @@ export default class ServerListeners {
             content.data.signature = signature of the connection_string
             content.data.publicKey = public key of the peer signing the connection_string
         */
-        // ? This is still unused (delete this line once it is used)
         if (content.type === "hello_peer") {
             log.info("[Hello Peer Listener] Received hello peer request")
-            ;({ response, require_reply, extra } = await ServerHandlers.handleHelloPeer(content))
+
+            // Preparing the responses
+            let response = false
+            let require_reply = false
+            let extra = "not yet digested"
+
+            // ? Do we need to do additional checks here? A comlink is validated anyway
+
+            // Connecting to the peer
+            ;({ response, require_reply, extra } =
+                await ServerHandlers.handleHelloPeer(content))
             if (!response) {
                 if (!extra) {
-                    extra = "Error while handling Hello Peer request: error not specified"
+                    extra =
+                        "Error while handling Hello Peer request: error not specified"
                 }
                 log.error("Error while handling Hello Peer request: " + extra)
                 response = false
@@ -186,16 +206,14 @@ export default class ServerListeners {
             }
             // Sending back the response
             console.log("[Hello Peer Listener] Sending back comlink")
-            await demostdlib.reply(
-                _comlink_request,
+            await ComLinkUtils.replyToComlink(_comlink_request, receiver, {
                 response,
                 require_reply,
                 extra,
-            )
-            receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
+            })
             return
         }
-
+        0
         // TODO Better to modularize this
         // REVIEW We use the 'extra' field to see if it is a confirmTx request (prior to execution)
         // or an broadcastTx request (to execute the transaction after gas cost is calculated).
@@ -248,11 +266,9 @@ export default class ServerListeners {
         //console.log("content.message.action: " + content.message.action)
 
         // ANCHOR Reply logic
-        // NOTE unless specified, we now send back the updated comlink as a response
-        await demostdlib.reply(_comlink_request, response, require_reply, extra)
 
         // TODO & REVIEW Call security module for send limiting messages
-        let secDisabled = false
+        let secDisabled = true
         if (!secDisabled) {
             let ts = new Date().getTime()
             let securityInterceptor: ISecurityReport =
@@ -280,13 +296,13 @@ export default class ServerListeners {
 
         // Sending back the response
         console.log("[SERVER] Sending back comlink")
-        //console.log(JSON.stringify(_comlink_request))
-        receiver.emit("comlink_reply", _comlink_request) // reply is managed in the common listeners
+        // NOTE unless specified, we now send back the updated comlink as a response
+        await ComLinkUtils.replyToComlink(_comlink_request, receiver, { response, require_reply, extra }) // reply is managed in the common listeners
     }
 
     // INFO Register or update a peer identity and connection string
     async authReplyListener() {
-        // REVIEW Auth reply listener should not add a client to the peerlist if is read only   
+        // REVIEW Auth reply listener should not add a client to the peerlist if is read only
         this.peer.connection.socket.on("auth_reply", async data => {
             let identity = await cryptography.load("./.demos_identity")
             term.yellow("[SERVER] Received auth reply")
@@ -295,8 +311,10 @@ export default class ServerListeners {
                 term.yellow("[SERVER] Received auth reply: verifying")
                 log.info("Received auth reply: verifying")
                 let original_message = data[0] as string
-                let original_signature = data[1] as forge.pki.ed25519.NativeBuffer
-                let original_identity = data[2] as forge.pki.ed25519.BinaryBuffer
+                let original_signature =
+                    data[1] as forge.pki.ed25519.NativeBuffer
+                let original_identity =
+                    data[2] as forge.pki.ed25519.BinaryBuffer
                 let _verification = await cryptography.verify(
                     original_message, // The message that our peer should have signed
                     original_signature, // The signature of the auth message as defined in commonListeners.ts
@@ -309,7 +327,8 @@ export default class ServerListeners {
                 }
                 // Getting the public IP of the peer so we can add it to the peerlist
                 let remote_ip = original_message.split(":")[0].trim()
-                let connection_string = remote_ip + ">53550>" + original_identity // ! Allow dynamic ports
+                let connection_string =
+                    remote_ip + ">53550>" + original_identity // ! Allow dynamic ports
                 // ? REVIEW build the Peer object and add it to the peerlist (connection string missing atm)
                 let new_peer: Peer = new Peer()
                 new_peer.connection.socket = this.peer.connection.socket
@@ -341,24 +360,27 @@ export default class ServerListeners {
     }
 
     voteRequestListener = async () => {
-        this.peer.connection.socket.on("voteRequest", async (request, callback) => {
-            term.yellow("[SERVER] Received vote request\n")
-            //console.log(request)
-            let voteResponse: string
-            let res: string
+        this.peer.connection.socket.on(
+            "voteRequest",
+            async (request, callback) => {
+                term.yellow("[SERVER] Received vote request\n")
+                //console.log(request)
+                let voteResponse: string
+                let res: string
 
-            console.log("request")
-            //console.log(request)
+                console.log("request")
+                //console.log(request)
 
-            switch (request.parameter) {
-                case "forgedProposedHash":
-                    res = await ServerHandlers.handleVoteRequest(
-                        request.timestamp,
-                    )
-                    voteResponse = res
-            }
+                switch (request.parameter) {
+                    case "forgedProposedHash":
+                        res = await ServerHandlers.handleVoteRequest(
+                            request.timestamp,
+                        )
+                        voteResponse = res
+                }
 
-            callback(voteResponse)
-        })
+                callback(voteResponse)
+            },
+        )
     }
 }
