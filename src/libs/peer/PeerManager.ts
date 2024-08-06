@@ -17,6 +17,9 @@ import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import sharedState from "src/utilities/sharedState"
 import forge from "node-forge"
+import { comlinkUtils } from "../communications"
+import ResponseRegistry from "../communications/responseRegistry"
+import { Response } from "../communications/types/responseregistry"
 
 function ForgeToHex(forgeBuffer: any) {
     console.log("[forge to string encoded]")
@@ -125,12 +128,18 @@ export default class PeerManager {
     }
 
     async getOnlinePeers(): Promise<Peer[]> {
-        const onlinePeers: Peer[] = []
+        //const onlinePeers: Peer[] = []
         for await (const _peer of Object.values(this.peerList)) {
             const peerInstance = new Peer()
             peerInstance.identity = _peer.identity
             peerInstance.connection.string = _peer.connection.string
             peerInstance.connection.socket = _peer.connection.socket
+            console.log("[PEERMANAGER] Checking online status of peer " + peerInstance.identity.toString("hex"))
+            await PeerManager.sayHelloToPeer(peerInstance)
+        }
+        // Returning the list of online peers from the peerlist
+        return this.getPeers() // REVIEW is this working?
+            /* // ! TODO Rewrite this to use hello_peer routines
             const onlinePeerStatus = await peerInstance.checkOnlineStatus()
             if (onlinePeerStatus) {
                 // Saying hello to the peer if it is not ourself
@@ -140,7 +149,7 @@ export default class PeerManager {
                 onlinePeers.push(peerInstance) // FIXME We should keep track of duplicates
             }
         }
-        return onlinePeers
+        return onlinePeers */
     }
 
     addPeer(peer: Peer) {
@@ -150,17 +159,20 @@ export default class PeerManager {
             console.log(peer)
             return false
         }
-        // ! TODO check for duplicates
+        // REVIEW check for duplicates
         const identity = peer.identity.toString("hex")
+        let action = "added"
+        if (this.peerList[identity]) {
+            console.log("[PEERMANAGER] Peer already exists: updating it")
+            action = "updated"
+        }
         this.peerList[identity] = peer
-        console.log("[PEERMANAGER] Peer added")
+        console.log("[PEERMANAGER] Peer " + action)
         console.log("Identity: " + peer.identity.toString("hex"))
         console.log("Connection string: " + peer.connection.string)
         if (!peer.connection.string) {
             console.log("[WARN] No connection string detected")
         }
-        // FIXME Run the routine in peers to get it
-        // REVIEW Sync?
         return true
     }
 
@@ -245,15 +257,45 @@ export default class PeerManager {
         )
         await transmission.finalize()
         log.info("[Hello Peer] Transmission created")
-        log.info("[Hello Peer] Transmission: " + JSON.stringify(transmission))
-        // Sending the transmission
+        log.info("[Hello Peer] Sending our string as: " + connection_string)
+        // Creating a comlink and setting it to require a reply
         const comlink = new ComLink()
+        comlink.properties.require_reply = true
+        // Awaiting the response asynchronously in the response registry
+        ResponseRegistry.getInstance().requestResponse(comlink)
+        console.log("[Hello Peer] Response registry requested")
+        // Sending the transmission to the peer
         let hello_comlink_status = await comlink.broadcastMessageToPeer(
             peer,
             transmission,
             sharedState.getInstance().identity.ed25519.privateKey,
-        ) // This should also hash and sign
+        )
         log.info("[Hello Peer] Hello comlink status: " + hello_comlink_status)
-        // TODO Finish this after the above
+        // NOTE The below would wait for the response asynchronously, so to not block the main thread
+        // we use a callback that will be executed by the ResponseRegistry when the response is received
+        ResponseRegistry.getInstance().checkResponseAsync(comlink.muid, (response) => {
+            PeerManager.helloPeerCallback(response, peer)
+        })
+        log.info("[Hello Peer] Response check started")
+    }
+
+    // Callback for the hello peer
+    static helloPeerCallback(response: Response, peer: Peer) {
+        log.info("[Hello Peer] Response received from peer: " + response.identity.toString("hex"))
+        //console.log(response) // ? Delete this if not needed
+        // TODO Test and Finish this
+        // REVIEW is the message the response itself?
+        log.info("[Hello Peer] Response message: " + response.message)
+        // Based on the response, we can decide what to do
+        if (response.message) {
+            log.info("[Hello Peer] Peer is online, replied and recognized us. Adding to peer list")
+            //console.log(peer)
+            PeerManager.getInstance().addPeer(peer)
+        } else {
+            log.info("[Hello Peer] Failed to connect to peer: " + response.identity + ". Adding to offline list")
+            // Add the peer to the offline list
+            PeerManager.getInstance().addOfflinePeer(peer.connection.string)
+        }
+        //process.exit(0)
     }
 }

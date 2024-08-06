@@ -37,7 +37,7 @@ export default class log {
     static info(message: string, logToTerminal: boolean = true) {
         const logEntry = `[INFO] [${this.getTimestamp()}] ${message}\n`
         if (logToTerminal) {
-            term.bold(logEntry.trim())
+            term.bold(logEntry.trim() + "\n")
         }
         fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
     }

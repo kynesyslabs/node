@@ -75,6 +75,7 @@ export default async function mainLoop() {
 // ANCHOR Unified peer routine
 async function peerRoutine(): Promise<any> {
     // Logging the current peerlist
+    log.info("[PEERROUTINE] Logging peerlist")
     PeerManager.getInstance().logPeerList()
 
     // REVIEW Re check offline peers asynchronously
@@ -82,7 +83,7 @@ async function peerRoutine(): Promise<any> {
 
     // every block write online list
     console.log("[MAINLOOP]: getting online peers")
-    const onlinePeers = await PeerManager.getInstance().getOnlinePeers() // REVIEW getOnlinePeers should use hello_peer for every peer so we are sure to have the latest online status and a synced peerlist
+    const onlinePeers = await PeerManager.getInstance().getOnlinePeers()
 
     // check if online peers have been online for 3 blocks
 
@@ -93,7 +94,7 @@ async function peerRoutine(): Promise<any> {
 
     console.log("[MAINLOOP]: getting online peers for last three blocks")
     const peersOnlineForLastThreeBlocks =
-        await Chain.getOnlinePeersForLastThreeBlocks()
+        await Chain.getOnlinePeersForLastThreeBlocks() // ! REVIEW if this works with hello_peer
 
     if (peersOnlineForLastThreeBlocks.length > 0) {
         // We found peers that have been online for 3 blocks. Use them in the consensus loop

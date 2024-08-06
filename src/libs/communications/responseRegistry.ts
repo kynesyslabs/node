@@ -19,6 +19,7 @@ import * as Security from "../network/securityModule"
 import ComLink from "./comlink"
 import Transmission from "./transmission"
 import { Response, ResponseRegistryElement } from "./types/responseregistry"
+import log from "src/utilities/logger"
 
 const term = terminalkit.terminal
 
@@ -298,9 +299,9 @@ export default class ResponseRegistry {
     }
 
     // INFO Check with the muid if a response has been received and return a promise
-    async checkResponse(muid: string): Promise<[boolean, Response]> {
+    async checkResponse(muid: string, max_timeout: number = 2000): Promise<[boolean, Response]> {
         let timeout = 0
-        console.log("Logging MUID: " + muid)
+        console.log("[ResponseRegistry - checkResponse] Checking response for muid: " + muid)
         term.yellow.bold.bgBlue(
             "Response Registry length: " + Object.keys(this.list).length + "\n",
         )
@@ -342,7 +343,8 @@ export default class ResponseRegistry {
         while (!this.list[muid]?.response?.message) {
             await sleep(100)
             timeout += 100
-            if (timeout > 2000) {
+            if (timeout > max_timeout) {
+                log.info("[ResponseRegistry] Response check timed out for muid: " + muid)
                 return [false, this.list[muid]?.response]
             }
         }
@@ -353,5 +355,20 @@ export default class ResponseRegistry {
                 muid,
         )
         return [true, this.list[muid].response]
+    }
+
+    // The below method is used to avoid blocking while waiting for a response
+    async checkResponseAsync(muid: string, callback: (response: Response) => void) {
+        log.info("[ResponseRegistry] Checking response for muid: " + muid) 
+        // Call the checkResponse method with a timeout of 5000 milliseconds and asynchronously
+        // ! FIXME Why this timeout?
+        this.checkResponse(muid, 5000).then((response) => { 
+            console.log("[ResponseRegistry] Response received with status: " + response[0])
+            if (response[0]) {
+                callback(response[1])
+            } else {
+                log.info("[ResponseRegistry] Response check failed for muid: " + muid)
+            }
+        })
     }
 }

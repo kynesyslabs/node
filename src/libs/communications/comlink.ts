@@ -116,8 +116,8 @@ export default class ComLink {
             this.chain.current.currentMessageHash = message.bundle.hash
             // Hashing the current chain of messages
             await this.hashAndSignCurrent(privateKey)
-            console.log("[COMMUNICATIONS] Generated comlink:")
-            console.log(this)
+            console.log("[COMMUNICATIONS] Generated comlink with muid: " + this.muid)
+            //console.log(this)
             console.log("[COMMUNICATIONS] About to send a Comlink with current hash: " + this.chain.comlinkCurrentHash)
             // Emitting the message
             let result = await this.broadcastToPeer(peer)
@@ -125,8 +125,8 @@ export default class ComLink {
             //console.log(result)
             return result
         }
-        console.log("[COMMUNICATIONS] Invalid peer")
-        return [false, "Invalid peer"]
+        console.log("[COMMUNICATIONS] Invalid peer: no socket")
+        return [false, "Invalid peer: no socket"]
     }
 
     // INFO Prepare a reply to the last message in the chain
@@ -174,8 +174,8 @@ export default class ComLink {
 
     // INFO Generic comlink validation function
     async validateComlink() {
-        var _currentMessage = this.chain.current.currentMessage
-        console.log(_currentMessage)
+        var _currentMessage = this.chain.current.currentMessage 
+        //console.log(_currentMessage)
         console.log("[COMLINK VALIDATION 2] Stringifying...")
         // Check if the current message hash matches the message
         let stringifiedMessage = JSON.stringify(_currentMessage.bundle.content)
@@ -218,8 +218,8 @@ export default class ComLink {
         //console.log(typeof(_currentMessage.bundle.hash))
         // DEBUG LINES
         console.log("[COMLINK VALIDATION] Bundle hash: " + _currentMessage.bundle.hash)
-        console.log("[COMLINK VALIDATION] Bundle signature: " + _currentMessage.bundle.signature)
-        console.log("[COMLINK VALIDATION] Public key: " + _publicKey)
+        console.log("[COMLINK VALIDATION] Bundle signature: " + _currentMessage.bundle.signature.toString("hex"))
+        console.log("[COMLINK VALIDATION] Public key: " + _publicKey.toString("hex"))
         let _messageSignatureValidity = Cryptography.verify(
             _currentMessage.bundle.hash,
             _currentMessage.bundle.signature,

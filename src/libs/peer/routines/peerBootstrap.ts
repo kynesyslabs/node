@@ -19,6 +19,12 @@ import log from "src/utilities/logger"
 
 const peerManager = PeerManager.getInstance()
 
+// Proxy function to call peerBootstrap in a nicer way
+export async function peerlistCheck(local_list: string[]): Promise<Peer[]> {
+    return await peerBootstrap(local_list)
+}
+
+// ANCHOR Main function
 export default async function peerBootstrap(
     local_list: string[],
 ): Promise<Peer[]> {
@@ -26,6 +32,7 @@ export default async function peerBootstrap(
     // Validity check
     for (let i = 0; i < local_list.length; i++) {
         console.log("[PEER BOOTSTRAP] Checking peer " + local_list[i])
+        // ANCHOR Extract peer info from the string
         let _currentPeerURL = local_list[i] // The url of the peer
         // If there is a : in the url, we assume it's a address + port
         let currentPeerAddress: string
@@ -46,11 +53,8 @@ export default async function peerBootstrap(
                 currentPeerPort +
                 ":" +
                 currentPublicKey,
-        )
-        // REVIEW Connection test and add to valid_peers
-        // Trying to connect and retrieve the socket for the given peer using Peer class
-        let _currentTestingPeer: Peer = PeerManager.extractPeerFromString(_currentPeerURL)
-        // TODO See PeerManager.extractPeerFromString and Client.connectToPeer comments
+        ) 
+        // ANCHOR Connection test and hello_peer routine
         let _currentPeerObject = await Client.connectToPeer(
             currentPeerAddress,
             currentPeerPort,
@@ -88,10 +92,11 @@ export default async function peerBootstrap(
             log.info("[BOOTSTRAP] OK: Valid peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
 
             console.log("[BOOTSTRAP] _currentPeerObject", _currentPeerObject)
-
-            /*if (containsPeer(_currentPeerObject, peerlist)) { // FIXME Disabled as was not working. Should be fixed
-				term.yellow("[BOOTSTRAP] WARNING: Duplicate peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
-			} else */
+            // This should automatically add the peer to the peer list or the offline list
+            await PeerManager.sayHelloToPeer(_currentPeerObject)
+            
+            /* ! If the above works, we can remove the following code
+            
             console.warn("[PEERBOOTSTRAP] Adding peer to peerlist")
             //console.warn(_currentPeerObject)
             if (_currentPeerObject.connection.socket.connected) {
@@ -125,13 +130,15 @@ export default async function peerBootstrap(
             )
             log.info("[BOOTSTRAP] ERROR: Cannot connect to peer: " + currentPeerAddress + ":" + currentPeerPort + " (will retry) \n")
             // Adding the peer string to the list of offline peers so it can be tried later
-            PeerManager.getInstance().addOfflinePeer(_currentPeerURL)
-        }
+            PeerManager.getInstance().addOfflinePeer(_currentPeerURL) */
+        } 
     }
     // Dying if there are no valid peers
     if (peerManager.getPeers().length == 0) {
         // Exit if there are no valid peers
         console.log("No valid peers found, listening for connections...")
+    } else {
+        console.log("Valid peers found: " + peerManager.getPeers().length)
     }
     return peerManager.getPeers()
 }

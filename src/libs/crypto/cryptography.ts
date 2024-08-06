@@ -181,10 +181,9 @@ export default class Cryptography {
         }
 
         console.log("[*] Verifying the signature of: " + signed + "\n")
-        console.log("[*] Using the signature: ")
-        console.log(signature)
-        console.log("[*] And the public key: ")
-        console.log(publicKey)
+        console.log("[*] Using the signature: " + signature.toString("hex"))
+        console.log("[*] And the public key: " + publicKey.toString("hex"))
+        //console.log(publicKey)
         return forge.pki.ed25519.verify({
             message: signed,
             encoding: "utf8",

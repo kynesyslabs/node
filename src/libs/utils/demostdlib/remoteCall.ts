@@ -37,8 +37,8 @@ export async function remoteCall(
     await _askMessage.finalize()
     console.log("[SYNC] Finalized the message")
     // Putting the message into a new comlink
-    console.log("[SYNC] Putting the message into the comlink using socket: ")
-    console.log(peer.connection.socket)
+    console.log("[SYNC] Putting the message into the comlink using socket: " + peer.connection.socket.id)
+    //console.log(peer.connection.socket)
     console.log(
         "[SYNC] Asking " + peer.connection.socket.id + " for " + type + "\n" + message,
     )

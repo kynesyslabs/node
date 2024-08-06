@@ -30,10 +30,8 @@ export default async function manageMessages(
 
             break
         case "consensus":
-            console.log("[SERVER LISTENER HANDLER]: received consensus request")
-            console.log(
-                original_comlink.chain.current.currentMessage.bundle.content
-                    .sender,
+            console.log("[SERVER LISTENER HANDLER]: received consensus request from: " + 
+                original_comlink.chain.current.currentMessage.bundle.content.sender.toString("hex"),
             )
             ;({ extra, require_reply, response } =
                 await ServerHandlers.handleConsensusRequest(

@@ -100,8 +100,8 @@ export default class ServerListeners {
         id_ed25519: forge.pki.KeyPair
         receiver: any
     }> {
-        term.yellow("[SERVER] Received comlink\n")
-        console.log(request)
+        term.yellow("[SERVER] Received comlink: " + request.muid + "\n")
+        //console.log(request)
         const id_ed25519 = sharedState.getInstance().identity.ed25519
         const receiver: Socket = this.peer.connection.socket
         let _comlink_request: ComLink
@@ -199,6 +199,7 @@ export default class ServerListeners {
                     extra =
                         "Error while handling Hello Peer request: error not specified"
                 }
+                // ! Why this happens with two peers?
                 log.error("Error while handling Hello Peer request: " + extra)
                 response = false
                 extra = "Error while handling Hello Peer request: " + extra

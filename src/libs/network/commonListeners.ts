@@ -127,12 +127,15 @@ export default class CommonListeners {
                 connection_string +
                 ":" +
                 sharedState.getInstance().serverPort
+            console.log("[Comlink Reply Listener] Registering response for muid: " + request.muid)
+            //console.log(request.chain.current.currentMessage)
             ResponseRegistry.getInstance().registerResponse(
                 request.chain.current.currentMessage,
                 request.muid,
                 this.peer.connection.socket,
                 connection_string,
             )
+            console.log("[Comlink Reply Listener] Response registered for muid: " + request.muid)
         })
     }
 

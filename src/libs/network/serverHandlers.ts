@@ -81,6 +81,8 @@ export default class ServerHandlers {
         let require_reply = false
         let extra = "not yet digested"
 
+        console.log("[Handle Hello Peer] Handling hello peer...")
+
         // Identify the peer // ? (is this even necessary?)
         let peerString = content.message as string // This is also the signed message to verify the peer
         let signature = content.data.signature as forge.pki.ed25519.BinaryBuffer // REVIEW is this the right type?
@@ -91,6 +93,7 @@ export default class ServerHandlers {
             return { response: true, require_reply: false, extra: "Cannot add ourselves: not blocking anyway" }
         }
         // Let's verify the peer
+        console.log("[Hello Peer Listener] Verifying peer...")  
         let verified = Cryptography.verify(peerString, signature, publicKey)
         if (!verified) {
             return { response: false, require_reply: false, extra: "Invalid signature" }
@@ -441,8 +444,7 @@ export default class ServerHandlers {
         let response: any
 
         console.log("[SERVER] Received consensus request")
-        console.log("[SERVER] Peer identity information received")
-        console.log(senderIdentity)
+        console.log("[SERVER] Peer identity information received: " + senderIdentity.toString("hex"))
         if (!sharedState.getInstance().consensusMode) {
             return {
                 extra,
