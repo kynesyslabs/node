@@ -175,8 +175,9 @@ async function main() {
     sharedState.getInstance().connectionString = ourselves
     log.info("Our connection string is: " + ourselves)
     // And saves the public key file
-    fs.writeFileSync("publickey", id.ed25519.publicKey.toString("hex") + "\n")
-    log.info("Our public key is: " + id.ed25519.publicKey.toString("hex"))
+    const publicKeyHex = id.ed25519.publicKey.toString("hex")
+    fs.writeFileSync("publickey_" + publicKeyHex, publicKeyHex + "\n")
+    log.info("Our public key is: " + publicKeyHex)
 
     try {
         await sharedState.getInstance().identity.getPublicIP()

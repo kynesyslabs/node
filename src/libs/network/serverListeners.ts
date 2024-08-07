@@ -199,7 +199,7 @@ export default class ServerListeners {
                     extra =
                         "Error while handling Hello Peer request: error not specified"
                 }
-                // ! Why this happens with two peers?
+                // ! Why this happens with two peers, only on the first one?
                 log.error("Error while handling Hello Peer request: " + extra)
                 response = false
                 extra = "Error while handling Hello Peer request: " + extra
