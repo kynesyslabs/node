@@ -151,7 +151,7 @@ export class Web2APIClass {
             )
             // TODO Specify this as a parameter that users can set
             this.request.raw.minAttestations = 10
-            this.request.raw.stage.hopNumber = 0
+            this.request.raw.stage.hop_number = 0
         } else {
             this.request = payload
         }
@@ -230,7 +230,7 @@ export class Web2APIClass {
         // Now we can return the class result as the request is processed on our side
         term.yellow("[Web2Parser] Digested:\n")
         console.log(this.request)
-        this.request.raw.stage.hopNumber += 1 // REVIEW If this is ok
+        this.request.raw.stage.hop_number += 1 // REVIEW If this is ok
         return this.request
     }
 

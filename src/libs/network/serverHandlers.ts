@@ -75,7 +75,7 @@ export default class ServerHandlers {
 
     // SECTION Hello Peer
     // ? REVIEW Should we move this to the PeerManager?
-    static async handleHelloPeer(content: BundleContent): Promise<{ response: any, require_reply: boolean, extra: any }> {
+        static async handleHelloPeer(content: BundleContent): Promise<{ response: any, require_reply: boolean, extra: any }> {
         // Prepare the response
         let response = false
         let require_reply = false
@@ -136,11 +136,11 @@ export default class ServerHandlers {
 
         // Add the peer as authenticated
         peerObject.verification.status = true
-        // TODO // ! Check somehow if the peer is already in the peerlist
         let isAddedToPeerlist = PeerManager.getInstance().addPeer(peerObject)
         if (!isAddedToPeerlist) {
             return { response: false, require_reply: false, extra: "Could not add peer to peerlist" }
         }
+        // ! Should we make so that hello_peer replaces auth_ask? If yes, it should also return our own authentication data
         return { response: true, require_reply: false, extra: null }
     }
 

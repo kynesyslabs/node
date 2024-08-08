@@ -24,7 +24,10 @@ export default async function deriveBlock(
     // We can infer the block number from the last block
     let lastBlockNumber = await Chain.getLastBlockNumber()
     derivedBlock.number = lastBlockNumber + 1
-    let proposer = Hashing.sha256(JSON.stringify(await shard.getPeers()))
+    // Compiling and hashing the proposer's peers
+    let proposersPeers = await shard.getPeers()
+    let hashableProposers = proposersPeers.map(peer => peer.connection.string)
+    let proposer = Hashing.sha256(JSON.stringify(hashableProposers))
     /*sharedState
         .getInstance()
         .identity.ed25519.publicKey.toString("hex") */

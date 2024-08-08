@@ -20,7 +20,7 @@ import { MoreThan } from "typeorm"
 
 import {
     AddressInfo, Operation, StatusNative as StatusNativeType,
-    StatusProperties as StatusPropertiesType, TransactionContent,
+    StatusProperties as StatusPropertiesType, StringifiedPayload, TransactionContent,
 } from "@kynesyslabs/demosdk/types"
 
 import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
@@ -29,6 +29,7 @@ import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
 import Block from "./block"
 import manageNative from "./routines/gls_routines/manageNative"
 import Transaction from "./transaction"
+import { Peer } from "../peer"
 
 
 export default class Chain {
@@ -214,8 +215,9 @@ export default class Chain {
         return lastBlock
     }
 
+    // ! FIXME Rewrite this to return a peer list
     static async getOnlinePeersForLastThreeBlocks(): Promise<
-        [string, string][]
+        Peer[]
     > {
         const lastBlockNumber = await this.getLastBlockNumber()
 
@@ -239,7 +241,7 @@ export default class Chain {
                     )
 
                     // Filter NODE_ONLINE transactions and extract their data
-                    const onlinePeersInBlock = transactions
+                    const onlinePeersInBlockTransactions = transactions
                         .filter(
                             transaction =>
                                 transaction?.content.type === "NODE_ONLINE",
@@ -249,7 +251,15 @@ export default class Chain {
                                 (transaction?.content as TransactionContent)
                                     .data,
                         )
-
+                    // Extract the peer list from the transactions
+                    let onlinePeersInBlock: Peer[] = []
+                    for (let i = 0; i < onlinePeersInBlockTransactions.length; i++) {
+                        const onlineTxRaw = onlinePeersInBlockTransactions[i] as StringifiedPayload
+                        const onlineTx = JSON.parse(onlineTxRaw[0])
+                        // ? This typization is totally random for now
+                        const onlinePeer = onlineTx.data as Peer
+                        onlinePeersInBlock.push(onlinePeer)
+                    }
                     return onlinePeersInBlock
                 }),
             )
@@ -262,7 +272,7 @@ export default class Chain {
                 processedBlocks[0] || [],
             )
 
-            return commonPeers as [string, string][]
+            return commonPeers
         } catch (e) {
             return []
         }

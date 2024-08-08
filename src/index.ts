@@ -205,9 +205,10 @@ async function main() {
     term.yellow("[BOOTSTRAP] 🌐 Bootstrapping peers...\n")
     console.log(PEER_LIST)
     const peerList = await peerBootstrap(PEER_LIST)
-    for (const peer of peerList) {
+    // ? Remove the following code if it's not needed: peerManager.addPeer(peer) is called within peerBootstrap (hello_peer routines)
+    /*for (const peer of peerList) {
         peerManager.addPeer(peer)
-    }
+    }*/
 
     term.green(
         "[BOOTSTRAP] 🌐 Peers loaded (" + peerManager.getPeers().length + ")\n",

@@ -42,7 +42,7 @@ export default class RepresentativeShard {
     }
 
     // INFO Generating the shard if needed
-    private async generateShard(peerList): Promise<ProofOfRepresentation> {
+    private async generateShard(peerList: Peer[]): Promise<ProofOfRepresentation> {
         let shard = new ProofOfRepresentation()
         await shard.getSeed(undefined, peerList)
         shard.selectRepresentativeShard()

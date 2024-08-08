@@ -5,6 +5,7 @@ import Hashing from "src/libs/crypto/hashing"
 import { Peer } from "src/libs/peer"
 import required from "src/utilities/required"
 import { IValidator } from "./types/IValidator"
+import log from "src/utilities/logger"
 
 export class ProofOfRepresentation {
     private common_seed: string = null
@@ -17,9 +18,11 @@ export class ProofOfRepresentation {
     constructor() { }
 
     // INFO Creating the immutable common seed for this specific proof of representation session
-    private async createSeed(on_block: number, onlinePeers): Promise<string> {
+    private async createSeed(on_block: number, onlinePeers: Peer[]): Promise<string> {
         // this.peers = await GLS.getGLSValidatorsAtBlock() // REVIEW Getting all the possible peers
         this.peers = onlinePeers
+        // Define hashable peers
+        let hashablePeers = onlinePeers.map(peer => peer.connection.string)
         console.log(this.peers)
         console.log("this.peers")
         if (this.immutable) {
@@ -30,7 +33,7 @@ export class ProofOfRepresentation {
         let lastBlockHash = await Chain.getLastBlockHash()
         let nextBlockNumber = on_block + 1
         let hashedStakes = await GLS.getGLSHashedStakes()
-        let hashedPeers = Hashing.sha256(JSON.stringify(this.peers))
+        let hashedPeers = Hashing.sha256(JSON.stringify(hashablePeers))
         // Combining the two immutable factors to improve unpredictability towards malicious validators
         let combined = lastBlockHash
             .concat(hashedStakes)
@@ -50,7 +53,7 @@ export class ProofOfRepresentation {
     }
 
     // INFO Getting out the current seed
-    async getSeed(block_n: number = null, onlinePeers): Promise<string> {
+    async getSeed(block_n: number = null, onlinePeers: Peer[]): Promise<string> {
         if (!block_n) {
             block_n = Number(await Chain.getLastBlockNumber())
         } // REVIEW Fix sanity check here ^ to catch NaN errors
@@ -95,8 +98,9 @@ export class ProofOfRepresentation {
             console.log(this.peers.length, integerRandom, selectedPeer)
             // Assigning the validator to the list
             console.log(selectedPeer)
+            log.info("[PoR] Selected peer: " + selectedPeer.connection.string)
             let validator = {
-                connectionURL: selectedPeer.connectionString,
+                connectionURL: selectedPeer.connection.string,
                 publicKey_string: selectedPeer.identity.toString("hex"), // REVIEW Is this correct?
                 publicKey: selectedPeer.identity,
             }

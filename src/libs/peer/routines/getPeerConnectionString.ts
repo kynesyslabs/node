@@ -52,7 +52,7 @@ export default async function getPeerConnectionString(
     if (response[0]) {
         console.log("[PEER CONNECTION] Received response")
         //console.log(response[1])
-        peer.connectionString = response[1].message
+        peer.connection.string = response[1].message
     } else {
         console.log("[PEER CONNECTION] No response received")
     }

@@ -56,7 +56,7 @@ export default async function mainLoop() {
         }
 
         // Execute the peer routine before the consensus loop
-        let currentlyOnlinePeers = await peerRoutine()
+        let currentlyOnlinePeers: Peer[] = await peerRoutine()
         // we now have a list of online peers that can be used for consensus
 
         // NOTE We need both the consensus time and the sync status to be true, to avoid
@@ -73,7 +73,7 @@ export default async function mainLoop() {
 }
 
 // ANCHOR Unified peer routine
-async function peerRoutine(): Promise<any> {
+async function peerRoutine(): Promise<Peer[]> {
     // Logging the current peerlist
     log.info("[PEERROUTINE] Logging peerlist")
     PeerManager.getInstance().logPeerList()
@@ -90,7 +90,7 @@ async function peerRoutine(): Promise<any> {
     // if its the first block ever or we are doing a regenesis, we might want to skip this check, but we still need a list of reliable nodes.
     // In the "3 block online" the history of online peers is validated by the blockchain AND by the consensus so it can be relied on.
 
-    let currentlyOnlinePeers: any // ! typize
+    let currentlyOnlinePeers: Peer[] // ! typize
 
     console.log("[MAINLOOP]: getting online peers for last three blocks")
     const peersOnlineForLastThreeBlocks =
@@ -103,12 +103,7 @@ async function peerRoutine(): Promise<any> {
         // We didn't find peers that have been online for 3 blocks. Use the online peers list as it is
         // In this case we assume the node is isolated, starting up or that other nodes are not online or still connencting to the network
         console.log("using online peers list as it is")
-        currentlyOnlinePeers = onlinePeers.map(peer => {
-            return {
-                identity: peer.identity,
-                connectionString: peer.connection.string,
-            }
-        })
+        currentlyOnlinePeers = onlinePeers  
     }
 
     console.log("Family:")
@@ -165,7 +160,7 @@ async function sendNodeOnlineTx() {
 }
 
 // ANCHOR Consensus routine
-async function consensusRoutine(currentlyOnlinePeers: any) {
+async function consensusRoutine(currentlyOnlinePeers: Peer[]) {
     console.log("[MAIN LOOP] Consensus time reached")
     sharedState.getInstance().mainLoopPaused = true // Pause the main loop
     hasSentNodeOnlineTx = false // Reset it for the next cycle.
