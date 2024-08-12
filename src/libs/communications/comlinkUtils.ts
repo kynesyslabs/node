@@ -21,13 +21,14 @@ import ComLink from "./comlink"
 import log from "src/utilities/logger"
 import { demostdlib } from "../utils"
 
+import { RPCResponse } from "../network/server_rpc"
+
 const term = terminalkit.terminal
 
 export default class ComLinkUtils {
     // INFO common comlink digestor
     static async parseComlink(
         request: ComLink,
-        peerSocket: Socket<DefaultEventsMap, DefaultEventsMap>,
     ): Promise<ComLink> {
         // We need to check if the message request is valid (is a ComLink object)
         term.yellow("[COMLINKUTILS] Received comlink\n")
@@ -45,10 +46,7 @@ export default class ComLinkUtils {
                     reqSize.toString() +
                     " bytes\n",
             )
-            peerSocket.emit("comlink", {
-                status: "error",
-                message: "TOO_BIG",
-            })
+            return null
         }
         // Debug log
         //console.log("\n" + _comlink_request.chain.current.currentMessage + "\n")
@@ -65,11 +63,6 @@ export default class ComLinkUtils {
                     .type
         } catch (e) {
             log.error("[Comlink Validation Error 1] " + e)
-
-            peerSocket.emit("comlink", {
-                status: "error",
-                message: e,
-            })
             return null
         }
         if (!(type_of_call === "nodeCall")) {
@@ -84,10 +77,6 @@ export default class ComLinkUtils {
             }
             if (!valid[0]) {
                 log.error("[Comlink Validation Error 2] " + valid[1])
-                peerSocket.emit("comlink", {
-                    status: "error",
-                    message: valid[1],
-                })
                 return null
             }
         } else {
@@ -97,10 +86,9 @@ export default class ComLinkUtils {
         console.log("[COMLINK PARSING] Parsing comlink message...")
         // Sanitizing the request
         if (!request.muid) {
-            peerSocket.emit("error", {
-                muid: null,
-                message: "No muid specified",
-            })
+            console.log(
+                "[COMLINK PARSING] No muid specified. Erroring back.",
+            )
             return null
         }
         console.log("[COMLINK PARSING] MUID: " + request.muid)
@@ -116,10 +104,7 @@ export default class ComLinkUtils {
                 "[COMLINK PARSING] Eww, no content specified. Erroring back.",
             )
             //console.log(request.chain.current.currentMessage.bundle)
-            peerSocket.emit("error", {
-                muid: request.muid,
-                message: "Ewwwwwwwww no content specified",
-            })
+            return null
         }
         console.log("[COMLINK PARSING] Content parsed")
         //console.log(content)
@@ -128,10 +113,6 @@ export default class ComLinkUtils {
                 "[COMLINK PARSING] No message or data specified. Erroring back.",
                 //console.log(content),
             )
-            peerSocket.emit("error", {
-                muid: request.muid,
-                message: "Eww...no message specified",
-            })
             return null
         }
         console.log("[COMLINK PARSING] Message parsed")
@@ -139,17 +120,23 @@ export default class ComLinkUtils {
     }
 
     // INFO reply to a comlink
-    static async replyToComlink(
+    static async replyToComlink( // ? REVIEW RPC compliant reply
         comlink: ComLink,
-        receiver: Socket,
         {
             response,
             require_reply,
             extra,
         }: { response: any; require_reply: boolean; extra: string },
-    ) {
+    ): Promise<RPCResponse> {
+        let rpcResponse: RPCResponse = {
+            result: 200,
+            response: response,
+            require_reply: require_reply,
+            extra: extra,
+        }
         await demostdlib.reply(comlink, response, require_reply, extra)
-        receiver.emit("comlink_reply", comlink)
+        //LINK - receiver.emit("comlink_reply", comlink) // ? Replaced with rpc methods compliant stuff
         // TODO add logging
+        return rpcResponse
     }
 }

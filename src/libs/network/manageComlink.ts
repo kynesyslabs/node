@@ -57,7 +57,7 @@ export async function preflightComLinkChecks(request: any): Promise<{
 }
 
 // Here, we manage the comlink and its content
-export default async function manageComLink(request: any) {
+export default async function manageComLink(request: any): Promise<RPCResponse> {
     // Security and sanity checks
     let _comlink_request: ComLink
     let content: BundleContent
@@ -88,13 +88,12 @@ export default async function manageComLink(request: any) {
             )
         }
         // Sending back the response // REVIEW Experimental
-        await comlinkUtils.replyToComlink(_comlink_request, {
-            // ! FIXME This should return things that we send back with express
+        let rpcResponse: RPCResponse = await comlinkUtils.replyToComlink(_comlink_request, {
             response,
             require_reply,
             extra,
         })
-        return
+        return rpcResponse
     }
 
     // NOTE As first step, we check if this is a peer pairing request
@@ -128,13 +127,12 @@ export default async function manageComLink(request: any) {
         }
         // Sending back the response
         console.log("[Hello Peer Listener] Sending back comlink")
-        await comlinkUtils.replyToComlink(_comlink_request, {
-            // ! FIXME This should return things that we send back with express
+        let rpcResponse: RPCResponse = await comlinkUtils.replyToComlink(_comlink_request, {
             response,
             require_reply,
             extra,
         })
-        return
+        return rpcResponse
     }
     0
     // TODO Better to modularize this
@@ -213,9 +211,10 @@ export default async function manageComLink(request: any) {
     // Sending back the response
     console.log("[SERVER] Sending back comlink")
     // NOTE unless specified, we now send back the updated comlink as a response
-    await comlinkUtils.replyToComlink(_comlink_request, {
+    let rpcResponse: RPCResponse = await comlinkUtils.replyToComlink(_comlink_request, {
         response,
         require_reply,
         extra,
-    }) // ! FIXME This should return things that we send back with express
+    })
+    return rpcResponse
 }
