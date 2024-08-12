@@ -41,7 +41,6 @@ export default class ServerListeners {
 
     async runListeners() {
         await this.browserRequestListener()
-        await this.voteRequestListener()
     }
 
     // NOTE Browser requests follows a completely different path from the others
@@ -361,10 +360,7 @@ export default class ServerListeners {
     }
     */
 
-    authAskEmit = async () => { // ! This should be obsoleted now that we use RPC
-        await this.peer.connection.socket.emit("auth_ask", "sign this")
-    }
-
+    /* REVIEW This is the old way of managing auth replies and is now managed by manageAuth.ts
 
     voteRequestListener = async () => {
         this.peer.connection.socket.on(
@@ -390,4 +386,12 @@ export default class ServerListeners {
             },
         )
     }
+    */
+
+    authAskEmit = async () => { // ! This should be obsoleted now that we use RPC
+        await this.peer.connection.socket.emit("auth_ask", "sign this")
+    }
+
+
+    
 }
