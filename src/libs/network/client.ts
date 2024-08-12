@@ -13,7 +13,6 @@ import { io } from "socket.io-client"
 import terminalkit from "terminal-kit"
 
 import Peer from "../peer/Peer"
-import ClientListeners from "./clientListeners"
 import CommonListeners from "./commonListeners"
 import log from "src/utilities/logger"
 const term = terminalkit.terminal
@@ -94,9 +93,7 @@ export default class Client {
                     "\n",
             )
             const commonListeners = new CommonListeners(_peerForged)
-            const clientListeners = new ClientListeners(_peerForged)
             await commonListeners.runListeners()
-            await clientListeners.runListeners()
             connected = true
         })
 
