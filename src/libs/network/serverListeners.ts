@@ -40,7 +40,6 @@ export default class ServerListeners {
     }
 
     async runListeners() {
-        await this.comlinkListener()
         await this.browserRequestListener()
         await this.voteRequestListener()
     }
@@ -84,6 +83,9 @@ export default class ServerListeners {
      either execute it or discard it.
      A message is just a message, so it is handled by its type.
     */
+
+    /* REVIEW This is the old way of managing comlinks and is now managed by manageComLink.ts
+
     async comlinkListener() {
         this.peer.connection.socket.on("comlink", async request => {
             await this.manageComLink(request)
@@ -180,7 +182,7 @@ export default class ServerListeners {
             content.message = connection_string
             content.data.signature = signature of the connection_string
             content.data.publicKey = public key of the peer signing the connection_string
-        */
+        +/
         if (content.type === "hello_peer") {
             log.info("[Hello Peer Listener] Received hello peer request")
 
@@ -299,9 +301,11 @@ export default class ServerListeners {
         console.log("[SERVER] Sending back comlink")
         // NOTE unless specified, we now send back the updated comlink as a response
         await ComLinkUtils.replyToComlink(_comlink_request, receiver, { response, require_reply, extra }) // reply is managed in the common listeners
-    }
+    } */
 
     // INFO Register or update a peer identity and connection string
+
+    /* REVIEW This is the old way of managing auth replies and is now managed by manageAuth.ts
     async authReplyListener() {
         // REVIEW Auth reply listener should not add a client to the peerlist if is read only
         this.peer.connection.socket.on("auth_reply", async data => {
@@ -355,10 +359,12 @@ export default class ServerListeners {
             this.peer.connection.socket.emit("auth_ok", _reply)
         })
     }
+    */
 
-    authAskEmit = async () => {
+    authAskEmit = async () => { // ! This should be obsoleted now that we use RPC
         await this.peer.connection.socket.emit("auth_ask", "sign this")
     }
+
 
     voteRequestListener = async () => {
         this.peer.connection.socket.on(

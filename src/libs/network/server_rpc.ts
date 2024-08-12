@@ -1,4 +1,8 @@
 import express, { Request, Response } from "express"
+import ComLinkUtils from "../communications/comlinkUtils"
+import ComLink from "../communications/comlink"
+import manageComLink from "./manageComlink"
+import { manageAuth, AuthMessage } from "./manageAuth"
 
 const serverApp = express()
 const port = 53550
@@ -53,6 +57,15 @@ serverApp.post("/", (req: Request, res: Response) => {
 
 // Function to process the payload
 async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
+    // ComLink management
+    if (payload.method === "comlink") {
+        let comlink: ComLink = payload.params[0]
+        return await manageComLink(comlink) // ! FIXME Be sure that this returns the right things
+    }
+    // Auth management
+    if (payload.method === "auth") {
+        return await manageAuth(payload.params[0] as AuthMessage)
+    }
     // TODO: Implement your payload processing logic here
     return {
         result: 200,
