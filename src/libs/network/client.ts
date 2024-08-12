@@ -31,24 +31,39 @@ export default class Client {
     ): Promise<[boolean, Peer | null]> {
         // We can work with a connection string and it would be better to do so
         if (peer.connection.string) {
-            log.info("[CLIENT] Peer has a connection string: trying to connect using it")
+            log.info(
+                "[CLIENT] Peer has a connection string: trying to connect using it",
+            )
             const address = peer.connection.string.split(">")[0]
             const port = parseInt(peer.connection.string.split(">")[1])
-            const connectedPeer: Peer | null = await this.connectToPeer(address, port)
+            const connectedPeer: Peer | null = await this.connectToPeer(
+                address,
+                port,
+            )
             if (!connectedPeer) {
                 return [false, null]
             } else {
+                // Setting the identity as received, and adding identity to the connection string
+                connectedPeer.identity = peer.identity
+                connectedPeer.connection.string =
+                    connectedPeer.connection.string +
+                    ">" +
+                    peer.identity.toString("hex")
                 return [true, connectedPeer]
             }
         }
         // We can work with a simple socket anyway
         else if (peer.connection.socket) {
-            log.info("[CLIENT] Peer has a socket but no connection string: trying to use it")
+            log.info(
+                "[CLIENT] Peer has a socket but no connection string: trying to use it",
+            )
             return [peer.connection.socket.connected, peer] // ? If it is not connected we should try to reconnect
         }
         // We can't work with a peer without a socket or a connection string
         else {
-            log.error("[CLIENT] Peer has no socket or connection string: cannot connect")
+            log.error(
+                "[CLIENT] Peer has no socket or connection string: cannot connect",
+            )
             return [false, null]
         }
     }

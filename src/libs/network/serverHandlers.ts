@@ -109,7 +109,9 @@ export default class ServerHandlers {
         } */
 
         // REVIEW This is an experimental hello peer management that uses the same mechanism as peerBootstrap
-            let peerObjectRaw = PeerManager.extractPeerFromString(peerString)
+        console.log("[Hello Peer Listener] Extracting peer from string: " + peerString)
+        let peerObjectRaw = PeerManager.extractPeerFromString(peerString)
+        console.log("[Hello Peer Listener] Extracted peer: ", peerObjectRaw)
         if (!peerObjectRaw) {
             log.error("Error while extracting peer from string: " + peerString)
             extra = "Error while extracting peer from string: " + peerString
@@ -136,6 +138,7 @@ export default class ServerHandlers {
 
         // Add the peer as authenticated
         peerObject.verification.status = true
+        console.log("[Hello Peer Listener] Adding peer with id: " + peerObject.identity.toString("hex"))
         let isAddedToPeerlist = PeerManager.getInstance().addPeer(peerObject)
         if (!isAddedToPeerlist) {
             return { response: false, require_reply: false, extra: "Could not add peer to peerlist" }

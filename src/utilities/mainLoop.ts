@@ -79,11 +79,14 @@ async function peerRoutine(): Promise<Peer[]> {
     PeerManager.getInstance().logPeerList()
 
     // REVIEW Re check offline peers asynchronously
+    console.log("[MAINLOOP]: checking offline peers")
     checkOfflinePeers() // NOTE This is an async method that will be executed in the background
+    console.log("[MAINLOOP]: checked offline peers")
 
     // every block write online list
     console.log("[MAINLOOP]: getting online peers")
     const onlinePeers = await PeerManager.getInstance().getOnlinePeers()
+    console.log("[MAINLOOP]: got online peers")
 
     // check if online peers have been online for 3 blocks
 
@@ -173,8 +176,9 @@ async function consensusRoutine(currentlyOnlinePeers: Peer[]) {
     const shard = await RepresentativeShard.getInstance().getShard(
         currentlyOnlinePeers,
     )
+    
 
-    sharedState.getInstance().shard = shard
+    sharedState.getInstance().shard = shard // ! On the first node, the shard does not include the second node (maybe it does not even reach that point     )
     console.log("[MAIN LOOP] Shard selected")
     console.log(shard)
 

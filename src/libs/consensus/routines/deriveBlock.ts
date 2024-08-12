@@ -25,7 +25,7 @@ export default async function deriveBlock(
     let lastBlockNumber = await Chain.getLastBlockNumber()
     derivedBlock.number = lastBlockNumber + 1
     // Compiling and hashing the proposer's peers
-    let proposersPeers = await shard.getPeers()
+    let proposersPeers = await shard.getPeers() // ! Undefined on the second peer?
     let hashableProposers = proposersPeers.map(peer => peer.connection.string)
     let proposer = Hashing.sha256(JSON.stringify(hashableProposers))
     /*sharedState

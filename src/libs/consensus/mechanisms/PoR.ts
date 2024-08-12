@@ -52,6 +52,10 @@ export class ProofOfRepresentation {
         return seed
     }
 
+    async getSelectedPeers(): Promise<Peer[]> {
+        return this.peers
+    }
+
     // INFO Getting out the current seed
     async getSeed(block_n: number = null, onlinePeers: Peer[]): Promise<string> {
         if (!block_n) {

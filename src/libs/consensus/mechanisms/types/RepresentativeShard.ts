@@ -1,5 +1,6 @@
 import { Peer } from "src/libs/peer"
 import { ProofOfRepresentation } from "../PoR"
+import log from "src/utilities/logger"      
 
 /* INFO
     This class is very strict about what you can and what you cannot do with it. This is by design to avoid
@@ -36,8 +37,14 @@ export default class RepresentativeShard {
     public async getShard(peerList: Peer[]): Promise<ProofOfRepresentation> {
         let shard = this.shard
         if (!shard) {
-            return await this.generateShard(peerList)
+            shard = await this.generateShard(peerList)
         }
+        // Logging the shard
+        let selectedPeersPrintable = []
+        for (let selectedPeer of await shard.getSelectedPeers()) {
+            selectedPeersPrintable.push(selectedPeer.identity.toString("hex"))
+        }
+        log.custom("shard.log", JSON.stringify(selectedPeersPrintable), false, true)
         return shard
     }
 
