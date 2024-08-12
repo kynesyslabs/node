@@ -10,6 +10,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+// TODO // ! This is the old way of doing things, we should move to RPC by importing server_rpc.ts (after setting sharedState.getInstance().serverPort)
+
 import "reflect-metadata"
 
 import * as dotenv from "dotenv"
@@ -189,6 +191,7 @@ async function main() {
 
     // INFO We start the server
     term.yellow("[BOOTSTRAP] 🖥️ Starting the server\n")
+    // ! See top comment and server_rpc.ts for the new way of doing things
     await server.listen(SERVER_PORT)
     term.green("[SERVER] 🖥️ listening on *:" + SERVER_PORT + "\n")
     await networkServer.setupListeners(io_server)

@@ -1,11 +1,16 @@
+/*  NOTE Importing this file automatically spawns a new server that listens for RPC requests */
+
 import express, { Request, Response } from "express"
+import sharedState from "src/utilities/sharedState"
 import ComLinkUtils from "../communications/comlinkUtils"
 import ComLink from "../communications/comlink"
 import manageComLink from "./manageComlink"
 import { manageAuth, AuthMessage } from "./manageAuth"
 import { manageVote, VoteRequest } from "./manageVote"
 const serverApp = express()
-const port = 53550
+
+// Reading the port from sharedState
+const port = sharedState.getInstance().serverPort
 
 /* Interface definitions */
 
