@@ -10,7 +10,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import ComLink from "../../communications/comlink"
-import ResponseRegistry from "../../communications/responseRegistry"
 import Transmission from "../../communications/transmission"
 import Peer from "../Peer"
 import sharedState from "src/utilities/sharedState"
@@ -26,10 +25,6 @@ export default async function getPeerIdentity(
     peer: Peer,
     expectedKey: string,
 ): Promise<Peer> {
-    // A peer object must have a valid socket
-    if (!peer.connection.socket) {
-        return null
-    }
 
     // Getting our identity
     let id = sharedState.getInstance().identity.ed25519
@@ -59,23 +54,15 @@ export default async function getPeerIdentity(
         "[PEER AUTHENTICATION] Sending comlink requesting authentication",
     )
     //console.log(comlink)
-    // Adding the response request
-    ResponseRegistry.getInstance().requestResponse(comlink)
-    console.log("[PEER AUTHENTICATION] Response registry is ready")
     // Broadcasting the request
-    await comlink.broadcastMessageToPeer(peer, identity_ask, id.privateKey)
-    // Awaiting the response
-    console.log("[PEER AUTHENTICATION] Awaiting the response")
-    let response = await ResponseRegistry.getInstance().checkResponse(
-        comlink.muid,
-    )
+    let response = await comlink.broadcastMessageToPeer(peer, identity_ask, id.privateKey)
     console.log("[PEER AUTHENTICATION] Response received")
     //console.log(response)
     // Response management
-    if (response[0]) {
+    if (response.result === 200) {
         console.log("[PEER AUTHENTICATION] Received response")
         //console.log(response[1].identity.toString("hex"))
-        if (response[1].identity.toString("hex") === expectedKey) {
+        if (response.response.toString("hex") === expectedKey) {
             console.log("[PEER AUTHENTICATION] Identity is the expected one")
         } else {
             console.log(
@@ -84,13 +71,13 @@ export default async function getPeerIdentity(
             console.log("Expected: ")
             console.log(expectedKey)
             console.log("Received: ")
-            console.log(response[1].identity.toString("hex"))
+            console.log(response.response.identity.toString("hex"))
             console.log("Non hex:")
-            console.log(response[1].identity)
+            console.log(response.response.identity)
             return null
         }
         // Adding the property to the peer
-        peer.identity = response[1].identity // Identity is now known
+        peer.identity = response.response.identity // Identity is now known
         peer.status.online = true // Peer is now online
         peer.status.ready = true // Peer is now ready
         peer.status.timestamp = new Date().getTime()
@@ -98,7 +85,7 @@ export default async function getPeerIdentity(
         peer.verification.message = "getPeerIdentity routine verified"      
         peer.verification.timestamp = new Date().getTime()
     } else {
-        console.log("[PEER AUTHENTICATION] No response received")
+        console.log("[PEER AUTHENTICATION] Response " + response.result + " received: " + response.response)
     }
     // ? Should we add it to the peerList here instead of in the peerBootstrap routine / hello_peer routine?
     return peer

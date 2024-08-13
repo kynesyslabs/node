@@ -11,17 +11,18 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import type { IPeerConfig } from "@kynesyslabs/demosdk/types"
 import forge from "node-forge"
-import { Socket } from "socket.io-client"
-import { Socket as ServerSocket } from "socket.io"
 import log from "src/utilities/logger"
-import { io } from "socket.io-client"
+import { RPCRequest, RPCResponse } from "../network/server_rpc"
+import axios from "axios"
+import sharedState from "src/utilities/sharedState"
+import Cryptography from "../crypto/cryptography"
+import Hashing from "../crypto/hashing"
 
 export default class Peer {
     // connection informations
     public connection: {
         string: string // this is optional and is mostly used for permanent connections
-        socket: Socket // this is the socket object from the client pov and is mandatory
-        serverSocket: ServerSocket // this is the socket object from a server pov and is mandatory
+        // ? Communication registry?
     }
     public identity: forge.pki.ed25519.BinaryBuffer // public key
     // verification informations
@@ -47,8 +48,6 @@ export default class Peer {
     constructor() {
         this.connection = {
             string: "",
-            socket: null,
-            serverSocket: null,
         }
         this.identity = null
         this.verification = {
@@ -72,22 +71,14 @@ export default class Peer {
 
     // INFO Connect to a peer
     async connect(): Promise<boolean> {
-        try {
-            this.connection.socket = io(this.connection.string)
-        } catch (error) {
-            log.error("Peer connection to " + this.connection.string + " failed: " + error)
-            return false
-        }
+        // TODO Implement RPC methods
         return true
     }
 
     // INFO Check online status for a peer
     async checkOnlineStatus(): Promise<boolean> {
-        if (!this.connection.socket) {
-            return false
-        }
-        // We have a socket, lets check if is connected
-        return this.connection.socket.connected
+        // TODO Implement RPC methods
+        return true
     }
 
     // INFO Check if the peer is ready to be used  // TODO Implement periodically each loop in the background
@@ -98,6 +89,33 @@ export default class Peer {
         }
         this.status.ready = false
         return false
+    }
+
+    // New method to make an arbitrary RPC call // REVIEW
+    // ? As this returns a promise, should it manage its own response registry?
+    async call(request: RPCRequest): Promise<RPCResponse> {
+        // Prepare a request with our identity
+        const pubkey = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
+        const signature = Cryptography.sign(pubkey, sharedState.getInstance().identity.ed25519.privateKey).toString("hex")
+        // Make the request
+        try {
+            const response = await axios.post<RPCResponse>(this.connection.string, request, {
+                headers: {
+                    "Content-Type": "application/json",
+                    "identity": pubkey,
+                    "signature": signature,
+                },
+            })
+            return response.data
+        } catch (error) {
+            log.error("Error making RPC call:" + error)
+            return {         
+                result: 500,
+                response: error,
+                require_reply: false,
+                extra: null,
+            }
+        }
     }
 
 }

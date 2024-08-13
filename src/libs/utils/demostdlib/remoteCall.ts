@@ -1,9 +1,9 @@
 import sharedState from "src/utilities/sharedState"
 
 import ComLink from "../../communications/comlink"
-import ResponseRegistry from "../../communications/responseRegistry"
 import Transmission from "../../communications/transmission"
 import { Peer } from "../../peer"
+import { RPCResponse } from "../../network/server_rpc"
 
 // INFO Compose, sign and send a signed comlink chain easily
 export async function remoteCall(
@@ -14,7 +14,7 @@ export async function remoteCall(
     requireReply: boolean = false,
     isReply: boolean = false,
     args: any = null,
-): Promise<[boolean, any]> {
+): Promise<RPCResponse> {
     let { identity } = sharedState.getInstance()
     console.log("[remoteCall] Type: " + type)
     console.log("[remoteCall] Message: " + message)
@@ -37,28 +37,22 @@ export async function remoteCall(
     await _askMessage.finalize()
     console.log("[SYNC] Finalized the message")
     // Putting the message into a new comlink
-    console.log("[SYNC] Putting the message into the comlink using socket: " + peer.connection.socket.id)
+    console.log("[SYNC] Putting the message into the comlink using socket: " + peer.connection.string)
     //console.log(peer.connection.socket)
     console.log(
-        "[SYNC] Asking " + peer.connection.socket.id + " for " + type + "\n" + message,
+        "[SYNC] Asking " + peer.connection.string + " for " + type + "\n" + message,
     )
     // Preparing for a response
     _comlink.properties.require_reply = requireReply
     _comlink.properties.is_reply = isReply
 
-    // Propagating the responseRegistry actual status
-    ResponseRegistry.getInstance().requestResponse(_comlink)
-    console.log("[RESPONSE REQUESTED]")
+    
     // Ask for the last block
-    await _comlink.broadcastMessageToPeer(
+    let responsePromise = _comlink.broadcastMessageToPeer(
         peer,
         _askMessage,
         identity.ed25519.privateKey,
     )
 
-    // Get out the response promise
-    let responsePromise = ResponseRegistry.getInstance().checkResponse(
-        _comlink.muid,
-    )
     return responsePromise
 }

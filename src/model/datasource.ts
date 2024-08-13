@@ -15,7 +15,6 @@ import { Blocks } from "./entities/Blocks"
 import { Consensus } from "./entities/Consensus"
 import { Mempool } from "./entities/Mempool"
 import { PgpKeyServer } from "./entities/PgpKeyServer"
-import { ResponseRegistry } from "./entities/ResponseRegistry"
 import { StatusHashes } from "./entities/StatusHashes"
 import { StatusNative } from "./entities/StatusNative"
 import { StatusProperties } from "./entities/StatusProperties"
@@ -40,7 +39,6 @@ class Datasource {
                 Mempool,
                 Consensus,
                 PgpKeyServer,
-                ResponseRegistry,
                 StatusHashes,
                 StatusProperties,
                 StatusNative,

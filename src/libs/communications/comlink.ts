@@ -10,7 +10,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import forge, { pki } from "node-forge"
-import { Socket } from "socket.io-client"
 import sharedState from "src/utilities/sharedState"
 
 import Cryptography from "../crypto/cryptography"
@@ -20,6 +19,7 @@ import Peer from "../peer/Peer"
 import Transmission from "./transmission"
 
 import { Current, Properties } from "./types/comlink"
+import { RPCResponse } from "../network/server_rpc"
 export default class ComLink {
     private static instances: Map<string, ComLink> = new Map()
 
@@ -92,15 +92,20 @@ export default class ComLink {
         peer: Peer,
         message: Transmission,
         privateKey: pki.ed25519.BinaryBuffer | any,
-    ) {
+    ): Promise<RPCResponse> {
         // REVIEW Sanitize message and type
         if (!message.bundle.content.type) {
             console.log("[COMMUNICATIONS] Invalid message")
-            return [false, "Invalid message"]
+            return {
+                result: 500,
+                response: "Invalid message",
+                require_reply: false,
+                extra: null,
+            }
         }
-        if (peer.connection.socket) {
+        
             console.log(
-                "[COMMUNICATIONS] Sending message to peer " + peer.connection.socket.id,
+                "[COMMUNICATIONS] Sending message to peer " + peer.connection.string,
             )
             // NOTE Removing privated key from message if present
             if (message.privateKey) {
@@ -120,13 +125,14 @@ export default class ComLink {
             //console.log(this)
             console.log("[COMMUNICATIONS] About to send a Comlink with current hash: " + this.chain.comlinkCurrentHash)
             // Emitting the message
-            let result = await this.broadcastToPeer(peer)
+            let result = await peer.call({
+                method: "comlink",
+                params: [this], // ? Is it ok to send the object as is?
+            })
             console.log("[COMMUNICATIONS] Message sent")
             //console.log(result)
             return result
-        }
-        console.log("[COMMUNICATIONS] Invalid peer: no socket")
-        return [false, "Invalid peer: no socket"]
+        
     }
 
     // INFO Prepare a reply to the last message in the chain
@@ -152,7 +158,6 @@ export default class ComLink {
     }
     // INFO Broadcast a ComLink object to a peer (usually called by the above methods)
     async broadcastToPeer(peer: Peer) {
-        let _socket = peer.connection.socket
         console.log("[COMMUNICATIONS] Broadcast message to peer")
         // NOTE Here we make sure that we dont have private data in the message
         if (this.chain.current.currentMessage.privateKey) {
@@ -161,15 +166,12 @@ export default class ComLink {
             )
             this.chain.current.currentMessage.privateKey = null
         }
-        // TODO & REVIEW See if we need a listener here or we should just use ResponseRegistry as above
-        _socket.emit("comlink", this) // Emitting this object to the peer
-        return [true, this.muid]
-    }
-    // INFO Support for sending to a socket directly
-    async broadcastToSocketPeer(socket: Socket) {
-        let compatible_peer = new Peer()
-        compatible_peer.connection.socket = socket
-        await this.broadcastToPeer(compatible_peer)
+        let result = await peer.call({
+            method: "comlink",
+            params: [this], // ? Is it ok to send the object as is?
+        })
+        console.log("[COMMUNICATIONS] Message sent")
+        return result
     }
 
     // INFO Generic comlink validation function

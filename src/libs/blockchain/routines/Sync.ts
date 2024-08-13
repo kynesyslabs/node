@@ -12,14 +12,12 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 // REVIEW Conflict handling between peers (longest chain)
 
-import ResponseRegistry from "src/libs/communications/responseRegistry"
 import { demostdlib } from "src/libs/utils"
 import sharedState from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 
 import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
-import { Response } from "../../communications/types/responseregistry"
 import Peer from "../../peer/Peer"
 import PeerManager from "../../peer/PeerManager"
 import Block from "../block"

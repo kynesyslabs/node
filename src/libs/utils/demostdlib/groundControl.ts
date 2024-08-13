@@ -173,9 +173,6 @@ export default class groundControl {
                     metric = groundControl.get.connected_peers().toString()
                     status = 200
                     break
-                case "response_registry_size":
-                    // TODO in responseRegistry
-                    break
                 case "mempool_size":
                     // TODO in mempool
                     break

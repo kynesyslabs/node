@@ -3,7 +3,6 @@ import sharedState from "src/utilities/sharedState"
 import { promisify } from "util"
 
 import ComLink from "../../communications/comlink"
-import ResponseRegistry from "../../communications/responseRegistry"
 import Transmission from "../../communications/transmission"
 /* eslint-disable indent */
 import * as stat from "./timeSyncUtils"
@@ -24,7 +23,7 @@ export default async function getPeerTime(
     id: any,
 ): Promise<number> {
     // A peer object must have a valid socket
-    if (!peer.connection.socket) {
+    if (!peer.connection.string) {
         return null
     }
 
@@ -50,26 +49,21 @@ export default async function getPeerTime(
     comlink.properties.is_reply = false
     console.log("[PEER TIMESYNC] Sending comlink")
     //console.log(comlink)
-    // Adding the response request
-    ResponseRegistry.getInstance().requestResponse(comlink)
+    
     // Broadcasting the request
-    await comlink.broadcastMessageToPeer(peer, time_ask, id.privateKey)
-    // Awaiting the response
-    let response = await ResponseRegistry.getInstance().checkResponse(
-        comlink.muid,
-    )
+    let response = await comlink.broadcastMessageToPeer(peer, time_ask, id.privateKey)
     console.log("[PEER TIMESYNC] Response received")
     //console.log(response)
 
     // Response management
     if (response[0]) {
         console.log(
-            `[PEER TIMESYNC] Received timestamp in response: ${response[1].timestamp}`,
+            `[PEER TIMESYNC] Received timestamp in response: ${response.response.timestamp}`,
         )
     } else {
         console.log("[PEER TIMESYNC] No timestamp received")
     }
-    return response[1].timestamp
+    return response.response.timestamp
 }
 
 export const calculatePeerTimeOffset =

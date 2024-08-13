@@ -14,7 +14,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { Socket } from "socket.io"
 
 import ComLink from "../../communications/comlink"
-import ResponseRegistry from "../../communications/responseRegistry"
 import Transmission from "../../communications/transmission"
 import Peer from "../Peer"
 
@@ -22,10 +21,6 @@ export default async function getPeerConnectionString(
     peer: Peer,
     id: any,
 ): Promise<Peer> {
-    // A peer object must have a valid socket
-    if (!peer.connection.socket) {
-        return null
-    }
     // Asking the peer for its identity
     let comlink = new ComLink()
     let identity_ask = new Transmission(id.privateKey)
@@ -40,21 +35,15 @@ export default async function getPeerConnectionString(
     await identity_ask.finalize()
     comlink.properties.require_reply = true
     comlink.properties.is_reply = false
-    // Adding the response request
-    ResponseRegistry.getInstance().requestResponse(comlink)
     // Broadcasting the request
-    await comlink.broadcastMessageToPeer(peer, identity_ask, id.privateKey)
-    // Awaiting the response
-    let response = await ResponseRegistry.getInstance().checkResponse(
-        comlink.muid,
-    )
+    let response = await comlink.broadcastMessageToPeer(peer, identity_ask, id.privateKey)
     // Response management
-    if (response[0]) {
+    if (response.result === 200) {
         console.log("[PEER CONNECTION] Received response")
         //console.log(response[1])
-        peer.connection.string = response[1].message
+        peer.connection.string = response.response
     } else {
-        console.log("[PEER CONNECTION] No response received")
+        console.log("[PEER CONNECTION] Response " + response.result + " received: " + response.response)
     }
     return peer
 }

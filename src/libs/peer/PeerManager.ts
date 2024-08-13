@@ -18,8 +18,7 @@ import Hashing from "../crypto/hashing"
 import sharedState from "src/utilities/sharedState"
 import forge from "node-forge"
 import { comlinkUtils } from "../communications"
-import ResponseRegistry from "../communications/responseRegistry"
-import { Response } from "../communications/types/responseregistry"
+import { RPCResponse } from "../network/server_rpc"
 
 function ForgeToHex(forgeBuffer: any) {
     console.log("[forge to string encoded]")
@@ -133,7 +132,6 @@ export default class PeerManager {
             const peerInstance = new Peer()
             peerInstance.identity = _peer.identity
             peerInstance.connection.string = _peer.connection.string
-            peerInstance.connection.socket = _peer.connection.socket
             console.log("[PEERMANAGER] Checking online status of peer " + peerInstance.identity.toString("hex"))
             await PeerManager.sayHelloToPeer(peerInstance)
         }
@@ -261,38 +259,35 @@ export default class PeerManager {
         // Creating a comlink and setting it to require a reply
         const comlink = new ComLink()
         comlink.properties.require_reply = true
-        // Awaiting the response asynchronously in the response registry
-        ResponseRegistry.getInstance().requestResponse(comlink)
-        console.log("[Hello Peer] Response registry requested")
         // Sending the transmission to the peer
-        let hello_comlink_status = await comlink.broadcastMessageToPeer(
+        let hello_comlink_status = comlink.broadcastMessageToPeer(
             peer,
             transmission,
             sharedState.getInstance().identity.ed25519.privateKey,
         )
-        log.info("[Hello Peer] Hello comlink status: " + hello_comlink_status)
+        log.info("[Hello Peer] Hello comlink promise returned")
         // NOTE The below would wait for the response asynchronously, so to not block the main thread
-        // we use a callback that will be executed by the ResponseRegistry when the response is received
-        ResponseRegistry.getInstance().checkResponseAsync(comlink.muid, (response) => {
+        // we use a callback that will be executed when the response is received
+        hello_comlink_status.then((response) => {
             PeerManager.helloPeerCallback(response, peer)
         })
         log.info("[Hello Peer] Response check started")
     }
 
     // Callback for the hello peer
-    static helloPeerCallback(response: Response, peer: Peer) {
-        log.info("[Hello Peer] Response received from peer: " + response.identity.toString("hex"))
+    static helloPeerCallback(response: RPCResponse, peer: Peer) {
+        log.info("[Hello Peer] Response received from peer: " + peer.identity.toString("hex"))
         //console.log(response) // ? Delete this if not needed
         // TODO Test and Finish this
         // REVIEW is the message the response itself?
-        log.info("[Hello Peer] Response message: " + response.message)
+        log.info("[Hello Peer] Response message: " + response.response)
         // Based on the response, we can decide what to do
-        if (response.message) {
+        if (response.result === 200) {
             log.info("[Hello Peer] Peer is online, replied and recognized us. Adding to peer list")
             //console.log(peer)
             PeerManager.getInstance().addPeer(peer)
         } else {
-            log.info("[Hello Peer] Failed to connect to peer: " + response.identity + ". Adding to offline list")
+            log.info("[Hello Peer] Failed to connect to peer: " + peer.identity.toString("hex") + ". Adding to offline list")
             // Add the peer to the offline list
             PeerManager.getInstance().addOfflinePeer(peer.connection.string)
         }
