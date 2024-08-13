@@ -10,23 +10,13 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-// TODO // ! This is the old way of doing things, we should move to RPC by importing server_rpc.ts (after setting sharedState.getInstance().serverPort)
 
 import "reflect-metadata"
 
 import * as dotenv from "dotenv"
-import express from "express"
-//import process from "node:process"
 import * as fs from "fs"
-import * as http from "http"
-// TODO Put into .env
-// groundControl.init(10250, "0.0.0.0", "http", {
-//     key: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.key",
-//     cert: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.crt",
-//     ca: "/opt/tinycp/domains/node2.demoscan.live/ssl/ssl-letsencrypt.ca",
-// })
-import * as https from "https"
-import { Server } from "socket.io"
+
+import { server_rpc } from "./libs/network"
 import terminalkit from "terminal-kit"
 
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
@@ -61,14 +51,6 @@ let COMMANDLINE_MODE = null
 
 let PEER_LIST: any
 
-const app = express()
-
-var ssl_options = {
-    key: fs.readFileSync("src/ssl/server.key"),
-    cert: fs.readFileSync("src/ssl/server.crt"),
-    ca: fs.readFileSync("src/ssl/ca.crt"),
-} // TODO Fill the right values
-const s_server =    https.createServer(ssl_options, app) // REVIEW Use tHIS instead of http.createServer
 
 /* SECTION Environment variables loading and configuration */
 let RPC_FEE: number = parseInt(process.env.RPC_FEE) || 10
@@ -90,21 +72,10 @@ console.log("SERVER_PORT: " + SERVER_PORT)
 console.log("PEER_LIST_FILE: " + PEER_LIST_FILE)
 console.log("= End of Configuration = \n")
 
-
-const server = http.createServer(app)
-
-//import { Server as HttpServer } from 'http';
-const io_server = new Server(server, {
-    //wsEngine: eiows.Server, // REVIEW Comment this line to use the standard ws engine
-    perMessageDeflate: {
-        threshold: 32768,
-    },
-    cors: {
-        origin: "*",
-        methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
-        preflightContinue: false,
-    },
-})
+// ? REVIEW Starting the server_rpc: should we keep this async?
+// This should start the server_rpc without any other needed operation
+log.info("[MAIN] Starting the RPC server")
+server_rpc()
 
 // Instances of classes we need to keep in memory for the rest of the modules, as we use them as state containers which will be passed around
 const peerManager = PeerManager.getInstance()
@@ -187,13 +158,6 @@ async function main() {
         console.log(e)
         term.yellow("[WARN] {OFFLINE?} Failed to get public IP\n")
     }
-
-    // INFO We start the server
-    term.yellow("[BOOTSTRAP] 🖥️ Starting the server\n")
-    // ! See top comment and server_rpc.ts for the new way of doing things
-    await server.listen(SERVER_PORT)
-    term.green("[SERVER] 🖥️ listening on *:" + SERVER_PORT + "\n")
-    await networkServer.setupListeners(io_server)
 
     term.yellow("[BOOTSTRAP] Looking for the genesis block\n")
     // INFO Now ensuring we have an initialized chain or initializing the genesis block

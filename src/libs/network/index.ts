@@ -10,3 +10,4 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 export { default as client } from "./client"
+export { default as server_rpc } from "./server_rpc"
