@@ -35,7 +35,6 @@ AbortSignal.timeout ??= function timeout(ms) {
  *
  * @param {string} command - The command to execute. If it's "remove", the function will remove an instance.
  * @param {string} named - The name of the instance to get or remove.
- * @param {any} sendSock - The sender socket. If the command is "remove", this should be the name of the instance to remove.
  * @param {IWeb2Request} req - The request to use when getting an instance.
  * @returns {Web2APIClass} The instance of the Web2APIClass, if the command is not "remove".
  * @export
@@ -45,18 +44,15 @@ AbortSignal.timeout ??= function timeout(ms) {
 export default function Web2API(
     command: string = null,
     named: string = null,
-    sendSock: any = null,
     req: IWeb2Request = null,
 ): Web2APIClass {
-    if (command === "remove" && typeof sendSock === "string") {
-        const instanceNameToRemove = sendSock
-        Web2APIClass.removeInstance(instanceNameToRemove)
+    if (command === "remove") {
+        Web2APIClass.removeInstance(named)
         return
     }
 
     const apiInstance: Web2APIClass = Web2APIClass.getInstance(
         named,
-        sendSock,
         req,
     )
     return apiInstance
@@ -84,14 +80,12 @@ export class Web2APIClass {
     /**
      * Get an instance of the class.
      * @param {string} named - The name of the instance.
-     * @param {any} sendSock - The sender socket.
      * @param {IWeb2Request} req - The request.
      * @returns {Web2APIClass} The instance of the class.
      * @static
      */
     static getInstance(
         named: string = null,
-        sendSock: any = null,
         req: IWeb2Request = null,
     ): Web2APIClass {
         if (!named) {
@@ -102,11 +96,10 @@ export class Web2APIClass {
         if (!Web2APIClass.requests.has(named)) {
             term.yellow("[Web2APIClass] Creating new Web2API instance\n")
 
-            required(sendSock, "[Web2APIClass] Missing sender socket")
             required(req, "[Web2APIClass] Missing request")
             Web2APIClass.requests.set(
                 named,
-                new Web2APIClass(named, sendSock, req),
+                new Web2APIClass(named, req),
             )
         }
         return Web2APIClass.requests.get(named)
@@ -117,12 +110,6 @@ export class Web2APIClass {
      * @type {IWeb2Request}
      */
     request: IWeb2Request = null
-
-    /**
-     * The sender's socket.
-     * @type {any}
-     */
-    senderSocket: null
 
     /**
      * The name of the request.
@@ -139,12 +126,10 @@ export class Web2APIClass {
     /**
      * Create a named instance of the class and bootstrap it.
      * @param {string} name - The name of the instance.
-     * @param {any} sendSock - The sender socket.
      * @param {IWeb2Request} payload - The request.
      */
-    constructor(name: string, sendSock: any, payload: IWeb2Request = null) {
+    constructor(name: string, payload: IWeb2Request = null) {
         this.name = name
-        this.senderSocket = sendSock
         if (!payload.raw) {
             term.yellow.bold(
                 "[Web2API] No raw request attached. Is this right?",

@@ -12,12 +12,12 @@ export type VoteRequest = {
 // ? REVIEW This has not been tested yet
 export async function manageVote(
     request: VoteRequest,
-    callback: (response: string) => void,
+    callback: (response: RPCResponse) => void,
 ): Promise<RPCResponse> {
     term.yellow("[SERVER] Received vote request\n")
     //console.log(request)
-    let voteResponse: string
-    let res: string
+    let voteResponse: RPCResponse
+    let res: RPCResponse
 
     console.log("request")
     //console.log(request)

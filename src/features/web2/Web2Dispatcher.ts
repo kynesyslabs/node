@@ -27,7 +27,6 @@ const term = terminalKit.terminal
  */
 export default async function handleWeb2(
     payload: IWeb2Request,
-    senderSocket: any,
 ): Promise<[boolean, string | IWeb2Request]> {
     // Creating the workable interface
     // TODO Remember that web2 could need to be signed and could need a fee
@@ -56,7 +55,7 @@ export default async function handleWeb2(
      * An attestation is automatically added by the .digest() method, attesting its result
      * TODO Implement timeouts properly
      */
-    const web2interface = Web2API(null, nameHash, senderSocket, payload)
+    const web2interface = Web2API(null, nameHash, payload)
     // NOTE We want to wait for the request to be digested before proceeding (see above paragraph)
     await web2interface.digestedPromise
     // Now result is in web2request.request.result
@@ -135,7 +134,7 @@ export default async function handleWeb2(
         "[web2Dispatcher] Attestations validated. Deriving a transaction + operation...",
     )
 
-    Web2API("remove", nameHash, senderSocket)
+    Web2API("remove", nameHash)
 
     // TODO Maybe we should also return derivedResult somehow
     return [true, web2interface.request] // , derivedResult

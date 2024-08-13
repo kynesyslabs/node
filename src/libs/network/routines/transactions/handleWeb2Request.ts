@@ -5,7 +5,6 @@ import handleWeb2 from "src/features/web2/Web2Dispatcher"
 
 export default async function handleWeb2Request(
     content: IWeb2Request,
-    senderSocket: any,
 ): Promise<{ response: any; require_reply: boolean; extra: any }> {
     /* NOTE This workflow goeas as:
      * The Web2 Operation is validated, executed and verified
@@ -27,7 +26,7 @@ export default async function handleWeb2Request(
 
     //console.log("[WEB2 CONTENT DUMP]")
     //console.log(content)
-    let fullResponse = await handleWeb2(content, senderSocket)
+    let fullResponse = await handleWeb2(content)
     //console.log("[WEB2 CONTENT RESPONSE DUMP]")
     //console.log(fullResponse)
 

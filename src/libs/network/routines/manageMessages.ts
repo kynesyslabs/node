@@ -9,6 +9,7 @@ import terminalkit from "terminal-kit"
 import { BundleContent } from "@kynesyslabs/demosdk/types"
 
 import ServerHandlers from "../serverHandlers"
+import { RPCResponse } from "../server_rpc"
 
 const term = terminalkit.terminal
 
@@ -17,58 +18,53 @@ export default async function manageMessages(
     original_comlink: ComLink,
     original_request: any,
     id_ed25519: pki.KeyPair,
-    receiver: Socket,
-) {
-    let extra = null
-    let require_reply = false
-    let response = null
+): Promise<RPCResponse> {
+    
+    let result: RPCResponse = {
+        result: 500,
+        response: "no response yet",
+        require_reply: false,
+        extra: "",
+    }
 
     switch (content.type) {
         case "proofOfConsensus":
-            ({ extra, require_reply, response } =
-                await proofConsensusHandler(content))
-
+            result = await proofConsensusHandler(content)
             break
         case "consensus":
             console.log("[SERVER LISTENER HANDLER]: received consensus request from: " + 
                 original_comlink.chain.current.currentMessage.bundle.content.sender.toString("hex"),
             )
-            ;({ extra, require_reply, response } =
-                await ServerHandlers.handleConsensusRequest(
+            result = await ServerHandlers.handleConsensusRequest(
                     original_request,
                     content,
                     original_comlink.chain.current.currentMessage.bundle.content
                         .sender,
-                ))
+                )
             break
 
         case "messages":
-            ({ extra, require_reply, response } =
-                await ServerHandlers.handleMessage(content))
+            result = await ServerHandlers.handleMessage(content)
             break
 
         case "storage":
-            ({ extra, require_reply, response } =
-                await ServerHandlers.handleStorage())
+            result = await ServerHandlers.handleStorage()
             break
 
         case "mempool":
-            ({ extra, require_reply, response } =
-                await ServerHandlers.handleMempool(content))
+            result = await ServerHandlers.handleMempool(content)
             break
 
         case "nodeCall":
-            ({ extra, require_reply, response } =
-                await ServerHandlers.handleNodeAPI(
+            result = await ServerHandlers.handleNodeAPI(
                     content,
-                    receiver,
                     id_ed25519,
-                ))
+                )
             break
 
         default:
             term.red(`[COMLINK INVALID] No known type: ${content.type}\n`)
             break
     }
-    return { extra, require_reply, response }
+    return result
 }

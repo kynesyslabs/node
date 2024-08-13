@@ -104,7 +104,7 @@ export default async function server_rpc(): Promise<Express> {
             case "vote":
                 return await manageVote(
                     payload.params[0] as VoteRequest,
-                    payload.params[1] as (response: string) => void,
+                    payload.params[1] as (response: RPCResponse) => void,
                 )
 
             default:

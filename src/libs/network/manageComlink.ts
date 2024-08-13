@@ -83,20 +83,16 @@ export default async function manageComLink(request: any): Promise<RPCResponse> 
     console.log("[serverListeners] content.extra: " + content.extra)
 
     if (content.type === "l2ps") {
-        ({ response, require_reply, extra } = await ServerHandlers.handleL2PS(
+        let response = await ServerHandlers.handleL2PS( // ! This should return a RPCResponse
             content,
-        ))
-        if (!response) {
+        )
+        if (response.result !== 200) {
             term.red.bold(
                 "[SERVER] Error while handling L2PS request, aborting",
             )
         }
         // Sending back the response // REVIEW Experimental
-        let rpcResponse: RPCResponse = await comlinkUtils.replyToComlink(_comlink_request, {
-            response,
-            require_reply,
-            extra,
-        })
+        let rpcResponse: RPCResponse = await comlinkUtils.replyToComlink(_comlink_request, response)
         return rpcResponse
     }
 
@@ -109,33 +105,21 @@ export default async function manageComLink(request: any): Promise<RPCResponse> 
     if (content.type === "hello_peer") {
         log.info("[Hello Peer Listener] Received hello peer request")
 
-        // Preparing the responses
-        let response = false
-        let require_reply = false
-        let extra = "not yet digested"
 
         // ? Do we need to do additional checks here? A comlink is validated anyway
 
         // Connecting to the peer
-        ;({ response, require_reply, extra } =
-            await ServerHandlers.handleHelloPeer(content))
-        if (!response) {
+        let response = await ServerHandlers.handleHelloPeer(content)
+        if (response.result !== 200) {
             if (!extra) {
                 extra =
                     "Error while handling Hello Peer request: error not specified"
             }
             log.error("Error while handling Hello Peer request: " + extra)
-            response = false
-            extra = "Error while handling Hello Peer request: " + extra
-            require_reply = false
         }
         // Sending back the response
         console.log("[Hello Peer Listener] Sending back comlink")
-        let rpcResponse: RPCResponse = await comlinkUtils.replyToComlink(_comlink_request, {
-            response,
-            require_reply,
-            extra,
-        })
+        let rpcResponse: RPCResponse = await comlinkUtils.replyToComlink(_comlink_request, response)
         return rpcResponse
     }
     0
@@ -215,10 +199,6 @@ export default async function manageComLink(request: any): Promise<RPCResponse> 
     // Sending back the response
     console.log("[SERVER] Sending back comlink")
     // NOTE unless specified, we now send back the updated comlink as a response
-    let rpcResponse: RPCResponse = await comlinkUtils.replyToComlink(_comlink_request, {
-        response,
-        require_reply,
-        extra,
-    })
+    let rpcResponse: RPCResponse = await comlinkUtils.replyToComlink(_comlink_request, response)
     return rpcResponse
 }

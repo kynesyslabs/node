@@ -10,6 +10,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+// ! TODO Pay attention to the return types (RPCResponse)
+
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import Chain from "src/libs/blockchain/chain"
@@ -67,6 +69,7 @@ import forge from "node-forge"
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
 import Client from "./client"
+import { RPCResponse } from "./server_rpc"
 
 let term = terminalkit.terminal
 
@@ -75,7 +78,7 @@ export default class ServerHandlers {
 
     // SECTION Hello Peer
     // ? REVIEW Should we move this to the PeerManager?
-        static async handleHelloPeer(content: BundleContent): Promise<{ response: any, require_reply: boolean, extra: any }> {
+        static async handleHelloPeer(content: BundleContent): Promise<RPCResponse> {
         // Prepare the response
         let response = false
         let require_reply = false
@@ -148,14 +151,14 @@ export default class ServerHandlers {
     }
 
     // SECTION Login On Chain
-    static async handleLoginRequest(content: BrowserRequest) {
+    static async handleLoginRequest(content: BrowserRequest): Promise<RPCResponse> {
         // A browser login request is the first step for a user to confirm their identity
         // The user will be prompted for a message to sign and their session is either created or updated
         let address_requested = content.data.publicKey // Must be a JSON string of a publicKey
         return Sessions.getInstance().newSession(address_requested)
     }
 
-    static async handleLoginResponse(content: BrowserRequest) {
+    static async handleLoginResponse(content: BrowserRequest): Promise<RPCResponse> {
         let result = [true, ""]
         let s_signature = content.data.signature // Must be a JSON or a string of a signature (as Uint8Array or {type: "Buffer", data: []})
         let signature_conversion = normalizeWebBuffers(s_signature)
@@ -175,7 +178,7 @@ export default class ServerHandlers {
     // !SECTION Consensus Voting
     // ANCHOR Vote request
 
-    static async handleVoteRequest(timestamp: number): Promise<string> {
+    static async handleVoteRequest(timestamp: number): Promise<RPCResponse> {
         // Todo : compare the received response response with what we have locally, and return the vote result
         console.log("[SERVERHANDLER] handleVoteRequest")
         const mempool = await Mempool.getMempool()
@@ -244,7 +247,6 @@ export default class ServerHandlers {
     // TODO Either put this into a module or do something to make it more modular
     static async handleExecuteTransaction(
         validatedData: ValidityData,
-        senderSocket: any,
     ): Promise<ExecutionResult> {
         let fname = "[handleExecuteTransaction] "
         let result: ExecutionResult = {
@@ -356,7 +358,6 @@ export default class ServerHandlers {
                 payload = tx.content.data as Web2Payload
                 var web2_result = await ServerHandlers.handleWeb2Request(
                     payload[1] as IWeb2Request,
-                    senderSocket,
                 )
 
                 // TODO Add result.success handling
@@ -390,7 +391,7 @@ export default class ServerHandlers {
     // INFO Handling XM Transaction
     static async handleXMChainOperation(
         xmscript: XMScript,
-    ): Promise<{ response: any; require_reply: boolean; extra: any }> {
+    ): Promise<RPCResponse> {
         /* NOTE This workflow goeas as:
          * The XM Operation is validated, executed and verified
          * when applicable.
@@ -415,7 +416,7 @@ export default class ServerHandlers {
         // TODO Probably to take out
     }
 
-    static async handleXMChainStatus(): Promise<any> {
+    static async handleXMChainStatus(): Promise<RPCResponse> {
         let extra: any
         let require_reply = false
         // NOTE Remember that crosschain operations are in chainscript syntax (see chainscript_example.ts)
@@ -427,13 +428,12 @@ export default class ServerHandlers {
     // Proxy method for handleWeb2Request
     static async handleWeb2Request(
         content: IWeb2Request,
-        senderSocket: any,
-    ): Promise<{ response: any; require_reply: boolean; extra: any }> {
-        return handleWeb2Request(content, senderSocket)
+    ): Promise<RPCResponse> {
+        return handleWeb2Request(content)
     }
 
     // Proxy method for handleL2PS
-    static async handleL2PS(content: any): Promise<{ response: any; require_reply: boolean; extra: any }> {
+    static async handleL2PS(content: any): Promise<RPCResponse> {
         return handleL2PS(content)
     }
 
@@ -441,7 +441,7 @@ export default class ServerHandlers {
         request: any,
         content: any,
         senderIdentity: any,
-    ): Promise<any> {
+    ): Promise<RPCResponse> {
         let extra: string,
             require_reply = false
         let response: any
@@ -541,9 +541,8 @@ export default class ServerHandlers {
     // NOTE As you can see, this method is a mess. Please modularize it.
     static async handleNodeAPI(
         content: any,
-        receiver: any,
         id_ed25519: any,
-    ): Promise<any> {
+    ): Promise<RPCResponse> {
         // Basic Node API handling logic
         // ...
         let extra: any

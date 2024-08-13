@@ -122,19 +122,16 @@ export default class ComLinkUtils {
     // INFO reply to a comlink
     static async replyToComlink( // ? REVIEW RPC compliant reply
         comlink: ComLink,
-        {
-            response,
-            require_reply,
-            extra,
-        }: { response: any; require_reply: boolean; extra: string },
+        response: RPCResponse,
     ): Promise<RPCResponse> {
+        await demostdlib.reply(comlink, response)
+        // Now we need to return a RPCResponse
         let rpcResponse: RPCResponse = {
-            result: 200,
-            response: response,
-            require_reply: require_reply,
-            extra: extra,
+            result: response.result,
+            response: response.response,
+            require_reply: response.require_reply,
+            extra: response.extra,
         }
-        await demostdlib.reply(comlink, response, require_reply, extra)
         //LINK - receiver.emit("comlink_reply", comlink) // ? Replaced with rpc methods compliant stuff
         // TODO add logging
         return rpcResponse
