@@ -7,6 +7,8 @@ import ComLink from "../communications/comlink"
 import manageComLink from "./manageComlink"
 import { manageAuth, AuthMessage } from "./manageAuth"
 import { manageVote, VoteRequest } from "./manageVote"
+import Cryptography from "../crypto/cryptography"
+import Hashing from "../crypto/hashing"
 
 // Reading the port from sharedState
 const port = sharedState.getInstance().serverPort
@@ -54,10 +56,37 @@ export default async function server_rpc(): Promise<Express> {
         if (!isRPCRequest(req.body)) {
             return res.status(400).json({ error: "Invalid RPCRequest format" })
         }
+        // Header check
+        const headers = req.headers
+        var header_validation = validateHeaders(headers)
+        if (!header_validation[0]) {
+            return res.status(401).json({ error: "Invalid headers:" + header_validation[1] })
+        }
+        // Extract the payload and process it
         const payload = req.body as RPCRequest
         const response = processPayload(payload)
         res.json(response) // Send the response back to the client
     })
+
+    // Validate the headers
+    function validateHeaders(headers: any): [boolean, string] {
+        // Check if we have a valid signature and identity header
+        if (!headers["signature"]) {
+            return [false, "Missing signature header"]
+        }
+        if (!headers["identity"]) {
+            return [false, "Missing identity header"]
+        }
+        // TODO Check if the signature is valid
+        const signature = headers["signature"] as string
+        const identity = headers["identity"] as string
+        const message = Hashing.sha256(identity)
+        const isValid = Cryptography.verify(identity, signature, message)
+        if (!isValid) {
+            return [false, "Invalid signature"]
+        }
+        return [true, ""]
+    }
 
     // Function to process the payload
     async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
