@@ -11,6 +11,11 @@ import sharedState from "src/utilities/sharedState"
 import manageMessages from "src/libs/network/routines/manageMessages"
 import { RPCResponse } from "./server_rpc"
 
+/* INFO for the transition to RPC
+- We need to return a RPCResponse object instead of a ComLink object
+- We need to use the comlinkUtils.replyToComlink method to inscript a response in the registry and to get
+    the RPC compliant response to send back to server_rpc logic
+*/
 
 import terminalkit from "terminal-kit"
 
@@ -30,7 +35,6 @@ export async function preflightComLinkChecks(request: any): Promise<{
     try {
         // Parsing comlink
         _comlink_request = await comlinkUtils.parseComlink(
-            // ! This shouldn't care about the socket as there isnt anymore
             request,
         )
         if (!_comlink_request) {

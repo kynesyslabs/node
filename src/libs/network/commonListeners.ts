@@ -112,7 +112,6 @@ export default class CommonListeners {
             // Parsing the comlink
             let parsed_comlink = await ComLinkUtils.parseComlink(
                 request,
-                this.peer.connection.socket,
             )
             if (!parsed_comlink) {
                 return

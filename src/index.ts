@@ -31,7 +31,6 @@ import terminalkit from "terminal-kit"
 
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 // import * as eiows from 'eiows';
-import { server as networkServer } from "./libs/network"
 import { PeerManager } from "./libs/peer"
 // import commandLine from "./utilities/commandLine"
 import peerBootstrap from "./libs/peer/routines/peerBootstrap"
