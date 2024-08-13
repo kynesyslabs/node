@@ -62,3 +62,7 @@ logs/
 start_two_nodes.sh
 node_*.sh
 publickey_*
+
+# Doc files
+documentation/*.html
+documentation/*.zip
