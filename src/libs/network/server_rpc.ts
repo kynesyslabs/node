@@ -52,7 +52,7 @@ export default async function server_rpc(): Promise<Express> {
     }
 
     // POST request handler
-    serverApp.post("/", (req: Request, res: Response) => {
+    serverApp.post("/", async (req: Request, res: Response) => {
         if (!isRPCRequest(req.body)) {
             return res.status(400).json({ error: "Invalid RPCRequest format" })
         }
@@ -64,8 +64,8 @@ export default async function server_rpc(): Promise<Express> {
         }
         // Extract the payload and process it
         const payload = req.body as RPCRequest
-        const response = processPayload(payload)
-        res.json(response) // Send the response back to the client
+        const response = await processPayload(payload)
+        res.json(response)
     })
 
     // Validate the headers

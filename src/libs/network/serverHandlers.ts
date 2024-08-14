@@ -75,14 +75,18 @@ let term = terminalkit.terminal
 
 export default class ServerHandlers {
     // ANCHOR BrowserRequest
+    static emptyResponse: RPCResponse = {
+        result: 0,
+        response: true,
+        require_reply: false,
+        extra: null,
+    }
 
     // SECTION Hello Peer
     // ? REVIEW Should we move this to the PeerManager?
-        static async handleHelloPeer(content: BundleContent): Promise<RPCResponse> {
+    static async handleHelloPeer(content: BundleContent): Promise<RPCResponse> {
         // Prepare the response
-        let response = false
-        let require_reply = false
-        let extra = "not yet digested"
+        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
 
         console.log("[Handle Hello Peer] Handling hello peer...")
 
@@ -91,16 +95,26 @@ export default class ServerHandlers {
         let signature = content.data.signature as forge.pki.ed25519.BinaryBuffer // REVIEW is this the right type?
         let publicKey = content.data.publicKey as forge.pki.PublicKey
         // Refusing to add ourselves
-        if (publicKey.toString("hex") === sharedState.getInstance().identity.ed25519.publicKey.toString("hex")) {
-            console.log("[Hello Peer Listener] Refusing to add ourselves, proceeding anyway")
-            return { response: true, require_reply: false, extra: "Cannot add ourselves: not blocking anyway" }
+        if (
+            publicKey.toString("hex") ===
+            sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
+        ) {
+            console.log(
+                "[Hello Peer Listener] Refusing to add ourselves, proceeding anyway",
+            )
+            response.result = 200
+            response.extra = "Cannot add ourselves: not blocking anyway"
+            return response
         }
         // Let's verify the peer
-        console.log("[Hello Peer Listener] Verifying peer...")  
+        console.log("[Hello Peer Listener] Verifying peer...")
         let verified = Cryptography.verify(peerString, signature, publicKey)
         if (!verified) {
-            return { response: false, require_reply: false, extra: "Invalid signature" }
-        } 
+            response.result = 401
+            response.response = false
+            response.extra = "Invalid signature"
+            return response
+        }
         /*
         // Creating a Peer object
         let peer = new Peer()
@@ -112,53 +126,74 @@ export default class ServerHandlers {
         } */
 
         // REVIEW This is an experimental hello peer management that uses the same mechanism as peerBootstrap
-        console.log("[Hello Peer Listener] Extracting peer from string: " + peerString)
+        console.log(
+            "[Hello Peer Listener] Extracting peer from string: " + peerString,
+        )
         let peerObjectRaw = PeerManager.extractPeerFromString(peerString)
         console.log("[Hello Peer Listener] Extracted peer: ", peerObjectRaw)
         if (!peerObjectRaw) {
             log.error("Error while extracting peer from string: " + peerString)
-            extra = "Error while extracting peer from string: " + peerString
-            return { response, require_reply, extra }
+            response.result = 500
+            response.response = false
+            response.extra =
+                "Error while extracting peer from string: " + peerString
+            return response
         }
         // Destructuring the peer object once connected
         let connectionResult = await Client.connectToPeerObject(peerObjectRaw)
         if (!connectionResult[0]) {
             log.error("Error while connecting to peer: " + peerString)
-            extra = "Error while connecting to peer: " + peerString
-            return { response, require_reply, extra }
+            response.result = 500
+            response.response = false
+            response.extra = "Error while connecting to peer: " + peerString
+            return response
         }
         let peerObject: Peer = connectionResult[1]
         if (!peerObject) {
             log.error("Error while connecting to peer: " + peerString)
-            extra = "Error while connecting to peer: " + peerString
-            return { response, require_reply, extra }
+            response.result = 500
+            response.response = false
+            response.extra = "Error while connecting to peer: " + peerString
+            return response
         }
 
         // If we are here, the peer is connected
-        response = true
-        require_reply = false
-        extra = "Peer connected"
+        response.result = 200
+        response.response = true
+        response.extra = "Peer connected"
 
         // Add the peer as authenticated
         peerObject.verification.status = true
-        console.log("[Hello Peer Listener] Adding peer with id: " + peerObject.identity.toString("hex"))
+        console.log(
+            "[Hello Peer Listener] Adding peer with id: " +
+                peerObject.identity.toString("hex"),
+        )
         let isAddedToPeerlist = PeerManager.getInstance().addPeer(peerObject)
         if (!isAddedToPeerlist) {
-            return { response: false, require_reply: false, extra: "Could not add peer to peerlist" }
+            response.result = 500
+            response.response = false
+            response.extra = "Error while adding peer to peerlist"
+            return response
         }
         // ! Should we make so that hello_peer replaces auth_ask? If yes, it should also return our own authentication data
-        return { response: true, require_reply: false, extra: null }
+        return response
     }
 
     // SECTION Login On Chain
-    static async handleLoginRequest(content: BrowserRequest): Promise<RPCResponse> {
+    static async handleLoginRequest(
+        content: BrowserRequest,
+    ): Promise<RPCResponse> {
+        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
         // A browser login request is the first step for a user to confirm their identity
         // The user will be prompted for a message to sign and their session is either created or updated
         let address_requested = content.data.publicKey // Must be a JSON string of a publicKey
         return Sessions.getInstance().newSession(address_requested)
     }
 
-    static async handleLoginResponse(content: BrowserRequest): Promise<RPCResponse> {
+    static async handleLoginResponse(
+        content: BrowserRequest,
+    ): Promise<RPCResponse> {
+        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
         let result = [true, ""]
         let s_signature = content.data.signature // Must be a JSON or a string of a signature (as Uint8Array or {type: "Buffer", data: []})
         let signature_conversion = normalizeWebBuffers(s_signature)
@@ -179,6 +214,7 @@ export default class ServerHandlers {
     // ANCHOR Vote request
 
     static async handleVoteRequest(timestamp: number): Promise<RPCResponse> {
+        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
         // Todo : compare the received response response with what we have locally, and return the vote result
         console.log("[SERVERHANDLER] handleVoteRequest")
         const mempool = await Mempool.getMempool()
@@ -392,6 +428,7 @@ export default class ServerHandlers {
     static async handleXMChainOperation(
         xmscript: XMScript,
     ): Promise<RPCResponse> {
+        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
         /* NOTE This workflow goeas as:
          * The XM Operation is validated, executed and verified
          * when applicable.
@@ -400,15 +437,13 @@ export default class ServerHandlers {
          * An operation for the gas is also pushed it pn the GLS.
          * The tx is pushed in the mempool if applicable.
          */
-        let extra: any
-        let require_reply = false
         console.log("[XMChain] Handling XM Chain Operation...")
         // REVIEW Remember that crosschain operations can be in chainscript syntax
         // INFO Use the src/features/multichain/chainscript/chainscript.chs for the specs
         //console.log(content.data)
-        let response = await multichainDispatcher.digest(xmscript)
+        response = await multichainDispatcher.digest(xmscript)
         // TODO
-        return { extra, require_reply, response }
+        return response
     }
 
     // INFO This method is used to allow signed data exchanges between peers and clients
@@ -417,24 +452,27 @@ export default class ServerHandlers {
     }
 
     static async handleXMChainStatus(): Promise<RPCResponse> {
-        let extra: any
-        let require_reply = false
+        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
         // NOTE Remember that crosschain operations are in chainscript syntax (see chainscript_example.ts)
-        const response = await multichainCapabilities()
+        response.response = await multichainCapabilities()
         // TODO
-        return { extra, require_reply, response }
+        return response
     }
 
     // Proxy method for handleWeb2Request
     static async handleWeb2Request(
         content: IWeb2Request,
     ): Promise<RPCResponse> {
-        return handleWeb2Request(content)
+        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
+        response = handleWeb2Request(content)
+        return response
     }
 
     // Proxy method for handleL2PS
     static async handleL2PS(content: any): Promise<RPCResponse> {
-        return handleL2PS(content)
+        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
+        response = handleL2PS(content)
+        return response
     }
 
     static async handleConsensusRequest(
@@ -442,18 +480,18 @@ export default class ServerHandlers {
         content: any,
         senderIdentity: any,
     ): Promise<RPCResponse> {
-        let extra: string,
-            require_reply = false
-        let response: any
+        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
 
         console.log("[SERVER] Received consensus request")
-        console.log("[SERVER] Peer identity information received: " + senderIdentity.toString("hex"))
+        console.log(
+            "[SERVER] Peer identity information received: " +
+                senderIdentity.toString("hex"),
+        )
         if (!sharedState.getInstance().consensusMode) {
-            return {
-                extra,
-                require_reply,
-                response: { error: "We are not in consensus mode" },
-            }
+            response.result = 400
+            response.response = false
+            response.extra = "We are not in consensus mode"
+            return response
         }
 
         console.log("we are in consensus mode")
@@ -464,11 +502,10 @@ export default class ServerHandlers {
         const { shard } = sharedState.getInstance()
 
         if (!shard) {
-            return {
-                extra,
-                require_reply,
-                response: { error: "No shard found in shared state" },
-            }
+            response.result = 400
+            response.response = false
+            response.extra = "No shard found in shared state"
+            return response
         }
         console.log("[SERVERHANDLER] Shard found in shared state")
         //console.log(shard)
@@ -485,26 +522,27 @@ export default class ServerHandlers {
 
         // Return error if not authorized
         if (!authorized) {
-            return {
-                extra,
-                require_reply,
-                response: { error: "Not authorized" },
-            }
+            response.result = 401
+            response.response = false
+            response.extra = "Not authorized"
+            return response
         }
 
         switch (content.message) {
             case "getMempool":
-                response = await Mempool.getMempool()
-                console.log("[SERVERHANDLER] Received mempool")
+                response.response = await Mempool.getMempool()
                 //console.log(response)
-                return { extra, require_reply, response }
+                response.result = 200
+                response.require_reply = false
+                response.extra = "Mempool received"
+                console.log("[SERVERHANDLER] Received mempool")
+                return response
 
             default:
-                return {
-                    extra,
-                    require_reply,
-                    response: { error: "Unknown message" },
-                }
+                response.result = 400
+                response.response = false
+                response.extra = "Unknown message"
+                return response
         }
     }
 
