@@ -68,6 +68,7 @@ export default class ComLinkUtils {
         if (!(type_of_call === "nodeCall")) {
             let valid: any[]
             try {
+                // ! This is not yet working: why?
                 valid = await _comlink_request.validateComlink()
             } catch (e) {
                 valid = [

@@ -1,29 +1,47 @@
 // Defining a log class
 
+import sharedState from "src/utilities/sharedState"
 import fs from "fs"
 import terminalkit from "terminal-kit"
 const term = terminalkit.terminal
-import sharedState from "./sharedState"
 
-const LOGS_DIR = "logs_" + sharedState.getInstance().serverPort + "_" + sharedState.getInstance().identityFile.replace(".", "")
-// Create the logs directory if it doesn't exist
-if (!fs.existsSync(LOGS_DIR)) {
-    fs.mkdirSync(LOGS_DIR, { recursive: true })
-}
 
 export default class log {
-    static LOG_INFO_FILE = LOGS_DIR + "/info.log"
-    static LOG_ERROR_FILE = LOGS_DIR + "/error.log"
-    static LOG_DEBUG_FILE = LOGS_DIR + "/debug.log"
-    static LOG_WARNING_FILE = LOGS_DIR + "/warning.log"
-    static LOG_CRITICAL_FILE = LOGS_DIR + "/critical.log"
-    static LOG_CUSTOM_PREFIX = LOGS_DIR + "/custom_"
+    static LOGS_DIR = "logs"
+    static LOG_INFO_FILE = this.LOGS_DIR + "/info.log"
+    static LOG_ERROR_FILE = this.LOGS_DIR + "/error.log"
+    static LOG_DEBUG_FILE = this.LOGS_DIR + "/debug.log"
+    static LOG_WARNING_FILE = this.LOGS_DIR + "/warning.log"
+    static LOG_CRITICAL_FILE = this.LOGS_DIR + "/critical.log"
+    static LOG_CUSTOM_PREFIX = this.LOGS_DIR + "/custom_"
+
+    static setLogsDir() {
+        try {
+            this.LOGS_DIR =
+                "logs_" +
+                sharedState.getInstance().serverPort +
+                "_" +
+                sharedState.getInstance().identityFile.replace(".", "")
+            // Create the logs directory if it doesn't exist
+            if (!fs.existsSync(this.LOGS_DIR)) {
+                fs.mkdirSync(this.LOGS_DIR, { recursive: true })
+            }
+        } catch (error) {
+            term.red("Error creating logs directory:", error)
+            this.LOGS_DIR = "logs"
+        }
+    }
 
     private static getTimestamp(): string {
         return new Date().toISOString()
     }
 
-    static custom(logfile: string, message: string, logToTerminal: boolean = true, cleanFile: boolean = false) {
+    static custom(
+        logfile: string,
+        message: string,
+        logToTerminal: boolean = true,
+        cleanFile: boolean = false,
+    ) {
         const logEntry = `[INFO] [${this.getTimestamp()}] ${message}\n`
         if (logToTerminal) {
             term.bold(logEntry.trim())
@@ -45,7 +63,7 @@ export default class log {
     static error(message: string, logToTerminal: boolean = true) {
         const logEntry = `[ERROR] [${this.getTimestamp()}] ${message}\n`
         if (logToTerminal) {
-            term.red(logEntry.trim())
+            term.red(logEntry.trim() + "\n")
         }
         fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
         fs.appendFileSync(this.LOG_ERROR_FILE, logEntry)
@@ -54,7 +72,7 @@ export default class log {
     static debug(message: string, logToTerminal: boolean = true) {
         const logEntry = `[DEBUG] [${this.getTimestamp()}] ${message}\n`
         if (logToTerminal) {
-            term.magenta(logEntry.trim())
+            term.magenta(logEntry.trim() + "\n")
         }
         fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
         fs.appendFileSync(this.LOG_DEBUG_FILE, logEntry)
@@ -63,7 +81,7 @@ export default class log {
     static warning(message: string, logToTerminal: boolean = true) {
         const logEntry = `[WARNING] [${this.getTimestamp()}] ${message}\n`
         if (logToTerminal) {
-            term.yellow(logEntry.trim())
+            term.yellow(logEntry.trim() + "\n")
         }
         fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
         fs.appendFileSync(this.LOG_WARNING_FILE, logEntry)
@@ -72,10 +90,9 @@ export default class log {
     static critical(message: string, logToTerminal: boolean = true) {
         const logEntry = `[CRITICAL] [${this.getTimestamp()}] ${message}\n`
         if (logToTerminal) {
-            term.bold.red(logEntry.trim())
+            term.bold.red(logEntry.trim() + "\n")
         }
         fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
         fs.appendFileSync(this.LOG_CRITICAL_FILE, logEntry)
     }
-
 }

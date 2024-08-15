@@ -208,10 +208,10 @@ export default class PeerManager {
             currentPeerPort = 53550
         }
         const peer = new Peer()
-        peer.identity = Buffer.from(currentPublicKey, "hex")
+        peer.identity = currentPublicKey
         // ! Remove debug code
         try {
-            peer.connection.string = currentPeerAddress + ">" + currentPeerPort
+            peer.connection.string = currentPeerAddress + ">" + currentPeerPort + ">" + currentPublicKey
         } catch (error) {
             console.log(
                 "[PEERMANAGER] Error extracting peer from string: " + error,
@@ -225,10 +225,14 @@ export default class PeerManager {
 
     // REVIEW This method should be tested and finalized
     static async sayHelloToPeer(peer: Peer) {
+        // Assigning an identity to the peer if it doesn't have one
+        if (!peer.identity) {
+            peer = PeerManager.extractPeerFromString(peer.connection.string)
+        }
         // TODO test and finalize this method
         log.info(
             "[Hello Peer] Saying hello to peer " +
-                peer.identity.toString("hex"),
+                peer.connection.string,
         )
         const our_id = sharedState.getInstance().identity.ed25519.publicKey
         let connection_string = sharedState.getInstance().connectionString // ? Are we sure about this

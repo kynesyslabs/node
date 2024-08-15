@@ -8,7 +8,7 @@ import terminalkit from "terminal-kit"
 
 import { BundleContent } from "@kynesyslabs/demosdk/types"
 
-import ServerHandlers from "../serverHandlers"
+import ServerHandlers from "../endpointHandlers"
 import { RPCResponse } from "../server_rpc"
 
 const term = terminalkit.terminal

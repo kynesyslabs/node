@@ -11,7 +11,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { cryptography } from "src/libs/crypto"
 
-import Client from "../../network/client"
 import Peer from "../Peer"
 import PeerManager from "../PeerManager"
 import getPeerIdentity from "./getPeerIdentity"
@@ -55,10 +54,7 @@ export default async function peerBootstrap(
                 currentPublicKey,
         ) 
         // ANCHOR Connection test and hello_peer routine
-        let _currentPeerObject = await Client.connectToPeer(
-            currentPeerAddress,
-            currentPeerPort,
-        ) // Returns the Peer object
+        let _currentPeerObject: Peer = new Peer(currentPeerAddress, currentPeerPort, currentPublicKey)
         if (_currentPeerObject) {
             // Adding identity if any
             console.log(
@@ -93,43 +89,6 @@ export default async function peerBootstrap(
             console.log("[BOOTSTRAP] _currentPeerObject", _currentPeerObject)
             // This should automatically add the peer to the peer list or the offline list
             await PeerManager.sayHelloToPeer(_currentPeerObject)
-            
-            /* ! If the above works, we can remove the following code
-            
-            console.warn("[PEERBOOTSTRAP] Adding peer to peerlist")
-            //console.warn(_currentPeerObject)
-            if (_currentPeerObject.connection.socket.connected) {
-                let inserted =
-                    PeerManager.getInstance().addPeer(_currentPeerObject)
-                if (!inserted) {
-                    console.log(
-                        "[PEERBOOTSTRAP] Could not add peer to peerlist (see above)",
-                    )
-                    log.info("[PEERBOOTSTRAP] Could not add peer to peerlist (see error)")
-                    // peerlist.push(_currentPeerObject)
-                }
-            }
-            else {
-                    console.log(
-                        "[PEERBOOTSTRAP] Refusing to add peer " +
-                            currentPeerAddress +
-                            " as it is not connected",
-                    )
-                    log.info("[PEERBOOTSTRAP] Refusing to add peer " + currentPeerAddress + " as it is not connected")
-                    // Adding the peer string to the list of offline peers so it can be tried later
-                    PeerManager.getInstance().addOfflinePeer(_currentPeerURL)
-            }
-        } else {
-            console.log(
-                "[BOOTSTRAP] ERROR: Cannot connect to peer: " +
-                    currentPeerAddress +
-                    ":" +
-                    currentPeerPort +
-                    " (will retry) \n",
-            )
-            log.info("[BOOTSTRAP] ERROR: Cannot connect to peer: " + currentPeerAddress + ":" + currentPeerPort + " (will retry) \n")
-            // Adding the peer string to the list of offline peers so it can be tried later
-            PeerManager.getInstance().addOfflinePeer(_currentPeerURL) */
         } 
     }
     // Dying if there are no valid peers

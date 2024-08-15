@@ -7,8 +7,19 @@ import ComLink from "../communications/comlink"
 import manageComLink from "./manageComlink"
 import { manageAuth, AuthMessage } from "./manageAuth"
 import { manageVote, VoteRequest } from "./manageVote"
+import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
+import { manageNodeCall, NodeCall } from "./manageNodeCall"
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
+import log from "src/utilities/logger"
+
+// ANCHOR BrowserRequest
+export const emptyResponse: RPCResponse = {
+    result: 0,
+    response: true,
+    require_reply: false,
+    extra: null,
+}
 
 // Reading the port from sharedState
 const port = sharedState.getInstance().serverPort
@@ -25,8 +36,91 @@ export interface RPCResponse {
     require_reply: boolean
     extra: any
 }
+
+export interface BrowserRequest {
+    message: string
+    data: any
+}
 /* End of interface definitions */
 
+/* Helper functions */
+
+// Type guard to check if the payload is an RPCRequest
+function isRPCRequest(obj: any): obj is RPCRequest {
+    return (
+        typeof obj === "object" &&
+        obj !== null &&
+        "method" in obj &&
+        typeof obj.method === "string" &&
+        "params" in obj &&
+        Array.isArray(obj.params)
+    )
+}
+
+// Validate the headers
+function validateHeaders(headers: any): [boolean, string] {
+    // Check if we have a valid signature and identity header
+    log.info("[RPC Call] Validating headers: " + JSON.stringify(headers, null, 2))
+    if (!headers["signature"]) {
+        return [false, "Missing signature header"]
+    }
+    if (!headers["identity"]) {
+        return [false, "Missing identity header"]
+    }
+    // TODO Check if the signature is valid
+    const signature = headers.signature as string
+    const identity = headers.identity as string
+    const message = identity
+    const isValid = Cryptography.verify(message, signature, identity)
+    if (!isValid) {
+        log.error("[RPC Call] Invalid signature for: " + identity)
+        return [false, "Invalid signature"]
+    } else {
+        log.info("[RPC Call] Headers are valid for: " + identity)
+    }
+    return [true, ""]
+}
+
+/* End of helper functions */
+
+/* ANCHOR Processor method */
+// Function to process the payload
+async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
+    // ComLink management
+    switch (payload.method) {
+        case "comlink":
+            var comlink: ComLink = payload.params[0]
+            return await manageComLink(comlink)
+        // ! When things are working, we should remove the login_request and login_response methods and use a "login" method with params
+        case "login_request":
+            return await handleLoginRequest(payload.params[0] as BrowserRequest)
+        case "login_response":
+            return await handleLoginResponse(
+                payload.params[0] as BrowserRequest,
+            )
+        // Auth management
+        case "auth":
+            return await manageAuth(payload.params[0] as AuthMessage)
+        // Vote management
+        case "vote":
+            return await manageVote(
+                payload.params[0] as VoteRequest,
+                payload.params[1] as (response: RPCResponse) => void,
+            )
+        // Communications not requiring authentication
+        case "nodeCall":
+            return await manageNodeCall(payload.params[0] as NodeCall)
+
+        default:
+            return {
+                result: 404,
+                response: "Method not found",
+                require_reply: false,
+                extra: null,
+            }
+    }
+}
+/* End of processor method */
 
 export default async function server_rpc(): Promise<Express> {
     const serverApp = express()
@@ -39,83 +133,28 @@ export default async function server_rpc(): Promise<Express> {
         res.send("Hello, World!")
     })
 
-    // Type guard to check if the payload is an RPCRequest
-    function isRPCRequest(obj: any): obj is RPCRequest {
-        return (
-            typeof obj === "object" &&
-            obj !== null &&
-            "method" in obj &&
-            typeof obj.method === "string" &&
-            "params" in obj &&
-            Array.isArray(obj.params)
-        )
-    }
-
-    // POST request handler
+    // ANCHOR Main Endpoint: POST request handler
     serverApp.post("/", async (req: Request, res: Response) => {
         if (!isRPCRequest(req.body)) {
             return res.status(400).json({ error: "Invalid RPCRequest format" })
         }
-        // Header check
-        const headers = req.headers
-        var header_validation = validateHeaders(headers)
-        if (!header_validation[0]) {
-            return res.status(401).json({ error: "Invalid headers:" + header_validation[1] })
-        }
         // Extract the payload and process it
         const payload = req.body as RPCRequest
+        // Header check
+        const headers = req.headers
+        // Excluding nodeCall from header validation
+        if (payload.method !== "nodeCall") {
+            var header_validation = validateHeaders(headers)
+            log.info("[RPC Call] Header validation: " + header_validation[0])
+            if (!header_validation[0]) {
+                return res
+                    .status(401)
+                    .json({ error: "Invalid headers:" + header_validation[1] })
+            }
+        }
         const response = await processPayload(payload)
         res.json(response)
     })
-
-    // Validate the headers
-    function validateHeaders(headers: any): [boolean, string] {
-        // Check if we have a valid signature and identity header
-        if (!headers["signature"]) {
-            return [false, "Missing signature header"]
-        }
-        if (!headers["identity"]) {
-            return [false, "Missing identity header"]
-        }
-        // TODO Check if the signature is valid
-        const signature = headers["signature"] as string
-        const identity = headers["identity"] as string
-        const message = Hashing.sha256(identity)
-        const isValid = Cryptography.verify(identity, signature, message)
-        if (!isValid) {
-            return [false, "Invalid signature"]
-        }
-        return [true, ""]
-    }
-
-    // Function to process the payload
-    async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
-        // ComLink management
-        switch (payload.method) {
-            case "comlink":
-                var comlink: ComLink = payload.params[0]
-                return await manageComLink(comlink) // ! FIXME Be sure that this returns the right things
-
-            // Auth management
-            case "auth":
-                return await manageAuth(payload.params[0] as AuthMessage)
-
-            // Vote management
-            case "vote":
-                return await manageVote(
-                    payload.params[0] as VoteRequest,
-                    payload.params[1] as (response: RPCResponse) => void,
-                )
-
-            default:
-                return {
-                    result: 404,
-                    response: "Method not found",
-                    require_reply: false,
-                    extra: null,
-                }
-        }
-    }
 
     // Start the server
     serverApp.listen(port, () => {

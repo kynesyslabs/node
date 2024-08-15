@@ -1,0 +1,179 @@
+import { RPCRequest, RPCResponse, emptyResponse } from "./server_rpc"
+import { Peer } from "../peer"
+import { Blocks } from "src/model/entities/Blocks"
+import Transaction from "../blockchain/transaction"
+import { AddressInfo } from "@kynesyslabs/demosdk/types"
+import Chain from "../blockchain/chain"
+import { StatusNative } from "@kynesyslabs/demosdk/types"
+import GLS from "../blockchain/gls/gls"
+import eggs from "./routines/eggs"
+import sharedState from "src/utilities/sharedState"
+import _ from "lodash"
+// Importing methods themselves
+import getPeerInfo from "./routines/nodecalls/getPeerInfo"
+import getPeerlist from "./routines/nodecalls/getPeerlist"
+import getPreviousHashFromBlockNumber from "./routines/nodecalls/getPreviousHashFromBlockNumber"
+import getPreviousHashFromBlockHash from "./routines/nodecalls/getPreviousHashFromBlockHash"
+import getBlockHeaderByNumber from "./routines/nodecalls/getBlockHeaderByNumber"
+import getBlockHeaderByHash from "./routines/nodecalls/getBlockHeaderByHash"
+import getBlockByNumber from "./routines/nodecalls/getBlockByNumber"
+import getBlockByHash from "./routines/nodecalls/getBlockByHash"
+
+export interface NodeCall {
+    message: string
+    data: any
+    muid: string
+}
+
+// TODO Make this modular ffs
+// FIXME Pls modularize me! Don't leave me alone!
+// REVIEW The method is scared: please modularize it!
+// NOTE As you can see, this method is a mess. Please modularize it.
+export async function manageNodeCall(
+    content: NodeCall,
+): Promise<RPCResponse> {
+    // Basic Node API handling logic
+    // ...
+    let result: any // Storage for the result
+    let nStat: any // Storage for the native status
+    let { data } = content
+    let response = _.cloneDeep(emptyResponse)
+    response.result = 200 // Until proven otherwise
+    response.require_reply = false // Until proven otherwise
+    response.extra = null // Until proven otherwise
+    //console.log(typeof data)
+    console.log(JSON.stringify(content))
+    switch (content.message) {
+        // NOTE The following commented block of code is vestigial
+        /*case "crosschain_operation":
+            case "multichain_operation":
+                term.yellow.bold("[SERVER] Received crosschain_operation\n")
+                response = await ServerHandlers.handleXMChainOperation(content)
+                break // REVIEW Here or in comlinks? */
+        case "getPeerInfo":
+            response.response = await getPeerInfo()
+            break
+        case "getPeerlist":
+            response.response = await getPeerlist()
+            break
+        // REVIEW Both below for getting the last hash (untested yet)
+        case "getPreviousHashFromBlockNumber":
+            result = await getPreviousHashFromBlockNumber(data)
+            response.response = result.response
+            response.extra = result.extra
+            break
+        case "getPreviousHashFromBlockHash":
+            result = await getPreviousHashFromBlockHash(data)
+            response.response = result.response
+            response.extra = result.extra
+            break
+        // REVIEW (untested) Headers instead of full blocks
+        case "getBlockHeaderByNumber":
+            result = await getBlockHeaderByNumber(data)
+            response.response = result.response
+            response.extra = result.extra
+            break
+        case "getBlockHeaderByHash":
+            result = await getBlockHeaderByHash(data)
+            response.response = result.response
+            response.extra = result.extra
+            break
+        case "getLastBlockNumber":
+            console.log("[SERVER] Received getLastBlockNumber")
+            response.response = await Chain.getLastBlockNumber()
+            console.log("[CHAIN.ts] Received reply from the database") // REVIEW Debug
+            //console.log(response)
+            break
+        case "getLastBlockHash":
+            response.response = await Chain.getLastBlockHash()
+            break
+        case "getBlockByNumber":
+            console.log(`get block by number ${data.blockNumber}`)
+            result = await getBlockByNumber(data)
+            response.response = result.response
+            response.extra = result.extra
+            break
+        case "getBlockByHash":
+            console.log(`get block by hash ${data.hash}`)
+            result = getBlockByHash(data)
+            response.response = result.response
+            response.extra = result.extra
+            break
+        case "getTxByHash":
+            if (!data.hash) {
+                response.result = 400
+                response.response = "No hash specified"
+                break
+            }
+            console.log(`getting tx with hash ${data.hash}`)
+            try {
+                response.response = await Chain.getTxByHash(data.hash)
+            } catch (e) {
+                console.log(e)
+                response.result = 500
+                response.response = "error"
+                response.extra = e
+            }
+            break
+        case "getMempool":
+            response.response = await Chain.getPendingPool()
+            break
+        // INFO Authentication listener
+        case "getPeerIdentity":
+            // NOTE We don't need to sign anything as the comlink is signed already
+            response.response = "I am " + sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
+            //console.log(response)
+            break
+
+        // INFO Address info endpoint
+        case "getAddressInfo":
+            if (!data.address) {
+                response.result = 400
+                response.response = "No address specified"
+                break
+            }
+            try {
+                nStat = (await GLS.getGLSNativeStatus(
+                    data.address,
+                )) as StatusNative
+                response = nStat //.toString() // REVIEW It works ?
+            } catch (error) {
+                response.result = 500
+                response.response = "error"
+                response.extra = error
+            }
+            break
+        case "getAddressNonce":
+            if (!data.address) {
+                response.result = 400
+                response.response = "No address specified"
+                break
+            }
+            nStat = (await GLS.getGLSNativeStatus(data.address)) as StatusNative
+            response.response = nStat.nonce
+            break
+        case "getPeerTime":
+            response.response = new Date().getTime()
+            break
+
+        case "getAllTxs":
+            var response_object = await Chain.getAllTxs()
+            response.response = JSON.stringify(response_object)
+            break
+
+        // NOTE Don't look past here, go away
+        // INFO For real, nothing here to be seen
+        case "hots":
+            console.log("[SERVER] Received hots")
+            response.response = eggs.hots()
+            break
+        default:
+            console.log("[SERVER] Received unknown message")
+            // eslint-disable-next-line quotes
+            response.response = '{ error: "Unknown message"}'
+            break
+    }
+
+    // REVIEW Is this ok? Follow back and see
+    return response
+}

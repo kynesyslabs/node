@@ -45,7 +45,7 @@ export default class Peer {
     }
 
     // Creating an empty peer
-    constructor() {
+    constructor(address?: string, port?: number, publicKey?: string) {
         this.connection = {
             string: "",
         }
@@ -97,15 +97,21 @@ export default class Peer {
         // Prepare a request with our identity
         const pubkey = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
         const signature = Cryptography.sign(pubkey, sharedState.getInstance().identity.ed25519.privateKey).toString("hex")
+        // Extract the url and port from the connection string
+        const url = this.connection.string.split(">")[0]
+        const port = this.connection.string.split(">")[1]
+        const connectionUrl = url + ":" + port
+        log.info("[RPC Call] Making RPC call to: " + connectionUrl)
         // Make the request
         try {
-            const response = await axios.post<RPCResponse>(this.connection.string, request, {
+            const response = await axios.post<RPCResponse>(connectionUrl, request, {
                 headers: {
                     "Content-Type": "application/json",
                     "identity": pubkey,
                     "signature": signature,
                 },
             })
+            log.info("[RPC Call] Response: " + response.data)
             return response.data
         } catch (error) {
             log.error("Error making RPC call:" + error)

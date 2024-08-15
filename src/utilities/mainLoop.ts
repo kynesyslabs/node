@@ -12,7 +12,6 @@ import { Peer, PeerManager } from "src/libs/peer"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
 // INFO The main loop executed in background by index.ts
 import sharedState from "./sharedState"
-import Client from "src/libs/network/client"
 import checkOfflinePeers from "src/libs/peer/routines/checkOfflinePeers"
 import log from "src/utilities/logger"
 

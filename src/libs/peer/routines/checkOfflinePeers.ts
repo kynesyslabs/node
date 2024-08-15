@@ -1,5 +1,4 @@
 import PeerManager from "../PeerManager"
-import Client from "src/libs/network/client"
 import sharedState from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 
@@ -16,8 +15,8 @@ export default async function checkOfflinePeers(): Promise<void> {
         const offlinePeerString = offlinePeers[i]
         const offlinePeer = PeerManager.extractPeerFromString(offlinePeerString)
         // TODO Add sanity checks
-        const isOnline = await Client.connectToPeerObject(offlinePeer)
-        if (isOnline[0]) {
+        const isOnline = await offlinePeer.connect()
+        if (isOnline) {
             console.log("[MAIN LOOP] [PEER RECHECK] Peer is online: ", offlinePeerString)
             // Add the peer to the peer manager and online list
             PeerManager.getInstance().addPeer(offlinePeer)

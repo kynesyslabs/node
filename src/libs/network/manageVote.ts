@@ -1,4 +1,4 @@
-import ServerHandlers from "./serverHandlers"
+import ServerHandlers from "./endpointHandlers"
 import { RPCResponse } from "./server_rpc"
 import terminalkit from "terminal-kit"
 

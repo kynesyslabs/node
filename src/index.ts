@@ -16,6 +16,7 @@ import "reflect-metadata"
 import * as dotenv from "dotenv"
 import * as fs from "fs"
 
+import sharedState from "./utilities/sharedState"
 import { server_rpc } from "./libs/network"
 import terminalkit from "terminal-kit"
 
@@ -26,7 +27,6 @@ import { PeerManager } from "./libs/peer"
 import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import groundControl from "./libs/utils/demostdlib/groundControl"
 import mainLoop from "./utilities/mainLoop"
-import sharedState from "./utilities/sharedState"
 import log from "src/utilities/logger"
 
 const term = terminalkit.terminal
@@ -71,7 +71,8 @@ console.log("RPC_FEE: " + RPC_FEE)
 console.log("SERVER_PORT: " + SERVER_PORT)
 console.log("PEER_LIST_FILE: " + PEER_LIST_FILE)
 console.log("= End of Configuration = \n")
-
+// Configure the logs directory
+log.setLogsDir()
 // ? REVIEW Starting the server_rpc: should we keep this async?
 // This should start the server_rpc without any other needed operation
 log.info("[MAIN] Starting the RPC server")

@@ -35,7 +35,6 @@ import getPreviousHashFromBlockNumber from "src/libs/network/routines/nodecalls/
 import handleL2PS from "./routines/transactions/handleL2PS"
 import { normalizeWebBuffers } from "src/libs/network/routines/normalizeWebBuffers"
 import Sessions from "src/libs/network/routines/sessionManager"
-import { BrowserRequest } from "src/libs/network/serverListeners"
 import { Peer } from "src/libs/peer"
 import { Blocks } from "src/model/entities/Blocks"
 import sharedState from "src/utilities/sharedState"
@@ -68,25 +67,18 @@ import getPeerInfo from "./routines/nodecalls/getPeerInfo"
 import forge from "node-forge"
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
-import Client from "./client"
-import { RPCResponse } from "./server_rpc"
+import { RPCResponse, emptyResponse } from "./server_rpc"
 
 let term = terminalkit.terminal
 
 export default class ServerHandlers {
-    // ANCHOR BrowserRequest
-    static emptyResponse: RPCResponse = {
-        result: 0,
-        response: true,
-        require_reply: false,
-        extra: null,
-    }
+    
 
     // SECTION Hello Peer
     // ? REVIEW Should we move this to the PeerManager?
     static async handleHelloPeer(content: BundleContent): Promise<RPCResponse> {
         // Prepare the response
-        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
+        let response: RPCResponse = _.cloneDeep(emptyResponse)
 
         console.log("[Handle Hello Peer] Handling hello peer...")
 
@@ -140,15 +132,15 @@ export default class ServerHandlers {
             return response
         }
         // Destructuring the peer object once connected
-        let connectionResult = await Client.connectToPeerObject(peerObjectRaw)
-        if (!connectionResult[0]) {
+        let connectionResult = await peerObjectRaw.connect()
+        if (!connectionResult) {
             log.error("Error while connecting to peer: " + peerString)
             response.result = 500
             response.response = false
             response.extra = "Error while connecting to peer: " + peerString
             return response
         }
-        let peerObject: Peer = connectionResult[1]
+        let peerObject: Peer = peerObjectRaw // ? Redundant
         if (!peerObject) {
             log.error("Error while connecting to peer: " + peerString)
             response.result = 500
@@ -178,43 +170,11 @@ export default class ServerHandlers {
         // ! Should we make so that hello_peer replaces auth_ask? If yes, it should also return our own authentication data
         return response
     }
-
-    // SECTION Login On Chain
-    static async handleLoginRequest(
-        content: BrowserRequest,
-    ): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
-        // A browser login request is the first step for a user to confirm their identity
-        // The user will be prompted for a message to sign and their session is either created or updated
-        let address_requested = content.data.publicKey // Must be a JSON string of a publicKey
-        return Sessions.getInstance().newSession(address_requested)
-    }
-
-    static async handleLoginResponse(
-        content: BrowserRequest,
-    ): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
-        let result = [true, ""]
-        let s_signature = content.data.signature // Must be a JSON or a string of a signature (as Uint8Array or {type: "Buffer", data: []})
-        let signature_conversion = normalizeWebBuffers(s_signature)
-        let signature = signature_conversion[0]
-        if (!signature) {
-            return [false, "Invalid signature: " + signature_conversion[1]]
-        }
-        // TODO Check session validity
-        // INFO When a user logs in, the server will store and send a token valid for X time
-        // the user possessing that token will be able to demonstrate that the user is still logged in
-        // even in 3rd party applications.
-        // In any case, by calling loginRequest any application is able to enforce the user to log in
-        // and verify themselves again.
-        return result
-    }
-
     // !SECTION Consensus Voting
     // ANCHOR Vote request
 
     static async handleVoteRequest(timestamp: number): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
+        let response: RPCResponse = _.cloneDeep(emptyResponse)
         // Todo : compare the received response response with what we have locally, and return the vote result
         console.log("[SERVERHANDLER] handleVoteRequest")
         const mempool = await Mempool.getMempool()
@@ -428,7 +388,7 @@ export default class ServerHandlers {
     static async handleXMChainOperation(
         xmscript: XMScript,
     ): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
+        let response: RPCResponse = _.cloneDeep(emptyResponse)
         /* NOTE This workflow goeas as:
          * The XM Operation is validated, executed and verified
          * when applicable.
@@ -452,7 +412,7 @@ export default class ServerHandlers {
     }
 
     static async handleXMChainStatus(): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
+        let response: RPCResponse = _.cloneDeep(emptyResponse)
         // NOTE Remember that crosschain operations are in chainscript syntax (see chainscript_example.ts)
         response.response = await multichainCapabilities()
         // TODO
@@ -463,14 +423,14 @@ export default class ServerHandlers {
     static async handleWeb2Request(
         content: IWeb2Request,
     ): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
+        let response: RPCResponse = _.cloneDeep(emptyResponse)
         response = handleWeb2Request(content)
         return response
     }
 
     // Proxy method for handleL2PS
     static async handleL2PS(content: any): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
+        let response: RPCResponse = _.cloneDeep(emptyResponse)
         response = handleL2PS(content)
         return response
     }
@@ -480,7 +440,7 @@ export default class ServerHandlers {
         content: any,
         senderIdentity: any,
     ): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(this.emptyResponse)
+        let response: RPCResponse = _.cloneDeep(emptyResponse)
 
         console.log("[SERVER] Received consensus request")
         console.log(
@@ -573,170 +533,4 @@ export default class ServerHandlers {
         return { extra, require_reply, response }
     }
 
-    // TODO Make this modular ffs
-    // FIXME Pls modularize me! Don't leave me alone!
-    // REVIEW The method is scared: please modularize it!
-    // NOTE As you can see, this method is a mess. Please modularize it.
-    static async handleNodeAPI(
-        content: any,
-        id_ed25519: any,
-    ): Promise<RPCResponse> {
-        // Basic Node API handling logic
-        // ...
-        let extra: any
-        let require_reply = false
-        let response:
-            | string
-            | Peer[]
-            | number
-            | Blocks
-            | Transaction
-            | Transaction[]
-            | AddressInfo
-        let result: any // Storage for the result
-        let nStat: any // Storage for the native status
-        let { data } = content
-        //console.log(typeof data)
-        console.log(JSON.stringify(content))
-        switch (content.message) {
-            // NOTE The following commented block of code is vestigial
-            /*case "crosschain_operation":
-            case "multichain_operation":
-                term.yellow.bold("[SERVER] Received crosschain_operation\n")
-                response = await ServerHandlers.handleXMChainOperation(content)
-                break // REVIEW Here or in comlinks? */
-            case "getPeerInfo":
-                response = await getPeerInfo()
-                break
-            case "getPeerlist":
-                response = await getPeerlist()
-                break
-            // REVIEW Both below for getting the last hash (untested yet)
-            case "getPreviousHashFromBlockNumber":
-                result = await getPreviousHashFromBlockNumber(data)
-                response = result.response
-                extra = result.extra
-                break
-            case "getPreviousHashFromBlockHash":
-                result = await getPreviousHashFromBlockHash(data)
-                response = result.response
-                extra = result.extra
-                break
-            // REVIEW (untested) Headers instead of full blocks
-            case "getBlockHeaderByNumber":
-                result = await getBlockHeaderByNumber(data)
-                response = result.response
-                extra = result.extra
-                break
-            case "getBlockHeaderByHash":
-                result = await getBlockHeaderByHash(data)
-                response = result.response
-                extra = result.extra
-                break
-            case "getLastBlockNumber":
-                console.log("[SERVER] Received getLastBlockNumber")
-                response = await Chain.getLastBlockNumber()
-                console.log("[CHAIN.ts] Received reply from the database") // REVIEW Debug
-                //console.log(response)
-                break
-            case "getLastBlockHash":
-                response = await Chain.getLastBlockHash()
-                break
-            case "getBlockByNumber":
-                console.log(`get block by number ${data.blockNumber}`)
-                result = await getBlockByNumber(data)
-                response = result.response
-                extra = result.extra
-                break
-            case "getBlockByHash":
-                console.log(`get block by hash ${data.hash}`)
-                result = getBlockByHash(data)
-                response = result.response
-                extra = result.extra
-                break
-            case "getTxByHash":
-                if (!data.hash) {
-                    receiver.emit("public", {
-                        error: "No tx specified",
-                    })
-                }
-                console.log(`getting tx with hash ${data.hash}`)
-                try {
-                    response = await Chain.getTxByHash(data.hash)
-                } catch (e) {
-                    console.log(e)
-                    response = "error"
-                    extra = e
-                }
-                break
-            case "getMempool":
-                response = await Chain.getPendingPool()
-                break
-            // INFO Authentication listener
-            case "getPeerIdentity":
-                // NOTE We don't need to sign anything as the comlink is signed already
-                response = "I am " + id_ed25519.publicKey.toString("hex")
-                //console.log(response)
-                break
-
-            // INFO Address info endpoint
-            case "getAddressInfo":
-                if (!data.address) {
-                    response = "error"
-                    extra = "No address specified"
-                    break
-                }
-                try {
-                    nStat = (await GLS.getGLSNativeStatus(
-                        data.address,
-                    )) as StatusNative
-                    response = nStat //.toString() // REVIEW It works ?
-                } catch (error) {
-                    response = "error"
-                    extra = error
-                }
-                break
-            case "getAddressNonce":
-                if (!data.address) {
-                    receiver.emit("public", {
-                        error: "No address specified",
-                    })
-                }
-                nStat = (await GLS.getGLSNativeStatus(
-                    data.address,
-                )) as StatusNative
-                response = nStat.nonce
-                break
-            case "getPeerTime":
-                response = new Date().getTime()
-                break
-
-            case "getAllTxs":
-                var response_object = await Chain.getAllTxs()
-                response = JSON.stringify(response_object)
-                break
-
-            // NOTE Don't look past here, go away
-            // INFO For real, nothing here to be seen
-            case "hots":
-                console.log("[SERVER] Received hots")
-                response = eggs.hots()
-                break
-            default:
-                console.log("[SERVER] Received unknown message")
-                // eslint-disable-next-line quotes
-                response = '{ error: "Unknown message"}'
-                break
-        }
-
-        // REVIEW Unified error handling
-        if (response === "error") {
-            receiver.emit("error", {
-                error: extra,
-                muid: content.muid,
-            })
-        }
-        // REVIEW Is this ok? Follow back and see
-        return { extra, require_reply, response }
-    }
 }
