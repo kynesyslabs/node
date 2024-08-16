@@ -1,4 +1,5 @@
 import Cryptography from "src/libs/crypto/cryptography"
+import { RPCResponse } from "src/libs/network/server_rpc"
 import { Peer } from "src/libs/peer"
 import { demostdlib } from "src/libs/utils"
 import sharedState from "src/utilities/sharedState"
@@ -31,31 +32,41 @@ export async function proofConsensus(hash: string): Promise<[string, string]> {
     return poc
 }
 
-export async function proofConsensusHandler(raw_content: any): Promise<any> {
-    let require_reply = true // REVIEW Sure?
-    let extra: string, response: [string, string]
+export async function proofConsensusHandler(hash: any): Promise<RPCResponse> {
+    let response: RPCResponse = {
+        result: 200,
+        response: "",
+        require_reply: true,
+        extra: "",
+    }
     //console.log(raw_content)
     // process.exit(0)
-    let content = raw_content.message
     // REVIEW Check if the content is valid - Or maybe not
     console.log("proofConsensusHandler")
     //console.log(content)
-    response = await proofConsensus(content)
-    return { extra, response, require_reply }
+    let pocFullResponse = await proofConsensus(hash)
+    response.response = pocFullResponse[0]
+    response.extra = pocFullResponse[1]
+    return response
 }
 
 export async function askPoC(hash: string, peer: Peer): Promise<any> {
     // FIXME If peer has no socket, it will crash (shouldn't exist btw)
-    let response = await demostdlib.remoteCall(
+    let poc_call = {
+        method: "proofOfConsensus",
+        params: [hash],
+    }
+    /*let response = await demostdlib.remoteCall(
         "any",
         peer,
         hash,
         "proofOfConsensus",
         true,
         false,
-    )
-    if (response[0]) {
-        return response[1]
+    ) */
+    let response = await peer.call(poc_call)
+    if (response.result===200) {
+        return response.result
     } else {
         return null
     }

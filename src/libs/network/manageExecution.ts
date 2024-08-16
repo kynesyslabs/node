@@ -2,7 +2,6 @@ import { RPCResponse, emptyResponse } from "./server_rpc"
 import { BundleContent } from "@kynesyslabs/demosdk/types"
 import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import ServerHandlers from "./endpointHandlers"
-import manageMessages from "./routines/manageMessages"
 import { ISecurityReport } from "@kynesyslabs/demosdk/types"
 import * as Security from "src/libs/network/securityModule"
 import _ from "lodash"
@@ -68,9 +67,9 @@ export async function manageExecution(
         // They are treated as messages and are handled by their types themselves
         // For readability, we call an external function to manage the messages
         default:
-            return_value = await manageMessages(
-                content,
-            ) // ! This shouldn't care about the socket as there isnt anymore
+            return_value.result = 404
+            return_value.response = "Unknown message type"
+            return_value.require_reply = false
             break
     }
     //console.log("content.message: " + content.message)

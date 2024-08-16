@@ -6,6 +6,7 @@ import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
 /* eslint-disable indent */
 import * as stat from "./timeSyncUtils"
+import { NodeCall } from "../manageNodeCall"
 
 const sleep = promisify(setTimeout)
 interface Offset {
@@ -31,6 +32,12 @@ export default async function getPeerTime(
     console.log(peer)
     console.log(id)
 
+    let node_call: NodeCall = {
+        message: "getPeerTime",
+        data: null,
+        muid: null,
+    }
+    /*
     // Asking the peer for its time
     let comlink = new ComLink()
     let time_ask = new Transmission(id.privateKey)
@@ -54,11 +61,17 @@ export default async function getPeerTime(
     let response = await comlink.broadcastMessageToPeer(peer, time_ask, id.privateKey)
     console.log("[PEER TIMESYNC] Response received")
     //console.log(response)
+    */
+
+    let response = await peer.call({
+        method: "nodeCall",
+        params: [node_call],
+    })
 
     // Response management
-    if (response[0]) {
+    if (response.result === 200) {
         console.log(
-            `[PEER TIMESYNC] Received timestamp in response: ${response.response.timestamp}`,
+            `[PEER TIMESYNC] Received timestamp in response: ${response.response}`,
         )
     } else {
         console.log("[PEER TIMESYNC] No timestamp received")

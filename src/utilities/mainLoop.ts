@@ -51,7 +51,7 @@ export default async function mainLoop() {
             console.log(
                 "[MAINLOOP]: is not consensus time and no online node tx",
             )
-            await sendNodeOnlineTx()
+            //await sendNodeOnlineTx()
         }
 
         // Execute the peer routine before the consensus loop
@@ -119,9 +119,10 @@ async function peerRoutine(): Promise<Peer[]> {
     // Returns the list of currently online peers
     return currentlyOnlinePeers
 }
-
+// ? This is not used anymore i think
+/*
 // ANCHOR Manages the node online tx
-async function sendNodeOnlineTx() {
+async function sendNodeOnlineTx() { 
     var online_presence_message = new Transmission(
         sharedState.getInstance().identity.ed25519.privateKey,
     )
@@ -159,7 +160,8 @@ async function sendNodeOnlineTx() {
     console.log("[MAIN LOOP] 🐸 Peer is online")
 
     hasSentNodeOnlineTx = true
-}
+} 
+*/
 
 // ANCHOR Consensus routine
 async function consensusRoutine(currentlyOnlinePeers: Peer[]) {

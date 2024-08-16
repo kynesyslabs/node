@@ -15,6 +15,8 @@ import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
 import { BundleContent } from "@kynesyslabs/demosdk/types"
+import ServerHandlers from "./endpointHandlers"
+import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
 
 // ANCHOR BrowserRequest
 export const emptyResponse: RPCResponse = {
@@ -45,6 +47,11 @@ export interface RPCResponse {
 export interface BrowserRequest {
     message: string
     data: any
+}
+
+export interface ConsensusRequest {
+    message: string
+    sender: string
 }
 /* End of interface definitions */
 
@@ -99,6 +106,29 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
         // ? Testing alternative to comlinks
         case "execute":
             return await manageExecution(payload.params[0] as BundleContent)
+        case "hello_peer": // As it is authenticated, we can use it to check if the peer is still alive and is in our peer list
+            return await manageHelloPeer(payload.params[0] as HelloPeerRequest)
+        // ! Convert in progress from manageMessages.ts [[src/libs/network/routines/manageMessages.ts]]: see the calls
+        case "consensus":
+            return await ServerHandlers.handleConsensusRequest(payload.params[0] as ConsensusRequest)
+        case "proofOfConsensus":
+            return await proofConsensusHandler(payload.params[0])
+        case "mempool":
+            return await ServerHandlers.handleMempool(payload.params[0])
+        // Auth management
+        case "auth":
+            return await manageAuth(payload.params[0] as AuthMessage)
+        // NOTE Communications not requiring authentication
+        case "nodeCall":
+            return await manageNodeCall(payload.params[0] as NodeCall)
+
+        /* SECTION Possibly deprecated methods */
+        // Vote management // ? Useful or not?
+        case "vote":
+            return await manageVote(
+                payload.params[0] as VoteRequest,
+                payload.params[1] as (response: RPCResponse) => void,
+            )
         // ! When things are working, we should remove the login_request and login_response methods and use a "login" method with params
         case "login_request":
             return await handleLoginRequest(payload.params[0] as BrowserRequest)
@@ -106,25 +136,13 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
             return await handleLoginResponse(
                 payload.params[0] as BrowserRequest,
             )
-        case "hello_peer": // As it is authenticated, we can use it to check if the peer is still alive and is in our peer list
-            return await manageHelloPeer(payload.params[0] as HelloPeerRequest)
-        // Auth management
-        case "auth":
-            return await manageAuth(payload.params[0] as AuthMessage)
-        // Vote management
-        case "vote":
-            return await manageVote(
-                payload.params[0] as VoteRequest,
-                payload.params[1] as (response: RPCResponse) => void,
-            )
-        // Communications not requiring authentication
-        case "nodeCall":
-            return await manageNodeCall(payload.params[0] as NodeCall)
+        /* !SECTION Possibly deprecated methods */
 
         default:
+            log.warning("[RPC Call] [Received] Method not found: " + payload.method)
             return {
                 result: 404,
-                response: "Method not found",
+                response: "Method not found: " + payload.method,
                 require_reply: false,
                 extra: null,
             }

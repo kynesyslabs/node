@@ -23,6 +23,7 @@ import PeerManager from "../../peer/PeerManager"
 import Block from "../block"
 import Chain from "../chain"
 import required from "src/utilities/required"
+import { NodeCall } from "src/libs/network/manageNodeCall"
 
 const term = terminalkit.terminal
 
@@ -72,7 +73,7 @@ export async function fastSync(
     console.log("[SYNC] First peer is " + firstPeer.connection.string)
 
     // Asking the first peer for the last block number
-    let blockNumberResponse = await demostdlib.remoteCall(
+    /*let blockNumberResponse = await demostdlib.remoteCall(
         firstPeer.connection.string,
         firstPeer,
         "getLastBlockNumber",
@@ -80,14 +81,24 @@ export async function fastSync(
         true,
         false,
         "",
-    )
+    ) */
+    let node_call: NodeCall = {
+        message: "getLastBlockNumber",
+        data: null,
+        muid: null,
+    }
+    let blockNumberResponse = await firstPeer.call({
+        method: "nodeCall",
+        params: [node_call],
+    }, false)
     let blockNumber: number = 0
-    if (blockNumberResponse[0]) {
-        blockNumber = blockNumberResponse[1].message    
+    if (blockNumberResponse.result === 200) {
+        blockNumber = blockNumberResponse.response   
         console.log("[SYNC] First peer has the last block number ")
         console.log(blockNumber)
     } else {
-        console.log("[SYNC] First peer does not have the last block number")
+        console.log("[SYNC] First peer does not have the last block number: " + blockNumberResponse.result)
+        console.log(blockNumberResponse.response)
         console.log("[SYNC] TODO: Not yet implemented; next peer logic")
         //process.exit(0)
         return true // TODO Not yet implemented ^
@@ -173,14 +184,6 @@ export async function fastSync(
 
 // TODO Sync reimplementation
 export async function Sync(peer: Peer): Promise<boolean> {
-    if (!peer.connection.socket) {
-        console.log("[SYNC] Peer has no socket: " + peer.connection.string)
-        return false
-    }
-    if(!peer.connection.socket.connected) {
-        console.log("[SYNC] Peer socket is not connected: " + peer.connection.string)
-        return false
-    }
     // Getting our last block number and hash
     let lastSyncedBlockResponse = await Chain.getBlockByNumber(lastBlockNumber)
     if (!lastSyncedBlockResponse[0]) {

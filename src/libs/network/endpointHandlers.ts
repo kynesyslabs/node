@@ -67,7 +67,7 @@ import getPeerInfo from "./routines/nodecalls/getPeerInfo"
 import forge from "node-forge"
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
-import { RPCResponse, emptyResponse } from "./server_rpc"
+import { ConsensusRequest, RPCResponse, emptyResponse } from "./server_rpc"
 
 let term = terminalkit.terminal
 
@@ -341,16 +341,14 @@ export default class ServerHandlers {
     }
 
     static async handleConsensusRequest(
-        request: any,
-        content: any,
-        senderIdentity: any,
+        request: ConsensusRequest,
     ): Promise<RPCResponse> {
         let response: RPCResponse = _.cloneDeep(emptyResponse)
-
+        let senderIdentity = request.sender
         console.log("[SERVER] Received consensus request")
         console.log(
             "[SERVER] Peer identity information received: " +
-                senderIdentity.toString("hex"),
+                senderIdentity,
         )
         if (!sharedState.getInstance().consensusMode) {
             response.result = 400
@@ -362,7 +360,7 @@ export default class ServerHandlers {
         console.log("we are in consensus mode")
 
         let authorized = false
-        let senderPublicKey = senderIdentity.toString("hex")
+        let senderPublicKey = senderIdentity
 
         const { shard } = sharedState.getInstance()
 
@@ -393,7 +391,7 @@ export default class ServerHandlers {
             return response
         }
 
-        switch (content.message) {
+        switch (request.message) {
             case "getMempool":
                 response.response = await Mempool.getMempool()
                 //console.log(response)

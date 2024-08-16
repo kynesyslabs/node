@@ -11,6 +11,7 @@ import deriveBlock from "../routines/deriveBlock"
 import { askPoC } from "../routines/proofOfConsensus"
 import { ProofOfRepresentation } from "./PoR"
 import log from "src/utilities/logger"
+import { ConsensusRequest } from "src/libs/network/server_rpc"
 
 export default class QBFT {
     constructor() {}
@@ -64,7 +65,16 @@ export default class QBFT {
             console.log(
                 "[BFT] Peer identity: " + peerInstance.identity.toString("hex"),
             )
-
+            let consensus_call: ConsensusRequest = {
+                message: "getMempool",
+                sender: peerInstance.identity.toString("hex"),
+            }
+            let remotePoolResponse = await peerInstance.call({
+                method: "consensus",
+                params: [consensus_call],
+            })
+            /*
+            // ! Replace with a node call or whatever
             let remotePoolResponse = await demostdlib.remoteCall(
                 peerInstance.identity.toString("hex"),
                 peerInstance,
@@ -74,14 +84,13 @@ export default class QBFT {
             )
             console.log("[BFT] Received Remote Mempool Response")
             console.log(remotePoolResponse)
-
+            */
             // Check the response
-            if (remotePoolResponse[0] !== true) {
+            if (remotePoolResponse.result !== 200) {
                 console.log("Remote mempool not valid")
                 return [false, null]
             }
-
-            remotePool = JSON.parse(remotePoolResponse[1].message)
+            remotePool = remotePoolResponse.response
 
             console.log("[BFT] Received Remote Mempool")
             console.log(remotePool)
@@ -178,8 +187,8 @@ export default class QBFT {
             )
 
             pocList.push(await askPoC(forgedProposedHash, peerInstance))
-            console.warn(forgedProposedHash)
-            console.warn(peerInstance)
+            console.warn("[BFT] [Response from PoC] forgedProposedHash: " + forgedProposedHash)
+            console.warn("[BFT] [Response from PoC] peerInstance: " + peerInstance.identity)
         }
 
         console.log("[BFT]: pocList")

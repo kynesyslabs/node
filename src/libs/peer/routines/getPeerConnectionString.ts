@@ -16,11 +16,18 @@ import { Socket } from "socket.io"
 import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
 import Peer from "../Peer"
+import { NodeCall } from "src/libs/network/manageNodeCall"
 
 export default async function getPeerConnectionString(
     peer: Peer,
     id: any,
 ): Promise<Peer> {
+    let node_call: NodeCall = {
+        message: "getPeerConnectionString",
+        data: null,
+        muid: null,
+    }
+    /*
     // Asking the peer for its identity
     let comlink = new ComLink()
     let identity_ask = new Transmission(id.privateKey)
@@ -37,6 +44,11 @@ export default async function getPeerConnectionString(
     comlink.properties.is_reply = false
     // Broadcasting the request
     let response = await comlink.broadcastMessageToPeer(peer, identity_ask, id.privateKey)
+    */
+    let response = await peer.call({
+        method: "nodeCall",
+        params: [node_call],
+    })
     // Response management
     if (response.result === 200) {
         console.log("[PEER CONNECTION] Received response")

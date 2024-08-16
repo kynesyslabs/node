@@ -17,6 +17,7 @@
         "juanblanco.solidity",
         "qwtel.sqlite-viewer",
         "pmneo.tsimporter",
-        "mylesmurphy.prettify-ts"
+        "mylesmurphy.prettify-ts",
+        "isotechnics.commentlinks"
     ]
 }

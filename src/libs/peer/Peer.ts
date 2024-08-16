@@ -115,7 +115,13 @@ export default class Peer {
                     "signature": signature,
                 },
             })
-            log.info("[RPC Call] Response: " + response.data)
+            log.info("[RPC Call] Response: ")
+            log.info(JSON.stringify(response.data, null, 2))
+            if (response.data.result !== 200) {
+                log.warning("[RPC Call] [Response] Response not OK: " + response.data.response + " - " + response.data.result)
+            } else {
+                log.info("[RPC Call] [Response] Response OK: " + response.data.response)
+            }
             return response.data
         } catch (error) {
             log.error("Error making RPC call:" + error)
