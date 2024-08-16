@@ -2,16 +2,19 @@
 
 import express, { Request, Response, Express } from "express"
 import sharedState from "src/utilities/sharedState"
-import ComLinkUtils from "../communications/comlinkUtils"
+/*import ComLinkUtils from "../communications/comlinkUtils"
 import ComLink from "../communications/comlink"
-import manageComLink from "./manageComlink"
+import manageComLink from "./manageComlink"*/
 import { manageAuth, AuthMessage } from "./manageAuth"
 import { manageVote, VoteRequest } from "./manageVote"
 import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
 import { manageNodeCall, NodeCall } from "./manageNodeCall"
+import { manageHelloPeer, HelloPeerRequest } from "./manageHelloPeer"
+import { manageExecution } from "./manageExecution"
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
+import { BundleContent } from "@kynesyslabs/demosdk/types"
 
 // ANCHOR BrowserRequest
 export const emptyResponse: RPCResponse = {
@@ -23,6 +26,8 @@ export const emptyResponse: RPCResponse = {
 
 // Reading the port from sharedState
 const port = sharedState.getInstance().serverPort
+
+const noAuthMethods = ["nodeCall"]
 
 /* Interface definitions */
 export interface RPCRequest {
@@ -88,9 +93,12 @@ function validateHeaders(headers: any): [boolean, string] {
 async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
     // ComLink management
     switch (payload.method) {
-        case "comlink":
+        /* "comlink":
             var comlink: ComLink = payload.params[0]
-            return await manageComLink(comlink)
+            return await manageComLink(comlink) */
+        // ? Testing alternative to comlinks
+        case "execute":
+            return await manageExecution(payload.params[0] as BundleContent)
         // ! When things are working, we should remove the login_request and login_response methods and use a "login" method with params
         case "login_request":
             return await handleLoginRequest(payload.params[0] as BrowserRequest)
@@ -98,6 +106,8 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
             return await handleLoginResponse(
                 payload.params[0] as BrowserRequest,
             )
+        case "hello_peer": // As it is authenticated, we can use it to check if the peer is still alive and is in our peer list
+            return await manageHelloPeer(payload.params[0] as HelloPeerRequest)
         // Auth management
         case "auth":
             return await manageAuth(payload.params[0] as AuthMessage)
@@ -142,8 +152,8 @@ export default async function server_rpc(): Promise<Express> {
         const payload = req.body as RPCRequest
         // Header check
         const headers = req.headers
-        // Excluding nodeCall from header validation
-        if (payload.method !== "nodeCall") {
+        // Excluding due to noAuthMethods from header validation
+        if (!noAuthMethods.includes(payload.method)) {
             var header_validation = validateHeaders(headers)
             log.info("[RPC Call] Header validation: " + header_validation[0])
             if (!header_validation[0]) {

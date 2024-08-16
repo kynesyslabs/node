@@ -88,7 +88,15 @@ export default async function peerBootstrap(
 
             console.log("[BOOTSTRAP] _currentPeerObject", _currentPeerObject)
             // This should automatically add the peer to the peer list or the offline list
-            await PeerManager.sayHelloToPeer(_currentPeerObject)
+            let response =await _currentPeerObject.call({
+                method: "hello_peer",
+                params: [{
+                    url: currentPeerAddress,
+                    port: currentPeerPort,
+                    publicKey: currentPublicKey,
+                }],
+            })
+            console.log("[BOOTSTRAP] Response: " + JSON.stringify(response, null, 2))
         } 
     }
     // Dying if there are no valid peers

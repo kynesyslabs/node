@@ -76,14 +76,14 @@ export async function fastSync(
         firstPeer.connection.string,
         firstPeer,
         "getLastBlockNumber",
-        "nodeCall",
+        "nodeCall", 
         true,
         false,
         "",
     )
     let blockNumber: number = 0
     if (blockNumberResponse[0]) {
-        blockNumber = blockNumberResponse[1].message
+        blockNumber = blockNumberResponse[1].message    
         console.log("[SYNC] First peer has the last block number ")
         console.log(blockNumber)
     } else {

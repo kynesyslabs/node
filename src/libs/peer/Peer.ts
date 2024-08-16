@@ -93,10 +93,14 @@ export default class Peer {
 
     // New method to make an arbitrary RPC call // REVIEW
     // ? As this returns a promise, should it manage its own response registry?
-    async call(request: RPCRequest): Promise<RPCResponse> {
+    async call(request: RPCRequest, isAuthenticated: boolean = true): Promise<RPCResponse> {
         // Prepare a request with our identity
-        const pubkey = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
-        const signature = Cryptography.sign(pubkey, sharedState.getInstance().identity.ed25519.privateKey).toString("hex")
+        let pubkey = ""
+        let signature = ""
+        if (isAuthenticated) {
+            pubkey = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
+            signature = Cryptography.sign(pubkey, sharedState.getInstance().identity.ed25519.privateKey).toString("hex")
+        }
         // Extract the url and port from the connection string
         const url = this.connection.string.split(">")[0]
         const port = this.connection.string.split(">")[1]

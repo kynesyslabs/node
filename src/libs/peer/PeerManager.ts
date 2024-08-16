@@ -19,6 +19,8 @@ import sharedState from "src/utilities/sharedState"
 import forge from "node-forge"
 import { comlinkUtils } from "../communications"
 import { RPCResponse } from "../network/server_rpc"
+import { method } from "lodash"
+import { HelloPeerRequest } from "../network/manageHelloPeer"
 
 function ForgeToHex(forgeBuffer: any) {
     console.log("[forge to string encoded]")
@@ -245,6 +247,7 @@ export default class PeerManager {
             "[Hello Peer] Signed connection string: " +
                 ForgeToHex(signed_connection_string),
         )
+        /* NOTE Testing the hello peer method without the comlink
         // Creating a hello transmission
         const transmission = new Transmission(
             sharedState.getInstance().identity.ed25519.privateKey,
@@ -263,7 +266,6 @@ export default class PeerManager {
         // Creating a comlink and setting it to require a reply
         const comlink = new ComLink()
         comlink.properties.require_reply = true
-        // Sending the transmission to the peer
         let hello_comlink_status = comlink.broadcastMessageToPeer(
             peer,
             transmission,
@@ -276,6 +278,21 @@ export default class PeerManager {
             PeerManager.helloPeerCallback(response, peer)
         })
         log.info("[Hello Peer] Response check started")
+        */
+        // Sending the transmission to the peer
+        const hello_request: HelloPeerRequest = {
+            url: connection_string,
+            port: sharedState.getInstance().serverPort,
+            publicKey: our_id.toString("hex"),
+        }
+        // Not awaiting the response to not block the main thread
+        peer.call({
+            method: "hello_peer",
+            params: [hello_request],
+        }).then((response) => {
+            PeerManager.helloPeerCallback(response, peer)
+        })
+        console.log("[Hello Peer] Hello request sent: waiting for response")
     }
 
     // Callback for the hello peer

@@ -15,9 +15,6 @@ const term = terminalkit.terminal
 
 export default async function manageMessages(
     content: BundleContent,
-    original_comlink: ComLink,
-    original_request: any,
-    id_ed25519: pki.KeyPair,
 ): Promise<RPCResponse> {
     
     let result: RPCResponse = {

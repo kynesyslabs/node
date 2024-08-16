@@ -96,33 +96,7 @@ export default async function manageComLink(request: any): Promise<RPCResponse> 
         return rpcResponse
     }
 
-    // NOTE As first step, we check if this is a peer pairing request
-    /* This endpoint requires content to be:
-        content.message = connection_string
-        content.data.signature = signature of the connection_string
-        content.data.publicKey = public key of the peer signing the connection_string
-    */
-    if (content.type === "hello_peer") {
-        log.info("[Hello Peer Listener] Received hello peer request")
-
-
-        // ? Do we need to do additional checks here? A comlink is validated anyway
-
-        // Connecting to the peer
-        let response = await ServerHandlers.handleHelloPeer(content)
-        if (response.result !== 200) {
-            if (!extra) {
-                extra =
-                    "Error while handling Hello Peer request: error not specified"
-            }
-            log.error("Error while handling Hello Peer request: " + extra)
-        }
-        // Sending back the response
-        console.log("[Hello Peer Listener] Sending back comlink")
-        let rpcResponse: RPCResponse = await comlinkUtils.replyToComlink(_comlink_request, response)
-        return rpcResponse
-    }
-    0
+    
     // TODO Better to modularize this
     // REVIEW We use the 'extra' field to see if it is a confirmTx request (prior to execution)
     // or an broadcastTx request (to execute the transaction after gas cost is calculated).
