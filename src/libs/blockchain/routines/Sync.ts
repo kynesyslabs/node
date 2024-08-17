@@ -15,7 +15,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { demostdlib } from "src/libs/utils"
 import sharedState from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
-
 import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
 import Peer from "../../peer/Peer"
@@ -73,24 +72,20 @@ export async function fastSync(
     console.log("[SYNC] First peer is " + firstPeer.connection.string)
 
     // Asking the first peer for the last block number
-    /*let blockNumberResponse = await demostdlib.remoteCall(
-        firstPeer.connection.string,
-        firstPeer,
-        "getLastBlockNumber",
-        "nodeCall", 
-        true,
-        false,
-        "",
-    ) */
+    
     let node_call: NodeCall = {
         message: "getLastBlockNumber",
         data: null,
         muid: null,
     }
+    // Calling the nodeCall method on the first peer
     let blockNumberResponse = await firstPeer.call({
         method: "nodeCall",
         params: [node_call],
     }, false)
+    console.log("[SYNC] Block number response code: " + blockNumberResponse.result)
+    console.log("[SYNC] Block number response message: " + blockNumberResponse.response)
+    // Managing the response
     let blockNumber: number = 0
     if (blockNumberResponse.result === 200) {
         blockNumber = blockNumberResponse.response   
@@ -130,18 +125,19 @@ export async function fastSync(
         // Effectively asking the first peer for the block
         // TODO Test if it is more logic to just download the headers and, once a chain has been estabilished, download the blocks
         // TODO And by test i mean we have to do it
-        let blockResponse = await demostdlib.remoteCall(
-            firstPeer.connection.string,
-            firstPeer,
-            "getBlockByNumber",
-            "nodeCall",
-            true,
-            false,
-            { blockNumber: blocktoAsk.toString() },
-        )
+        let node_call: NodeCall = {
+            message: "getBlockByNumber",
+            data: { blockNumber: blocktoAsk.toString() },
+            muid: null,
+        }
+        let blockResponse = await firstPeer.call({
+            method: "nodeCall",
+            params: [node_call],
+        }, false)
 
-        console.log("[SYNC] Block response: " + blockResponse[0])
-        let parsedBlock: Block = JSON.parse(JSON.parse(blockResponse[1].message)) // TODO Why has to be like this?
+        console.log("[SYNC] Block response code: " + blockResponse.result)
+        console.log("[SYNC] Block response message: " + blockResponse.response)
+        let parsedBlock: Block = JSON.parse(JSON.parse(blockResponse.response)) // TODO Why has to be like this?
 
         console.log("[SYNC DEBUG] Parsed block:")
         console.log(parsedBlock)
@@ -248,17 +244,17 @@ export async function Sync(peer: Peer): Promise<boolean> {
 }
 
 async function askLastBlockNumber(peer: Peer): Promise<number> {
-    let blockNumberResponse = await demostdlib.remoteCall(
-        peer.connection.string,
-        peer,
-        "getLastBlockNumber",
-        "nodeCall",
-        true,
-        false,
-        "",
-    )
-    if (blockNumberResponse[0]) {
-        return blockNumberResponse[1].message as number
+    let node_call: NodeCall = {
+        message: "getLastBlockNumber",
+        data: null,
+        muid: null,
+    }
+    let blockNumberResponse = await peer.call({
+        method: "nodeCall",
+        params: [node_call],
+    }, false)
+    if (blockNumberResponse.result === 200) {
+        return blockNumberResponse.response as number
     } else {
         console.log("[SYNC] Peer does not have the last block number")
         return 0
@@ -266,17 +262,17 @@ async function askLastBlockNumber(peer: Peer): Promise<number> {
 }
 
 async function askBlockByNumber(peer: Peer, blockNumber: number): Promise<Block> {
-    let blockResponse = await demostdlib.remoteCall(
-        peer.connection.string,
-        peer,
-        "getBlockByNumber",
-        "nodeCall",
-        true,
-        false,
-        { blockNumber: blockNumber.toString() },
-    )
-    if (blockResponse[0]) {
-        return JSON.parse(JSON.parse(blockResponse[1].message)) as Block
+    let node_call: NodeCall = {
+        message: "getBlockByNumber",
+        data: { blockNumber: blockNumber.toString() },
+        muid: null,
+    }
+    let blockResponse = await peer.call({
+        method: "nodeCall",
+        params: [node_call],
+    }, false)
+    if (blockResponse.result === 200) {
+        return JSON.parse(JSON.parse(blockResponse.response)) as Block
     } else {
         console.log("[SYNC] Peer does not have the block " + blockNumber)
         return null

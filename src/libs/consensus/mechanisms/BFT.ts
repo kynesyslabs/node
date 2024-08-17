@@ -73,18 +73,7 @@ export default class QBFT {
                 method: "consensus",
                 params: [consensus_call],
             })
-            /*
-            // ! Replace with a node call or whatever
-            let remotePoolResponse = await demostdlib.remoteCall(
-                peerInstance.identity.toString("hex"),
-                peerInstance,
-                "getMempool",
-                "consensus",
-                true,
-            )
-            console.log("[BFT] Received Remote Mempool Response")
-            console.log(remotePoolResponse)
-            */
+            
             // Check the response
             if (remotePoolResponse.result !== 200) {
                 console.log("Remote mempool not valid")
