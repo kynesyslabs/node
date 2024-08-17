@@ -272,7 +272,7 @@ export default class Mempool {
             )
             let signature_valid = Cryptography.verify(
                 tx_hash,
-                signature,
+                signature.data.toString("hex"),
                 public_key,
             )
             if (!signature_valid) {

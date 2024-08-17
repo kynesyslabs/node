@@ -79,6 +79,8 @@ export default class ServerHandlers {
     // ANCHOR Vote request
 
     static async handleVoteRequest(timestamp: number): Promise<RPCResponse> {
+        console.log("[handleVoteRequest] Handling vote request with timestamp: ")
+        console.log(timestamp)
         let response: RPCResponse = _.cloneDeep(emptyResponse)
         // Todo : compare the received response response with what we have locally, and return the vote result
         console.log("[SERVERHANDLER] handleVoteRequest")
@@ -90,7 +92,10 @@ export default class ServerHandlers {
         const { derivedBlock } = await deriveBlock(mempool, timestamp, shard)
         const proposedBlock = derivedBlock
         let proposedBlockHash = proposedBlock.hash
-        return proposedBlockHash
+        console.log("[handleVoteRequest] Proposed block hash: " + proposedBlockHash)
+        response.result = 200
+        response.response = proposedBlockHash.trim()
+        return response
     }
 
     // !SECTION Login On Chain
@@ -329,14 +334,14 @@ export default class ServerHandlers {
         content: IWeb2Request,
     ): Promise<RPCResponse> {
         let response: RPCResponse = _.cloneDeep(emptyResponse)
-        response = handleWeb2Request(content)
+        response = await handleWeb2Request(content)
         return response
     }
 
     // Proxy method for handleL2PS
     static async handleL2PS(content: any): Promise<RPCResponse> {
         let response: RPCResponse = _.cloneDeep(emptyResponse)
-        response = handleL2PS(content)
+        response = await handleL2PS(content)
         return response
     }
 

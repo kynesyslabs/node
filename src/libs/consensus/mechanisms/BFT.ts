@@ -11,7 +11,7 @@ import deriveBlock from "../routines/deriveBlock"
 import { askPoC } from "../routines/proofOfConsensus"
 import { ProofOfRepresentation } from "./PoR"
 import log from "src/utilities/logger"
-import { ConsensusRequest } from "src/libs/network/server_rpc"
+import { ConsensusRequest, RPCRequest, RPCResponse } from "src/libs/network/server_rpc"
 
 export default class QBFT {
     constructor() {}
@@ -187,8 +187,14 @@ export default class QBFT {
             )
 
             pocList.push(await askPoC(forgedProposedHash, peerInstance))
-            console.warn("[BFT] [Response from PoC] forgedProposedHash: " + forgedProposedHash)
-            console.warn("[BFT] [Response from PoC] peerInstance: " + peerInstance.identity)
+            console.warn(
+                "[BFT] [Response from PoC] forgedProposedHash: " +
+                    forgedProposedHash,
+            )
+            console.warn(
+                "[BFT] [Response from PoC] peerInstance: " +
+                    peerInstance.identity,
+            )
         }
 
         console.log("[BFT]: pocList")
@@ -260,10 +266,15 @@ export default class QBFT {
         // Iterating over all the peers
         for (let i = 0; i < peerlist.length; i++) {
             let peer = peerlist[i]
-            log.info(`[BFT] Voting on parameter ${parameter} for peer ${peer.identity.toString("hex")}`)
+            log.info(
+                `[BFT] Voting on parameter ${parameter} for peer ${peer.identity.toString(
+                    "hex",
+                )}`,
+            )
             // ! remove the debug
-            var response = null
+            var response: RPCResponse = null
             try {
+                /*
             response = await new Promise(resolve => {
                 peer.connection.socket.emit(
                     "voteRequest",
@@ -275,18 +286,37 @@ export default class QBFT {
                         resolve(response)
                     },
                 )
-                })
+                })*/
+                let vote_call: RPCRequest = {
+                    method: "voteRequest",
+                    params: [
+                        {
+                            parameter: parameter,
+                            timestamp: timestamp,
+                        },
+                    ],
+                }
+                response = await peer.call(vote_call)
             } catch (error) {
-                log.error(`[BFT] Error voting on parameter ${parameter} for peer ${peer.identity.toString("hex")}`+error)
+                log.error(
+                    `[BFT] Error voting on parameter ${parameter} for peer ${peer.identity.toString(
+                        "hex",
+                    )}` + error,
+                )
                 response = null
             }
-
+            if (!response) {
+                return false
+            } else if (response.result !== 200) {
+                return false
+            }
             console.log("Voting will compare:\n")
-            //console.log(response)
+            console.log(response.response)
             console.log(our)
+            console.log("\n")
 
             // Compiling the registry
-            if (response != our) {
+            if (response.response != our) {
                 numericResult.con++
             } else {
                 numericResult.pro++

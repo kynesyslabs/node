@@ -8,7 +8,6 @@ import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import { ISecurityReport } from "@kynesyslabs/demosdk/types"
 import * as Security from "src/libs/network/securityModule"
 import sharedState from "src/utilities/sharedState"
-import manageMessages from "src/libs/network/routines/manageMessages"
 import { RPCResponse } from "./server_rpc"
 
 /* INFO for the transition to RPC
@@ -134,12 +133,13 @@ export default async function manageComLink(request: any): Promise<RPCResponse> 
         // They are treated as messages and are handled by their types themselves
         // For readability, we call an external function to manage the messages
         default:
-            ({ extra, require_reply, response } = await manageMessages(
-                content,
-                _comlink_request,
-                request,
-                id_ed25519,
-            )) // ! This shouldn't care about the socket as there isnt anymore
+            term.red.bold("[SERVER] [manageComLink] Unknown extra: " + content.extra)
+            response = {
+                result: 404,
+                response: "Unknown extra: " + content.extra,
+                require_reply: false,
+                extra: null,
+            }
             break
     }
     //console.log("content.message: " + content.message)

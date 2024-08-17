@@ -129,6 +129,8 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
                 payload.params[0] as VoteRequest,
                 payload.params[1] as (response: RPCResponse) => void,
             )
+        case "voteRequest":
+            return await ServerHandlers.handleVoteRequest(payload.params[0].timestamp)
         // ! When things are working, we should remove the login_request and login_response methods and use a "login" method with params
         case "login_request":
             return await handleLoginRequest(payload.params[0] as BrowserRequest)

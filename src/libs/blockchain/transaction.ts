@@ -99,8 +99,8 @@ export default class Transaction implements ITransaction {
         // verify using identity.cryptography.verify(tx.content, tx.signature, publicKey)
         let _verified = Cryptography.verify(
             JSON.stringify(tx.content),
-            tx.signature,
-            tx.content.from,
+            tx.signature.data.toString("hex"),
+            tx.content.from.toString("hex"),
         )
         return [_verified, "Result of verify()"]
     }
@@ -150,8 +150,8 @@ export default class Transaction implements ITransaction {
         //let tx_content_hash = Hashing.sha256(JSON.stringify(tx.content))
         let _result = Cryptography.verify(
             tx.hash,
-            tx.signature.data,
-            tx.content.from,
+            tx.signature.data.toString("hex"),
+            tx.content.from.toString("hex"),
         )
         console.log("[sanityCheck] Sanity: " + _result)
         return _result
