@@ -110,7 +110,6 @@ export default class proxyManager {
         }
     }
 
-    // TODO Add methods to manage a chain of communication as comlink
 
     // SECTION Static security methods
     // TODO Signing, hashing, etc.

@@ -15,13 +15,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { demostdlib } from "src/libs/utils"
 import sharedState from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
-import ComLink from "../../communications/comlink"
-import Transmission from "../../communications/transmission"
 import Peer from "../../peer/Peer"
 import PeerManager from "../../peer/PeerManager"
 import Block from "../block"
 import Chain from "../chain"
-import required from "src/utilities/required"
 import { NodeCall } from "src/libs/network/manageNodeCall"
 
 const term = terminalkit.terminal

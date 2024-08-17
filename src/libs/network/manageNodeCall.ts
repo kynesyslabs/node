@@ -44,12 +44,6 @@ export async function manageNodeCall(
     //console.log(typeof data)
     console.log(JSON.stringify(content))
     switch (content.message) {
-        // NOTE The following commented block of code is vestigial
-        /*case "crosschain_operation":
-            case "multichain_operation":
-                term.yellow.bold("[SERVER] Received crosschain_operation\n")
-                response = await ServerHandlers.handleXMChainOperation(content)
-                break // REVIEW Here or in comlinks? */
         case "getPeerInfo":
             response.response = await getPeerInfo()
             break
@@ -120,7 +114,7 @@ export async function manageNodeCall(
             break
         // INFO Authentication listener
         case "getPeerIdentity":
-            // NOTE We don't need to sign anything as the comlink is signed already
+            // NOTE We don't need to sign anything as the headers are signed already
             response.response = "I am " + sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
             //console.log(response)
             break

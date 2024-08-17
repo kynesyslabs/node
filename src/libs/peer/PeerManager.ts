@@ -11,13 +11,11 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import Peer from "./Peer"
 import log from "src/utilities/logger"
-import ComLink from "../communications/comlink"
 import Transmission from "../communications/transmission"
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import sharedState from "src/utilities/sharedState"
 import forge from "node-forge"
-import { comlinkUtils } from "../communications"
 import { RPCResponse } from "../network/server_rpc"
 import { method } from "lodash"
 import { HelloPeerRequest } from "../network/manageHelloPeer"
@@ -247,38 +245,6 @@ export default class PeerManager {
             "[Hello Peer] Signed connection string: " +
                 ForgeToHex(signed_connection_string),
         )
-        /* NOTE Testing the hello peer method without the comlink
-        // Creating a hello transmission
-        const transmission = new Transmission(
-            sharedState.getInstance().identity.ed25519.privateKey,
-        )
-        transmission.initialize(
-            "hello_peer",
-            connection_string,
-            our_id,
-            peer.identity,
-            { signature: signed_connection_string, publicKey: our_id },
-            {},
-        )
-        await transmission.finalize()
-        log.info("[Hello Peer] Transmission created")
-        log.info("[Hello Peer] Sending our string as: " + connection_string)
-        // Creating a comlink and setting it to require a reply
-        const comlink = new ComLink()
-        comlink.properties.require_reply = true
-        let hello_comlink_status = comlink.broadcastMessageToPeer(
-            peer,
-            transmission,
-            sharedState.getInstance().identity.ed25519.privateKey,
-        )
-        log.info("[Hello Peer] Hello comlink promise returned")
-        // NOTE The below would wait for the response asynchronously, so to not block the main thread
-        // we use a callback that will be executed when the response is received
-        hello_comlink_status.then((response) => {
-            PeerManager.helloPeerCallback(response, peer)
-        })
-        log.info("[Hello Peer] Response check started")
-        */
         // Sending the transmission to the peer
         const hello_request: HelloPeerRequest = {
             url: connection_string,

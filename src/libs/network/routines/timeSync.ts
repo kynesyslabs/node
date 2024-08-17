@@ -2,7 +2,6 @@ import { Peer, PeerManager } from "src/libs/peer"
 import sharedState from "src/utilities/sharedState"
 import { promisify } from "util"
 
-import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
 /* eslint-disable indent */
 import * as stat from "./timeSyncUtils"
@@ -37,31 +36,6 @@ export default async function getPeerTime(
         data: null,
         muid: null,
     }
-    /*
-    // Asking the peer for its time
-    let comlink = new ComLink()
-    let time_ask = new Transmission(id.privateKey)
-    time_ask.initialize(
-        "nodeCall",
-        "getPeerTime",
-        id.publicKey,
-        "placeholder",
-        null,
-        null,
-    )
-    console.log("[PEER TIMESYNC] Time Ask")
-    console.log(time_ask)
-    await time_ask.finalize()
-    comlink.properties.require_reply = true
-    comlink.properties.is_reply = false
-    console.log("[PEER TIMESYNC] Sending comlink")
-    //console.log(comlink)
-    
-    // Broadcasting the request
-    let response = await comlink.broadcastMessageToPeer(peer, time_ask, id.privateKey)
-    console.log("[PEER TIMESYNC] Response received")
-    //console.log(response)
-    */
 
     let response = await peer.call({
         method: "nodeCall",

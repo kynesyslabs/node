@@ -10,7 +10,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { NodeCall } from "src/libs/network/manageNodeCall"
-import ComLink from "../../communications/comlink"
 import Transmission from "../../communications/transmission"
 import Peer from "../Peer"
 import sharedState from "src/utilities/sharedState"
@@ -41,32 +40,6 @@ export default async function getPeerIdentity(
         muid: null,
     }
 
-    /*
-    // Asking the peer for its identity
-    let comlink = new ComLink()
-    let identity_ask = new Transmission(id.privateKey)
-    identity_ask.initialize(
-        "nodeCall",
-        "getPeerIdentity",
-        id.publicKey,
-        "placeholder",
-        null,
-        null,
-    )
-    console.log("[PEER AUTHENTICATION] Identity Ask")
-    //console.log(identity_ask)
-    await identity_ask.finalize()
-    comlink.properties.require_reply = true
-    comlink.properties.is_reply = false
-    console.log(
-        "[PEER AUTHENTICATION] Sending comlink requesting authentication",
-    )
-    //console.log(comlink)
-    // Broadcasting the request
-    let response = await comlink.broadcastMessageToPeer(peer, identity_ask, id.privateKey)
-    console.log("[PEER AUTHENTICATION] Response received")
-    //console.log(response)
-    */
 
     let response = await peer.call({
         method: "nodeCall",

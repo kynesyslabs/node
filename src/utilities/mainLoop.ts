@@ -2,7 +2,6 @@ import { pki } from "node-forge"
 import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool"
 import { fastSync } from "src/libs/blockchain/routines/Sync"
-import ComLink from "src/libs/communications/comlink"
 import Transmission from "src/libs/communications/transmission"
 import QBFT from "src/libs/consensus/mechanisms/BFT"
 import RepresentativeShard from "src/libs/consensus/mechanisms/types/RepresentativeShard"
@@ -119,49 +118,6 @@ async function peerRoutine(): Promise<Peer[]> {
     // Returns the list of currently online peers
     return currentlyOnlinePeers
 }
-// ? This is not used anymore i think
-/*
-// ANCHOR Manages the node online tx
-async function sendNodeOnlineTx() { 
-    var online_presence_message = new Transmission(
-        sharedState.getInstance().identity.ed25519.privateKey,
-    )
-    online_presence_message.initialize(
-        // TODO Specify the answer so that it has a type AND a message
-        "NODE_ONLINE",
-        JSON.stringify({}),
-        sharedState.getInstance().identity.ed25519.publicKey,
-        "placeholder", // TODO Add the receiver, don't we already have it in the receiver object?
-        null,
-        {},
-    )
-    await online_presence_message.finalize()
-    // Populating the comlink
-    const comLink = new ComLink()
-    comLink.properties.require_reply = true
-    comLink.properties.is_reply = false
-
-    let peer = PeerManager.getInstance().getPeer(
-        sharedState.getInstance().identity.ed25519
-            .publicKey as unknown as string,
-    )
-
-    if (!peer) {
-        peer = new Peer()
-        peer.identity = sharedState.getInstance().identity.ed25519
-            .publicKey as pki.ed25519.BinaryBuffer
-    }
-
-    await comLink.broadcastMessageToPeer(
-        peer,
-        online_presence_message,
-        sharedState.getInstance().identity.ed25519.privateKey as any,
-    )
-    console.log("[MAIN LOOP] 🐸 Peer is online")
-
-    hasSentNodeOnlineTx = true
-} 
-*/
 
 // ANCHOR Consensus routine
 async function consensusRoutine(currentlyOnlinePeers: Peer[]) {

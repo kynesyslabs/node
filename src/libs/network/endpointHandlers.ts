@@ -100,7 +100,7 @@ export default class ServerHandlers {
 
     // !SECTION Login On Chain
 
-    // ANCHOR Comlinks
+    // ANCHOR Validate transaction
     static async handleValidateTransaction(
         tx: Transaction,
     ): Promise<ValidityData> {

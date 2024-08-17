@@ -13,7 +13,6 @@ export async function manageExecution(
     content: BundleContent,
 ): Promise<RPCResponse> {
     let return_value = _.cloneDeep(emptyResponse)
-    // ! TODO Manage things here instead of comlinks possibly
 
     console.log("[serverListeners] content.type: " + content.type)
     console.log("[serverListeners] content.extra: " + content.extra)
@@ -63,7 +62,6 @@ export async function manageExecution(
             return_value.extra = result.extra
             break
         // ANCHOR Messages
-        // All the rest of the comlink types do not require extra validation or gas calculation
         // They are treated as messages and are handled by their types themselves
         // For readability, we call an external function to manage the messages
         default:
@@ -81,27 +79,12 @@ export async function manageExecution(
     let secDisabled = true
     if (!secDisabled) {
         let ts = new Date().getTime()
-        let securityInterceptor: ISecurityReport =
-            await Security.modules.communications.comlink.checkRateLimits(ts)
-        if (!securityInterceptor.state) {
-            switch (securityInterceptor.code) {
-                case "429":
-                    break
-
-                default:
-                    term.red.bold(
-                        "[COMLINK] [SECURITY INTERCEPTOR] Unknown error: " +
-                            securityInterceptor.code.toString(),
-                    )
-                    term.red.bold("[COMLINK] [SECURITY INTERCEPTOR] Reported:")
-                    console.log(securityInterceptor.message)
-                    break
-            }
-        }
+        let securityInterceptor: ISecurityReport = null // ! implement this
     }
 
     // Sending back the response
     console.log("[SERVER] Sending back a response")
-    console.log(return_value)
+    //console.log(return_value)
     return return_value
 }
+

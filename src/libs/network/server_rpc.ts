@@ -2,9 +2,6 @@
 
 import express, { Request, Response, Express } from "express"
 import sharedState from "src/utilities/sharedState"
-/*import ComLinkUtils from "../communications/comlinkUtils"
-import ComLink from "../communications/comlink"
-import manageComLink from "./manageComlink"*/
 import { manageAuth, AuthMessage } from "./manageAuth"
 import { manageVote, VoteRequest } from "./manageVote"
 import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
@@ -98,12 +95,8 @@ function validateHeaders(headers: any): [boolean, string] {
 /* ANCHOR Processor method */
 // Function to process the payload
 async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
-    // ComLink management
+    // Payloads management
     switch (payload.method) {
-        /* "comlink":
-            var comlink: ComLink = payload.params[0]
-            return await manageComLink(comlink) */
-        // ? Testing alternative to comlinks
         case "execute":
             return await manageExecution(payload.params[0] as BundleContent)
         case "hello_peer": // As it is authenticated, we can use it to check if the peer is still alive and is in our peer list
