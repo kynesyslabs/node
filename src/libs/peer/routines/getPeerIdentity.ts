@@ -49,6 +49,7 @@ export default async function getPeerIdentity(
     if (response.result === 200) {
         console.log("[PEER AUTHENTICATION] Received response")
         //console.log(response[1].identity.toString("hex"))
+        console.log(response.response)
         if (response.response.toString("hex") === expectedKey) {
             console.log("[PEER AUTHENTICATION] Identity is the expected one")
         } else {
@@ -72,7 +73,8 @@ export default async function getPeerIdentity(
         peer.verification.message = "getPeerIdentity routine verified"      
         peer.verification.timestamp = new Date().getTime()
     } else {
-        console.log("[PEER AUTHENTICATION] Response " + response.result + " received: " + response.response)
+        console.log("[PEER AUTHENTICATION] [FAILED] Response " + response.result + " received: " + response.response)
+        return null
     }
     // ? Should we add it to the peerList here instead of in the peerBootstrap routine / hello_peer routine?
     return peer

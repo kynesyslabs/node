@@ -13,6 +13,7 @@ export default async function checkOfflinePeers(): Promise<void> {
     const offlinePeers = PeerManager.getInstance().getOfflinePeers()
     for (let i = 0; i < offlinePeers.length; i++) {
         const offlinePeerString = offlinePeers[i]
+        console.log("[MAIN LOOP] [PEER RECHECK] Checking offline peer: ", offlinePeerString)
         const offlinePeer = PeerManager.extractPeerFromString(offlinePeerString)
         // TODO Add sanity checks
         const isOnline = await offlinePeer.connect()

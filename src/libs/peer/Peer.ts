@@ -9,7 +9,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import type { IPeerConfig } from "@kynesyslabs/demosdk/types"
+import type { IPeerConfig } from "@kynesyslabs/demosdk-http/types"
 import forge from "node-forge"
 import log from "src/utilities/logger"
 import { RPCRequest, RPCResponse } from "../network/server_rpc"
@@ -17,6 +17,8 @@ import axios from "axios"
 import sharedState from "src/utilities/sharedState"
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
+import { HexToForge } from "../crypto/forgeUtils"
+import { NodeCall } from "../network/manageNodeCall"
 
 export default class Peer {
     // connection informations
@@ -45,11 +47,11 @@ export default class Peer {
     }
 
     // Creating an empty peer
-    constructor(address?: string, port?: number, publicKey?: string) {
+    constructor(address: string = "", port: number = 0, publicKey: string = "") {
         this.connection = {
-            string: "",
+            string: address + ">" + port + ">" + publicKey,
         }
-        this.identity = null
+        this.identity = HexToForge(publicKey)
         this.verification = {
             status: false,
             message: null,
@@ -71,8 +73,22 @@ export default class Peer {
 
     // INFO Connect to a peer
     async connect(): Promise<boolean> {
-        // TODO Implement RPC methods
-        return true
+        console.log("[PEER] Testing connection to peer: " + this.connection.string)
+        let call: NodeCall = {
+            message: "ping",
+            data: null,
+            muid: "",
+        }
+        let response = await this.call({
+            method: "nodeCall",
+            params: [call],
+        })
+        console.log("[PEER] [PING] Response: " + response.result + " - " + response.response)
+        if (response.result === 200) {
+            return true
+        } else {
+            return false
+        }
     }
 
     // INFO Check online status for a peer

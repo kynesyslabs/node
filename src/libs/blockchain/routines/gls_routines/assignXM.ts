@@ -1,4 +1,4 @@
-import { Operation, OperationResult } from "@kynesyslabs/demosdk/types"
+import { Operation, OperationResult } from "@kynesyslabs/demosdk-http/types"
 
 import GLS from "../../gls/gls"
 

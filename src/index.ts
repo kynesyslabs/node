@@ -60,7 +60,9 @@ let PG_PORT: number = parseInt(process.env.RPC_PG_PORT, 10) || 5332
 let SERVER_PORT: number = parseInt(process.env.RPC_PORT, 10) || 0
 if (SERVER_PORT == 0) {
     SERVER_PORT = parseInt(process.env.SERVER_PORT, 10) || 53550
-}   
+}
+// Setting the server port to the shared state
+sharedState.getInstance().serverPort = SERVER_PORT
 // Allow overriding peer list file through RPC_PEER_LIST_FILE
 let PEER_LIST_FILE = process.env.PEER_LIST_FILE || "./demos_peers"
 /* !SECTION Environment variables loading and configuration */
@@ -72,7 +74,7 @@ console.log("SERVER_PORT: " + SERVER_PORT)
 console.log("PEER_LIST_FILE: " + PEER_LIST_FILE)
 console.log("= End of Configuration = \n")
 // Configure the logs directory
-log.setLogsDir()
+log.setLogsDir(SERVER_PORT)
 // ? REVIEW Starting the server_rpc: should we keep this async?
 // This should start the server_rpc without any other needed operation
 log.info("[MAIN] Starting the RPC server")
@@ -171,7 +173,7 @@ async function main() {
     // INFO Setting the common variables and propagating them
     term.yellow("[BOOTSTRAP] 🌐 Bootstrapping peers...\n")
     console.log(PEER_LIST)
-    const peerList = await peerBootstrap(PEER_LIST)
+    await peerBootstrap(PEER_LIST)
     // ? Remove the following code if it's not needed: peerManager.addPeer(peer) is called within peerBootstrap (hello_peer routines)
     /*for (const peer of peerList) {
         peerManager.addPeer(peer)

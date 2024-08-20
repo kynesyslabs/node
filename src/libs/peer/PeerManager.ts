@@ -181,9 +181,11 @@ export default class PeerManager {
     }
 
     addOfflinePeer(peerString: string) {
+        console.log("[PEERMANAGER] Adding offline peer " + peerString)
         if (this.offlinePeers.indexOf(peerString) === -1) {
             this.offlinePeers.push(peerString)
         }
+        console.log("[PEERMANAGER] Offline peers: " + this.offlinePeers)
     }
 
     removeOfflinePeer(peerString: string) {

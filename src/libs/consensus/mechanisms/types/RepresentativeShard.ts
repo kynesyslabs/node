@@ -35,6 +35,7 @@ export default class RepresentativeShard {
 
     // INFO We avoid to expose .shard directly so it can't be edited by mistake
     public async getShard(peerList: Peer[]): Promise<ProofOfRepresentation> {
+        console.log("[REPRESENTATIVE SHARD] Getting shard")
         let shard = this.shard
         if (!shard) {
             shard = await this.generateShard(peerList)
@@ -50,6 +51,7 @@ export default class RepresentativeShard {
 
     // INFO Generating the shard if needed
     private async generateShard(peerList: Peer[]): Promise<ProofOfRepresentation> {
+        console.log("[REPRESENTATIVE SHARD] Generating shard")
         let shard = new ProofOfRepresentation()
         await shard.getSeed(undefined, peerList)
         shard.selectRepresentativeShard()

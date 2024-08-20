@@ -19,7 +19,7 @@ import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import sharedState from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
-import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
+import { Operation, ValidityData } from "@kynesyslabs/demosdk-http/types"
 import required from "src/utilities/required"
 const term = terminalkit.terminal
 

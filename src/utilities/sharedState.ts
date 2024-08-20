@@ -31,6 +31,7 @@ export default class sharedState {
     syncStatus: boolean = false
     // SECTION shared state variables
     shard: ProofOfRepresentation
+    lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard
     identity: Identity
     connectionString: string = ""
     // !SECTION shared state variables

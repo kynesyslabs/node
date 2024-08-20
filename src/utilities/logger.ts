@@ -15,11 +15,14 @@ export default class log {
     static LOG_CRITICAL_FILE = this.LOGS_DIR + "/critical.log"
     static LOG_CUSTOM_PREFIX = this.LOGS_DIR + "/custom_"
 
-    static setLogsDir() {
+    static setLogsDir(port?: number) {
+        if (!port) {
+            port = sharedState.getInstance().serverPort
+        }
         try {
             this.LOGS_DIR =
                 "logs_" +
-                sharedState.getInstance().serverPort +
+                port +
                 "_" +
                 sharedState.getInstance().identityFile.replace(".", "")
             // Create the logs directory if it doesn't exist
@@ -30,6 +33,14 @@ export default class log {
             term.red("Error creating logs directory:", error)
             this.LOGS_DIR = "logs"
         }
+        console.log("Logs directory set to:", this.LOGS_DIR)
+        this.LOG_INFO_FILE = this.LOGS_DIR + "/info.log"
+        this.LOG_ERROR_FILE = this.LOGS_DIR + "/error.log"
+        this.LOG_DEBUG_FILE = this.LOGS_DIR + "/debug.log"
+        this.LOG_WARNING_FILE = this.LOGS_DIR + "/warning.log"
+        this.LOG_CRITICAL_FILE = this.LOGS_DIR + "/critical.log"
+        this.LOG_CUSTOM_PREFIX = this.LOGS_DIR + "/custom_"
+
     }
 
     private static getTimestamp(): string {

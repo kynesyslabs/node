@@ -11,7 +11,7 @@ import { manageExecution } from "./manageExecution"
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
-import { BundleContent } from "@kynesyslabs/demosdk/types"
+import { BundleContent } from "@kynesyslabs/demosdk-http/types"
 import ServerHandlers from "./endpointHandlers"
 import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
 
@@ -24,7 +24,6 @@ export const emptyResponse: RPCResponse = {
 }
 
 // Reading the port from sharedState
-const port = sharedState.getInstance().serverPort
 
 const noAuthMethods = ["nodeCall"]
 
@@ -97,6 +96,13 @@ function validateHeaders(headers: any): [boolean, string] {
 async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
     // Payloads management
     switch (payload.method) {
+        case "ping":
+            return {
+                result: 200,
+                response: "pong",
+                require_reply: false,
+                extra: null,
+            }
         case "execute":
             return await manageExecution(payload.params[0] as BundleContent)
         case "hello_peer": // As it is authenticated, we can use it to check if the peer is still alive and is in our peer list
@@ -146,6 +152,7 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
 /* End of processor method */
 
 export default async function server_rpc(): Promise<Express> {
+    const port = sharedState.getInstance().serverPort
     const serverApp = express()
 
     // Middleware to parse JSON payloads

@@ -2,9 +2,9 @@ import { RPCRequest, RPCResponse, emptyResponse } from "./server_rpc"
 import { Peer } from "../peer"
 import { Blocks } from "src/model/entities/Blocks"
 import Transaction from "../blockchain/transaction"
-import { AddressInfo } from "@kynesyslabs/demosdk/types"
+import { AddressInfo } from "@kynesyslabs/demosdk-http/types"
 import Chain from "../blockchain/chain"
-import { StatusNative } from "@kynesyslabs/demosdk/types"
+import { StatusNative } from "@kynesyslabs/demosdk-http/types"
 import GLS from "../blockchain/gls/gls"
 import eggs from "./routines/eggs"
 import sharedState from "src/utilities/sharedState"
@@ -89,9 +89,15 @@ export async function manageNodeCall(
             break
         case "getBlockByHash":
             console.log(`get block by hash ${data.hash}`)
-            result = getBlockByHash(data)
-            response.response = result.response
-            response.extra = result.extra
+            try {
+                result = await getBlockByHash(data)
+                response.response = result.response
+                response.extra = result.extra
+            } catch (e) {
+                response.response = null
+                response.result = 500
+                response.extra = e
+            }
             break
         case "getTxByHash":
             if (!data.hash) {
@@ -103,10 +109,13 @@ export async function manageNodeCall(
             try {
                 response.response = await Chain.getTxByHash(data.hash)
             } catch (e) {
-                console.log(e)
+                response.response = null
+                response.result = 500
+                response.extra = e
+            }
+            if (!response.response) {
                 response.result = 500
                 response.response = "error"
-                response.extra = e
             }
             break
         case "getMempool":
@@ -115,7 +124,7 @@ export async function manageNodeCall(
         // INFO Authentication listener
         case "getPeerIdentity":
             // NOTE We don't need to sign anything as the headers are signed already
-            response.response = "I am " + sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
+            response.response = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
             //console.log(response)
             break
 
@@ -129,7 +138,7 @@ export async function manageNodeCall(
             try {
                 nStat = (await GLS.getGLSNativeStatus(
                     data.address,
-                )) as StatusNative
+                )) as StatusNative  
                 response = nStat //.toString() // REVIEW It works ?
             } catch (error) {
                 response.result = 500

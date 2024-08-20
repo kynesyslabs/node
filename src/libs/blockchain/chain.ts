@@ -21,9 +21,9 @@ import { MoreThan } from "typeorm"
 import {
     AddressInfo, Operation, StatusNative as StatusNativeType,
     StatusProperties as StatusPropertiesType, StringifiedPayload, TransactionContent,
-} from "@kynesyslabs/demosdk/types"
+} from "@kynesyslabs/demosdk-http/types"
 
-import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
+import { Hashing } from "node_modules/@kynesyslabs/demosdk-http/build/encryption"
 
 
 import Block from "./block"
@@ -80,7 +80,7 @@ export default class Chain {
         } catch (error) {
             console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(error))
             console.error(error)
-            throw error
+            throw error // It does not crash the node, as it is caught by the endpoint handler
         }
     }
 

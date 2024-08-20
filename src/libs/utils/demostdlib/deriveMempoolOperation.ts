@@ -4,7 +4,7 @@ import sharedState from "src/utilities/sharedState"
 
 import GLS from "../../blockchain/gls/gls"
 import Mempool from "../../blockchain/mempool"
-import { Operation } from "@kynesyslabs/demosdk/types"
+import { Operation } from "@kynesyslabs/demosdk-http/types"
 /* eslint-disable no-unused-vars */
 import Transaction from "../../blockchain/transaction"
 

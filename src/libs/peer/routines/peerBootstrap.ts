@@ -50,7 +50,7 @@ export default async function peerBootstrap(
                 currentPeerAddress +
                 ":" +
                 currentPeerPort +
-                ":" +
+                " with id " +
                 currentPublicKey,
         ) 
         // ANCHOR Connection test and hello_peer routine
@@ -58,13 +58,18 @@ export default async function peerBootstrap(
         if (_currentPeerObject) {
             // Adding identity if any
             console.log(
-                "[BOOTSTRAP] Testing " + currentPeerAddress + " identity",
+                "[BOOTSTRAP] Testing " + currentPeerAddress + ":" + currentPeerPort + " identity",
             )
             // After this, the peer object will have an identity and thus will be verified
             _currentPeerObject = await getPeerIdentity(
                 _currentPeerObject,
                 currentPublicKey,
             )
+            if (!_currentPeerObject) {
+                console.log("[PEERBOOTSTRAP] [FAILED] Failed to get peer identity: see above")
+                peerManager.addOfflinePeer(currentPeerAddress + ">" + currentPeerPort + ">" + currentPublicKey)
+                continue
+            }
             console.log(
                 "[BOOSTRAP: overriding connectionstring] " + _currentPeerURL,
             )

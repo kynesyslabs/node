@@ -25,7 +25,7 @@ import {
     RawTransaction,
     Transaction as ITransaction,
     TransactionContent,
-} from "@kynesyslabs/demosdk/types"
+} from "@kynesyslabs/demosdk-http/types"
 
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"

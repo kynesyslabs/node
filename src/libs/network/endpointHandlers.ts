@@ -15,7 +15,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import Chain from "src/libs/blockchain/chain"
-import Mempool from "src/libs/blockchain/mempool"
+import Mempool, { MempoolData } from "src/libs/blockchain/mempool"
 import {
     broadcastVerifiedNativeTransaction,
     confirmTransaction,
@@ -50,7 +50,7 @@ import {
     IWeb2Request,
     ValidityData,
     XMScript,
-} from "@kynesyslabs/demosdk/types"
+} from "@kynesyslabs/demosdk-http/types"
 
 import GLS from "../blockchain/gls/gls"
 import {
@@ -58,7 +58,7 @@ import {
     StringifiedPayload,
     Web2Payload,
     XMPayload,
-} from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/Transaction"
+} from "node_modules/@kynesyslabs/demosdk-http/build/types/blockchain/Transaction"
 import { StatusNative } from "src/model/entities/StatusNative"
 import Block from "../blockchain/block"
 import { BlockContent } from "../../../../sdks/src/types/blockchain/blocks"
@@ -68,6 +68,7 @@ import forge from "node-forge"
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
 import { ConsensusRequest, RPCResponse, emptyResponse } from "./server_rpc"
+import RepresentativeShard from "../consensus/mechanisms/types/RepresentativeShard"
 
 let term = terminalkit.terminal
 
@@ -87,7 +88,15 @@ export default class ServerHandlers {
         const mempool = await Mempool.getMempool()
 
         // REVIEW Is this the right way to get the shard?
-        const { shard } = sharedState.getInstance()
+        var shard = sharedState.getInstance().shard // ! Why sometimes it is undefined?
+        if (!shard) {
+            console.log("[handleVoteRequest] Shard not found, generating...")
+            let onlinePeers = await PeerManager.getInstance().getOnlinePeers()
+            console.log("[handleVoteRequest] Online peers: " + onlinePeers)
+            shard = await RepresentativeShard.getInstance().getShard(onlinePeers)
+            console.log("[handleVoteRequest] Shard: " + shard)
+        }
+        console.log("[handleVoteRequest] Shard: " + shard)
 
         const { derivedBlock } = await deriveBlock(mempool, timestamp, shard)
         const proposedBlock = derivedBlock
@@ -437,7 +446,7 @@ export default class ServerHandlers {
         // ...
         let extra: any
         let require_reply = false
-        const response = await Mempool.receive(content.message)
+        const response = await Mempool.receive(content.message as MempoolData)
         return { extra, require_reply, response }
     }
 
