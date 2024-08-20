@@ -23,6 +23,7 @@ export default async function getCommonValidatorSeed(): Promise<string> {
   const hashedValidationDatas = Hashing.sha256(JSON.stringify(validationDatas))
   // Get the common validator seed
   const commonValidatorSeed = Hashing.sha256(hashedProposers + hashedHashes + hashedValidationDatas)
-
+  // NOTE The common validator seed is set in the sharedState as soon as it is computed
+  sharedState.getInstance().currentValidatorSeed = commonValidatorSeed
   return commonValidatorSeed
 }

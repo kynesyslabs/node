@@ -15,9 +15,12 @@ import { BundleContent } from "@kynesyslabs/demosdk-http/types"
 import ServerHandlers from "./endpointHandlers"
 import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
 import { RPCRequest, RPCResponse, ConsensusRequest, BrowserRequest } from "@kynesyslabs/demosdk-http/types"
+import manageConsensusRoutines from "./manageConsensusRoutines"
+import _ from "lodash"
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
+
 
 export const emptyResponse: RPCResponse = {
     result: 0,
@@ -98,7 +101,7 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
 
         /* SECTION Possibly deprecated methods */
         // Vote management // ? Useful or not?
-        case "vote":
+        case "vote": // ? see below for the consensus methods
             return await manageVote(
                 payload.params[0] as VoteRequest,
                 payload.params[1] as (response: RPCResponse) => void,
@@ -113,6 +116,10 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
                 payload.params[0] as BrowserRequest,
             )
         /* !SECTION Possibly deprecated methods */
+
+        // ! Add here the methods that derive from consensus/v2 mechanisms
+        case "consensus_routine": // ? Change in consensus once we have the new consensus mechanism
+            return await manageConsensusRoutines(payload.params[0])
 
         default:
             log.warning("[RPC Call] [Received] Method not found: " + payload.method)
