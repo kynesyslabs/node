@@ -1,5 +1,5 @@
 import ServerHandlers from "./endpointHandlers"
-import { RPCResponse } from "./server_rpc"
+import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
 import terminalkit from "terminal-kit"
 
 const term = terminalkit.terminal

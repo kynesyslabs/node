@@ -1,4 +1,5 @@
-import { RPCRequest, RPCResponse, emptyResponse } from "./server_rpc"
+import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { emptyResponse } from "./server_rpc"
 import { Peer } from "../peer"
 import { Blocks } from "src/model/entities/Blocks"
 import Transaction from "../blockchain/transaction"

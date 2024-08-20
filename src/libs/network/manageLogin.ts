@@ -1,4 +1,5 @@
-import { RPCResponse, BrowserRequest, emptyResponse } from "./server_rpc"
+import { RPCResponse, BrowserRequest } from "@kynesyslabs/demosdk-http/types"
+import { emptyResponse } from "./server_rpc"
 import { normalizeWebBuffers } from "src/libs/network/routines/normalizeWebBuffers"
 import Sessions from "./routines/sessionManager"
 import _ from "lodash"

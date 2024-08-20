@@ -67,7 +67,8 @@ import getPeerInfo from "./routines/nodecalls/getPeerInfo"
 import forge from "node-forge"
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
-import { ConsensusRequest, RPCResponse, emptyResponse } from "./server_rpc"
+import { ConsensusRequest, RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { emptyResponse } from "./server_rpc"
 import RepresentativeShard from "../consensus/mechanisms/types/RepresentativeShard"
 
 let term = terminalkit.terminal

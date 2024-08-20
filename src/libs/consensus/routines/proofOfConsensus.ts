@@ -1,5 +1,5 @@
 import Cryptography from "src/libs/crypto/cryptography"
-import { RPCResponse } from "src/libs/network/server_rpc"
+import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
 import { Peer } from "src/libs/peer"
 import { demostdlib } from "src/libs/utils"
 import sharedState from "src/utilities/sharedState"

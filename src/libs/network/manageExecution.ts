@@ -1,4 +1,5 @@
-import { RPCResponse, emptyResponse } from "./server_rpc"
+import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { emptyResponse } from "./server_rpc"
 import { BundleContent } from "@kynesyslabs/demosdk-http/types"
 import { Transaction, ValidityData } from "@kynesyslabs/demosdk-http/types"
 import ServerHandlers from "./endpointHandlers"

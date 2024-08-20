@@ -2,7 +2,7 @@ import Cryptography from "../crypto/cryptography"
 import * as forge from "node-forge"
 import terminalkit from "terminal-kit"
 import log from "src/utilities/logger"
-import { RPCResponse } from "./server_rpc"
+import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
 import { Peer, PeerManager } from "../peer"
 
 const term = terminalkit.terminal

@@ -1,4 +1,5 @@
-import { RPCResponse, emptyResponse } from "./server_rpc"
+import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { emptyResponse } from "./server_rpc"
 import sharedState from "src/utilities/sharedState"
 import { PeerManager, Peer } from "../peer"
 import log from "src/utilities/logger"

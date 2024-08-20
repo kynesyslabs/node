@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import * as socket_client from "socket.io-client"
 import Transmission from "src/libs/communications/transmission"
 import { NodeCall } from "src/libs/network/manageNodeCall"
-import { RPCResponse } from "src/libs/network/server_rpc"
+import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
 import { Peer } from "src/libs/peer"
 import terminalkit from "terminal-kit"
 
