@@ -11,7 +11,7 @@ import deriveBlock from "../routines/deriveBlock"
 import { askPoC } from "../routines/proofOfConsensus"
 import { ProofOfRepresentation } from "./PoR"
 import log from "src/utilities/logger"
-import { ConsensusRequest, RPCRequest, RPCResponse } from "src/libs/network/server_rpc"
+import { ConsensusRequest, RPCRequest, RPCResponse } from "@kynesyslabs/demosdk-http/types"
 
 export default class QBFT {
     constructor() {}

@@ -14,42 +14,17 @@ import log from "src/utilities/logger"
 import { BundleContent } from "@kynesyslabs/demosdk-http/types"
 import ServerHandlers from "./endpointHandlers"
 import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
+import { RPCRequest, RPCResponse, ConsensusRequest, BrowserRequest } from "@kynesyslabs/demosdk-http/types"
+// Reading the port from sharedState
 
-// ANCHOR BrowserRequest
+const noAuthMethods = ["nodeCall"]
+
 export const emptyResponse: RPCResponse = {
     result: 0,
     response: true,
     require_reply: false,
     extra: null,
 }
-
-// Reading the port from sharedState
-
-const noAuthMethods = ["nodeCall"]
-
-/* Interface definitions */
-export interface RPCRequest {
-    method: string
-    params: any[]
-}
-
-export interface RPCResponse {
-    result: number // HTTP status code
-    response: any
-    require_reply: boolean
-    extra: any
-}
-
-export interface BrowserRequest {
-    message: string
-    data: any
-}
-
-export interface ConsensusRequest {
-    message: string
-    sender: string
-}
-/* End of interface definitions */
 
 /* Helper functions */
 

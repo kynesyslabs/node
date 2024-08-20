@@ -1,7 +1,8 @@
 import { BlockContent, EncryptedTransaction } from "@kynesyslabs/demosdk-http/types"
 import Chain from "src/libs/blockchain/chain"
 import Hashing from "src/libs/crypto/hashing"
-import { RPCResponse, emptyResponse } from "../../server_rpc"
+import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { emptyResponse } from "../../server_rpc"
 import _ from "lodash"
 
 export default async function handleL2PS(
