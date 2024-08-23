@@ -9,7 +9,7 @@ export async function broadcastBlockHash(block: Block, shard: Peer[]): Promise<[
     for (const peer of shard) {
         promises.push(
             peer.call({
-                method: "proposeBlockHash", // ! We should create the necessary RPCs endpoints for this
+                method: "proposeBlockHash",
                 params: [block.hash, block.validation_data],
             }),
         )
