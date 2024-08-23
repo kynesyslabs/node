@@ -4,6 +4,7 @@ import Mempool from "src/libs/blockchain/mempool"
 import { fastSync } from "src/libs/blockchain/routines/Sync"
 import Transmission from "src/libs/communications/transmission"
 import QBFT from "src/libs/consensus/mechanisms/BFT"
+import { consensusRoutine as ConsensusRoutineV2 } from "src/libs/consensus/v2/PoRBFT" // experimental v2 consensus
 import RepresentativeShard from "src/libs/consensus/mechanisms/types/RepresentativeShard"
 import { Identity } from "src/libs/identity"
 import { Peer, PeerManager } from "src/libs/peer"
@@ -60,7 +61,9 @@ export default async function mainLoop() {
         // NOTE We need both the consensus time and the sync status to be true, to avoid
         // conflicts with the sync loop that would lead to a failure in the consensus mechanism.
         if (isConsensusTimeReached && sharedState.getInstance().syncStatus) {
-            await consensusRoutine(currentlyOnlinePeers)
+            log.info("[MAIN LOOP] Consensus time reached and sync status is true")
+            //await consensusRoutine(currentlyOnlinePeers)
+            await ConsensusRoutineV2()
         } else if (!sharedState.getInstance().syncStatus) {
             // ? This is a bit redundant, isn't it?
             console.log(

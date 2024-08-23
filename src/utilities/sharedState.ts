@@ -1,5 +1,6 @@
 // INFO This singleton is used to store the state of the application through different parts of the application.
 
+import Block from "src/libs/blockchain/block"
 import * as dotenv from "dotenv"
 import forge from "node-forge"
 import chain from "src/libs/blockchain/chain"
@@ -35,7 +36,10 @@ export default class sharedState {
     currentValidatorSeed: string
     identity: Identity
     connectionString: string = ""
-    // !SECTION shared state variables
+    lastConsensusTime: number = 0
+    // SECTION Consensus states
+    candidateBlock: Block
+
 
     // SECTION Configuration
     rpcFee: number = parseInt(process.env.RPC_FEE_PERCENT) // TODO Implement // Percentage of the fee to be charged for the rpc

@@ -39,11 +39,15 @@ export async function consensusRoutine() {
         // ! Should we just go on with the RPC operations and listen for the block? I think so
         // ? We can control once the block arrives if it is created by a node in the shard using the lastShard state
         return
+    } else {
+        log.info("[consensusRoutine] We are in the shard, creating the block")
     }
     log.info(`[consensusRoutine] shard: ${shard}`)
     // Sending our mempool to the shard while waiting for the others to do the same
-    const ourMempool = await Mempool.getMempool() // ? Could this be already modified by the time we send it? Do we care?
+    const ourMempool = await Mempool.getMempool() // ? Could this be already modified by time we send it? Do we care?
+    log.info("[consensusRoutine] Our mempool has been retrieved")
     const mempool = await mergeMempools(ourMempool, shard)
+    log.info("[consensusRoutine] Mempools have been merged")
     // Now the shard should have the same mempool, merged with the mempools of the other nodes
     var orderedTransactions = await orderTransactions(mempool)
     var block = await createBlock(
@@ -63,14 +67,25 @@ export async function consensusRoutine() {
     // Checking if the block is valid with a BFT approach
     const totalVotes = shard.length
     const threshold = Math.floor(totalVotes * 2 / 3) + 1
+    log.info(`[consensusRoutine] Threshold: ${threshold}`)
+    log.info(`[consensusRoutine] Total votes: ${totalVotes}`)
+    log.info(`[consensusRoutine] Block hash: ${block.hash}`)
     if (pro >= threshold) {
         log.info(`[consensusRoutine] Block is valid with ${pro} votes`)
         // Add the block to the chain
         Chain.insertBlock(block)
         sharedState.getInstance().consensusMode = false
         sharedState.getInstance().inConsensusLoop = false
+        log.info("[consensusRoutine] Block added to the chain")
+        const lastBlock = await Chain.getLastBlock()
+        console.log(lastBlock)
         // REVIEW End of the consensus routine
     } else {
         log.info(`[consensusRoutine] Block is not valid with ${pro} votes`)
     }
+    // Deleting the candidate block
+    sharedState.getInstance().candidateBlock = null
+    // NOTE Adding the block to the blockchain is done above
+    // Setting the last consensus time in the shared state
+    sharedState.getInstance().lastConsensusTime = Date.now()
 }

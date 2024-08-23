@@ -445,9 +445,11 @@ export default class ServerHandlers {
     static async handleMempool(content: any): Promise<any> {
         // Basic message handling logic
         // ...
+        console.log("[handleMempool] Received a message")
+        console.log(content)
         let extra: any
         let require_reply = false
-        const response = await Mempool.receive(content.message as MempoolData)
+        const response = await Mempool.receive(content.data as MempoolData)
         return { extra, require_reply, response }
     }
 

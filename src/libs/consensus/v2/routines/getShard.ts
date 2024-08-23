@@ -2,6 +2,7 @@ import { PeerManager } from "src/libs/peer"
 import { Peer } from "src/libs/peer"
 import Alea from "alea"
 import sharedState from "src/utilities/sharedState"
+import log from "src/utilities/logger"
 
 export default async function getShard(seed: string): Promise<Peer[]> {
     // ! we need to get the peers from the last 3 blocks too
@@ -23,5 +24,9 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     }
     // Setting the last shard
     sharedState.getInstance().lastShard = shard.map((peer) => peer.identity.toString("hex"))
+    if (sharedState.getInstance().lastShard.length < 3) {
+        log.warning("There are less than 3 peers in the last shard: this could be a security issue")
+    }
+    log.info(`Last shard: ${sharedState.getInstance().lastShard}`)
     return shard
 }

@@ -1,6 +1,7 @@
 import Mempool from "src/libs/blockchain/mempool"
 import { MempoolData } from "src/libs/blockchain/mempool"
 import { Peer } from "src/libs/peer"
+import log from "src/utilities/logger"
 
 export async function mergeMempools(
     mempool: MempoolData,
@@ -8,6 +9,7 @@ export async function mergeMempools(
 ): Promise<MempoolData> {
     var promises = []
     for (const peer of shard) {
+        log.info(`[mergeMempools] Merging mempool with ${peer.identity}`)
         promises.push(
             peer.call({
                 method: "mempool", // see server_rpc.ts
@@ -15,8 +17,10 @@ export async function mergeMempools(
             }),
         )
     }
+    log.info("[mergeMempools] Merging mempools is awaiting")
     // Waiting for the various calls to complete
     await Promise.all(promises) // ! Add error handling
+    log.info("[mergeMempools] Merging mempools is complete")
     // We call getMempool again to make sure we have the latest version that should have the merged mempools
     let mergedMempool = await Mempool.getMempool()
     return mergedMempool

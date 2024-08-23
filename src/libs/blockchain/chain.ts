@@ -324,6 +324,7 @@ export default class Chain {
         newBlock.status = block.status
         newBlock.validation_data = block.validation_data
         newBlock.content = block.content
+        newBlock.status = "confirmed"
         newBlock.content.ordered_transactions = transactionEntities.map(
             tx => tx.hash,
         )

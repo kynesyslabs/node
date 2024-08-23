@@ -1,3 +1,4 @@
+import Chain from "src/libs/blockchain/chain"
 import sharedState from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 
@@ -5,10 +6,18 @@ const term = terminalkit.terminal
 
 export async function checkConsensusTime(): Promise<boolean> {
     let isConsensusTime = false
-    let consensusIntervalTime =
-        sharedState.getInstance().getConsensusTime() || 10000
-    // Calculate the delta between the current timestamp and the genesis timestamp
-    let delta = await sharedState.getInstance().getTimePassed()
+    // We cannot calculate the consensus time from the last block, 
+    // as timestamps might be synthetic (see createBlock.ts) due to sharding and internal logic
+    let lastTimestamp = sharedState.getInstance().lastConsensusTime
+    let currentTimestamp = Date.now()
+    let delta = currentTimestamp - lastTimestamp
+    let consensusIntervalTime = sharedState.getInstance().getConsensusTime() || 10000
+    console.log("[CONSENSUS TIME] lastTimestamp: " + lastTimestamp)
+    console.log("[CONSENSUS TIME] currentTimestamp: " + currentTimestamp)
+    console.log("[CONSENSUS TIME] delta: " + delta)
+    console.log("[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime)
+    //process.exit(0)
+
     // If the delta is greater than the consensus interval time, then the consensus time has passed
     console.log(
         "[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime,

@@ -1,41 +1,52 @@
+import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
 import { ConsensusHashResponse } from "../interfaces"
 import Block from "src/libs/blockchain/block"
 import { Peer } from "src/libs/peer"
+import sharedState from "src/utilities/sharedState"
 
 export async function broadcastBlockHash(block: Block, shard: Peer[]): Promise<[number, number]> {
     var pro = 0
     var con = 0
     var promises = []
+    const ourId = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
+    const proposeParams = [block.hash, block.validation_data, ourId]
     for (const peer of shard) {
         promises.push(
             peer.call({
-                method: "proposeBlockHash",
-                params: [block.hash, block.validation_data],
+                method: "consensus_routine",
+                params: [{
+                    method: "proposeBlockHash",
+                    params: proposeParams,
+                }],
             }),
         )
     }
-    // ! The endpoints should reply with a boolean and their own validation data
+    // See manageConsensusRoutine.ts for more details on the response format and mechanism
     for (const promise of promises) {
         // Work asynchronously
-        promise.then((response: ConsensusHashResponse) => {
-            console.log("[consensusRoutine] response from a validator: ", response)
-            if (response.success) {
+        promise.then((response: RPCResponse) => {
+            console.log("[consensusRoutine] response from a validator received.")
+            if (response.result === 200) {
                 console.log(
                     "[consensusRoutine] Block hash confirmation received from the validator: " +
-                        response.validation_data[0],
+                        response.response,
                 )
                 // Add the validation data to the block
-                block.validation_data.signatures[response.validation_data[0]] =
-                    response.validation_data[1]
+                // ? Should we check if the peer is in the shard? Theoretically we checked before
+                let peerValidationData = response.extra.signatures[response.response]
+                console.log("[consensusRoutine] Peer validation data: ", peerValidationData)
+                block.validation_data.signatures[response.response] =
+                    peerValidationData
                 pro++
             } else {
-                console.log("[consensusRoutine] Block hash not confirmed from the validator: " + response.validation_data[0])
+                console.log("[consensusRoutine] Block hash not confirmed from the validator: " + response.response)
                 console.log("[consensusRoutine] Block hash proposed: ", block.hash)
-                console.log("[consensusRoutine] Block hash received: ", response.hash)
+                console.log("[consensusRoutine] Response received: ", response.extra)
                 con++
             }
         })
     }
     await Promise.all(promises)
+    console.log("[consensusRoutine] Block hash broadcasted to the shard: votes: ", pro, "rejections: ", con)
     return [pro, con]
 }

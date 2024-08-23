@@ -35,7 +35,7 @@ export default class Block {
             timestamp: null,
         }
         this.proposer = null
-        this.validation_data = null
+        this.validation_data = { signatures: {} }
     }
 
     // ANCHOR Getters
