@@ -24,15 +24,17 @@ export default async function getCommonValidatorSeed(): Promise<string> {
     const proposers = lastThreeBlocks.map(block => block.proposer)
     const hashes = lastThreeBlocks.map(block => block.hash)
     const validationDatas = lastThreeBlocks.map(block => block.validation_data)
+    const lastTimestamps = lastThreeBlocks.map(block => block.content.timestamp)
     // Hash everything
     const hashedProposers = Hashing.sha256(JSON.stringify(proposers))
     const hashedHashes = Hashing.sha256(JSON.stringify(hashes))
     const hashedValidationDatas = Hashing.sha256(
         JSON.stringify(validationDatas),
     )
+    const hashedTimestamps = Hashing.sha256(JSON.stringify(lastTimestamps))
     // Get the common validator seed
     const commonValidatorSeed = Hashing.sha256(
-        hashedProposers + hashedHashes + hashedValidationDatas,
+        hashedProposers + hashedHashes + hashedValidationDatas + hashedTimestamps,
     )
     // NOTE The common validator seed is set in the sharedState as soon as it is computed
     sharedState.getInstance().currentValidatorSeed = commonValidatorSeed
