@@ -1,3 +1,4 @@
+
 import Transaction from "src/libs/blockchain/transaction"
 import getCommonValidatorSeed from "./routines/getCommonValidatorSeed"
 import getShard from "./routines/getShard"
@@ -18,7 +19,6 @@ import averageTimestamps from "./routines/averageTimestamp"
 
 // Wrapper for the consensus routine calling all the necessary subroutines
 export async function consensusRoutine() {
-    // ! Add a way to average the timestamps of the nodes in the shard to assign a common timestamp to the block
     // ! Add a way to exclude nodes from the shard if they are too far in the past or too far in the future
     // Setting the shared state to consensus mode
     sharedState.getInstance().consensusMode = true
