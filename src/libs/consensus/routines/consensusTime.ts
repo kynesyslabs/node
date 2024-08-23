@@ -6,8 +6,7 @@ const term = terminalkit.terminal
 
 export async function checkConsensusTime(): Promise<boolean> {
     let isConsensusTime = false
-    // We cannot calculate the consensus time from the last block, 
-    // as timestamps might be synthetic (see createBlock.ts) due to sharding and internal logic
+    // We might as well use the average timestamp of the last block, which should be identical to the shared state's lastConsensusTime
     let lastTimestamp = sharedState.getInstance().lastConsensusTime
     let currentTimestamp = Date.now()
     let delta = currentTimestamp - lastTimestamp

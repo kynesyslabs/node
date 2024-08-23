@@ -110,6 +110,9 @@ export default class Peer {
     // New method to make an arbitrary RPC call // REVIEW
     // ? As this returns a promise, should it manage its own response registry?
     async call(request: RPCRequest, isAuthenticated: boolean = true): Promise<RPCResponse> {
+        // Get some informations
+        let method = request.method
+        let currentTimestampReadable = new Date(Date.now()).toISOString()
         // Prepare a request with our identity
         let pubkey = ""
         let signature = ""
@@ -121,7 +124,7 @@ export default class Peer {
         const url = this.connection.string.split(">")[0]
         const port = this.connection.string.split(">")[1]
         const connectionUrl = url + ":" + port
-        log.info("[RPC Call] Making RPC call to: " + connectionUrl)
+        log.info("[RPC Call] [" + method + "] [" + currentTimestampReadable + "] Making RPC call to: " + connectionUrl)
         // Make the request
         try {
             const response = await axios.post<RPCResponse>(connectionUrl, request, {
@@ -131,12 +134,12 @@ export default class Peer {
                     "signature": signature,
                 },
             })
-            log.info("[RPC Call] Response: ")
-            log.info(JSON.stringify(response.data, null, 2))
+            log.info("[RPC Call] [" + method + "] [" + currentTimestampReadable + "] Response received ")
+            // log.info(JSON.stringify(response.data, null, 2))
             if (response.data.result !== 200) {
-                log.warning("[RPC Call] [Response] Response not OK: " + response.data.response + " - " + response.data.result)
+                log.warning("[RPC Call] [" + method + "] [" + currentTimestampReadable + "] Response not OK: " + response.data.response + " - " + response.data.result)
             } else {
-                log.info("[RPC Call] [Response] Response OK: " + response.data.response)
+                log.info("[RPC Call] [" + method + "] [" + currentTimestampReadable + "] Response OK: " + response.data.result)
             }
             return response.data
         } catch (error) {

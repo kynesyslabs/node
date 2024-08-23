@@ -117,7 +117,6 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
             )
         /* !SECTION Possibly deprecated methods */
 
-        // ! Add here the methods that derive from consensus/v2 mechanisms
         case "consensus_routine": // ? Change in consensus once we have the new consensus mechanism
             return await manageConsensusRoutines(payload.params[0])
 

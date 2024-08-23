@@ -30,14 +30,14 @@ export async function manageHelloPeer(
             "[Hello Peer Listener] Refusing to add ourselves, proceeding anyway",
         )
         response.result = 200
-        response.extra = "Cannot add ourselves: not blocking anyway"
+        response.extra = "Cannot a: ", JSON.stringify(peerObject, null, 2)dd ourselves: not blocking anyway"
         return response
     } */
     log.info("[Hello Peer Listener] Building peer object...")
     let peerObject = new Peer()
     peerObject.identity = content.publicKey
     peerObject.connection.string = content.url + ">" + content.port + ">" + content.publicKey
-    console.log("[Hello Peer Listener] Extracted peer: ", JSON.stringify(peerObject, null, 2))
+    console.log("[Hello Peer Listener] Extracted peer with connection string: " + peerObject.connection.string)
 
     // If we are here, the peer is connected
     response.result = 200

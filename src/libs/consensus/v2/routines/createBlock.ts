@@ -32,13 +32,9 @@ export async function createBlock(
     block.validation_data.signatures[ // ! Define a decent type for validation_data
         sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
     ] = blockSignature.toString("hex")
-    /* NOTE - To be sure the timestamp is valid, even if synthetic, we take the genesis block timestamp and
-    add (consensusTime*blockNumber) to it. This is to ensure that the timestamp is always increasing and that
-    consensus time can be calculated globally.
-    */
-    let consensusTime = sharedState.getInstance().getConsensusTime() || 10000
-    let genesisBlockTimestamp = (await Chain.getGenesisBlock()).content.timestamp
-    block.content.timestamp = genesisBlockTimestamp + (consensusTime * blockNumber)
+    /* NOTE - The block timestamp is the average timestamp of the shard 
+    see averageTimestamp.ts for more details */
+    block.content.timestamp = sharedState.getInstance().lastConsensusTime
     // Add the candidate to the shared state
     sharedState.getInstance().candidateBlock = block
     return block

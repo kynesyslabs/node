@@ -18,6 +18,7 @@ export interface ConsensusMethod {
         | "proposeBlockHash"
         | "broadcastBlock"
         | "getCommonValidatorSeed"
+        | "getValidatorTimestamp"
     params: any[]
 }
 
@@ -62,6 +63,10 @@ export default async function manageConsensusRoutines(
                 payload.params[0].timestamp,
             )
         // ANCHOR New methods for consensus v2
+        case "getValidatorTimestamp":
+            response.result = 200
+            response.response = sharedState.getInstance().lastTimestamp
+            return response
         case "proposeBlockHash": // For shard members to vote on a block hash
             console.log("[Consensus Message Received] Propose Block Hash")
             console.log("Block Hash: ", payload.params[0])

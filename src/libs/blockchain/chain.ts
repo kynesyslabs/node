@@ -144,8 +144,8 @@ export default class Chain {
         const blockRepository = db.getDataSource().getRepository(Blocks)
 
         let genBlock = await blockRepository.findOneBy({ number: 0 })
-        console.log("genesis Block")
-        console.log(genBlock)
+        console.log("[getGenesisBlock] genesis Block retrieved")
+        //console.log(genBlock)
         return genBlock
     }
 

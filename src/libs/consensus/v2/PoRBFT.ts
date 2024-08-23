@@ -14,12 +14,16 @@ import { mergeMempools } from "./routines/mergeMempools"
 import { createBlock } from "./routines/createBlock"
 import { orderTransactions } from "./routines/orderTransactions"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
+import averageTimestamps from "./routines/averageTimestamp"
 
 // Wrapper for the consensus routine calling all the necessary subroutines
 export async function consensusRoutine() {
+    // ! Add a way to average the timestamps of the nodes in the shard to assign a common timestamp to the block
+    // ! Add a way to exclude nodes from the shard if they are too far in the past or too far in the future
     // Setting the shared state to consensus mode
     sharedState.getInstance().consensusMode = true
     sharedState.getInstance().inConsensusLoop = true
+    sharedState.getInstance().lastTimestamp = Date.now()
     // Deriving our parameters
     const previousBlockHash = await Chain.getLastBlockHash()
     const lastBlockNumber = await Chain.getLastBlockNumber()
@@ -43,6 +47,9 @@ export async function consensusRoutine() {
         log.info("[consensusRoutine] We are in the shard, creating the block")
     }
     log.info(`[consensusRoutine] shard: ${shard}`)
+    // Averaging the timestamps of the nodes in the shard
+    const averageTimestamp = await averageTimestamps(shard)
+    sharedState.getInstance().lastConsensusTime = averageTimestamp
     // Sending our mempool to the shard while waiting for the others to do the same
     const ourMempool = await Mempool.getMempool() // ? Could this be already modified by time we send it? Do we care?
     log.info("[consensusRoutine] Our mempool has been retrieved")
