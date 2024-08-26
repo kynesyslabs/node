@@ -1,6 +1,7 @@
 /*  NOTE Importing this file automatically spawns a new server that listens for RPC requests */
 
 import express, { Request, Response, Express } from "express"
+import cors from "cors"
 import sharedState from "src/utilities/sharedState"
 import { manageAuth, AuthMessage } from "./manageAuth"
 import { manageVote, VoteRequest } from "./manageVote"
@@ -135,6 +136,7 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
 export default async function server_rpc(): Promise<Express> {
     const port = sharedState.getInstance().serverPort
     const serverApp = express()
+    serverApp.use(cors())
 
     // Middleware to parse JSON payloads
     serverApp.use(express.json())
