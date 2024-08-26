@@ -143,11 +143,13 @@ export default async function server_rpc(): Promise<Express> {
 
     // GET request handler
     serverApp.get("/", (req: Request, res: Response) => {
+        res.header("Access-Control-Allow-Origin", "*")
         res.send("Hello, World!")
     })
 
     // ANCHOR Main Endpoint: POST request handler
     serverApp.post("/", async (req: Request, res: Response) => {
+        res.header("Access-Control-Allow-Origin", "*")
         if (!isRPCRequest(req.body)) {
             return res.status(400).json({ error: "Invalid RPCRequest format" })
         }
