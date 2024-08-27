@@ -20,6 +20,8 @@ import PeerManager from "../../peer/PeerManager"
 import Block from "../block"
 import Chain from "../chain"
 import { NodeCall } from "src/libs/network/manageNodeCall"
+import log from "src/utilities/logger"
+import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk-http/types"
 
 const term = terminalkit.terminal
 
@@ -33,212 +35,104 @@ export interface IPeerLastInfo {
     peerLastBlockHash: string
 }
 
-// INFO Experimental fast syncing with the first peer
-// TODO This should be executed each time we connect to a new peer
-export async function fastSync(
-    cPeerlist: Peer[] = [],
-    singlePeer: Peer = null,
-) {
-    // Our data is stored locally for convenience
-    console.log("[SYNC] Syncing with the network...")
-    console.log("[SYNC] Getting our last block number and hash...")
+// ? Modularize this function
+export async function fastSync(peers: Peer[] = []): Promise<boolean> {
+    // Getting all the peers if not specified
+    if (peers.length === 0) {
+        peers = peerManager.getPeers()
+    }
+    // Getting our data
     let ourLastBlockNumber = await Chain.getLastBlockNumber()
     let ourLastBlockHash = await Chain.getLastBlockHash()
-    console.log(
-        "[SYNC] Our last block number is " +
-            ourLastBlockNumber +
-            " and our last block hash is " +
-            ourLastBlockHash,
-        "\n",
-    )
-    // Let's also store the actual peerlist or the things that we received from the caller
-    console.log("[SYNC] Getting the peerlist...")
-    let peerlist
-    if (!singlePeer) {
-        if (cPeerlist.length > 0) {
-            peerlist = cPeerlist
-        } else {
-            peerlist = peerManager.getPeers()
-        }
-        console.log("[SYNC] Peerlist has length: " + peerlist.length)
-    } else {
-        peerlist = [singlePeer]
-    }
-    // Selecting the first peer
-    let firstPeer: Peer = peerlist[0]
-    console.log("[SYNC] First peer is " + firstPeer.connection.string)
-
-    // Asking the first peer for the last block number
-    
-    let node_call: NodeCall = {
-        message: "getLastBlockNumber",
-        data: null,
-        muid: null,
-    }
-    // Calling the nodeCall method on the first peer
-    let blockNumberResponse = await firstPeer.call({
-        method: "nodeCall",
-        params: [node_call],
-    }, false)
-    console.log("[SYNC] Block number response code: " + blockNumberResponse.result)
-    console.log("[SYNC] Block number response message: " + blockNumberResponse.response)
-    // Managing the response
-    let blockNumber: number = 0
-    if (blockNumberResponse.result === 200) {
-        blockNumber = blockNumberResponse.response   
-        console.log("[SYNC] First peer has the last block number ")
-        console.log(blockNumber)
-    } else {
-        console.log("[SYNC] First peer does not have the last block number: " + blockNumberResponse.result)
-        console.log(blockNumberResponse.response)
-        console.log("[SYNC] TODO: Not yet implemented; next peer logic")
-        //process.exit(0)
-        return true // TODO Not yet implemented ^
-    }
-    // Compute the block number difference
-    let blockNumberDifference = blockNumber - ourLastBlockNumber
-    console.log("[SYNC] Block number difference is " + blockNumberDifference)
-
-    console.log("[SYNC] We need to sync " + blockNumberDifference + " blocks")
-
-    // We need to sync?
-    let blocktoAsk = ourLastBlockNumber
-
-    // check on ourLastBlockHash that switch to each new block
-    let isHashCoherent = true
-    let previousHash = ourLastBlockHash
-
-    // REVIEW This is a very naive way of doing this; we should use a better algorithm
-    // REVIEW (the AI says so, it wrote the comment above)
-    for (let i = 0; i < blockNumberDifference; i++) {
-        // We need to ask blocks so we force the sync loop flag
-        sharedState.getInstance().inSyncLoop = true
-        // sourcery skip: use-braces
-        // NOTE Debug flags
-        // if (sharedState.getInstance().PROD)
-        blocktoAsk++
-
-        console.log("[SYNC] Asking the first peer for block " + blocktoAsk)
-        // Effectively asking the first peer for the block
-        // TODO Test if it is more logic to just download the headers and, once a chain has been estabilished, download the blocks
-        // TODO And by test i mean we have to do it
-        let node_call: NodeCall = {
-            message: "getBlockByNumber",
-            data: { blockNumber: blocktoAsk.toString() },
-            muid: null,
-        }
-        let blockResponse = await firstPeer.call({
+    log.info("[fastSync] Our last block number is " + ourLastBlockNumber + " and our last block hash is " + ourLastBlockHash)
+    // Asking the peers for the last block number
+    let peerLastBlockNumbers = []
+    let promises = new Map<string, Promise<RPCResponse>>()
+    for (let peer of peers) {
+        let call: RPCRequest = {
             method: "nodeCall",
-            params: [node_call],
-        }, false)
-
-        console.log("[SYNC] Block response code: " + blockResponse.result)
-        console.log("[SYNC] Block response message: " + blockResponse.response)
-        let parsedBlock: Block = JSON.parse(JSON.parse(blockResponse.response)) // TODO Why has to be like this?
-
-        console.log("[SYNC DEBUG] Parsed block:")
-        console.log(parsedBlock)
-        console.log("[SYNC DEBUG] Type of parsed block:")
-        console.log(typeof(parsedBlock))
-
-        console.log("[SYNC] Block hash:")
-        console.log(parsedBlock.hash)
-        console.log("[SYNC] Previous hash:")
-        console.log(parsedBlock.content.previousHash)
-
-        console.log("[SYNC] Expecting: " + previousHash)
-        // Checking if the hash of the previous block is the same of our block
-        if (parsedBlock.content.previousHash !== previousHash) {
-            term.red.bold("[SYNC] Hash is not coherent")
-            isHashCoherent = false // TODO Handle bad responses
-            // NOTE Debug flag
-            if (sharedState.getInstance().PROD) isHashCoherent = true
-            break
+            params: [{
+                message: "getLastBlockNumber",
+                data: null,
+                muid: null,
+            }],
         }
-
-        term.green("[SYNC] Block previous hash is coherent! Block accepted!")
-        // We now have a valid block to insert I guess
-        // eslint-disable-next-line no-unreachable
-        Chain.insertBlock(parsedBlock)
-        // Updating the last hash to be this one as we inserted it successfully
-        previousHash = parsedBlock.hash
-        term.green.bold(
-            "[SYNC] Block inserted successfully at the head of the chain!",
-        )
+        promises.set(peer.identity.toString("hex"), peer.call(call, false))
     }
-
-    console.log("✅ [ Syncing with the network completed successfully ] ✅")
-    sharedState.getInstance().syncStatus = true
-    sharedState.getInstance().inSyncLoop = false
-    //process.exit(0)
-}
-
-/* WARNING - Experimental Ahead */
-
-// TODO Sync reimplementation
-export async function Sync(peer: Peer): Promise<boolean> {
-    // Getting our last block number and hash
-    let lastSyncedBlockResponse = await Chain.getBlockByNumber(lastBlockNumber)
-    if (!lastSyncedBlockResponse[0]) {
-        console.log("[SYNC] We cannot retrieve our last block!")
-        return false
+    // Wait for all the promises to resolve (synchronously?)
+    let responses = new Map<string, RPCResponse>()
+    for (let [peerId, promise] of promises) {
+        let response = await promise
+        responses.set(peerId, response)
     }
-    let lastSyncedBlock: Block = lastSyncedBlockResponse[1] as Block
-    var lastBlockNumber = lastSyncedBlock.number
-    var lastBlockHash = lastSyncedBlock.hash
-    // Asking the peer for the last block number
-    var peerLastBlockNumber = await askLastBlockNumber(peer)
-    // Compute the block number difference
-    var blockNumberDifference = peerLastBlockNumber - lastBlockNumber
-    console.log("[SYNC] Block number difference is " + blockNumberDifference)
-    if (blockNumberDifference > 0) {
-        console.log("[SYNC] We need to sync " + blockNumberDifference + " blocks")
-    } else {
-        console.log("[SYNC] We are already synced with this peer")
+    for (let response of responses) {
+        if (response[1].result === 200) {
+            peerLastBlockNumbers.push(response[1].response as number)
+            log.info("[fastSync] Peer " + response[0] + " has last block number: " + response[1].response)
+        }
+    }
+    log.info("[fastSync] Peer last block numbers: " + peerLastBlockNumbers)
+    // REVIEW Choose the peer with the highest last block number
+    let highestBlockNumber = peerLastBlockNumbers.reduce((max, peer) => Math.max(max, peer), 0)
+    
+    // If we have the same block number as the highest block number peer, we are already synced
+    if (highestBlockNumber === ourLastBlockNumber) {
+        log.info("[fastSync] We are already synced with the peer")
+        sharedState.getInstance().syncStatus = true
         return true
     }
-    // Verifying if the hash of the last block we have is coherent with the one of the peer
-    var peerSyncedBlock = await askBlockByNumber(peer, lastBlockNumber)
-    if (peerSyncedBlock.hash!== lastBlockHash) {
-        console.log("[SYNC] Hash is not coherent for block: ", peerSyncedBlock.number)
-        console.log("Peer hash: ", peerSyncedBlock.hash)
-        console.log("Our hash: ", lastBlockHash)
-        console.log("[SYNC] We cannot sync with this peer")
-        return false
+    // Otherwise, we need to sync
+    let highestBlockNumberPeerIndex = peerLastBlockNumbers.findIndex((peer) => peer === highestBlockNumber)
+    let highestBlockNumberPeer = peers[highestBlockNumberPeerIndex]
+    log.info("[fastSync] Peer with highest last block number: " + highestBlockNumberPeer.identity.toString("hex") + " with block number: " + highestBlockNumber)
+    // Verify if the last block hash is coherent
+    let lastSyncedBlockRequest: RPCRequest = {
+        method: "nodeCall",
+        params: [{
+            message: "getBlockByNumber",
+            data: { blockNumber: ourLastBlockNumber.toString() },
+            muid: null,
+        }],
     }
-    console.log("[SYNC] Hash is coherent for block: ", peerSyncedBlock.number)
-    console.log("[SYNC] We can sync with this peer")
-    // Syncing the blocks one by one
-    for (let i = 0; i < blockNumberDifference; i++) {
-        // Calculating the next block number to ask
-        let block_to_ask = lastBlockNumber + i
-        // Asking the peer for the block
-        let blockResponse = await askBlockByNumber(peer, block_to_ask)
-        // Response handling
-        if (!blockResponse[0]) {
-            console.log("[SYNC] We cannot sync with this peer for block: ", block_to_ask)
-            return false
+    let lastSyncedBlockResponse = await highestBlockNumberPeer.call(lastSyncedBlockRequest, false)
+    if (lastSyncedBlockResponse.result === 200) {
+        console.log("[fastSync] Last synced block response received")
+        let lastSyncedBlock = JSON.parse(lastSyncedBlockResponse.response) as Block
+        if (lastSyncedBlock.hash !== ourLastBlockHash) {
+            log.info("[fastSync] Hash is not coherent")
+            log.info("[fastSync] Our hash: " + ourLastBlockHash)
+            log.info("[fastSync] Peer hash: " + lastSyncedBlock.hash)
+            sharedState.getInstance().syncStatus = false
+            return false // ! Pass to the next peer
         }
-        console.log("[SYNC] Block response: " + blockResponse[1])
-        let currentSyncingBlock = blockResponse[1] as Block
-        // Coherence checking
-        if (!(currentSyncingBlock.content.previousHash === lastBlockHash)) {
-            console.log("[SYNC] Hash is not coherent for block: ", currentSyncingBlock.number)
-            console.log("Peer hash: ", currentSyncingBlock.content.previousHash)
-            console.log("Our hash: ", lastBlockHash)
-            console.log("[SYNC] We cannot sync with this peer")
-            return false
-        }
-        console.log("[SYNC] Hash is coherent for block: ", currentSyncingBlock.number)
-        console.log("[SYNC] Inserting block: ", currentSyncingBlock.number)
-        // TODO Insert the block in the chain
-        // Now updating the last block we have
-        lastSyncedBlock = currentSyncingBlock
-        lastBlockNumber = currentSyncingBlock.number
-        lastBlockHash = currentSyncingBlock.hash
+        console.log("[fastSync] Hash is coherent: we can sync with: " + highestBlockNumberPeer.identity.toString("hex"))
     }
-    // REVIEW the above logic
+    // Sync the blocks one by one starting from the lowest block number that we do not have
+    // ? Way more error handling needed
+    let blockToAsk = ourLastBlockNumber + 1
+    while (blockToAsk <= highestBlockNumber) {
+        console.log("[fastSync] Asking peer for block: " + blockToAsk)
+        let blockRequest: RPCRequest = {
+            method: "nodeCall",
+            params: [{
+                message: "getBlockByNumber",
+                data: { blockNumber: blockToAsk.toString() },
+                muid: null,
+            }],
+        }
+        let blockResponse = await highestBlockNumberPeer.call(blockRequest, false)
+        if (blockResponse.result === 200) {
+            console.log("[fastSync] Block response received for block: " + blockToAsk)
+            let block = JSON.parse(blockResponse.response) as Block
+            Chain.insertBlock(block)
+            console.log("[fastSync] Block inserted successfully at the head of the chain!")
+        }
+        blockToAsk++
+    }
+    sharedState.getInstance().syncStatus = true
+    return true
 }
+
 
 async function askLastBlockNumber(peer: Peer): Promise<number> {
     let node_call: NodeCall = {

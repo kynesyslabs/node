@@ -4,6 +4,7 @@ import sharedState from "src/utilities/sharedState"
 import { emptyResponse } from "src/libs/network/server_rpc"
 import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
 import _ from "lodash"
+import ensureCandidateBlockFormed from "./ensureCandidateBlockFormed"
 
 export default async function manageProposeBlockHash(
     blockHash: string,
@@ -28,6 +29,15 @@ export default async function manageProposeBlockHash(
     log.info("[manageProposeBlockHash] Validator is in the shard: voting for the block hash")
     // ? Should we check for the block number as well? Or we cancel the candidateBlock at the end of the consensus?
     // Vote for the block hash
+    // ! We must ensure we generated a block indeed
+    let candidateBlockFormed = await ensureCandidateBlockFormed()
+    if (!candidateBlockFormed) {
+        log.error("[manageProposeBlockHash] Candidate block not formed: refusing the block hash")
+        response.result = 401
+        response.response = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
+        response.extra = "Candidate block not formed"
+        return response
+    }
     const ourCandidateHash = sharedState.getInstance().candidateBlock.hash
     if (ourCandidateHash === blockHash) {
         log.info("[manageProposeBlockHash] Hash corresponds to our candidate block")

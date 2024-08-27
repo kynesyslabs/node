@@ -3,6 +3,7 @@ import sharedState from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import Cryptography from "src/libs/crypto/cryptography"
 import Chain from "src/libs/blockchain/chain"
+import log from "src/utilities/logger"
 
 export async function createBlock(
     orderedTransactions: string[],
@@ -10,6 +11,11 @@ export async function createBlock(
     previousBlockHash: string,
     blockNumber: number,
 ): Promise<Block> {
+    if (sharedState.getInstance().candidateBlock) {
+        log.warning("Candidate block already exists: we should not overwrite it (returning the existing one)")
+        // ? Number check?
+        return sharedState.getInstance().candidateBlock
+    }
     // Creating the block
     var block = new Block()
     block.content.ordered_transactions = orderedTransactions
