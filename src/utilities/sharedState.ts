@@ -4,12 +4,13 @@ import Block from "src/libs/blockchain/block"
 import * as dotenv from "dotenv"
 import forge from "node-forge"
 import chain from "src/libs/blockchain/chain"
-import { ProofOfRepresentation } from "src/libs/consensus/mechanisms/PoR"
 import { Identity } from "src/libs/identity"
 // eslint-disable-next-line no-unused-vars
 import * as Security from "src/libs/network/securityModule"
 import axios from "axios"
 import * as ntpClient from "ntp-client"
+import Chain from "src/libs/blockchain/chain"
+import { Peer } from "src/libs/peer"
 
 dotenv.config({ path: "../../.commons" })
 
@@ -34,7 +35,7 @@ export default class sharedState {
     consensusMode: boolean = false
     syncStatus: boolean = false
     // SECTION shared state variables
-    shard: ProofOfRepresentation
+    shard: Peer[]
     lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard
     currentValidatorSeed: string
     identity: Identity
@@ -80,39 +81,19 @@ export default class sharedState {
             return true
         } catch (err) {
             console.error(err)
+            this.currentUTCTime = Date.now()
             return false
         }
     }
 
-    public async getTimePassed(): Promise<number> {
-        this.currentTimestamp = new Date().getTime()
-
+    public async getLastConsensusTime(): Promise<number> {
+        // Retrieve the last block and get the timestamp of it
         const lastBlock = await chain.getLastBlock()
-        console.warn("[SHAREDSTATE]: getting last block")
-        //console.warn(lastBlock)
-        let lastTimestamp: number
-        if (chain.isGenesis(lastBlock as any)) {
-            //REVIEW - is this useless? I think so.
-            console.log("[SHAREDSTATE]: Genesis block detected")
-            //REVIEW: is this different than other blocks?
-            lastTimestamp = new Date().getTime() - 69420 * 1000
-        } else {
-            //console.log("blockContent")
-            //console.log(lastBlock.content)
-            lastTimestamp = lastBlock.content.timestamp
-        }
-
-        console.log("LAST TIMESTAMP: " + lastTimestamp)
-
-        let delta = this.currentTimestamp - lastTimestamp
-        // lastTimestamp = this.currentTimestamp // REVIEW Done? | This must be the last block timestamp
-
-        console.log("this.lastTimestamp: " + this.lastTimestamp)
-        console.log("this.currentTimestamp: " + this.currentTimestamp)
-        console.log("delta: " + delta.toString())
-
-        return delta
+        this.lastConsensusTime = lastBlock.content.timestamp
+        return this.lastConsensusTime
     }
+
+    
 
     public getTimestamp(): number {
         this.currentTimestamp = Date.now() // REVIEW Maybe

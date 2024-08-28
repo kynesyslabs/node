@@ -7,7 +7,9 @@ export default async function ensureCandidateBlockFormed(): Promise<boolean> {
     let success = false
     if (!sharedState.getInstance().candidateBlock) {
         log.info("Candidate block not formed yet, forcing the consensus routine...")
-        await consensusRoutine()
+        if (!sharedState.getInstance().inConsensusLoop) {
+            await consensusRoutine()
+        }
     }
     if (sharedState.getInstance().candidateBlock) {
         success = true

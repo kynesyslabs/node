@@ -102,6 +102,9 @@ export async function consensusRoutine(): Promise<void> {
     // Forge the block from the ordered transactions
     const block = await forgeBlock(mempool)
 
+    // REVIEW Set last consensus time to the current block timestamp
+    sharedState.getInstance().lastConsensusTime = block.content.timestamp
+    
     // Vote on the block by broadcasting the block hash to the shard
     const [pro, con] = await voteOnBlock(block, shard)
 
@@ -174,9 +177,10 @@ function isInShard(shard: Peer[]): boolean {
 async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
     await fastSync(shard)
     var averageTimestamp = await averageTimestamps(shard)
-    // Round the average timestamp to the nearest second if it's not already an integer
+    // Strip the decimal part
     if (!Number.isInteger(averageTimestamp)) {
-        averageTimestamp = Math.round(averageTimestamp + 0.5)
+        log.warning("[synchronizeAndAverageTime] Average timestamp is not an integer")
+        averageTimestamp = Math.round(averageTimestamp)
     }
     sharedState.getInstance().lastConsensusTime = averageTimestamp
 }

@@ -9,8 +9,8 @@ export async function checkConsensusTime(
     flextime: number = 2000,
 ): Promise<boolean> {
     let isConsensusTime = false
-    // We might as well use the average timestamp of the last block, which should be identical to the shared state's lastConsensusTime
-    let lastTimestamp = sharedState.getInstance().lastConsensusTime // ? Should we check it from the blockchain each time?
+    // Using the average timestamp set in the last block
+    let lastTimestamp = await sharedState.getInstance().getLastConsensusTime() // ? Should we check it from the blockchain each time?
     // REVIEW Using the UTC timestamp as per mainLoop.ts settings
     let currentTimestamp = sharedState.getInstance().currentUTCTime // Date.now()
     let delta = currentTimestamp - lastTimestamp

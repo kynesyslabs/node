@@ -4,7 +4,6 @@ import express, { Request, Response, Express } from "express"
 import cors from "cors"
 import sharedState from "src/utilities/sharedState"
 import { manageAuth, AuthMessage } from "./manageAuth"
-import { manageVote, VoteRequest } from "./manageVote"
 import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
 import { manageNodeCall, NodeCall } from "./manageNodeCall"
 import { manageHelloPeer, HelloPeerRequest } from "./manageHelloPeer"
@@ -100,15 +99,7 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
         case "nodeCall":
             return await manageNodeCall(payload.params[0] as NodeCall)
 
-        /* SECTION Possibly deprecated methods */
-        // Vote management // ? Useful or not?
-        case "vote": // ? see below for the consensus methods
-            return await manageVote(
-                payload.params[0] as VoteRequest,
-                payload.params[1] as (response: RPCResponse) => void,
-            )
-        case "voteRequest":
-            return await ServerHandlers.handleVoteRequest(payload.params[0].timestamp)
+        
         // ! When things are working, we should remove the login_request and login_response methods and use a "login" method with params
         case "login_request":
             return await handleLoginRequest(payload.params[0] as BrowserRequest)

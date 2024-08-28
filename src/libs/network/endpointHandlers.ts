@@ -21,7 +21,6 @@ import {
     confirmTransaction,
 } from "src/libs/blockchain/routines/validateTransaction"
 import Transaction from "src/libs/blockchain/transaction"
-import deriveBlock from "src/libs/consensus/routines/deriveBlock"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import eggs from "src/libs/network/routines/eggs"
@@ -69,7 +68,6 @@ import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
 import { ConsensusRequest, RPCResponse } from "@kynesyslabs/demosdk-http/types"
 import { emptyResponse } from "./server_rpc"
-import RepresentativeShard from "../consensus/mechanisms/types/RepresentativeShard"
 
 let term = terminalkit.terminal
 
@@ -78,36 +76,7 @@ export default class ServerHandlers {
 
     
     // !SECTION Consensus Voting
-    // ANCHOR Vote request
-
-    static async handleVoteRequest(timestamp: number): Promise<RPCResponse> {
-        console.log("[handleVoteRequest] Handling vote request with timestamp: ")
-        console.log(timestamp)
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
-        // Todo : compare the received response response with what we have locally, and return the vote result
-        console.log("[SERVERHANDLER] handleVoteRequest")
-        const mempool = await Mempool.getMempool()
-
-        // REVIEW Is this the right way to get the shard?
-        var shard = sharedState.getInstance().shard // ! Why sometimes it is undefined?
-        if (!shard) {
-            console.log("[handleVoteRequest] Shard not found, generating...")
-            let onlinePeers = await PeerManager.getInstance().getOnlinePeers()
-            console.log("[handleVoteRequest] Online peers: " + onlinePeers)
-            shard = await RepresentativeShard.getInstance().getShard(onlinePeers)
-            console.log("[handleVoteRequest] Shard: " + shard)
-        }
-        console.log("[handleVoteRequest] Shard: " + shard)
-
-        const { derivedBlock } = await deriveBlock(mempool, timestamp, shard)
-        const proposedBlock = derivedBlock
-        let proposedBlockHash = proposedBlock.hash
-        console.log("[handleVoteRequest] Proposed block hash: " + proposedBlockHash)
-        response.result = 200
-        response.response = proposedBlockHash.trim()
-        return response
-    }
-
+    
     // !SECTION Login On Chain
 
     // ANCHOR Validate transaction
@@ -388,7 +357,7 @@ export default class ServerHandlers {
         console.log("[SERVERHANDLER] Shard found in shared state")
         //console.log(shard)
 
-        const peerList = await shard.getPeers()
+        const peerList = shard
 
         // Authorizing the sender
         for (let peer of peerList) {

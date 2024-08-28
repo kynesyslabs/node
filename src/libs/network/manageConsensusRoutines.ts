@@ -1,11 +1,9 @@
-import { manageVote } from "./manageVote"
 import { RPCResponse, VoteRequest } from "@kynesyslabs/demosdk-http/types"
 import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorSeed"
 import { emptyResponse } from "./server_rpc"
 import _ from "lodash"
 import ServerHandlers from "./endpointHandlers"
 import sharedState from "src/utilities/sharedState"
-import { ProofOfRepresentation } from "../consensus/mechanisms/PoR"
 import getShard from "../consensus/v2/routines/getShard"
 import { Peer } from "../peer"
 import manageProposeBlockHash from "../consensus/v2/routines/manageProposeBlockHash"
@@ -49,7 +47,7 @@ export default async function manageConsensusRoutines(
         response.response = "Consensus time not reached (checked by manageConsensusRoutines)"
         return response
     } else {
-        if (!isConsensusAlreadyRunning()) {
+        if (!sharedState.getInstance().inConsensusLoop) {
             log.info("[manageConsensusRoutines] Starting the consensus routine as we are in consensus time window but not in consensus mode yet")
             consensusRoutine() // Asynchronous function     to avoid blocking the main thread
         }

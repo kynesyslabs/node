@@ -3,9 +3,7 @@ import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool"
 import { fastSync } from "src/libs/blockchain/routines/Sync"
 import Transmission from "src/libs/communications/transmission"
-import QBFT from "src/libs/consensus/mechanisms/BFT"
 import { consensusRoutine } from "src/libs/consensus/v2/PoRBFT" // experimental v2 consensus
-import RepresentativeShard from "src/libs/consensus/mechanisms/types/RepresentativeShard"
 import { Identity } from "src/libs/identity"
 import { Peer, PeerManager } from "src/libs/peer"
 
@@ -64,7 +62,8 @@ export default async function mainLoop() {
             //await sendNodeOnlineTx()
         }
 
-
+        // ! Many times, this loops and is always true (specifically, after the first successful block is forged between two nodes)
+        // ? Check if the average timestamp of the last block makes sense (inspect with pgadmin )
         // NOTE We need both the consensus time and the sync status to be true, to avoid
         // conflicts with the sync loop that would lead to a failure in the consensus mechanism.
         if (isConsensusTimeReached && sharedState.getInstance().syncStatus) {
@@ -101,7 +100,7 @@ async function peerRoutine(): Promise<Peer[]> {
     // if its the first block ever or we are doing a regenesis, we might want to skip this check, but we still need a list of reliable nodes.
     // In the "3 block online" the history of online peers is validated by the blockchain AND by the consensus so it can be relied on.
 
-    let currentlyOnlinePeers: Peer[] // ! typize
+    let currentlyOnlinePeers: Peer[] 
 
     console.log("[MAINLOOP]: getting online peers for last three blocks")
     const peersOnlineForLastThreeBlocks =
