@@ -37,6 +37,11 @@ export default class ShardManager {
         return ShardManager.instance
     }
 
+    // Destructor
+    public static destroy() {
+        ShardManager.instance = null
+    }
+
     public setShard(shard: Peer[]) {
         this.shard = shard
         this.shardStatus = new Map<string, ValidatorStatus>()

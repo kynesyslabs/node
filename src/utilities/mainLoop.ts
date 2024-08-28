@@ -4,7 +4,7 @@ import Mempool from "src/libs/blockchain/mempool"
 import { fastSync } from "src/libs/blockchain/routines/Sync"
 import Transmission from "src/libs/communications/transmission"
 import QBFT from "src/libs/consensus/mechanisms/BFT"
-import { consensusRoutine as ConsensusRoutineV2 } from "src/libs/consensus/v2/PoRBFT" // experimental v2 consensus
+import { consensusRoutine } from "src/libs/consensus/v2/PoRBFT" // experimental v2 consensus
 import RepresentativeShard from "src/libs/consensus/mechanisms/types/RepresentativeShard"
 import { Identity } from "src/libs/identity"
 import { Peer, PeerManager } from "src/libs/peer"
@@ -63,7 +63,9 @@ export default async function mainLoop() {
         if (isConsensusTimeReached && sharedState.getInstance().syncStatus) {
             log.info("[MAIN LOOP] Consensus time reached and sync status is true")
             //await consensusRoutine(currentlyOnlinePeers)
-            await ConsensusRoutineV2()
+            sharedState.getInstance().consensusMode = true
+            await consensusRoutine()
+            sharedState.getInstance().consensusMode = false
         } else if (!sharedState.getInstance().syncStatus) {
             // ? This is a bit redundant, isn't it?
             console.log(
@@ -123,7 +125,7 @@ async function peerRoutine(): Promise<Peer[]> {
 }
 
 // ANCHOR Consensus routine
-async function consensusRoutine(currentlyOnlinePeers: Peer[]) {
+/* async function consensusRoutine(currentlyOnlinePeers: Peer[]) {
     console.log("[MAIN LOOP] Consensus time reached")
     sharedState.getInstance().mainLoopPaused = true // Pause the main loop
     hasSentNodeOnlineTx = false // Reset it for the next cycle.
@@ -171,4 +173,4 @@ async function consensusRoutine(currentlyOnlinePeers: Peer[]) {
     sharedState.getInstance().consensusMode = false
     sharedState.getInstance().inConsensusLoop = false
     sharedState.getInstance().mainLoopPaused = false // Pause the main loop
-}
+} */

@@ -368,7 +368,7 @@ export default class ServerHandlers {
         if (!sharedState.getInstance().consensusMode) {
             response.result = 400
             response.response = false
-            response.extra = "We are not in consensus mode"
+            response.extra = "We are not in consensus mode (and you are using the old consensus mechanism)"
             return response
         }
 

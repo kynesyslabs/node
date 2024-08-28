@@ -9,7 +9,11 @@ import Chain from "src/libs/blockchain/chain"
 import sharedState from "src/utilities/sharedState"
 import { Peer } from "src/libs/peer"
 import log from "src/utilities/logger"
-import { ConsensusHashVote, ConsensusHashResponse, ValidationData } from "./interfaces"
+import {
+    ConsensusHashVote,
+    ConsensusHashResponse,
+    ValidationData,
+} from "./interfaces"
 import { mergeMempools } from "./routines/mergeMempools"
 import { createBlock } from "./routines/createBlock"
 import { orderTransactions } from "./routines/orderTransactions"
@@ -19,19 +23,50 @@ import { fastSync } from "src/libs/blockchain/routines/Sync"
 import { RPCRequest } from "@kynesyslabs/demosdk-http/types"
 import ShardManager, { ValidatorStatus } from "./routines/shardManager"
 
+/* INFO
+
+ The consensus routine is the main function that runs the consensus algorithm.
+ Within the consensus routine there is a semaphore system that ensure the shard
+ to have a common state and to avoid race conditions such as node desynchronization.
+ 
+ Each important step of the consensus routine broadcast a message to the shard
+ to inform the other nodes that the step has been completed.
+ 
+ All the nodes in the shard (including the local node) will wait for the step to be completed 
+ before proceeding to the next step.
+ 
+ This way we ensure that the shard will have a common state and will be able to
+ continue the consensus routine.
+
+ For example, the shard manager is initialized at the beginning of the consensus routine
+ and the local status is updated to reflect that we are in consensus loop.
+ Prior to continue the consensus routine, the local node will wait that also the
+ other nodes in the shard are in consensus loop by checking the validator statuses.
+    
+ The semaphore system is implemented by the ShardManager class.
+ 
+*/
+
 // Main consensus routine calling all the subroutines
 export async function consensusRoutine(): Promise<void> {
-    if (isConsensusAlreadyRunning()) return
-    
+    if (isConsensusAlreadyRunning()) {
+        log.info(
+            "[consensusRoutine] Consensus loop already running: keeping it running (returning)",
+        )
+        return
+    }
+
     // Initialize the consensus state and check if the local node is in the shard
     initializeConsensusState()
     const shard = await initializeShard()
-    
+
     if (!isInShard(shard)) {
-        log.info("[consensusRoutine] We are not in the shard, waiting for the block")
+        log.info(
+            "[consensusRoutine] We are not in the shard, waiting for the block",
+        )
         return
     }
-    
+
     log.info("[consensusRoutine] We are in the shard, creating the block")
     log.info(`[consensusRoutine] shard: ${shard}`)
 
@@ -40,9 +75,12 @@ export async function consensusRoutine(): Promise<void> {
 
     // Here we wait that the shard is ready by checking the validators statuses and if they are in consensus loop
     // We can't continue until the shard is ready and synced to our validator status
-    let shardIsReady = await ShardManager.getInstance().waitUntilShardIsReady(ShardManager.getInstance().getOurValidatorStatus())
+    let shardIsReady = await ShardManager.getInstance().waitUntilShardIsReady(
+        ShardManager.getInstance().getOurValidatorStatus(),
+    )
     // See ShardManager.ts -> waitUntilShardIsReady for the above call
     // TODO Do something with the shardIsReady variable
+    log.info("[consensusRoutine] Shard readiness is: " + shardIsReady)
 
     // synchronize and average the time between the shard and the local node
     await synchronizeAndAverageTime(shard)
@@ -50,26 +88,31 @@ export async function consensusRoutine(): Promise<void> {
     const mempool = await mergeAndOrderMempools(shard)
     // Forge the block from the ordered transactions
     const block = await forgeBlock(mempool)
-    
+
     // Vote on the block by broadcasting the block hash to the shard
     const [pro, con] = await voteOnBlock(block, shard)
 
     // Check if the block is valid using BFT
     if (isBlockValid(pro, shard.length)) {
+        log.info("[consensusRoutine] [result] Block is valid with " + pro + " votes")
         await finalizeBlock(block, pro)
     } else {
-        log.info(`[consensusRoutine] Block is not valid with ${pro} votes`)
+        log.info(`[consensusRoutine] [result] Block is not valid with ${pro} votes`)
     }
 
     // Cleanup the consensus state
     cleanupConsensusState()
+    // Destroy the shard manager to free it up for the next consensus routine
+    ShardManager.destroy()
     log.info("[consensusRoutine] Consensus routine ended")
 }
 
 // Safeguard to prevent multiple consensus loops from running
 function isConsensusAlreadyRunning(): boolean {
     if (sharedState.getInstance().inConsensusLoop) {
-        log.warning("Consensus loop already running: keeping it running (returning)")
+        log.warning(
+            "Consensus loop already running: keeping it running (returning)",
+        )
         return true
     }
     return false
@@ -92,19 +135,23 @@ async function initializeShard(): Promise<Peer[]> {
 // Initialize the shard manager
 async function initializeShardManager(shard: Peer[]): Promise<void> {
     ShardManager.getInstance().setShard(shard)
-    const ourIdentity = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
-    let validatorStatus = ShardManager.getInstance().shardStatus.get(ourIdentity)
+    const ourIdentity = sharedState
+        .getInstance()
+        .identity.ed25519.publicKey.toString("hex")
+    let validatorStatus =
+        ShardManager.getInstance().shardStatus.get(ourIdentity)
     validatorStatus.inConsensusLoop = true
     ShardManager.getInstance().setValidatorStatus(ourIdentity, validatorStatus)
-    ShardManager.getInstance().transmitOurValidatorStatus()
+    await ShardManager.getInstance().transmitOurValidatorStatus()
 }
-
 
 // SECTION Checks
 
 // Check if the local node is in the shard
 function isInShard(shard: Peer[]): boolean {
-    const ourIdentity = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
+    const ourIdentity = sharedState
+        .getInstance()
+        .identity.ed25519.publicKey.toString("hex")
     return shard.some(peer => peer.identity === ourIdentity)
 }
 
@@ -123,7 +170,7 @@ async function mergeAndOrderMempools(shard: Peer[]): Promise<string[]> {
     log.info("[consensusRoutine] Our mempool has been retrieved")
     const mergedMempool = await mergeMempools(ourMempool, shard)
     log.info("[consensusRoutine] Mempools have been merged")
-    updateValidatorStatus("mergedMempool")
+    await updateValidatorStatus("mergedMempool")
     return await orderTransactions(mergedMempool)
 }
 
@@ -132,7 +179,7 @@ async function forgeBlock(orderedTransactions: string[]): Promise<Block> {
     const previousBlockHash = await Chain.getLastBlockHash()
     const lastBlockNumber = await Chain.getLastBlockNumber()
     const commonValidatorSeed = await getCommonValidatorSeed()
-    
+
     const block = await createBlock(
         orderedTransactions,
         commonValidatorSeed,
@@ -140,25 +187,32 @@ async function forgeBlock(orderedTransactions: string[]): Promise<Block> {
         lastBlockNumber + 1,
     )
 
-    updateValidatorStatus("forgedBlock")
+    await updateValidatorStatus("forgedBlock")
     return block
 }
 
 // Vote on the block by broadcasting the block hash to the shard
-async function voteOnBlock(block: Block, shard: Peer[]): Promise<[number, number]> {
-    log.info(`[consensusRoutine] Broadcasting block hash to the shard: ${block.hash}`)
+async function voteOnBlock(
+    block: Block,
+    shard: Peer[],
+): Promise<[number, number]> {
+    log.info(
+        `[consensusRoutine] Broadcasting block hash to the shard: ${block.hash}`,
+    )
     const [pro, con] = await broadcastBlockHash(block, shard)
-    updateValidatorStatus("votedForBlock")
-    
-    log.info(`[consensusRoutine] Block hash broadcasted to the shard: ${block.hash}`)
+    await updateValidatorStatus("votedForBlock")
+
+    log.info(
+        `[consensusRoutine] Block hash broadcasted to the shard: ${block.hash}`,
+    )
     log.info(`[consensusRoutine] Votes:\nPro: ${pro}\nCon: ${con}`)
-    
+
     return [pro, con]
 }
 
 // Check if the block is valid using BFT
 function isBlockValid(pro: number, totalVotes: number): boolean {
-    const threshold = Math.floor(totalVotes * 2 / 3) + 1
+    const threshold = Math.floor((totalVotes * 2) / 3) + 1
     log.info(`[consensusRoutine] Threshold: ${threshold}`)
     log.info(`[consensusRoutine] Total votes: ${totalVotes}`)
     return pro >= threshold
@@ -168,8 +222,8 @@ function isBlockValid(pro: number, totalVotes: number): boolean {
 async function finalizeBlock(block: Block, pro: number): Promise<void> {
     log.info(`[consensusRoutine] Block is valid with ${pro} votes`)
     await Chain.insertBlock(block)
-    sharedState.getInstance().consensusMode = false
-    sharedState.getInstance().inConsensusLoop = false
+    //sharedState.getInstance().consensusMode = false
+    ///sharedState.getInstance().inConsensusLoop = false
     log.info("[consensusRoutine] Block added to the chain")
     const lastBlock = await Chain.getLastBlock()
     console.log(lastBlock)
@@ -184,10 +238,13 @@ function cleanupConsensusState(): void {
 }
 
 // REVIEW This function updates and transmits the validator status to the shard
-function updateValidatorStatus(status: string): void {
-    const ourIdentity = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
-    let validatorStatus = ShardManager.getInstance().shardStatus.get(ourIdentity)
+async function updateValidatorStatus(status: string): Promise<void> {
+    const ourIdentity = sharedState
+        .getInstance()
+        .identity.ed25519.publicKey.toString("hex")
+    let validatorStatus =
+        ShardManager.getInstance().shardStatus.get(ourIdentity)
     validatorStatus[status] = true
     ShardManager.getInstance().setValidatorStatus(ourIdentity, validatorStatus)
-    ShardManager.getInstance().transmitOurValidatorStatus()
+    await ShardManager.getInstance().transmitOurValidatorStatus()
 }
