@@ -27,11 +27,21 @@ export default async function mainLoop() {
 
     while (sharedState.getInstance().runMainLoop) {
         await sleep(500) // Sleep for 500 ms
+
+        // Get the current UTC time (set the currentUTCTime variable in sharedState)
+        await sharedState.getInstance().getUTCTime()
+        log.info(`[MAIN LOOP] Current UTC time: ${sharedState.getInstance().currentUTCTime}`)
+        
         if (sharedState.getInstance().mainLoopPaused) {
             continue // Check if the main loop is paused
         }
         // If it is not in pause, we set (or force set) the mainLoop flag to be on
         sharedState.getInstance().inMainLoop = true
+
+        // Execute the peer routine before the consensus loop
+        let currentlyOnlinePeers: Peer[] = await peerRoutine()
+        // we now have a list of online peers that can be used for consensus
+
         // NOTE Syncing the blockchain
         await fastSync() // REVIEW Test here
         console.log("[MAIN LOOP] Synced! 🟢 ")
@@ -54,18 +64,13 @@ export default async function mainLoop() {
             //await sendNodeOnlineTx()
         }
 
-        // Execute the peer routine before the consensus loop
-        let currentlyOnlinePeers: Peer[] = await peerRoutine()
-        // we now have a list of online peers that can be used for consensus
 
         // NOTE We need both the consensus time and the sync status to be true, to avoid
         // conflicts with the sync loop that would lead to a failure in the consensus mechanism.
         if (isConsensusTimeReached && sharedState.getInstance().syncStatus) {
             log.info("[MAIN LOOP] Consensus time reached and sync status is true")
             //await consensusRoutine(currentlyOnlinePeers)
-            sharedState.getInstance().consensusMode = true
             await consensusRoutine()
-            sharedState.getInstance().consensusMode = false
         } else if (!sharedState.getInstance().syncStatus) {
             // ? This is a bit redundant, isn't it?
             console.log(

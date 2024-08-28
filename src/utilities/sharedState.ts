@@ -8,6 +8,8 @@ import { ProofOfRepresentation } from "src/libs/consensus/mechanisms/PoR"
 import { Identity } from "src/libs/identity"
 // eslint-disable-next-line no-unused-vars
 import * as Security from "src/libs/network/securityModule"
+import axios from "axios"
+import * as ntpClient from "ntp-client"
 
 dotenv.config({ path: "../../.commons" })
 
@@ -17,6 +19,7 @@ export default class sharedState {
     block_time: number = 10 // TODO Get it from the genesis (or see Consensus module)
 
     currentTimestamp: number = 0
+    currentUTCTime: number = 0
     lastTimestamp: number = 0
 
     // SECTION shared state variables
@@ -60,6 +63,25 @@ export default class sharedState {
             sharedState.instance = new sharedState()
         }
         return sharedState.instance
+    }
+
+    // If this works, use it for the timestamp of the blocks (avg timestamp, consensus time...)
+    public async getUTCTime(): Promise<boolean> {
+        try {
+            const date = await new Promise<Date>((resolve, reject) => {
+                ntpClient.getNetworkTime("pool.ntp.org", 123, (err, date) => {
+                    if (err) reject(err)
+                    else resolve(date)
+                })
+            })
+            
+            // Convert date to Unix timestamp
+            this.currentUTCTime = date.getTime()
+            return true
+        } catch (err) {
+            console.error(err)
+            return false
+        }
     }
 
     public async getTimePassed(): Promise<number> {

@@ -4,17 +4,24 @@ import terminalkit from "terminal-kit"
 
 const term = terminalkit.terminal
 
-export async function checkConsensusTime(): Promise<boolean> {
+export async function checkConsensusTime(
+    flexible: boolean = false,
+    flextime: number = 2000,
+): Promise<boolean> {
     let isConsensusTime = false
     // We might as well use the average timestamp of the last block, which should be identical to the shared state's lastConsensusTime
-    let lastTimestamp = sharedState.getInstance().lastConsensusTime
-    let currentTimestamp = Date.now()
+    let lastTimestamp = sharedState.getInstance().lastConsensusTime // ? Should we check it from the blockchain each time?
+    // REVIEW Using the UTC timestamp as per mainLoop.ts settings
+    let currentTimestamp = sharedState.getInstance().currentUTCTime // Date.now()
     let delta = currentTimestamp - lastTimestamp
-    let consensusIntervalTime = sharedState.getInstance().getConsensusTime() || 10000
+    let consensusIntervalTime =
+        sharedState.getInstance().getConsensusTime() || 10000
     console.log("[CONSENSUS TIME] lastTimestamp: " + lastTimestamp)
     console.log("[CONSENSUS TIME] currentTimestamp: " + currentTimestamp)
     console.log("[CONSENSUS TIME] delta: " + delta)
-    console.log("[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime)
+    console.log(
+        "[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime,
+    )
     //process.exit(0)
 
     // If the delta is greater than the consensus interval time, then the consensus time has passed
@@ -25,6 +32,18 @@ export async function checkConsensusTime(): Promise<boolean> {
         isConsensusTime = true
         console.log("[CONSENSUS TIME] Consensus time reached")
     } else {
+        // REVIEW Allow a small leeway for the consensus time
+        if (flexible) {
+            // Calculate if the delta is within the flexible time
+            let maxDelta = consensusIntervalTime + flextime
+            let minDelta = consensusIntervalTime - flextime
+            if (delta > minDelta && delta < maxDelta) {
+                isConsensusTime = true
+                console.log("[CONSENSUS TIME] Consensus time reached")
+            }
+        }
+    }
+    if (!isConsensusTime) {
         console.log("[CONSENSUS TIME] Consensus time not reached")
     }
     // We can return the result

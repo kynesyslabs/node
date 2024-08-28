@@ -137,17 +137,6 @@ export default class PeerManager {
         }
         // Returning the list of online peers from the peerlist
         return this.getPeers() // REVIEW is this working?
-            /* // ! TODO Rewrite this to use hello_peer routines
-            const onlinePeerStatus = await peerInstance.checkOnlineStatus()
-            if (onlinePeerStatus) {
-                // Saying hello to the peer if it is not ourself
-                if (peerInstance.identity.toString("hex") !== sharedState.getInstance().identity.ed25519.publicKey.toString("hex")) {
-                    await PeerManager.sayHelloToPeer(peerInstance) // ? Does it need a callback or a return value?
-                }
-                onlinePeers.push(peerInstance) // FIXME We should keep track of duplicates
-            }
-        }
-        return onlinePeers */
     }
 
     addPeer(peer: Peer) {

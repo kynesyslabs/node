@@ -25,6 +25,8 @@ import ShardManager, { ValidatorStatus } from "./routines/shardManager"
 
 /* INFO
 
+# Semaphore system
+
  The consensus routine is the main function that runs the consensus algorithm.
  Within the consensus routine there is a semaphore system that ensure the shard
  to have a common state and to avoid race conditions such as node desynchronization.
@@ -44,6 +46,17 @@ import ShardManager, { ValidatorStatus } from "./routines/shardManager"
  other nodes in the shard are in consensus loop by checking the validator statuses.
     
  The semaphore system is implemented by the ShardManager class.
+
+ # Synchronization of timestamps
+
+ The local node timestamp is calculated from the NTP server pool so that is precise
+ and UTC based.
+ 
+ This happens at each mainLoop cycle, and is the basis to check if the consensus time
+ is reached and to compute the average timestamp of the last block.
+
+ This allows to have a precise time synchronization between the nodes in the shard within
+ a +/-2 second range.
  
 */
 
@@ -108,7 +121,7 @@ export async function consensusRoutine(): Promise<void> {
 }
 
 // Safeguard to prevent multiple consensus loops from running
-function isConsensusAlreadyRunning(): boolean {
+export function isConsensusAlreadyRunning(): boolean {
     if (sharedState.getInstance().inConsensusLoop) {
         log.warning(
             "Consensus loop already running: keeping it running (returning)",
@@ -160,7 +173,11 @@ function isInShard(shard: Peer[]): boolean {
 // Synchronize and average the time between the shard and the local node
 async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
     await fastSync(shard)
-    const averageTimestamp = await averageTimestamps(shard)
+    var averageTimestamp = await averageTimestamps(shard)
+    // Round the average timestamp to the nearest second if it's not already an integer
+    if (!Number.isInteger(averageTimestamp)) {
+        averageTimestamp = Math.round(averageTimestamp + 0.5)
+    }
     sharedState.getInstance().lastConsensusTime = averageTimestamp
 }
 
@@ -232,7 +249,7 @@ async function finalizeBlock(block: Block, pro: number): Promise<void> {
 // Cleanup the consensus state
 function cleanupConsensusState(): void {
     sharedState.getInstance().candidateBlock = null
-    sharedState.getInstance().lastConsensusTime = Date.now()
+    sharedState.getInstance().lastConsensusTime = sharedState.getInstance().currentUTCTime // REVIEW Using the current UTC time as the last consensus time
     sharedState.getInstance().inConsensusLoop = false
     sharedState.getInstance().consensusMode = false
 }

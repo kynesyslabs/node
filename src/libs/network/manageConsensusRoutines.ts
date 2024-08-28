@@ -11,6 +11,9 @@ import { Peer } from "../peer"
 import manageProposeBlockHash from "../consensus/v2/routines/manageProposeBlockHash"
 import { ValidationData } from "../consensus/v2/interfaces"
 import ShardManager, { ValidatorStatus } from "../consensus/v2/routines/shardManager"
+import { checkConsensusTime } from "../consensus/routines/consensusTime"
+import { consensusRoutine, isConsensusAlreadyRunning } from "../consensus/v2/PoRBFT"
+import log from "src/utilities/logger"
 
 export interface ConsensusMethod {
     method:
@@ -30,12 +33,29 @@ export default async function manageConsensusRoutines(
     payload: ConsensusMethod,
 ): Promise<RPCResponse> {
     let response = _.cloneDeep(emptyResponse)
-    // Refuses the routine if we are not in consensus mode
-    if (!sharedState.getInstance().consensusMode) {
+
+    /* REVIEW
+    We allow incoming requests when we are within the consensus time window.
+    If we are not in consensus mode, we start the consensus mode and then execute the request.
+    This should not conflict with mainLoop as the semaphore will prevent the execution of two
+    consensus routines at the same time.
+    Also this should make so that within the time window all the shard members are in consensus mode.
+    */
+    // If the consensus is already running, we do not need to check the time again
+    // ! This happens way too often - why? Sometimes it does not happen
+    const isConsensusTime = await checkConsensusTime(true, 2000) || isConsensusAlreadyRunning()
+    if (!isConsensusTime) {
         response.result = 400
-        response.response = "Consensus mode is not active"
+        response.response = "Consensus time not reached (checked by manageConsensusRoutines)"
         return response
+    } else {
+        if (!isConsensusAlreadyRunning()) {
+            log.info("[manageConsensusRoutines] Starting the consensus routine as we are in consensus time window but not in consensus mode yet")
+            consensusRoutine() // Asynchronous function     to avoid blocking the main thread
+        }
+        log.info("[manageConsensusRoutines] We are within the consensus time window")
     }
+
     // Also refuses the routine if we are not in the shard
     const shard = await getShard(sharedState.getInstance().currentValidatorSeed)
     const ourId = sharedState
@@ -71,7 +91,8 @@ export default async function manageConsensusRoutines(
         // ANCHOR New methods for consensus v2
         case "getValidatorTimestamp":
             response.result = 200
-            response.response = sharedState.getInstance().lastTimestamp
+            // REVIEW Using the current UTC time as the validator timestamp (affect average time of the blocks)
+            response.response = sharedState.getInstance().currentUTCTime //.lastTimestamp
             return response
         case "proposeBlockHash": // For shard members to vote on a block hash
             console.log("[Consensus Message Received] Propose Block Hash")
@@ -104,8 +125,14 @@ export default async function manageConsensusRoutines(
         case "setValidatorStatus":
             console.log("[Consensus Message Received] setValidatorStatus")
             // This call requires public key as string and status as ValidatorStatus
-            ShardManager.getInstance().setValidatorStatus(payload.params[0] as string, payload.params[1] as ValidatorStatus)
-            console.log("[Consensus Message Received] setValidatorStatus set")
+            var setResult = ShardManager.getInstance().setValidatorStatus(payload.params[0] as string, payload.params[1] as ValidatorStatus)
+            if (setResult[0]) {
+                response.result = 200
+                response.response = "Validator status set"
+            } else {
+                response.result = 400
+                response.response = setResult[1]
+            }
             break
         case "getValidatorStatus":
             console.log("[Consensus Message Received] getValidatorStatus")

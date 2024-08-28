@@ -60,9 +60,14 @@ export default class ShardManager {
         this.shard.push(peer)
     }
 
-    public setValidatorStatus(peer: string, status: ValidatorStatus) {
+    public setValidatorStatus(peer: string, status: ValidatorStatus): [boolean, string] {
         // ! Identity checks or done by the server rpc?
+        if (!this.shardStatus) {
+            log.error("[shardManager] Shard status not set because the shard is not set")
+            return [false, "Shard status not set because the shard is not set"]
+        }
         this.shardStatus.set(peer, status)
+        return [true, ""]
     }
 
     public getValidatorStatus(peer: string) {
