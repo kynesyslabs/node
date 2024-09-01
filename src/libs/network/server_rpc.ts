@@ -1,6 +1,6 @@
 /*  NOTE Importing this file automatically spawns a new server that listens for RPC requests */
 
-import fastify, { FastifyInstance, FastifyRequest, FastifyReply } from "fastify"
+import fastify, { FastifyInstance, FastifyRequest, FastifyReply, RouteShorthandOptions } from "fastify"
 import fastifyCors from "@fastify/cors"
 //import helmet from "@fastify/helmet"
 import sharedState from "src/utilities/sharedState"
@@ -18,13 +18,16 @@ import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
 import { RPCRequest, RPCResponse, ConsensusRequest, BrowserRequest } from "@kynesyslabs/demosdk-http/types"
 import manageConsensusRoutines from "./manageConsensusRoutines"
 import _ from "lodash"
+import { registerMethodListingEndpoint } from "./methodListing"
+import { setupOpenAPI, rpcSchema } from "./openApiSpec"
+
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
 
 export const emptyResponse: RPCResponse = {
     result: 0,
-    response: true,
+    response: "",
     require_reply: false,
     extra: null,
 }
@@ -141,13 +144,25 @@ export default async function server_rpc(): Promise<FastifyInstance> {
     const serverApp: FastifyInstance = fastify()
     await serverApp.register(fastifyCors)
 
+    // Register the method listing endpoint
+    registerMethodListingEndpoint(serverApp)
+
     // GET request handler
     serverApp.get("/", async (req: FastifyRequest, reply: FastifyReply) => {
         reply.send("Hello, World!")
     })
 
-    // ANCHOR Main Endpoint: POST request handler
-    serverApp.post("/", { schema: postSchema }, async (req: FastifyRequest, reply: FastifyReply) => {
+    // Setup OpenAPI
+    setupOpenAPI(serverApp)
+
+    // Define the options for the main RPC endpoint
+    const postOptions: RouteShorthandOptions = {
+        schema: rpcSchema,
+    }
+
+    // Update the main RPC endpoint
+    serverApp.post("/", postOptions, async (req: FastifyRequest, reply: FastifyReply) => {
+        log.info("[RPC Call] Received request: " + JSON.stringify(req.body, null, 2))
         const payload = req.body as RPCRequest
 
         // Header check
@@ -161,8 +176,9 @@ export default async function server_rpc(): Promise<FastifyInstance> {
                 return
             }
         }
-
+        console.log("[RPC Call] Processing payload: " + JSON.stringify(payload, null, 2))
         const response = await processPayload(payload)
+        console.log("[RPC Call] Response: " + JSON.stringify(response, null, 2))
         reply.send(response)
     })
 

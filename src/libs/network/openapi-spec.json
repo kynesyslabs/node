@@ -1,0 +1,94 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+      "title": "RPC Server API - Demos Network",
+      "description": "API for RPC Servers on Demos Network",
+      "version": "1.0.0"
+    },
+    "tags": [
+      { "name": "RPC", "description": "RPC related endpoints" }
+    ],
+    "components": {
+      "securitySchemes": {
+        "apiKey": {
+          "type": "apiKey",
+          "name": "signature",
+          "in": "header"
+        }
+      },
+      "schemas": {
+        "AnyType": {
+          "type": "AnyType",
+          "description": "Any type"
+        },  
+        "RPCRequest": {
+          "type": "object",
+          "required": ["method", "params"],
+          "properties": {
+            "method": {
+              "type": "string",
+              "description": "The name of the RPC method to execute"
+            },
+            "params": {
+              "type": "array",
+              "description": "An array of parameters for the RPC method",
+              "items": {
+                "type": "AnyType"
+              }
+            }
+          }
+        },
+        "RPCResponse": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "number",
+              "description": "The result code of the RPC call"
+            },
+            "response": {
+              "type": "AnyType",
+              "description": "The actual response from the RPC call"
+            },
+            "require_reply": {
+              "type": "boolean",
+              "description": "Indicates if a reply is required"
+            },
+            "extra": {
+              "type": "AnyType",
+              "description": "Additional data returned by the RPC call"
+            }
+          }
+        }
+      }
+    },
+    "paths": {
+      "/": {
+        "post": {
+          "summary": "Execute  RPC method",
+          "description": "Executes the specified RPC method with given parameters",
+          "tags": ["RPC"],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RPCRequest"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "Successful response",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/RPCResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }

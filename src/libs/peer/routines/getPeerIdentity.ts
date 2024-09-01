@@ -45,12 +45,13 @@ export default async function getPeerIdentity(
         method: "nodeCall",
         params: [node_call],
     })
+    console.log("[PEER AUTHENTICATION] Response Received: " + JSON.stringify(response, null, 2))
     // Response management
     if (response.result === 200) {
         console.log("[PEER AUTHENTICATION] Received response")
         //console.log(response[1].identity.toString("hex"))
         console.log(response.response)
-        if (response.response.toString("hex") === expectedKey) {
+        if (response.response=== expectedKey) {
             console.log("[PEER AUTHENTICATION] Identity is the expected one")
         } else {
             console.log(
@@ -59,9 +60,7 @@ export default async function getPeerIdentity(
             console.log("Expected: ")
             console.log(expectedKey)
             console.log("Received: ")
-            console.log(response.response.identity.toString("hex"))
-            console.log("Non hex:")
-            console.log(response.response.identity)
+            console.log(response.response)
             return null
         }
         // Adding the property to the peer
