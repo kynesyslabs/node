@@ -38,6 +38,16 @@ if is_first_run; then
         exit 1
     fi
     echo "Ok, docker compose installed"
+    # Check if Bun is installed
+    if ! command -v bun &> /dev/null; then
+        echo "Warning: Bun is not installed. For better performance, consider installing Bun: https://bun.sh/"
+        echo "The script will continue using Node.js instead of Bun."
+        echo "Install bun following: https://bun.sh/docs/installation if you want to use Bun for a major performance improvement"   
+    else
+        echo "Ok, Bun is installed"
+    fi
+    # This file is used to check if we are on the first run
+
     # This file is used to check if we are on the first run
     touch .RUN
 fi
@@ -59,6 +69,17 @@ shift $((OPTIND -1))
 echo "PORT=$PORT"
 echo "PG_PORT=$PG_PORT"
 echo "IDENTITY_FILE=$IDENTITY_FILE"
+
+
+# Check if Bun is available and set the start command
+if command -v bun &> /dev/null; then
+    START_COMMAND="yarn start:bun"
+else
+    START_COMMAND="yarn start"
+fi
+
+echo "Starting the node with $START_COMMAND"
+
 
 # PG_PORT and IDENTITY_FILE are exported for both docker and yarn
 export PG_PORT=$PG_PORT
@@ -102,8 +123,9 @@ while ! nc -z localhost $PG_PORT; do
     sleep 1
 done
 
+
 # Starting the node managing errors
-if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE yarn start; then
+if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE $START_COMMAND; then
     if [ "$HAS_BEEN_INTERRUPTED" == "true" ]; then
         echo "RPC exited successfully"
     else
