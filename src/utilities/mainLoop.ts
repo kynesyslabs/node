@@ -62,8 +62,30 @@ export default async function mainLoop() {
             //await sendNodeOnlineTx()
         }
 
-        // ! Many times, this loops and is always true (specifically, after the first successful block is forged between two nodes)
-        // ? Check if the average timestamp of the last block makes sense (inspect with pgadmin )
+        // ! Many times, during the consensus, there is a lot of output before the block is forged. Inspect why
+        // ? Is there an hello_peer loop? Or are the semaphores broken?
+        // ? Looks like  we re-enter in the loop without finishing the previous one.
+        // ? Also due to this (presumably) sometimes a node adds twice the same block
+        /*
+[INFO] [2024-08-29T11:51:11.698Z] [consensusRoutine] Threshold: 2
+[INFO] [2024-08-29T11:51:11.698Z] [consensusRoutine] Total votes: 2
+[INFO] [2024-08-29T11:51:11.699Z] [consensusRoutine] [result] Block is valid with 2 votes
+[INFO] [2024-08-29T11:51:11.699Z] [consensusRoutine] Block is valid with 2 votes
+[CHAIN] reading hash
+[]
+[CHAIN] bork
+[ChainDB] [ INFO ]: Checking if block with position undefined already exists
+[ChainDB] [ INFO ]: Found block with null position, possibly genesis block
+[ChainDB] [ INFO ]: Block with position undefined does not exist: inserting a new block
+[CONSENSUS TIME] lastTimestamp: 1724932238313
+[CONSENSUS TIME] currentTimestamp: 1724932271588
+[CONSENSUS TIME] delta: 33275
+[CONSENSUS TIME] consensusIntervalTime: 10000
+[CONSENSUS TIME] consensusIntervalTime: 10000
+[CONSENSUS TIME] Consensus time reached
+[INFO] [2024-08-29T11:51:11.700Z] [manageConsensusRoutines] We are within the consensus time window
+...
+        */
         // NOTE We need both the consensus time and the sync status to be true, to avoid
         // conflicts with the sync loop that would lead to a failure in the consensus mechanism.
         if (isConsensusTimeReached && sharedState.getInstance().syncStatus) {

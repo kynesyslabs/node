@@ -332,18 +332,18 @@ export default class Chain {
         // Check if the position is provided and if a block with that position exists
         let existingBlock = null
         console.log(
-            "[ChainDB] [ INFO ]: Checking if block with position " +
-                position +
+            "[ChainDB] [ INFO ]: Checking if block with hash " +
+                block.hash +
                 " already exists",
         )
         if (position) {
             console.log("Block has a position passed as arg")
             existingBlock = await blockRepository.findOneBy({
-                number: position,
+                hash: block.hash,
             })
         } else {
             console.log(
-                "[ChainDB] [ INFO ]: Found block with null position, possibly genesis block",
+                "[ChainDB] [ INFO ]: Found block with null hash, possibly genesis block",
             )
         }
 

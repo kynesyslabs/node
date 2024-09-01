@@ -1,7 +1,8 @@
 /*  NOTE Importing this file automatically spawns a new server that listens for RPC requests */
 
-import express, { Request, Response, Express } from "express"
-import cors from "cors"
+import fastify, { FastifyInstance, FastifyRequest, FastifyReply } from "fastify"
+import fastifyCors from "@fastify/cors"
+//import helmet from "@fastify/helmet"
 import sharedState from "src/utilities/sharedState"
 import { manageAuth, AuthMessage } from "./manageAuth"
 import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
@@ -21,12 +22,23 @@ import _ from "lodash"
 
 const noAuthMethods = ["nodeCall"]
 
-
 export const emptyResponse: RPCResponse = {
     result: 0,
     response: true,
     require_reply: false,
     extra: null,
+}
+
+// Add near the top of the file
+const postSchema = {
+  body: {
+    type: "object",
+    required: ["method", "params"],
+    properties: {
+      method: { type: "string" },
+      params: { type: "array" },
+    },
+  },
 }
 
 /* Helper functions */
@@ -124,28 +136,20 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
 }
 /* End of processor method */
 
-export default async function server_rpc(): Promise<Express> {
+export default async function server_rpc(): Promise<FastifyInstance> {
     const port = sharedState.getInstance().serverPort
-    const serverApp = express()
-    serverApp.use(cors())
-
-    // Middleware to parse JSON payloads
-    serverApp.use(express.json())
+    const serverApp: FastifyInstance = fastify()
+    await serverApp.register(fastifyCors)
 
     // GET request handler
-    serverApp.get("/", (req: Request, res: Response) => {
-        res.header("Access-Control-Allow-Origin", "*")
-        res.send("Hello, World!")
+    serverApp.get("/", async (req: FastifyRequest, reply: FastifyReply) => {
+        reply.send("Hello, World!")
     })
 
     // ANCHOR Main Endpoint: POST request handler
-    serverApp.post("/", async (req: Request, res: Response) => {
-        res.header("Access-Control-Allow-Origin", "*")
-        if (!isRPCRequest(req.body)) {
-            return res.status(400).json({ error: "Invalid RPCRequest format" })
-        }
-        // Extract the payload and process it
+    serverApp.post("/", { schema: postSchema }, async (req: FastifyRequest, reply: FastifyReply) => {
         const payload = req.body as RPCRequest
+
         // Header check
         const headers = req.headers
         // Excluding due to noAuthMethods from header validation
@@ -153,20 +157,21 @@ export default async function server_rpc(): Promise<Express> {
             var header_validation = validateHeaders(headers)
             log.info("[RPC Call] Header validation: " + header_validation[0])
             if (!header_validation[0]) {
-                return res
-                    .status(401)
-                    .json({ error: "Invalid headers:" + header_validation[1] })
+                reply.status(401).send({ error: "Invalid headers:" + header_validation[1] })
+                return
             }
         }
+
         const response = await processPayload(payload)
-        res.json(response)
+        reply.send(response)
     })
 
     // Start the server
-    serverApp.listen(port, () => {
-        console.log(`Server is running on http://localhost:${port}`)
-    })
+    await serverApp.listen({ port })
+    console.log(`Server is running on http://localhost:${port}`)
 
-    // ? Return the server app, should we singleton it?
+    // Add helmet for security headers
+    // await serverApp.register(helmet)
+
     return serverApp
 }
