@@ -16,7 +16,7 @@ import { StatusHashes } from "src/model/entities/StatusHashes"
 import { StatusNative } from "src/model/entities/StatusNative"
 import { StatusProperties } from "src/model/entities/StatusProperties"
 import { Transactions } from "src/model/entities/Transactions"
-import { MoreThan } from "typeorm"
+import { MoreThan, ILike } from "typeorm"
 
 import {
     AddressInfo, Operation, StatusNative as StatusNativeType,
@@ -74,10 +74,10 @@ export default class Chain {
         try {
             return Transaction.fromRawTransaction(
                 await transactionRepository.findOneBy({
-                    hash,
+                    hash: ILike(hash),
                 }),
             )
-        } catch (error) {
+        } catch (error) {   
             console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(error))
             console.error(error)
             throw error // It does not crash the node, as it is caught by the endpoint handler
@@ -117,7 +117,7 @@ export default class Chain {
     static async getBlockByHash(hash: string): Promise<Blocks> {
         const db = await Datasource.getInstance()
         const blockRepository = db.getDataSource().getRepository(Blocks)
-        return await blockRepository.findOneBy({ hash })
+        return await blockRepository.findOneBy({ hash: ILike(hash) })
     }
     // INFO Get a group of blocks by their status
     static async getBlockNumbersByStatus(status: string): Promise<number[]> {
@@ -168,7 +168,7 @@ export default class Chain {
             .getDataSource()
             .getRepository(Transactions)
         return Transaction.fromRawTransaction(
-            await transactionRepository.findOneBy({ hash }),
+            await transactionRepository.findOneBy({ hash: ILike(hash) }),
         )
     }
 
@@ -185,10 +185,10 @@ export default class Chain {
             .getRepository(StatusProperties)
 
         const nativeState = (await nativeStateRepository.findOneBy({
-            address,
+            address: ILike(address),
         })) as StatusNativeType
         const propertiesState = (await propertiesStateRepository.findOneBy({
-            address,
+            address: ILike(address),
         })) as StatusPropertiesType
 
         return {
@@ -339,7 +339,7 @@ export default class Chain {
         if (position) {
             console.log("Block has a position passed as arg")
             existingBlock = await blockRepository.findOneBy({
-                hash: block.hash,
+                hash: ILike(block.hash),
             })
         } else {
             console.log(
@@ -508,7 +508,7 @@ export default class Chain {
                 .getRepository(StatusNative)
 
             return (await statusNativeRepository.findOneBy({
-                address,
+                address: ILike(address),
             })) as StatusNativeType
         } else if (type === 1) {
             const db = await Datasource.getInstance()
@@ -517,7 +517,7 @@ export default class Chain {
                 .getRepository(StatusProperties)
 
             return (await statusPropertiesRepository.findOneBy({
-                address,
+                address: ILike(address),
             })) as StatusPropertiesType
         }
         return null
