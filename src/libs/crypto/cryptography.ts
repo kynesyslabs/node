@@ -166,7 +166,7 @@ export default class Cryptography {
         console.log("publicKey: " + publicKey) */
         // REVIEW Test HexToForge support
         if (typeof signature == "string") {
-            console.log("[HexToForge] Deriving a buffer from signature...")
+            console.log("[HexToForge] Deriving a buffer from signature: " + signature)
             signature = HexToForge(signature)
         }
         if (typeof publicKey == "string") {
@@ -188,9 +188,9 @@ export default class Cryptography {
 
         console.log(publicKey)
 
-        console.log("[Cryptography] Verifying the signature of: " + signed)
-        console.log("[Cryptography] Using the signature: " + ForgeToHex(signature))
-        console.log("[Cryptography] And the public key: " + ForgeToHex(publicKey))
+        console.log("[Cryptography] Verifying the signature of: (" + typeof signed + ") " + signed)
+        console.log("[Cryptography] Using the signature: (" + typeof signature + ") " + ForgeToHex(signature))
+        console.log("[Cryptography] And the public key: (" + typeof publicKey + ") " + ForgeToHex(publicKey))
         //console.log(publicKey)
         return forge.pki.ed25519.verify({
             message: signed,
