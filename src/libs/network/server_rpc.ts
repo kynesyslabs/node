@@ -142,7 +142,10 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
 export default async function server_rpc(): Promise<FastifyInstance> {
     const port = sharedState.getInstance().serverPort
     const serverApp: FastifyInstance = fastify()
-    await serverApp.register(fastifyCors)
+    await serverApp.register(fastifyCors, {
+        origin: "*",
+        methods: ["GET", "POST"],
+    })
 
     // Register the method listing endpoint
     registerMethodListingEndpoint(serverApp)
