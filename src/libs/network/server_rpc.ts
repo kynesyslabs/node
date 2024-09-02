@@ -149,6 +149,8 @@ export default async function server_rpc(): Promise<FastifyInstance> {
 
     // GET request handler
     serverApp.get("/", async (req: FastifyRequest, reply: FastifyReply) => {
+
+        reply.header("Access-Control-Allow-Origin", "*")
         reply.send("Hello, World!")
     })
 
@@ -179,6 +181,8 @@ export default async function server_rpc(): Promise<FastifyInstance> {
         console.log("[RPC Call] Processing payload: " + JSON.stringify(payload, null, 2))
         const response = await processPayload(payload)
         console.log("[RPC Call] Response: " + JSON.stringify(response, null, 2))
+
+        reply.header("Access-Control-Allow-Origin", "*")
         reply.send(response)
     })
 
