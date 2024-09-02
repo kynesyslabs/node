@@ -1,7 +1,7 @@
 /*  NOTE Importing this file automatically spawns a new server that listens for RPC requests */
 
 import fastify, { FastifyInstance, FastifyRequest, FastifyReply, RouteShorthandOptions } from "fastify"
-import fastifyCors from "@fastify/cors"
+// import fastifyCors from "@fastify/cors"
 //import helmet from "@fastify/helmet"
 import sharedState from "src/utilities/sharedState"
 import { manageAuth, AuthMessage } from "./manageAuth"
@@ -142,10 +142,10 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
 export default async function server_rpc(): Promise<FastifyInstance> {
     const port = sharedState.getInstance().serverPort
     const serverApp: FastifyInstance = fastify()
-    await serverApp.register(fastifyCors, {
+    /* await serverApp.register(fastifyCors, {
         origin: "*",
         methods: ["GET", "POST"],
-    })
+    }) */
 
     // Register the method listing endpoint
     registerMethodListingEndpoint(serverApp)
