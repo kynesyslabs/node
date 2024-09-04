@@ -22,7 +22,7 @@ export default async function getBlockByNumber(data: any) {
 
         // REVIEW Debug lines
         //console.log(response)
-        response = JSON.stringify(response)
+        //response = JSON.stringify(response)
         //console.log(response)
     }
 
