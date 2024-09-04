@@ -43,9 +43,9 @@ export async function manageNodeCall(
     response.require_reply = false // Until proven otherwise
     response.extra = null // Until proven otherwise
     //console.log(typeof data)
-    console.log(JSON.stringify(content))
+    console.log(JSON.stringify(content))        
     switch (content.message) {
-        case "getPeerInfo":
+        case "getPeerInfo": 
             response.response = await getPeerInfo()
             break
         case "getPeerlist":
@@ -162,7 +162,7 @@ export async function manageNodeCall(
 
         case "getAllTxs":
             var response_object = await Chain.getAllTxs()
-            response.response = JSON.stringify(response_object)
+            response.response = response_object
             break
 
         // NOTE Don't look past here, go away
