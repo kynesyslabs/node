@@ -29,8 +29,8 @@ export default async function handleL2PS(
             // Checking if the encrypted transaction coherent
             var expectedHash = Hashing.sha256(encryptedTxData.encryptedTransaction) // Hashing the encrypted transaction
             if (expectedHash!= encryptedTxData.encryptedHash) {
-                response.result = 400
-                response.response = "error"
+                response.result = 422
+                response.response = "Unprocessable Entity"
                 response.require_reply = true
                 response.extra = "The encrypted transaction is not coherent"
                 return response

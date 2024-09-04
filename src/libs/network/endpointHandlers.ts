@@ -10,7 +10,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-// ! TODO Pay attention to the return types (RPCResponse)
+// REVIEW Pay attention to the return types (RPCResponse)
 
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
@@ -73,11 +73,6 @@ let term = terminalkit.terminal
 
 export default class ServerHandlers {
     
-
-    
-    // !SECTION Consensus Voting
-    
-    // !SECTION Login On Chain
 
     // ANCHOR Validate transaction
     static async handleValidateTransaction(

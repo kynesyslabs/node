@@ -66,8 +66,8 @@ export async function manageExecution(
         // They are treated as messages and are handled by their types themselves
         // For readability, we call an external function to manage the messages
         default:
-            return_value.result = 404
-            return_value.response = "Unknown message type"
+            return_value.result = 400
+            return_value.response = "Bad Request"
             return_value.require_reply = false
             break
     }

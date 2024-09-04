@@ -100,7 +100,6 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
             return await manageExecution(payload.params[0] as BundleContent)
         case "hello_peer": // As it is authenticated, we can use it to check if the peer is still alive and is in our peer list
             return await manageHelloPeer(payload.params[0] as HelloPeerRequest)
-        // ! Convert in progress from manageMessages.ts [[src/libs/network/routines/manageMessages.ts]]: see the calls
         case "consensus":
             return await ServerHandlers.handleConsensusRequest(payload.params[0] as ConsensusRequest)
         case "proofOfConsensus":
@@ -130,8 +129,8 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
         default:
             log.warning("[RPC Call] [Received] Method not found: " + payload.method)
             return {
-                result: 404,
-                response: "Method not found: " + payload.method,
+                result: 501,
+                response: "Method not implemented: " + payload.method,
                 require_reply: false,
                 extra: null,
             }

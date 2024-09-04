@@ -26,10 +26,7 @@ export interface NodeCall {
     muid: string
 }
 
-// TODO Make this modular ffs
-// FIXME Pls modularize me! Don't leave me alone!
-// REVIEW The method is scared: please modularize it!
-// NOTE As you can see, this method is a mess. Please modularize it.
+// REVIEW Is this module too big?
 export async function manageNodeCall(
     content: NodeCall,
 ): Promise<RPCResponse> {
