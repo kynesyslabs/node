@@ -89,7 +89,16 @@ export async function manageNodeCall(
             response.extra = result.extra
             break
         case "getBlockByHash":
-            console.log(`get block by hash ${data.hash}`)
+            // Check if we have .hash or .blockHash
+            if (data.hash) {
+                console.log(`get block by hash ${data.hash}`)
+            } else if (data.blockHash) {
+                console.log(`get block by hash ${data.blockHash}`)
+                data.hash = data.blockHash
+            } else {
+                response.result = 400
+                response.response = "No hash or blockHash specified"
+            }
             try {
                 result = await getBlockByHash(data)
                 response.response = result.response
