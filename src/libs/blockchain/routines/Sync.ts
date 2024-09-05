@@ -97,7 +97,7 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
     let lastSyncedBlockResponse = await highestBlockNumberPeer.call(lastSyncedBlockRequest, false)
     if (lastSyncedBlockResponse.result === 200) {
         console.log("[fastSync] Last synced block response received")
-        let lastSyncedBlock = JSON.parse(lastSyncedBlockResponse.response) as Block
+        let lastSyncedBlock = lastSyncedBlockResponse.response as Block
         if (lastSyncedBlock.hash !== ourLastBlockHash) {
             log.info("[fastSync] Hash is not coherent")
             log.info("[fastSync] Our hash: " + ourLastBlockHash)
@@ -123,7 +123,7 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
         let blockResponse = await highestBlockNumberPeer.call(blockRequest, false)
         if (blockResponse.result === 200) {
             console.log("[fastSync] Block response received for block: " + blockToAsk)
-            let block = JSON.parse(blockResponse.response) as Block
+            let block = blockResponse.response as Block
             Chain.insertBlock(block)
             console.log("[fastSync] Block inserted successfully at the head of the chain!")
         }

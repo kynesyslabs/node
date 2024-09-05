@@ -71,6 +71,8 @@ export async function consensusRoutine(): Promise<void> {
 
     // Initialize the consensus state and check if the local node is in the shard
     initializeConsensusState()
+    // Reset the startingConsensus flag
+    sharedState.getInstance().startingConsensus = false
     const shard = await initializeShard()
 
     if (!isInShard(shard)) {

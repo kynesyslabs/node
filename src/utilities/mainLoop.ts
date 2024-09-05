@@ -88,9 +88,10 @@ export default async function mainLoop() {
         */
         // NOTE We need both the consensus time and the sync status to be true, to avoid
         // conflicts with the sync loop that would lead to a failure in the consensus mechanism.
-        if (isConsensusTimeReached && sharedState.getInstance().syncStatus) {
+        if (isConsensusTimeReached && sharedState.getInstance().syncStatus && !sharedState.getInstance().startingConsensus) {
+            // Set the startingConsensus flag to true to avoid conflicts with starting loops
+            sharedState.getInstance().startingConsensus = true
             log.info("[MAIN LOOP] Consensus time reached and sync status is true")
-            //await consensusRoutine(currentlyOnlinePeers)
             await consensusRoutine()
         } else if (!sharedState.getInstance().syncStatus) {
             // ? This is a bit redundant, isn't it?
