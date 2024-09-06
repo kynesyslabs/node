@@ -156,8 +156,8 @@ export default class groundControl {
         }
         // NOTE 'show' endpoint is for metrics
         if (!args) {
-            response.message = "This is not the page you are looking for."
-            response.status = 404
+            response.message = "Bad Request"
+            response.status = 400
             return response
         }
         if (args.has("show")) {
@@ -172,9 +172,6 @@ export default class groundControl {
                 case "connected_peers":
                     metric = groundControl.get.connected_peers().toString()
                     status = 200
-                    break
-                case "response_registry_size":
-                    // TODO in responseRegistry
                     break
                 case "mempool_size":
                     // TODO in mempool

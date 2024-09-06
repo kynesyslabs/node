@@ -1,0 +1,58 @@
+import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { ConsensusHashResponse } from "../interfaces"
+import Block from "src/libs/blockchain/block"
+import { Peer } from "src/libs/peer"
+import sharedState from "src/utilities/sharedState"
+
+export async function broadcastBlockHash(block: Block, shard: Peer[]): Promise<[number, number]> {
+    var pro = 0
+    var con = 0
+    var promises = []
+    const ourId = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
+    const proposeParams = [block.hash, block.validation_data, ourId]
+    for (const peer of shard) {
+        promises.push(
+            peer.call({
+                method: "consensus_routine",
+                params: [{
+                    method: "proposeBlockHash",
+                    params: proposeParams,
+                }],
+            }),
+        )
+    }
+    // See manageConsensusRoutine.ts for more details on the response format and mechanism
+    for (const promise of promises) {
+        // Work asynchronously
+        promise.then((response: RPCResponse) => {
+            console.log("[consensusRoutine] response from a validator received.")
+            if (response.result === 200) {
+                console.log(
+                    "[consensusRoutine] Block hash confirmation received from the validator: " +
+                        response.response,
+                )
+                // Add the validation data to the block
+                // ? Should we check if the peer is in the shard? Theoretically we checked before
+                let peerValidationData = response.extra.signatures[response.response]
+                console.log("[consensusRoutine] Peer validation data: ", peerValidationData)
+                block.validation_data.signatures[response.response] =
+                    peerValidationData
+                pro++
+            } else {
+                console.log("[consensusRoutine] Block hash not confirmed from the validator: " + response.response)
+                // ! We have: 
+                /* [WARNING] [2024-08-27T21:31:41.139Z] [RPC Call] [consensus_routine] [2024-08-27T21:31:41.100Z] Response not OK: Consensus mode is not active - 400
+                   [consensusRoutine] response from a validator received.
+                   [consensusRoutine] Block hash not confirmed from the validator: Consensus mode is not active
+                // ! With the timestamp being 41 on the second node running and 37 on the first (the time interval taken to run the second node is indeed 3 seconds)
+                */
+                console.log("[consensusRoutine] Block hash proposed: ", block.hash)
+                console.log("[consensusRoutine] Response received: ", response.extra)
+                con++
+            }
+        })
+    }
+    await Promise.all(promises)
+    console.log("[consensusRoutine] Block hash broadcasted to the shard: votes: ", pro, "rejections: ", con)
+    return [pro, con]
+}

@@ -15,7 +15,6 @@ import { Blocks } from "./entities/Blocks"
 import { Consensus } from "./entities/Consensus"
 import { Mempool } from "./entities/Mempool"
 import { PgpKeyServer } from "./entities/PgpKeyServer"
-import { ResponseRegistry } from "./entities/ResponseRegistry"
 import { StatusHashes } from "./entities/StatusHashes"
 import { StatusNative } from "./entities/StatusNative"
 import { StatusProperties } from "./entities/StatusProperties"
@@ -28,15 +27,18 @@ class Datasource {
 
     private constructor() {
         this.dataSource = new DataSource({
-            type: "sqlite",
-            database: "./data/chain.db",
+            type: "postgres",
+            host: "localhost",
+            port: parseInt(process.env.PG_PORT) || 5332,
+            username: "demosuser",
+            password: "demospassword",
+            database: "demos",
             entities: [
                 Blocks,
                 Transactions,
                 Mempool,
                 Consensus,
                 PgpKeyServer,
-                ResponseRegistry,
                 StatusHashes,
                 StatusProperties,
                 StatusNative,

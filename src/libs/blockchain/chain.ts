@@ -16,19 +16,20 @@ import { StatusHashes } from "src/model/entities/StatusHashes"
 import { StatusNative } from "src/model/entities/StatusNative"
 import { StatusProperties } from "src/model/entities/StatusProperties"
 import { Transactions } from "src/model/entities/Transactions"
-import { MoreThan } from "typeorm"
+import { MoreThan, ILike } from "typeorm"
 
 import {
     AddressInfo, Operation, StatusNative as StatusNativeType,
-    StatusProperties as StatusPropertiesType, TransactionContent,
-} from "@kynesyslabs/demosdk/types"
+    StatusProperties as StatusPropertiesType, StringifiedPayload, TransactionContent,
+} from "@kynesyslabs/demosdk-http/types"
 
-import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
+import { Hashing } from "node_modules/@kynesyslabs/demosdk-http/build/encryption"
 
 
 import Block from "./block"
 import manageNative from "./routines/gls_routines/manageNative"
 import Transaction from "./transaction"
+import { Peer } from "../peer"
 
 
 export default class Chain {
@@ -70,12 +71,17 @@ export default class Chain {
         const transactionRepository = db
             .getDataSource()
             .getRepository(Transactions)
-
-        return Transaction.fromRawTransaction(
-            await transactionRepository.findOneBy({
-                hash,
-            }),
-        )
+        try {
+            return Transaction.fromRawTransaction(
+                await transactionRepository.findOneBy({
+                    hash: ILike(hash),
+                }),
+            )
+        } catch (error) {   
+            console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(error))
+            console.error(error)
+            throw error // It does not crash the node, as it is caught by the endpoint handler
+        }
     }
 
     // INFO Get the last block number
@@ -111,7 +117,7 @@ export default class Chain {
     static async getBlockByHash(hash: string): Promise<Blocks> {
         const db = await Datasource.getInstance()
         const blockRepository = db.getDataSource().getRepository(Blocks)
-        return await blockRepository.findOneBy({ hash })
+        return await blockRepository.findOneBy({ hash: ILike(hash) })
     }
     // INFO Get a group of blocks by their status
     static async getBlockNumbersByStatus(status: string): Promise<number[]> {
@@ -138,8 +144,8 @@ export default class Chain {
         const blockRepository = db.getDataSource().getRepository(Blocks)
 
         let genBlock = await blockRepository.findOneBy({ number: 0 })
-        console.log("genesis Block")
-        console.log(genBlock)
+        console.log("[getGenesisBlock] genesis Block retrieved")
+        //console.log(genBlock)
         return genBlock
     }
 
@@ -162,7 +168,7 @@ export default class Chain {
             .getDataSource()
             .getRepository(Transactions)
         return Transaction.fromRawTransaction(
-            await transactionRepository.findOneBy({ hash }),
+            await transactionRepository.findOneBy({ hash: ILike(hash) }),
         )
     }
 
@@ -179,10 +185,10 @@ export default class Chain {
             .getRepository(StatusProperties)
 
         const nativeState = (await nativeStateRepository.findOneBy({
-            address,
+            address: ILike(address),
         })) as StatusNativeType
         const propertiesState = (await propertiesStateRepository.findOneBy({
-            address,
+            address: ILike(address),
         })) as StatusPropertiesType
 
         return {
@@ -209,8 +215,9 @@ export default class Chain {
         return lastBlock
     }
 
+    // ! FIXME Rewrite this to return a peer list
     static async getOnlinePeersForLastThreeBlocks(): Promise<
-        [string, string][]
+        Peer[]
     > {
         const lastBlockNumber = await this.getLastBlockNumber()
 
@@ -234,7 +241,7 @@ export default class Chain {
                     )
 
                     // Filter NODE_ONLINE transactions and extract their data
-                    const onlinePeersInBlock = transactions
+                    const onlinePeersInBlockTransactions = transactions
                         .filter(
                             transaction =>
                                 transaction?.content.type === "NODE_ONLINE",
@@ -244,7 +251,15 @@ export default class Chain {
                                 (transaction?.content as TransactionContent)
                                     .data,
                         )
-
+                    // Extract the peer list from the transactions
+                    let onlinePeersInBlock: Peer[] = []
+                    for (let i = 0; i < onlinePeersInBlockTransactions.length; i++) {
+                        const onlineTxRaw = onlinePeersInBlockTransactions[i] as StringifiedPayload
+                        const onlineTx = JSON.parse(onlineTxRaw[0])
+                        // ? This typization is totally random for now
+                        const onlinePeer = onlineTx.data as Peer
+                        onlinePeersInBlock.push(onlinePeer)
+                    }
                     return onlinePeersInBlock
                 }),
             )
@@ -257,10 +272,18 @@ export default class Chain {
                 processedBlocks[0] || [],
             )
 
-            return commonPeers as [string, string][]
+            return commonPeers
         } catch (e) {
             return []
         }
+    }
+
+    static async getAllTxs(): Promise<Transactions[]> {
+        const db = await Datasource.getInstance()
+        const transactionRepository = db
+            .getDataSource()
+            .getRepository(Transactions)
+        return await transactionRepository.find()
     }
 
     // !SECTION Getters
@@ -301,6 +324,7 @@ export default class Chain {
         newBlock.status = block.status
         newBlock.validation_data = block.validation_data
         newBlock.content = block.content
+        newBlock.status = "confirmed"
         newBlock.content.ordered_transactions = transactionEntities.map(
             tx => tx.hash,
         )
@@ -308,18 +332,18 @@ export default class Chain {
         // Check if the position is provided and if a block with that position exists
         let existingBlock = null
         console.log(
-            "[ChainDB] [ INFO ]: Checking if block with position " +
-                position +
+            "[ChainDB] [ INFO ]: Checking if block with hash " +
+                block.hash +
                 " already exists",
         )
         if (position) {
             console.log("Block has a position passed as arg")
             existingBlock = await blockRepository.findOneBy({
-                number: position,
+                hash: ILike(block.hash),
             })
         } else {
             console.log(
-                "[ChainDB] [ INFO ]: Found block with null position, possibly genesis block",
+                "[ChainDB] [ INFO ]: Found block with null hash, possibly genesis block",
             )
         }
 
@@ -438,6 +462,9 @@ export default class Chain {
                 balance,
             )
         }
+
+        // Adding an empty encrypted transactions list
+        genesisBlock.content.encrypted_transactions = []
         return await genesisBlock
     }
 
@@ -481,7 +508,7 @@ export default class Chain {
                 .getRepository(StatusNative)
 
             return (await statusNativeRepository.findOneBy({
-                address,
+                address: ILike(address),
             })) as StatusNativeType
         } else if (type === 1) {
             const db = await Datasource.getInstance()
@@ -490,7 +517,7 @@ export default class Chain {
                 .getRepository(StatusProperties)
 
             return (await statusPropertiesRepository.findOneBy({
-                address,
+                address: ILike(address),
             })) as StatusPropertiesType
         }
         return null

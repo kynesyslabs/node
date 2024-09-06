@@ -75,17 +75,20 @@ export default class Enigma {
         additionalData: string = null,
     ): Promise<Uint8Array> {
         let bufMessage = Buffer.from(message, "utf8")
+        // Convert to Uint8Array
+        let bufMessageUint8 = new Uint8Array(bufMessage)
         let signed: Uint8Array
         if (additionalData) {
             let bufAdditionalData = Buffer.from(additionalData, "utf8")
+            let bufAdditionalDataUint8 = new Uint8Array(bufAdditionalData)
             signed = await superDilithium.sign(
-                bufMessage,
+                bufMessageUint8,
                 this.signingKeyPair.privateKey,
-                bufAdditionalData,
+                bufAdditionalDataUint8,
             )
         } else {
             signed = await superDilithium.sign(
-                bufMessage,
+                bufMessageUint8,
                 this.signingKeyPair.privateKey,
             )
         }
@@ -100,10 +103,11 @@ export default class Enigma {
         let verifyData: Uint8Array
         if (additionalData) {
             let bufAdditionalData = Buffer.from(additionalData, "utf8")
+            let bufAdditionalDataUint8 = new Uint8Array(bufAdditionalData)
             verifyData = await superDilithium.open(
                 signed,
                 publicKey,
-                bufAdditionalData,
+                bufAdditionalDataUint8,
             )
         } else {
             verifyData = await superDilithium.open(signed, publicKey)
@@ -116,10 +120,12 @@ export default class Enigma {
         additionalData: string | Uint8Array = null,
     ) {
         if (typeof message === "string") {
-            message = Buffer.from(message, "utf8")
+            let bufMessage = Buffer.from(message, "utf8")
+            message = new Uint8Array(bufMessage)
         }
         if (typeof additionalData === "string") {
-            additionalData = Buffer.from(additionalData, "utf8")
+            let bufAdditionalData = Buffer.from(additionalData, "utf8")
+            additionalData = new Uint8Array(bufAdditionalData)
         }
         // Signing
         let signed: Uint8Array
@@ -145,10 +151,12 @@ export default class Enigma {
         additionalData: string | Uint8Array = null,
     ) {
         if (typeof message === "string") {
-            message = Buffer.from(message, "utf8")
+            let bufMessage = Buffer.from(message, "utf8")
+            message = new Uint8Array(bufMessage)
         }
         if (typeof additionalData === "string") {
-            additionalData = Buffer.from(additionalData, "utf8")
+            let bufAdditionalData = Buffer.from(additionalData, "utf8")
+            additionalData = new Uint8Array(bufAdditionalData)
         }
         // Verifying
         let verified: boolean

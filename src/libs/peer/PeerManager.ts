@@ -10,6 +10,25 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import Peer from "./Peer"
+import log from "src/utilities/logger"
+import Transmission from "../communications/transmission"
+import Cryptography from "../crypto/cryptography"
+import Hashing from "../crypto/hashing"
+import sharedState from "src/utilities/sharedState"
+import forge from "node-forge"
+import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { method } from "lodash"
+import { HelloPeerRequest } from "../network/manageHelloPeer"
+
+function ForgeToHex(forgeBuffer: any) {
+    console.log("[forge to string encoded]")
+    //console.log(forgeBuffer)
+    let rebuffer = Buffer.from(forgeBuffer)
+    forgeBuffer = rebuffer.toString("hex")
+    console.log("DECODED INTO:")
+    console.log("0x" + forgeBuffer)
+    return "0x" + forgeBuffer
+}
 
 export default class PeerManager {
     private static instance: PeerManager
@@ -47,11 +66,9 @@ export default class PeerManager {
         return this._getActors(true, true)
     }
 
-
     getOfflinePeers(): string[] {
         return this.offlinePeers
     }
-
 
     private _getActors(peers: boolean, connections: boolean): Peer[] {
         console.log("[PeerManager] Getting all peers...")
@@ -91,24 +108,35 @@ export default class PeerManager {
         return actorList
     }
 
-
     getPeer(identity: string): Peer {
         return this.peerList[identity]
     }
 
+    // Creating a JSON object with the peerlist and logging it
+    logPeerList() {
+        const json_peerlist = {}
+        for (const peer in this.peerList) {
+            json_peerlist[peer] = {
+                connection_string: this.peerList[peer].connection.string,
+                identity: this.peerList[peer].identity.toString("hex"),
+                is_authenticated: this.peerList[peer].verification.status,
+            }
+        }
+        // Flushing the log file and logging the peerlist
+        log.custom("peer_list", JSON.stringify(json_peerlist, null, 2), false, true)
+    }
+
     async getOnlinePeers(): Promise<Peer[]> {
-        const onlinePeers: Peer[] = []
+        //const onlinePeers: Peer[] = []
         for await (const _peer of Object.values(this.peerList)) {
             const peerInstance = new Peer()
             peerInstance.identity = _peer.identity
-            peerInstance.connectionString = _peer.connectionString
-            peerInstance.socket = _peer.socket
-            const onlinePeerStatus = await peerInstance.checkOnlineStatus()
-            if (onlinePeerStatus.status === "online") {
-                onlinePeers.push(peerInstance)
-            }
+            peerInstance.connection.string = _peer.connection.string
+            console.log("[PEERMANAGER] Checking online status of peer " + peerInstance.identity.toString("hex"))
+            await PeerManager.sayHelloToPeer(peerInstance)
         }
-        return onlinePeers
+        // Returning the list of online peers from the peerlist
+        return this.getPeers() // REVIEW is this working?
     }
 
     addPeer(peer: Peer) {
@@ -118,16 +146,20 @@ export default class PeerManager {
             console.log(peer)
             return false
         }
+        // REVIEW check for duplicates
         const identity = peer.identity.toString("hex")
+        let action = "added"
+        if (this.peerList[identity]) {
+            console.log("[PEERMANAGER] Peer already exists: updating it")
+            action = "updated"
+        }
         this.peerList[identity] = peer
-        console.log("[PEERMANAGER] Peer added")
+        console.log("[PEERMANAGER] Peer " + action)
         console.log("Identity: " + peer.identity.toString("hex"))
-        console.log("Connection string: " + peer.connectionString)
-        if (!peer.connectionString) {
+        console.log("Connection string: " + peer.connection.string)
+        if (!peer.connection.string) {
             console.log("[WARN] No connection string detected")
         }
-        // FIXME Run the routine in peers to get it
-        // REVIEW Sync?
         return true
     }
 
@@ -138,13 +170,17 @@ export default class PeerManager {
     }
 
     addOfflinePeer(peerString: string) {
+        console.log("[PEERMANAGER] Adding offline peer " + peerString)
         if (this.offlinePeers.indexOf(peerString) === -1) {
             this.offlinePeers.push(peerString)
         }
+        console.log("[PEERMANAGER] Offline peers: " + this.offlinePeers)
     }
 
     removeOfflinePeer(peerString: string) {
-        this.offlinePeers = this.offlinePeers.filter((peer) => peer !== peerString)
+        this.offlinePeers = this.offlinePeers.filter(
+            peer => peer !== peerString,
+        )
     }
 
     // REVIEW this should replace much of the client.ts and peerBootstrap.ts logic
@@ -163,10 +199,76 @@ export default class PeerManager {
             currentPeerPort = 53550
         }
         const peer = new Peer()
-        peer.identity = Buffer.from(currentPublicKey, "hex")
-        peer.connectionString = currentPeerAddress + ">" + currentPeerPort
-        // NOTE peer.socket = null
+        peer.identity = currentPublicKey
+        // ! Remove debug code
+        try {
+            peer.connection.string = currentPeerAddress + ">" + currentPeerPort + ">" + currentPublicKey
+        } catch (error) {
+            console.log(
+                "[PEERMANAGER] Error extracting peer from string: " + error,
+            )
+            log.critical("Error extracting peer from string: " + error)
+            process.exit(1)
+        }
+        // NOTE peer.connection.socket = null
         return peer
     }
 
+    // REVIEW This method should be tested and finalized
+    static async sayHelloToPeer(peer: Peer) {
+        // Assigning an identity to the peer if it doesn't have one
+        if (!peer.identity) {
+            peer = PeerManager.extractPeerFromString(peer.connection.string)
+        }
+        // TODO test and finalize this method
+        log.info(
+            "[Hello Peer] Saying hello to peer " +
+                peer.connection.string,
+        )
+        const our_id = sharedState.getInstance().identity.ed25519.publicKey
+        let connection_string = sharedState.getInstance().connectionString // ? Are we sure about this
+        let signed_connection_string = Cryptography.sign(
+            connection_string,
+            sharedState.getInstance().identity.ed25519.privateKey,
+        )
+        log.info("[Hello Peer] Signing connection string: " + connection_string)
+        log.info(
+            "[Hello Peer] Signed connection string: " +
+                ForgeToHex(signed_connection_string),
+        )
+        // Sending the transmission to the peer
+        const hello_request: HelloPeerRequest = {
+            url: connection_string,
+            port: sharedState.getInstance().serverPort,
+            publicKey: our_id.toString("hex"),
+        }
+        // Not awaiting the response to not block the main thread
+        peer.call({
+            method: "hello_peer",
+            params: [hello_request],
+        }).then((response) => {
+            PeerManager.helloPeerCallback(response, peer)
+        })
+        console.log("[Hello Peer] Hello request sent: waiting for response")
+    }
+
+    // Callback for the hello peer
+    static helloPeerCallback(response: RPCResponse, peer: Peer) {
+        log.info("[Hello Peer] Response received from peer: " + peer.identity.toString("hex"))
+        //console.log(response) // ? Delete this if not needed
+        // TODO Test and Finish this
+        // REVIEW is the message the response itself?
+        log.info("[Hello Peer] Response message: " + response.response)
+        // Based on the response, we can decide what to do
+        if (response.result === 200) {
+            log.info("[Hello Peer] Peer is online, replied and recognized us. Adding to peer list")
+            //console.log(peer)
+            PeerManager.getInstance().addPeer(peer)
+        } else {
+            log.info("[Hello Peer] Failed to connect to peer: " + peer.identity.toString("hex") + ". Adding to offline list")
+            // Add the peer to the offline list
+            PeerManager.getInstance().addOfflinePeer(peer.connection.string)
+        }
+        //process.exit(0)
+    }
 }

@@ -156,35 +156,42 @@ export default class Cryptography {
 
     static verify(
         signed: string,
-        signature: any | forge.pki.ed25519.BinaryBuffer,
-        publicKey: any | forge.pki.ed25519.BinaryBuffer,
+        signature: string | forge.pki.ed25519.BinaryBuffer,
+        publicKey: string | forge.pki.ed25519.BinaryBuffer,
     ) {
+        /*
+        console.log("signature.type: " + typeof signature)
+        console.log("signature: " + signature)
+        console.log("publicKey.type: " + typeof publicKey)
+        console.log("publicKey: " + publicKey) */
         // REVIEW Test HexToForge support
-        if (signature.type == "string") {
-            console.log("[HexToForge] Deriving a buffer from signature...")
+        if (typeof signature == "string") {
+            console.log("[HexToForge] Deriving a buffer from signature: " + signature)
             signature = HexToForge(signature)
         }
-        if (publicKey.type == "string") {
+        if (typeof publicKey == "string") {
             console.log("[HexToForge] Deriving a buffer from publicKey...")
             publicKey = HexToForge(publicKey)
         }
 
         // Also, we have to sanitize buffers so that they are forge compatible
-        if (signature.type == "Buffer") {
+        if (signature.length == 64) {
             console.log("[*] Normalizing signature...")
-            console.log(typeof signature)
-            signature = Buffer.from(signature) // REVIEW Does not work in bun
+            signature = Buffer.from(signature as Uint8Array) // REVIEW Does not work in bun
         }
-        if (publicKey.type == "Buffer") {
+        console.log(signature)
+
+        if (publicKey.length == 64) {
             console.log("[*] Normalizing publicKey...")
-            publicKey = Buffer.from(publicKey) // REVIEW Does not work in bun
+            publicKey = Buffer.from(publicKey as Uint8Array) // REVIEW Does not work in bun
         }
 
-        console.log("[*] Verifying the signature of: " + signed + "\n")
-        console.log("[*] Using the signature: ")
-        console.log(signature)
-        console.log("[*] And the public key: ")
         console.log(publicKey)
+
+        console.log("[Cryptography] Verifying the signature of: (" + typeof signed + ") " + signed)
+        console.log("[Cryptography] Using the signature: (" + typeof signature + ") " + ForgeToHex(signature))
+        console.log("[Cryptography] And the public key: (" + typeof publicKey + ") " + ForgeToHex(publicKey))
+        //console.log(publicKey)
         return forge.pki.ed25519.verify({
             message: signed,
             encoding: "utf8",

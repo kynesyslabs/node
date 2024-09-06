@@ -9,7 +9,7 @@ export default async function getPeerlist(): Promise<Peer[]> {
     let response = [] as Peer[]
     // Filling response with peers without socket objects
     for (let peer of socketized_response) {
-        peer.socket = null
+        // peer.connection.socket = null // ? What is this
         response.push(peer)
     }
     return response

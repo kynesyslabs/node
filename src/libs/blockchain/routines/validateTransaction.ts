@@ -19,7 +19,7 @@ import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import sharedState from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
-import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
+import { Operation, ValidityData } from "@kynesyslabs/demosdk-http/types"
 import required from "src/utilities/required"
 const term = terminalkit.terminal
 
@@ -28,11 +28,11 @@ const term = terminalkit.terminal
 export async function confirmTransaction(
     tx: Transaction, // Must contain a tx property being a Transaction object
 ): Promise<ValidityData> {
-    term.yellow("[Native Tx Validation] Validating transaction...\n")
+    term.yellow("\n[Native Tx Validation] Validating transaction...\n")
     // Getting the current block number
     let reference_block = await Chain.getLastBlockNumber()
     // Loading identity
-    const id_ed25519 = await Cryptography.load("./.demos_identity")
+    const id_ed25519 = sharedState.getInstance().identity.ed25519
     let publicKey = id_ed25519.publicKey
     let privateKey = id_ed25519.privateKey
     // REVIEW This should work just fine

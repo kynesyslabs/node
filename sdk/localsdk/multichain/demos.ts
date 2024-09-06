@@ -10,17 +10,20 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import * as socket_client from "socket.io-client"
-import ComLink from "src/libs/communications/comlink"
 import Transmission from "src/libs/communications/transmission"
+import { NodeCall } from "src/libs/network/manageNodeCall"
+import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { Peer } from "src/libs/peer"
 import terminalkit from "terminal-kit"
 
 const term = terminalkit.terminal
 
 export default class Demos {
-    socket: socket_client.Socket
+    connection: string
+    rpc: Peer
 
     constructor() {
-        this.socket = null
+        this.connection = null
     }
 
     // INFO Connecting to a Demos RPC
@@ -29,63 +32,17 @@ export default class Demos {
         server: string = "localhost",
         port: number = 53550,
     ): Promise<boolean> {
-        this.socket = socket_client.io(protocol + "://" + server + ":" + port)
-        this.setSocket()
-        let timer = 0
-        if (!this.socket.connected) {
-            if (timer < 10000) {
-                await sleep(1000)
-                timer += 1000
-            } else {
-                throw new Error("Could not connect to server")
-            }
+        this.connection = protocol + "://" + server + ">" + port + ">placeholder"
+        this.rpc = new Peer()
+        this.rpc.connection.string = this.connection
+        let rpc_response = await this.rpc.connect()
+        if (rpc_response) {
+            return true
+        } else {
+            return false
         }
-        return this.socket.connected
     }
 
-    // INFO Set listeners for socket events
-    setSocket() {
-        this.socket.on("connect", () => {
-            console.log("[Connected]Connected to server")
-        })
-
-        this.socket.on("auth_ask", () => {
-            console.log("[AuthAsk] Auth ask")
-            this.socket.emit("auth_reply", "readonly")
-        })
-
-        this.socket.on("auth_ok", () => {
-            console.log("[AuthOk] Auth ok")
-        })
-
-        this.socket.on("comlink", data => {
-            console.log("[ComLink] Received data")
-            //console.log(data)
-            //console.log(data.chain.current.currentMessage)
-        })
-
-        this.socket.on("comlink_reply", data => {
-            console.log("[ComLink Reply] Received data")
-            //console.log(data)
-            let response = JSON.parse(
-                data.chain.current.currentMessage.bundle.content.message,
-            )
-            //console.log(response)
-        })
-
-        this.socket.on("error", data => {
-            console.log("[Error] Received data")
-            ////console.log(data)
-        })
-
-        // Fallback
-
-        this.socket.onAny((eventName, data) => {
-            console.log("[RECEIVED] " + eventName)
-            //console.log (data)
-            //console.log("\n======")
-        })
-    }
 
     // NOTE Get the last block number easily
     getLastBlockNumber() {
@@ -120,19 +77,18 @@ export default class Demos {
     }
 
     // INFO NodeCalls use the same structure
-    nodeCall(message: string, args: any = {}) {
-        if (!this.socket.connected) {
-            console.log("[ERROR] We are disconnected")
-            return
+    async nodeCall(message: string, args: any = {}): Promise<RPCResponse>{
+        
+        let node_call: NodeCall = {
+            message: message,
+            data: args,
+            muid: null,
         }
-        let comlink = new ComLink()
-        let transmission = new Transmission()
-        transmission.bundle.content.type = "nodeCall"
-        transmission.bundle.content.message = message
-        transmission.bundle.content.data = args
-        comlink.chain.current.currentMessage = transmission
-        console.log("Sending message to server with muid: " + comlink.muid)
-        this.socket.emit("comlink", comlink)
+        let rpc_response = await this.rpc.call({
+            method: "nodeCall",
+            params: [node_call],
+        })
+        return rpc_response
     }
 }
 

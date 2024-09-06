@@ -1,18 +1,24 @@
 // INFO forgeBuffer comes in as the raw result of forge methods
 export function ForgeToHex(forgeBuffer: any) {
-    console.log("[forge to string encoded]")
+    try {
+        if (forgeBuffer.type == "Buffer") {
+            forgeBuffer = forgeBuffer.data
+        }
+    } catch (e) {
+        console.log("[ForgeToHex] Not a buffer")
+    }
     //console.log(forgeBuffer)
     let rebuffer = Buffer.from(forgeBuffer)
     forgeBuffer = rebuffer.toString("hex")
-    console.log("DECODED INTO:")
-    console.log("0x" + forgeBuffer)
-    return "0x" + forgeBuffer
+    return forgeBuffer
 }
 
 // INFO finalArray must come out as an acceptable input for forge methods
 // NOTE The above and the below must be revertible with each other
 export function HexToForge(forgeString: string) {
-    forgeString = forgeString.slice(2)
+    /*if (forgeString.startsWith("0x")) {
+        forgeString = forgeString.slice(2)
+    }*/
     let finalArray = new Uint8Array(64)
     console.log("[string to forge encoded]")
     //console.log(forgeString)
@@ -21,7 +27,22 @@ export function HexToForge(forgeString: string) {
         const decimalValue = parseInt(hexValue, 16)
         finalArray[i / 2] = decimalValue
     }
-    console.log("ENCODED INTO:")
-    //console.log(finalArray)
-    return finalArray
+    // Remove trailing zeroes
+    // TODO Find a better solution as this trims also the last byte(s) if it's 0
+    var trimmedArray = finalArray
+    while (trimmedArray[trimmedArray.length - 1] == 0) {
+        trimmedArray = trimmedArray.slice(0, -1)
+    }
+    // NOTE This is an horrible, yet working solution to the above problem
+    if (trimmedArray.length == 63 || trimmedArray.length == 31) {
+        console.log("[HexToForge] Suspicious length: " + trimmedArray.length)
+        var _finalArray = new Uint8Array(trimmedArray.length + 1)
+        for (let i = 0; i < trimmedArray.length; i++) {
+            _finalArray[i] = trimmedArray[i]
+        }
+        trimmedArray = _finalArray  
+    }
+    console.log("[HexToForge] Encoded into an Uint8Array of lenght: " + finalArray.length)
+    console.log(trimmedArray)
+    return trimmedArray
 }

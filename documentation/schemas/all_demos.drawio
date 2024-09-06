@@ -1,6 +1,6 @@
-<mxfile host="Electron" modified="2023-10-12T12:58:09.850Z" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/22.0.2 Chrome/114.0.5735.289 Electron/25.8.4 Safari/537.36" etag="VbEBXgxZOS8SeplnN46x" version="22.0.2" type="device">
+<mxfile host="Electron" modified="2024-08-07T13:23:06.195Z" agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/24.6.4 Chrome/124.0.6367.207 Electron/30.0.6 Safari/537.36" etag="lSUCWoq0C24QfS2OM2na" version="24.6.4" type="device">
   <diagram name="Pagina-1" id="YPCZZJie2zq10TtlItkV">
-    <mxGraphModel dx="1024" dy="821" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+    <mxGraphModel dx="1115" dy="673" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -112,44 +112,26 @@
         <mxCell id="rFKnUhQcz_V2Pc9SrVM1-26" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;Web2 Transactions&lt;/font&gt;" style="swimlane;whiteSpace=wrap;html=1;rounded=1;" parent="1" vertex="1">
           <mxGeometry x="40" y="800" width="320" height="320" as="geometry" />
         </mxCell>
+        <mxCell id="Tqh_LfMl19mYtcyC6nHl-2" value="Generates&lt;br&gt;a dedicated&lt;br&gt;DAHR Proxy" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;curved=0;startArrow=classic;startFill=1;" edge="1" parent="rFKnUhQcz_V2Pc9SrVM1-26" source="rFKnUhQcz_V2Pc9SrVM1-40" target="Tqh_LfMl19mYtcyC6nHl-1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="280" y="190" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
         <mxCell id="rFKnUhQcz_V2Pc9SrVM1-40" value="RPC" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;rounded=1;" parent="rFKnUhQcz_V2Pc9SrVM1-26" vertex="1">
           <mxGeometry x="250" y="30" width="60" height="80" as="geometry" />
         </mxCell>
         <mxCell id="rFKnUhQcz_V2Pc9SrVM1-42" value="Web2" style="html=1;aspect=fixed;strokeColor=none;shadow=0;fillColor=#3B8DF1;verticalAlign=top;labelPosition=center;verticalLabelPosition=bottom;shape=mxgraph.gcp2.globe_world;rounded=1;" parent="rFKnUhQcz_V2Pc9SrVM1-26" vertex="1">
           <mxGeometry x="10" y="36.75" width="70" height="66.5" as="geometry" />
         </mxCell>
-        <mxCell id="rFKnUhQcz_V2Pc9SrVM1-43" value="Fetching resources" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" parent="rFKnUhQcz_V2Pc9SrVM1-26" source="rFKnUhQcz_V2Pc9SrVM1-40" target="rFKnUhQcz_V2Pc9SrVM1-42" edge="1">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="Tqh_LfMl19mYtcyC6nHl-1" value="DAHR Proxy" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="rFKnUhQcz_V2Pc9SrVM1-26">
+          <mxGeometry x="120" y="150" width="80" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="rFKnUhQcz_V2Pc9SrVM1-49" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="rFKnUhQcz_V2Pc9SrVM1-26" source="rFKnUhQcz_V2Pc9SrVM1-44" target="rFKnUhQcz_V2Pc9SrVM1-45" edge="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="rFKnUhQcz_V2Pc9SrVM1-44" value="Peer" style="triangle;whiteSpace=wrap;html=1;rounded=1;" parent="rFKnUhQcz_V2Pc9SrVM1-26" vertex="1">
-          <mxGeometry x="40" y="200" width="60" height="80" as="geometry" />
-        </mxCell>
-        <mxCell id="rFKnUhQcz_V2Pc9SrVM1-48" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="rFKnUhQcz_V2Pc9SrVM1-26" source="rFKnUhQcz_V2Pc9SrVM1-45" target="rFKnUhQcz_V2Pc9SrVM1-46" edge="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="rFKnUhQcz_V2Pc9SrVM1-45" value="Peer" style="triangle;whiteSpace=wrap;html=1;rounded=1;" parent="rFKnUhQcz_V2Pc9SrVM1-26" vertex="1">
-          <mxGeometry x="120" y="200" width="60" height="80" as="geometry" />
-        </mxCell>
-        <mxCell id="rFKnUhQcz_V2Pc9SrVM1-46" value="Peer" style="triangle;whiteSpace=wrap;html=1;rounded=1;" parent="rFKnUhQcz_V2Pc9SrVM1-26" vertex="1">
-          <mxGeometry x="200" y="200" width="60" height="80" as="geometry" />
-        </mxCell>
-        <mxCell id="rFKnUhQcz_V2Pc9SrVM1-47" value="Complete&lt;br&gt;Request&lt;br&gt;With N&lt;br&gt;Attestations" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;entryPerimeter=0;" parent="rFKnUhQcz_V2Pc9SrVM1-26" source="rFKnUhQcz_V2Pc9SrVM1-46" target="rFKnUhQcz_V2Pc9SrVM1-40" edge="1">
+        <mxCell id="Tqh_LfMl19mYtcyC6nHl-3" value="Communication&lt;br&gt;is managed&lt;br&gt;by the Proxy" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=1.006;entryY=0.535;entryDx=0;entryDy=0;entryPerimeter=0;curved=0;" edge="1" parent="rFKnUhQcz_V2Pc9SrVM1-26" source="Tqh_LfMl19mYtcyC6nHl-1" target="rFKnUhQcz_V2Pc9SrVM1-42">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
-              <mxPoint x="280" y="240" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="rFKnUhQcz_V2Pc9SrVM1-50" value="Requesting attestation chain" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="rFKnUhQcz_V2Pc9SrVM1-26" source="rFKnUhQcz_V2Pc9SrVM1-40" target="rFKnUhQcz_V2Pc9SrVM1-44" edge="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="240" y="70" />
-              <mxPoint x="240" y="150" />
-              <mxPoint x="20" y="150" />
-              <mxPoint x="20" y="240" />
+              <mxPoint x="160" y="72" />
             </Array>
           </mxGeometry>
         </mxCell>
@@ -208,7 +190,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="rFKnUhQcz_V2Pc9SrVM1-51" value="Complete Request&lt;br&gt;are sent to the &lt;br&gt;consensus process" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fillColor=#d80073;strokeColor=#A50040;curved=1;dashed=1;strokeWidth=2;" parent="1" source="rFKnUhQcz_V2Pc9SrVM1-40" target="rFKnUhQcz_V2Pc9SrVM1-33" edge="1">
+        <mxCell id="rFKnUhQcz_V2Pc9SrVM1-51" value="DAHR Proxies status&lt;br&gt;is written in the blockchain" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fillColor=#d80073;strokeColor=#A50040;curved=1;dashed=1;strokeWidth=2;" parent="1" source="rFKnUhQcz_V2Pc9SrVM1-40" target="rFKnUhQcz_V2Pc9SrVM1-33" edge="1">
           <mxGeometry x="-0.1704" y="-30" relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="320" y="760" />
@@ -223,14 +205,23 @@
             <mxPoint as="offset" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="rFKnUhQcz_V2Pc9SrVM1-76" value="&lt;h1&gt;Chain of Trust&lt;/h1&gt;&lt;p&gt;As a malicious group of nodes could theoretically set up&amp;nbsp;&lt;/p&gt;&lt;p&gt;a&lt;span style=&quot;background-color: initial;&quot;&gt;&amp;nbsp;fake attestations chain to push an invalid web2 request,&amp;nbsp;&lt;/span&gt;&lt;/p&gt;&lt;p&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;every peer send the attestation request to a single other&amp;nbsp;&lt;/span&gt;&lt;/p&gt;&lt;p&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;peer until the required number of attestations has been&amp;nbsp;&lt;/span&gt;&lt;/p&gt;&lt;p&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;reached&lt;/span&gt;&lt;/p&gt;" style="text;html=1;strokeColor=none;fillColor=none;spacing=5;spacingTop=-20;whiteSpace=wrap;overflow=hidden;rounded=1;" parent="1" vertex="1">
-          <mxGeometry x="40" y="1140" width="320" height="170" as="geometry" />
+        <mxCell id="rFKnUhQcz_V2Pc9SrVM1-76" value="&lt;h1&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;DAHR Proxy Oversee&lt;br&gt;&lt;/span&gt;&lt;/h1&gt;&lt;div&gt;The Data Agnostic HTTP(S) Relay Proxy is able to&amp;nbsp;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;directly&amp;nbsp;&lt;span style=&quot;background-color: initial;&quot;&gt;manage the communication between the client and the&amp;nbsp;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;requested resource. At the same time, the RPC is able to&amp;nbsp;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;cryptographically attest and guarantee that the&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;&lt;br&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;communication is not tampered with or insecure.&lt;/span&gt;&lt;/div&gt;" style="text;html=1;strokeColor=none;fillColor=none;spacing=5;spacingTop=-20;whiteSpace=wrap;overflow=hidden;rounded=1;" parent="1" vertex="1">
+          <mxGeometry x="40" y="1140" width="320" height="210" as="geometry" />
         </mxCell>
         <mxCell id="rFKnUhQcz_V2Pc9SrVM1-77" value="&lt;h1&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;Signed Payloads&lt;span style=&quot;font-size: 12px; font-weight: 400;&quot;&gt;&lt;br&gt;&lt;/span&gt;&lt;/span&gt;&lt;span style=&quot;font-size: 12px; font-weight: 400;&quot;&gt;Crosschain transactions can be read only, so not requiring any signature, or can require a signed transaction to be sent on behalf of the client. To remain trustless, DEMOS network requires signatures to be made exclusively on client side&lt;/span&gt;&lt;/h1&gt;" style="text;html=1;strokeColor=none;fillColor=none;spacing=5;spacingTop=-20;whiteSpace=wrap;overflow=hidden;rounded=1;" parent="1" vertex="1">
           <mxGeometry x="480" y="1140" width="320" height="180" as="geometry" />
         </mxCell>
-        <mxCell id="rFKnUhQcz_V2Pc9SrVM1-88" value="&lt;h1&gt;Operations United&lt;/h1&gt;&lt;p&gt;Once processed, every transaction is&lt;br&gt;&lt;/p&gt;&lt;p&gt;anyway noted in the Global State Layer&lt;/p&gt;&lt;p&gt;in the same format of the others&lt;/p&gt;" style="text;html=1;strokeColor=none;fillColor=none;spacing=5;spacingTop=-20;whiteSpace=wrap;overflow=hidden;rounded=1;" parent="1" vertex="1">
+        <mxCell id="rFKnUhQcz_V2Pc9SrVM1-88" value="&lt;h1&gt;Operations United&lt;/h1&gt;&lt;p&gt;The following type of transactions are always contained in a demosWork object, the common structure that allows RPCs to act in different contexts seamlessly.&lt;/p&gt;" style="text;html=1;strokeColor=none;fillColor=none;spacing=5;spacingTop=-20;whiteSpace=wrap;overflow=hidden;rounded=1;" parent="1" vertex="1">
           <mxGeometry x="525" y="30" width="230" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="Tqh_LfMl19mYtcyC6nHl-4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;curved=0;startArrow=classic;startFill=1;dashed=1;dashPattern=8 8;fillColor=#d80073;strokeColor=#A50040;" edge="1" parent="1" source="Tqh_LfMl19mYtcyC6nHl-1" target="rFKnUhQcz_V2Pc9SrVM1-4">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="20" y="160" as="targetPoint" />
+            <Array as="points">
+              <mxPoint x="20" y="990" />
+              <mxPoint x="20" y="160" />
+            </Array>
+          </mxGeometry>
         </mxCell>
       </root>
     </mxGraphModel>

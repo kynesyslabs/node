@@ -6,7 +6,7 @@ import { StatusHashes } from "src/model/entities/StatusHashes"
 
 // which is set by the validators during the consensus and is an hash of all the applicable operations for that block.
 import Chain from "../../chain"
-import { Operation } from "../executeOperations"
+import { Operation } from "@kynesyslabs/demosdk-http/types"
 
 // REVIEW This could be avoided probably, by using inline hashes instead of hashing the whole table
 // TODO Expand the operation registry (if any) to support inlining of hashes into GLS states.

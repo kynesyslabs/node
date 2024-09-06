@@ -1,5 +1,5 @@
-import { IOperation } from "@kynesyslabs/demosdk/types"
-import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
+import { IOperation } from "@kynesyslabs/demosdk-http/types"
+import * as multichain from "@kynesyslabs/demosdk-http/xm-localsdk"
 
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
@@ -44,7 +44,8 @@ export default async function handlePayOperation(
     console.log("[XMScript Parser] Non-EVM PAY")
 
     // ANCHOR Ripple
-    const rpc_url = operation.rpc || chainProviders[operation.chain][operation.subchain]
+    const rpc_url =
+        operation.rpc || chainProviders[operation.chain][operation.subchain]
     if (!rpc_url) {
         return {
             result: "error",
@@ -58,7 +59,11 @@ export default async function handlePayOperation(
             break
 
         case "egld":
-            result = await genericJsonRpcPay(multichain.MULTIVERSX, rpc_url, operation)
+            result = await genericJsonRpcPay(
+                multichain.MULTIVERSX,
+                rpc_url,
+                operation,
+            )
             break
 
         case "ibc":
@@ -66,7 +71,15 @@ export default async function handlePayOperation(
             break
 
         case "solana":
-            result = await genericJsonRpcPay(multichain.SOLANA, rpc_url, operation)
+            result = await genericJsonRpcPay(
+                multichain.SOLANA,
+                rpc_url,
+                operation,
+            )
+            break
+
+        case "ton":
+            result = await genericJsonRpcPay(multichain.TON, rpc_url, operation)
             break
 
         default:
@@ -142,7 +155,7 @@ async function handleEVMPay(chainID: number, operation: IOperation) {
 
     if (!evmInstance) {
         const rpc_url = evmProviders[operation.chain][operation.subchain]
-        evmInstance = multichain.EVM.createInstance(chainID,rpc_url)
+        evmInstance = multichain.EVM.createInstance(chainID, rpc_url)
         await evmInstance.connect()
     }
 
@@ -213,4 +226,3 @@ async function handleXRPLPay(
         }
     }
 }
-

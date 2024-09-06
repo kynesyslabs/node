@@ -2,11 +2,10 @@ import { Peer, PeerManager } from "src/libs/peer"
 import sharedState from "src/utilities/sharedState"
 import { promisify } from "util"
 
-import ComLink from "../../communications/comlink"
-import ResponseRegistry from "../../communications/responseRegistry"
 import Transmission from "../../communications/transmission"
 /* eslint-disable indent */
 import * as stat from "./timeSyncUtils"
+import { NodeCall } from "../manageNodeCall"
 
 const sleep = promisify(setTimeout)
 interface Offset {
@@ -24,7 +23,7 @@ export default async function getPeerTime(
     id: any,
 ): Promise<number> {
     // A peer object must have a valid socket
-    if (!peer.socket) {
+    if (!peer.connection.string) {
         return null
     }
 
@@ -32,44 +31,26 @@ export default async function getPeerTime(
     console.log(peer)
     console.log(id)
 
-    // Asking the peer for its time
-    let comlink = new ComLink()
-    let time_ask = new Transmission(id.privateKey)
-    time_ask.initialize(
-        "nodeCall",
-        "getPeerTime",
-        id.publicKey,
-        "placeholder",
-        null,
-        null,
-    )
-    console.log("[PEER TIMESYNC] Time Ask")
-    console.log(time_ask)
-    await time_ask.finalize()
-    comlink.properties.require_reply = true
-    comlink.properties.is_reply = false
-    console.log("[PEER TIMESYNC] Sending comlink")
-    //console.log(comlink)
-    // Adding the response request
-    ResponseRegistry.getInstance().requestResponse(comlink)
-    // Broadcasting the request
-    await comlink.broadcastMessageToPeer(peer, time_ask, id.privateKey)
-    // Awaiting the response
-    let response = await ResponseRegistry.getInstance().checkResponse(
-        comlink.muid,
-    )
-    console.log("[PEER TIMESYNC] Response received")
-    //console.log(response)
+    let node_call: NodeCall = {
+        message: "getPeerTime",
+        data: null,
+        muid: null,
+    }
+
+    let response = await peer.call({
+        method: "nodeCall",
+        params: [node_call],
+    })
 
     // Response management
-    if (response[0]) {
+    if (response.result === 200) {
         console.log(
-            `[PEER TIMESYNC] Received timestamp in response: ${response[1].timestamp}`,
+            `[PEER TIMESYNC] Received timestamp in response: ${response.response}`,
         )
     } else {
         console.log("[PEER TIMESYNC] No timestamp received")
     }
-    return response[1].timestamp
+    return response.response.timestamp
 }
 
 export const calculatePeerTimeOffset =

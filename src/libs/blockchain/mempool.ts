@@ -21,7 +21,7 @@ import PeerManager from "../peer/PeerManager"
 import Block from "./block"
 // INFO Singleton Mempool class
 import Transaction from "./transaction"
-import { ISignature } from "@kynesyslabs/demosdk/types"
+import { ISignature } from "@kynesyslabs/demosdk-http/types"
 
 export interface MempoolData {
     number: number
@@ -272,7 +272,7 @@ export default class Mempool {
             )
             let signature_valid = Cryptography.verify(
                 tx_hash,
-                signature,
+                signature.data.toString("hex"),
                 public_key,
             )
             if (!signature_valid) {

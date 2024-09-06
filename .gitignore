@@ -1,5 +1,5 @@
 #Demos files
-/.demos_identity
+/.demos_id*
 demos_peers
 chain.db
 keyfile.json
@@ -46,3 +46,23 @@ docker/node_1/data/chain.db
 docker/node_2/data/chain.db
 .trunk/tools
 .vscode/settings.json
+documentation/schemas/.*
+pnpm-lock.yaml
+
+# DB Files
+postgres/data
+postgres/data_*
+postgres_*
+
+# Logs
+logs_*/
+logs/
+
+# Test files
+start_two_nodes.sh
+node_*.sh
+publickey_*
+
+# Doc files
+documentation/*.html
+documentation/*.zip

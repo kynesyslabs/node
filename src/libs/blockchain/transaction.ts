@@ -25,12 +25,13 @@ import {
     RawTransaction,
     Transaction as ITransaction,
     TransactionContent,
-} from "@kynesyslabs/demosdk/types"
+} from "@kynesyslabs/demosdk-http/types"
 
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import { compressData, decompressData } from "../utils/demostdlib"
 import Confirmation from "./types/confirmation"
+import { ForgeToHex } from "../crypto/forgeUtils"
 
 interface TransactionResponse {
     status: string
@@ -99,8 +100,8 @@ export default class Transaction implements ITransaction {
         // verify using identity.cryptography.verify(tx.content, tx.signature, publicKey)
         let _verified = Cryptography.verify(
             JSON.stringify(tx.content),
-            tx.signature,
-            tx.content.from,
+            tx.signature.data.toString("hex"),
+            tx.content.from.toString("hex"),
         )
         return [_verified, "Result of verify()"]
     }
@@ -123,8 +124,11 @@ export default class Transaction implements ITransaction {
         privateKey: forge.pki.ed25519.BinaryBuffer,
     ) {
         console.log("[TRANSACTION]: confirmTx")
+        console.log("Public key: ")
         console.log(publicKey)
+        console.log("Private key: ")
         console.log(privateKey)
+        console.log("Signature: ")
         console.log(tx.signature)
         let confirmed =
             this.sanityCheck(tx) && this.isCoherent(tx) && this.structured(tx)
@@ -144,14 +148,17 @@ export default class Transaction implements ITransaction {
 
     // INFO Checks the integrity of a transaction
     public static sanityCheck(tx: Transaction) {
-        console.log(
-            "[sanityCheck] Checking the sanity of the tx with hash: " + tx.hash,
-        )
+        console.log("[sanityCheck] Checking the sanity of the tx")
+        console.log("Hash: " + tx.hash)
+        console.log("Signature: ")
+        console.log(ForgeToHex(tx.signature.data))
+        console.log("From: ")
+        console.log(ForgeToHex(tx.content.from))
         //let tx_content_hash = Hashing.sha256(JSON.stringify(tx.content))
         let _result = Cryptography.verify(
             tx.hash,
-            tx.signature.data,
-            tx.content.from,
+            ForgeToHex(tx.signature.data),
+            ForgeToHex(tx.content.from),
         )
         console.log("[sanityCheck] Sanity: " + _result)
         return _result

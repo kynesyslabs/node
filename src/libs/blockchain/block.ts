@@ -11,7 +11,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { pki } from "node-forge"
 
-import { BlockContent } from "@kynesyslabs/demosdk/types"
+import { BlockContent } from "@kynesyslabs/demosdk-http/types"
 
 // NOTE Block class
 export default class Block {
@@ -35,7 +35,7 @@ export default class Block {
             timestamp: null,
         }
         this.proposer = null
-        this.validation_data = null
+        this.validation_data = { signatures: {} }
     }
 
     // ANCHOR Getters

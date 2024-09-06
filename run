@@ -1,0 +1,143 @@
+#!/bin/bash
+
+PG_PORT=5332
+
+# trap ctrl-c and call ctrl_c()
+trap ctrl_c INT
+
+HAS_BEEN_INTERRUPTED=false
+
+function ctrl_c() {
+    HAS_BEEN_INTERRUPTED=true
+    cd postgres
+    docker compose down
+    cd ..
+}
+
+# Function to check if we are on the first run with the .RUN file
+function is_first_run() {
+    if [ ! -f ".RUN" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+
+# If we are on the first run, we need to install the dependencies
+if is_first_run; then
+    echo "Installing node dependencies"
+    if ! yarn install; then
+        echo "Error: Dependencies failed to install"
+        exit 1
+    fi
+    echo "Ok, dependencies installed"
+    # We need docker and docker compose to be installed
+    if ! docker compose version; then
+        echo "Error: Docker and docker compose are not installed: please refer to https://docs.docker.com/compose/install/"
+        exit 1
+    fi
+    echo "Ok, docker compose installed"
+    # Check if Bun is installed
+    if ! command -v bun &> /dev/null; then
+        echo "Warning: Bun is not installed. For better performance, consider installing Bun: https://bun.sh/"
+        echo "The script will continue using Node.js instead of Bun."
+        echo "Install bun following: https://bun.sh/docs/installation if you want to use Bun for a major performance improvement"   
+    else
+        echo "Ok, Bun is installed"
+    fi
+    # This file is used to check if we are on the first run
+
+    # This file is used to check if we are on the first run
+    touch .RUN
+fi
+
+CLEAN="false"
+PORT=53550
+
+# Getting arguments
+while getopts "p:d:c:i:" opt; do
+    case $opt in
+        p) PORT=$OPTARG;;
+        d) PG_PORT=$OPTARG;;
+        c) CLEAN=$OPTARG;;
+        i) IDENTITY_FILE=$OPTARG;;
+        #...
+    esac
+done
+shift $((OPTIND -1))
+echo "PORT=$PORT"
+echo "PG_PORT=$PG_PORT"
+echo "IDENTITY_FILE=$IDENTITY_FILE"
+
+
+# Check if Bun is available and set the start command
+if command -v bun &> /dev/null; then
+    START_COMMAND="yarn start:bun"
+else
+    START_COMMAND="yarn start"
+fi
+
+echo "Starting the node with $START_COMMAND"
+
+
+# PG_PORT and IDENTITY_FILE are exported for both docker and yarn
+export PG_PORT=$PG_PORT
+export IDENTITY_FILE=$IDENTITY_FILE
+
+# Database management with proper folder based on the port
+PG_FOLDER="postgres_${PG_PORT}"
+if [ ! -d "$PG_FOLDER" ]; then
+    cp -r postgres $PG_FOLDER   
+fi
+cd $PG_FOLDER
+
+# If we are cleaning, we need to remove the database
+if [ "$CLEAN" == "true" ]; then
+    echo "Cleaning the database"
+    sleep 1
+    sudo rm -rf data_*
+    mkdir data_${PG_PORT}
+fi
+
+# Suppressing errors if the database is not running
+docker compose down > /dev/null 2>&1
+if [ "$CLEAN" == "true" ]; then
+    sudo rm -rf data_${PG_PORT}
+    mkdir data_${PG_PORT}
+fi  
+# Finally starting the database
+docker compose up -d
+cd ..
+
+# Waiting for db port to be available
+echo -n "Waiting for the database to be available"
+COUNT=0
+while ! nc -z localhost $PG_PORT; do 
+    echo -n "."
+    COUNT=$((COUNT+1))
+    if [ $COUNT -gt 10 ]; then
+        echo "Timeout waiting for the database to be available"
+        exit 1
+    fi
+    sleep 1
+done
+
+
+# Starting the node managing errors
+if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE $START_COMMAND; then
+    if [ "$HAS_BEEN_INTERRUPTED" == "true" ]; then
+        echo "RPC exited successfully"
+    else
+        echo "Error: RPC failed to start or crashed"
+        exit_code=$?
+    fi
+else
+    echo "RPC exited successfully"
+    exit_code=0
+fi
+
+# Once exiting, stopping the database
+cd postgres_${PG_PORT}
+docker compose down
+cd ..
