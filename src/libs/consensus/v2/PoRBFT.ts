@@ -71,8 +71,6 @@ export async function consensusRoutine(): Promise<void> {
 
     // Initialize the consensus state and check if the local node is in the shard
     initializeConsensusState()
-    // Reset the startingConsensus flag
-    sharedState.getInstance().startingConsensus = false
     const shard = await initializeShard()
 
     if (!isInShard(shard)) {
@@ -90,6 +88,7 @@ export async function consensusRoutine(): Promise<void> {
 
     // Here we wait that the shard is ready by checking the validators statuses and if they are in consensus loop
     // We can't continue until the shard is ready and synced to our validator status
+    // ? Should we use updateValidatorStatus instead of waitUntilShardIsReady directly?
     let shardIsReady = await ShardManager.getInstance().waitUntilShardIsReady(
         ShardManager.getInstance().getOurValidatorStatus(),
     )
@@ -103,7 +102,6 @@ export async function consensusRoutine(): Promise<void> {
     const mempool = await mergeAndOrderMempools(shard)
     // Forge the block from the ordered transactions
     const block = await forgeBlock(mempool)
-
     // REVIEW Set last consensus time to the current block timestamp
     sharedState.getInstance().lastConsensusTime = block.content.timestamp
     
@@ -142,6 +140,8 @@ function initializeConsensusState(): void {
     sharedState.getInstance().consensusMode = true
     sharedState.getInstance().inConsensusLoop = true
     sharedState.getInstance().lastTimestamp = Date.now()
+    // Reset the startingConsensus flag
+    sharedState.getInstance().startingConsensus = false
 }
 
 // SECTION Initalizations
@@ -185,6 +185,7 @@ async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
         averageTimestamp = Math.round(averageTimestamp)
     }
     sharedState.getInstance().lastConsensusTime = averageTimestamp
+    await updateValidatorStatus("synchronizedTime")
 }
 
 // Merge and order the mempools between the shard and the local node
@@ -261,7 +262,7 @@ function cleanupConsensusState(): void {
 }
 
 // REVIEW This function updates and transmits the validator status to the shard
-async function updateValidatorStatus(status: string): Promise<void> {
+async function updateValidatorStatus(status: string, wait: boolean = true): Promise<void> {
     const ourIdentity = sharedState
         .getInstance()
         .identity.ed25519.publicKey.toString("hex")
@@ -270,4 +271,10 @@ async function updateValidatorStatus(status: string): Promise<void> {
     validatorStatus[status] = true
     ShardManager.getInstance().setValidatorStatus(ourIdentity, validatorStatus)
     await ShardManager.getInstance().transmitOurValidatorStatus()
+    // If not specified otherwise, we wait for the shard to be ready
+    if (wait) { 
+        await ShardManager.getInstance().waitUntilShardIsReady(
+            ShardManager.getInstance().getOurValidatorStatus(),
+        )
+    }
 }

@@ -12,13 +12,13 @@ export async function broadcastBlockHash(block: Block, shard: Peer[]): Promise<[
     const proposeParams = [block.hash, block.validation_data, ourId]
     for (const peer of shard) {
         promises.push(
-            peer.call({
+            peer.longCall({
                 method: "consensus_routine",
                 params: [{
                     method: "proposeBlockHash",
                     params: proposeParams,
                 }],
-            }),
+            }), // REVIEW  We should wait a little if the call returns false as the node is not in the consensus loop yet and in general for all consensus_routine calls
         )
     }
     // See manageConsensusRoutine.ts for more details on the response format and mechanism

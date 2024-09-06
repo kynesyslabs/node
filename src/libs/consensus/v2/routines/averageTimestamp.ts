@@ -8,13 +8,13 @@ export default async function averageTimestamps(shard: Peer[]) {
     var promises: Promise<RPCResponse>[] = []
     // Ask each peer in the shard for their timestamp
     for (const peer of shard) {
-        promises.push(peer.call({
+        promises.push(peer.longCall({
             method: "consensus_routine",
             params: [{
                 method: "getValidatorTimestamp",
                 params: [],
             }],
-        }))
+        })) // REVIEW We should wait a little if the call returns false as the node is not in the consensus loop yet and in general for all consensus_routine calls
     }
     // Wait for all promises to resolve
     await Promise.all(promises)

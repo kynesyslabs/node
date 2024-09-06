@@ -25,7 +25,7 @@ export default class Cryptography {
     static new() {
         const seed = forge.random.getBytesSync(32)
         const keys = forge.pki.ed25519.generateKeyPair({ seed })
-        console.log("Generated new keypair")
+        console.log("Generated new ed25519 keypair")
         return keys
     }
 
@@ -214,7 +214,6 @@ export default class Cryptography {
             let pnrg = forge.random.createInstance()
             pnrg.seedFileSync = () => seed
             let keys = forge.pki.rsa.generateKeyPair({ bits: 4096, prng: pnrg })
-            sharedState.getInstance().identity.rsa = keys
             return keys
         },
 

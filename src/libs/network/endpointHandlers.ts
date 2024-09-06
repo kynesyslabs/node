@@ -324,19 +324,20 @@ export default class ServerHandlers {
     ): Promise<RPCResponse> {
         let response: RPCResponse = _.cloneDeep(emptyResponse)
         let senderIdentity = request.sender
-        console.log("[SERVER] Received consensus request")
-        console.log(
+        //console.log("[SERVER] Received consensus request")
+        /*console.log(
             "[SERVER] Peer identity information received: " +
                 senderIdentity,
-        )
+        )*/
         if (!sharedState.getInstance().consensusMode) {
+            log.error("[endpointHandlers] We are not in consensus mode")
             response.result = 400
             response.response = false
             response.extra = "We are not in consensus mode (and you are using the old consensus mechanism)"
             return response
         }
 
-        console.log("we are in consensus mode")
+        //console.log("we are in consensus mode")
 
         let authorized = false
         let senderPublicKey = senderIdentity
@@ -344,12 +345,13 @@ export default class ServerHandlers {
         const { shard } = sharedState.getInstance()
 
         if (!shard) {
+            log.error("[endpointHandlers] No shard found in shared state")
             response.result = 400
             response.response = false
             response.extra = "No shard found in shared state"
             return response
         }
-        console.log("[SERVERHANDLER] Shard found in shared state")
+        //console.log("[SERVERHANDLER] Shard found in shared state")
         //console.log(shard)
 
         const peerList = shard
@@ -364,6 +366,7 @@ export default class ServerHandlers {
 
         // Return error if not authorized
         if (!authorized) {
+            log.error("[endpointHandlers] Not authorized")
             response.result = 401
             response.response = false
             response.extra = "Not authorized"
@@ -377,10 +380,11 @@ export default class ServerHandlers {
                 response.result = 200
                 response.require_reply = false
                 response.extra = "Mempool received"
-                console.log("[SERVERHANDLER] Received mempool")
+                //console.log("[SERVERHANDLER] Received mempool")
                 return response
 
             default:
+                log.error("[endpointHandlers] Unknown message")
                 response.result = 400
                 response.response = false
                 response.extra = "Unknown message"

@@ -100,10 +100,11 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
             return await manageExecution(payload.params[0] as BundleContent)
         case "hello_peer": // As it is authenticated, we can use it to check if the peer is still alive and is in our peer list
             return await manageHelloPeer(payload.params[0] as HelloPeerRequest)
-        case "consensus":
+        /*case "consensus":
             return await ServerHandlers.handleConsensusRequest(payload.params[0] as ConsensusRequest)
         case "proofOfConsensus":
-            return await proofConsensusHandler(payload.params[0])
+            return await proofConsensusHandler(payload.params[0]) 
+        */
         case "mempool":
             return await ServerHandlers.handleMempool(payload.params[0])
         // Auth management

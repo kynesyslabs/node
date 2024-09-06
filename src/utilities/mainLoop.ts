@@ -67,24 +67,23 @@ export default async function mainLoop() {
         // ? Looks like  we re-enter in the loop without finishing the previous one.
         // ? Also due to this (presumably) sometimes a node adds twice the same block
         /*
-[INFO] [2024-08-29T11:51:11.698Z] [consensusRoutine] Threshold: 2
-[INFO] [2024-08-29T11:51:11.698Z] [consensusRoutine] Total votes: 2
-[INFO] [2024-08-29T11:51:11.699Z] [consensusRoutine] [result] Block is valid with 2 votes
-[INFO] [2024-08-29T11:51:11.699Z] [consensusRoutine] Block is valid with 2 votes
-[CHAIN] reading hash
-[]
-[CHAIN] bork
-[ChainDB] [ INFO ]: Checking if block with position undefined already exists
-[ChainDB] [ INFO ]: Found block with null position, possibly genesis block
-[ChainDB] [ INFO ]: Block with position undefined does not exist: inserting a new block
-[CONSENSUS TIME] lastTimestamp: 1724932238313
-[CONSENSUS TIME] currentTimestamp: 1724932271588
-[CONSENSUS TIME] delta: 33275
-[CONSENSUS TIME] consensusIntervalTime: 10000
-[CONSENSUS TIME] consensusIntervalTime: 10000
-[CONSENSUS TIME] Consensus time reached
-[INFO] [2024-08-29T11:51:11.700Z] [manageConsensusRoutines] We are within the consensus time window
-...
+            [INFO] [2024-08-29T11:51:11.698Z] [consensusRoutine] Threshold: 2
+            [INFO] [2024-08-29T11:51:11.698Z] [consensusRoutine] Total votes: 2
+            [INFO] [2024-08-29T11:51:11.699Z] [consensusRoutine] [result] Block is valid with 2 votes
+            [INFO] [2024-08-29T11:51:11.699Z] [consensusRoutine] Block is valid with 2 votes
+            [CHAIN] reading hash
+            []
+            [CHAIN] bork
+            [ChainDB] [ INFO ]: Checking if block with position undefined already exists
+            [ChainDB] [ INFO ]: Found block with null position, possibly genesis block
+            [ChainDB] [ INFO ]: Block with position undefined does not exist: inserting a new block
+            [CONSENSUS TIME] lastTimestamp: 1724932238313
+            [CONSENSUS TIME] currentTimestamp: 1724932271588
+            [CONSENSUS TIME] delta: 33275
+            [CONSENSUS TIME] consensusIntervalTime: 10000
+            [CONSENSUS TIME] Consensus time reached
+            [INFO] [2024-08-29T11:51:11.700Z] [manageConsensusRoutines] We are within the consensus time window
+            ...
         */
         // NOTE We need both the consensus time and the sync status to be true, to avoid
         // conflicts with the sync loop that would lead to a failure in the consensus mechanism.
@@ -150,54 +149,3 @@ async function peerRoutine(): Promise<Peer[]> {
     // Returns the list of currently online peers
     return currentlyOnlinePeers
 }
-
-// ANCHOR Consensus routine
-/* async function consensusRoutine(currentlyOnlinePeers: Peer[]) {
-    console.log("[MAIN LOOP] Consensus time reached")
-    sharedState.getInstance().mainLoopPaused = true // Pause the main loop
-    hasSentNodeOnlineTx = false // Reset it for the next cycle.
-    sharedState.getInstance().consensusMode = true
-    sharedState.getInstance().inConsensusLoop = true
-
-    // REVIEW We have to proceed with the next mempool here, to avoid queued transactions to be included in the current immutable consensus round
-    // await Mempool.nextMempool() // ? What if consensus fails? Should we rollback the mempool?
-
-    const shard = await RepresentativeShard.getInstance().getShard(
-        currentlyOnlinePeers,
-    )
-    
-
-    sharedState.getInstance().shard = shard // ! On the first node, the shard does not include the second node (maybe it does not even reach that point     )
-    console.log("[MAIN LOOP] Shard selected")
-    console.log(shard)
-
-    let consensus = null
-    try {
-        consensus = await QBFT.representationAssembly(shard)
-    } catch (e) {
-        console.log(e)
-        throw e
-    }
-    console.log(
-        `[MAIN LOOP] Consensus: ${
-            consensus[0]
-        }, proposed block: ${JSON.stringify(consensus[1])}`,
-    )
-
-    if (consensus[0]) {
-        const prevBlockNumber = (await Chain.getLastBlock()).number
-        consensus[1].number = prevBlockNumber + 1
-
-        await Chain.insertBlock(consensus[1])
-
-        // Next mempool
-        await Mempool.nextMempool()
-    }
-
-    // At the end of the consensus period, the main loop should start again
-
-    delete sharedState.getInstance().shard
-    sharedState.getInstance().consensusMode = false
-    sharedState.getInstance().inConsensusLoop = false
-    sharedState.getInstance().mainLoopPaused = false // Pause the main loop
-} */
