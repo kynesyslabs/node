@@ -216,6 +216,7 @@ export default class PeerManager {
 
     // REVIEW This method should be tested and finalized
     static async sayHelloToPeer(peer: Peer) {
+        sharedState.getInstance().peerRoutineRunning += 1 // Adding one to the peer routine running counter
         // Assigning an identity to the peer if it doesn't have one
         if (!peer.identity) {
             peer = PeerManager.extractPeerFromString(peer.connection.string)
@@ -269,6 +270,7 @@ export default class PeerManager {
             // Add the peer to the offline list
             PeerManager.getInstance().addOfflinePeer(peer.connection.string)
         }
+        sharedState.getInstance().peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
         //process.exit(0)
     }
 }

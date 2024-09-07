@@ -35,6 +35,7 @@ export default class sharedState {
     mainLoopPaused: boolean = false
     consensusMode: boolean = false
     syncStatus: boolean = false
+    peerRoutineRunning: number = 0
     // SECTION shared state variables
     shard: Peer[]
     lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard

@@ -139,6 +139,7 @@ export default class Peer {
             await new Promise(resolve => setTimeout(resolve, sleepTime))
             tries++
         }
+        log.error("[PEER] [LONG CALL] Max retries reached: " + response)
         return {
             result: 400,
             response: "Max retries reached",
