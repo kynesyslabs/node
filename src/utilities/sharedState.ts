@@ -17,6 +17,8 @@ dotenv.config({ path: "../../.commons" })
 export default class sharedState {
     private static instance: sharedState
 
+    version: string = "0.7.1"
+
     block_time: number = 10 // TODO Get it from the genesis (or see Consensus module)
 
     currentTimestamp: number = 0

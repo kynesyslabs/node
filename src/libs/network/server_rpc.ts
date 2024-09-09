@@ -157,6 +157,11 @@ export default async function server_rpc(): Promise<FastifyInstance> {
         reply.send("Hello, World!")
     })
 
+    serverApp.get("/version", async (req: FastifyRequest, reply: FastifyReply) => {
+        reply.header("Access-Control-Allow-Origin", "*")
+        reply.send(sharedState.getInstance().version)
+    })
+
     // Setup OpenAPI
     setupOpenAPI(serverApp)
 
