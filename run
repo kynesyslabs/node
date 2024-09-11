@@ -1,6 +1,7 @@
 #!/bin/bash
 
 PG_PORT=5332
+GIT_PULL=true
 
 # trap ctrl-c and call ctrl_c()
 trap ctrl_c INT
@@ -62,10 +63,19 @@ while getopts "p:d:c:i:" opt; do
         d) PG_PORT=$OPTARG;;
         c) CLEAN=$OPTARG;;
         i) IDENTITY_FILE=$OPTARG;;
+        n) GIT_PULL=false;;
         #...
     esac
 done
 shift $((OPTIND -1))
+
+# Perform git pull if GIT_PULL is true
+if [ "$GIT_PULL" = true ]; then
+    echo "Updating repository..."
+    git pull
+fi
+
+
 echo "PORT=$PORT"
 echo "PG_PORT=$PG_PORT"
 echo "IDENTITY_FILE=$IDENTITY_FILE"
