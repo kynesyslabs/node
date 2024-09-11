@@ -1,7 +1,7 @@
 // INFO In this module is offloaded the parsing of XM requests
 import * as fs from "fs"
-import * as multichain from "@kynesyslabs/demosdk-http/xm-localsdk"
-import { IOperation, XMScript } from "@kynesyslabs/demosdk-http/types"
+import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
+import { IOperation, XMScript } from "@kynesyslabs/demosdk/types"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 
 import handlePayOperation from "./executors/pay"

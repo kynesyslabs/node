@@ -20,7 +20,7 @@ import { orderTransactions } from "./routines/orderTransactions"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
 import averageTimestamps from "./routines/averageTimestamp"
 import { fastSync } from "src/libs/blockchain/routines/Sync"
-import { RPCRequest } from "@kynesyslabs/demosdk-http/types"
+import { RPCRequest } from "@kynesyslabs/demosdk/types"
 import ShardManager, { ValidatorStatus } from "./routines/shardManager"
 
 /* INFO

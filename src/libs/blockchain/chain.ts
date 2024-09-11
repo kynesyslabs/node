@@ -21,9 +21,9 @@ import { MoreThan, ILike } from "typeorm"
 import {
     AddressInfo, Operation, StatusNative as StatusNativeType,
     StatusProperties as StatusPropertiesType, StringifiedPayload, TransactionContent,
-} from "@kynesyslabs/demosdk-http/types"
+} from "@kynesyslabs/demosdk/types"
 
-import { Hashing } from "node_modules/@kynesyslabs/demosdk-http/build/encryption"
+import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
 
 
 import Block from "./block"

@@ -1,7 +1,7 @@
 import axios from "axios"
 import terminalKit from "terminal-kit"
 
-import { IParam, IRawWeb2Request, IWeb2Result } from "@kynesyslabs/demosdk-http/types"
+import { IParam, IRawWeb2Request, IWeb2Result } from "@kynesyslabs/demosdk/types"
 
 const term = terminalKit.terminal
 

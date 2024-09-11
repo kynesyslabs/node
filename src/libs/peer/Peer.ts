@@ -9,10 +9,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import type { IPeerConfig } from "@kynesyslabs/demosdk-http/types"
+import type { IPeerConfig } from "@kynesyslabs/demosdk/types"
 import forge from "node-forge"
 import log from "src/utilities/logger"
-import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import axios from "axios"
 import sharedState from "src/utilities/sharedState"
 import Cryptography from "../crypto/cryptography"

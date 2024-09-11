@@ -10,7 +10,7 @@ import {
     IWeb2Attestation,
     IWeb2Request,
     IWeb2Result,
-} from "@kynesyslabs/demosdk-http/types"
+} from "@kynesyslabs/demosdk/types"
 
 import post from "./operations/Web2Post"
 import retrieve from "./operations/Web2Retrieve"

@@ -1,4 +1,4 @@
-import { RPCRequest } from "@kynesyslabs/demosdk-http/types"
+import { RPCRequest } from "@kynesyslabs/demosdk/types"
 import { Peer } from "src/libs/peer"
 import log from "src/utilities/logger"
 import sharedState from "src/utilities/sharedState"

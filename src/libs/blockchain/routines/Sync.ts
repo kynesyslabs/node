@@ -21,7 +21,7 @@ import Block from "../block"
 import Chain from "../chain"
 import { NodeCall } from "src/libs/network/manageNodeCall"
 import log from "src/utilities/logger"
-import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 
 const term = terminalkit.terminal
 

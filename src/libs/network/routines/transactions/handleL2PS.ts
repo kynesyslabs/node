@@ -1,7 +1,7 @@
-import { BlockContent, EncryptedTransaction } from "@kynesyslabs/demosdk-http/types"
+import { BlockContent, EncryptedTransaction } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
 import Hashing from "src/libs/crypto/hashing"
-import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "../../server_rpc"
 import _ from "lodash"
 

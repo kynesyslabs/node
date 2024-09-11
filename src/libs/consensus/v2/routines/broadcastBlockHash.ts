@@ -1,4 +1,4 @@
-import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { ConsensusHashResponse } from "../interfaces"
 import Block from "src/libs/blockchain/block"
 import { Peer } from "src/libs/peer"

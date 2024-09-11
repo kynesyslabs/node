@@ -49,7 +49,7 @@ import {
     IWeb2Request,
     ValidityData,
     XMScript,
-} from "@kynesyslabs/demosdk-http/types"
+} from "@kynesyslabs/demosdk/types"
 
 import GLS from "../blockchain/gls/gls"
 import {
@@ -57,7 +57,7 @@ import {
     StringifiedPayload,
     Web2Payload,
     XMPayload,
-} from "node_modules/@kynesyslabs/demosdk-http/build/types/blockchain/Transaction"
+} from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/Transaction"
 import { StatusNative } from "src/model/entities/StatusNative"
 import Block from "../blockchain/block"
 import { BlockContent } from "../../../../sdks/src/types/blockchain/blocks"
@@ -66,7 +66,7 @@ import getPeerInfo from "./routines/nodecalls/getPeerInfo"
 import forge from "node-forge"
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
-import { ConsensusRequest, RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { ConsensusRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
 
 let term = terminalkit.terminal

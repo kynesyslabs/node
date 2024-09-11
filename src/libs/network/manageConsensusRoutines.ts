@@ -1,4 +1,4 @@
-import { RPCResponse, VoteRequest } from "@kynesyslabs/demosdk-http/types"
+import { RPCResponse, VoteRequest } from "@kynesyslabs/demosdk/types"
 import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorSeed"
 import { emptyResponse } from "./server_rpc"
 import _ from "lodash"

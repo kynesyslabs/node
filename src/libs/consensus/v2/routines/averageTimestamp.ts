@@ -1,4 +1,4 @@
-import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { Peer } from "src/libs/peer"
 

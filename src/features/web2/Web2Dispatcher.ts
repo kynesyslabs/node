@@ -6,7 +6,7 @@ import required from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
 import terminalKit from "terminal-kit"
 
-import { IWeb2Request } from "@kynesyslabs/demosdk-http/types"
+import { IWeb2Request } from "@kynesyslabs/demosdk/types"
 
 const term = terminalKit.terminal
 

@@ -16,7 +16,7 @@ import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import sharedState from "src/utilities/sharedState"
 import forge from "node-forge"
-import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { method } from "lodash"
 import { HelloPeerRequest } from "../network/manageHelloPeer"
 

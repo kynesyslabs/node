@@ -21,7 +21,7 @@ import PeerManager from "../peer/PeerManager"
 import Block from "./block"
 // INFO Singleton Mempool class
 import Transaction from "./transaction"
-import { ISignature } from "@kynesyslabs/demosdk-http/types"
+import { ISignature } from "@kynesyslabs/demosdk/types"
 
 export interface MempoolData {
     number: number
