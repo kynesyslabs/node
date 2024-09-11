@@ -66,3 +66,4 @@ publickey_*
 # Doc files
 documentation/*.html
 documentation/*.zip
+demos_peers_remote
