@@ -10,7 +10,8 @@ import * as Security from "src/libs/network/securityModule"
 import axios from "axios"
 import * as ntpClient from "ntp-client"
 import Chain from "src/libs/blockchain/chain"
-import { Peer } from "src/libs/peer"
+import { Peer, PeerManager } from "src/libs/peer"
+import getPublicIP from "./getPublicIP"
 
 dotenv.config({ path: "../../.commons" })
 
@@ -113,5 +114,22 @@ export default class sharedState {
 
     public getConsensusTime(): number {
         return Number(process.env.CONSENSUS_TIME)
+    }
+
+    public async getConnectionString(): Promise<string> {
+        // Getting our public ip
+        const ip = await getPublicIP()
+        return `${ip}:${this.serverPort}`
+    }
+
+    // NOTE This is a wrapper for many stats that are used by the node and the rpc server
+    public async getInfo(): Promise<any> {
+        let info = {
+            version: this.version,
+            identity: this.identity.ed25519.publicKey.toString("hex"),
+            connectionString: await this.getConnectionString(),
+            peerlist: PeerManager.getInstance().getPeers(),
+        }
+        return info
     }
 }

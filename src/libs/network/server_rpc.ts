@@ -20,6 +20,7 @@ import manageConsensusRoutines from "./manageConsensusRoutines"
 import _ from "lodash"
 import { registerMethodListingEndpoint } from "./methodListing"
 import { setupOpenAPI, rpcSchema } from "./openApiSpec"
+import { PeerManager } from "../peer"
 
 // Reading the port from sharedState
 
@@ -150,13 +151,21 @@ export default async function server_rpc(): Promise<FastifyInstance> {
     // Register the method listing endpoint
     registerMethodListingEndpoint(serverApp)
 
-    // GET request handler
+    // GET request handlers
+
     serverApp.get("/", async (req: FastifyRequest, reply: FastifyReply) => {
 
         reply.header("Access-Control-Allow-Origin", "*")
         reply.send("Hello, World!")
     })
 
+    // NOTE Generic info endpoint
+    serverApp.get("/info", async (req: FastifyRequest, reply: FastifyReply) => {
+        reply.header("Access-Control-Allow-Origin", "*")
+        reply.send(await sharedState.getInstance().getInfo())
+    })
+    
+    // Specific info endpoints
     serverApp.get("/version", async (req: FastifyRequest, reply: FastifyReply) => {
         reply.header("Access-Control-Allow-Origin", "*")
         reply.send(sharedState.getInstance().version)
@@ -167,7 +176,11 @@ export default async function server_rpc(): Promise<FastifyInstance> {
     })
     serverApp.get("/connectionstring", async (req: FastifyRequest, reply: FastifyReply) => {
         reply.header("Access-Control-Allow-Origin", "*")
-        reply.send(sharedState.getInstance().connectionString)
+        reply.send(await sharedState.getInstance().getConnectionString())
+    })
+    serverApp.get("/peerlist", async (req: FastifyRequest, reply: FastifyReply) => {
+        reply.header("Access-Control-Allow-Origin", "*")
+        reply.send(PeerManager.getInstance().getPeers())
     })
 
     // Setup OpenAPI
