@@ -119,7 +119,8 @@ export default class sharedState {
     public async getConnectionString(): Promise<string> {
         // Getting our public ip
         const ip = await getPublicIP()
-        return `${ip}:${this.serverPort}`
+        const publicKey = this.identity.ed25519.publicKey.toString("hex")
+        return `http://${ip}>${this.serverPort}>${publicKey}`
     }
 
     // NOTE This is a wrapper for many stats that are used by the node and the rpc server
