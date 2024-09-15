@@ -60,6 +60,12 @@ export default class PeerManager {
         }
     }
 
+    // Fetching peer info from /info endpoint
+    async fetchPeerInfo(peer: Peer) {
+        const info = await peer.fetch("info")
+        console.log("[PeerManager] Peer info: " + info)
+    }
+
     createNewPeer(identity: string): Peer {
         const peer = new Peer()
         peer.identity = identity

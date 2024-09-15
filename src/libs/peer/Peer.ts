@@ -230,4 +230,19 @@ export default class Peer {
             }
         }
     }
+
+    // INFO Fetch through http get
+    async fetch(endpoint: string): Promise<any> {
+        // Sanitize the url
+        if (endpoint.startsWith("/")) {
+            endpoint = endpoint.substring(1)
+        }
+        if (this.connection.string.endsWith("/")) {
+            this.connection.string = this.connection.string.slice(0, -1)
+        }
+        const url = this.connection.string + "/" + endpoint
+        log.info("[Fetch] Making fetch call to: " + url)
+        const response = await axios.get(url)
+        return response.data
+    }
 }
