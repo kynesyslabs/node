@@ -118,6 +118,7 @@ export default class Peer {
         request: RPCRequest,
         isAuthenticated: boolean = true,
     ): Promise<RPCResponse> {
+        log.info("[RPC Call] [" + request.method + "] [" + new Date(Date.now()).toISOString() + "] Making RPC call to: " + this.connection.string)
         // Get some informations
         let method = request.method
         let currentTimestampReadable = new Date(Date.now()).toISOString()
@@ -187,7 +188,7 @@ export default class Peer {
             }
             return response.data
         } catch (error) {
-            log.error("Error making RPC call:" + error)
+            log.error("[RPC Call] [" + method + "] [" + currentTimestampReadable + "] Error making RPC call:" + error)
             return {
                 result: 500,
                 response: error,
@@ -210,5 +211,10 @@ export default class Peer {
         log.info("[Fetch] Making fetch call to: " + url)
         const response = await axios.get(url)
         return response.data
+    }
+
+
+    async getInfo(): Promise<any> {
+        return await this.fetch("info")
     }
 }

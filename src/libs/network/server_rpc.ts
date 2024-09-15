@@ -87,7 +87,7 @@ function validateHeaders(headers: any): [boolean, string] {
 
 /* ANCHOR Processor method */
 // Function to process the payload
-async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
+async function processPayload(payload: RPCRequest, sender: string): Promise<RPCResponse> {
     // Payloads management
     switch (payload.method) {
         case "ping":
@@ -100,7 +100,8 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
         case "execute":
             return await manageExecution(payload.params[0] as BundleContent)
         case "hello_peer": // As it is authenticated, we can use it to check if the peer is still alive and is in our peer list
-            return await manageHelloPeer(payload.params[0] as HelloPeerRequest)
+            var helloPeerRequest = payload.params[0] as HelloPeerRequest
+            return await manageHelloPeer( helloPeerRequest as HelloPeerRequest, sender)
         /*case "consensus":
             return await ServerHandlers.handleConsensusRequest(payload.params[0] as ConsensusRequest)
         case "proofOfConsensus":
@@ -198,6 +199,7 @@ export default async function server_rpc(): Promise<FastifyInstance> {
 
         // Header check
         const headers = req.headers
+        var sender = ""
         // Excluding due to noAuthMethods from header validation
         if (!noAuthMethods.includes(payload.method)) {
             var header_validation = validateHeaders(headers)
@@ -206,9 +208,10 @@ export default async function server_rpc(): Promise<FastifyInstance> {
                 reply.status(401).send({ error: "Invalid headers:" + header_validation[1] })
                 return
             }
+            sender = headers["identity"] as string
         }
         console.log("[RPC Call] Processing payload: " + JSON.stringify(payload, null, 2))
-        const response = await processPayload(payload)
+        const response = await processPayload(payload, sender)
         console.log("[RPC Call] Response: " + JSON.stringify(response, null, 2))
 
         reply.header("Access-Control-Allow-Origin", "*")

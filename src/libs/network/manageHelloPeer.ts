@@ -5,15 +5,19 @@ import { PeerManager, Peer } from "../peer"
 import log from "src/utilities/logger"
 import _ from "lodash"
 import * as forge from "node-forge"
+import { Cryptography } from "node_modules/@kynesyslabs/demosdk/build/encryption"
 
 export interface HelloPeerRequest {
     url: string
     publicKey: string
+    signature: string
 }
 
 // Hello Peer takes the request of an already authenticated client and treat the client as a peer
+// ! More robust checks should be done in the hello peer routine to avod adding invalid peers that may block the network
 export async function manageHelloPeer(
     content: HelloPeerRequest,
+    sender: string,
 ): Promise<RPCResponse> {
     // Prepare the response
     let response: RPCResponse = _.cloneDeep(emptyResponse)
@@ -36,22 +40,47 @@ export async function manageHelloPeer(
     let peerObject = new Peer()
     peerObject.identity = content.publicKey
     peerObject.connection.string = content.url
-    console.log("[Hello Peer Listener] Extracted peer with connection string: " + peerObject.connection.string)
+    console.log(
+        "[Hello Peer Listener] Extracted peer with connection string: " +
+            peerObject.connection.string,
+    )
+
+    // Check if the authentication info is valid based on the sender info from the headers
+    console.log("[Hello Peer Listener] Verifying authentication info...")
+    let isValid = sender === content.publicKey
+
+    if (!isValid) {
+        log.error(
+            "[Hello Peer Listener] Invalid authentication info for: " +
+                peerObject.identity +
+                " @ " +
+                peerObject.connection.string,
+        )
+        response.result = 401
+        response.response = false
+        response.extra = "invalid authentication info"
+        return response
+    } 
+
+    // Add the peer as authenticated
+    peerObject.verification.status = true
+
+    // ! TODO Add info checking
+    peerObject.status.ready = true
+    peerObject.status.online = true
+    peerObject.status.timestamp = Date.now()
 
     // If we are here, the peer is connected
     response.result = 200
     response.response = true
     response.extra = "Peer connected"
 
-    // Add the peer as authenticated
-    peerObject.verification.status = true
     console.log(
-        "[Hello Peer Listener] Adding peer with id: " +
-            peerObject.identity,
+        "[Hello Peer Listener] Adding peer with id: " + peerObject.identity,
     )
     let isAddedToPeerlist = PeerManager.getInstance().addPeer(peerObject)
     if (!isAddedToPeerlist) {
-        response.result = 500
+        response.result = 400
         response.response = false
         response.extra = "Error while adding peer to peerlist"
         return response

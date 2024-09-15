@@ -214,10 +214,12 @@ export default class PeerManager {
             "[Hello Peer] Signed connection string: " +
                 ForgeToHex(signed_connection_string),
         )
+
         // Sending the transmission to the peer
         const hello_request: HelloPeerRequest = {
             url: connection_string,
             publicKey: our_id.toString("hex"),
+            signature: signed_connection_string.toString("hex"),
         }
         // Not awaiting the response to not block the main thread
         peer.call({
