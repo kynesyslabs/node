@@ -8,7 +8,6 @@ import * as forge from "node-forge"
 
 export interface HelloPeerRequest {
     url: string
-    port: number
     publicKey: string
 }
 
@@ -36,7 +35,7 @@ export async function manageHelloPeer(
     log.info("[Hello Peer Listener] Building peer object...")
     let peerObject = new Peer()
     peerObject.identity = content.publicKey
-    peerObject.connection.string = content.url + ">" + content.port + ">" + content.publicKey
+    peerObject.connection.string = content.url
     console.log("[Hello Peer Listener] Extracted peer with connection string: " + peerObject.connection.string)
 
     // If we are here, the peer is connected

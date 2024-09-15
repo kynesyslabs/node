@@ -37,10 +37,10 @@ export async function manageAuth(data: any): Promise<RPCResponse> {
         }
         // Getting the public IP of the peer so we can add it to the peerlist
         let remote_ip = original_message.split(":")[0].trim()
-        let connection_string = remote_ip + ">53550>" + original_identity // ! Allow dynamic ports
+        let connection_string = remote_ip + ":53550" // ! Allow dynamic ports
         // ? REVIEW build the Peer object and add it to the peerlist (connection string missing atm)
         let new_peer: Peer = new Peer()
-        new_peer.identity = original_identity
+        new_peer.identity = original_identity.toString("hex")
         new_peer.connection.string = connection_string
         // Setting the verification status to true
         new_peer.verification.status = true

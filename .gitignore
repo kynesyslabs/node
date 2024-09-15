@@ -1,6 +1,7 @@
 #Demos files
 /.demos_id*
 demos_peers
+demos_peerlist.json
 chain.db
 keyfile.json
 keyfile_password.txt

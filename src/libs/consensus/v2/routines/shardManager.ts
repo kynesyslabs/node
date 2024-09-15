@@ -50,7 +50,7 @@ export default class ShardManager {
         // Init to empty validator status
         for (let peer of this.shard) {
             this.shardStatus.set(
-                peer.identity.toString("hex"),
+                peer.identity,
                 emptyValidatorStatus,
             )
         }
@@ -99,16 +99,12 @@ export default class ShardManager {
     ) {
         for (let peer of this.shard) {
             log.info(
-                `[shardManager] Checking the status of the node ${peer.identity.toString(
-                    "hex",
-                )}`,
+                `[shardManager] Checking the status of the node ${peer.identity}`,
             )
             // REVIEW If force is true, make a call to the node to get the status using getValidatorStatus
             if (force) {
                 log.info(
-                    `[shardManager] Forcing recheck of the status of the node ${peer.identity.toString(
-                        "hex",
-                    )}`,
+                    `[shardManager] Forcing recheck of the status of the node ${peer.identity}`,
                 )
                 let status = await peer.longCall(
                     {
@@ -116,7 +112,7 @@ export default class ShardManager {
                         params: [
                             {
                                 method: "getValidatorStatus",
-                                params: [peer.identity.toString("hex")],
+                                params: [peer.identity],
                             },
                         ],
                     },
@@ -124,27 +120,23 @@ export default class ShardManager {
                 ) // REVIEW  We should wait a little if the call returns false as the node is not in the consensus loop yet and in general for all consensus_routine calls
                 // The above call returns a ValidatorStatus object so we can set it directly
                 this.setValidatorStatus(
-                    peer.identity.toString("hex"),
+                    peer.identity,
                     status.response,
                 )
             }
             // Check if the status is the same as the one in the shard status
             log.info(
-                `[shardManager] Checking if the status of the node ${peer.identity.toString(
-                    "hex",
-                )} is the same as the one in the shard status`,
+                `[shardManager] Checking if the status of the node ${peer.identity} is the same as the one in the shard status`,
             )
 
             // For every true value in the status, check if the peer status has the same true value
             // NOTE We don't really care about the false values as we might be in the process of doing something
-            let peerStatus = this.shardStatus.get(peer.identity.toString("hex"))
+            let peerStatus = this.shardStatus.get(peer.identity)
             for (let key in peerStatus) {
                 if (status[key]) {
                     if (!peerStatus[key]) {
                         log.warning(
-                            `[shardManager] The node ${peer.identity.toString(
-                                "hex",
-                            )} is not in the same status as the one in the shard status: specific value is false: ${key}`,
+                            `[shardManager] The node ${peer.identity} is not in the same status as the one in the shard status: specific value is false: ${key}`,
                         )
                         return false
                     }
@@ -204,7 +196,7 @@ export default class ShardManager {
         // Call every node in the shard that is not us to show we are in the consensus loop
         let promises = []
         for (let peer of this.shard) {
-            if (peer.identity.toString("hex") !== ourIdentity) {
+            if (peer.identity !== ourIdentity) {
                 promises.push(peer.longCall(statusCall, true))
             }
         }

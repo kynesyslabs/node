@@ -358,7 +358,7 @@ export default class ServerHandlers {
 
         // Authorizing the sender
         for (let peer of peerList) {
-            if (peer.identity.toString("hex") === senderPublicKey) {
+            if (peer.identity === senderPublicKey) {
                 authorized = true
                 break
             }

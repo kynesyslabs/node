@@ -19,46 +19,41 @@ import log from "src/utilities/logger"
 const peerManager = PeerManager.getInstance()
 
 // Proxy function to call peerBootstrap in a nicer way
-export async function peerlistCheck(local_list: string[]): Promise<Peer[]> {
+export async function peerlistCheck(local_list: Peer[]): Promise<Peer[]> {
     return await peerBootstrap(local_list)
 }
 
 // ANCHOR Main function
+// ! Add hostname support with autodiscovery on /info endpoint
+// ! About the above, check if thats also something we have to edit elsewhere
+/*
+ ! We might want to change the hello_peer routine to also support hostname resolution
+ ! Also we should probably add an environment variable for the exposed hostname
+*/
 export default async function peerBootstrap(
-    local_list: string[],
+    local_list: Peer[],
 ): Promise<Peer[]> {
     console.log("[PEER BOOTSTRAP] Loading peers...")
     // Validity check
     for (let i = 0; i < local_list.length; i++) {
         console.log("[PEER BOOTSTRAP] Checking peer " + local_list[i])
         // ANCHOR Extract peer info from the string
-        let _currentPeerURL = local_list[i] // The url of the peer
+        let _currentPeer: Peer = local_list[i] // The url of the peer
         // If there is a : in the url, we assume it's a address + port
-        let currentPeerAddress: string
-        let currentPeerPort: number
-        let currentPublicKey: string
-        if (_currentPeerURL.includes(">")) {
-            currentPeerAddress = _currentPeerURL.split(">")[0]
-            currentPeerPort = parseInt(_currentPeerURL.split(">")[1])
-            currentPublicKey = _currentPeerURL.split(">")[2]
-        } else {
-            currentPeerAddress = _currentPeerURL
-            currentPeerPort = 53550
-        }
+        let currentPeerUrl: string = _currentPeer.connection.string
+        let currentPublicKey: string = _currentPeer.identity
         console.log(
             "[BOOTSTRAP] Testing " +
-                currentPeerAddress +
-                ":" +
-                currentPeerPort +
+                currentPeerUrl +
                 " with id " +
                 currentPublicKey,
         ) 
         // ANCHOR Connection test and hello_peer routine
-        let _currentPeerObject: Peer = new Peer(currentPeerAddress, currentPeerPort, currentPublicKey)
+        let _currentPeerObject: Peer = new Peer(currentPeerUrl, currentPublicKey)
         if (_currentPeerObject) {
             // Adding identity if any
             console.log(
-                "[BOOTSTRAP] Testing " + currentPeerAddress + ":" + currentPeerPort + " identity",
+                "[BOOTSTRAP] Testing " + currentPeerUrl + " identity",
             )
             // After this, the peer object will have an identity and thus will be verified
             _currentPeerObject = await getPeerIdentity(
@@ -67,16 +62,16 @@ export default async function peerBootstrap(
             )
             if (!_currentPeerObject) {
                 console.log("[PEERBOOTSTRAP] [FAILED] Failed to get peer identity: see above")
-                peerManager.addOfflinePeer(currentPeerAddress + ">" + currentPeerPort + ">" + currentPublicKey)
+                peerManager.addOfflinePeer(_currentPeerObject)
                 continue
             }
             console.log(
-                "[BOOSTRAP: overriding connectionstring] " + _currentPeerURL,
+                "[BOOSTRAP: overriding connectionstring] " + currentPeerUrl,
             )
             console.log(_currentPeerObject)
             // ! remove debug code
             try {
-                _currentPeerObject.connection.string = _currentPeerURL // Adding this step
+                _currentPeerObject.connection.string = currentPeerUrl // Adding this step
             } catch (error) {
                 console.log("[PEERBOOTSTRAP] Error setting connection string: " + error)
                 log.critical("Error setting connection string: " + error)
@@ -84,20 +79,17 @@ export default async function peerBootstrap(
             }
             console.log(
                 "[BOOTSTRAP] OK: Valid peer " +
-                    currentPeerAddress +
-                    ":" +
-                    currentPeerPort +
+                    currentPeerUrl +
                     "\n",
             )
-            log.info("[BOOTSTRAP] OK: Valid peer " + currentPeerAddress + ":" + currentPeerPort + "\n")
+            log.info("[BOOTSTRAP] OK: Valid peer " + currentPeerUrl + "\n")
 
             console.log("[BOOTSTRAP] _currentPeerObject", _currentPeerObject)
             // This should automatically add the peer to the peer list or the offline list
             let response =await _currentPeerObject.call({
                 method: "hello_peer",
                 params: [{
-                    url: currentPeerAddress,
-                    port: currentPeerPort,
+                    url: _currentPeerObject.connection.string,
                     publicKey: currentPublicKey,
                 }],
             })

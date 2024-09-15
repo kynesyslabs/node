@@ -86,8 +86,6 @@ export default class Identity {
     }
 
     getConnectionString(): string {
-        return `http://${this.publicIP}>${
-            this.publicPort
-        }>${this.getPublicKeyHex()}`
+        return sharedState.getInstance().exposedUrl
     }
 }

@@ -23,7 +23,7 @@ export default async function getShard(seed: string): Promise<Peer[]> {
         availablePeers.splice(index, 1)
     }
     // Setting the last shard
-    sharedState.getInstance().lastShard = shard.map((peer) => peer.identity.toString("hex"))
+    sharedState.getInstance().lastShard = shard.map((peer) => peer.identity)
     if (sharedState.getInstance().lastShard.length < 3) {
         log.warning("There are less than 3 peers in the last shard: this could be a security issue")
     }

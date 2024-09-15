@@ -40,6 +40,26 @@ npm install -g n
 n 20
 ```
 
+## Prerequisites
+
+The client uses two main files that are required for its functioning:
+
+- `.env`
+- `demos_peerlist.json`
+
+You can copy `env.example` and `demos_peerlist.json.example` to `.env` and `demos_peerlist.json` respectively.
+
+### The .env file
+
+This file contains the environment variables for the node software. You can probably leave most of them as they are, but you will need to change the following:
+
+- `EXPOSED_URL`: This is the URL that the node software will be exposed to the network. This should be a public URL that points to the machine running the node software. If you are running the node software on the same machine as the client, you can use `http://localhost:53550`. If you are running the node software on a different machine, you can use the public IP address of that machine (for example `http://1.2.3.4:53550`). If you are running the node behind a reverse proxy, you can use the public URL of the proxy server (as in `https://demos.example.com`). *IMPORTANT NOTE: The URL must start with `http://` or `https://` and the port must be included if needed. Setting this value incorrectly will make the node software unable to connect to the network.*
+
+### The demos_peerlist.json file
+
+This file contains the list of peers that the node software will try to connect to. If you want to test the node locally (connecting to yourself), you can start the node software and, upon the first run, replace the ***placeholder*** in the file with the public key of your node (found in `publickey_yourkey`). Else, you should add the peers you know to the file and, once the node software is started, it will automatically connect to the peers (format: `"publickey": "connectionstring"`).
+
+
 ## Usage
 
 Clone the repository and run the following command:

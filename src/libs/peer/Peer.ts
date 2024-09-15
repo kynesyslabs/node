@@ -24,9 +24,8 @@ export default class Peer {
     // connection informations
     public connection: {
         string: string // this is optional and is mostly used for permanent connections
-        // ? Communication registry?
     }
-    public identity: forge.pki.ed25519.BinaryBuffer // public key
+    public identity: string // public key
     // verification informations
     public verification: {
         status: boolean // has been verified against the public key
@@ -48,14 +47,13 @@ export default class Peer {
 
     // Creating an empty peer
     constructor(
-        address: string = "",
-        port: number = 0,
+        url: string = "",
         publicKey: string = "",
     ) {
         this.connection = {
-            string: address + ">" + port + ">" + publicKey,
+            string: url,
         }
-        this.identity = HexToForge(publicKey)
+        this.identity = publicKey
         this.verification = {
             status: false,
             message: null,
@@ -71,6 +69,7 @@ export default class Peer {
             timestamp: null,
             ready: false,
         }
+        
     }
 
     // Methods to handle the peer
@@ -168,10 +167,8 @@ export default class Peer {
                 sharedState.getInstance().identity.ed25519.privateKey,
             ).toString("hex")
         }
-        // Extract the url and port from the connection string
-        const url = this.connection.string.split(">")[0]
-        const port = this.connection.string.split(">")[1]
-        const connectionUrl = url + ":" + port
+        // REVIEW Using the connection string as the url with the new format
+        const connectionUrl = this.connection.string
         log.info(
             "[RPC Call] [" +
                 method +

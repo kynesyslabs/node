@@ -18,7 +18,7 @@ dotenv.config({ path: "../../.commons" })
 export default class sharedState {
     private static instance: sharedState
 
-    version: string = "0.7.1"
+    version: string = "0.7.2"
 
     block_time: number = 10 // TODO Get it from the genesis (or see Consensus module)
 
@@ -54,6 +54,8 @@ export default class sharedState {
     rpcFee: number = parseInt(process.env.RPC_FEE_PERCENT) // TODO Implement // Percentage of the fee to be charged for the rpc
     serverPort: number = 53550
     identityFile: string = process.env.IDENTITY_FILE || ".demos_identity"
+    peerListFile: string = process.env.PEER_LIST_FILE || "demos_peerlist.json"
+    exposedUrl: string = process.env.EXPOSED_URL || "http://localhost:" + this.serverPort
     PROD: boolean = false
     // !SECTION Configuration
 
@@ -118,9 +120,7 @@ export default class sharedState {
 
     public async getConnectionString(): Promise<string> {
         // Getting our public ip
-        const ip = await getPublicIP()
-        const publicKey = this.identity.ed25519.publicKey.toString("hex")
-        return `http://${ip}>${this.serverPort}>${publicKey}`
+        return this.exposedUrl
     }
 
     // NOTE This is a wrapper for many stats that are used by the node and the rpc server

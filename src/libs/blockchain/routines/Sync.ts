@@ -57,7 +57,7 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
                 muid: null,
             }],
         }
-        promises.set(peer.identity.toString("hex"), peer.call(call, false))
+        promises.set(peer.identity, peer.call(call, false))
     }
     // Wait for all the promises to resolve (synchronously?)
     let responses = new Map<string, RPCResponse>()
@@ -84,7 +84,7 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
     // Otherwise, we need to sync
     let highestBlockNumberPeerIndex = peerLastBlockNumbers.findIndex((peer) => peer === highestBlockNumber)
     let highestBlockNumberPeer = peers[highestBlockNumberPeerIndex]
-    log.info("[fastSync] Peer with highest last block number: " + highestBlockNumberPeer.identity.toString("hex") + " with block number: " + highestBlockNumber)
+    log.info("[fastSync] Peer with highest last block number: " + highestBlockNumberPeer.identity + " with block number: " + highestBlockNumber)
     // Verify if the last block hash is coherent
     let lastSyncedBlockRequest: RPCRequest = {
         method: "nodeCall",
@@ -105,7 +105,7 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
             sharedState.getInstance().syncStatus = false
             return false // ! Pass to the next peer
         }
-        console.log("[fastSync] Hash is coherent: we can sync with: " + highestBlockNumberPeer.identity.toString("hex"))
+        console.log("[fastSync] Hash is coherent: we can sync with: " + highestBlockNumberPeer.identity)
     }
     // Sync the blocks one by one starting from the lowest block number that we do not have
     // ? Way more error handling needed
