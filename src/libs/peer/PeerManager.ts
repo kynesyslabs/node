@@ -11,13 +11,9 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import Peer from "./Peer"
 import log from "src/utilities/logger"
-import Transmission from "../communications/transmission"
 import Cryptography from "../crypto/cryptography"
-import Hashing from "../crypto/hashing"
 import sharedState from "src/utilities/sharedState"
-import forge from "node-forge"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
-import { method } from "lodash"
 import { HelloPeerRequest } from "../network/manageHelloPeer"
 import fs from "fs"
 

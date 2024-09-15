@@ -1,18 +1,14 @@
-import { pki } from "node-forge"
 import Chain from "src/libs/blockchain/chain"
-import Mempool from "src/libs/blockchain/mempool"
 import { fastSync } from "src/libs/blockchain/routines/Sync"
-import Transmission from "src/libs/communications/transmission"
-import { consensusRoutine } from "src/libs/consensus/v2/PoRBFT" // experimental v2 consensus
-import { Identity } from "src/libs/identity"
+import { consensusRoutine } from "src/libs/consensus/v2/PoRBFT"
 import { Peer, PeerManager } from "src/libs/peer"
-
-import * as consensusTime from "../libs/consensus/routines/consensusTime"
-// INFO The main loop executed in background by index.ts
-import sharedState from "./sharedState"
 import checkOfflinePeers from "src/libs/peer/routines/checkOfflinePeers"
 import log from "src/utilities/logger"
 
+import * as consensusTime from "../libs/consensus/routines/consensusTime"
+import sharedState from "./sharedState"
+
+// INFO The main loop executed in background by index.ts
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
 }

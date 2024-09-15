@@ -1,23 +1,8 @@
-/* LICENSE
-
-© 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
-
-Full license text: https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode
-Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
-
-KyneSys Labs: https://www.kynesys.xyz/
-
-*/
-
-import type { IPeerConfig } from "@kynesyslabs/demosdk/types"
-import forge from "node-forge"
 import log from "src/utilities/logger"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import axios from "axios"
 import sharedState from "src/utilities/sharedState"
 import Cryptography from "../crypto/cryptography"
-import Hashing from "../crypto/hashing"
-import { HexToForge } from "../crypto/forgeUtils"
 import { NodeCall } from "../network/manageNodeCall"
 
 export default class Peer {
