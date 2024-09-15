@@ -101,25 +101,6 @@ export default class Peer {
         }
     }
 
-    // INFO Check online status for a peer
-    async checkOnlineStatus(): Promise<boolean> {
-        // TODO Implement RPC methods
-        return true
-    }
-
-    // INFO Check if the peer is ready to be used  // TODO Implement periodically each loop in the background
-    async checkReady(): Promise<boolean> {
-        if (
-            this.sync.status &&
-            this.verification.status &&
-            this.status.online
-        ) {
-            this.status.ready = true
-            return true
-        }
-        this.status.ready = false
-        return false
-    }
 
     // TODO (WIP) call with retries on fail
     async longCall(
