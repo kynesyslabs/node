@@ -3,14 +3,58 @@ import http from "http"
 import httpProxy from "http-proxy"
 import required from "src/utilities/required"
 import axios from "axios"
+import forge from "node-forge"
 
-import { IWeb2Request } from "@kynesyslabs/demosdk-http/types"
-import { EnumWeb2Methods } from "node_modules/@kynesyslabs/demosdk-http/build/types/web2"
 import { DAHR } from "./DAHR"
 
 import terminalKit from "terminal-kit"
 
 const term = terminalKit.terminal
+
+// TODO Move this to the SDK
+export interface IParam {
+    name: string // Ignored in POST requests
+    value: any
+}
+
+// TODO Move this to the SDK
+export interface IRawWeb2Request {
+    action: string
+    parameters: IParam[]
+    requestedParameters: [] | null
+    method: EnumWeb2Methods
+    url: string
+    headers: any
+    minAttestations: number
+    // Handling the various stages of an IWeb2Request
+    stage: {
+        // The one that will handle the response too
+        origin: {
+            identity: forge.pki.ed25519.BinaryBuffer
+            connection_url: string
+        }
+        // Starting from 0, each attestation it is increased
+        hop_number: number
+    }
+}
+
+// TODO Move this to the SDK
+export interface IWeb2Request {
+    raw: IRawWeb2Request
+    result: any
+    attestations: {}
+    hash: string
+    signature?: forge.pki.ed25519.BinaryBuffer
+}
+
+// TODO Move this to the SDK
+export enum EnumWeb2Methods {
+    GET = "GET",
+    POST = "POST",
+    PUT = "PUT",
+    DELETE = "DELETE",
+    PATCH = "PATCH",
+}
 
 export class Proxy {
     constructor(private dahr: DAHR) {

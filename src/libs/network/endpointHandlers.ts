@@ -50,15 +50,14 @@ import {
     IWeb2Request,
     ValidityData,
     XMScript,
-} from "@kynesyslabs/demosdk-http/types"
-import { EnumWeb2Methods } from "node_modules/@kynesyslabs/demosdk-http/build/types/web2"
-import GLS from "../blockchain/gls/gls"
-import {
     NativePayload,
     StringifiedPayload,
     Web2Payload,
     XMPayload,
-} from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/Transaction"
+} from "@kynesyslabs/demosdk/types"
+import { EnumWeb2Methods } from "src/features/web2/dahr/Proxy"
+
+import GLS from "../blockchain/gls/gls"
 import { StatusNative } from "src/model/entities/StatusNative"
 import { DAHR } from "src/features/web2/dahr/DAHR"
 import Block from "../blockchain/block"
