@@ -66,6 +66,10 @@ export default class Identity {
             privateKey: "0x" + this.ed25519.privateKey.toString("hex"),
             publicKey: "0x" + this.ed25519.publicKey.toString("hex"),
         }
+        // Setting the ed25519 keypair in shared state
+        sharedState.getInstance().identity.ed25519 = this.ed25519
+        // Deriving the RSA keypair from the ed25519 one
+        //  this.rsa = cryptography.rsa.derive()
     }
 
     async getPublicIP(): Promise<string> {
@@ -82,8 +86,6 @@ export default class Identity {
     }
 
     getConnectionString(): string {
-        return `http://${this.publicIP}>${
-            this.publicPort
-        }>${this.getPublicKeyHex()}`
+        return sharedState.getInstance().exposedUrl
     }
 }

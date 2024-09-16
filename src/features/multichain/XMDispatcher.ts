@@ -6,7 +6,7 @@ import {
 import { json } from "stream/consumers"
 
 import XMParser from "./routines/XMParser"
-import { XMScript } from "@kynesyslabs/demosdk-http/types"
+import { XMScript } from "@kynesyslabs/demosdk/types"
 
 export default class multichainDispatcher {
     // INFO Digesting the request from the server

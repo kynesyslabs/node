@@ -16,7 +16,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 	executeSequence is called for each address to execute the operations contained.
 */
 
-import { Operation, OperationResult } from "@kynesyslabs/demosdk-http/types"
+import { Operation, OperationResult } from "@kynesyslabs/demosdk/types"
 
 import Block from "../block"
 import subOperations from "./subOperations"

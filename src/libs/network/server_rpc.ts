@@ -12,14 +12,15 @@ import { manageExecution } from "./manageExecution"
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
-import { BundleContent } from "@kynesyslabs/demosdk-http/types"
+import { BundleContent } from "@kynesyslabs/demosdk/types"
 import ServerHandlers from "./endpointHandlers"
 import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
-import { RPCRequest, RPCResponse, ConsensusRequest, BrowserRequest } from "@kynesyslabs/demosdk-http/types"
+import { RPCRequest, RPCResponse, ConsensusRequest, BrowserRequest } from "@kynesyslabs/demosdk/types"
 import manageConsensusRoutines from "./manageConsensusRoutines"
 import _ from "lodash"
 import { registerMethodListingEndpoint } from "./methodListing"
 import { setupOpenAPI, rpcSchema } from "./openApiSpec"
+import { PeerManager } from "../peer"
 
 // Reading the port from sharedState
 
@@ -86,7 +87,7 @@ function validateHeaders(headers: any): [boolean, string] {
 
 /* ANCHOR Processor method */
 // Function to process the payload
-async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
+async function processPayload(payload: RPCRequest, sender: string): Promise<RPCResponse> {
     // Payloads management
     switch (payload.method) {
         case "ping":
@@ -99,11 +100,13 @@ async function processPayload(payload: RPCRequest): Promise<RPCResponse> {
         case "execute":
             return await manageExecution(payload.params[0] as BundleContent)
         case "hello_peer": // As it is authenticated, we can use it to check if the peer is still alive and is in our peer list
-            return await manageHelloPeer(payload.params[0] as HelloPeerRequest)
-        case "consensus":
+            var helloPeerRequest = payload.params[0] as HelloPeerRequest
+            return await manageHelloPeer( helloPeerRequest as HelloPeerRequest, sender)
+        /*case "consensus":
             return await ServerHandlers.handleConsensusRequest(payload.params[0] as ConsensusRequest)
         case "proofOfConsensus":
-            return await proofConsensusHandler(payload.params[0])
+            return await proofConsensusHandler(payload.params[0]) 
+        */
         case "mempool":
             return await ServerHandlers.handleMempool(payload.params[0])
         // Auth management
@@ -149,11 +152,36 @@ export default async function server_rpc(): Promise<FastifyInstance> {
     // Register the method listing endpoint
     registerMethodListingEndpoint(serverApp)
 
-    // GET request handler
+    // GET request handlers
+
     serverApp.get("/", async (req: FastifyRequest, reply: FastifyReply) => {
 
         reply.header("Access-Control-Allow-Origin", "*")
         reply.send("Hello, World!")
+    })
+
+    // NOTE Generic info endpoint
+    serverApp.get("/info", async (req: FastifyRequest, reply: FastifyReply) => {
+        reply.header("Access-Control-Allow-Origin", "*")
+        reply.send(await sharedState.getInstance().getInfo())
+    })
+    
+    // Specific info endpoints
+    serverApp.get("/version", async (req: FastifyRequest, reply: FastifyReply) => {
+        reply.header("Access-Control-Allow-Origin", "*")
+        reply.send(sharedState.getInstance().version)
+    })
+    serverApp.get("/publickey", async (req: FastifyRequest, reply: FastifyReply) => {
+        reply.header("Access-Control-Allow-Origin", "*")
+        reply.send(sharedState.getInstance().identity.ed25519.publicKey.toString("hex"))
+    })
+    serverApp.get("/connectionstring", async (req: FastifyRequest, reply: FastifyReply) => {
+        reply.header("Access-Control-Allow-Origin", "*")
+        reply.send(await sharedState.getInstance().getConnectionString())
+    })
+    serverApp.get("/peerlist", async (req: FastifyRequest, reply: FastifyReply) => {
+        reply.header("Access-Control-Allow-Origin", "*")
+        reply.send(PeerManager.getInstance().getPeers())
     })
 
     // Setup OpenAPI
@@ -171,6 +199,7 @@ export default async function server_rpc(): Promise<FastifyInstance> {
 
         // Header check
         const headers = req.headers
+        var sender = ""
         // Excluding due to noAuthMethods from header validation
         if (!noAuthMethods.includes(payload.method)) {
             var header_validation = validateHeaders(headers)
@@ -179,9 +208,10 @@ export default async function server_rpc(): Promise<FastifyInstance> {
                 reply.status(401).send({ error: "Invalid headers:" + header_validation[1] })
                 return
             }
+            sender = headers["identity"] as string
         }
         console.log("[RPC Call] Processing payload: " + JSON.stringify(payload, null, 2))
-        const response = await processPayload(payload)
+        const response = await processPayload(payload, sender)
         console.log("[RPC Call] Response: " + JSON.stringify(response, null, 2))
 
         reply.header("Access-Control-Allow-Origin", "*")

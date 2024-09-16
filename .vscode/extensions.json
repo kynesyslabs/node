@@ -18,6 +18,7 @@
         "qwtel.sqlite-viewer",
         "pmneo.tsimporter",
         "mylesmurphy.prettify-ts",
-        "isotechnics.commentlinks"
+        "isotechnics.commentlinks",
+        "kisstkondoros.typelens"
     ]
 }

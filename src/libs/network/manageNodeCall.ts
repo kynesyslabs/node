@@ -1,11 +1,11 @@
-import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
 import { Peer } from "../peer"
 import { Blocks } from "src/model/entities/Blocks"
 import Transaction from "../blockchain/transaction"
-import { AddressInfo } from "@kynesyslabs/demosdk-http/types"
+import { AddressInfo } from "@kynesyslabs/demosdk/types"
 import Chain from "../blockchain/chain"
-import { StatusNative } from "@kynesyslabs/demosdk-http/types"
+import { StatusNative } from "@kynesyslabs/demosdk/types"
 import GLS from "../blockchain/gls/gls"
 import eggs from "./routines/eggs"
 import sharedState from "src/utilities/sharedState"
@@ -102,7 +102,7 @@ export async function manageNodeCall(
                 response.extra = result.extra
             } catch (e) {
                 response.response = null
-                response.result = 500
+                response.result = 400
                 response.extra = e
             }
             break
@@ -117,11 +117,11 @@ export async function manageNodeCall(
                 response.response = await Chain.getTxByHash(data.hash)
             } catch (e) {
                 response.response = null
-                response.result = 500
+                response.result = 400
                 response.extra = e
             }
             if (!response.response) {
-                response.result = 500
+                response.result = 400
                 response.response = "error"
             }
             break
@@ -148,7 +148,7 @@ export async function manageNodeCall(
                 )) as StatusNative  
                 response = nStat //.toString() // REVIEW It works ?
             } catch (error) {
-                response.result = 500
+                response.result = 400
                 response.response = "error"
                 response.extra = error
             }

@@ -1,4 +1,4 @@
-import { RPCResponse, VoteRequest } from "@kynesyslabs/demosdk-http/types"
+import { RPCResponse, VoteRequest } from "@kynesyslabs/demosdk/types"
 import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorSeed"
 import { emptyResponse } from "./server_rpc"
 import _ from "lodash"
@@ -40,15 +40,20 @@ export default async function manageConsensusRoutines(
     Also this should make so that within the time window all the shard members are in consensus mode.
     */
     // If the consensus is already running, we do not need to check the time again
-    // ! This happens way too often - why? Sometimes it does not happen
-    const isConsensusTime = await checkConsensusTime(true, 2000) || isConsensusAlreadyRunning()
-    if (!isConsensusTime) {
+    // ! When we return false, we cannot have the client asking for the same method over and over again or
+    // ! continue asking for consensus_routine, we must rate limit the requests
+    const isConsensusTime = await checkConsensusTime(true, 2000)
+    const isConsensusRunning = isConsensusAlreadyRunning()
+    const inConsensus = isConsensusTime || isConsensusRunning
+    if (!inConsensus) {
+        log.error("[manageConsensusRoutines] Consensus time not reached")
         response.result = 400
         response.response = "Consensus time not reached (checked by manageConsensusRoutines)"
-        return response
+        response.extra = "not in consensus"
+        return response // ? Should we add some info about our delta time?
     } else {
-        if (!sharedState.getInstance().inConsensusLoop) {
-            log.info("[manageConsensusRoutines] Starting the consensus routine as we are in consensus time window but not in consensus mode yet")
+        if (!isConsensusAlreadyRunning()) {
+            //log.info("[manageConsensusRoutines] Starting the consensus routine as we are in consensus time window but not in consensus mode yet")
             consensusRoutine() // Asynchronous function     to avoid blocking the main thread
         }
         log.info("[manageConsensusRoutines] We are within the consensus time window")
@@ -115,7 +120,7 @@ export default async function manageConsensusRoutines(
         // SECTION Shard management
         // ! Add authentication to these methods
         case "getShard":
-            console.log("[Consensus Message Received] getShard")
+            //console.log("[Consensus Message Received] getShard")
             response.result = 200
             response.response = ShardManager.getInstance().getShard()
             console.log("[Consensus Message Received] getShard sent back")
@@ -133,7 +138,7 @@ export default async function manageConsensusRoutines(
             }
             break
         case "getValidatorStatus":
-            console.log("[Consensus Message Received] getValidatorStatus")
+            //console.log("[Consensus Message Received] getValidatorStatus")
             response.result = 200
             response.response = ShardManager.getInstance().getValidatorStatus(payload.params[0] as string)
             console.log("[Consensus Message Received] getValidatorStatus sent back")

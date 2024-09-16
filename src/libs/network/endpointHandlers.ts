@@ -58,7 +58,7 @@ import {
     StringifiedPayload,
     Web2Payload,
     XMPayload,
-} from "node_modules/@kynesyslabs/demosdk-http/build/types/blockchain/Transaction"
+} from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/Transaction"
 import { StatusNative } from "src/model/entities/StatusNative"
 import { DAHR } from "src/features/web2/dahr/DAHR"
 import Block from "../blockchain/block"
@@ -68,7 +68,7 @@ import getPeerInfo from "./routines/nodecalls/getPeerInfo"
 import forge from "node-forge"
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
-import { ConsensusRequest, RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { ConsensusRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
 
 let term = terminalkit.terminal
@@ -375,11 +375,13 @@ export default class ServerHandlers {
     ): Promise<RPCResponse> {
         let response: RPCResponse = _.cloneDeep(emptyResponse)
         let senderIdentity = request.sender
-        console.log("[SERVER] Received consensus request")
-        console.log(
-            "[SERVER] Peer identity information received: " + senderIdentity,
-        )
+        //console.log("[SERVER] Received consensus request")
+        /*console.log(
+            "[SERVER] Peer identity information received: " +
+                senderIdentity,
+        )*/
         if (!sharedState.getInstance().consensusMode) {
+            log.error("[endpointHandlers] We are not in consensus mode")
             response.result = 400
             response.response = false
             response.extra =
@@ -387,7 +389,7 @@ export default class ServerHandlers {
             return response
         }
 
-        console.log("we are in consensus mode")
+        //console.log("we are in consensus mode")
 
         let authorized = false
         let senderPublicKey = senderIdentity
@@ -395,19 +397,20 @@ export default class ServerHandlers {
         const { shard } = sharedState.getInstance()
 
         if (!shard) {
+            log.error("[endpointHandlers] No shard found in shared state")
             response.result = 400
             response.response = false
             response.extra = "No shard found in shared state"
             return response
         }
-        console.log("[SERVERHANDLER] Shard found in shared state")
+        //console.log("[SERVERHANDLER] Shard found in shared state")
         //console.log(shard)
 
         const peerList = shard
 
         // Authorizing the sender
         for (let peer of peerList) {
-            if (peer.identity.toString("hex") === senderPublicKey) {
+            if (peer.identity === senderPublicKey) {
                 authorized = true
                 break
             }
@@ -415,6 +418,7 @@ export default class ServerHandlers {
 
         // Return error if not authorized
         if (!authorized) {
+            log.error("[endpointHandlers] Not authorized")
             response.result = 401
             response.response = false
             response.extra = "Not authorized"
@@ -428,10 +432,11 @@ export default class ServerHandlers {
                 response.result = 200
                 response.require_reply = false
                 response.extra = "Mempool received"
-                console.log("[SERVERHANDLER] Received mempool")
+                //console.log("[SERVERHANDLER] Received mempool")
                 return response
 
             default:
+                log.error("[endpointHandlers] Unknown message")
                 response.result = 400
                 response.response = false
                 response.extra = "Unknown message"

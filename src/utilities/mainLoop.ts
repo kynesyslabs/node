@@ -1,18 +1,14 @@
-import { pki } from "node-forge"
 import Chain from "src/libs/blockchain/chain"
-import Mempool from "src/libs/blockchain/mempool"
 import { fastSync } from "src/libs/blockchain/routines/Sync"
-import Transmission from "src/libs/communications/transmission"
-import { consensusRoutine } from "src/libs/consensus/v2/PoRBFT" // experimental v2 consensus
-import { Identity } from "src/libs/identity"
+import { consensusRoutine } from "src/libs/consensus/v2/PoRBFT"
 import { Peer, PeerManager } from "src/libs/peer"
-
-import * as consensusTime from "../libs/consensus/routines/consensusTime"
-// INFO The main loop executed in background by index.ts
-import sharedState from "./sharedState"
 import checkOfflinePeers from "src/libs/peer/routines/checkOfflinePeers"
 import log from "src/utilities/logger"
 
+import * as consensusTime from "../libs/consensus/routines/consensusTime"
+import sharedState from "./sharedState"
+
+// INFO The main loop executed in background by index.ts
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
 }
@@ -37,6 +33,9 @@ export default async function mainLoop() {
         sharedState.getInstance().inMainLoop = true
 
         // Execute the peer routine before the consensus loop
+        /* NOTE The peerRoutine also checks getOnlinePeers, so it works by waiting for
+           sharedState.getInstance().peerRoutineRunning to be 0 so we don't get into conflicts while
+           running the consensus routine. */
         let currentlyOnlinePeers: Peer[] = await peerRoutine()
         // we now have a list of online peers that can be used for consensus
 
@@ -62,36 +61,25 @@ export default async function mainLoop() {
             //await sendNodeOnlineTx()
         }
 
-        // ! Many times, during the consensus, there is a lot of output before the block is forged. Inspect why
-        // ? Is there an hello_peer loop? Or are the semaphores broken?
-        // ? Looks like  we re-enter in the loop without finishing the previous one.
-        // ? Also due to this (presumably) sometimes a node adds twice the same block
-        /*
-[INFO] [2024-08-29T11:51:11.698Z] [consensusRoutine] Threshold: 2
-[INFO] [2024-08-29T11:51:11.698Z] [consensusRoutine] Total votes: 2
-[INFO] [2024-08-29T11:51:11.699Z] [consensusRoutine] [result] Block is valid with 2 votes
-[INFO] [2024-08-29T11:51:11.699Z] [consensusRoutine] Block is valid with 2 votes
-[CHAIN] reading hash
-[]
-[CHAIN] bork
-[ChainDB] [ INFO ]: Checking if block with position undefined already exists
-[ChainDB] [ INFO ]: Found block with null position, possibly genesis block
-[ChainDB] [ INFO ]: Block with position undefined does not exist: inserting a new block
-[CONSENSUS TIME] lastTimestamp: 1724932238313
-[CONSENSUS TIME] currentTimestamp: 1724932271588
-[CONSENSUS TIME] delta: 33275
-[CONSENSUS TIME] consensusIntervalTime: 10000
-[CONSENSUS TIME] consensusIntervalTime: 10000
-[CONSENSUS TIME] Consensus time reached
-[INFO] [2024-08-29T11:51:11.700Z] [manageConsensusRoutines] We are within the consensus time window
-...
-        */
+        
         // NOTE We need both the consensus time and the sync status to be true, to avoid
         // conflicts with the sync loop that would lead to a failure in the consensus mechanism.
         if (isConsensusTimeReached && sharedState.getInstance().syncStatus && !sharedState.getInstance().startingConsensus) {
             // Set the startingConsensus flag to true to avoid conflicts with starting loops
             sharedState.getInstance().startingConsensus = true
             log.info("[MAIN LOOP] Consensus time reached and sync status is true")
+            // Wait for the peer routine to finish if it is still running
+            log.info("[MAIN LOOP] Waiting for the peer routine to finish")
+            let timer = 0
+            while (sharedState.getInstance().peerRoutineRunning > 0) {
+                await sleep(100)
+                timer += 1
+                if (timer > 10) {
+                    log.error("[MAIN LOOP] Peer routine is taking too long to finish: forcing consensus")
+                    sharedState.getInstance().peerRoutineRunning = 0 // Force the peer routine to act as if it finished
+                    break
+                }
+            }
             await consensusRoutine()
         } else if (!sharedState.getInstance().syncStatus) {
             // ? This is a bit redundant, isn't it?
@@ -150,54 +138,3 @@ async function peerRoutine(): Promise<Peer[]> {
     // Returns the list of currently online peers
     return currentlyOnlinePeers
 }
-
-// ANCHOR Consensus routine
-/* async function consensusRoutine(currentlyOnlinePeers: Peer[]) {
-    console.log("[MAIN LOOP] Consensus time reached")
-    sharedState.getInstance().mainLoopPaused = true // Pause the main loop
-    hasSentNodeOnlineTx = false // Reset it for the next cycle.
-    sharedState.getInstance().consensusMode = true
-    sharedState.getInstance().inConsensusLoop = true
-
-    // REVIEW We have to proceed with the next mempool here, to avoid queued transactions to be included in the current immutable consensus round
-    // await Mempool.nextMempool() // ? What if consensus fails? Should we rollback the mempool?
-
-    const shard = await RepresentativeShard.getInstance().getShard(
-        currentlyOnlinePeers,
-    )
-    
-
-    sharedState.getInstance().shard = shard // ! On the first node, the shard does not include the second node (maybe it does not even reach that point     )
-    console.log("[MAIN LOOP] Shard selected")
-    console.log(shard)
-
-    let consensus = null
-    try {
-        consensus = await QBFT.representationAssembly(shard)
-    } catch (e) {
-        console.log(e)
-        throw e
-    }
-    console.log(
-        `[MAIN LOOP] Consensus: ${
-            consensus[0]
-        }, proposed block: ${JSON.stringify(consensus[1])}`,
-    )
-
-    if (consensus[0]) {
-        const prevBlockNumber = (await Chain.getLastBlock()).number
-        consensus[1].number = prevBlockNumber + 1
-
-        await Chain.insertBlock(consensus[1])
-
-        // Next mempool
-        await Mempool.nextMempool()
-    }
-
-    // At the end of the consensus period, the main loop should start again
-
-    delete sharedState.getInstance().shard
-    sharedState.getInstance().consensusMode = false
-    sharedState.getInstance().inConsensusLoop = false
-    sharedState.getInstance().mainLoopPaused = false // Pause the main loop
-} */

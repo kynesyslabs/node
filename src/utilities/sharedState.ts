@@ -10,12 +10,15 @@ import * as Security from "src/libs/network/securityModule"
 import axios from "axios"
 import * as ntpClient from "ntp-client"
 import Chain from "src/libs/blockchain/chain"
-import { Peer } from "src/libs/peer"
+import { Peer, PeerManager } from "src/libs/peer"
+import getPublicIP from "./getPublicIP"
 
 dotenv.config({ path: "../../.commons" })
 
 export default class sharedState {
     private static instance: sharedState
+
+    version: string = "0.7.2"
 
     block_time: number = 10 // TODO Get it from the genesis (or see Consensus module)
 
@@ -35,6 +38,7 @@ export default class sharedState {
     mainLoopPaused: boolean = false
     consensusMode: boolean = false
     syncStatus: boolean = false
+    peerRoutineRunning: number = 0
     // SECTION shared state variables
     shard: Peer[]
     lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard
@@ -50,6 +54,8 @@ export default class sharedState {
     rpcFee: number = parseInt(process.env.RPC_FEE_PERCENT) // TODO Implement // Percentage of the fee to be charged for the rpc
     serverPort: number = 53550
     identityFile: string = process.env.IDENTITY_FILE || ".demos_identity"
+    peerListFile: string = process.env.PEER_LIST_FILE || "demos_peerlist.json"
+    exposedUrl: string = process.env.EXPOSED_URL || "http://localhost:" + this.serverPort
     PROD: boolean = false
     // !SECTION Configuration
 
@@ -110,5 +116,21 @@ export default class sharedState {
 
     public getConsensusTime(): number {
         return Number(process.env.CONSENSUS_TIME)
+    }
+
+    public async getConnectionString(): Promise<string> {
+        // Getting our public ip
+        return this.exposedUrl
+    }
+
+    // NOTE This is a wrapper for many stats that are used by the node and the rpc server
+    public async getInfo(): Promise<any> {
+        let info = {
+            version: this.version,
+            identity: this.identity.ed25519.publicKey.toString("hex"),
+            connectionString: await this.getConnectionString(),
+            peerlist: PeerManager.getInstance().getPeers(),
+        }
+        return info
     }
 }

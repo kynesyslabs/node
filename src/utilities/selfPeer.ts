@@ -6,11 +6,11 @@ export default async function selfPeer() {
     let public_key_file = "publickey"
     let public_key = fs.readFileSync(public_key_file, "utf8")
     let basic_peer_script = `
-    [
-        "http://127.0.0.1>53550>` + public_key + `"
-    ]
+    {
+        "${public_key}": "${process.env.EXPOSED_URL}"
+    }
     `
-    let basic_peer_script_file = "demos_peers"
+    let basic_peer_script_file = "demos_peerlist.json"
     fs.rmSync(basic_peer_script_file)
     fs.writeFileSync(basic_peer_script_file, basic_peer_script)
 }

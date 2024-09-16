@@ -1,32 +1,16 @@
-/* LICENSE
-
-© 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
-
-Full license text: https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode
-Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
-
-KyneSys Labs: https://www.kynesys.xyz/
-
-*/
-
-import type { IPeerConfig } from "@kynesyslabs/demosdk-http/types"
-import forge from "node-forge"
 import log from "src/utilities/logger"
-import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import axios from "axios"
 import sharedState from "src/utilities/sharedState"
 import Cryptography from "../crypto/cryptography"
-import Hashing from "../crypto/hashing"
-import { HexToForge } from "../crypto/forgeUtils"
 import { NodeCall } from "../network/manageNodeCall"
 
 export default class Peer {
     // connection informations
     public connection: {
         string: string // this is optional and is mostly used for permanent connections
-        // ? Communication registry?
     }
-    public identity: forge.pki.ed25519.BinaryBuffer // public key
+    public identity: string // public key
     // verification informations
     public verification: {
         status: boolean // has been verified against the public key
@@ -47,11 +31,14 @@ export default class Peer {
     }
 
     // Creating an empty peer
-    constructor(address: string = "", port: number = 0, publicKey: string = "") {
+    constructor(
+        url: string = "",
+        publicKey: string = "",
+    ) {
         this.connection = {
-            string: address + ">" + port + ">" + publicKey,
+            string: url,
         }
-        this.identity = HexToForge(publicKey)
+        this.identity = publicKey
         this.verification = {
             status: false,
             message: null,
@@ -67,13 +54,16 @@ export default class Peer {
             timestamp: null,
             ready: false,
         }
+        
     }
 
     // Methods to handle the peer
 
     // INFO Connect to a peer
     async connect(): Promise<boolean> {
-        console.log("[PEER] Testing connection to peer: " + this.connection.string)
+        console.log(
+            "[PEER] Testing connection to peer: " + this.connection.string,
+        )
         let call: NodeCall = {
             message: "ping",
             data: null,
@@ -83,7 +73,12 @@ export default class Peer {
             method: "nodeCall",
             params: [call],
         })
-        console.log("[PEER] [PING] Response: " + response.result + " - " + response.response)
+        console.log(
+            "[PEER] [PING] Response: " +
+                response.result +
+                " - " +
+                response.response,
+        )
         if (response.result === 200) {
             return true
         } else {
@@ -91,25 +86,39 @@ export default class Peer {
         }
     }
 
-    // INFO Check online status for a peer
-    async checkOnlineStatus(): Promise<boolean> {
-        // TODO Implement RPC methods
-        return true
-    }
 
-    // INFO Check if the peer is ready to be used  // TODO Implement periodically each loop in the background
-    async checkReady(): Promise<boolean> {
-        if (this.sync.status && this.verification.status && this.status.online) {
-            this.status.ready = true
-            return true
+    // TODO (WIP) call with retries on fail
+    async longCall(
+        request: RPCRequest,
+        isAuthenticated: boolean = true,
+        sleepTime: number = 1000,
+        retries: number = 3,
+    ): Promise<RPCResponse> {
+        let tries = 0
+        let response = null
+        while (tries < retries) {
+            response = await this.call(request, isAuthenticated)
+            if (response.result === 200) {
+                return response
+            }
+            await new Promise(resolve => setTimeout(resolve, sleepTime))
+            tries++
         }
-        this.status.ready = false
-        return false
+        log.error("[PEER] [LONG CALL] Max retries reached: " + response)
+        return {
+            result: 400,
+            response: "Max retries reached",
+            require_reply: false,
+            extra: response,
+        }
     }
 
-    // New method to make an arbitrary RPC call // REVIEW
-    // ? As this returns a promise, should it manage its own response registry?
-    async call(request: RPCRequest, isAuthenticated: boolean = true): Promise<RPCResponse> {
+    // New method to make an arbitrary RPC call
+    async call(
+        request: RPCRequest,
+        isAuthenticated: boolean = true,
+    ): Promise<RPCResponse> {
+        log.info("[RPC Call] [" + request.method + "] [" + new Date(Date.now()).toISOString() + "] Making RPC call to: " + this.connection.string)
         // Get some informations
         let method = request.method
         let currentTimestampReadable = new Date(Date.now()).toISOString()
@@ -117,34 +126,70 @@ export default class Peer {
         let pubkey = ""
         let signature = ""
         if (isAuthenticated) {
-            pubkey = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
-            signature = Cryptography.sign(pubkey, sharedState.getInstance().identity.ed25519.privateKey).toString("hex")
+            pubkey = sharedState
+                .getInstance()
+                .identity.ed25519.publicKey.toString("hex")
+            signature = Cryptography.sign(
+                pubkey,
+                sharedState.getInstance().identity.ed25519.privateKey,
+            ).toString("hex")
         }
-        // Extract the url and port from the connection string
-        const url = this.connection.string.split(">")[0]
-        const port = this.connection.string.split(">")[1]
-        const connectionUrl = url + ":" + port
-        log.info("[RPC Call] [" + method + "] [" + currentTimestampReadable + "] Making RPC call to: " + connectionUrl)
+        // REVIEW Using the connection string as the url with the new format
+        const connectionUrl = this.connection.string
+        log.info(
+            "[RPC Call] [" +
+                method +
+                "] [" +
+                currentTimestampReadable +
+                "] Making RPC call to: " +
+                connectionUrl,
+        )
         // Make the request
         try {
-            const response = await axios.post<RPCResponse>(connectionUrl, request, {
-                headers: {
-                    "Content-Type": "application/json",
-                    "identity": pubkey,
-                    "signature": signature,
+            const response = await axios.post<RPCResponse>(
+                connectionUrl,
+                request,
+                {
+                    headers: {
+                        "Content-Type": "application/json",
+                        identity: pubkey,
+                        signature: signature,
+                    },
                 },
-            })
-            log.info("[RPC Call] [" + method + "] [" + currentTimestampReadable + "] Response received ")
+            )
+            log.info(
+                "[RPC Call] [" +
+                    method +
+                    "] [" +
+                    currentTimestampReadable +
+                    "] Response received ",
+            )
             // log.info(JSON.stringify(response.data, null, 2))
             if (response.data.result !== 200) {
-                log.warning("[RPC Call] [" + method + "] [" + currentTimestampReadable + "] Response not OK: " + response.data.response + " - " + response.data.result)
+                log.warning(
+                    "[RPC Call] [" +
+                        method +
+                        "] [" +
+                        currentTimestampReadable +
+                        "] Response not OK: " +
+                        response.data.response +
+                        " - " +
+                        response.data.result,
+                )
             } else {
-                log.info("[RPC Call] [" + method + "] [" + currentTimestampReadable + "] Response OK: " + response.data.result)
+                log.info(
+                    "[RPC Call] [" +
+                        method +
+                        "] [" +
+                        currentTimestampReadable +
+                        "] Response OK: " +
+                        response.data.result,
+                )
             }
             return response.data
         } catch (error) {
-            log.error("Error making RPC call:" + error)
-            return {         
+            log.error("[RPC Call] [" + method + "] [" + currentTimestampReadable + "] Error making RPC call:" + error)
+            return {
                 result: 500,
                 response: error,
                 require_reply: false,
@@ -153,4 +198,23 @@ export default class Peer {
         }
     }
 
+    // INFO Fetch through http get
+    async fetch(endpoint: string): Promise<any> {
+        // Sanitize the url
+        if (endpoint.startsWith("/")) {
+            endpoint = endpoint.substring(1)
+        }
+        if (this.connection.string.endsWith("/")) {
+            this.connection.string = this.connection.string.slice(0, -1)
+        }
+        const url = this.connection.string + "/" + endpoint
+        log.info("[Fetch] Making fetch call to: " + url)
+        const response = await axios.get(url)
+        return response.data
+    }
+
+
+    async getInfo(): Promise<any> {
+        return await this.fetch("info")
+    }
 }

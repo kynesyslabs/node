@@ -11,7 +11,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import forge, { pki } from "node-forge"
 
-import { Bundle } from "@kynesyslabs/demosdk-http/types"
+import { Bundle } from "@kynesyslabs/demosdk/types"
 
 import Cryptography from "../crypto/cryptography"
 // INFO This module exposes methods designed to have an unified way of communicate in DEMOS

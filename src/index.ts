@@ -28,6 +28,7 @@ import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import groundControl from "./libs/utils/demostdlib/groundControl"
 import mainLoop from "./utilities/mainLoop"
 import log from "src/utilities/logger"
+import { Peer } from "./libs/peer"
 
 const term = terminalkit.terminal
 
@@ -37,19 +38,18 @@ log.info("[MAIN] Starting the node")
 
 let enough_peers = true // ? Review this
 // INFO Loading the known peers
-if (!fs.existsSync("./demos_peers")) {
+if (!fs.existsSync("./demos_peerlist.json")) {
     enough_peers = false
     console.log("No peers found, listening for peers...")
 }
 
 // ANCHOR Overrides
 let OVERRIDE_PORT = null
-let OVERRIDE_PEER_LIST_FILE = null
 let OVERRIDE_IS_TESTER = null
 let COMMANDLINE_MODE = null
 
 
-let PEER_LIST: any
+let PeerList: Peer[]
 
 
 /* SECTION Environment variables loading and configuration */
@@ -63,15 +63,13 @@ if (SERVER_PORT == 0) {
 }
 // Setting the server port to the shared state
 sharedState.getInstance().serverPort = SERVER_PORT
-// Allow overriding peer list file through RPC_PEER_LIST_FILE
-let PEER_LIST_FILE = process.env.PEER_LIST_FILE || "./demos_peers"
+// Allow overriding peer list file through RPC_PeerList_FILE
 /* !SECTION Environment variables loading and configuration */
 
 console.log("= Configured environment variables = \n")
 console.log("PG_PORT: " + PG_PORT)
 console.log("RPC_FEE: " + RPC_FEE)
 console.log("SERVER_PORT: " + SERVER_PORT)
-console.log("PEER_LIST_FILE: " + PEER_LIST_FILE)
 console.log("= End of Configuration = \n")
 // Configure the logs directory
 log.setLogsDir(SERVER_PORT)
@@ -104,8 +102,7 @@ async function digestArguments() {
                     OVERRIDE_PORT = param[1]
                     break
                 case "peerfile":
-                    console.log("Overriding peer list file")
-                    OVERRIDE_PEER_LIST_FILE = param[1]
+                    log.warning("WARNING: Overriding peer list file is not supported anymore (see PeerManager)")
                     break
                 case "tester":
                     console.log("Starting in tester mode")
@@ -130,12 +127,14 @@ async function main() {
     }
     sharedState.getInstance().serverPort = SERVER_PORT // Sharing this with any module that needs it
     sharedState.getInstance().rpcFee = RPC_FEE
-    if (OVERRIDE_PEER_LIST_FILE) {
-        PEER_LIST_FILE = OVERRIDE_PEER_LIST_FILE
-    }
-    PEER_LIST = JSON.parse(fs.readFileSync(PEER_LIST_FILE, "utf8"))
+    
+    PeerManager.getInstance().loadPeerList()
+    PeerList = PeerManager.getInstance().getPeers()
     term.green("[BOOTSTRAP] Loaded a list of peers:\n")
-    //console.log(PEER_LIST)
+    
+    for (const peer of PeerList) {
+        console.log( peer.identity + " @ "  + peer.connection.string )
+    }
 
     // NOTE The whole first part of main ensures the environment is ready to run
     await sharedState.getInstance().identity.ensureIdentity() // ? Should we generate the identity option based too? (see SERVER_PORT and others    )
@@ -146,7 +145,7 @@ async function main() {
         "\n[MAIN] 🔗 WE ARE " + id.ed25519.publicKey.toString("hex") + " 🔗 \n",
     )
     // Creating ourselves as a peer // ? Should this be removed in production?
-    let ourselves = "http://127.0.0.1>" + SERVER_PORT + ">" + id.ed25519.publicKey.toString("hex")
+    let ourselves = "http://127.0.0.1:" + SERVER_PORT
     sharedState.getInstance().connectionString = ourselves
     log.info("Our connection string is: " + ourselves)
     // And saves the public key file
@@ -168,12 +167,12 @@ async function main() {
     term.green("[GENESIS] 🖥️ Found the genesis block\n")
 
     // Loading the peers
-    PEER_LIST.push(ourselves)
+    //PeerList.push(ourselves)
 
     // INFO Setting the common variables and propagating them
     term.yellow("[BOOTSTRAP] 🌐 Bootstrapping peers...\n")
-    console.log(PEER_LIST)
-    await peerBootstrap(PEER_LIST)
+    console.log(PeerList)
+    await peerBootstrap(PeerList)
     // ? Remove the following code if it's not needed: peerManager.addPeer(peer) is called within peerBootstrap (hello_peer routines)
     /*for (const peer of peerList) {
         peerManager.addPeer(peer)
@@ -182,6 +181,9 @@ async function main() {
     term.green(
         "[BOOTSTRAP] 🌐 Peers loaded (" + peerManager.getPeers().length + ")\n",
     )
+
+    //console.log(peerManager.getPeers())
+
     // Checking for listening mode
     if (peerManager.getPeers().length < 1) {
         console.log("[WARNING] 🔍 No peers detected, listening...")

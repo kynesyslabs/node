@@ -9,6 +9,8 @@ export default async function ensureCandidateBlockFormed(): Promise<boolean> {
         log.info("Candidate block not formed yet, forcing the consensus routine...")
         if (!sharedState.getInstance().inConsensusLoop) {
             await consensusRoutine()
+        } else {
+            log.info("Consensus routine already running, waiting for it to finish...")
         }
     }
     if (sharedState.getInstance().candidateBlock) {
