@@ -1,9 +1,8 @@
 import {
-  IRawWeb2Request,
-  IWeb2Attestation,
-  IWeb2Request,
-} from "@kynesyslabs/demosdk/types"
-
+    IRawWeb2Request,
+    IWeb2Attestation,
+    IWeb2Request,
+} from "@kynesyslabs/demosdk-http/types"
 import { Web2RequestManager } from "src/features/web2/Web2RequestManager"
 import { Proxy } from "src/features/web2/dahr/Proxy"
 
@@ -20,18 +19,26 @@ export class DAHR {
     }
 
     async talkWithTarget(
-        source: string, 
+        source: string,
         web2Request: IWeb2Request,
-        path: string, 
-        method: IRawWeb2Request["method"]): Promise<IWeb2Attestation> {
-            this._web2Request = web2Request
-            
-            const web2RequestManager = new Web2RequestManager(this)
-            const web2Promise = this.proxy.sendHTTPRequest(source, web2Request, path, method)
-            console.log("[DAHR] web2Promise: ", web2Promise)
-            const attestedResult = await web2RequestManager.getAttestedResult(web2Promise)
+        path: string,
+        method: IRawWeb2Request["method"],
+    ): Promise<IWeb2Attestation> {
+        this._web2Request = web2Request
 
-            return attestedResult
+        const web2RequestManager = new Web2RequestManager(this)
+        const web2Promise = this.proxy.sendHTTPRequest(
+            source,
+            web2Request,
+            path,
+            method,
+        )
+        console.log("[DAHR] web2Promise: ", web2Promise)
+        const attestedResult = await web2RequestManager.getAttestedResult(
+            web2Promise,
+        )
+
+        return attestedResult
     }
 
     stopTalkWithTarget(): void {

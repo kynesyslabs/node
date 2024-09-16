@@ -1,6 +1,5 @@
-import { IWeb2Request } from "@kynesyslabs/demosdk-http/types"
-import handleWeb2 from "src/features/web2/Web2Dispatcher"
-import { RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { IWeb2Request, RPCResponse } from "@kynesyslabs/demosdk-http/types"
+import { handleWeb2 } from "src/features/web2/handleWeb2"
 import { emptyResponse } from "../../server_rpc"
 import _ from "lodash"
 

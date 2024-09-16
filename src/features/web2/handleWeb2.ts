@@ -3,11 +3,7 @@ import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import required from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
-
-import {
-    IWeb2Request,
-  } from "@kynesyslabs/demosdk/types"
-
+import { IWeb2Request } from "@kynesyslabs/demosdk-http/types"
 import { Web2RequestManager } from "./Web2RequestManager"
 import { DAHRManager } from "src/features/web2/dahr/DAHRManager"
 
@@ -50,9 +46,7 @@ export async function handleWeb2(
     const DAHR = DAHRManagerInstance.getDAHR(nameHash)
     const web2RequestManager = new Web2RequestManager(DAHR)
 
-    console.log(
-        "[handleWeb2] DAHR instance created.",
-    )
+    console.log("[handleWeb2] DAHR instance created.")
 
     const numOfAttestations = Object.keys(request.attestations).length
     const originalFlag = numOfAttestations === 1
@@ -86,13 +80,16 @@ export async function handleWeb2(
                 "[handleWeb2] [*] Hashing and signing the request's attestations...",
             )
 
-            const hashedAttestations = Hashing.sha256(JSON.stringify(DAHR.web2Request.attestations))
-            const ourPrivateKey = sharedState.getInstance().identity.ed25519.privateKey
+            const hashedAttestations = Hashing.sha256(
+                JSON.stringify(DAHR.web2Request.attestations),
+            )
+            const ourPrivateKey =
+                sharedState.getInstance().identity.ed25519.privateKey
             const signedAttestations = Cryptography.sign(
                 hashedAttestations,
                 ourPrivateKey,
             )
-    
+
             term.green(
                 "[handleWeb2] [*] Compiling and certifying the result on our side...",
             )
@@ -103,9 +100,7 @@ export async function handleWeb2(
             console.log("[handleWeb2] Error: " + JSON.stringify(error))
             return [false, JSON.stringify(error)]
         }
-    }
-
-    else {
+    } else {
         /* TODO Activate the below on production  */
         // First, we have to validate the attestations
         // web2RequestManager.web2ResultIsValid
@@ -113,9 +108,7 @@ export async function handleWeb2(
         // TODO we have to merge the attestations' arrays with valid values
     }
 
-    console.log(
-        "[handleWeb2] Done! Sending the response back to the client...",
-    )
+    console.log("[handleWeb2] Done! Sending the response back to the client...")
     console.log(
         "[handleWeb2] Attestations validated. Deriving a transaction + operation...",
     )

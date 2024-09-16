@@ -4,11 +4,8 @@ import httpProxy from "http-proxy"
 import required from "src/utilities/required"
 import axios from "axios"
 
-import {
-    IWeb2Request,
-} from "@kynesyslabs/demosdk/types"
-import { EnumWeb2Methods } from "node_modules/@kynesyslabs/demosdk/build/types/web2"
-
+import { IWeb2Request } from "@kynesyslabs/demosdk-http/types"
+import { EnumWeb2Methods } from "node_modules/@kynesyslabs/demosdk-http/build/types/web2"
 import { DAHR } from "./DAHR"
 
 import terminalKit from "terminal-kit"
@@ -36,7 +33,11 @@ export class Proxy {
 
     private createProxyServer(source: string, target: string): void {
         term.yellow.bold(
-            "[Web2API] Creating a proxy server with source " + source + " and target " + target + "...\n",
+            "[Web2API] Creating a proxy server with source " +
+                source +
+                " and target " +
+                target +
+                "...\n",
         )
 
         // Parse the target URL to get the protocol, hostname, and port
@@ -57,7 +58,11 @@ export class Proxy {
         console.log(this.proxyServer)
 
         // Parse the source URL to get the protocol, hostname, and port
-        const { protocol: hostProtocol, hostname: sourceHostname, port: sourcePort } = parseUrl(source)
+        const {
+            protocol: hostProtocol,
+            hostname: sourceHostname,
+            port: sourcePort,
+        } = parseUrl(source)
 
         // Create an HTTP or HTTPS proxy server based on the hostProtocol
         if (hostProtocol === "http:") {
@@ -65,14 +70,16 @@ export class Proxy {
                 this.proxyServer.web(req, res)
             }).listen(sourcePort, sourceHostname)
         } else if (hostProtocol === "https:") {
-            https.createServer((req, res) => {
-                this.proxyServer.web(req, res)
-            }).listen(sourcePort, sourceHostname)
+            https
+                .createServer((req, res) => {
+                    this.proxyServer.web(req, res)
+                })
+                .listen(sourcePort, sourceHostname)
         } else {
             console.error("Unsupported hostProtocol: " + hostProtocol)
         }
     }
-    
+
     /**
      * Send a HTTP request.
      * @param {string} source - The source where the proxy server will listen for incoming requests.
@@ -82,13 +89,13 @@ export class Proxy {
      * @returns {Promise<any>} A HTTP promise.
      */
     sendHTTPRequest(
-        source: string, 
+        source: string,
         web2Request: IWeb2Request,
-        targetPath: string = "/", 
+        targetPath: string = "/",
         targetMethod: EnumWeb2Methods = EnumWeb2Methods.GET,
         // TODO Need to type web2Result somehow
     ): Promise<any> {
-        console.log("sendHTTPRequest called") 
+        console.log("sendHTTPRequest called")
 
         const targetBody = web2Request.raw
         this.target = web2Request.raw.url
@@ -107,7 +114,7 @@ export class Proxy {
 
         try {
             return new Promise((resolve, reject) => {
-                console.log("Promise started") 
+                console.log("Promise started")
                 const options = {
                     hostname: this.targetHostname,
                     baseURL: `${this.targetProtocol}//${this.targetHostname}`,
@@ -117,22 +124,24 @@ export class Proxy {
                     method: targetMethod,
                     headers: {
                         "Content-Type": "application/json",
-                        "Content-Length": Buffer.byteLength(JSON.stringify(targetBody)),
+                        "Content-Length": Buffer.byteLength(
+                            JSON.stringify(targetBody),
+                        ),
                     },
                     data: targetBody,
-                }     
-    
+                }
+
                 axios(options)
-                    .then((res) => {
+                    .then(res => {
                         console.log("Response received")
                         console.log("Response ended")
                         resolve(res.data)
                     })
-                    .catch((error) => {
+                    .catch(error => {
                         console.error("Request error", error)
                         reject(error)
                     })
-            }).catch((error) => {
+            }).catch(error => {
                 console.error("Error in Promise", error)
             })
         } catch (error) {
@@ -142,7 +151,9 @@ export class Proxy {
 
     stopProxy(): void {
         required(this.proxyServer, "Proxy server has not been started.")
-        term.yellow.bold("[Web2API] Stopping proxy server with target " + this.target)
+        term.yellow.bold(
+            "[Web2API] Stopping proxy server with target " + this.target,
+        )
 
         this.proxyServer.close()
     }

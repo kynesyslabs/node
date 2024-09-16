@@ -51,7 +51,7 @@ import {
     ValidityData,
     XMScript,
 } from "@kynesyslabs/demosdk-http/types"
-import { EnumWeb2Methods } from "node_modules/@kynesyslabs/demosdk/build/types/web2"
+import { EnumWeb2Methods } from "node_modules/@kynesyslabs/demosdk-http/build/types/web2"
 import GLS from "../blockchain/gls/gls"
 import {
     NativePayload,
@@ -309,8 +309,7 @@ export default class ServerHandlers {
         senderSocket: any,
     ): Promise<any> /*  Promise<RPCResponse> {
         let response: RPCResponse = _.cloneDeep(emptyResponse)
-        response = await handleWeb2Request(content) */
-    {
+        response = await handleWeb2Request(content) */ {
         /* NOTE This workflow goeas as:
          * The Web2 Operation is validated, executed and verified
          * when applicable. Is then sent back once attested.
