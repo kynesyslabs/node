@@ -14,5 +14,5 @@ export default async function handleDemosWorkRequest(
     response.result = 400
     response.response = "not yet implemented"
     response.extra = "Your request has been received but DemosWork logic is not implemented yet"
-    return response
+    return response 
 }

@@ -253,9 +253,11 @@ export default class ServerHandlers {
             case "demoswork": // ? Shouldn't this replace all the above? See demosWork logic and docs
                 var demosWorkPayload = tx.content.data
                 var demosWorkScript = demosWorkPayload[1] as DemoScript
+                var demoswork_result = handleDemosWorkRequest(demosWorkScript)
+                result.response = demoswork_result
 
                 // ! The below code is legacy and will be eliminated once demosWork is in place
-                // REVIEW This still works with the new tx system?
+                /*
                 var native_result = await broadcastVerifiedNativeTransaction(
                     validatedData,
                 )
@@ -264,7 +266,7 @@ export default class ServerHandlers {
                     result.success = true
                 }
                 // REVIEW Check if this is ok with types
-                result.response = native_result
+                result.response = native_result */
         }
         // Only if the transaction is valid we add it to the mempool
         if (result.success) {
