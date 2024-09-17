@@ -12,8 +12,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 // REVIEW Pay attention to the return types (RPCResponse)
 
-import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
-import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import Chain from "src/libs/blockchain/chain"
 import Mempool, { MempoolData } from "src/libs/blockchain/mempool"
 import {
@@ -52,22 +50,32 @@ import {
 } from "@kynesyslabs/demosdk/types"
 
 import GLS from "../blockchain/gls/gls"
-import {
-    NativePayload,
-    StringifiedPayload,
-    Web2Payload,
-    XMPayload,
-} from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/Transaction"
 import { StatusNative } from "src/model/entities/StatusNative"
 import Block from "../blockchain/block"
 import { BlockContent } from "../../../../sdks/src/types/blockchain/blocks"
-import handleWeb2Request from "./routines/transactions/handleWeb2Request"
 import getPeerInfo from "./routines/nodecalls/getPeerInfo"
 import forge from "node-forge"
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
 import { ConsensusRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
+// SECTION Handlers for different types of transactions
+import handleWeb2Request from "./routines/transactions/handleWeb2Request"
+import handleDemosWorkRequest from "./routines/transactions/handleDemosWorkRequest"
+import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
+import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Rename to handleXMRequest
+
+// ? Note: this is to be implemented once demosWork is in place
+import { DemosWork } from "@kynesyslabs/demosdk/demoswork"
+import { DemoScript } from "@kynesyslabs/demosdk/types"
+
+// ! Note: this will be removed once demosWork is in place
+import { 
+    NativePayload,
+    StringifiedPayload,
+    Web2Payload,
+    XMPayload,
+ } from "../../../../sdks/src/types/blockchain/Transaction"
 
 let term = terminalkit.terminal
 
@@ -222,7 +230,6 @@ export default class ServerHandlers {
             | StringifiedPayload
         switch (tx.content.type) {
             case "crosschainOperation":
-            case "multichainOperation":
                 payload = tx.content.data as XMPayload
                 console.log("[Included XM Chainscript]")
                 console.log(payload[1])
@@ -243,7 +250,11 @@ export default class ServerHandlers {
                 // TODO Add result.success handling
                 result.response = web2_result
                 break
-            case "native":
+            case "demoswork": // ? Shouldn't this replace all the above? See demosWork logic and docs
+                var demosWorkPayload = tx.content.data
+                var demosWorkScript = demosWorkPayload[1] as DemoScript
+
+                // ! The below code is legacy and will be eliminated once demosWork is in place
                 // REVIEW This still works with the new tx system?
                 var native_result = await broadcastVerifiedNativeTransaction(
                     validatedData,
@@ -300,6 +311,15 @@ export default class ServerHandlers {
         // NOTE Remember that crosschain operations are in chainscript syntax (see chainscript_example.ts)
         response.response = await multichainCapabilities()
         // TODO
+        return response
+    }
+
+    // Proxy method for handleDemosWorkRequest
+    static async handleDemosWorkRequest(
+        content: DemoScript,
+    ) {
+        let response: RPCResponse = _.cloneDeep(emptyResponse)
+        response = await handleDemosWorkRequest(content)
         return response
     }
 
