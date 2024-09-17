@@ -11,7 +11,7 @@ import Transaction from "../../blockchain/transaction"
 export interface DerivableNative {
     from: string
     to: string
-    type: "web2" | "xm" | "native"
+    type: "web2Request" | "crosschainOperation" | "demoswork"
     data: any | string
     timestamp: number
     fees: {
@@ -95,11 +95,11 @@ export async function deriveOperations(
     // Analyzing the transaction type
     switch (transaction.content.type) {
         // TODO Do this
-        case "web2":
+        case "web2Request":
             break
-        case "xm":
+        case "crosschainOperation":
             break
-        case "native":
+        case "demoswork":
             break
         default:
             break
@@ -156,7 +156,7 @@ export async function createTransaction(
             from: null,
             to: null,
             amount: null,
-            data: ["content", null], // type as string and content in hex string
+            data: ["demoswork", null], // type as string and content in hex string
             nonce: null, // Increments every time a transaction is sent from the same account
             timestamp: null, // Is the registered unix timestamp when the transaction was sent the first time
             transaction_fee: {

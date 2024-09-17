@@ -246,7 +246,6 @@ export default class ServerHandlers {
                 var web2_result = await ServerHandlers.handleWeb2Request(
                     payload[1] as IWeb2Request,
                 )
-
                 // TODO Add result.success handling
                 result.response = web2_result
                 break

@@ -82,7 +82,7 @@ export default async function executeNativeTransaction(
     }
 
     // ANCHOR Managing complex operations
-    if (transaction.content.data[0] === "execute") {
+    if (transaction.content.data[0] === "demoswork") {
         // TODO Execute the code based on a currently not defined schema
     }
 

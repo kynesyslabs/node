@@ -29,7 +29,6 @@ import {
 
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
-import { compressData, decompressData } from "../utils/demostdlib"
 import Confirmation from "./types/confirmation"
 import { ForgeToHex } from "../crypto/forgeUtils"
 
@@ -242,7 +241,7 @@ export default class Transaction implements ITransaction {
         tx.status = rawTx.status
         tx.hash = rawTx.hash
         tx.content = {
-            type: rawTx.type,
+            type: rawTx.type as "web2Request" | "crosschainOperation" | "demoswork", // ! Remove this horrible thing when possible
             from: Buffer.from(rawTx.from, "hex"),
             to: Buffer.from(rawTx.to, "hex"),
             amount: rawTx.amount,
@@ -259,15 +258,4 @@ export default class Transaction implements ITransaction {
         return tx
     }
 
-    // SECTION Compression support
-
-    public static compress(tx: Transaction): Transaction {
-        let _tx = compressData(tx)
-        return _tx
-    }
-
-    public static decompress(tx: Transaction): Transaction {
-        let _tx = decompressData(tx)
-        return _tx
-    }
 }

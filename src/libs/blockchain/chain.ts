@@ -20,7 +20,7 @@ import { MoreThan, ILike } from "typeorm"
 
 import {
     AddressInfo, Operation, StatusNative as StatusNativeType,
-    StatusProperties as StatusPropertiesType, StringifiedPayload, TransactionContent,
+    StatusProperties as StatusPropertiesType, TransactionContent,
 } from "@kynesyslabs/demosdk/types"
 
 import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
@@ -254,7 +254,7 @@ export default class Chain {
                     // Extract the peer list from the transactions
                     let onlinePeersInBlock: Peer[] = []
                     for (let i = 0; i < onlinePeersInBlockTransactions.length; i++) {
-                        const onlineTxRaw = onlinePeersInBlockTransactions[i] as StringifiedPayload
+                        const onlineTxRaw = onlinePeersInBlockTransactions[i]
                         const onlineTx = JSON.parse(onlineTxRaw[0])
                         // ? This typization is totally random for now
                         const onlinePeer = onlineTx.data as Peer
