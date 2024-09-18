@@ -47,6 +47,8 @@ import {
     IWeb2Request,
     ValidityData,
     XMScript,
+    ConsensusRequest,
+    RPCResponse,
 } from "@kynesyslabs/demosdk/types"
 
 import GLS from "../blockchain/gls/gls"
@@ -57,7 +59,6 @@ import getPeerInfo from "./routines/nodecalls/getPeerInfo"
 import forge from "node-forge"
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
-import { ConsensusRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
 // SECTION Handlers for different types of transactions
 import handleWeb2Request from "./routines/transactions/handleWeb2Request"
@@ -69,8 +70,8 @@ import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Ren
 import { DemosWork } from "@kynesyslabs/demosdk/demoswork"
 import { DemoScript } from "@kynesyslabs/demosdk/types"
 
-// ! Note: this will be removed once demosWork is in place
-/*
+
+/* // ! Note: this will be removed once demosWork is in place
 import { 
     NativePayload,
     StringifiedPayload,
