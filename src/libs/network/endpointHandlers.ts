@@ -70,12 +70,14 @@ import { DemosWork } from "@kynesyslabs/demosdk/demoswork"
 import { DemoScript } from "@kynesyslabs/demosdk/types"
 
 // ! Note: this will be removed once demosWork is in place
+/*
 import { 
     NativePayload,
     StringifiedPayload,
     Web2Payload,
     XMPayload,
- } from "../../../../sdks/src/types/blockchain/Transaction"
+} from "@kynesyslabs/demosdk/types"
+*/
 
 let term = terminalkit.terminal
 
@@ -224,13 +226,13 @@ export default class ServerHandlers {
         let tx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
         // Using a payload variable to be able to check types immediately
         let payload:
-            | XMPayload
-            | Web2Payload
-            | NativePayload
-            | StringifiedPayload
+            | DemoScript
+            | any // ! Remove this once demosWork is in place
         switch (tx.content.type) {
+            
+            // SECTION Legacy code // ! Remove this once demosWork is in place
             case "crosschainOperation":
-                payload = tx.content.data as XMPayload
+                payload = tx.content.data
                 console.log("[Included XM Chainscript]")
                 console.log(payload[1])
                 // TODO Better types on answers
@@ -242,20 +244,22 @@ export default class ServerHandlers {
                 break
             case "web2Request":
                 // TODO Better types on answers
-                payload = tx.content.data as Web2Payload
+                payload = tx.content.data
                 var web2_result = await ServerHandlers.handleWeb2Request(
                     payload[1] as IWeb2Request,
                 )
                 // TODO Add result.success handling
                 result.response = web2_result
-                break
-            case "demoswork": // ? Shouldn't this replace all the above? See demosWork logic and docs
+                break 
+            // SECTION End of legacy code
+
+            case "demoswork":
                 var demosWorkPayload = tx.content.data
                 var demosWorkScript = demosWorkPayload[1] as DemoScript
                 var demoswork_result = handleDemosWorkRequest(demosWorkScript)
                 result.response = demoswork_result
 
-                // ! The below code is legacy and will be eliminated once demosWork is in place
+                // ! The below code should be implemented in handleDemosWorkRequest
                 /*
                 var native_result = await broadcastVerifiedNativeTransaction(
                     validatedData,
