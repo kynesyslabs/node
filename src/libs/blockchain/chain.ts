@@ -30,6 +30,7 @@ import Block from "./block"
 import manageNative from "./routines/gls_routines/manageNative"
 import Transaction from "./transaction"
 import { Peer } from "../peer"
+import Mempool from "./mempool"
 
 
 export default class Chain {
@@ -303,14 +304,30 @@ export default class Chain {
             .getDataSource()
             .getRepository(Transactions)
 
+        console.log("[insertBlock] Attempting to insert a block with hash: " + block.hash)
+        console.log("[insertBlock] Block to be inserted: ")
+        console.log(block)
+        // Convert the transactions strings back to Transaction objects
+        console.log("[insertBlock] Extracting transactions from block")
+        // ! FIXME The below fails when a tx like a web2Request is inserted
+        let orderedTransactionsHashes = block.content.ordered_transactions
+        console.log(orderedTransactionsHashes)  
+        // Fetch transaction entities from the repository based on ordered transaction hashes
         const transactionEntities = await Promise.all(
-            block.content.ordered_transactions.map(async txHash =>
-                Transaction.fromRawTransaction(
-                    await transactionRepository.findOneBy({
-                        hash: txHash,
-                    }),
-                ),
-            ),
+            orderedTransactionsHashes.map(async txHash => {
+                console.log("[insertBlock] Fetching transaction with hash: " + txHash)
+                /*
+                // Why do we look into the transactions repository? Shouldn't be in the mempool yet?
+                const rawTransaction = await transactionRepository.findOneBy({
+                    hash: txHash,
+                }) // This returns null
+                console.log("[insertBlock] Transaction fetched: ")
+                console.log(rawTransaction)
+                return Transaction.fromRawTransaction(rawTransaction) */
+                let mempoolData = await Mempool.getMempool()
+                let tx = mempoolData.transactions.find(tx => tx.hash === txHash)
+                return tx
+            }),
         )
 
         let newBlock = new Blocks()
@@ -370,8 +387,18 @@ export default class Chain {
             )
             let result = await blockRepository.save(newBlock)
             //console.log(result)
+
+            // REVIEW We then add the transactions to the Transactions repository   
+            for (let i = 0; i < transactionEntities.length; i++) {
+                let tx = transactionEntities[i]
+                await this.insertTransaction(tx)
+            }
+            // REVIEW And we clean the mempool
+            await Mempool.clean()
+
             return result
         }
+
     }
 
     // INFO Generate the genesis block
@@ -399,7 +426,6 @@ export default class Chain {
         }
         genesis_tx.status = "confirmed"
 
-        genesis_tx.hash = Hashing.sha256(JSON.stringify(genesis_tx.content))
         if (!genesis_data.timestamp) {
             genesis_tx.content.timestamp = Date.now()
         } else {
@@ -410,7 +436,10 @@ export default class Chain {
         genesis_tx.content.transaction_fee.network_fee = 0
         genesis_tx.content.transaction_fee.rpc_fee = 0
         genesis_tx.content.transaction_fee.additional_fee = 0
+
+        genesis_tx.hash = Hashing.sha256(JSON.stringify(genesis_tx.content))
         console.log(genesis_tx)
+
         // Build a block containing the genesis tx
         genesis_block.content.timestamp = genesis_tx.content.timestamp
         genesis_block.content.ordered_transactions.push(genesis_tx.hash)
@@ -421,6 +450,7 @@ export default class Chain {
         genesis_block.hash = Hashing.sha256(
             JSON.stringify(genesis_block.content),
         )
+        
         // REVIEW Create a GLS Operation and execute it
         let genesis_op: Operation = {
             operator: "genesis",
@@ -440,9 +470,10 @@ export default class Chain {
         //console.log(genesis_block)
         console.log("[GENESIS] Block generated, ready to insert it")
         console.log(genesis_block)
-        console.log("[GENESIS] inserting transaction")
+        console.log("[GENESIS] inserting transaction into the mempool")
         console.log(genesis_tx)
-        await this.insertTransaction(genesis_tx)
+        //await this.insertTransaction(genesis_tx)
+        await Mempool.addTransaction(genesis_tx) // ! FIXME This fails
         console.log("[GENESIS] inserted transaction")
         const genesisBlock = await this.insertBlock(
             genesis_block,
@@ -485,8 +516,10 @@ export default class Chain {
         transaction: Transaction,
         status: string = "confirmed",
     ): Promise<any> {
+        console.log("[insertTransaction] Inserting transaction: " + transaction.hash)
         const rawTransaction = Transaction.toRawTransaction(transaction, status)
-
+        console.log("[insertTransaction] Raw transaction: ")
+        console.log(rawTransaction)
         const db = await Datasource.getInstance()
         const transactionRepository = db
             .getDataSource()

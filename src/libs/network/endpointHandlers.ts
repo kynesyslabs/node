@@ -175,8 +175,15 @@ export default class ServerHandlers {
         }
         console.log("dataSignature: " + hexDataSignature)
         let queriedTx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
-
-        // queriedTx.content.from = queriedTx?.content?.from?.toString()
+        // REVIEW Correct? If the transaction has no block number, we set it to the last block number + 1
+        if (!queriedTx.blockNumber) {
+            log.warning("[handleExecuteTransaction] Queried tx has no block number: " + queriedTx.hash)
+            let lastBlockNumber = await Chain.getLastBlockNumber()
+            queriedTx.blockNumber = lastBlockNumber + 1
+            log.warning("[handleExecuteTransaction] Queried tx block number set to: " + queriedTx.blockNumber)
+        }
+        console.log("[handleExecuteTransaction] Queried tx processing in block: " + queriedTx.blockNumber)
+                // queriedTx.content.from = queriedTx?.content?.from?.toString()
         // queriedTx.content.from = queriedTx?.content?.to?.toString()
 
         console.log(
@@ -299,7 +306,9 @@ export default class ServerHandlers {
         // Only if the transaction is valid we add it to the mempool
         if (result.success) {
             // REVIEW We add the transaction to the mempool
-            Mempool.addTransaction(queriedTx)
+            console.log("[handleExecuteTransaction] Adding tx with hash: " + queriedTx.hash + " to the mempool")
+            await Mempool.addTransaction(queriedTx)
+            console.log("[handleExecuteTransaction] Transaction added to mempool")
             // TODO Check if Operation(s) are added to the GLS too
             // FIXME Add an operation for the nonce or anyway a way to manage the nonce
         }

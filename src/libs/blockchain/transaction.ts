@@ -190,9 +190,9 @@ export default class Transaction implements ITransaction {
     ): RawTransaction {
         console.log("[toRawTransaction] attempting to create a raw tx")
         console.log(
-            "[toRawTransaction] Signature: " +
-                tx.signature.data.toString("hex"),
+            "[toRawTransaction] Signature: ",
         )
+        console.log(tx.signature.data)
         console.log("[toRawTransaction] Block number: " + tx.blockNumber)
         console.log("[toRawTransaction] Status: " + status)
         console.log("[toRawTransaction] Hash: " + tx.hash)
@@ -210,7 +210,7 @@ export default class Transaction implements ITransaction {
         console.log("[toRawTransaction] To: " + tx.content.to)
         const rawTx = {
             blockNumber: tx.blockNumber,
-            signature: Buffer.from(tx.signature.data as Buffer).toString("hex"),
+            signature: JSON.stringify(tx.signature.data), // REVIEW This is a horrible thing, if it even works
             status: status,
             hash: tx.hash,
             content: JSON.stringify(tx.content),
@@ -229,6 +229,7 @@ export default class Transaction implements ITransaction {
     }
 
     public static fromRawTransaction(rawTx: RawTransaction): Transaction {
+        console.log("[fromRawTransaction] Attempting to create a transaction from a raw transaction with hash: " + rawTx.hash)
         const tx = new Transaction()
 
         console.log(rawTx)

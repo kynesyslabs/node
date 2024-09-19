@@ -4,9 +4,10 @@ import Hashing from "src/libs/crypto/hashing"
 import Cryptography from "src/libs/crypto/cryptography"
 import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
+import { Transaction } from "@kynesyslabs/demosdk/types"
 
 export async function createBlock(
-    orderedTransactions: string[],
+    orderedTransactions: Transaction[],
     commonValidatorSeed: string,
     previousBlockHash: string,
     blockNumber: number,
@@ -18,7 +19,7 @@ export async function createBlock(
     }
     // Creating the block
     var block = new Block()
-    block.content.ordered_transactions = orderedTransactions
+    block.content.ordered_transactions = orderedTransactions.map(transaction => transaction.hash)
     block.content.previousHash = previousBlockHash
     block.proposer = commonValidatorSeed // This is the shard identifier
     block.number = blockNumber

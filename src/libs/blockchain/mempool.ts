@@ -91,6 +91,16 @@ export default class Mempool {
         return result
     }
 
+    // INFO Cleaning the mempool
+    public static async clean(): Promise<void> {
+        const db = await Datasource.getInstance()
+        const mempoolRepository = db
+            .getDataSource()
+            .getRepository(MempoolEntity)
+
+        await mempoolRepository.delete({ current: 1 })
+    }
+
     // INFO Writing a transaction to the mempool
     /* NOTE
         Here we should already have cryptographically valid data: adding the transaction to the mempool is the way

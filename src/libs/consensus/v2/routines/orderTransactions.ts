@@ -3,7 +3,7 @@ import Transaction from "src/libs/blockchain/transaction"
 
 export async function orderTransactions(
     mempool: MempoolData,
-): Promise<string[]> {
+): Promise<Transaction[]> {
     // NOTE Sort transactions by timestamp
     // Explanation:
     // 1. We use the built-in Array.sort() method to order the transactions.
@@ -21,7 +21,7 @@ export async function orderTransactions(
     )
     // Stringify the transactions
     const orderedTransactions = orderedTransactionsObjects.map(transaction =>
-        transaction.toString(),
+        transaction,
     )
     return orderedTransactions
 }
