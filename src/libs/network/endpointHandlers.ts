@@ -144,15 +144,26 @@ export default class ServerHandlers {
             success: true,
             response: null,
             extra: null,
-            require_reply: false,
+                require_reply: false,
         }
         // NOTE Content should contain validity data and our signature to proceed
         // Integrity checks
         let ourKey = sharedState.getInstance().identity.ed25519.publicKey
         let hexOurKey = ourKey.toString("hex")
         let dataKey = validatedData.rpc_public_key
-        let hexDataKey = Buffer.from(dataKey as Buffer).toString("hex")
+        let hexDataKey: string
+        if (typeof dataKey === "string") {
+            hexDataKey = dataKey
+        } else {
+            hexDataKey = Buffer.from(dataKey as Buffer).toString("hex")
+        }
         let dataSignature = validatedData.signature
+        let hexDataSignature: string
+        if (typeof dataSignature === "string") {
+            hexDataSignature = dataSignature
+        } else {
+            hexDataSignature = Buffer.from(dataSignature as Buffer).toString("hex")
+        }
         let queriedTx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
 
         // queriedTx.content.from = queriedTx?.content?.from?.toString()
@@ -179,19 +190,19 @@ export default class ServerHandlers {
         console.log("Backend - Hash:", hashedData)
         console.log(
             "Backend - Data Signature:",
-            Buffer.from(dataSignature as Buffer).toString("hex"),
+            hexDataSignature,
         )
         console.log(
             "Backend - Data Key:",
-            Buffer.from(dataKey as Buffer).toString("hex"),
+            hexDataKey,
         )
         let signatureValid = Cryptography.verify(
             hashedData,
-            dataSignature,
-            dataKey,
+            hexDataSignature, // REVIEW use dataSignature if needed
+            hexDataKey, // REVIEW use dataKey if needed
         )
         if (!signatureValid) {
-            term.red.bold(fname + "Invalid validityData signature 💀 : ")
+            log.error("[handleExecuteTransaction] Invalid validityData signature: " + hexDataSignature + " - " + hexDataKey)
             result.success = false
             result.response = false
             result.extra = "Invalid signature"
@@ -201,7 +212,7 @@ export default class ServerHandlers {
         let blockNumber = validatedData.data.reference_block
         let lastBlockNumber = await Chain.getLastBlockNumber()
         if (blockNumber != lastBlockNumber) {
-            term.red.bold(fname + "Invalid validityData block reference 💀 : ")
+            log.error("[handleExecuteTransaction] Invalid validityData block reference: " + blockNumber + " - " + lastBlockNumber)
             result.success = false
             result.response = false
             result.extra = "Invalid block reference"
@@ -210,8 +221,7 @@ export default class ServerHandlers {
         // REVIEW Is this useful at this point?
         if (!validatedData.data.valid) {
             // An invalid transaction won't even be added to the mempool
-            term.yellow.bold(fname + "Invalid validityData 💀 : ")
-            console.log(validatedData.data.message)
+            log.error("[handleExecuteTransaction] Invalid validityData: " + validatedData.data.message)
             result.success = false
             result.response = false
             result.extra = validatedData.data.message
