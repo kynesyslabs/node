@@ -69,7 +69,7 @@ import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Ren
 // ? Note: this is to be implemented once demosWork is in place
 import { DemosWork } from "@kynesyslabs/demosdk/demoswork"
 import { DemoScript } from "@kynesyslabs/demosdk/types"
-
+import { ForgeToHex } from "../crypto/forgeUtils"
 
 /* // ! Note: this will be removed once demosWork is in place
 import { 
@@ -83,8 +83,6 @@ import {
 let term = terminalkit.terminal
 
 export default class ServerHandlers {
-    
-
     // ANCHOR Validate transaction
     static async handleValidateTransaction(
         tx: Transaction,
@@ -139,31 +137,43 @@ export default class ServerHandlers {
     static async handleExecuteTransaction(
         validatedData: ValidityData,
     ): Promise<ExecutionResult> {
+        console.log("[handleExecuteTransaction] Starting execution...")
         let fname = "[handleExecuteTransaction] "
         let result: ExecutionResult = {
             success: true,
             response: null,
             extra: null,
-                require_reply: false,
+            require_reply: false,
         }
         // NOTE Content should contain validity data and our signature to proceed
         // Integrity checks
         let ourKey = sharedState.getInstance().identity.ed25519.publicKey
         let hexOurKey = ourKey.toString("hex")
         let dataKey = validatedData.rpc_public_key
+        /*  console.log("[handleExecuteTransaction] dataKey: ")
+        console.log(dataKey)
+        console.log(typeof dataKey)
+        console.log("\n") */
         let hexDataKey: string
         if (typeof dataKey === "string") {
+            console.log("[handleExecuteTransaction] dataKey is a string: using as is")
             hexDataKey = dataKey
         } else {
-            hexDataKey = Buffer.from(dataKey as Buffer).toString("hex")
+            console.log("[handleExecuteTransaction] dataKey is a buffer: using ForgeToHex")
+            hexDataKey = ForgeToHex(dataKey)
         }
+        console.log("dataKey: " + hexDataKey)
         let dataSignature = validatedData.signature
         let hexDataSignature: string
         if (typeof dataSignature === "string") {
+            console.log("[handleExecuteTransaction] dataSignature is a string: using as is")
             hexDataSignature = dataSignature
         } else {
-            hexDataSignature = Buffer.from(dataSignature as Buffer).toString("hex")
+            console.log("[handleExecuteTransaction] dataSignature is a buffer: using ForgeToHex")
+            console.log(dataSignature)
+            hexDataSignature = ForgeToHex(dataSignature)
         }
+        console.log("dataSignature: " + hexDataSignature)
         let queriedTx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
 
         // queriedTx.content.from = queriedTx?.content?.from?.toString()
@@ -188,21 +198,20 @@ export default class ServerHandlers {
         let hashedData = Hashing.sha256(JSON.stringify(validatedData.data))
         console.log(JSON.stringify(validatedData))
         console.log("Backend - Hash:", hashedData)
-        console.log(
-            "Backend - Data Signature:",
-            hexDataSignature,
-        )
-        console.log(
-            "Backend - Data Key:",
-            hexDataKey,
-        )
+        console.log("Backend - Data Signature:", hexDataSignature)
+        console.log("Backend - Data Key:", hexDataKey)
         let signatureValid = Cryptography.verify(
             hashedData,
             hexDataSignature, // REVIEW use dataSignature if needed
             hexDataKey, // REVIEW use dataKey if needed
         )
         if (!signatureValid) {
-            log.error("[handleExecuteTransaction] Invalid validityData signature: " + hexDataSignature + " - " + hexDataKey)
+            log.error(
+                "[handleExecuteTransaction] Invalid validityData signature: " +
+                    hexDataSignature +
+                    " - " +
+                    hexDataKey,
+            )
             result.success = false
             result.response = false
             result.extra = "Invalid signature"
@@ -212,7 +221,12 @@ export default class ServerHandlers {
         let blockNumber = validatedData.data.reference_block
         let lastBlockNumber = await Chain.getLastBlockNumber()
         if (blockNumber != lastBlockNumber) {
-            log.error("[handleExecuteTransaction] Invalid validityData block reference: " + blockNumber + " - " + lastBlockNumber)
+            log.error(
+                "[handleExecuteTransaction] Invalid validityData block reference: " +
+                    blockNumber +
+                    " - " +
+                    lastBlockNumber,
+            )
             result.success = false
             result.response = false
             result.extra = "Invalid block reference"
@@ -221,7 +235,10 @@ export default class ServerHandlers {
         // REVIEW Is this useful at this point?
         if (!validatedData.data.valid) {
             // An invalid transaction won't even be added to the mempool
-            log.error("[handleExecuteTransaction] Invalid validityData: " + validatedData.data.message)
+            log.error(
+                "[handleExecuteTransaction] Invalid validityData: " +
+                    validatedData.data.message,
+            )
             result.success = false
             result.response = false
             result.extra = validatedData.data.message
@@ -236,11 +253,8 @@ export default class ServerHandlers {
         // REVIEW Switch case for different types of transactions
         let tx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
         // Using a payload variable to be able to check types immediately
-        let payload:
-            | DemoScript
-            | any // ! Remove this once demosWork is in place
+        let payload: DemoScript | any // ! Remove this once demosWork is in place
         switch (tx.content.type) {
-            
             // SECTION Legacy code // ! Remove this once demosWork is in place
             case "crosschainOperation":
                 payload = tx.content.data
@@ -261,7 +275,7 @@ export default class ServerHandlers {
                 )
                 // TODO Add result.success handling
                 result.response = web2_result
-                break 
+                break
             // SECTION End of legacy code
 
             case "demoswork":
@@ -270,8 +284,8 @@ export default class ServerHandlers {
                 var demoswork_result = handleDemosWorkRequest(demosWorkScript)
                 result.response = demoswork_result
 
-                // ! The below code should be implemented in handleDemosWorkRequest
-                /*
+            // ! The below code should be implemented in handleDemosWorkRequest
+            /*
                 var native_result = await broadcastVerifiedNativeTransaction(
                     validatedData,
                 )
@@ -331,9 +345,7 @@ export default class ServerHandlers {
     }
 
     // Proxy method for handleDemosWorkRequest
-    static async handleDemosWorkRequest(
-        content: DemoScript,
-    ) {
+    static async handleDemosWorkRequest(content: DemoScript) {
         let response: RPCResponse = _.cloneDeep(emptyResponse)
         response = await handleDemosWorkRequest(content)
         return response
@@ -369,7 +381,8 @@ export default class ServerHandlers {
             log.error("[endpointHandlers] We are not in consensus mode")
             response.result = 400
             response.response = false
-            response.extra = "We are not in consensus mode (and you are using the old consensus mechanism)"
+            response.extra =
+                "We are not in consensus mode (and you are using the old consensus mechanism)"
             return response
         }
 
@@ -456,5 +469,4 @@ export default class ServerHandlers {
         const response = await Mempool.receive(content.data as MempoolData)
         return { extra, require_reply, response }
     }
-
 }
