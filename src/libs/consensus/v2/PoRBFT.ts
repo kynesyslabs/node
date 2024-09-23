@@ -100,6 +100,10 @@ export async function consensusRoutine(): Promise<void> {
     await synchronizeAndAverageTime(shard)
     // Merge and order the mempools between the shard and the local node
     const mempool = await mergeAndOrderMempools(shard)
+    
+    console.log("[consensusRoutine] mempool merged (aka ordered transactions):")
+    console.log(mempool)
+    
     // Forge the block from the ordered transactions
     const block = await forgeBlock(mempool)
     // REVIEW Set last consensus time to the current block timestamp
@@ -189,9 +193,11 @@ async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
 }
 
 // Merge and order the mempools between the shard and the local node
-async function mergeAndOrderMempools(shard: Peer[]): Promise<string[]> {
+async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
     const ourMempool = await Mempool.getMempool()
-    log.info("[consensusRoutine] Our mempool has been retrieved")
+    console.log("[consensusRoutine] Our mempool:")
+    console.log(ourMempool)
+    log.info("[consensusRoutine] Our mempool has been retrieved")               
     const mergedMempool = await mergeMempools(ourMempool, shard)
     log.info("[consensusRoutine] Mempools have been merged")
     await updateValidatorStatus("mergedMempool")
@@ -199,7 +205,7 @@ async function mergeAndOrderMempools(shard: Peer[]): Promise<string[]> {
 }
 
 // Forge the block from the ordered transactions
-async function forgeBlock(orderedTransactions: string[]): Promise<Block> {
+async function forgeBlock(orderedTransactions: Transaction[]): Promise<Block> {
     const previousBlockHash = await Chain.getLastBlockHash()
     const lastBlockNumber = await Chain.getLastBlockNumber()
     const commonValidatorSeed = await getCommonValidatorSeed()
@@ -245,6 +251,7 @@ function isBlockValid(pro: number, totalVotes: number): boolean {
 // Finalize the block
 async function finalizeBlock(block: Block, pro: number): Promise<void> {
     log.info(`[consensusRoutine] Block is valid with ${pro} votes`)
+    console.log(block)
     await Chain.insertBlock(block)
     //sharedState.getInstance().consensusMode = false
     ///sharedState.getInstance().inConsensusLoop = false

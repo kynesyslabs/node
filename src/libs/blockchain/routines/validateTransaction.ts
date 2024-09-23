@@ -115,7 +115,12 @@ async function defineGas(
     */
     let from: string
     try {
-        from = tx.content.from.toString("hex")
+        // REVIEW This could be legacy
+        if (typeof tx.content.from === "string") {
+            from = tx.content.from
+        } else {
+            from = tx.content.from.toString("hex")
+        }
         console.log(
             "[Native Tx Validation] Calculating gas for: " + from + "\n",
         )

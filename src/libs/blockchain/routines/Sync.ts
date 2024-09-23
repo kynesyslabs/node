@@ -107,6 +107,7 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
         }
         console.log("[fastSync] Hash is coherent: we can sync with: " + highestBlockNumberPeer.identity)
     }
+    // REVIEW: lowest or highest?
     // Sync the blocks one by one starting from the lowest block number that we do not have
     // ? Way more error handling needed
     let blockToAsk = ourLastBlockNumber + 1
@@ -121,10 +122,17 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
             }],
         }
         let blockResponse = await highestBlockNumberPeer.call(blockRequest, false)
+        
         if (blockResponse.result === 200) {
             console.log("[fastSync] Block response received for block: " + blockToAsk)
             let block = blockResponse.response as Block
             Chain.insertBlock(block)
+            /*
+            ! TODO 
+            - Parse the txs hashes in the block
+            - Ask for all the txs from the peer
+            - One by one, verify them and prepare a query to insert them into the transactions database table
+            */
             console.log("[fastSync] Block inserted successfully at the head of the chain!")
         }
         blockToAsk++

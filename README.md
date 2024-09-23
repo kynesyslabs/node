@@ -1,11 +1,38 @@
 # Demos Network RPC Software
 
+***Extremely Important Note:*** Before opening any issues, please ensure you have read this README.md file and have followed all the instructions. Focus especially on the [Usage](#usage) section.
+
+***Disclaimer:*** This software is currently in an early development stage and is not yet ready for production use. The software is not stable and is missing many features that are essential for a production-ready node. Use at your own risk.
+
+# Table of Contents
+
+- [Demos Network RPC Software](#demos-network-rpc-software)
+- [Table of Contents](#table-of-contents)
+  - [Description](#description)
+  - [Hardware and software requirements](#hardware-and-software-requirements)
+    - [Hardware](#hardware)
+      - [Minimum](#minimum)
+      - [Recommended](#recommended)
+    - [Software and System](#software-and-system)
+      - [Tips for a correct installation](#tips-for-a-correct-installation)
+  - [Usage](#usage)
+    - [Preparation](#preparation)
+      - [The .env file](#the-env-file)
+      - [The demos\_peerlist.json file](#the-demos_peerlistjson-file)
+    - [Running](#running)
+  - [Troubleshooting](#troubleshooting)
+    - [Node software not starting](#node-software-not-starting)
+    - [Cleaning the database](#cleaning-the-database)
+    - [Clearing and reinstalling dependencies](#clearing-and-reinstalling-dependencies)
+  - [License](#license)
+
+
 ## Description
 
 This repository contains the official implementation of the Demos Network RPC software.
 The included software follows the Demos Network specifications and can be used as a node for the Demos Network.
 
-## Prerequisites
+## Hardware and software requirements
 
 ### Hardware
 
@@ -40,7 +67,9 @@ npm install -g n
 n 20
 ```
 
-## Prerequisites
+## Usage
+
+### Preparation
 
 The client uses two main files that are required for its functioning:
 
@@ -49,20 +78,28 @@ The client uses two main files that are required for its functioning:
 
 You can copy `env.example` and `demos_peerlist.json.example` to `.env` and `demos_peerlist.json` respectively.
 
-### The .env file
+#### The .env file
 
 This file contains the environment variables for the node software. You can probably leave most of them as they are, but you will need to change the following:
 
 - `EXPOSED_URL`: This is the URL that the node software will be exposed to the network. This should be a public URL that points to the machine running the node software. If you are running the node software on the same machine as the client, you can use `http://localhost:53550`. If you are running the node software on a different machine, you can use the public IP address of that machine (for example `http://1.2.3.4:53550`). If you are running the node behind a reverse proxy, you can use the public URL of the proxy server (as in `https://demos.example.com`). *IMPORTANT NOTE: The URL must start with `http://` or `https://` and the port must be included if needed. Setting this value incorrectly will make the node software unable to connect to the network.*
 
-### The demos_peerlist.json file
+#### The demos_peerlist.json file
 
-This file contains the list of peers that the node software will try to connect to. If you want to test the node locally (connecting to yourself), you can start the node software and, upon the first run, replace the ***placeholder*** in the file with the public key of your node (found in `publickey_yourkey`). Else, you should add the peers you know to the file and, once the node software is started, it will automatically connect to the peers (format: `"publickey": "connectionstring"`).
+This file contains the list of peers that the node software will try to connect to. If you want to test the node locally (connecting to yourself), you can start the node software and, upon the first run, replace the ***identity*** key in the file with the public key of your node (found in `publickey_yourkey`). Else, you should add the peers you know to the file and, once the node software is started, it will automatically connect to the peers (format: `"publickey": "connectionstring"`).
+
+Example:
+
+```json
+{
+    "6f1df0905c986d41bcb01c8b542c0af8263c03ba52a3dd3af9123d99fc8e1067": "http://127.0.0.1:53550"
+}
+```
 
 
-## Usage
+### Running
 
-Clone the repository and run the following command:
+Run the following command:
 
 ```bash
 yarn # To install the dependencies

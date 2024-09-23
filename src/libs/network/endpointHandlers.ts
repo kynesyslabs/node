@@ -12,8 +12,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 // REVIEW Pay attention to the return types (RPCResponse)
 
-import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
-import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { handleWeb2 } from "src/features/web2/handleWeb2"
 import Chain from "src/libs/blockchain/chain"
 import Mempool, { MempoolData } from "src/libs/blockchain/mempool"
@@ -50,25 +48,40 @@ import {
     IWeb2Request,
     ValidityData,
     XMScript,
-    NativePayload,
-    StringifiedPayload,
-    Web2Payload,
-    XMPayload,
+    ConsensusRequest,
+    RPCResponse,
 } from "@kynesyslabs/demosdk/types"
-import { EnumWeb2Methods } from "src/features/web2/dahr/Proxy"
 
+import { EnumWeb2Methods } from "src/features/web2/dahr/Proxy"
 import GLS from "../blockchain/gls/gls"
 import { StatusNative } from "src/model/entities/StatusNative"
 import { DAHR } from "src/features/web2/dahr/DAHR"
 import Block from "../blockchain/block"
 import { BlockContent } from "../../../../sdks/src/types/blockchain/blocks"
-import handleWeb2Request from "./routines/transactions/handleWeb2Request"
 import getPeerInfo from "./routines/nodecalls/getPeerInfo"
 import forge from "node-forge"
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
-import { ConsensusRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
+// SECTION Handlers for different types of transactions
+import handleWeb2Request from "./routines/transactions/handleWeb2Request"
+import handleDemosWorkRequest from "./routines/transactions/handleDemosWorkRequest"
+import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
+import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Rename to handleXMRequest
+
+// ? Note: this is to be implemented once demosWork is in place
+import { DemosWork } from "@kynesyslabs/demosdk/demoswork"
+import { DemoScript } from "@kynesyslabs/demosdk/types"
+import { ForgeToHex } from "../crypto/forgeUtils"
+
+/* // ! Note: this will be removed once demosWork is in place
+import { 
+    NativePayload,
+    StringifiedPayload,
+    Web2Payload,
+    XMPayload,
+} from "@kynesyslabs/demosdk/types"
+*/
 
 let term = terminalkit.terminal
 
@@ -127,6 +140,9 @@ export default class ServerHandlers {
     static async handleExecuteTransaction(
         validatedData: ValidityData,
     ): Promise<ExecutionResult> {
+        // Log the entire validatedData object to inspect its structure
+        console.log("[handleExecuteTransaction] Validated Data:", validatedData)
+
         let fname = "[handleExecuteTransaction] "
         let result: ExecutionResult = {
             success: true,
@@ -138,11 +154,60 @@ export default class ServerHandlers {
         // Integrity checks
         let ourKey = sharedState.getInstance().identity.ed25519.publicKey
         let hexOurKey = ourKey.toString("hex")
-        let dataKey = validatedData.rpc_public_key
-        let hexDataKey = Buffer.from(dataKey as Buffer).toString("hex")
+        let dataKey = _.cloneDeep(validatedData.rpc_public_key)
+        console.log("validatedData.rpc_public_key:  ")
+        console.log(validatedData.rpc_public_key)
+        /*  console.log("[handleExecuteTransaction] dataKey: ")
+        console.log(dataKey)
+        console.log(typeof dataKey)
+        console.log("\n") */
+        let hexDataKey: string
+        if (typeof dataKey === "string") {
+            console.log(
+                "[handleExecuteTransaction] dataKey is a string: using as is",
+            )
+            hexDataKey = dataKey
+        } else {
+            console.log(
+                "[handleExecuteTransaction] dataKey is a buffer: using ForgeToHex",
+            )
+            console.log(dataKey)
+            hexDataKey = ForgeToHex(dataKey)
+        }
+        console.log("dataKey: " + hexDataKey)
         let dataSignature = validatedData.signature
+        let hexDataSignature: string
+        if (typeof dataSignature === "string") {
+            console.log(
+                "[handleExecuteTransaction] dataSignature is a string: using as is",
+            )
+            hexDataSignature = dataSignature
+        } else {
+            console.log(
+                "[handleExecuteTransaction] dataSignature is a buffer: using ForgeToHex",
+            )
+            console.log(dataSignature)
+            hexDataSignature = ForgeToHex(dataSignature)
+        }
+        console.log("dataSignature: " + hexDataSignature)
         let queriedTx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
-
+        // REVIEW Correct? If the transaction has no block number, we set it to the last block number + 1
+        if (!queriedTx.blockNumber) {
+            log.warning(
+                "[handleExecuteTransaction] Queried tx has no block number: " +
+                    queriedTx.hash,
+            )
+            let lastBlockNumber = await Chain.getLastBlockNumber()
+            queriedTx.blockNumber = lastBlockNumber + 1
+            log.warning(
+                "[handleExecuteTransaction] Queried tx block number set to: " +
+                    queriedTx.blockNumber,
+            )
+        }
+        console.log(
+            "[handleExecuteTransaction] Queried tx processing in block: " +
+                queriedTx.blockNumber,
+        )
         // queriedTx.content.from = queriedTx?.content?.from?.toString()
         // queriedTx.content.from = queriedTx?.content?.to?.toString()
 
@@ -165,21 +230,20 @@ export default class ServerHandlers {
         let hashedData = Hashing.sha256(JSON.stringify(validatedData.data))
         console.log(JSON.stringify(validatedData))
         console.log("Backend - Hash:", hashedData)
-        console.log(
-            "Backend - Data Signature:",
-            Buffer.from(dataSignature as Buffer).toString("hex"),
-        )
-        console.log(
-            "Backend - Data Key:",
-            Buffer.from(dataKey as Buffer).toString("hex"),
-        )
+        console.log("Backend - Data Signature:", hexDataSignature)
+        console.log("Backend - Data Key:", hexDataKey)
         let signatureValid = Cryptography.verify(
             hashedData,
-            dataSignature,
-            dataKey,
+            hexDataSignature, // REVIEW use dataSignature if needed
+            hexDataKey, // REVIEW use dataKey if needed
         )
         if (!signatureValid) {
-            term.red.bold(fname + "Invalid validityData signature 💀 : ")
+            log.error(
+                "[handleExecuteTransaction] Invalid validityData signature: " +
+                    hexDataSignature +
+                    " - " +
+                    hexDataKey,
+            )
             result.success = false
             result.response = false
             result.extra = "Invalid signature"
@@ -189,7 +253,12 @@ export default class ServerHandlers {
         let blockNumber = validatedData.data.reference_block
         let lastBlockNumber = await Chain.getLastBlockNumber()
         if (blockNumber != lastBlockNumber) {
-            term.red.bold(fname + "Invalid validityData block reference 💀 : ")
+            log.error(
+                "[handleExecuteTransaction] Invalid validityData block reference: " +
+                    blockNumber +
+                    " - " +
+                    lastBlockNumber,
+            )
             result.success = false
             result.response = false
             result.extra = "Invalid block reference"
@@ -198,8 +267,10 @@ export default class ServerHandlers {
         // REVIEW Is this useful at this point?
         if (!validatedData.data.valid) {
             // An invalid transaction won't even be added to the mempool
-            term.yellow.bold(fname + "Invalid validityData 💀 : ")
-            console.log(validatedData.data.message)
+            log.error(
+                "[handleExecuteTransaction] Invalid validityData: " +
+                    validatedData.data.message,
+            )
             result.success = false
             result.response = false
             result.extra = validatedData.data.message
@@ -214,15 +285,11 @@ export default class ServerHandlers {
         // REVIEW Switch case for different types of transactions
         let tx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
         // Using a payload variable to be able to check types immediately
-        let payload:
-            | XMPayload
-            | Web2Payload
-            | NativePayload
-            | StringifiedPayload
+        let payload: DemoScript | any // ! Remove this once demosWork is in place
         switch (tx.content.type) {
+            // SECTION Legacy code // ! Remove this once demosWork is in place
             case "crosschainOperation":
-            case "multichainOperation":
-                payload = tx.content.data as XMPayload
+                payload = tx.content.data
                 console.log("[Included XM Chainscript]")
                 console.log(payload[1])
                 // TODO Better types on answers
@@ -234,16 +301,27 @@ export default class ServerHandlers {
                 break
             case "web2Request":
                 // TODO Better types on answers
-                payload = tx.content.data as Web2Payload
+                payload = tx.content.data
                 var web2_result = await ServerHandlers.handleWeb2Request(
                     payload[1] as IWeb2Request,
                 )
-
                 // TODO Add result.success handling
                 result.response = web2_result
                 break
-            case "native":
-                // REVIEW This still works with the new tx system?
+            // SECTION End of legacy code
+
+            case "demoswork":
+                var demosWorkPayload = tx.content.data
+                var demosWorkScript = demosWorkPayload[1] as DemoScript
+
+                var demoswork_result = await handleDemosWorkRequest(
+                    demosWorkScript,
+                )
+                result.response = demoswork_result
+                break
+
+            // ! The below code should be implemented in handleDemosWorkRequest
+            /*
                 var native_result = await broadcastVerifiedNativeTransaction(
                     validatedData,
                 )
@@ -252,12 +330,20 @@ export default class ServerHandlers {
                     result.success = true
                 }
                 // REVIEW Check if this is ok with types
-                result.response = native_result
+                result.response = native_result */
         }
         // Only if the transaction is valid we add it to the mempool
         if (result.success) {
             // REVIEW We add the transaction to the mempool
-            Mempool.addTransaction(queriedTx)
+            console.log(
+                "[handleExecuteTransaction] Adding tx with hash: " +
+                    queriedTx.hash +
+                    " to the mempool",
+            )
+            await Mempool.addTransaction(queriedTx)
+            console.log(
+                "[handleExecuteTransaction] Transaction added to mempool",
+            )
             // TODO Check if Operation(s) are added to the GLS too
             // FIXME Add an operation for the nonce or anyway a way to manage the nonce
         }
@@ -299,6 +385,13 @@ export default class ServerHandlers {
         // NOTE Remember that crosschain operations are in chainscript syntax (see chainscript_example.ts)
         response.response = await multichainCapabilities()
         // TODO
+        return response
+    }
+
+    // Proxy method for handleDemosWorkRequest
+    static async handleDemosWorkRequest(content: DemoScript) {
+        let response: RPCResponse = _.cloneDeep(emptyResponse)
+        response = await handleDemosWorkRequest(content)
         return response
     }
 

@@ -20,7 +20,7 @@ async function main() {
     console.log("[*] Creating a transaction...")
     let tx = await createTransaction(
         1,
-        "test",
+        "demoswork",
         our_identity.publicKey,
         receiver_identity.publicKey,
         "data",
@@ -34,7 +34,7 @@ async function main() {
 
 async function createTransaction(
     value: number,
-    txType: string,
+    txType: "web2Request" | "crosschainOperation" | "demoswork",
     sender: forge.pki.ed25519.BinaryBuffer,
     receiver: forge.pki.ed25519.BinaryBuffer,
     txData: any,
