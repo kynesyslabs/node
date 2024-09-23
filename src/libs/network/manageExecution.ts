@@ -7,6 +7,7 @@ import { ISecurityReport } from "@kynesyslabs/demosdk/types"
 import * as Security from "src/libs/network/securityModule"
 import _ from "lodash"
 import terminalkit from "terminal-kit"
+import { emptyResponse } from "../../../../sdks/src/types/communication/rpc"
 
 const term = terminalkit.terminal
 
@@ -52,8 +53,8 @@ export async function manageExecution(
             term.yellow.bold("[SERVER] Received broadcastTx\n")
             // REVIEW This method needs to actually verify if the transaction is valid
             try {
-                var result = await ServerHandlers.handleExecuteTransaction(
-                    content.data as ValidityData,
+                var result = await   ServerHandlers.handleExecuteTransaction(
+                    content.data.response as ValidityData,
                 )
                 console.log("[SERVER] Transaction executed. Sending back the result")
                 // Destructuring the result to get the extra, require_reply and response

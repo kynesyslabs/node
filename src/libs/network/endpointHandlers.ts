@@ -137,7 +137,10 @@ export default class ServerHandlers {
     static async handleExecuteTransaction(
         validatedData: ValidityData,
     ): Promise<ExecutionResult> {
-        console.log("[handleExecuteTransaction] Starting execution...")
+
+        // Log the entire validatedData object to inspect its structure
+        console.log("[handleExecuteTransaction] Validated Data:", validatedData)
+
         let fname = "[handleExecuteTransaction] "
         let result: ExecutionResult = {
             success: true,
@@ -149,7 +152,9 @@ export default class ServerHandlers {
         // Integrity checks
         let ourKey = sharedState.getInstance().identity.ed25519.publicKey
         let hexOurKey = ourKey.toString("hex")
-        let dataKey = validatedData.rpc_public_key
+        let dataKey = _.cloneDeep(validatedData.rpc_public_key) 
+        console.log("validatedData.rpc_public_key:  ")
+        console.log(validatedData.rpc_public_key)
         /*  console.log("[handleExecuteTransaction] dataKey: ")
         console.log(dataKey)
         console.log(typeof dataKey)
@@ -160,6 +165,7 @@ export default class ServerHandlers {
             hexDataKey = dataKey
         } else {
             console.log("[handleExecuteTransaction] dataKey is a buffer: using ForgeToHex")
+            console.log(dataKey)    
             hexDataKey = ForgeToHex(dataKey)
         }
         console.log("dataKey: " + hexDataKey)
@@ -183,7 +189,7 @@ export default class ServerHandlers {
             log.warning("[handleExecuteTransaction] Queried tx block number set to: " + queriedTx.blockNumber)
         }
         console.log("[handleExecuteTransaction] Queried tx processing in block: " + queriedTx.blockNumber)
-                // queriedTx.content.from = queriedTx?.content?.from?.toString()
+        // queriedTx.content.from = queriedTx?.content?.from?.toString()
         // queriedTx.content.from = queriedTx?.content?.to?.toString()
 
         console.log(
