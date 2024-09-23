@@ -53,19 +53,25 @@ export async function manageExecution(
             // REVIEW This method needs to actually verify if the transaction is valid
 
             // ! Remove the next block when demosWork is implemented
-            var validityDataPayload: ValidityData       
+            var validityDataPayload: ValidityData
             // If content.data.response.rpc_public_key exists, we assign validityDataPayload to response
-            if (content.data.response.rpc_public_key) {
-                validityDataPayload = content.data.response
-            } else {
+            try {
+                if (content.data.response.rpc_public_key) {
+                    validityDataPayload = content.data.response
+                } else {
+                    validityDataPayload = content.data
+                }
+            } catch (e) {
                 validityDataPayload = content.data
             }
 
             try {
-                var result = await   ServerHandlers.handleExecuteTransaction(
+                var result = await ServerHandlers.handleExecuteTransaction(
                     validityDataPayload,
                 )
-                console.log("[SERVER] Transaction executed. Sending back the result")
+                console.log(
+                    "[SERVER] Transaction executed. Sending back the result",
+                )
                 // Destructuring the result to get the extra, require_reply and response
                 return_value.result = 200
                 return_value.response = result.response
@@ -73,7 +79,8 @@ export async function manageExecution(
                 return_value.extra = result.extra
                 break
             } catch (error) {
-                let errorMessage = "[SERVER] Error while handling broadcastTx: " + error
+                let errorMessage =
+                    "[SERVER] Error while handling broadcastTx: " + error
                 console.log(errorMessage)
                 return_value.result = 400
                 return_value.response = "Bad Request"
