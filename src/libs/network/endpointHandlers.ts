@@ -294,8 +294,10 @@ export default class ServerHandlers {
             case "demoswork":
                 var demosWorkPayload = tx.content.data
                 var demosWorkScript = demosWorkPayload[1] as DemoScript
-                var demoswork_result = handleDemosWorkRequest(demosWorkScript)
+
+                var demoswork_result = await handleDemosWorkRequest(demosWorkScript)
                 result.response = demoswork_result
+                break   
 
             // ! The below code should be implemented in handleDemosWorkRequest
             /*

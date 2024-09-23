@@ -7,7 +7,6 @@ import { ISecurityReport } from "@kynesyslabs/demosdk/types"
 import * as Security from "src/libs/network/securityModule"
 import _ from "lodash"
 import terminalkit from "terminal-kit"
-import { emptyResponse } from "../../../../sdks/src/types/communication/rpc"
 
 const term = terminalkit.terminal
 

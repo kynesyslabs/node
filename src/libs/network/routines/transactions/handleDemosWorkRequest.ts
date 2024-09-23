@@ -19,7 +19,7 @@ export default async function handleDemosWorkRequest(
     log.info("[handleDemosWOrkRequest] Received a DemoScript: " + JSON.stringify(content))
     // TODO Implement the logic for demosWork
     // TODO Call web2 and xm handlers based on the script
-    response.result = 400
+    response.result = 200
     response.response = "not yet implemented"
     response.extra = "Your request has been received but DemosWork logic is not implemented yet"
     return response 
