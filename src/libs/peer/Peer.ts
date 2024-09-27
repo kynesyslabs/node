@@ -97,12 +97,14 @@ export default class Peer {
         let tries = 0
         let response = null
         while (tries < retries) {
+            
             response = await this.call(request, isAuthenticated)
             if (response.result === 200) {
                 return response
             }
-            await new Promise(resolve => setTimeout(resolve, sleepTime))
             tries++
+            // Sleep for sleepTime milliseconds
+            await new Promise(resolve => setTimeout(resolve, sleepTime))
         }
         log.error("[PEER] [LONG CALL] Max retries reached: " + response)
         return {

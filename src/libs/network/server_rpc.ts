@@ -62,11 +62,13 @@ function isRPCRequest(obj: any): obj is RPCRequest {
 // Validate the headers
 function validateHeaders(headers: any): [boolean, string] {
     // Check if we have a valid signature and identity header
-    log.info("[RPC Call] Validating headers: " + JSON.stringify(headers, null, 2))
+    log.info("[RPC Call] Validating headers...") // + JSON.stringify(headers, null, 2))
     if (!headers["signature"]) {
+        log.error("[RPC Call] Missing signature header")
         return [false, "Missing signature header"]
     }
     if (!headers["identity"]) {
+        log.error("[RPC Call] Missing identity header")
         return [false, "Missing identity header"]
     }
     // TODO Check if the signature is valid
@@ -217,9 +219,9 @@ export default async function server_rpc(): Promise<FastifyInstance> {
             }
             sender = headers["identity"] as string
         }
-        console.log("[RPC Call] Processing payload: " + JSON.stringify(payload, null, 2))
+        console.log("[RPC Call] Processing payload...") // + JSON.stringify(payload, null, 2))
         const response = await processPayload(payload, sender)
-        console.log("[RPC Call] Response: " + JSON.stringify(response, null, 2))
+        console.log("[RPC Call] Response ready: sending it to the client...") // + JSON.stringify(response, null, 2))
 
         reply.header("Access-Control-Allow-Origin", "*")
         reply.send(response)
