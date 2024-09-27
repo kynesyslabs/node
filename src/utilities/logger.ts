@@ -5,7 +5,6 @@ import fs from "fs"
 import terminalkit from "terminal-kit"
 const term = terminalkit.terminal
 
-
 export default class log {
     static LOGS_DIR = "logs"
     static LOG_INFO_FILE = this.LOGS_DIR + "/info.log"
@@ -40,22 +39,23 @@ export default class log {
         this.LOG_WARNING_FILE = this.LOGS_DIR + "/warning.log"
         this.LOG_CRITICAL_FILE = this.LOGS_DIR + "/critical.log"
         this.LOG_CUSTOM_PREFIX = this.LOGS_DIR + "/custom_"
-
     }
 
     private static getTimestamp(): string {
         return new Date().toISOString()
     }
 
-    static getLogs(): string {
-        // Enumerate all the files in the logs directory
-        const files = fs.readdirSync(this.LOGS_DIR)
-        // Read the content of each file and add the title
-        const logs = files.map(file => {
-            const title = file.split("_")[1]
-            return `[${title}] [${this.getTimestamp()}] ${fs.readFileSync(this.LOGS_DIR + "/" + file, "utf8")}`
-        })
-        return logs.join("\n")
+    static getPublicLogs(): string {
+        // Enumerate all the files in the logs directory that match the pattern "custom_*.log"
+        const files = fs
+            .readdirSync(this.LOGS_DIR)
+            .filter(file => file.startsWith(this.LOG_CUSTOM_PREFIX))
+        // Read the content of each file and add a title to each log
+        let logs = ""
+        for (const file of files) {
+            logs += `[${file.split("_")[2].split(".")[0]}] ${fs.readFileSync(this.LOGS_DIR + "/" + file, "utf8")}`
+        }
+        return logs
     }
 
     static custom(
@@ -69,7 +69,9 @@ export default class log {
             term.bold(logEntry.trim())
         }
         if (cleanFile) {
-            fs.rmSync(this.LOG_CUSTOM_PREFIX + logfile + ".log", { force: true })
+            fs.rmSync(this.LOG_CUSTOM_PREFIX + logfile + ".log", {
+                force: true,
+            })
             fs.writeFileSync(this.LOG_CUSTOM_PREFIX + logfile + ".log", "")
         }
         fs.appendFileSync(this.LOG_CUSTOM_PREFIX + logfile + ".log", logEntry)
