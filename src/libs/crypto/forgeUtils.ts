@@ -20,7 +20,7 @@ export function HexToForge(forgeString: string) {
         forgeString = forgeString.slice(2)
     }*/
     let finalArray = new Uint8Array(64)
-    console.log("[string to forge encoded]")
+    //console.log("[string to forge encoded]")
     //console.log(forgeString)
     for (let i = 0; i < forgeString.length; i += 2) {
         const hexValue = forgeString.substr(i, 2)
@@ -42,7 +42,7 @@ export function HexToForge(forgeString: string) {
         }
         trimmedArray = _finalArray  
     }
-    console.log("[HexToForge] Encoded into an Uint8Array of lenght: " + finalArray.length)
-    console.log(trimmedArray)
+    //console.log("[HexToForge] Encoded into an Uint8Array of lenght: " + finalArray.length)
+    //console.log(trimmedArray)
     return trimmedArray
 }
