@@ -152,7 +152,7 @@ export default class PeerManager {
                 "[PEERMANAGER] Checking online status of peer " +
                     peerInstance.identity,
             )
-            if (peerInstance.connection.string == sharedState.getInstance().exposedUrl) {
+            if (peerInstance.identity == sharedState.getInstance().identity.ed25519.publicKey.toString("hex")) {
                 console.log("[PEERMANAGER] Peer is us: skipping")
                 continue
             }
