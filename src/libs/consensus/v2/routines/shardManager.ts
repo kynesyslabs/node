@@ -80,7 +80,11 @@ export default class ShardManager {
         }
         this.shardStatus.set(peer, status)
         // Logging the shard status
-        log.custom("shard_status", JSON.stringify(this.shardStatus, null, 2), false, true)
+        let dump = ""
+        for (let [key, value] of this.shardStatus.entries()) {
+            dump += `${key}: ${JSON.stringify(value, null, 2)}\n`
+        }
+        log.custom("shard_status_dump", dump, false, true)
         return [true, ""]
     }
 
