@@ -49,13 +49,13 @@ export default class sharedState {
     // SECTION Consensus states
     candidateBlock: Block
 
-
     // SECTION Configuration
     rpcFee: number = parseInt(process.env.RPC_FEE_PERCENT) // TODO Implement // Percentage of the fee to be charged for the rpc
     serverPort: number = 53550
     identityFile: string = process.env.IDENTITY_FILE || ".demos_identity"
     peerListFile: string = process.env.PEER_LIST_FILE || "demos_peerlist.json"
-    exposedUrl: string = process.env.EXPOSED_URL || "http://localhost:" + this.serverPort
+    exposedUrl: string =
+        process.env.EXPOSED_URL || "http://localhost:" + this.serverPort
     PROD: boolean = false
     // !SECTION Configuration
 
@@ -73,24 +73,49 @@ export default class sharedState {
         return sharedState.instance
     }
 
-    // If this works, use it for the timestamp of the blocks (avg timestamp, consensus time...)
-    public async getUTCTime(): Promise<boolean> {
+    // Getter for the current UTC time (optional in ms, default in s integer)
+    // It can use NTP or system time based on the ntp parameter, default is system time
+    public async getUTCTime(
+        ntp: boolean = false,
+        inSeconds: boolean = true,
+    ): Promise<boolean> {
         try {
-            const date = await new Promise<Date>((resolve, reject) => {
-                ntpClient.getNetworkTime("pool.ntp.org", 123, (err, date) => {
-                    if (err) reject(err)
-                    else resolve(date)
-                })
-            })
-            
-            // Convert date to Unix timestamp
-            this.currentUTCTime = date.getTime()
+            if (ntp) {
+                this.currentUTCTime = await this.getNTPTime()
+            } else {
+                this.currentUTCTime = this.getTimestamp(inSeconds)
+            }
             return true
         } catch (err) {
             console.error(err)
-            this.currentUTCTime = Date.now()
+            this.currentUTCTime = this.getTimestamp(inSeconds)
             return false
         }
+    }
+
+    // Getter for the current NTP time
+    public async getNTPTime(): Promise<number> {
+        let date = await new Promise<Date>((resolve, reject) => {
+            ntpClient.getNetworkTime(
+                "pool.ntp.org",
+                123,
+                (err, date) => {
+                    if (err) reject(err)
+                    else resolve(date)
+                },
+            )
+        })
+        let timestamp = date.getTime()
+        return timestamp
+    }
+
+    // Getter for the current timestamp (optional in ms, default in s integer)
+    public getTimestamp(inSeconds: boolean = true): number {
+        this.currentTimestamp = Date.now() // REVIEW Maybe
+        let timestamp = inSeconds
+            ? Math.floor(this.currentTimestamp / 1000)
+            : this.currentTimestamp
+        return timestamp
     }
 
     public async getLastConsensusTime(): Promise<number> {
@@ -98,13 +123,6 @@ export default class sharedState {
         const lastBlock = await chain.getLastBlock()
         this.lastConsensusTime = lastBlock.content.timestamp
         return this.lastConsensusTime
-    }
-
-    
-
-    public getTimestamp(): number {
-        this.currentTimestamp = Date.now() // REVIEW Maybe
-        return this.currentTimestamp
     }
 
     // ANCHOR Dynamic configurations (customizable in .commons)

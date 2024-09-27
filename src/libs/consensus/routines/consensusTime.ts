@@ -23,7 +23,7 @@ export async function checkConsensusTime(
     let currentTimestamp = sharedState.getInstance().currentUTCTime // Date.now()
     let delta = currentTimestamp - lastTimestamp
     let consensusIntervalTime =
-        sharedState.getInstance().getConsensusTime() || 10000
+        sharedState.getInstance().getConsensusTime() || 10 // 10 seconds, use 10000 for 10 seconds in ms
     console.log("[CONSENSUS TIME] lastTimestamp: " + lastTimestamp)
     console.log("[CONSENSUS TIME] currentTimestamp: " + currentTimestamp)
     console.log("[CONSENSUS TIME] delta: " + delta)
