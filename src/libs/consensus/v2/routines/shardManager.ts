@@ -79,6 +79,8 @@ export default class ShardManager {
             return [false, "Shard status not set because the shard is not set"]
         }
         this.shardStatus.set(peer, status)
+        // Logging the shard status
+        log.custom("shard_status", JSON.stringify(this.shardStatus, null, 2), false, true)
         return [true, ""]
     }
 

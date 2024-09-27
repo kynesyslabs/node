@@ -58,6 +58,7 @@ export default class log {
             term.bold(logEntry.trim())
         }
         if (cleanFile) {
+            fs.rmSync(this.LOG_CUSTOM_PREFIX + logfile + ".log", { force: true })
             fs.writeFileSync(this.LOG_CUSTOM_PREFIX + logfile + ".log", "")
         }
         fs.appendFileSync(this.LOG_CUSTOM_PREFIX + logfile + ".log", logEntry)
