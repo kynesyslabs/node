@@ -137,9 +137,7 @@ export default class ShardManager {
             for (let key in peerStatus) {
                 if (status[key]) {
                     if (!peerStatus[key]) {
-                        log.warning(
-                            `[shardManager] The node ${peer.identity} is not in the same status as the one in the shard status: specific value is false: ${key}`,
-                        )
+                        log.warning(`[shardManager] The node ${peer.identity} specific value (${key}) is in the status: ${peerStatus[key]} and not in the status: ${status[key]}`)
                         return false
                     }
                 }
@@ -155,7 +153,7 @@ export default class ShardManager {
     // Utility to wait until the shard is ready in a set status
     public async waitUntilShardIsReady(
         status: ValidatorStatus,
-        timeout: number = 2000,
+        timeout: number = 3000,
     ): Promise<boolean> {
         log.info(
             `[shardManager] Waiting until the shard is ready in status: ${status}`,
