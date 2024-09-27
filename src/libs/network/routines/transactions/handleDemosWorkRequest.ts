@@ -15,7 +15,7 @@ import _ from "lodash"
 // SECTION Operation types
 import { XMScript, IWeb2Payload } from "@kynesyslabs/demosdk/types"
 // SECTION Handlers
-import handleWeb2Request from "./handleWeb2Request"
+import handleWeb2Request from "./handleWeb2Request"     
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { INativePayload } from "node_modules/@kynesyslabs/demosdk/build/types/native"
 import executeNativeTransaction from "src/libs/blockchain/routines/executeNativeTransaction"
@@ -114,7 +114,10 @@ export default async function handleDemosWorkRequest(
             // TODO: Implement conditional operations
             // ? Is this the right way to return an error?
             response.result = 400
-            response.response = "Conditional operations are not implemented yet (in operation: " + operation.id + ")"
+            response.response =
+                "Conditional operations are not implemented yet (in operation: " +
+                operation.id +
+                ")"
             return response
         }
     }
