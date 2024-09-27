@@ -47,13 +47,18 @@ export default class log {
 
     static getPublicLogs(): string {
         // Enumerate all the files in the logs directory that match the pattern "custom_*.log"
+        let logs = ""
         const files = fs
             .readdirSync(this.LOGS_DIR)
             .filter(file => file.startsWith(this.LOG_CUSTOM_PREFIX))
+        logs += "Public logs:\n"
+        logs += "==========\n"
         // Read the content of each file and add a title to each log
-        let logs = ""
         for (const file of files) {
-            logs += `[${file.split("_")[2].split(".")[0]}] ${fs.readFileSync(this.LOGS_DIR + "/" + file, "utf8")}`
+            logs += file + "\n"
+            logs += "----------\n"
+            logs += fs.readFileSync(this.LOGS_DIR + "/" + file, "utf8")
+            logs += "\n\n"
         }
         return logs
     }
