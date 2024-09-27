@@ -184,6 +184,11 @@ export default async function server_rpc(): Promise<FastifyInstance> {
         reply.send(PeerManager.getInstance().getPeers())
     })
 
+    serverApp.get("/logs", async (req: FastifyRequest, reply: FastifyReply) => {
+        reply.header("Access-Control-Allow-Origin", "*")
+        reply.send(log.getLogs())
+    })
+
     // Setup OpenAPI
     setupOpenAPI(serverApp)
 

@@ -47,6 +47,17 @@ export default class log {
         return new Date().toISOString()
     }
 
+    static getLogs(): string {
+        // Enumerate all the files in the logs directory
+        const files = fs.readdirSync(this.LOGS_DIR)
+        // Read the content of each file and add the title
+        const logs = files.map(file => {
+            const title = file.split("_")[1]
+            return `[${title}] [${this.getTimestamp()}] ${fs.readFileSync(this.LOGS_DIR + "/" + file, "utf8")}`
+        })
+        return logs.join("\n")
+    }
+
     static custom(
         logfile: string,
         message: string,
