@@ -152,6 +152,10 @@ export default class PeerManager {
                 "[PEERMANAGER] Checking online status of peer " +
                     peerInstance.identity,
             )
+            if (peerInstance.connection.string == sharedState.getInstance().exposedUrl) {
+                console.log("[PEERMANAGER] Peer is us: skipping")
+                continue
+            }
             await PeerManager.sayHelloToPeer(peerInstance)
         }
         // Returning the list of online peers from the peerlist
