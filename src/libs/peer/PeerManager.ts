@@ -204,7 +204,7 @@ export default class PeerManager {
         // TODO test and finalize this method
         log.info("[Hello Peer] Saying hello to peer " + peer.identity)
         const our_id = sharedState.getInstance().identity.ed25519.publicKey
-        let connection_string = sharedState.getInstance().connectionString // ? Are we sure about this
+        let connection_string = sharedState.getInstance().exposedUrl // ? Are we sure about this
         let signed_connection_string = Cryptography.sign(
             connection_string,
             sharedState.getInstance().identity.ed25519.privateKey,
