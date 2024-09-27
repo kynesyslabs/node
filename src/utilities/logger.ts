@@ -50,7 +50,7 @@ export default class log {
         let logs = ""
         const files = fs
             .readdirSync(this.LOGS_DIR)
-            .filter(file => file.startsWith(this.LOG_CUSTOM_PREFIX))
+            .filter(file => file.startsWith("custom_"))
         logs += "Public logs:\n"
         logs += "==========\n"
         // Read the content of each file and add a title to each log
