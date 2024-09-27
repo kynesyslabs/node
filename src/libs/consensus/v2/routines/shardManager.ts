@@ -54,6 +54,8 @@ export default class ShardManager {
                 emptyValidatorStatus,
             )
         }
+        // Logging the shard
+        log.custom("last_shard", JSON.stringify(this.shard))
     }
 
     public getShard() {
