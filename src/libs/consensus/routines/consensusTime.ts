@@ -7,7 +7,7 @@ const term = terminalkit.terminal
 
 export async function checkConsensusTime(
     flexible: boolean = false,
-    flextime: number = 2000,
+    flextime: number = 2,
 ): Promise<boolean> {
     // Safeguard to prevent the consensus time from being checked before the last block is forged
     if (sharedState.getInstance().inConsensusLoop) {
