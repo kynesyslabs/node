@@ -55,7 +55,7 @@ export default class ShardManager {
             )
         }
         // Logging the shard
-        log.custom("last_shard", JSON.stringify(this.shard))
+        log.custom("last_shard", JSON.stringify(this.shard, null, 2), false, true)
     }
 
     public getShard() {
