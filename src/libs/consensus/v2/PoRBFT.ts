@@ -269,7 +269,7 @@ function cleanupConsensusState(): void {
 }
 
 // REVIEW This function updates and transmits the validator status to the shard
-async function updateValidatorStatus(status: string, wait: boolean = true): Promise<void> {
+async function updateValidatorStatus(status: string, wait: boolean = true): Promise<boolean> {
     const ourIdentity = sharedState
         .getInstance()
         .identity.ed25519.publicKey.toString("hex")
@@ -280,8 +280,14 @@ async function updateValidatorStatus(status: string, wait: boolean = true): Prom
     await ShardManager.getInstance().transmitOurValidatorStatus()
     // If not specified otherwise, we wait for the shard to be ready
     if (wait) { 
-        await ShardManager.getInstance().waitUntilShardIsReady(
+        let shardIsReady = await ShardManager.getInstance().waitUntilShardIsReady(
             ShardManager.getInstance().getOurValidatorStatus(),
         )
+        if (!shardIsReady) {
+            log.warning("[updateValidatorStatus] [ERROR] Shard is not ready: " + status)
+            return false
+        }
+        return true
     }
+    return true
 }
