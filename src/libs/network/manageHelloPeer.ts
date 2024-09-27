@@ -39,6 +39,13 @@ export async function manageHelloPeer(
     log.info("[Hello Peer Listener] Building peer object...")
     let peerObject = new Peer()
     peerObject.identity = content.publicKey
+    if (peerObject.identity == sharedState.getInstance().identity.ed25519.publicKey.toString("hex")) {
+        console.log("[Hello Peer Listener] Peer is us: skipping")
+        response.result = 200
+        response.response = true
+        response.extra = "Peer is us: skipping"
+        return response
+    }
     peerObject.connection.string = content.url
     console.log(
         "[Hello Peer Listener] Extracted peer with connection string: " +
