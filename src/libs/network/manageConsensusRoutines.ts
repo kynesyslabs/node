@@ -42,7 +42,7 @@ export default async function manageConsensusRoutines(
     // If the consensus is already running, we do not need to check the time again
     // ! When we return false, we cannot have the client asking for the same method over and over again or
     // ! continue asking for consensus_routine, we must rate limit the requests
-    const isConsensusTime = await checkConsensusTime(true, 2000)
+    const isConsensusTime = await checkConsensusTime(true, 2)
     const isConsensusRunning = isConsensusAlreadyRunning()
     const inConsensus = isConsensusTime || isConsensusRunning
     if (!inConsensus) {
