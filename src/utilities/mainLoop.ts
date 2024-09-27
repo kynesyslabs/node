@@ -21,7 +21,7 @@ export default async function mainLoop() {
 
     while (sharedState.getInstance().runMainLoop) {
         await sleep(500) // Sleep for 500 ms
-
+        log.info("\n============================================================\n", true)
         // Get the current UTC time (set the currentUTCTime variable in sharedState)
         await sharedState.getInstance().getUTCTime()
         log.info(`[MAIN LOOP] Current UTC time: ${sharedState.getInstance().currentUTCTime}`)
@@ -41,7 +41,7 @@ export default async function mainLoop() {
 
         // NOTE Syncing the blockchain
         await fastSync() // REVIEW Test here
-        console.log("[MAIN LOOP] Synced! 🟢 ")
+        log.info("[MAIN LOOP] Synced! 🟢", true)
         // NOTE Using this as the timestamp of the current cycle
         // eslint-disable-next-line no-unused-vars
         cycleTimestamp = sharedState.getInstance().getTimestamp() // REVIEW Unused
@@ -52,12 +52,10 @@ export default async function mainLoop() {
         // TODO Check if we have to forge the block now
         let isConsensusTimeReached = await consensusTime.checkConsensusTime()
 
-        console.log("[MAINLOOP]: about to check if its time for consensus")
+        log.info("[MAINLOOP]: about to check if its time for consensus", false)
 
         if (!hasSentNodeOnlineTx && !isConsensusTimeReached) {
-            console.log(
-                "[MAINLOOP]: is not consensus time and no online node tx",
-            )
+            log.info("[MAINLOOP]: is not consensus time", false)
             //await sendNodeOnlineTx()
         }
 
@@ -83,9 +81,7 @@ export default async function mainLoop() {
             await consensusRoutine()
         } else if (!sharedState.getInstance().syncStatus) {
             // ? This is a bit redundant, isn't it?
-            console.log(
-                "[MAIN LOOP] Cannot start consensus, not in sync. Sync loop should start automatically",
-            )
+            log.warning("[MAIN LOOP] Cannot start consensus, not in sync. Sync loop should start automatically", true)
         }
     }
 }
@@ -93,18 +89,18 @@ export default async function mainLoop() {
 // ANCHOR Unified peer routine
 async function peerRoutine(): Promise<Peer[]> {
     // Logging the current peerlist
-    log.info("[PEERROUTINE] Logging peerlist")
+    log.info("[PEERROUTINE] Logging peerlist", false)
     PeerManager.getInstance().logPeerList()
 
     // REVIEW Re check offline peers asynchronously
-    console.log("[MAINLOOP]: checking offline peers")
+    log.info("[MAINLOOP]: checking offline peers", false)
     checkOfflinePeers() // NOTE This is an async method that will be executed in the background
-    console.log("[MAINLOOP]: checked offline peers")
+    log.info("[MAINLOOP]: checked offline peers", false)
 
     // every block write online list
-    console.log("[MAINLOOP]: getting online peers")
+    log.info("[MAINLOOP]: getting online peers", false)
     const onlinePeers = await PeerManager.getInstance().getOnlinePeers()
-    console.log("[MAINLOOP]: got online peers")
+    log.info("[MAINLOOP]: got online peers", false)
 
     // check if online peers have been online for 3 blocks
 
@@ -113,7 +109,7 @@ async function peerRoutine(): Promise<Peer[]> {
 
     let currentlyOnlinePeers: Peer[] 
 
-    console.log("[MAINLOOP]: getting online peers for last three blocks")
+    log.info("[MAINLOOP]: getting online peers for last three blocks", false)
     const peersOnlineForLastThreeBlocks =
         await Chain.getOnlinePeersForLastThreeBlocks() // ! REVIEW if this works with hello_peer
 
@@ -123,17 +119,17 @@ async function peerRoutine(): Promise<Peer[]> {
     } else {
         // We didn't find peers that have been online for 3 blocks. Use the online peers list as it is
         // In this case we assume the node is isolated, starting up or that other nodes are not online or still connencting to the network
-        console.log("using online peers list as it is")
+        log.info("[MAINLOOP]: using online peers list as it is", false)
         currentlyOnlinePeers = onlinePeers  
     }
 
-    console.log("Family:")
+    log.info("[MAINLOOP]: family:", true)
     let famLen = currentlyOnlinePeers.length
     let famString = ""
     for (let i = 0; i < famLen; i++) {
         famString += "🐸 "
     }
-    console.log(famString)
+    log.info("[MAINLOOP]: family: " + famString, true)
 
     // Returns the list of currently online peers
     return currentlyOnlinePeers

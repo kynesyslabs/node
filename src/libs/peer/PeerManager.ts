@@ -148,12 +148,11 @@ export default class PeerManager {
             const peerInstance = new Peer()
             peerInstance.identity = _peer.identity
             peerInstance.connection.string = _peer.connection.string
-            console.log(
+            log.info(
                 "[PEERMANAGER] Checking online status of peer " +
-                    peerInstance.identity,
-            )
+                    peerInstance.identity, false)
             if (peerInstance.identity == sharedState.getInstance().identity.ed25519.publicKey.toString("hex")) {
-                console.log("[PEERMANAGER] Peer is us: skipping")
+                log.info("[PEERMANAGER] Peer is us: skipping", false)
                 continue
             }
             await PeerManager.sayHelloToPeer(peerInstance)
@@ -163,10 +162,10 @@ export default class PeerManager {
     }
 
     addPeer(peer: Peer) {
-        console.log("[PEERMANAGER] Adding peer")
+        log.info("[PEERMANAGER] Adding peer", false)
         if (peer.identity === "placeholder") {
-            console.log("[WARN] No identity detected: refusing to add peer")
-            console.log(peer)
+            log.warning("[PEERMANAGER] No identity detected: refusing to add peer", true)
+            log.info("[PEERMANAGER] Peer: " + JSON.stringify(peer, null, 2), false)
             return false
         }
         // REVIEW check for duplicates
@@ -175,26 +174,25 @@ export default class PeerManager {
         if (this.peerList[identity]) {
             console.log("[PEERMANAGER] Peer already exists: updating it")
             action = "updated"
+        } else {
+            log.info("[PEERMANAGER] Adding new peer: " + peer.identity, true)
         }
         this.peerList[identity] = peer
-        console.log("[PEERMANAGER] Peer " + action)
-        console.log("Identity: " + peer.identity)
-        console.log("Connection string: " + peer.connection.string)
+        log.info("[PEERMANAGER] Peer " + action, false)
+        log.info("[PEERMANAGER] Identity: " + peer.identity, false)
+        log.info("[PEERMANAGER] Connection string: " + peer.connection.string, false)
         if (!peer.connection.string) {
-            console.log("[WARN] No connection string detected")
+            log.warning("[PEERMANAGER] No connection string detected", true)
         }
         return true
     }
 
     addOfflinePeer(peerInstance: Peer) {
-        console.log(
-            "[PEERMANAGER] Adding offline peer " +
-                peerInstance.connection.string,
-        )
+        log.info("[PEERMANAGER] Adding offline peer " + peerInstance.connection.string, false)
         if (this.offlinePeers[peerInstance.identity]) {
             this.offlinePeers[peerInstance.identity] = peerInstance
         }
-        console.log("[PEERMANAGER] Offline peers: " + this.offlinePeers)
+        log.info("[PEERMANAGER] Offline peers: " + this.offlinePeers, false)
     }
 
     removeOfflinePeer(identity: string) {
@@ -206,18 +204,17 @@ export default class PeerManager {
         sharedState.getInstance().peerRoutineRunning += 1 // Adding one to the peer routine running counter
 
         // TODO test and finalize this method
-        log.info("[Hello Peer] Saying hello to peer " + peer.identity)
+        log.info("[Hello Peer] Saying hello to peer " + peer.identity, false)
         const our_id = sharedState.getInstance().identity.ed25519.publicKey
         let connection_string = sharedState.getInstance().exposedUrl // ? Are we sure about this
         let signed_connection_string = Cryptography.sign(
             connection_string,
             sharedState.getInstance().identity.ed25519.privateKey,
         )
-        log.info("[Hello Peer] Signing connection string: " + connection_string)
+        log.info("[Hello Peer] Signing connection string: " + connection_string, false)
         log.info(
             "[Hello Peer] Signed connection string: " +
-                ForgeToHex(signed_connection_string),
-        )
+                ForgeToHex(signed_connection_string), false)
 
         // Sending the transmission to the peer
         const hello_request: HelloPeerRequest = {
@@ -232,21 +229,21 @@ export default class PeerManager {
         }).then(response => {
             PeerManager.helloPeerCallback(response, peer)
         })
-        console.log("[Hello Peer] Hello request sent: waiting for response")
+        log.info("[Hello Peer] Hello request sent: waiting for response", false)
     }
 
     // Callback for the hello peer
     static helloPeerCallback(response: RPCResponse, peer: Peer) {
-        log.info("[Hello Peer] Response received from peer: " + peer.identity)
+        log.info("[Hello Peer] Response received from peer: " + peer.identity, false)
         //console.log(response) // ? Delete this if not needed
         // TODO Test and Finish this
         // REVIEW is the message the response itself?
-        log.info("[Hello Peer] Response message: " + response.response)
+        log.info("[Hello Peer] Response message: " + response.response, false)
         // Based on the response, we can decide what to do
         if (response.result === 200) {
             log.info(
                 "[Hello Peer] Peer is online, replied and recognized us. Adding to peer list",
-            )
+                false)
             //console.log(peer)
             PeerManager.getInstance().addPeer(peer)
         } else {
@@ -254,7 +251,7 @@ export default class PeerManager {
                 "[Hello Peer] Failed to connect to peer: " +
                     peer.identity +
                     ". Adding to offline list",
-            )
+                false)
             // Add the peer to the offline list
             PeerManager.getInstance().addOfflinePeer(peer)
         }

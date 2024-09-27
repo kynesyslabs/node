@@ -34,6 +34,9 @@ const term = terminalkit.terminal
 
 dotenv.config()
 
+// INFO Cleaning the logs directory (except custom logs)
+log.cleanLogs(false)
+
 log.info("[MAIN] Starting the node")
 
 let enough_peers = true // ? Review this

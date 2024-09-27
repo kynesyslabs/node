@@ -63,8 +63,8 @@ import ShardManager, { ValidatorStatus } from "./routines/shardManager"
 // Main consensus routine calling all the subroutines
 export async function consensusRoutine(): Promise<void> {
     if (isConsensusAlreadyRunning()) {
-        log.info(
-            "[consensusRoutine] Consensus loop already running: keeping it running (returning)",
+        log.warning(
+            "[consensusRoutine] Consensus loop already running: keeping it running (returning)", false,
         )
         return
     }
@@ -81,7 +81,7 @@ export async function consensusRoutine(): Promise<void> {
     }
 
     log.info("[consensusRoutine] We are in the shard, creating the block")
-    log.info(`[consensusRoutine] shard: ${shard}`)
+    log.info(`[consensusRoutine] shard: ${shard}`, false)
 
     // Initialize the shard manager transmitting that we are in consensus loop
     await initializeShardManager(shard)
@@ -101,8 +101,8 @@ export async function consensusRoutine(): Promise<void> {
     // Merge and order the mempools between the shard and the local node
     const mempool = await mergeAndOrderMempools(shard)
     
-    console.log("[consensusRoutine] mempool merged (aka ordered transactions):")
-    console.log(mempool)
+    log.info("[consensusRoutine] mempool merged (aka ordered transactions)", true)
+    log.info("[consensusRoutine] mempool: " + JSON.stringify(mempool, null, 2), true)
     
     // Forge the block from the ordered transactions
     const block = await forgeBlock(mempool)

@@ -203,7 +203,7 @@ export default async function server_rpc(): Promise<FastifyInstance> {
 
     // Update the main RPC endpoint
     serverApp.post("/", postOptions, async (req: FastifyRequest, reply: FastifyReply) => {
-        log.info("[RPC Call] Received request: " + JSON.stringify(req.body, null, 2))
+        log.info("[RPC Call] Received request: " + JSON.stringify(req.body, null, 2), false)
         const payload = req.body as RPCRequest
 
         // Header check
@@ -219,9 +219,11 @@ export default async function server_rpc(): Promise<FastifyInstance> {
             }
             sender = headers["identity"] as string
         }
-        console.log("[RPC Call] Processing payload...") // + JSON.stringify(payload, null, 2))
+        log.info("[RPC Call] Processing payload...", false) 
+        log.info("[RPC Call] Payload: " + JSON.stringify(payload, null, 2), false)
         const response = await processPayload(payload, sender)
-        console.log("[RPC Call] Response ready: sending it to the client...") // + JSON.stringify(response, null, 2))
+        log.info("[RPC Call] Response ready: sending it to the client...", false) 
+        log.info("[RPC Call] Response: " + JSON.stringify(response, null, 2), false)
 
         reply.header("Access-Control-Allow-Origin", "*")
         reply.send(response)
@@ -229,7 +231,7 @@ export default async function server_rpc(): Promise<FastifyInstance> {
 
     // Start the server
     await serverApp.listen({ port })
-    console.log(`Server is running on http://localhost:${port}`)
+    log.info("[RPC Call] Server is running on http://localhost:" + port, true)
 
     // Add helmet for security headers
     // await serverApp.register(helmet)

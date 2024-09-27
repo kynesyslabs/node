@@ -125,4 +125,19 @@ export default class log {
         fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
         fs.appendFileSync(this.LOG_CRITICAL_FILE, logEntry)
     }
+
+    // Utils
+
+    static cleanLogs(withCustom: boolean = false) {
+        const files = fs.readdirSync(this.LOGS_DIR)
+        for (const file of files) {
+            if (file.startsWith("custom_")) {
+                if (withCustom) {
+                    fs.rmSync(this.LOGS_DIR + "/" + file, { force: true })
+                }
+            } else {
+                fs.rmSync(this.LOGS_DIR + "/" + file, { force: true })
+            }
+        }
+    }
 }
