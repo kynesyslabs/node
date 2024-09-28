@@ -141,6 +141,10 @@ if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE $START_COMMAND
     else
         echo "Error: RPC failed to start or crashed"
         exit_code=$?
+        # Logging memory usage
+        echo "Memory usage:"
+        free -m
+        echo $(free -m) > last_crash_memory_usage.txt
     fi
 else
     echo "RPC exited successfully"
