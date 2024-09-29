@@ -34,7 +34,7 @@ import { normalizeWebBuffers } from "src/libs/network/routines/normalizeWebBuffe
 import Sessions from "src/libs/network/routines/sessionManager"
 import { Peer } from "src/libs/peer"
 import { Blocks } from "src/model/entities/Blocks"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import _, { chain } from "lodash"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"

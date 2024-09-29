@@ -8,7 +8,7 @@ import getShard from "../consensus/v2/routines/getShard"
 import { Peer } from "../peer"
 import manageProposeBlockHash from "../consensus/v2/routines/manageProposeBlockHash"
 import { ValidationData } from "../consensus/v2/interfaces"
-import ShardManager, { ValidatorStatus, getShardManager } from "../consensus/v2/routines/shardManager"
+import { ValidatorStatus, getShardManager } from "../consensus/v2/routines/shardManager"
 import { checkConsensusTime } from "../consensus/routines/consensusTime"
 import { consensusRoutine, isConsensusAlreadyRunning } from "../consensus/v2/PoRBFT"
 import log from "src/utilities/logger"
@@ -61,8 +61,7 @@ export default async function manageConsensusRoutines(
 
     // Also refuses the routine if we are not in the shard
     const shard = await getShard(getSharedState.currentValidatorSeed)
-    const ourId = sharedState
-        .getInstance()
+    const ourId = getSharedState
         .identity.ed25519.publicKey.toString("hex")
     let isInShard = false
     for (const peer of shard) {

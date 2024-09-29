@@ -1,5 +1,5 @@
 import { Peer, PeerManager } from "src/libs/peer"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import { promisify } from "util"
 
 import Transmission from "../../communications/transmission"

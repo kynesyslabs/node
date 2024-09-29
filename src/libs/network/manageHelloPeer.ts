@@ -1,6 +1,6 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import { PeerManager, Peer } from "../peer"
 import log from "src/utilities/logger"
 import _ from "lodash"

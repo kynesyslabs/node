@@ -1,7 +1,7 @@
 import { PeerManager } from "src/libs/peer"
 import { Peer } from "src/libs/peer"
 import Alea from "alea"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 
 export default async function getShard(seed: string): Promise<Peer[]> {

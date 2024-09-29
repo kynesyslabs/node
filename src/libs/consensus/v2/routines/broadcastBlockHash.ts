@@ -2,7 +2,7 @@ import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { ConsensusHashResponse } from "../interfaces"
 import Block from "src/libs/blockchain/block"
 import { Peer } from "src/libs/peer"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 
 export async function broadcastBlockHash(block: Block, shard: Peer[]): Promise<[number, number]> {
     var pro = 0

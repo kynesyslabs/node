@@ -1,5 +1,5 @@
 import PeerManager from "../PeerManager"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 
 // REVIEW Check offline peers asynchronously

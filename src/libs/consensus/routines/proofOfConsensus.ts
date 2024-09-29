@@ -2,14 +2,13 @@ import Cryptography from "src/libs/crypto/cryptography"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { Peer } from "src/libs/peer"
 import { demostdlib } from "src/libs/utils"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 
 export async function proofConsensus(hash: string): Promise<[string, string]> {
     let poc: [string, string] = [hash, null]
     // Obtain Paperinik (PK, Public Key) and Public hash
     const pk = getSharedState.identity.ed25519.privateKey
-    const publicHex = sharedState
-        .getInstance()
+    const publicHex = getSharedState
         .identity.ed25519.publicKey.toString("hex")
     // Signing the hash
 

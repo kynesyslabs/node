@@ -1,6 +1,6 @@
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 
 import GLS from "../../blockchain/gls/gls"
 import Mempool from "../../blockchain/mempool"

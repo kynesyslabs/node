@@ -2,7 +2,7 @@ import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import { PeerManager } from "src/libs/peer"
 import required from "src/utilities/required"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import terminalKit from "terminal-kit"
 
 import {
@@ -263,8 +263,7 @@ export class Web2APIClass {
         term.bold("[Web2Parser] Attestation:\n")
         //console.log(attestation)
         // Adding the attestation to the request
-        const hexKey = sharedState
-            .getInstance()
+        const hexKey = getSharedState
             .identity.ed25519.publicKey.toString("hex") // REVIEW Is this ok?
         this.request.attestations[hexKey] = attestation
         term.bold("[Web2Parser] Added attestation to request\n")

@@ -1,4 +1,4 @@
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import sizeOf from "src/utilities/sizeOf"
 
 import Chain from "../chain"

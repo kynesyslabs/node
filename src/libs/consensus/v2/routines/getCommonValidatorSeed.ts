@@ -1,4 +1,4 @@
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import { PeerManager } from "src/libs/peer"
 import Chain from "src/libs/blockchain/chain"
 import { Blocks } from "src/model/entities/Blocks"

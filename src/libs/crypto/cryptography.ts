@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import * as crypto from "crypto"
 import { promises as fs } from "fs"
 import forge from "node-forge"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 
 import { ForgeToHex, HexToForge } from "./forgeUtils"

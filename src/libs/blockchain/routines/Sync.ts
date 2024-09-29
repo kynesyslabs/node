@@ -13,7 +13,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 // REVIEW Conflict handling between peers (longest chain)
 
 import { demostdlib } from "src/libs/utils"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 import Peer from "../../peer/Peer"
 import PeerManager from "../../peer/PeerManager"

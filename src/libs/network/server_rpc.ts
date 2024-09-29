@@ -3,7 +3,7 @@
 import fastify, { FastifyInstance, FastifyRequest, FastifyReply, RouteShorthandOptions } from "fastify"
 import fastifyCors from "@fastify/cors"
 //import helmet from "@fastify/helmet"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import { manageAuth, AuthMessage } from "./manageAuth"
 import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
 import { manageNodeCall, NodeCall } from "./manageNodeCall"

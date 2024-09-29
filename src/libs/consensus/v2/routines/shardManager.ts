@@ -1,7 +1,7 @@
 import { RPCRequest } from "@kynesyslabs/demosdk/types"
 import { Peer } from "src/libs/peer"
 import log from "src/utilities/logger"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 
 export interface ValidatorStatus {
     inConsensusLoop: boolean
@@ -96,9 +96,7 @@ export default class ShardManager {
 
     public getOurValidatorStatus() {
         return this.shardStatus.get(
-            sharedState
-                .getInstance()
-                .identity.ed25519.publicKey.toString("hex"),
+            getSharedState.identity.ed25519.publicKey.toString("hex"),
         )
     }
 
@@ -188,8 +186,7 @@ export default class ShardManager {
             "[shardManager] Transmitting our validator status to the shard",
         )
         // Prepare the call to the other nodes in the shard that show we are in the consensus loop
-        let ourIdentity = sharedState
-            .getInstance()
+        let ourIdentity = getSharedState
             .identity.ed25519.publicKey.toString("hex")
         let validatorStatus = this.getValidatorStatus(ourIdentity)
         let statusCall: RPCRequest = {
@@ -227,4 +224,3 @@ const shardManagerGetter = {
 }
 // Export the getter object
 export const { getShardManager } = shardManagerGetter
-

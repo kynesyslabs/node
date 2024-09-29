@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { NodeCall } from "src/libs/network/manageNodeCall"
 import Transmission from "../../communications/transmission"
 import Peer from "../Peer"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 
 // proxy method
 export async function verifyPeer(peer: Peer, expectedKey: string): Promise<Peer> {

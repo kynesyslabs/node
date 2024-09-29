@@ -1,4 +1,4 @@
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import { consensusRoutine } from "../PoRBFT"
 import log from "src/utilities/logger"
 

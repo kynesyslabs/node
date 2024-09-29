@@ -1,6 +1,6 @@
 import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 
 const term = terminalkit.terminal

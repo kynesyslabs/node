@@ -1,5 +1,5 @@
 import Block from "src/libs/blockchain/block"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import Cryptography from "src/libs/crypto/cryptography"
 import Chain from "src/libs/blockchain/chain"

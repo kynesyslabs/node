@@ -6,7 +6,7 @@ import Block from "src/libs/blockchain/block"
 import Hashing from "src/libs/crypto/hashing"
 import Cryptography from "src/libs/crypto/cryptography"
 import Chain from "src/libs/blockchain/chain"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import { Peer } from "src/libs/peer"
 import log from "src/utilities/logger"
 import {
@@ -168,8 +168,7 @@ async function initializeShard(): Promise<Peer[]> {
 // Initialize the shard manager
 async function initializeShardManager(shard: Peer[]): Promise<void> {
     getShardManager.setShard(shard)
-    const ourIdentity = sharedState
-        .getInstance()
+    const ourIdentity = getSharedState
         .identity.ed25519.publicKey.toString("hex")
     let validatorStatus =
         getShardManager.shardStatus.get(ourIdentity)
@@ -182,8 +181,7 @@ async function initializeShardManager(shard: Peer[]): Promise<void> {
 
 // Check if the local node is in the shard
 function isInShard(shard: Peer[]): boolean {
-    const ourIdentity = sharedState
-        .getInstance()
+    const ourIdentity = getSharedState
         .identity.ed25519.publicKey.toString("hex")
     return shard.some(peer => peer.identity === ourIdentity)
 }
@@ -292,8 +290,7 @@ async function updateValidatorStatus(
     wait: boolean = true,
     pull: boolean = false,
 ): Promise<boolean> {
-    const ourIdentity = sharedState
-        .getInstance()
+    const ourIdentity = getSharedState
         .identity.ed25519.publicKey.toString("hex")
     let validatorStatus =
         getShardManager.shardStatus.get(ourIdentity)

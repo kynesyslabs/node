@@ -3,7 +3,7 @@ import Web2API from "src/features/web2/routines/Web2Parser"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import required from "src/utilities/required"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import terminalKit from "terminal-kit"
 
 import { IWeb2Request } from "@kynesyslabs/demosdk/types"

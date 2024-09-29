@@ -15,7 +15,7 @@ import terminalkit from "terminal-kit"
 
 import { cryptography } from "../crypto"
 import getRemoteIP from "../network/routines/getRemoteIP"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 
 const term = terminalkit.terminal
 

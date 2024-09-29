@@ -1,6 +1,6 @@
 // Defining a log class
 
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import fs from "fs"
 import terminalkit from "terminal-kit"
 const term = terminalkit.terminal

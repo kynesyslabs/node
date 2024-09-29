@@ -6,7 +6,7 @@ import httpProxy from "http-proxy"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import required from "src/utilities/required"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 
 export interface IHTTPSCerts {
     key: string

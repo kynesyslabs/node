@@ -17,7 +17,7 @@ import executeNativeTransaction from "src/libs/blockchain/routines/executeNative
 import Transaction from "src/libs/blockchain/transaction"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import required from "src/utilities/required"

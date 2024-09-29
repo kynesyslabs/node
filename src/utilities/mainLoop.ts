@@ -6,7 +6,7 @@ import checkOfflinePeers from "src/libs/peer/routines/checkOfflinePeers"
 import log from "src/utilities/logger"
 
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
-import sharedState, { getSharedState} from "./sharedState"
+import { getSharedState } from "./sharedState"
 
 // INFO The main loop executed in background by index.ts
 async function sleep(time: number) {

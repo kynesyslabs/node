@@ -16,7 +16,7 @@ import "reflect-metadata"
 import * as dotenv from "dotenv"
 import * as fs from "fs"
 
-import sharedState, { getSharedState} from "./utilities/sharedState"
+import { getSharedState } from "./utilities/sharedState"
 import { server_rpc } from "./libs/network"
 import terminalkit from "terminal-kit"
 

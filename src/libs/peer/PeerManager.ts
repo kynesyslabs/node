@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import Peer from "./Peer"
 import log from "src/utilities/logger"
 import Cryptography from "../crypto/cryptography"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { HelloPeerRequest } from "../network/manageHelloPeer"
 import fs from "fs"

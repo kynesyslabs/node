@@ -8,7 +8,7 @@ import Chain from "../blockchain/chain"
 import { StatusNative } from "@kynesyslabs/demosdk/types"
 import GLS from "../blockchain/gls/gls"
 import eggs from "./routines/eggs"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import _ from "lodash"
 // Importing methods themselves
 import getPeerInfo from "./routines/nodecalls/getPeerInfo"

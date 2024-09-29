@@ -1,6 +1,6 @@
 import { ValidationData } from "../interfaces"
 import log from "src/utilities/logger"
-import sharedState, { getSharedState} from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import { emptyResponse } from "src/libs/network/server_rpc"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
