@@ -1,6 +1,6 @@
 import { ValidationData } from "../interfaces"
 import log from "src/utilities/logger"
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState} from "src/utilities/sharedState"
 import { emptyResponse } from "src/libs/network/server_rpc"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
@@ -17,12 +17,12 @@ export default async function manageProposeBlockHash(
     log.info("Validation Data: \n" + JSON.stringify(validationData, null, 2))
     log.info("Peer ID: " + peerId)
     // Checking if the validator that sent us the block hash is in the shard
-    const shard = sharedState.getInstance().lastShard
+    const shard = getSharedState.lastShard
     const validator = shard.find((validator) => validator === peerId)
     if (!validator) {
         log.error("[manageProposeBlockHash] Validator is not in the shard: refusing the block hash")
         response.result = 401
-        response.response = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
+        response.response = getSharedState.identity.ed25519.publicKey.toString("hex")
         response.extra = "Validator is not in the shard"
         return response
     }
@@ -34,21 +34,21 @@ export default async function manageProposeBlockHash(
     if (!candidateBlockFormed) {
         log.error("[manageProposeBlockHash] Candidate block not formed: refusing the block hash")
         response.result = 401
-        response.response = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
+        response.response = getSharedState.identity.ed25519.publicKey.toString("hex")
         response.extra = "Candidate block not formed"
         return response
     }
-    const ourCandidateHash = sharedState.getInstance().candidateBlock.hash
+    const ourCandidateHash = getSharedState.candidateBlock.hash
     if (ourCandidateHash === blockHash) {
         log.info("[manageProposeBlockHash] Hash corresponds to our candidate block")
         response.result = 200
-        response.response = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
-        response.extra = sharedState.getInstance().candidateBlock.validation_data
+        response.response = getSharedState.identity.ed25519.publicKey.toString("hex")
+        response.extra = getSharedState.candidateBlock.validation_data
         return response
     }
     log.info("[manageProposeBlockHash] Hash does not correspond to our candidate block")
     response.result = 401
-    response.response = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
+    response.response = getSharedState.identity.ed25519.publicKey.toString("hex")
     response.extra = "Hash does not correspond to our candidate block"
     return response
 }

@@ -1,7 +1,7 @@
 import { RPCRequest } from "@kynesyslabs/demosdk/types"
 import { Peer } from "src/libs/peer"
 import log from "src/utilities/logger"
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState} from "src/utilities/sharedState"
 
 export interface ValidatorStatus {
     inConsensusLoop: boolean
@@ -49,13 +49,15 @@ export default class ShardManager {
         this.shardStatus = new Map<string, ValidatorStatus>()
         // Init to empty validator status
         for (let peer of this.shard) {
-            this.shardStatus.set(
-                peer.identity,
-                emptyValidatorStatus,
-            )
+            this.shardStatus.set(peer.identity, emptyValidatorStatus)
         }
         // Logging the shard
-        log.custom("last_shard", JSON.stringify(this.shard, null, 2), false, true)
+        log.custom(
+            "last_shard",
+            JSON.stringify(this.shard, null, 2),
+            false,
+            true,
+        )
     }
 
     public getShard() {
@@ -103,14 +105,14 @@ export default class ShardManager {
     // Check if all nodes in the shard are in a specific status optionally forcing the check by calling the nodes
     public async checkShardStatus(
         status: ValidatorStatus,
-        force: boolean = true,
+        pull: boolean = true,
     ) {
         for (let peer of this.shard) {
             log.info(
                 `[shardManager] Checking the status of the node ${peer.identity}`,
             )
-            // REVIEW If force is true, make a call to the node to get the status using getValidatorStatus
-            if (force) {
+            // REVIEW If pull is true, make a call to the node to get the status using getValidatorStatus
+            if (pull) {
                 log.info(
                     `[shardManager] Forcing recheck of the status of the node ${peer.identity}`,
                 )
@@ -127,10 +129,7 @@ export default class ShardManager {
                     true,
                 ) // REVIEW  We should wait a little if the call returns false as the node is not in the consensus loop yet and in general for all consensus_routine calls
                 // The above call returns a ValidatorStatus object so we can set it directly
-                this.setValidatorStatus(
-                    peer.identity,
-                    status.response,
-                )
+                this.setValidatorStatus(peer.identity, status.response)
             }
             // Check if the status is the same as the one in the shard status
             log.info(
@@ -143,7 +142,9 @@ export default class ShardManager {
             for (let key in peerStatus) {
                 if (status[key]) {
                     if (!peerStatus[key]) {
-                        log.warning(`[shardManager] The node ${peer.identity} specific value (${key}) is in the status: ${peerStatus[key]} and not in the status: ${status[key]}`)
+                        log.warning(
+                            `[shardManager] The node ${peer.identity} specific value (${key}) is in the status: ${peerStatus[key]} and not in the status: ${status[key]}`,
+                        )
                         return false
                     }
                 }
@@ -160,12 +161,13 @@ export default class ShardManager {
     public async waitUntilShardIsReady(
         status: ValidatorStatus,
         timeout: number = 3000,
+        pull: boolean = false,
     ): Promise<boolean> {
         log.info(
             `[shardManager] Waiting until the shard is ready in status: ${status}`,
         )
         const startTime = Date.now()
-        let checkStatus = this.checkShardStatus(status)
+        let checkStatus = this.checkShardStatus(status, pull)
         while (!checkStatus) {
             if (Date.now() - startTime > timeout) {
                 log.error(
@@ -215,3 +217,14 @@ export default class ShardManager {
         )
     }
 }
+
+// REVIEW Experimental singleton elegant approach
+// Create an object with a getter
+const shardManagerGetter = {
+    get getShardManager() {
+        return ShardManager.getInstance()
+    },
+}
+// Export the getter object
+export const { getShardManager } = shardManagerGetter
+

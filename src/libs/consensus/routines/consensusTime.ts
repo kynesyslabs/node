@@ -1,6 +1,6 @@
 import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState} from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 
 const term = terminalkit.terminal
@@ -10,20 +10,20 @@ export async function checkConsensusTime(
     flextime: number = 2,
 ): Promise<boolean> {
     // Safeguard to prevent the consensus time from being checked before the last block is forged
-    if (sharedState.getInstance().inConsensusLoop) {
+    if (getSharedState.inConsensusLoop) {
         log.warning("[CONSENSUS TIME] Cannot check consensus time while in consensus loop, skipping")
         return false
     }
     let isConsensusTime = false
     // Using the average timestamp set in the last block
-    //let lastTimestamp = await sharedState.getInstance().getLastConsensusTime() // ? Should we check it from the blockchain each time?
+    //let lastTimestamp = await getSharedState.getLastConsensusTime() // ? Should we check it from the blockchain each time?
     let lastBlock = await Chain.getLastBlock()
     let lastTimestamp = lastBlock.content.timestamp
     // REVIEW Using the UTC timestamp as per mainLoop.ts settings
-    let currentTimestamp = sharedState.getInstance().currentUTCTime // Date.now()
+    let currentTimestamp = getSharedState.currentUTCTime // Date.now()
     let delta = currentTimestamp - lastTimestamp
     let consensusIntervalTime =
-        sharedState.getInstance().getConsensusTime() || 10 // 10 seconds, use 10000 for 10 seconds in ms
+        getSharedState.getConsensusTime() || 10 // 10 seconds, use 10000 for 10 seconds in ms
     log.info("[CONSENSUS TIME] lastTimestamp: " + lastTimestamp, false)
     log.info("[CONSENSUS TIME] currentTimestamp: " + currentTimestamp, false)
     log.info("[CONSENSUS TIME] delta: " + delta, false)

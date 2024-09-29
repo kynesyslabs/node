@@ -1,6 +1,6 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState} from "src/utilities/sharedState"
 import { PeerManager, Peer } from "../peer"
 import log from "src/utilities/logger"
 import _ from "lodash"
@@ -27,7 +27,7 @@ export async function manageHelloPeer(
     // Refusing to add ourselves
     /*if (
         content.publicKey ===
-        sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
+        getSharedState.identity.ed25519.publicKey.toString("hex")
     ) {
         console.log(
             "[Hello Peer Listener] Refusing to add ourselves, proceeding anyway",
@@ -39,7 +39,7 @@ export async function manageHelloPeer(
     log.info("[Hello Peer Listener] Building peer object...")
     let peerObject = new Peer()
     peerObject.identity = content.publicKey
-    if (peerObject.identity == sharedState.getInstance().identity.ed25519.publicKey.toString("hex")) {
+    if (peerObject.identity == getSharedState.identity.ed25519.publicKey.toString("hex")) {
         console.log("[Hello Peer Listener] Peer is us: skipping")
         response.result = 200
         response.response = true

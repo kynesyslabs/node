@@ -16,7 +16,7 @@ import "reflect-metadata"
 import * as dotenv from "dotenv"
 import * as fs from "fs"
 
-import sharedState from "./utilities/sharedState"
+import sharedState, { getSharedState} from "./utilities/sharedState"
 import { server_rpc } from "./libs/network"
 import terminalkit from "terminal-kit"
 
@@ -65,7 +65,7 @@ if (SERVER_PORT == 0) {
     SERVER_PORT = parseInt(process.env.SERVER_PORT, 10) || 53550
 }
 // Setting the server port to the shared state
-sharedState.getInstance().serverPort = SERVER_PORT
+getSharedState.serverPort = SERVER_PORT
 // Allow overriding peer list file through RPC_PeerList_FILE
 /* !SECTION Environment variables loading and configuration */
 
@@ -128,8 +128,8 @@ async function main() {
     if (OVERRIDE_PORT) {
         SERVER_PORT = OVERRIDE_PORT
     }
-    sharedState.getInstance().serverPort = SERVER_PORT // Sharing this with any module that needs it
-    sharedState.getInstance().rpcFee = RPC_FEE
+    getSharedState.serverPort = SERVER_PORT // Sharing this with any module that needs it
+    getSharedState.rpcFee = RPC_FEE
     
     PeerManager.getInstance().loadPeerList()
     PeerList = PeerManager.getInstance().getPeers()
@@ -140,8 +140,8 @@ async function main() {
     }
 
     // NOTE The whole first part of main ensures the environment is ready to run
-    await sharedState.getInstance().identity.ensureIdentity() // ? Should we generate the identity option based too? (see SERVER_PORT and others    )
-    const id = sharedState.getInstance().identity
+    await getSharedState.identity.ensureIdentity() // ? Should we generate the identity option based too? (see SERVER_PORT and others    )
+    const id = getSharedState.identity
     term.green("[BOOTSTRAP] Our identity is ready\n")
     // Log identity
     term.green(
@@ -149,7 +149,7 @@ async function main() {
     )
     // Creating ourselves as a peer // ? Should this be removed in production?
     let ourselves = "http://127.0.0.1:" + SERVER_PORT
-    sharedState.getInstance().connectionString = ourselves
+    getSharedState.connectionString = ourselves
     log.info("Our connection string is: " + ourselves)
     // And saves the public key file
     const publicKeyHex = id.ed25519.publicKey.toString("hex")
@@ -157,8 +157,8 @@ async function main() {
     log.info("Our public key is: " + publicKeyHex)
 
     try {
-        await sharedState.getInstance().identity.getPublicIP()
-        term.green("IP: " + sharedState.getInstance().identity.publicIP + "\n")
+        await getSharedState.identity.getPublicIP()
+        term.green("IP: " + getSharedState.identity.publicIP + "\n")
     } catch (e) {
         console.log(e)
         term.yellow("[WARN] {OFFLINE?} Failed to get public IP\n")

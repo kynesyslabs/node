@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import * as crypto from "crypto"
 import { promises as fs } from "fs"
 import forge from "node-forge"
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState} from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 
 import { ForgeToHex, HexToForge } from "./forgeUtils"
@@ -207,7 +207,7 @@ export default class Cryptography {
             let md = forge.md.sha256.create()
             md.update(
                 JSON.stringify(
-                    sharedState.getInstance().identity.ed25519.privateKey,
+                    getSharedState.identity.ed25519.privateKey,
                 ),
             )
             let seed = md.digest().toHex()
@@ -256,7 +256,7 @@ export default class Cryptography {
                 term.yellow(
                     "[DECRYPTION] No private key provided, using our one...\n",
                 )
-                privateKey = sharedState.getInstance().identity.rsa.privateKey
+                privateKey = getSharedState.identity.rsa.privateKey
                 if (!privateKey) {
                     term.red("[DECRYPTION] No private key found\n")
                     return [false, "No private key found"]

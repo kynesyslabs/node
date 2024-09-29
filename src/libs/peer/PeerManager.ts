@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import Peer from "./Peer"
 import log from "src/utilities/logger"
 import Cryptography from "../crypto/cryptography"
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState} from "src/utilities/sharedState"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { HelloPeerRequest } from "../network/manageHelloPeer"
 import fs from "fs"
@@ -47,7 +47,7 @@ export default class PeerManager {
     // Loading the peer list from the demos_peer.json
     loadPeerList() {
         let rawPeerList = fs.readFileSync(
-            sharedState.getInstance().peerListFile,
+            getSharedState.peerListFile,
             "utf8",
         )
         let peerList = JSON.parse(rawPeerList)
@@ -151,7 +151,7 @@ export default class PeerManager {
             log.info(
                 "[PEERMANAGER] Checking online status of peer " +
                     peerInstance.identity, false)
-            if (peerInstance.identity == sharedState.getInstance().identity.ed25519.publicKey.toString("hex")) {
+            if (peerInstance.identity == getSharedState.identity.ed25519.publicKey.toString("hex")) {
                 log.info("[PEERMANAGER] Peer is us: skipping", false)
                 continue
             }
@@ -201,15 +201,15 @@ export default class PeerManager {
 
     // REVIEW This method should be tested and finalized with the new peer structure
     static async sayHelloToPeer(peer: Peer) {
-        sharedState.getInstance().peerRoutineRunning += 1 // Adding one to the peer routine running counter
+        getSharedState.peerRoutineRunning += 1 // Adding one to the peer routine running counter
 
         // TODO test and finalize this method
         log.info("[Hello Peer] Saying hello to peer " + peer.identity, false)
-        const our_id = sharedState.getInstance().identity.ed25519.publicKey
-        let connection_string = sharedState.getInstance().exposedUrl // ? Are we sure about this
+        const our_id = getSharedState.identity.ed25519.publicKey
+        let connection_string = getSharedState.exposedUrl // ? Are we sure about this
         let signed_connection_string = Cryptography.sign(
             connection_string,
-            sharedState.getInstance().identity.ed25519.privateKey,
+            getSharedState.identity.ed25519.privateKey,
         )
         log.info("[Hello Peer] Signing connection string: " + connection_string, false)
         log.info(
@@ -255,7 +255,7 @@ export default class PeerManager {
             // Add the peer to the offline list
             PeerManager.getInstance().addOfflinePeer(peer)
         }
-        sharedState.getInstance().peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
+        getSharedState.peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
         //process.exit(0)
     }
 }

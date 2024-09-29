@@ -8,7 +8,7 @@ import Chain from "../blockchain/chain"
 import { StatusNative } from "@kynesyslabs/demosdk/types"
 import GLS from "../blockchain/gls/gls"
 import eggs from "./routines/eggs"
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState} from "src/utilities/sharedState"
 import _ from "lodash"
 // Importing methods themselves
 import getPeerInfo from "./routines/nodecalls/getPeerInfo"
@@ -131,7 +131,7 @@ export async function manageNodeCall(
         // INFO Authentication listener
         case "getPeerIdentity":
             // NOTE We don't need to sign anything as the headers are signed already
-            response.response = sharedState.getInstance().identity.ed25519.publicKey.toString("hex")
+            response.response = getSharedState.identity.ed25519.publicKey.toString("hex")
             //console.log(response)
             break
 

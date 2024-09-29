@@ -1,5 +1,5 @@
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState} from "src/utilities/sharedState"
 
 export default async function getPeerInfo(): Promise<string> {
-    return sharedState.getInstance().connectionString
+    return getSharedState.connectionString
 }

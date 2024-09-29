@@ -1,7 +1,7 @@
 import log from "src/utilities/logger"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import axios from "axios"
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState} from "src/utilities/sharedState"
 import Cryptography from "../crypto/cryptography"
 import { NodeCall } from "../network/manageNodeCall"
 
@@ -133,7 +133,7 @@ export default class Peer {
                 .identity.ed25519.publicKey.toString("hex")
             signature = Cryptography.sign(
                 pubkey,
-                sharedState.getInstance().identity.ed25519.privateKey,
+                getSharedState.identity.ed25519.privateKey,
             ).toString("hex")
         }
         // REVIEW Using the connection string as the url with the new format

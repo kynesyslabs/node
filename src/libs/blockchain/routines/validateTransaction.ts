@@ -17,7 +17,7 @@ import executeNativeTransaction from "src/libs/blockchain/routines/executeNative
 import Transaction from "src/libs/blockchain/transaction"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState} from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import required from "src/utilities/required"
@@ -32,7 +32,7 @@ export async function confirmTransaction(
     // Getting the current block number
     let reference_block = await Chain.getLastBlockNumber()
     // Loading identity
-    const id_ed25519 = sharedState.getInstance().identity.ed25519
+    const id_ed25519 = getSharedState.identity.ed25519
     let publicKey = id_ed25519.publicKey
     let privateKey = id_ed25519.privateKey
     // REVIEW This should work just fine
@@ -51,7 +51,7 @@ export async function confirmTransaction(
             transaction: tx,
         },
         signature: null,
-        rpc_public_key: sharedState.getInstance().identity.ed25519.publicKey as pki.ed25519.BinaryBuffer,
+        rpc_public_key: getSharedState.identity.ed25519.publicKey as pki.ed25519.BinaryBuffer,
     }
     let gas_operation: Operation
     let gas_calculus = await defineGas(tx, validityData, privateKey)
@@ -95,7 +95,7 @@ export async function confirmTransaction(
 }
 
 async function signValidityData(data: ValidityData): Promise<ValidityData> {
-    let privateKey = sharedState.getInstance().identity.ed25519.privateKey
+    let privateKey = getSharedState.identity.ed25519.privateKey
     let hash = Hashing.sha256(JSON.stringify(data.data))
     data.signature = Cryptography.sign(hash, privateKey)
     return data
@@ -158,7 +158,7 @@ async function defineGas(
     // TODO Work on this method
     let compositeFeeAmount = await calculateCurrentGas(tx)
     // FIXME Overriding for testing
-    if (fromBalance < compositeFeeAmount && sharedState.getInstance().PROD) {
+    if (fromBalance < compositeFeeAmount && getSharedState.PROD) {
         term.red.bold(
             "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
                 compositeFeeAmount +

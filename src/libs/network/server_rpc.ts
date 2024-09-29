@@ -3,7 +3,7 @@
 import fastify, { FastifyInstance, FastifyRequest, FastifyReply, RouteShorthandOptions } from "fastify"
 import fastifyCors from "@fastify/cors"
 //import helmet from "@fastify/helmet"
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState} from "src/utilities/sharedState"
 import { manageAuth, AuthMessage } from "./manageAuth"
 import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
 import { manageNodeCall, NodeCall } from "./manageNodeCall"
@@ -144,7 +144,7 @@ async function processPayload(payload: RPCRequest, sender: string): Promise<RPCR
 /* End of processor method */
 
 export default async function server_rpc(): Promise<FastifyInstance> {
-    const port = sharedState.getInstance().serverPort
+    const port = getSharedState.serverPort
     const serverApp: FastifyInstance = fastify()
     await serverApp.register(fastifyCors, {
         origin: "*",
@@ -165,21 +165,21 @@ export default async function server_rpc(): Promise<FastifyInstance> {
     // NOTE Generic info endpoint
     serverApp.get("/info", async (req: FastifyRequest, reply: FastifyReply) => {
         reply.header("Access-Control-Allow-Origin", "*")
-        reply.send(await sharedState.getInstance().getInfo())
+        reply.send(await getSharedState.getInfo())
     })
     
     // Specific info endpoints
     serverApp.get("/version", async (req: FastifyRequest, reply: FastifyReply) => {
         reply.header("Access-Control-Allow-Origin", "*")
-        reply.send(sharedState.getInstance().version)
+        reply.send(getSharedState.version)
     })
     serverApp.get("/publickey", async (req: FastifyRequest, reply: FastifyReply) => {
         reply.header("Access-Control-Allow-Origin", "*")
-        reply.send(sharedState.getInstance().identity.ed25519.publicKey.toString("hex"))
+        reply.send(getSharedState.identity.ed25519.publicKey.toString("hex"))
     })
     serverApp.get("/connectionstring", async (req: FastifyRequest, reply: FastifyReply) => {
         reply.header("Access-Control-Allow-Origin", "*")
-        reply.send(await sharedState.getInstance().getConnectionString())
+        reply.send(await getSharedState.getConnectionString())
     })
     serverApp.get("/peerlist", async (req: FastifyRequest, reply: FastifyReply) => {
         reply.header("Access-Control-Allow-Origin", "*")

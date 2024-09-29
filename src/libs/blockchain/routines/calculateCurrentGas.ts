@@ -1,4 +1,4 @@
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState} from "src/utilities/sharedState"
 import sizeOf from "src/utilities/sizeOf"
 
 import Chain from "../chain"
@@ -13,7 +13,7 @@ async function calculateComposedGas(): Promise<number> {
     let adapted_gas = lastblock_basegas * factor
     // Adding the fee for the rpc
     // TODO Set limits for the fee
-    let composed_gas = adapted_gas + sharedState.getInstance().rpcFee
+    let composed_gas = adapted_gas + getSharedState.rpcFee
     // TODO Add dApp fees
     return composed_gas
 }
@@ -38,7 +38,7 @@ async function adaptGasToCongestion(): Promise<number> {
     // Calculating the difference between the two timestamps
     let difference = lastBlockTimestamp - previousLastBlockTimestamp
     // Get the block time from the chain status (in seconds, so we multiply by 1000)
-    let block_time = sharedState.getInstance().block_time * 1000
+    let block_time = getSharedState.block_time * 1000
     // Calculating the factor
     let factor: number = 1
     if (difference > block_time) {

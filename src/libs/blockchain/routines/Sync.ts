@@ -13,7 +13,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 // REVIEW Conflict handling between peers (longest chain)
 
 import { demostdlib } from "src/libs/utils"
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState} from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 import Peer from "../../peer/Peer"
 import PeerManager from "../../peer/PeerManager"
@@ -78,7 +78,7 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
     // If we have the same block number as the highest block number peer, we are already synced
     if (highestBlockNumber === ourLastBlockNumber) {
         log.info("[fastSync] We are already synced with the peer")
-        sharedState.getInstance().syncStatus = true
+        getSharedState.syncStatus = true
         return true
     }
     // Otherwise, we need to sync
@@ -102,7 +102,7 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
             log.info("[fastSync] Hash is not coherent")
             log.info("[fastSync] Our hash: " + ourLastBlockHash)
             log.info("[fastSync] Peer hash: " + lastSyncedBlock.hash)
-            sharedState.getInstance().syncStatus = false
+            getSharedState.syncStatus = false
             return false // ! Pass to the next peer
         }
         console.log("[fastSync] Hash is coherent: we can sync with: " + highestBlockNumberPeer.identity)
@@ -137,6 +137,6 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
         }
         blockToAsk++
     }
-    sharedState.getInstance().syncStatus = true
+    getSharedState.syncStatus = true
     return true
 }

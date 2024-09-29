@@ -3,12 +3,12 @@ import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorS
 import { emptyResponse } from "./server_rpc"
 import _ from "lodash"
 import ServerHandlers from "./endpointHandlers"
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState } from "src/utilities/sharedState"
 import getShard from "../consensus/v2/routines/getShard"
 import { Peer } from "../peer"
 import manageProposeBlockHash from "../consensus/v2/routines/manageProposeBlockHash"
 import { ValidationData } from "../consensus/v2/interfaces"
-import ShardManager, { ValidatorStatus } from "../consensus/v2/routines/shardManager"
+import ShardManager, { ValidatorStatus, getShardManager } from "../consensus/v2/routines/shardManager"
 import { checkConsensusTime } from "../consensus/routines/consensusTime"
 import { consensusRoutine, isConsensusAlreadyRunning } from "../consensus/v2/PoRBFT"
 import log from "src/utilities/logger"
@@ -60,7 +60,7 @@ export default async function manageConsensusRoutines(
     }
 
     // Also refuses the routine if we are not in the shard
-    const shard = await getShard(sharedState.getInstance().currentValidatorSeed)
+    const shard = await getShard(getSharedState.currentValidatorSeed)
     const ourId = sharedState
         .getInstance()
         .identity.ed25519.publicKey.toString("hex")
@@ -95,7 +95,7 @@ export default async function manageConsensusRoutines(
         case "getValidatorTimestamp":
             response.result = 200
             // REVIEW Using the current UTC time as the validator timestamp (affect average time of the blocks)
-            response.response = sharedState.getInstance().currentUTCTime //.lastTimestamp
+            response.response = getSharedState.currentUTCTime //.lastTimestamp
             return response
         case "proposeBlockHash": // For shard members to vote on a block hash
             console.log("[Consensus Message Received] Propose Block Hash")
@@ -114,7 +114,7 @@ export default async function manageConsensusRoutines(
         case "getCommonValidatorSeed":
             response.result = 200
             await getCommonValidatorSeed() // NOTE This is generated each time and stored in the shared state
-            response.response = sharedState.getInstance().currentValidatorSeed
+            response.response = getSharedState.currentValidatorSeed
             break
 
         // SECTION Shard management
@@ -122,13 +122,13 @@ export default async function manageConsensusRoutines(
         case "getShard":
             //console.log("[Consensus Message Received] getShard")
             response.result = 200
-            response.response = ShardManager.getInstance().getShard()
+            response.response = getShardManager.getShard()
             console.log("[Consensus Message Received] getShard sent back")
             break
         case "setValidatorStatus":
             console.log("[Consensus Message Received] setValidatorStatus")
             // This call requires public key as string and status as ValidatorStatus
-            var setResult = ShardManager.getInstance().setValidatorStatus(payload.params[0] as string, payload.params[1] as ValidatorStatus)
+            var setResult = getShardManager.setValidatorStatus(payload.params[0] as string, payload.params[1] as ValidatorStatus)
             if (setResult[0]) {
                 response.result = 200
                 response.response = "Validator status set"
@@ -140,7 +140,7 @@ export default async function manageConsensusRoutines(
         case "getValidatorStatus":
             //console.log("[Consensus Message Received] getValidatorStatus")
             response.result = 200
-            response.response = ShardManager.getInstance().getValidatorStatus(payload.params[0] as string)
+            response.response = getShardManager.getValidatorStatus(payload.params[0] as string)
             console.log("[Consensus Message Received] getValidatorStatus sent back")
             break
     }

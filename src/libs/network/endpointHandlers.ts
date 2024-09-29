@@ -34,7 +34,7 @@ import { normalizeWebBuffers } from "src/libs/network/routines/normalizeWebBuffe
 import Sessions from "src/libs/network/routines/sessionManager"
 import { Peer } from "src/libs/peer"
 import { Blocks } from "src/model/entities/Blocks"
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState} from "src/utilities/sharedState"
 import _, { chain } from "lodash"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
@@ -123,7 +123,7 @@ export default class ServerHandlers {
             )
             validationData.signature = Cryptography.sign(
                 hashedValidationData,
-                sharedState.getInstance().identity.ed25519.privateKey,
+                getSharedState.identity.ed25519.privateKey,
             )
         }
 
@@ -150,7 +150,7 @@ export default class ServerHandlers {
         }
         // NOTE Content should contain validity data and our signature to proceed
         // Integrity checks
-        let ourKey = sharedState.getInstance().identity.ed25519.publicKey
+        let ourKey = getSharedState.identity.ed25519.publicKey
         let hexOurKey = ourKey.toString("hex")
         let dataKey = _.cloneDeep(validatedData.rpc_public_key) 
         console.log("validatedData.rpc_public_key:  ")
@@ -394,7 +394,7 @@ export default class ServerHandlers {
             "[SERVER] Peer identity information received: " +
                 senderIdentity,
         )*/
-        if (!sharedState.getInstance().consensusMode) {
+        if (!getSharedState.consensusMode) {
             log.error("[endpointHandlers] We are not in consensus mode")
             response.result = 400
             response.response = false
@@ -408,7 +408,7 @@ export default class ServerHandlers {
         let authorized = false
         let senderPublicKey = senderIdentity
 
-        const { shard } = sharedState.getInstance()
+        const { shard } = getSharedState
 
         if (!shard) {
             log.error("[endpointHandlers] No shard found in shared state")

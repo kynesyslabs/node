@@ -6,7 +6,7 @@ import checkOfflinePeers from "src/libs/peer/routines/checkOfflinePeers"
 import log from "src/utilities/logger"
 
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
-import sharedState from "./sharedState"
+import sharedState, { getSharedState} from "./sharedState"
 
 // INFO The main loop executed in background by index.ts
 async function sleep(time: number) {
@@ -19,22 +19,22 @@ export default async function mainLoop() {
     log.info("[MAIN LOOP] ✅ Started")
     var cycleTimestamp: number
 
-    while (sharedState.getInstance().runMainLoop) {
+    while (getSharedState.runMainLoop) {
         await sleep(500) // Sleep for 500 ms
         log.info("\n============================================================\n", true)
         // Get the current UTC time (set the currentUTCTime variable in sharedState)
-        await sharedState.getInstance().getUTCTime()
-        log.info(`[MAIN LOOP] Current UTC time: ${sharedState.getInstance().currentUTCTime}`)
+        await getSharedState.getUTCTime()
+        log.info(`[MAIN LOOP] Current UTC time: ${getSharedState.currentUTCTime}`)
         
-        if (sharedState.getInstance().mainLoopPaused) {
+        if (getSharedState.mainLoopPaused) {
             continue // Check if the main loop is paused
         }
         // If it is not in pause, we set (or force set) the mainLoop flag to be on
-        sharedState.getInstance().inMainLoop = true
+        getSharedState.inMainLoop = true
 
         // Execute the peer routine before the consensus loop
         /* NOTE The peerRoutine also checks getOnlinePeers, so it works by waiting for
-           sharedState.getInstance().peerRoutineRunning to be 0 so we don't get into conflicts while
+           getSharedState.peerRoutineRunning to be 0 so we don't get into conflicts while
            running the consensus routine. */
         let currentlyOnlinePeers: Peer[] = await peerRoutine()
         // we now have a list of online peers that can be used for consensus
@@ -44,7 +44,7 @@ export default async function mainLoop() {
         log.info("[MAIN LOOP] Synced! 🟢", true)
         // NOTE Using this as the timestamp of the current cycle
         // eslint-disable-next-line no-unused-vars
-        cycleTimestamp = sharedState.getInstance().getTimestamp() // REVIEW Unused
+        cycleTimestamp = getSharedState.getTimestamp() // REVIEW Unused
         // NOTE The following routine is capable of checking if the consensus time has been reached automatically with a 100 ms blocking period
 
         // SECTION Todo list for a typical consensus operation
@@ -62,24 +62,24 @@ export default async function mainLoop() {
         
         // NOTE We need both the consensus time and the sync status to be true, to avoid
         // conflicts with the sync loop that would lead to a failure in the consensus mechanism.
-        if (isConsensusTimeReached && sharedState.getInstance().syncStatus && !sharedState.getInstance().startingConsensus) {
+        if (isConsensusTimeReached && getSharedState.syncStatus && !getSharedState.startingConsensus) {
             // Set the startingConsensus flag to true to avoid conflicts with starting loops
-            sharedState.getInstance().startingConsensus = true
+            getSharedState.startingConsensus = true
             log.info("[MAIN LOOP] Consensus time reached and sync status is true")
             // Wait for the peer routine to finish if it is still running
             log.info("[MAIN LOOP] Waiting for the peer routine to finish")
             let timer = 0
-            while (sharedState.getInstance().peerRoutineRunning > 0) {
+            while (getSharedState.peerRoutineRunning > 0) {
                 await sleep(100)
                 timer += 1
                 if (timer > 10) {
                     log.error("[MAIN LOOP] Peer routine is taking too long to finish: forcing consensus")
-                    sharedState.getInstance().peerRoutineRunning = 0 // Force the peer routine to act as if it finished
+                    getSharedState.peerRoutineRunning = 0 // Force the peer routine to act as if it finished
                     break
                 }
             }
             await consensusRoutine()
-        } else if (!sharedState.getInstance().syncStatus) {
+        } else if (!getSharedState.syncStatus) {
             // ? This is a bit redundant, isn't it?
             log.warning("[MAIN LOOP] Cannot start consensus, not in sync. Sync loop should start automatically", true)
         }

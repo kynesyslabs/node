@@ -1,6 +1,6 @@
 // Defining a log class
 
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState} from "src/utilities/sharedState"
 import fs from "fs"
 import terminalkit from "terminal-kit"
 const term = terminalkit.terminal
@@ -16,14 +16,14 @@ export default class log {
 
     static setLogsDir(port?: number) {
         if (!port) {
-            port = sharedState.getInstance().serverPort
+            port = getSharedState.serverPort
         }
         try {
             this.LOGS_DIR =
                 "logs_" +
                 port +
                 "_" +
-                sharedState.getInstance().identityFile.replace(".", "")
+                getSharedState.identityFile.replace(".", "")
             // Create the logs directory if it doesn't exist
             if (!fs.existsSync(this.LOGS_DIR)) {
                 fs.mkdirSync(this.LOGS_DIR, { recursive: true })

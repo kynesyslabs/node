@@ -11,7 +11,7 @@ import Transaction from "src/libs/blockchain/transaction"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import { Peer, PeerManager } from "src/libs/peer"
-import sharedState from "src/utilities/sharedState"
+import sharedState, { getSharedState} from "src/utilities/sharedState"
 
 require("dotenv").config()
 const term = require("terminal-kit").terminal
@@ -36,7 +36,7 @@ export default class testingEnvironment {
             PeerManager: PeerManager,
         },
         statics: {
-            Identity: sharedState.getInstance().identity,
+            Identity: getSharedState.identity,
             Cryptography: Cryptography,
             Hashing: Hashing,
         },

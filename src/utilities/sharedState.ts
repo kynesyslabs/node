@@ -151,4 +151,15 @@ export default class sharedState {
         }
         return info
     }
+
+   
 }
+
+// REVIEW Experimental singleton elegant approach
+// Export the getter object
+const sharedStateGetter = {
+    get getSharedState() {
+        return sharedState.getInstance()
+    },
+}
+export const { getSharedState } = sharedStateGetter
