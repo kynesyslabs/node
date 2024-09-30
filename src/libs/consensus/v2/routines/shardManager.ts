@@ -186,8 +186,8 @@ export default class ShardManager {
             "[shardManager] Transmitting our validator status to the shard",
         )
         // Prepare the call to the other nodes in the shard that show we are in the consensus loop
-        let ourIdentity = getSharedState
-            .identity.ed25519.publicKey.toString("hex")
+        let ourIdentity =
+            getSharedState.identity.ed25519.publicKey.toString("hex")
         let validatorStatus = this.getValidatorStatus(ourIdentity)
         let statusCall: RPCRequest = {
             method: "consensus_routine",

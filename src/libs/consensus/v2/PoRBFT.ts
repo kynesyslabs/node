@@ -202,7 +202,7 @@ async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
         averageTimestamp = Math.round(averageTimestamp)
     }
     getSharedState.lastConsensusTime = averageTimestamp
-    await updateValidatorStatus("synchronizedTime", true, true, false)
+    await updateValidatorStatus("synchronizedTime", true, true, true)
 }
 
 // Merge and order the mempools between the shard and the local node
@@ -213,7 +213,7 @@ async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
     log.info("[consensusRoutine] Our mempool has been retrieved")
     const mergedMempool = await mergeMempools(ourMempool, shard)
     log.info("[consensusRoutine] Mempools have been merged")
-    await updateValidatorStatus("mergedMempool", true, true, false)
+    await updateValidatorStatus("mergedMempool", true, true, true)
     return await orderTransactions(mergedMempool)
 }
 
@@ -230,7 +230,7 @@ async function forgeBlock(orderedTransactions: Transaction[]): Promise<Block> {
         lastBlockNumber + 1,
     )
 
-    await updateValidatorStatus("forgedBlock", true, true, false)
+    await updateValidatorStatus("forgedBlock", true, true, true)
     return block
 }
 
@@ -243,7 +243,7 @@ async function voteOnBlock(
         `[consensusRoutine] Broadcasting block hash to the shard: ${block.hash}`,
     )
     const [pro, con] = await broadcastBlockHash(block, shard)
-    await updateValidatorStatus("votedForBlock", true, true, false)
+    await updateValidatorStatus("votedForBlock", true, true, true)
 
     log.info(
         `[consensusRoutine] Block hash broadcasted to the shard: ${block.hash}`,

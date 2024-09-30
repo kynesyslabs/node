@@ -3,7 +3,10 @@ import { fastSync } from "src/libs/blockchain/routines/Sync"
 import { consensusRoutine } from "src/libs/consensus/v2/PoRBFT"
 import { Peer, PeerManager } from "src/libs/peer"
 import checkOfflinePeers from "src/libs/peer/routines/checkOfflinePeers"
-import Diagnostic, { DiagnosticData, DiagnosticResponse } from "src/utilities/Diagnostic"
+import Diagnostic, {
+    DiagnosticData,
+    DiagnosticResponse,
+} from "src/utilities/Diagnostic"
 import log from "src/utilities/logger"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
 import { getSharedState } from "./sharedState"
@@ -19,15 +22,18 @@ export default async function mainLoop() {
     log.info("[MAIN LOOP] ✅ Started")
     var cycleTimestamp: number
 
-
-
     while (getSharedState.runMainLoop) {
         await sleep(500) // Sleep for 500 ms
-        log.info("\n============================================================\n", true)
+        log.info(
+            "\n============================================================\n",
+            true,
+        )
         // Get the current UTC time (set the currentUTCTime variable in sharedState)
         await getSharedState.getUTCTime()
-        log.info(`[MAIN LOOP] Current UTC time: ${getSharedState.currentUTCTime}`)
-        
+        log.info(
+            `[MAIN LOOP] Current UTC time: ${getSharedState.currentUTCTime}`,
+        )
+
         if (getSharedState.mainLoopPaused) {
             continue // Check if the main loop is paused
         }
@@ -65,13 +71,18 @@ export default async function mainLoop() {
             //await sendNodeOnlineTx()
         }
 
-        
         // NOTE We need both the consensus time and the sync status to be true, to avoid
         // conflicts with the sync loop that would lead to a failure in the consensus mechanism.
-        if (isConsensusTimeReached && getSharedState.syncStatus && !getSharedState.startingConsensus) {
+        if (
+            isConsensusTimeReached &&
+            getSharedState.syncStatus &&
+            !getSharedState.startingConsensus
+        ) {
             // Set the startingConsensus flag to true to avoid conflicts with starting loops
             getSharedState.startingConsensus = true
-            log.info("[MAIN LOOP] Consensus time reached and sync status is true")
+            log.info(
+                "[MAIN LOOP] Consensus time reached and sync status is true",
+            )
             // Wait for the peer routine to finish if it is still running
             log.info("[MAIN LOOP] Waiting for the peer routine to finish")
             let timer = 0
@@ -79,7 +90,9 @@ export default async function mainLoop() {
                 await sleep(100)
                 timer += 1
                 if (timer > 10) {
-                    log.error("[MAIN LOOP] Peer routine is taking too long to finish: forcing consensus")
+                    log.error(
+                        "[MAIN LOOP] Peer routine is taking too long to finish: forcing consensus",
+                    )
                     getSharedState.peerRoutineRunning = 0 // Force the peer routine to act as if it finished
                     break
                 }
@@ -87,7 +100,10 @@ export default async function mainLoop() {
             await consensusRoutine()
         } else if (!getSharedState.syncStatus) {
             // ? This is a bit redundant, isn't it?
-            log.warning("[MAIN LOOP] Cannot start consensus, not in sync. Sync loop should start automatically", true)
+            log.warning(
+                "[MAIN LOOP] Cannot start consensus, not in sync. Sync loop should start automatically",
+                true,
+            )
         }
     }
 }
@@ -113,7 +129,7 @@ async function peerRoutine(): Promise<Peer[]> {
     // if its the first block ever or we are doing a regenesis, we might want to skip this check, but we still need a list of reliable nodes.
     // In the "3 block online" the history of online peers is validated by the blockchain AND by the consensus so it can be relied on.
 
-    let currentlyOnlinePeers: Peer[] 
+    let currentlyOnlinePeers: Peer[]
 
     log.info("[MAINLOOP]: getting online peers for last three blocks", false)
     const peersOnlineForLastThreeBlocks =
@@ -126,7 +142,7 @@ async function peerRoutine(): Promise<Peer[]> {
         // We didn't find peers that have been online for 3 blocks. Use the online peers list as it is
         // In this case we assume the node is isolated, starting up or that other nodes are not online or still connencting to the network
         log.info("[MAINLOOP]: using online peers list as it is", false)
-        currentlyOnlinePeers = onlinePeers  
+        currentlyOnlinePeers = onlinePeers
     }
 
     log.info("[MAINLOOP]: family:", true)
@@ -144,7 +160,9 @@ async function peerRoutine(): Promise<Peer[]> {
 // Diagnostic
 
 async function logCurrentDiagnostics() {
-    const diagnosticData: DiagnosticResponse = { diagnostics: {} as DiagnosticData }
+    const diagnosticData: DiagnosticResponse = {
+        diagnostics: {} as DiagnosticData,
+    }
     Diagnostic.insertDiagnostics(diagnosticData)
 
     const { cpu, ram, disk, network } = diagnosticData.diagnostics
@@ -170,9 +188,16 @@ async function logCurrentDiagnostics() {
     diagnosticString += `  Average Usage: ${disk.averageUsage.toFixed(2)}%\n\n`
 
     diagnosticString += "Network:\n"
-    if (network.downloadSpeed !== undefined && network.uploadSpeed !== undefined) {
-        diagnosticString += `  Download Speed: ${network.downloadSpeed.toFixed(2)} Mbps\n`
-        diagnosticString += `  Upload Speed: ${network.uploadSpeed.toFixed(2)} Mbps\n`
+    if (
+        network.downloadSpeed !== undefined &&
+        network.uploadSpeed !== undefined
+    ) {
+        diagnosticString += `  Download Speed: ${network.downloadSpeed.toFixed(
+            2,
+        )} Mbps\n`
+        diagnosticString += `  Upload Speed: ${network.uploadSpeed.toFixed(
+            2,
+        )} Mbps\n`
     } else {
         diagnosticString += "  No network speed data available\n"
     }

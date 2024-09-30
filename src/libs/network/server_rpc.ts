@@ -1,9 +1,19 @@
 /*  NOTE Importing this file automatically spawns a new server that listens for RPC requests */
 
 import fastifyCors from "@fastify/cors"
-import fastify, { FastifyInstance, FastifyReply, FastifyRequest, RouteShorthandOptions } from "fastify"
+import fastify, {
+    FastifyInstance,
+    FastifyReply,
+    FastifyRequest,
+    RouteShorthandOptions,
+} from "fastify"
 //import helmet from "@fastify/helmet"
-import { BrowserRequest, BundleContent, RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
+import {
+    BrowserRequest,
+    BundleContent,
+    RPCRequest,
+    RPCResponse,
+} from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import Cryptography from "../crypto/cryptography"
@@ -31,14 +41,14 @@ export const emptyResponse: RPCResponse = {
 
 // Add near the top of the file
 const postSchema = {
-  body: {
-    type: "object",
-    required: ["method", "params"],
-    properties: {
-      method: { type: "string" },
-      params: { type: "array" },
+    body: {
+        type: "object",
+        required: ["method", "params"],
+        properties: {
+            method: { type: "string" },
+            params: { type: "array" },
+        },
     },
-  },
 }
 
 /* Helper functions */
@@ -85,7 +95,10 @@ function validateHeaders(headers: any): [boolean, string] {
 
 /* ANCHOR Processor method */
 // Function to process the payload
-async function processPayload(payload: RPCRequest, sender: string): Promise<RPCResponse> {
+async function processPayload(
+    payload: RPCRequest,
+    sender: string,
+): Promise<RPCResponse> {
     // Payloads management
     switch (payload.method) {
         case "ping":
@@ -99,7 +112,10 @@ async function processPayload(payload: RPCRequest, sender: string): Promise<RPCR
             return await manageExecution(payload.params[0] as BundleContent)
         case "hello_peer": // As it is authenticated, we can use it to check if the peer is still alive and is in our peer list
             var helloPeerRequest = payload.params[0] as HelloPeerRequest
-            return await manageHelloPeer( helloPeerRequest as HelloPeerRequest, sender)
+            return await manageHelloPeer(
+                helloPeerRequest as HelloPeerRequest,
+                sender,
+            )
         /*case "consensus":
             return await ServerHandlers.handleConsensusRequest(payload.params[0] as ConsensusRequest)
         case "proofOfConsensus":
@@ -114,7 +130,6 @@ async function processPayload(payload: RPCRequest, sender: string): Promise<RPCR
         case "nodeCall":
             return await manageNodeCall(payload.params[0] as NodeCall)
 
-        
         // ! When things are working, we should remove the login_request and login_response methods and use a "login" method with params
         case "login_request":
             return await handleLoginRequest(payload.params[0] as BrowserRequest)
@@ -128,7 +143,9 @@ async function processPayload(payload: RPCRequest, sender: string): Promise<RPCR
             return await manageConsensusRoutines(payload.params[0])
 
         default:
-            log.warning("[RPC Call] [Received] Method not found: " + payload.method)
+            log.warning(
+                "[RPC Call] [Received] Method not found: " + payload.method,
+            )
             return {
                 result: 501,
                 response: "Method not implemented: " + payload.method,
@@ -153,7 +170,6 @@ export default async function server_rpc(): Promise<FastifyInstance> {
     // GET request handlers
 
     serverApp.get("/", async (req: FastifyRequest, reply: FastifyReply) => {
-
         reply.header("Access-Control-Allow-Origin", "*")
         reply.send("Hello, World!")
     })
@@ -163,36 +179,55 @@ export default async function server_rpc(): Promise<FastifyInstance> {
         reply.header("Access-Control-Allow-Origin", "*")
         reply.send(await getSharedState.getInfo())
     })
-    
+
     // Specific info endpoints
-    serverApp.get("/version", async (req: FastifyRequest, reply: FastifyReply) => {
-        reply.header("Access-Control-Allow-Origin", "*")
-        reply.send(getSharedState.version)
-    })
-    serverApp.get("/publickey", async (req: FastifyRequest, reply: FastifyReply) => {
-        reply.header("Access-Control-Allow-Origin", "*")
-        reply.send(getSharedState.identity.ed25519.publicKey.toString("hex"))
-    })
-    serverApp.get("/connectionstring", async (req: FastifyRequest, reply: FastifyReply) => {
-        reply.header("Access-Control-Allow-Origin", "*")
-        reply.send(await getSharedState.getConnectionString())
-    })
-    serverApp.get("/peerlist", async (req: FastifyRequest, reply: FastifyReply) => {
-        reply.header("Access-Control-Allow-Origin", "*")
-        reply.send(PeerManager.getInstance().getPeers())
-    })
+    serverApp.get(
+        "/version",
+        async (req: FastifyRequest, reply: FastifyReply) => {
+            reply.header("Access-Control-Allow-Origin", "*")
+            reply.send(getSharedState.version)
+        },
+    )
+    serverApp.get(
+        "/publickey",
+        async (req: FastifyRequest, reply: FastifyReply) => {
+            reply.header("Access-Control-Allow-Origin", "*")
+            reply.send(
+                getSharedState.identity.ed25519.publicKey.toString("hex"),
+            )
+        },
+    )
+    serverApp.get(
+        "/connectionstring",
+        async (req: FastifyRequest, reply: FastifyReply) => {
+            reply.header("Access-Control-Allow-Origin", "*")
+            reply.send(await getSharedState.getConnectionString())
+        },
+    )
+    serverApp.get(
+        "/peerlist",
+        async (req: FastifyRequest, reply: FastifyReply) => {
+            reply.header("Access-Control-Allow-Origin", "*")
+            reply.send(PeerManager.getInstance().getPeers())
+        },
+    )
 
     // Get public logs (custom logs)
-    serverApp.get("/public_logs", async (req: FastifyRequest, reply: FastifyReply) => {
-        reply.header("Access-Control-Allow-Origin", "*")
-        reply.send(log.getPublicLogs())
-    })
+    serverApp.get(
+        "/public_logs",
+        async (req: FastifyRequest, reply: FastifyReply) => {
+            reply.header("Access-Control-Allow-Origin", "*")
+            reply.send(log.getPublicLogs())
+        },
+    )
 
-    serverApp.get("/diagnostics", async (req: FastifyRequest, reply: FastifyReply) => {
-        reply.header("Access-Control-Allow-Origin", "*")
-        reply.send(log.getDiagnostics())
-    })
-
+    serverApp.get(
+        "/diagnostics",
+        async (req: FastifyRequest, reply: FastifyReply) => {
+            reply.header("Access-Control-Allow-Origin", "*")
+            reply.send(log.getDiagnostics())
+        },
+    )
 
     // Setup OpenAPI
     setupOpenAPI(serverApp)
@@ -203,32 +238,55 @@ export default async function server_rpc(): Promise<FastifyInstance> {
     }
 
     // Update the main RPC endpoint
-    serverApp.post("/", postOptions, async (req: FastifyRequest, reply: FastifyReply) => {
-        log.info("[RPC Call] Received request: " + JSON.stringify(req.body, null, 2), false)
-        const payload = req.body as RPCRequest
+    serverApp.post(
+        "/",
+        postOptions,
+        async (req: FastifyRequest, reply: FastifyReply) => {
+            log.info(
+                "[RPC Call] Received request: " +
+                    JSON.stringify(req.body, null, 2),
+                false,
+            )
+            const payload = req.body as RPCRequest
 
-        // Header check
-        const headers = req.headers
-        var sender = ""
-        // Excluding due to noAuthMethods from header validation
-        if (!noAuthMethods.includes(payload.method)) {
-            var header_validation = validateHeaders(headers)
-            log.info("[RPC Call] Header validation: " + header_validation[0])
-            if (!header_validation[0]) {
-                reply.status(401).send({ error: "Invalid headers:" + header_validation[1] })
-                return
+            // Header check
+            const headers = req.headers
+            var sender = ""
+            // Excluding due to noAuthMethods from header validation
+            if (!noAuthMethods.includes(payload.method)) {
+                var header_validation = validateHeaders(headers)
+                log.info(
+                    "[RPC Call] Header validation: " + header_validation[0],
+                )
+                if (!header_validation[0]) {
+                    reply
+                        .status(401)
+                        .send({
+                            error: "Invalid headers:" + header_validation[1],
+                        })
+                    return
+                }
+                sender = headers["identity"] as string
             }
-            sender = headers["identity"] as string
-        }
-        log.info("[RPC Call] Processing payload...", false) 
-        log.info("[RPC Call] Payload: " + JSON.stringify(payload, null, 2), false)
-        const response = await processPayload(payload, sender)
-        log.info("[RPC Call] Response ready: sending it to the client...", false) 
-        log.info("[RPC Call] Response: " + JSON.stringify(response, null, 2), false)
+            log.info("[RPC Call] Processing payload...", false)
+            log.info(
+                "[RPC Call] Payload: " + JSON.stringify(payload, null, 2),
+                false,
+            )
+            const response = await processPayload(payload, sender)
+            log.info(
+                "[RPC Call] Response ready: sending it to the client...",
+                false,
+            )
+            log.info(
+                "[RPC Call] Response: " + JSON.stringify(response, null, 2),
+                false,
+            )
 
-        reply.header("Access-Control-Allow-Origin", "*")
-        reply.send(response)
-    })
+            reply.header("Access-Control-Allow-Origin", "*")
+            reply.send(response)
+        },
+    )
 
     // Start the server
     await serverApp.listen({ port })
