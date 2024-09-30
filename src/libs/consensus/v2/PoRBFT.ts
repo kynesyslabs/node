@@ -21,7 +21,10 @@ import { broadcastBlockHash } from "./routines/broadcastBlockHash"
 import averageTimestamps from "./routines/averageTimestamp"
 import { fastSync } from "src/libs/blockchain/routines/Sync"
 import { RPCRequest } from "@kynesyslabs/demosdk/types"
-import ShardManager, { ValidatorStatus, getShardManager } from "./routines/shardManager"
+import ShardManager, {
+    ValidatorStatus,
+    getShardManager,
+} from "./routines/shardManager"
 
 /* INFO
 
@@ -168,10 +171,9 @@ async function initializeShard(): Promise<Peer[]> {
 // Initialize the shard manager
 async function initializeShardManager(shard: Peer[]): Promise<void> {
     getShardManager.setShard(shard)
-    const ourIdentity = getSharedState
-        .identity.ed25519.publicKey.toString("hex")
-    let validatorStatus =
-        getShardManager.shardStatus.get(ourIdentity)
+    const ourIdentity =
+        getSharedState.identity.ed25519.publicKey.toString("hex")
+    let validatorStatus = getShardManager.shardStatus.get(ourIdentity)
     validatorStatus.inConsensusLoop = true
     getShardManager.setValidatorStatus(ourIdentity, validatorStatus)
     await getShardManager.transmitOurValidatorStatus()
@@ -181,8 +183,8 @@ async function initializeShardManager(shard: Peer[]): Promise<void> {
 
 // Check if the local node is in the shard
 function isInShard(shard: Peer[]): boolean {
-    const ourIdentity = getSharedState
-        .identity.ed25519.publicKey.toString("hex")
+    const ourIdentity =
+        getSharedState.identity.ed25519.publicKey.toString("hex")
     return shard.some(peer => peer.identity === ourIdentity)
 }
 
@@ -200,7 +202,7 @@ async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
         averageTimestamp = Math.round(averageTimestamp)
     }
     getSharedState.lastConsensusTime = averageTimestamp
-    await updateValidatorStatus("synchronizedTime", true, false)
+    await updateValidatorStatus("synchronizedTime", true, true, false)
 }
 
 // Merge and order the mempools between the shard and the local node
@@ -211,7 +213,7 @@ async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
     log.info("[consensusRoutine] Our mempool has been retrieved")
     const mergedMempool = await mergeMempools(ourMempool, shard)
     log.info("[consensusRoutine] Mempools have been merged")
-    await updateValidatorStatus("mergedMempool", true, false)
+    await updateValidatorStatus("mergedMempool", true, true, false)
     return await orderTransactions(mergedMempool)
 }
 
@@ -228,7 +230,7 @@ async function forgeBlock(orderedTransactions: Transaction[]): Promise<Block> {
         lastBlockNumber + 1,
     )
 
-    await updateValidatorStatus("forgedBlock", true, false)
+    await updateValidatorStatus("forgedBlock", true, true, false)
     return block
 }
 
@@ -241,7 +243,7 @@ async function voteOnBlock(
         `[consensusRoutine] Broadcasting block hash to the shard: ${block.hash}`,
     )
     const [pro, con] = await broadcastBlockHash(block, shard)
-    await updateValidatorStatus("votedForBlock", true, false)
+    await updateValidatorStatus("votedForBlock", true, true, false)
 
     log.info(
         `[consensusRoutine] Block hash broadcasted to the shard: ${block.hash}`,
@@ -274,38 +276,38 @@ async function finalizeBlock(block: Block, pro: number): Promise<void> {
 // Cleanup the consensus state
 function cleanupConsensusState(): void {
     getSharedState.candidateBlock = null
-    getSharedState.lastConsensusTime =
-        getSharedState.currentUTCTime // REVIEW Using the current UTC time as the last consensus time
+    getSharedState.lastConsensusTime = getSharedState.currentUTCTime // REVIEW Using the current UTC time as the last consensus time
     getSharedState.inConsensusLoop = false
     getSharedState.consensusMode = false
 }
 
 // REVIEW This function updates and transmits the validator status to the shard
-// NOTE If wait is true, the function will try to wait for the shard to be ready 
+// NOTE If wait is true, the function will try to wait for the shard to be ready
 // before returning with a timeout to prevent the consensus routine from getting stuck
-// NOTE If pull is true, the function will try to pull the status from each node 
+// NOTE If pull is true, the function will try to pull the status from each node
 // in the shard before returning to ensure the status is up to date
 async function updateValidatorStatus(
     status: string,
     wait: boolean = true,
     pull: boolean = false,
+    stream: boolean = true,
 ): Promise<boolean> {
-    const ourIdentity = getSharedState
-        .identity.ed25519.publicKey.toString("hex")
-    let validatorStatus =
-        getShardManager.shardStatus.get(ourIdentity)
+    const ourIdentity =
+        getSharedState.identity.ed25519.publicKey.toString("hex")
+    let validatorStatus = getShardManager.shardStatus.get(ourIdentity)
     validatorStatus[status] = true
     getShardManager.setValidatorStatus(ourIdentity, validatorStatus)
-    await getShardManager.transmitOurValidatorStatus()
+    if (stream) {
+        await getShardManager.transmitOurValidatorStatus()
+    }
     // If not specified otherwise, we wait for the shard to be ready
     let ourStatus = getShardManager.getOurValidatorStatus()
     if (wait) {
-        let shardIsReady =
-            await getShardManager.waitUntilShardIsReady(
-                ourStatus,
-                3000,
-                pull,
-            )
+        let shardIsReady = await getShardManager.waitUntilShardIsReady(
+            ourStatus,
+            3000,
+            pull,
+        )
         if (!shardIsReady) {
             log.warning(
                 "[updateValidatorStatus] [ERROR] Shard is not ready: " + status,
