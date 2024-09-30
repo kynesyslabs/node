@@ -1,17 +1,12 @@
 // INFO This singleton is used to store the state of the application through different parts of the application.
 
-import Block from "src/libs/blockchain/block"
 import * as dotenv from "dotenv"
-import forge from "node-forge"
+import Block from "src/libs/blockchain/block"
 import chain from "src/libs/blockchain/chain"
 import { Identity } from "src/libs/identity"
 // eslint-disable-next-line no-unused-vars
-import * as Security from "src/libs/network/securityModule"
-import axios from "axios"
 import * as ntpClient from "ntp-client"
-import Chain from "src/libs/blockchain/chain"
 import { Peer, PeerManager } from "src/libs/peer"
-import getPublicIP from "./getPublicIP"
 
 dotenv.config({ path: "../../.commons" })
 
@@ -96,14 +91,10 @@ export default class sharedState {
     // Getter for the current NTP time
     public async getNTPTime(): Promise<number> {
         let date = await new Promise<Date>((resolve, reject) => {
-            ntpClient.getNetworkTime(
-                "pool.ntp.org",
-                123,
-                (err, date) => {
-                    if (err) reject(err)
-                    else resolve(date)
-                },
-            )
+            ntpClient.getNetworkTime("pool.ntp.org", 123, (err, date) => {
+                if (err) reject(err)
+                else resolve(date)
+            })
         })
         let timestamp = date.getTime()
         return timestamp
@@ -151,8 +142,6 @@ export default class sharedState {
         }
         return info
     }
-
-   
 }
 
 // REVIEW Experimental singleton elegant approach
