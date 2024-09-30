@@ -63,6 +63,10 @@ export default class log {
         return logs
     }
 
+    static getDiagnostics(): string {
+        return fs.readFileSync(this.LOGS_DIR + "/custom_diagnostics.log", "utf8")
+    }
+
     static custom(
         logfile: string,
         message: string,

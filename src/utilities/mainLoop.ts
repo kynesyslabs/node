@@ -4,7 +4,7 @@ import { consensusRoutine } from "src/libs/consensus/v2/PoRBFT"
 import { Peer, PeerManager } from "src/libs/peer"
 import checkOfflinePeers from "src/libs/peer/routines/checkOfflinePeers"
 import log from "src/utilities/logger"
-
+import Diagnostic, { DiagnosticResponse, DiagnosticData } from "src/utilities/Diagnostic"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
 import { getSharedState } from "./sharedState"
 
@@ -19,6 +19,8 @@ export default async function mainLoop() {
     log.info("[MAIN LOOP] ✅ Started")
     var cycleTimestamp: number
 
+
+
     while (getSharedState.runMainLoop) {
         await sleep(500) // Sleep for 500 ms
         log.info("\n============================================================\n", true)
@@ -31,6 +33,10 @@ export default async function mainLoop() {
         }
         // If it is not in pause, we set (or force set) the mainLoop flag to be on
         getSharedState.inMainLoop = true
+
+        // Diagnostic
+        log.info("[MAIN LOOP] Logging current diagnostics", false)
+        logCurrentDiagnostics()
 
         // Execute the peer routine before the consensus loop
         /* NOTE The peerRoutine also checks getOnlinePeers, so it works by waiting for
@@ -133,4 +139,47 @@ async function peerRoutine(): Promise<Peer[]> {
 
     // Returns the list of currently online peers
     return currentlyOnlinePeers
+}
+
+// Diagnostic
+
+async function logCurrentDiagnostics() {
+    const diagnosticData: DiagnosticResponse = { diagnostics: {} as DiagnosticData }
+    Diagnostic.insertDiagnostics(diagnosticData)
+
+    const { cpu, ram, disk, network } = diagnosticData.diagnostics
+
+    let diagnosticString = "Current System Diagnostics:\n"
+    diagnosticString += "==========================\n"
+    diagnosticString += "CPU:\n"
+    diagnosticString += `  Type: ${cpu.type}\n`
+    diagnosticString += `  Info: ${cpu.info}\n`
+    diagnosticString += `  Current Usage: ${cpu.currentUsage.toFixed(2)}%\n`
+    diagnosticString += `  Average Usage: ${cpu.averageUsage.toFixed(2)}%\n\n`
+
+    diagnosticString += "RAM:\n"
+    diagnosticString += `  Type: ${ram.type}\n`
+    diagnosticString += `  Info: ${ram.info}\n`
+    diagnosticString += `  Current Usage: ${ram.currentUsage.toFixed(2)}%\n`
+    diagnosticString += `  Average Usage: ${ram.averageUsage.toFixed(2)}%\n\n`
+
+    diagnosticString += "Disk:\n"
+    diagnosticString += `  Type: ${disk.type}\n`
+    diagnosticString += `  Info: ${disk.info}\n`
+    diagnosticString += `  Current Usage: ${disk.currentUsage.toFixed(2)}%\n`
+    diagnosticString += `  Average Usage: ${disk.averageUsage.toFixed(2)}%\n\n`
+
+    diagnosticString += "Network:\n"
+    if (network.downloadSpeed !== undefined && network.uploadSpeed !== undefined) {
+        diagnosticString += `  Download Speed: ${network.downloadSpeed.toFixed(2)} Mbps\n`
+        diagnosticString += `  Upload Speed: ${network.uploadSpeed.toFixed(2)} Mbps\n`
+    } else {
+        diagnosticString += "  No network speed data available\n"
+    }
+
+    // Print to console
+    console.log(diagnosticString)
+
+    // Log to file using log.custom
+    log.custom("diagnostics", diagnosticString, false, true)
 }

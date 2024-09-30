@@ -1,26 +1,22 @@
 /*  NOTE Importing this file automatically spawns a new server that listens for RPC requests */
 
-import fastify, { FastifyInstance, FastifyRequest, FastifyReply, RouteShorthandOptions } from "fastify"
 import fastifyCors from "@fastify/cors"
+import fastify, { FastifyInstance, FastifyReply, FastifyRequest, RouteShorthandOptions } from "fastify"
 //import helmet from "@fastify/helmet"
+import { BrowserRequest, BundleContent, RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
+import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
-import { manageAuth, AuthMessage } from "./manageAuth"
+import Cryptography from "../crypto/cryptography"
+import { PeerManager } from "../peer"
+import ServerHandlers from "./endpointHandlers"
+import { AuthMessage, manageAuth } from "./manageAuth"
+import manageConsensusRoutines from "./manageConsensusRoutines"
+import { manageExecution } from "./manageExecution"
+import { HelloPeerRequest, manageHelloPeer } from "./manageHelloPeer"
 import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
 import { manageNodeCall, NodeCall } from "./manageNodeCall"
-import { manageHelloPeer, HelloPeerRequest } from "./manageHelloPeer"
-import { manageExecution } from "./manageExecution"
-import Cryptography from "../crypto/cryptography"
-import Hashing from "../crypto/hashing"
-import log from "src/utilities/logger"
-import { BundleContent } from "@kynesyslabs/demosdk/types"
-import ServerHandlers from "./endpointHandlers"
-import { proofConsensusHandler } from "../consensus/routines/proofOfConsensus"
-import { RPCRequest, RPCResponse, ConsensusRequest, BrowserRequest } from "@kynesyslabs/demosdk/types"
-import manageConsensusRoutines from "./manageConsensusRoutines"
-import _ from "lodash"
 import { registerMethodListingEndpoint } from "./methodListing"
-import { setupOpenAPI, rpcSchema } from "./openApiSpec"
-import { PeerManager } from "../peer"
+import { rpcSchema, setupOpenAPI } from "./openApiSpec"
 
 // Reading the port from sharedState
 
@@ -190,6 +186,11 @@ export default async function server_rpc(): Promise<FastifyInstance> {
     serverApp.get("/public_logs", async (req: FastifyRequest, reply: FastifyReply) => {
         reply.header("Access-Control-Allow-Origin", "*")
         reply.send(log.getPublicLogs())
+    })
+
+    serverApp.get("/diagnostics", async (req: FastifyRequest, reply: FastifyReply) => {
+        reply.header("Access-Control-Allow-Origin", "*")
+        reply.send(log.getDiagnostics())
     })
 
 
