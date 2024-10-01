@@ -57,7 +57,7 @@ CLEAN="false"
 PORT=53550
 
 # Getting arguments
-while getopts "p:d:c:i:n" opt; do
+while getopts "p:d:c:i:n:u:" opt; do
     case $opt in
         p) PORT=$OPTARG;;
         d) PG_PORT=$OPTARG;;
