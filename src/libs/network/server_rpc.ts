@@ -15,7 +15,7 @@ import {
     RPCResponse,
 } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
-import { getSharedState } from "src/utilities/sharedState"
+import sharedState, { getSharedState } from "src/utilities/sharedState"
 import Cryptography from "../crypto/cryptography"
 import { PeerManager } from "../peer"
 import ServerHandlers from "./endpointHandlers"
@@ -177,7 +177,7 @@ export default async function server_rpc(): Promise<FastifyInstance> {
     // NOTE Generic info endpoint
     serverApp.get("/info", async (req: FastifyRequest, reply: FastifyReply) => {
         reply.header("Access-Control-Allow-Origin", "*")
-        reply.send(await getSharedState.getInfo())
+        reply.send(await sharedState.getInstance().getInfo())
     })
 
     // Specific info endpoints
@@ -259,11 +259,9 @@ export default async function server_rpc(): Promise<FastifyInstance> {
                     "[RPC Call] Header validation: " + header_validation[0],
                 )
                 if (!header_validation[0]) {
-                    reply
-                        .status(401)
-                        .send({
-                            error: "Invalid headers:" + header_validation[1],
-                        })
+                    reply.status(401).send({
+                        error: "Invalid headers:" + header_validation[1],
+                    })
                     return
                 }
                 sender = headers["identity"] as string
