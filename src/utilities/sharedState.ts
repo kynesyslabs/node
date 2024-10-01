@@ -8,7 +8,7 @@ import { Identity } from "src/libs/identity"
 import * as ntpClient from "ntp-client"
 import { Peer, PeerManager } from "src/libs/peer"
 
-dotenv.config({ path: "../../.env" })
+dotenv.config()
 
 export default class sharedState {
     private static instance: sharedState
@@ -39,7 +39,6 @@ export default class sharedState {
     lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard
     currentValidatorSeed: string
     identity: Identity
-    connectionString: string = ""
     lastConsensusTime: number = 0
     // SECTION Consensus states
     candidateBlock: Block
@@ -49,8 +48,9 @@ export default class sharedState {
     serverPort: number = 53550
     identityFile: string = process.env.IDENTITY_FILE || ".demos_identity"
     peerListFile: string = process.env.PEER_LIST_FILE || "demos_peerlist.json"
+    connectionString: string = "http://localhost:" + this.serverPort
     exposedUrl: string =
-        process.env.EXPOSED_URL || "http://localhost:" + this.serverPort
+        process.env.EXPOSED_URL || this.connectionString
     PROD: boolean = false
     // !SECTION Configuration
 

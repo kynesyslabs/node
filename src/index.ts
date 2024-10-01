@@ -66,7 +66,8 @@ if (SERVER_PORT == 0) {
 }
 // Setting the server port to the shared state
 getSharedState.serverPort = SERVER_PORT
-// Allow overriding peer list file through RPC_PeerList_FILE
+// Exposed URL
+getSharedState.connectionString = process.env.EXPOSED_URL || "http://localhost:" + SERVER_PORT
 /* !SECTION Environment variables loading and configuration */
 
 console.log("= Configured environment variables = \n")
