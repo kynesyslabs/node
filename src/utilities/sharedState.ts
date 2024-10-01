@@ -8,7 +8,7 @@ import { Identity } from "src/libs/identity"
 import * as ntpClient from "ntp-client"
 import { Peer, PeerManager } from "src/libs/peer"
 
-dotenv.config({ path: "../../.commons" })
+dotenv.config({ path: "../../.env" })
 
 export default class sharedState {
     private static instance: sharedState

@@ -64,6 +64,7 @@ while getopts "p:d:c:i:n" opt; do
         c) CLEAN=$OPTARG;;
         i) IDENTITY_FILE=$OPTARG;;
         n) GIT_PULL=false;;
+        u) EXPOSED_URL=$OPTARG;;
         #...
     esac
 done
@@ -79,7 +80,7 @@ fi
 echo "PORT=$PORT"
 echo "PG_PORT=$PG_PORT"
 echo "IDENTITY_FILE=$IDENTITY_FILE"
-
+echo "EXPOSED_URL=$EXPOSED_URL"
 
 # Check if Bun is available and set the start command
 if command -v bun &> /dev/null; then
@@ -94,7 +95,7 @@ echo "Starting the node with $START_COMMAND"
 # PG_PORT and IDENTITY_FILE are exported for both docker and yarn
 export PG_PORT=$PG_PORT
 export IDENTITY_FILE=$IDENTITY_FILE
-
+export EXPOSED_URL=$EXPOSED_URL
 # Database management with proper folder based on the port
 PG_FOLDER="postgres_${PG_PORT}"
 if [ ! -d "$PG_FOLDER" ]; then
