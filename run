@@ -134,6 +134,8 @@ while ! nc -z localhost $PG_PORT; do
     sleep 1
 done
 
+# Ensuring the logs folder exists
+mkdir -p logs
 
 # Starting the node managing errors
 if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE $START_COMMAND; then

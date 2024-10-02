@@ -1,1 +1,0 @@
-totale utilizzata libera condivisa buff/cache disponibile Mem: 13817 11024 392 286 2400 2185 Swap: 8191 181 8010
