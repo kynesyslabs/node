@@ -10,7 +10,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-
 import "reflect-metadata"
 
 import * as dotenv from "dotenv"
@@ -51,9 +50,7 @@ let OVERRIDE_PORT = null
 let OVERRIDE_IS_TESTER = null
 let COMMANDLINE_MODE = null
 
-
 let PeerList: Peer[]
-
 
 /* SECTION Environment variables loading and configuration */
 let RPC_FEE: number = parseInt(process.env.RPC_FEE) || 10
@@ -67,7 +64,8 @@ if (SERVER_PORT == 0) {
 // Setting the server port to the shared state
 getSharedState.serverPort = SERVER_PORT
 // Exposed URL
-getSharedState.connectionString = process.env.EXPOSED_URL || "http://localhost:" + SERVER_PORT
+getSharedState.connectionString =
+    process.env.EXPOSED_URL || "http://localhost:" + SERVER_PORT
 /* !SECTION Environment variables loading and configuration */
 
 console.log("= Configured environment variables = \n")
@@ -106,7 +104,9 @@ async function digestArguments() {
                     OVERRIDE_PORT = param[1]
                     break
                 case "peerfile":
-                    log.warning("WARNING: Overriding peer list file is not supported anymore (see PeerManager)")
+                    log.warning(
+                        "WARNING: Overriding peer list file is not supported anymore (see PeerManager)",
+                    )
                     break
                 case "tester":
                     console.log("Starting in tester mode")
@@ -131,16 +131,8 @@ async function main() {
     }
     getSharedState.serverPort = SERVER_PORT // Sharing this with any module that needs it
     getSharedState.rpcFee = RPC_FEE
-    
-    PeerManager.getInstance().loadPeerList()
-    PeerList = PeerManager.getInstance().getPeers()
-    term.green("[BOOTSTRAP] Loaded a list of peers:\n")
-    
-    for (const peer of PeerList) {
-        console.log( peer.identity + " @ "  + peer.connection.string )
-    }
 
-    // NOTE The whole first part of main ensures the environment is ready to run
+    // ANCHOR The whole first part of main ensures the environment is ready to run
     await getSharedState.identity.ensureIdentity() // ? Should we generate the identity option based too? (see SERVER_PORT and others    )
     const id = getSharedState.identity
     term.green("[BOOTSTRAP] Our identity is ready\n")
@@ -157,6 +149,16 @@ async function main() {
     fs.writeFileSync("publickey_" + publicKeyHex, publicKeyHex + "\n")
     log.info("Our public key is: " + publicKeyHex)
 
+    // ANCHOR Preparing the peer manager and loading the peer list
+    PeerManager.getInstance().loadPeerList()
+    PeerList = PeerManager.getInstance().getPeers()
+    term.green("[BOOTSTRAP] Loaded a list of peers:\n")
+
+    for (const peer of PeerList) {
+        console.log(peer.identity + " @ " + peer.connection.string)
+    }
+
+    // ANCHOR Getting the public IP to check if we're online
     try {
         await getSharedState.identity.getPublicIP()
         term.green("IP: " + getSharedState.identity.publicIP + "\n")
@@ -165,6 +167,7 @@ async function main() {
         term.yellow("[WARN] {OFFLINE?} Failed to get public IP\n")
     }
 
+    // ANCHOR Looking for the genesis block
     term.yellow("[BOOTSTRAP] Looking for the genesis block\n")
     // INFO Now ensuring we have an initialized chain or initializing the genesis block
     await findGenesisBlock()
@@ -173,7 +176,7 @@ async function main() {
     // Loading the peers
     //PeerList.push(ourselves)
 
-    // INFO Setting the common variables and propagating them
+    // ANCHOR Bootstrapping the peers
     term.yellow("[BOOTSTRAP] 🌐 Bootstrapping peers...\n")
     console.log(PeerList)
     await peerBootstrap(PeerList)
@@ -205,6 +208,7 @@ async function main() {
             // commandLine() // While doing the rest of the stuff needed, a comand line interface is available
         }
         term.yellow("[MAIN] ✅ Starting the background loop\n")
+        // ANCHOR Starting the main loop
         mainLoop() // Is an async function so running without waiting send that to the background
     }
 }
