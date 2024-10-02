@@ -21,7 +21,7 @@ import Block from "../block"
 import Chain from "../chain"
 import { NodeCall } from "src/libs/network/manageNodeCall"
 import log from "src/utilities/logger"
-import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
+import { RPCRequest, RPCResponse, Transaction } from "@kynesyslabs/demosdk/types"
 
 const term = terminalkit.terminal
 
@@ -127,16 +127,51 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
             console.log("[fastSync] Block response received for block: " + blockToAsk)
             let block = blockResponse.response as Block
             Chain.insertBlock(block)
-            /*
-            ! TODO 
-            - Parse the txs hashes in the block
-            - Ask for all the txs from the peer
-            - One by one, verify them and prepare a query to insert them into the transactions database table
-            */
+
+            // REVIEW Parse the txs hashes in the block
+            log.info("[fastSync] Asking for transactions in the block", true)
+            let txs = await askTxsForBlock(block, highestBlockNumberPeer)
+            log.info("[fastSync] Transactions received: " + txs.length, true)
+
+            // REVIEW Insert the txs into the transactions database table
+            if (txs.length > 0) {
+                log.info("[fastSync] Inserting transactions into the database", true)
+                let success = await Chain.insertTransactions(txs)
+                if (success) {
+                    log.info("[fastSync] Transactions inserted successfully")
+                } else {
+                    log.error("[fastSync] Transactions insertion failed")
+                }
+            }
+
+            // ? We might want a rollback function here if something goes wrong
+
             console.log("[fastSync] Block inserted successfully at the head of the chain!")
         }
         blockToAsk++
     }
     getSharedState.syncStatus = true
     return true
+}
+
+// Helper function to ask for the transactions in a block
+export async function askTxsForBlock(block: Block, peer: Peer): Promise<Transaction[]> {
+    let txsHashes = block.content.ordered_transactions
+    let txs = []
+    for (let txHash of txsHashes) {
+        let txRequest: RPCRequest = {
+            method: "nodeCall",
+            params: [{
+                message: "getTxByHash",
+                data: { hash: txHash },
+                muid: null,
+            }],
+        }
+        let txResponse = await peer.call(txRequest, false)
+        if (txResponse.result === 200) {
+            let tx = txResponse.response as Transaction
+            txs.push(tx)
+        }
+    }
+    return txs
 }
