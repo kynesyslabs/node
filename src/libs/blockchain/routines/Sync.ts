@@ -21,18 +21,17 @@ import Block from "../block"
 import Chain from "../chain"
 import { NodeCall } from "src/libs/network/manageNodeCall"
 import log from "src/utilities/logger"
-import { RPCRequest, RPCResponse, Transaction } from "@kynesyslabs/demosdk/types"
+import {
+    RPCRequest,
+    RPCResponse,
+    Transaction,
+} from "@kynesyslabs/demosdk/types"
 
 const term = terminalkit.terminal
 
 const peerManager = PeerManager.getInstance()
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
-}
-
-export interface IPeerLastInfo {
-    peerLastBlockNumber: number
-    peerLastBlockHash: string
 }
 
 // ? Modularize this function
@@ -44,18 +43,25 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
     // Getting our data
     let ourLastBlockNumber = await Chain.getLastBlockNumber()
     let ourLastBlockHash = await Chain.getLastBlockHash()
-    log.info("[fastSync] Our last block number is " + ourLastBlockNumber + " and our last block hash is " + ourLastBlockHash)
+    log.info(
+        "[fastSync] Our last block number is " +
+            ourLastBlockNumber +
+            " and our last block hash is " +
+            ourLastBlockHash,
+    )
     // Asking the peers for the last block number
     let peerLastBlockNumbers = []
     let promises = new Map<string, Promise<RPCResponse>>()
     for (let peer of peers) {
         let call: RPCRequest = {
             method: "nodeCall",
-            params: [{
-                message: "getLastBlockNumber",
-                data: null,
-                muid: null,
-            }],
+            params: [
+                {
+                    message: "getLastBlockNumber",
+                    data: null,
+                    muid: null,
+                },
+            ],
         }
         promises.set(peer.identity, peer.call(call, false))
     }
@@ -68,13 +74,21 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
     for (let response of responses) {
         if (response[1].result === 200) {
             peerLastBlockNumbers.push(response[1].response as number)
-            log.info("[fastSync] Peer " + response[0] + " has last block number: " + response[1].response)
+            log.info(
+                "[fastSync] Peer " +
+                    response[0] +
+                    " has last block number: " +
+                    response[1].response,
+            )
         }
     }
     log.info("[fastSync] Peer last block numbers: " + peerLastBlockNumbers)
     // REVIEW Choose the peer with the highest last block number
-    let highestBlockNumber = peerLastBlockNumbers.reduce((max, peer) => Math.max(max, peer), 0)
-    
+    let highestBlockNumber = peerLastBlockNumbers.reduce(
+        (max, peer) => Math.max(max, peer),
+        0,
+    )
+
     // If we have the same block number as the highest block number peer, we are already synced
     if (highestBlockNumber === ourLastBlockNumber) {
         log.info("[fastSync] We are already synced with the peer")
@@ -82,19 +96,31 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
         return true
     }
     // Otherwise, we need to sync
-    let highestBlockNumberPeerIndex = peerLastBlockNumbers.findIndex((peer) => peer === highestBlockNumber)
+    let highestBlockNumberPeerIndex = peerLastBlockNumbers.findIndex(
+        peer => peer === highestBlockNumber,
+    )
     let highestBlockNumberPeer = peers[highestBlockNumberPeerIndex]
-    log.info("[fastSync] Peer with highest last block number: " + highestBlockNumberPeer.identity + " with block number: " + highestBlockNumber)
+    log.info(
+        "[fastSync] Peer with highest last block number: " +
+            highestBlockNumberPeer.identity +
+            " with block number: " +
+            highestBlockNumber,
+    )
     // Verify if the last block hash is coherent
     let lastSyncedBlockRequest: RPCRequest = {
         method: "nodeCall",
-        params: [{
-            message: "getBlockByNumber",
-            data: { blockNumber: ourLastBlockNumber.toString() },
-            muid: null,
-        }],
+        params: [
+            {
+                message: "getBlockByNumber",
+                data: { blockNumber: ourLastBlockNumber.toString() },
+                muid: null,
+            },
+        ],
     }
-    let lastSyncedBlockResponse = await highestBlockNumberPeer.call(lastSyncedBlockRequest, false)
+    let lastSyncedBlockResponse = await highestBlockNumberPeer.call(
+        lastSyncedBlockRequest,
+        false,
+    )
     if (lastSyncedBlockResponse.result === 200) {
         console.log("[fastSync] Last synced block response received")
         let lastSyncedBlock = lastSyncedBlockResponse.response as Block
@@ -105,7 +131,10 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
             getSharedState.syncStatus = false
             return false // ! Pass to the next peer
         }
-        console.log("[fastSync] Hash is coherent: we can sync with: " + highestBlockNumberPeer.identity)
+        console.log(
+            "[fastSync] Hash is coherent: we can sync with: " +
+                highestBlockNumberPeer.identity,
+        )
     }
     // REVIEW: lowest or highest?
     // Sync the blocks one by one starting from the lowest block number that we do not have
@@ -115,16 +144,23 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
         console.log("[fastSync] Asking peer for block: " + blockToAsk)
         let blockRequest: RPCRequest = {
             method: "nodeCall",
-            params: [{
-                message: "getBlockByNumber",
-                data: { blockNumber: blockToAsk.toString() },
-                muid: null,
-            }],
+            params: [
+                {
+                    message: "getBlockByNumber",
+                    data: { blockNumber: blockToAsk.toString() },
+                    muid: null,
+                },
+            ],
         }
-        let blockResponse = await highestBlockNumberPeer.call(blockRequest, false)
-        
+        let blockResponse = await highestBlockNumberPeer.call(
+            blockRequest,
+            false,
+        )
+
         if (blockResponse.result === 200) {
-            console.log("[fastSync] Block response received for block: " + blockToAsk)
+            console.log(
+                "[fastSync] Block response received for block: " + blockToAsk,
+            )
             let block = blockResponse.response as Block
             Chain.insertBlock(block)
 
@@ -135,7 +171,10 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
 
             // REVIEW Insert the txs into the transactions database table
             if (txs.length > 0) {
-                log.info("[fastSync] Inserting transactions into the database", true)
+                log.info(
+                    "[fastSync] Inserting transactions into the database",
+                    true,
+                )
                 let success = await Chain.insertTransactions(txs)
                 if (success) {
                     log.info("[fastSync] Transactions inserted successfully")
@@ -146,7 +185,9 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
 
             // ? We might want a rollback function here if something goes wrong
 
-            console.log("[fastSync] Block inserted successfully at the head of the chain!")
+            console.log(
+                "[fastSync] Block inserted successfully at the head of the chain!",
+            )
         }
         blockToAsk++
     }
@@ -155,17 +196,22 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
 }
 
 // Helper function to ask for the transactions in a block
-export async function askTxsForBlock(block: Block, peer: Peer): Promise<Transaction[]> {
+export async function askTxsForBlock(
+    block: Block,
+    peer: Peer,
+): Promise<Transaction[]> {
     let txsHashes = block.content.ordered_transactions
     let txs = []
     for (let txHash of txsHashes) {
         let txRequest: RPCRequest = {
             method: "nodeCall",
-            params: [{
-                message: "getTxByHash",
-                data: { hash: txHash },
-                muid: null,
-            }],
+            params: [
+                {
+                    message: "getTxByHash",
+                    data: { hash: txHash },
+                    muid: null,
+                },
+            ],
         }
         let txResponse = await peer.call(txRequest, false)
         if (txResponse.result === 200) {
