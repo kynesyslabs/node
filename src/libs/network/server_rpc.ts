@@ -177,7 +177,14 @@ export default async function server_rpc(): Promise<FastifyInstance> {
     // NOTE Generic info endpoint
     serverApp.get("/info", async (req: FastifyRequest, reply: FastifyReply) => {
         reply.header("Access-Control-Allow-Origin", "*")
-        reply.send(await sharedState.getInstance().getInfo())
+        const info = await sharedState.getInstance().getInfo()
+        const version = getSharedState.version
+        const versionName = getSharedState.version_name
+        reply.send({
+            version: version,
+            version_name: versionName,
+            ...info,
+        })
     })
 
     // Specific info endpoints
