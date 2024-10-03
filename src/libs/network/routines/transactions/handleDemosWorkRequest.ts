@@ -15,12 +15,27 @@ import _ from "lodash"
 // SECTION Operation types
 import { XMScript, IWeb2Payload } from "@kynesyslabs/demosdk/types"
 // SECTION Handlers
-import handleWeb2Request from "./handleWeb2Request"     
+import handleWeb2Request from "./handleWeb2Request"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { INativePayload } from "node_modules/@kynesyslabs/demosdk/build/types/native"
 import executeNativeTransaction from "src/libs/blockchain/routines/executeNativeTransaction"
 // ? Remove this proxy if possible
 let handleXMRequest = multichainDispatcher
+
+/* TODO Log
+- add to the DemoScript logic a flag to specify if a step is mandatory or not
+- add to the DemoScript logic a flag to specify if an operation is mandatory or not
+- ? add to the DemoScript logic a flag to specify if a step depends on the previous step(s)
+- ? add to the DemoScript logic a flag to specify if an operation depends on the previous operation(s)
+*/
+
+/* Quick logic reference
+- A DemoScript is composed of operations
+- An operation is composed of steps
+- A step is composed of a context and a task
+- They get executed in the order specified by the operationOrder property of DemoScript
+- The methods below are in order of nesting
+*/
 
 // ? Remove the dump below when the logic is implemented fully and correctly
 /* NOTE Reference dump of a received demosWork request (xm, no conditional) 
@@ -68,79 +83,136 @@ let handleXMRequest = multichainDispatcher
 
     */
 
+// ANCHOR Types for handling the steps and operations results
+
+export type StepResult = {
+    step: WorkStep
+    success: boolean
+    error?: string
+}
+
+export type OperationResult = {
+    operation: DemosWorkOperationScripts
+    success: boolean
+    error?: string
+}
+
+// ANCHOR - Handle the demosWork request
 export default async function handleDemosWorkRequest(
     content: DemoScript,
 ): Promise<RPCResponse> {
-    let compiledScript: DemoScript = _.cloneDeep(content)
-    let response: RPCResponse = _.cloneDeep(emptyResponse)
+    var compiledScript: DemoScript = _.cloneDeep(content)
+    var operationsResults: OperationResult[] = []
+    const response: RPCResponse = _.cloneDeep(emptyResponse)
+
     log.info("[demosWork] [handleDemosWorkRequest] Received a DemoScript: ")
     console.log(content)
 
-    /* TODO Logic */
-    // Check the operations order and put the operations in order in a list of operations
-    let orderedOperations: DemosWorkOperationScripts[] = []
-    for (const operationName of content.operationOrder) {
-        let currentOperation: DemosWorkOperationScripts =
-            content.operations[operationName]
-        orderedOperations.push(currentOperation)
-    }
-    console.log(
-        "[demosWork] [handleDemosWorkRequest] Ordered operations: ",
-        orderedOperations,
-    )
-    // For each operation, check the type of operation
-    for (const operation of orderedOperations) {
-        if (operation.operationType === "base") {
-            console.log(
-                "[demosWork] [handleDemosWorkRequest] Base operation detected: iterating over the works",
-            )
-            // If base, iterate over the works
-            for (const work of operation.work) {
-                let currentStep = content.steps[work]
-                console.log(
-                    "[demosWork] [handleDemosWorkRequest] Current step: ",
-                    currentStep,
-                )
-                // Check the step context and call the corresponding handler
-                currentStep = await handleStep(currentStep)
-                console.log(
-                    "[demosWork] [handleDemosWorkRequest] Compiled step result: ",
-                    currentStep.output,
-                )
-                // Replace the original step with the compiled step
-                compiledScript.steps[work] = currentStep
-            }
-        } else {
-            // TODO: Implement conditional operations
-            // ? Is this the right way to return an error?
-            response.result = 400
-            response.response =
-                "Conditional operations are not implemented yet (in operation: " +
-                operation.id +
-                ")"
-            return response
+    /* TODO As this fails if any step fails, we need to ensure that if not
+    explicitly specified otherwise, the steps are executed even if one fails with a
+    fallback to the next step and a meaningful error(s) log in the return value */
+    try {
+        [compiledScript, operationsResults] = await processOperations(content)
+        response.result = 200
+        response.response = {
+            compiledScript: compiledScript,
+            operationsResults: operationsResults,
         }
+    } catch (error) {
+        log.error(
+            "[demosWork] [handleDemosWorkRequest] Error processing DemoScript: " +
+                error,
+        )
+        response.result = 400
+        response.extra =
+            error instanceof Error ? error.message : "Unknown error occurred"
+        response.response = {
+            compiledScript: compiledScript,
+            operationsResults: operationsResults,
+        } // Return the partially compiled script even on error
     }
-    // Return the compiled script with the steps replaced by the compiled steps (aka with the output)
-    response.result = 200
-    response.response = compiledScript
-    response.extra = null
+
     return response
 }
 
-// Handling and compiling the step
-async function handleStep(step: WorkStep): Promise<WorkStep> {
+// ANCHOR - Process the operations
+// This method is responsible for iterating over the operations and steps
+// and executing them
+async function processOperations(
+    script: DemoScript,
+): Promise<[DemoScript, OperationResult[]]> {
+    let operationsResults: OperationResult[] = []
+    for (const operationName of script.operationOrder) {
+        const operation = script.operations[operationName]
+        // Prepare the operation result
+        let operationResult: OperationResult = {
+            operation: operation,
+            success: true,
+            error: "",
+        }
+
+        // Process the base operation
+        if (operation.operationType === "base") {
+            log.info(
+                "[demosWork] [processOperations] Base operation detected: iterating over the works",
+            )
+
+            for (const workId of operation.work) {
+                const currentStep = script.steps[workId]
+                const stepResult = await handleStep(currentStep)
+                /* NOTE If a step fails, the operation is not successful and
+                the error is appended to the operation error */
+                if (!stepResult.success) {
+                    operationResult.success = false
+                    operationResult.error +=
+                        "Step '" +
+                        stepResult.step.description +
+                        "' (id: " +
+                        stepResult.step.id +
+                        ")' failed with error: " +
+                        stepResult.error +
+                        "\n"
+                    break
+                }
+
+                script.steps[workId] = stepResult.step
+            }
+        } else {
+            /* NOTE If the operation is conditional, it is not implemented yet and it fails */
+            operationResult.success = false
+            operationResult.error =
+                "Conditional operations are not implemented yet (operation: " +
+                operation.id +
+                ")"
+            // ? Do we need to compile the script here? Like, the individual steps?
+        }
+        /* NOTE Append the operation result to the operations results */
+        operationsResults.push(operationResult)
+    }
+    // NOTE Return the script compiled
+    return [script, operationsResults]
+}
+
+// ANCHOR - Handle the step
+// This method is responsible for handling the step and compiling the result
+async function handleStep(step: WorkStep): Promise<StepResult> {
+    let stepResult: StepResult = {
+        step: step,
+        success: false,
+        error: "Not implemented",
+    }
+    let result: any = null
     // ? Do we have to do any additional check on the step?
     // Iterating over the step content
     let context = step.context
     let task = step.content
-    let result: any = null
     log.info(
         "[demosWork] [handleStep] Handling a step with context: " +
             context +
             " and description: " +
             step.description,
     )
+    stepResult.success = true // Until proven otherwise
     if (context === "xm") {
         // REVIEW Implement the logic for xm steps
         let xmScript = task as XMScript
@@ -148,13 +220,19 @@ async function handleStep(step: WorkStep): Promise<WorkStep> {
     } else if (context === "web2") {
         let web2Request = task as IWeb2Request
         result = await handleWeb2Request(web2Request)
-    } else {
+    } else if (context === "native") {
         let nativePayload = task as INativePayload
         // TODO: Implement the logic for native steps
         result = "Not implemented"
+        stepResult.error = "Not implemented"
+        stepResult.success = false
+    } else {
+        stepResult.error = "Unknown context: " + context
+        stepResult.success = false
     }
     // Compile the step result
     // ? Check typing with jeff
     step.output = result
-    return step
+    stepResult.step = step
+    return stepResult
 }
