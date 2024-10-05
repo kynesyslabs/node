@@ -7,8 +7,11 @@
     },
     "servers": [
         {
-            "url": "http://localhost:{port}",
+            "url": "http://{host}:{port}",
             "variables": {
+                "host": {
+                    "default": "localhost"
+                },
                 "port": {
                     "default": "53550"
                 }
