@@ -62,7 +62,7 @@ import log from "src/utilities/logger"
 import { emptyResponse } from "./server_rpc"
 // SECTION Handlers for different types of transactions
 import handleWeb2Request from "./routines/transactions/handleWeb2Request"
-import handleDemosWorkRequest from "./routines/transactions/handleDemosWorkRequest"
+import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Rename to handleXMRequest
 
@@ -137,7 +137,6 @@ export default class ServerHandlers {
     static async handleExecuteTransaction(
         validatedData: ValidityData,
     ): Promise<ExecutionResult> {
-
         // Log the entire validatedData object to inspect its structure
         console.log("[handleExecuteTransaction] Validated Data:", validatedData)
 
@@ -152,7 +151,7 @@ export default class ServerHandlers {
         // Integrity checks
         let ourKey = getSharedState.identity.ed25519.publicKey
         let hexOurKey = ourKey.toString("hex")
-        let dataKey = _.cloneDeep(validatedData.rpc_public_key) 
+        let dataKey = _.cloneDeep(validatedData.rpc_public_key)
         console.log("validatedData.rpc_public_key:  ")
         console.log(validatedData.rpc_public_key)
         /*  console.log("[handleExecuteTransaction] dataKey: ")
@@ -161,21 +160,29 @@ export default class ServerHandlers {
         console.log("\n") */
         let hexDataKey: string
         if (typeof dataKey === "string") {
-            console.log("[handleExecuteTransaction] dataKey is a string: using as is")
+            console.log(
+                "[handleExecuteTransaction] dataKey is a string: using as is",
+            )
             hexDataKey = dataKey
         } else {
-            console.log("[handleExecuteTransaction] dataKey is a buffer: using ForgeToHex")
-            console.log(dataKey)    
+            console.log(
+                "[handleExecuteTransaction] dataKey is a buffer: using ForgeToHex",
+            )
+            console.log(dataKey)
             hexDataKey = ForgeToHex(dataKey)
         }
         console.log("dataKey: " + hexDataKey)
         let dataSignature = validatedData.signature
         let hexDataSignature: string
         if (typeof dataSignature === "string") {
-            console.log("[handleExecuteTransaction] dataSignature is a string: using as is")
+            console.log(
+                "[handleExecuteTransaction] dataSignature is a string: using as is",
+            )
             hexDataSignature = dataSignature
         } else {
-            console.log("[handleExecuteTransaction] dataSignature is a buffer: using ForgeToHex")
+            console.log(
+                "[handleExecuteTransaction] dataSignature is a buffer: using ForgeToHex",
+            )
             console.log(dataSignature)
             hexDataSignature = ForgeToHex(dataSignature)
         }
@@ -183,12 +190,21 @@ export default class ServerHandlers {
         let queriedTx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
         // REVIEW Correct? If the transaction has no block number, we set it to the last block number + 1
         if (!queriedTx.blockNumber) {
-            log.warning("[handleExecuteTransaction] Queried tx has no block number: " + queriedTx.hash)
+            log.warning(
+                "[handleExecuteTransaction] Queried tx has no block number: " +
+                    queriedTx.hash,
+            )
             let lastBlockNumber = await Chain.getLastBlockNumber()
             queriedTx.blockNumber = lastBlockNumber + 1
-            log.warning("[handleExecuteTransaction] Queried tx block number set to: " + queriedTx.blockNumber)
+            log.warning(
+                "[handleExecuteTransaction] Queried tx block number set to: " +
+                    queriedTx.blockNumber,
+            )
         }
-        console.log("[handleExecuteTransaction] Queried tx processing in block: " + queriedTx.blockNumber)
+        console.log(
+            "[handleExecuteTransaction] Queried tx processing in block: " +
+                queriedTx.blockNumber,
+        )
         // queriedTx.content.from = queriedTx?.content?.from?.toString()
         // queriedTx.content.from = queriedTx?.content?.to?.toString()
 
@@ -295,9 +311,11 @@ export default class ServerHandlers {
                 var demosWorkPayload = tx.content.data
                 var demosWorkScript = demosWorkPayload[1] as DemoScript
 
-                var demoswork_result = await handleDemosWorkRequest(demosWorkScript)
+                var demoswork_result = await handleDemosWorkRequest(
+                    demosWorkScript,
+                )
                 result.response = demoswork_result
-                break   
+                break
 
             // ! The below code should be implemented in handleDemosWorkRequest
             /*
@@ -314,9 +332,15 @@ export default class ServerHandlers {
         // Only if the transaction is valid we add it to the mempool
         if (result.success) {
             // REVIEW We add the transaction to the mempool
-            console.log("[handleExecuteTransaction] Adding tx with hash: " + queriedTx.hash + " to the mempool")
+            console.log(
+                "[handleExecuteTransaction] Adding tx with hash: " +
+                    queriedTx.hash +
+                    " to the mempool",
+            )
             await Mempool.addTransaction(queriedTx)
-            console.log("[handleExecuteTransaction] Transaction added to mempool")
+            console.log(
+                "[handleExecuteTransaction] Transaction added to mempool",
+            )
             // TODO Check if Operation(s) are added to the GLS too
             // FIXME Add an operation for the nonce or anyway a way to manage the nonce
         }

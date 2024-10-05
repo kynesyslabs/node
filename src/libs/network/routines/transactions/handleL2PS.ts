@@ -5,9 +5,7 @@ import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "../../server_rpc"
 import _ from "lodash"
 
-export default async function handleL2PS(
-    content: any,
-): Promise<RPCResponse> {
+export default async function handleL2PS(content: any): Promise<RPCResponse> {
     // ! TODO Finalize the below TODOs
     let response = _.cloneDeep(emptyResponse)
     let data = content.data
@@ -24,11 +22,13 @@ export default async function handleL2PS(
         case "registerTx":
             /* Workflow:
              * We first need to check if the payload is valid by checking the hash of the encrypted transaction.
-            */
+             */
             var encryptedTxData: EncryptedTransaction = data.eTx
             // Checking if the encrypted transaction coherent
-            var expectedHash = Hashing.sha256(encryptedTxData.encryptedTransaction) // Hashing the encrypted transaction
-            if (expectedHash!= encryptedTxData.encryptedHash) {
+            var expectedHash = Hashing.sha256(
+                encryptedTxData.encryptedTransaction,
+            ) // Hashing the encrypted transaction
+            if (expectedHash != encryptedTxData.encryptedHash) {
                 response.result = 422
                 response.response = "Unprocessable Entity"
                 response.require_reply = true
