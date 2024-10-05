@@ -236,9 +236,6 @@ export default async function server_rpc(): Promise<FastifyInstance> {
         },
     )
 
-    // Setup OpenAPI
-    setupOpenAPI(serverApp)
-
     // Define the options for the main RPC endpoint
     const postOptions: RouteShorthandOptions = {
         schema: rpcSchema,
@@ -292,6 +289,9 @@ export default async function server_rpc(): Promise<FastifyInstance> {
             reply.send(response)
         },
     )
+
+    // Setup OpenAPI
+    setupOpenAPI(serverApp)
 
     // Start the server
     await serverApp.listen({ port })
