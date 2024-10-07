@@ -1,7 +1,6 @@
 services:
-    env_file: ../.env
     db:
-        container_name: postgres_${PG_PORT:-5332}
+        container_name: postgres_${PG_PORT}
         image: postgres
         environment:
             POSTGRES_USER: demosuser
@@ -9,9 +8,9 @@ services:
             PGDATA: /data/postgres
             POSTGRES_DB: demos
         volumes:
-            - ./data_${PG_PORT:-5332}/postgres:/data/postgres
+            - ./data_${PG_PORT}/postgres:/data/postgres
         ports:
-            - "${PG_PORT:-5332}:5432"
+            - "${PG_PORT}:5432"
         networks:
             - db
         restart: unless-stopped
