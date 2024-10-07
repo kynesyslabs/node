@@ -2,7 +2,7 @@ import {
     IRawWeb2Request,
     IWeb2Attestation,
     IWeb2Request,
-} from "@kynesyslabs/demosdk-http/types"
+} from "@kynesyslabs/demosdk/types"
 import { Web2RequestManager } from "src/features/web2/Web2RequestManager"
 import { Proxy } from "src/features/web2/dahr/Proxy"
 
