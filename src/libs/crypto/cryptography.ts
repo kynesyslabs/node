@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import * as crypto from "crypto"
 import { promises as fs } from "fs"
 import forge from "node-forge"
-import sharedState from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 
 import { ForgeToHex, HexToForge } from "./forgeUtils"
@@ -176,17 +176,17 @@ export default class Cryptography {
 
         // Also, we have to sanitize buffers so that they are forge compatible
         if (signature.length == 64) {
-            console.log("[*] Normalizing signature...")
+            //console.log("[*] Normalizing signature...")
             signature = Buffer.from(signature as Uint8Array) // REVIEW Does not work in bun
         }
-        console.log(signature)
+        //console.log(signature)
 
         if (publicKey.length == 64) {
-            console.log("[*] Normalizing publicKey...")
+            //console.log("[*] Normalizing publicKey...")
             publicKey = Buffer.from(publicKey as Uint8Array) // REVIEW Does not work in bun
         }
 
-        console.log(publicKey)
+        //console.log(publicKey)
 
         console.log("[Cryptography] Verifying the signature of: (" + typeof signed + ") " + signed)
         console.log("[Cryptography] Using the signature: (" + typeof signature + ") " + ForgeToHex(signature))
@@ -207,7 +207,7 @@ export default class Cryptography {
             let md = forge.md.sha256.create()
             md.update(
                 JSON.stringify(
-                    sharedState.getInstance().identity.ed25519.privateKey,
+                    getSharedState.identity.ed25519.privateKey,
                 ),
             )
             let seed = md.digest().toHex()
@@ -224,7 +224,7 @@ export default class Cryptography {
         ): [boolean, any] => {
             // NOTE Supporting "fake buffers" from web browsers
             if (publicKey.type == "Buffer") {
-                console.log("[ENCRYPTION] Normalizing publicKey...")
+                //console.log("[ENCRYPTION] Normalizing publicKey...")
                 publicKey = Buffer.from(publicKey)
             }
             // Converting the message and decrypting it
@@ -241,7 +241,7 @@ export default class Cryptography {
             // NOTE Supporting "fake buffers" from web browsers
             try {
                 if (privateKey.type == "Buffer") {
-                    term.yellow("[DECRYPTION] Normalizing privateKey...\n")
+                    //term.yellow("[DECRYPTION] Normalizing privateKey...\n")
                     privateKey = Buffer.from(privateKey)
                 }
             } catch (e) {
@@ -256,7 +256,7 @@ export default class Cryptography {
                 term.yellow(
                     "[DECRYPTION] No private key provided, using our one...\n",
                 )
-                privateKey = sharedState.getInstance().identity.rsa.privateKey
+                privateKey = getSharedState.identity.rsa.privateKey
                 if (!privateKey) {
                     term.red("[DECRYPTION] No private key found\n")
                     return [false, "No private key found"]

@@ -1,5 +1,5 @@
 import { Peer, PeerManager } from "src/libs/peer"
-import sharedState from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import { promisify } from "util"
 
 import Transmission from "../../communications/transmission"
@@ -56,7 +56,7 @@ export default async function getPeerTime(
 export const calculatePeerTimeOffset =
     async (): Promise<SynchronizationData> => {
         //FIXME: this should happen outside of here, in the part where the peers that will partecipate in block validation are selected
-        const id = sharedState.getInstance().identity
+        const id = getSharedState.identity
         const peer = PeerManager.getInstance().getPeers()[0]
 
         const offsets = [] as Offset[]

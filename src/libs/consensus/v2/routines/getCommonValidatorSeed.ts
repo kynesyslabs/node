@@ -1,4 +1,4 @@
-import sharedState from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import { PeerManager } from "src/libs/peer"
 import Chain from "src/libs/blockchain/chain"
 import { Blocks } from "src/model/entities/Blocks"
@@ -37,7 +37,7 @@ export default async function getCommonValidatorSeed(): Promise<string> {
         hashedProposers + hashedHashes + hashedValidationDatas + hashedTimestamps,
     )
     // NOTE The common validator seed is set in the sharedState as soon as it is computed
-    sharedState.getInstance().currentValidatorSeed = commonValidatorSeed
+    getSharedState.currentValidatorSeed = commonValidatorSeed
     log.info(`Common validator seed: ${commonValidatorSeed}`)
     return commonValidatorSeed
 }

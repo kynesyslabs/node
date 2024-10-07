@@ -1,7 +1,7 @@
 import log from "src/utilities/logger"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import axios from "axios"
-import sharedState from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import Cryptography from "../crypto/cryptography"
 import { NodeCall } from "../network/manageNodeCall"
 
@@ -31,10 +31,7 @@ export default class Peer {
     }
 
     // Creating an empty peer
-    constructor(
-        url: string = "",
-        publicKey: string = "",
-    ) {
+    constructor(url: string = "", publicKey: string = "") {
         this.connection = {
             string: url,
         }
@@ -54,7 +51,6 @@ export default class Peer {
             timestamp: null,
             ready: false,
         }
-        
     }
 
     // Methods to handle the peer
@@ -86,7 +82,6 @@ export default class Peer {
         }
     }
 
-
     // TODO (WIP) call with retries on fail
     async longCall(
         request: RPCRequest,
@@ -101,8 +96,9 @@ export default class Peer {
             if (response.result === 200) {
                 return response
             }
-            await new Promise(resolve => setTimeout(resolve, sleepTime))
             tries++
+            // Sleep for sleepTime milliseconds
+            await new Promise(resolve => setTimeout(resolve, sleepTime))
         }
         log.error("[PEER] [LONG CALL] Max retries reached: " + response)
         return {
@@ -118,7 +114,14 @@ export default class Peer {
         request: RPCRequest,
         isAuthenticated: boolean = true,
     ): Promise<RPCResponse> {
-        log.info("[RPC Call] [" + request.method + "] [" + new Date(Date.now()).toISOString() + "] Making RPC call to: " + this.connection.string)
+        log.info(
+            "[RPC Call] [" +
+                request.method +
+                "] [" +
+                new Date(Date.now()).toISOString() +
+                "] Making RPC call to: " +
+                this.connection.string,
+        )
         // Get some informations
         let method = request.method
         let currentTimestampReadable = new Date(Date.now()).toISOString()
@@ -126,12 +129,10 @@ export default class Peer {
         let pubkey = ""
         let signature = ""
         if (isAuthenticated) {
-            pubkey = sharedState
-                .getInstance()
-                .identity.ed25519.publicKey.toString("hex")
+            pubkey = getSharedState.identity.ed25519.publicKey.toString("hex")
             signature = Cryptography.sign(
                 pubkey,
-                sharedState.getInstance().identity.ed25519.privateKey,
+                getSharedState.identity.ed25519.privateKey,
             ).toString("hex")
         }
         // REVIEW Using the connection string as the url with the new format
@@ -188,7 +189,14 @@ export default class Peer {
             }
             return response.data
         } catch (error) {
-            log.error("[RPC Call] [" + method + "] [" + currentTimestampReadable + "] Error making RPC call:" + error)
+            log.error(
+                "[RPC Call] [" +
+                    method +
+                    "] [" +
+                    currentTimestampReadable +
+                    "] Error making RPC call:" +
+                    error,
+            )
             return {
                 result: 500,
                 response: error,
@@ -212,7 +220,6 @@ export default class Peer {
         const response = await axios.get(url)
         return response.data
     }
-
 
     async getInfo(): Promise<any> {
         return await this.fetch("info")

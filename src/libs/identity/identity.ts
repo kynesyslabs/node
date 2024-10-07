@@ -15,7 +15,7 @@ import terminalkit from "terminal-kit"
 
 import { cryptography } from "../crypto"
 import getRemoteIP from "../network/routines/getRemoteIP"
-import sharedState from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 
 const term = terminalkit.terminal
 
@@ -50,15 +50,15 @@ export default class Identity {
     }
 
     async ensureIdentity(): Promise<void> {
-        if (fs.existsSync(sharedState.getInstance().identityFile)) {
+        if (fs.existsSync(getSharedState.identityFile)) {
             // Loading the identity
             // TODO Add load with cryptography
-            this.ed25519 = await cryptography.load(sharedState.getInstance().identityFile)
+            this.ed25519 = await cryptography.load(getSharedState.identityFile)
             term.yellow("Loaded ecdsa identity")
         } else {
             this.ed25519 = cryptography.new()
             // Writing the identity to disk in binary format
-            await cryptography.save(this.ed25519, sharedState.getInstance().identityFile)
+            await cryptography.save(this.ed25519, getSharedState.identityFile)
             term.yellow("Generated new identity")
         }
         // Stringifying to hex
@@ -67,7 +67,7 @@ export default class Identity {
             publicKey: "0x" + this.ed25519.publicKey.toString("hex"),
         }
         // Setting the ed25519 keypair in shared state
-        sharedState.getInstance().identity.ed25519 = this.ed25519
+        getSharedState.identity.ed25519 = this.ed25519
         // Deriving the RSA keypair from the ed25519 one
         //  this.rsa = cryptography.rsa.derive()
     }
@@ -86,6 +86,6 @@ export default class Identity {
     }
 
     getConnectionString(): string {
-        return sharedState.getInstance().exposedUrl
+        return getSharedState.exposedUrl
     }
 }

@@ -12,7 +12,7 @@ import http from "node:http"
 import https from "node:https"
 import { PeerManager } from "src/libs/peer"
 import required, { requiredOutcome } from "src/utilities/required"
-import sharedState from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 
 export default class groundControl {
     static host: string
@@ -192,7 +192,7 @@ export default class groundControl {
 
     static get = {
         sync_status: function () {
-            return sharedState.getInstance().syncStatus
+            return getSharedState.syncStatus
         },
         connected_peers: function () {
             let plist = PeerManager.getInstance().getAll()

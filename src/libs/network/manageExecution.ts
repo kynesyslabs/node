@@ -52,7 +52,6 @@ export async function manageExecution(
             term.yellow.bold("[SERVER] Received broadcastTx\n")
             // REVIEW This method needs to actually verify if the transaction is valid
 
-            // ! Remove the next block when demosWork is implemented
             var validityDataPayload: ValidityData
             // If content.data.response.rpc_public_key exists, we assign validityDataPayload to response
             try {

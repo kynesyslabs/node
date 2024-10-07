@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { NodeCall } from "src/libs/network/manageNodeCall"
 import Transmission from "../../communications/transmission"
 import Peer from "../Peer"
-import sharedState from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 
 // proxy method
 export async function verifyPeer(peer: Peer, expectedKey: string): Promise<Peer> {
@@ -27,7 +27,7 @@ export default async function getPeerIdentity(
 ): Promise<Peer> {
 
     // Getting our identity
-    let id = sharedState.getInstance().identity.ed25519
+    let id = getSharedState.identity.ed25519
     
     console.warn("[PEER AUTHENTICATION] Getting peer identity")
     console.log(peer)

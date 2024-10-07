@@ -57,13 +57,14 @@ CLEAN="false"
 PORT=53550
 
 # Getting arguments
-while getopts "p:d:c:i:n" opt; do
+while getopts "p:d:c:i:n:u:" opt; do
     case $opt in
         p) PORT=$OPTARG;;
         d) PG_PORT=$OPTARG;;
         c) CLEAN=$OPTARG;;
         i) IDENTITY_FILE=$OPTARG;;
         n) GIT_PULL=false;;
+        u) EXPOSED_URL=$OPTARG;;
         #...
     esac
 done
@@ -79,7 +80,7 @@ fi
 echo "PORT=$PORT"
 echo "PG_PORT=$PG_PORT"
 echo "IDENTITY_FILE=$IDENTITY_FILE"
-
+echo "EXPOSED_URL=$EXPOSED_URL"
 
 # Check if Bun is available and set the start command
 if command -v bun &> /dev/null; then
@@ -103,7 +104,7 @@ yarn start --verbose
 # PG_PORT and IDENTITY_FILE are exported for both docker and yarn
 export PG_PORT=$PG_PORT
 export IDENTITY_FILE=$IDENTITY_FILE
-
+export EXPOSED_URL=$EXPOSED_URL
 # Database management with proper folder based on the port
 PG_FOLDER="postgres_${PG_PORT}"
 if [ ! -d "$PG_FOLDER" ]; then
@@ -142,6 +143,8 @@ while ! nc -z localhost $PG_PORT; do
     sleep 1
 done
 
+# Ensuring the logs folder exists
+mkdir -p logs
 
 # Starting the node managing errors
 if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE $START_COMMAND; then
@@ -150,6 +153,10 @@ if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE $START_COMMAND
     else
         echo "Error: RPC failed to start or crashed"
         exit_code=$?
+        # Logging memory usage
+        echo "Memory usage:"
+        free -m
+        echo $(free -m) > last_crash_memory_usage.txt
     fi
 else
     echo "RPC exited successfully"

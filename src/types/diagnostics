@@ -1,0 +1,10 @@
+export interface DiagnosticData {
+  // Add properties as needed, for example:
+  timestamp: number;
+  status: string;
+  // ... other diagnostic properties
+}
+
+export interface DiagnosticResponse {
+  diagnostics: DiagnosticData;
+}

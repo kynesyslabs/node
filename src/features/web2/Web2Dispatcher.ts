@@ -3,7 +3,7 @@ import Web2API from "src/features/web2/routines/Web2Parser"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import required from "src/utilities/required"
-import sharedState from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import terminalKit from "terminal-kit"
 
 import { IWeb2Request } from "@kynesyslabs/demosdk/types"
@@ -84,7 +84,7 @@ export default async function handleWeb2(
             term.yellow(
                 "[web2Dispatcher] [*] Waiting for the required quorum for this chain of trust...",
             )
-            if (sharedState.getInstance().PROD) {
+            if (getSharedState.PROD) {
                 required(
                     await Web2API(null, instanceName).awaitQuorum(),
                     "Not enough attestations to reach quorum",
@@ -98,7 +98,7 @@ export default async function handleWeb2(
             const hashedAttestations = Hashing.sha256(
                 JSON.stringify(web2interface.request.attestations),
             )
-            const ourPk = sharedState.getInstance().identity.ed25519.privateKey
+            const ourPk = getSharedState.identity.ed25519.privateKey
             const signedAttestations = Cryptography.sign(
                 hashedAttestations,
                 ourPk,

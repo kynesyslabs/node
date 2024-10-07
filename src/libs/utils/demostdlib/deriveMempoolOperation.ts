@@ -1,6 +1,6 @@
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
-import sharedState from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 
 import GLS from "../../blockchain/gls/gls"
 import Mempool from "../../blockchain/mempool"
@@ -175,7 +175,7 @@ export async function createTransaction(
     // REVIEW Why? Should be done differently I guess
     // Setting us as the sender
     transaction.content.from =
-        sharedState.getInstance().identity.ed25519.publicKey
+        getSharedState.identity.ed25519.publicKey
     transaction.content.to = derivable.to
     transaction.content.amount = 0
     transaction.content.nonce = 0
@@ -191,7 +191,7 @@ export async function createTransaction(
     transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
     let signature = Cryptography.sign(
         transaction.hash,
-        sharedState.getInstance().identity.ed25519.privateKey,
+        getSharedState.identity.ed25519.privateKey,
     )
     transaction.signature = signature as any // REVIEW Should be correct but it was transaction.signature = signature before
     // TODO See how to be general purpose but specific (a shared format?)

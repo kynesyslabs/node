@@ -10,7 +10,7 @@ export async function selfCheckPort(port: number, timeout = 2000): Promise<boole
     await connectPromise(port, "8.8.8.8")
     return true
   } catch (error) {
-    return false
+    return false  
   } finally {
     client.destroy()
   }

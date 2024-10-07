@@ -1,147 +1,302 @@
 {
     "openapi": "3.0.0",
     "info": {
-      "title": "RPC Server API - Demos Network",
-      "description": "API for RPC Servers on Demos Network",
-      "version": "1.0.0"
+        "title": "Demos Network RPC Server API",
+        "description": "API for RPC Servers on Demos Network",
+        "version": "1.0.0"
     },
-    "tags": [
-      { "name": "RPC", "description": "RPC related endpoints" }
+    "servers": [
+        {
+            "url": "{protocol}://{host}:{port}",
+            "variables": {
+                "protocol": {
+                    "default": "http"
+                },
+                "host": {
+                    "default": "localhost"
+                },
+                "port": {
+                    "default": "53550"
+                }
+            }
+        }
     ],
-    "components": {
-      "securitySchemes": {
-        "signature": {
-          "type": "apiKey",
-          "name": "signature",
-          "in": "header"
-        },
-        "identity": {
-          "type": "apiKey",
-          "name": "identity",
-          "in": "header"
-        }
-      },
-      "schemas": {
-        "AnyType": {
-          "type": "object",
-          "description": "Any type of data"
-        },
-        "RPCRequest": {
-          "type": "object",
-          "required": ["method", "params"],
-          "properties": {
-            "method": {
-              "type": "string",
-              "description": "The name of the RPC method to execute"
-            },
-            "params": {
-              "type": "array",
-              "description": "An array of parameters for the RPC method",
-              "items": {
-                "$ref": "#/components/schemas/AnyType"
-              }
-            }
-          }
-        },
-        "RPCResponse": {
-          "type": "object",
-          "properties": {
-            "result": {
-              "type": "number",
-              "description": "The result code of the RPC call"
-            },
-            "response": {
-              "$ref": "#/components/schemas/AnyType",
-              "description": "The actual response from the RPC call"
-            },
-            "require_reply": {
-              "type": "boolean",
-              "description": "Indicates if a reply is required"
-            },
-            "extra": {
-              "$ref": "#/components/schemas/AnyType",
-              "description": "Additional data returned by the RPC call"
-            }
-          }
-        }
-      }
-    },
+    "tags": [
+        { "name": "General", "description": "General endpoints" },
+        { "name": "Info", "description": "Information endpoints" },
+        { "name": "RPC", "description": "RPC related endpoints" }
+    ],
     "paths": {
-      "/": {
-        "post": {
-          "summary": "Execute RPC method",
-          "description": "Executes the specified RPC method with given parameters",
-          "tags": ["RPC"],
-          "security": [
-            {
-              "signature": [],
-              "identity": []
-            }
-          ],
-          "requestBody": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RPCRequest"
-                }
-              }
-            }
-          },
-          "responses": {
-            "200": {
-              "description": "Successful response",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/RPCResponse"
-                  }
-                }
-              }
-            },
-            "400": {
-              "description": "Bad request"
-            },
-            "401": {
-              "description": "Unauthorized"
-            },
-            "404": {
-              "description": "Method not found"
-            },
-            "500": {
-              "description": "Internal server error"
-            }
-          }
-        }
-      },
-      "/methods": {
-        "get": {
-          "summary": "Get available RPC methods",
-          "description": "Returns a list of available RPC methods",
-          "tags": ["RPC"],
-          "responses": {
-            "200": {
-              "description": "Successful response",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "type": "object",
-                    "properties": {
-                      "methods": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
+        "/": {
+            "get": {
+                "summary": "Hello World",
+                "tags": ["General"],
+                "responses": {
+                    "200": {
+                        "description": "Successful response",
+                        "content": {
+                            "text/plain": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
                         }
-                      },
-                      "count": {
-                        "type": "integer"
-                      }
                     }
-                  }
                 }
-              }
+            },
+            "post": {
+                "summary": "Execute RPC method",
+                "description": "Executes the specified RPC method with given parameters",
+                "tags": ["RPC"],
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "signature",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "Signature for authentication (required for some methods)"
+                    },
+                    {
+                        "in": "header",
+                        "name": "identity",
+                        "schema": { 
+                            "type": "string"
+                        },
+                        "description": "Identity for authentication (required for some methods)"
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RPCRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RPCResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
             }
-          }
+        },
+        "/info": {
+            "get": {
+                "summary": "Get general info",
+                "tags": ["Info"],
+                "responses": {
+                    "200": {
+                        "description": "Successful response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "version": { "type": "string" },
+                                        "version_name": { "type": "string" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/version": {
+            "get": {
+                "summary": "Get version",
+                "tags": ["Info"],
+                "responses": {
+                    "200": {
+                        "description": "Successful response",
+                        "content": {
+                            "text/plain": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/publickey": {
+            "get": {
+                "summary": "Get public key",
+                "tags": ["Info"],
+                "responses": {
+                    "200": {
+                        "description": "Successful response",
+                        "content": {
+                            "text/plain": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/connectionstring": {
+            "get": {
+                "summary": "Get connection string",
+                "tags": ["Info"],
+                "responses": {
+                    "200": {
+                        "description": "Successful response",
+                        "content": {
+                            "text/plain": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/peerlist": {
+            "get": {
+                "summary": "Get peer list",
+                "tags": ["Info"],
+                "responses": {
+                    "200": {
+                        "description": "Successful response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/public_logs": {
+            "get": {
+                "summary": "Get public logs",
+                "tags": ["Info"],
+                "responses": {
+                    "200": {
+                        "description": "Successful response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/diagnostics": {
+            "get": {
+                "summary": "Get diagnostics",
+                "tags": ["Info"],
+                "responses": {
+                    "200": {
+                        "description": "Successful response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/methods": {
+            "get": {
+                "summary": "Get available RPC methods",
+                "tags": ["RPC"],
+                "responses": {
+                    "200": {
+                        "description": "Successful response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "methods": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "count": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
-      }
+    },
+    "components": {
+        "schemas": {
+            "RPCRequest": {
+                "type": "object",
+                "required": ["method", "params"],
+                "properties": {
+                    "method": {
+                        "type": "string",
+                        "description": "The name of the RPC method to execute"
+                    },
+                    "params": {
+                        "type": "array",
+                        "description": "An array of parameters for the RPC method",
+                        "items": {
+                            "type": "object"
+                        }
+                    }
+                }
+            },
+            "RPCResponse": {
+                "type": "object",
+                "properties": {
+                    "result": {
+                        "type": "number",
+                        "description": "The result code of the RPC call"
+                    },
+                    "response": {
+                        "description": "The actual response from the RPC call"
+                    },
+                    "require_reply": {
+                        "type": "boolean",
+                        "description": "Indicates if a reply is required"
+                    },
+                    "extra": {
+                        "description": "Additional data returned by the RPC call"
+                    }
+                }
+            }
+        }
     }
-  }
+}

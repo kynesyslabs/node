@@ -31,6 +31,7 @@ import manageNative from "./routines/gls_routines/manageNative"
 import Transaction from "./transaction"
 import { Peer } from "../peer"
 import Mempool from "./mempool"
+import log from "src/utilities/logger"
 
 
 export default class Chain {
@@ -401,6 +402,7 @@ export default class Chain {
 
     }
 
+
     // INFO Generate the genesis block
     static async generateGenesisBlock(genesis_data: any): Promise<Block> {
         // TODO Add a type for the block json
@@ -515,7 +517,7 @@ export default class Chain {
     static async insertTransaction(
         transaction: Transaction,
         status: string = "confirmed",
-    ): Promise<any> {
+    ): Promise<boolean> {
         console.log("[insertTransaction] Inserting transaction: " + transaction.hash)
         const rawTransaction = Transaction.toRawTransaction(transaction, status)
         console.log("[insertTransaction] Raw transaction: ")
@@ -524,7 +526,25 @@ export default class Chain {
         const transactionRepository = db
             .getDataSource()
             .getRepository(Transactions)
-        return await transactionRepository.save(rawTransaction)
+        try {
+            await transactionRepository.save(rawTransaction)
+            return true
+        } catch (e) {
+            log.error("[insertTransaction] Error inserting transaction (" + transaction.hash + "): " + e)
+            return false
+        }
+    }
+
+    // Wrapper for inserting multiple transactions
+    static async insertTransactions(transactions: Transaction[]): Promise<boolean> {
+        let success = true
+        for (let tx of transactions) {
+            success = await this.insertTransaction(tx)
+            if (!success) {
+                return false
+            }
+        }
+        return success
     }
     // !SECTION Setters
 

@@ -1,7 +1,7 @@
 /* eslint-disable no-dupe-class-members */
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
-import sharedState from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 
 // TODO - Implement P2P messaging off chain but attested by the node
 // ? We can use the RSA keypair to encrypt the messages (shared state identity one)
