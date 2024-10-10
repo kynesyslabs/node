@@ -1,0 +1,106 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Define color codes
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m' # No Color
+
+# Function to print colored output
+print_color() {
+    printf "${1}%s${NC}\n" "${2}"
+}
+
+# Function to check if a command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Function to install a package if it's not already installed
+install_if_not_exists() {
+    if ! command_exists "$1"; then
+        print_color "$YELLOW" "Installing $1..."
+        sudo apt-get install -y "$1"
+        print_color "$GREEN" "$1 installed"
+    else
+        print_color "$GREEN" "$1 is already installed"
+    fi
+}
+
+# Function to run a command and handle errors
+run_command() {
+    if ! "$@"; then
+        print_color "$RED" "Error: Command '$*' failed"
+        exit 1
+    fi
+}
+
+# Update package lists
+print_color "$YELLOW" "Updating package lists..."
+run_command sudo apt-get update
+
+# Install prerequisites
+print_color "$YELLOW" "Installing prerequisites..."
+install_if_not_exists unzip
+install_if_not_exists nodejs
+install_if_not_exists npm
+
+# Install Docker
+print_color "$YELLOW" "Installing Docker..."
+if ! command_exists docker; then
+    run_command sudo apt-get install -y ca-certificates curl
+    run_command sudo install -m 0755 -d /etc/apt/keyrings
+    run_command sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+    run_command sudo chmod a+r /etc/apt/keyrings/docker.asc
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+      sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    run_command sudo apt-get update
+    run_command sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    
+    print_color "$YELLOW" "Adding user to Docker group..."
+    run_command sudo groupadd docker || true
+    run_command sudo usermod -aG docker $USER
+    print_color "$GREEN" "User added to Docker group. Please log out and back in for changes to take effect."
+else
+    print_color "$GREEN" "Docker is already installed"
+fi
+
+# Install n and Node.js 20
+if ! command_exists n; then
+    print_color "$YELLOW" "Installing n..."
+    run_command sudo npm install -g n
+fi
+
+print_color "$YELLOW" "Installing Node.js 20..."
+run_command sudo n 20
+
+# Install Yarn
+if ! command_exists yarn; then
+    print_color "$YELLOW" "Installing Yarn..."
+    run_command sudo npm install -g yarn
+else
+    print_color "$GREEN" "Yarn is already installed"
+fi
+
+# Install Bun
+if ! command_exists bun; then
+    print_color "$YELLOW" "Installing Bun..."
+    curl -fsSL https://bun.sh/install | bash
+    source $HOME/.bashrc
+else
+    print_color "$GREEN" "Bun is already installed"
+fi
+
+# Install node dependencies
+print_color "$YELLOW" "Installing node dependencies..."
+run_command yarn
+
+# Generate key
+print_color "$YELLOW" "Generating key..."
+run_command yarn keygen
+
+print_color "$GREEN" "All installations and configurations completed successfully!"
