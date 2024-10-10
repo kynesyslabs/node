@@ -12,6 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { pki } from "node-forge"
 
 import { BlockContent } from "@kynesyslabs/demosdk/types"
+import { Peer } from "../peer"
 
 // NOTE Block class
 export default class Block {
@@ -33,6 +34,7 @@ export default class Block {
             web2data: {}, // objects containing hashes of fetched web2data
             previousHash: null,
             timestamp: null,
+            peerlist: [],
         }
         this.proposer = null
         this.validation_data = { signatures: {} }

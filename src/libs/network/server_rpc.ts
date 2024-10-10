@@ -123,6 +123,9 @@ async function processPayload(
         */
         case "mempool":
             return await ServerHandlers.handleMempool(payload.params[0])
+        // REVIEW Peerlist merging
+        case "peerlist":
+            return await ServerHandlers.handlePeerlist(payload.params[0])
         // Auth management
         case "auth":
             return await manageAuth(payload.params[0] as AuthMessage)

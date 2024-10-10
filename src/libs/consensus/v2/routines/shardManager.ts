@@ -9,6 +9,7 @@ export interface ValidatorStatus {
     mergedMempool: boolean
     forgedBlock: boolean
     votedForBlock: boolean
+    mergedPeerlist: boolean
 }
 
 const emptyValidatorStatus: ValidatorStatus = {
@@ -17,6 +18,7 @@ const emptyValidatorStatus: ValidatorStatus = {
     mergedMempool: false,
     forgedBlock: false,
     votedForBlock: false,
+    mergedPeerlist: false,
 }
 
 // This class is used to manage the shard and the validator statuses during the consensus routine.

@@ -5,12 +5,14 @@ import Cryptography from "src/libs/crypto/cryptography"
 import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
 import { Transaction } from "@kynesyslabs/demosdk/types"
+import Peer from "src/libs/peer/Peer"
 
 export async function createBlock(
     orderedTransactions: Transaction[],
     commonValidatorSeed: string,
     previousBlockHash: string,
     blockNumber: number,
+    peerlist: Peer[],
 ): Promise<Block> {
     if (getSharedState.candidateBlock) {
         log.warning("Candidate block already exists: we should not overwrite it (returning the existing one)")
@@ -21,6 +23,7 @@ export async function createBlock(
     var block = new Block()
     block.content.ordered_transactions = orderedTransactions.map(transaction => transaction.hash)
     block.content.previousHash = previousBlockHash
+    block.content.peerlist = peerlist
     block.proposer = commonValidatorSeed // This is the shard identifier
     block.number = blockNumber
     block.hash = Hashing.sha256(JSON.stringify(block.content))

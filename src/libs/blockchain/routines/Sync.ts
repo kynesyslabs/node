@@ -163,7 +163,10 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
             )
             let block = blockResponse.response as Block
             Chain.insertBlock(block)
-
+            // REVIEW Merge the peerlist
+            log.info("[fastSync] Merging peers from block: " + block.hash)
+            let mergedPeerlist = await mergePeerlist(block)
+            log.info("[fastSync] Merged peers from block: " + mergedPeerlist)   
             // REVIEW Parse the txs hashes in the block
             log.info("[fastSync] Asking for transactions in the block", true)
             let txs = await askTxsForBlock(block, highestBlockNumberPeer)
@@ -220,4 +223,28 @@ export async function askTxsForBlock(
         }
     }
     return txs
+}
+
+// Helper function to merge the peerlist from the last block
+export async function mergePeerlist(block: Block): Promise<string[]> {
+    const blockPeerlist = block.content.peerlist
+    const ourPeerlist = PeerManager.getInstance().getPeers()
+    const mergedPeers: string[] = []
+
+    const ourPeerIdentities = new Set(ourPeerlist.map(peer => peer.identity))
+
+    for (const peer of blockPeerlist) {
+        const peerObject = Peer.fromIPeer(peer)
+
+        if (ourPeerIdentities.has(peerObject.identity)) {
+            continue
+        }
+
+        const success = peerManager.addPeer(peerObject)
+        if (success) {
+            mergedPeers.push(peerObject.identity)
+        }
+    }
+
+    return mergedPeers
 }

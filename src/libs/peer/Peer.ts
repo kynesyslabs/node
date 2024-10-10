@@ -1,5 +1,5 @@
 import log from "src/utilities/logger"
-import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
+import { IPeer, RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import axios from "axios"
 import { getSharedState } from "src/utilities/sharedState"
 import Cryptography from "../crypto/cryptography"
@@ -53,6 +53,17 @@ export default class Peer {
         }
     }
 
+    // Importing a peer from an IPeer
+    static fromIPeer(peer: IPeer): Peer {
+        let p = new Peer()
+        p.connection = peer.connection
+        p.identity = peer.identity
+        p.verification = peer.verification
+        p.sync = peer.sync
+        p.status = peer.status
+        return p
+    }
+    
     // Methods to handle the peer
 
     // INFO Connect to a peer

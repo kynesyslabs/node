@@ -199,6 +199,15 @@ export default class PeerManager {
         delete this.offlinePeers[identity]
     }
 
+    setPeers(peerlist: Peer[], discard_current_peerlist: boolean = true) {
+        if (discard_current_peerlist) {
+            this.peerList = {}
+        }
+        for (const peer of peerlist) {
+            this.addPeer(peer)
+        }
+    }
+
     // REVIEW This method should be tested and finalized with the new peer structure
     static async sayHelloToPeer(peer: Peer) {
         getSharedState.peerRoutineRunning += 1 // Adding one to the peer routine running counter
