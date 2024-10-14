@@ -7,7 +7,8 @@ import { IWeb2Request, XMScript } from "@kynesyslabs/demosdk/types"
 import { INativePayload } from "node_modules/@kynesyslabs/demosdk/build/types/native"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import handleWeb2Request from "../handleWeb2Request"
-import handleL2PS, { L2PSMessage } from "../handleL2PS"
+import handleL2PS from "../handleL2PS"
+import { L2PSMessage } from "src/libs/l2ps/parallelNetworks"
 // ? Remove this proxy if possible
 let handleXMRequest = multichainDispatcher
 
