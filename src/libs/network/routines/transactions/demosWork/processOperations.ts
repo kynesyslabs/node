@@ -1,4 +1,4 @@
-import { DemoScript } from "@kynesyslabs/demosdk/types"
+import { DemoScript, DemosWorkOperationScripts } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { OperationResult } from "./handleDemosWorkRequest"
 import handleStep from "./handleStep"
@@ -11,7 +11,7 @@ export async function processOperations(
 ): Promise<[DemoScript, OperationResult[]]> {
     let operationsResults: OperationResult[] = []
     for (const operationName of script.operationOrder) {
-        const operation = script.operations[operationName]
+        const operation: DemosWorkOperationScripts = script.operations[operationName]
         // Prepare the operation result
         let operationResult: OperationResult = {
             operation: operation,
