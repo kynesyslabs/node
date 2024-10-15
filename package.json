@@ -102,6 +102,7 @@
     "npm-check-updates": "^16.14.18",
     "nprogress": "^0.2.0",
     "ntp-client": "^0.5.3",
+    "ntp-time": "^2.0.6",
     "ntru": "^4.0.4",
     "object-sizeof": "^2.6.3",
     "openpgp": "^5.11.0",

@@ -28,6 +28,8 @@ import groundControl from "./libs/utils/demostdlib/groundControl"
 import mainLoop from "./utilities/mainLoop"
 import log from "src/utilities/logger"
 import { Peer } from "./libs/peer"
+import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
+import getTimestampCorrection from "./libs/utils/calibrateTime"
 
 const term = terminalkit.terminal
 
@@ -84,6 +86,13 @@ server_rpc()
 const peerManager = PeerManager.getInstance()
 console.log("[MAIN] peerManager started")
 
+// ANCHOR Calibrating the time
+async function calibrateTime() {
+    await getTimestampCorrection()
+    console.log("Timestamp correction: " + getSharedState.timestampCorrection)
+    console.log("Network timestamp: " + getNetworkTimestamp())
+}
+
 // ANCHOR Routine to handle parameters in advanced mode
 async function digestArguments() {
     let args = process.argv
@@ -125,6 +134,8 @@ async function digestArguments() {
 
 // ANCHOR Entry point
 async function main() {
+    // INFO Calibrating the time at the start of the node
+    await calibrateTime()
     // NOTE Overriding if necessary
     if (OVERRIDE_PORT) {
         SERVER_PORT = OVERRIDE_PORT

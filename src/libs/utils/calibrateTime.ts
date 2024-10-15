@@ -1,0 +1,80 @@
+import * as ntpClient from "ntp-client"
+import { getSharedState } from "src/utilities/sharedState"
+
+const PRIMARY_NTP_SERVER = "pool.ntp.org"
+const FALLBACK_NTP_SERVERS = [
+    "time.google.com",
+    "time.windows.com",
+    "time.apple.com",
+]
+
+export default async function getTimestampCorrection(): Promise<number> {
+    const timeDelta = await getMeasuredTimeDelta()
+    getSharedState.timestampCorrection = timeDelta
+    return timeDelta
+}
+
+export function getNetworkTimestamp(): number {
+    const correction = getSharedState.timestampCorrection
+    const networkTimestamp = Math.floor(Date.now() / 1000) + correction
+    return networkTimestamp
+}
+
+async function getMeasuredTimeDelta(): Promise<number> {
+    const startTime = Date.now()
+    const ntpTime = await getNtpTime()
+    const endTime = Date.now()
+    const roundTripTime = endTime - startTime
+    console.log("Round trip time:", roundTripTime)
+
+    const halfTripTime = Math.floor(roundTripTime / 2)
+    const halfTripTimeInSeconds = Math.floor(halfTripTime / 1000)
+    console.log("Half trip time (ntp correction in seconds):", halfTripTimeInSeconds)
+
+    const ntpTimeConsideringRoundTripTime = ntpTime - halfTripTimeInSeconds
+    const localTime = Math.floor(Date.now() / 1000)
+    const timeDelta = ntpTimeConsideringRoundTripTime - localTime
+    console.log("NTP time:", ntpTimeConsideringRoundTripTime)
+    console.log("Local time:", localTime)
+    console.log("Time delta:", timeDelta)
+    return timeDelta
+}
+
+async function getNtpTime(): Promise<number> {
+    try {
+        const time = await new Promise<Date>((resolve, reject) => {
+            ntpClient.getNetworkTime(PRIMARY_NTP_SERVER, 123, (err, date) => {
+                if (err) {
+                    reject(err)
+                } else {
+                    resolve(date)
+                }
+            })
+        })
+        return Math.floor(time.getTime() / 1000)
+    } catch (error) {
+        console.warn(`Failed to fetch time from ${PRIMARY_NTP_SERVER}:`, error)
+        return getFallbackNtpTime()
+    }
+}
+
+async function getFallbackNtpTime(): Promise<number> {
+    for (const server of FALLBACK_NTP_SERVERS) {
+        try {
+            const time = await new Promise<Date>((resolve, reject) => {
+                ntpClient.getNetworkTime(server, 123, (err, date) => {
+                    if (err) {
+                        reject(err)
+                    } else {
+                        resolve(date)
+                    }
+                })
+            })
+            return Math.floor(time.getTime() / 1000)
+        } catch (error) {
+            console.warn(`Failed to fetch time from ${server}:`, error)
+        }
+    }
+
+    throw new Error("Failed to fetch NTP time from all servers")
+}

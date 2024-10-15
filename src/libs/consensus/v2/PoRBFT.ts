@@ -26,6 +26,7 @@ import ShardManager, {
     ValidatorStatus,
     getShardManager,
 } from "./routines/shardManager"
+import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 
 /* INFO
 
@@ -161,7 +162,7 @@ function initializeConsensusState(): void {
     log.info("[consensusRoutine] Starting the consensus routine")
     getSharedState.consensusMode = true
     getSharedState.inConsensusLoop = true
-    getSharedState.lastTimestamp = Date.now()
+    getSharedState.lastTimestamp = getNetworkTimestamp()
     // Reset the startingConsensus flag
     getSharedState.startingConsensus = false
 }
