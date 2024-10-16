@@ -298,7 +298,7 @@ export default async function server_rpc(): Promise<FastifyInstance> {
 
     // Start the server
     await serverApp.listen({ port, host: "0.0.0.0" })
-    log.info("[RPC Call] Server is running on http://localhost:" + port, true)
+    log.info("[RPC Call] Server is running on 0.0.0.0:" + port, true)
 
     // Add helmet for security headers
     // await serverApp.register(helmet)
