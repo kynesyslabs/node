@@ -1,15 +1,11 @@
 import https from "https"
 import http from "http"
+import forge from "node-forge"
 import httpProxy from "http-proxy"
 import required from "src/utilities/required"
 import axios from "axios"
-import forge from "node-forge"
-
+import { URL } from "url"
 import { DAHR } from "./DAHR"
-
-import terminalKit from "terminal-kit"
-
-const term = terminalKit.terminal
 
 // TODO Move this to the SDK
 export interface IParam {
@@ -57,157 +53,144 @@ export enum EnumWeb2Methods {
 }
 
 export class Proxy {
+    private _proxyServer: httpProxy
+
     constructor(private dahr: DAHR) {
         required(this.dahr, "Missing DAHR instance")
     }
 
-    /**
-     * The proxy server used to forward HTTP requests.
-     * @type {httpProxy}
-     */
-    private proxyServer: httpProxy
-    /**
-     * The target URL where the HTTP request will be sent.
-     * @type {string}
-     */
-    private target: string
-    private targetProtocol: string
-    private targetHostname: string
-    private targetPort: number
+    private createProxyServer(target: string): void {
+        console.log(`[Web2API] Creating a proxy server for target ${target}`)
 
-    private createProxyServer(source: string, target: string): void {
-        term.yellow.bold(
-            "[Web2API] Creating a proxy server with source " +
-                source +
-                " and target " +
-                target +
-                "...\n",
-        )
+        const { protocol, hostname, port } = this._parseUrl(target)
 
-        // Parse the target URL to get the protocol, hostname, and port
-        const { protocol, hostname, port } = parseUrl(target)
-        this.targetProtocol = protocol
-        this.targetHostname = hostname
-        this.targetPort = port
+        const options: httpProxy.ServerOptions = {
+            target: { protocol, host: hostname, port },
+            changeOrigin: true,
+        }
 
-        this.proxyServer = httpProxy.createProxyServer({
-            target: {
-                protocol: this.targetProtocol,
-                host: this.targetHostname,
-                port: this.targetPort,
-            },
+        if (protocol === "https:") {
+            options.ssl = {
+                // Add your SSL options here if needed
+                rejectUnauthorized: false, // Use this only for development/testing
+            }
+        }
+
+        this._proxyServer = httpProxy.createProxyServer(options)
+
+        this._proxyServer.on("error", (err, req, res) => {
+            console.error("[Web2API] Proxy error:", err)
+            console.error("[Web2API] Request details:", {
+                method: req.method,
+                url: req.url,
+                headers: req.headers,
+            })
+            if (res instanceof http.ServerResponse) {
+                res.writeHead(500, { "Content-Type": "text/plain" })
+                res.end("Proxy error")
+            }
         })
 
-        term.yellow.bold("[Web2API] Proxy server created. \n")
-        console.log(this.proxyServer)
+        this._proxyServer.on("proxyReq", (proxyReq, req, res, options) => {
+            console.log("[Web2API] Proxying request:", {
+                method: req.method,
+                url: req.url,
+                targetUrl: options.target,
+            })
+        })
 
-        // Parse the source URL to get the protocol, hostname, and port
-        const {
-            protocol: hostProtocol,
-            hostname: sourceHostname,
-            port: sourcePort,
-        } = parseUrl(source)
+        this._proxyServer.on("proxyRes", (proxyRes, req, res) => {
+            console.log("[Web2API] Received response from target:", {
+                statusCode: proxyRes.statusCode,
+                headers: proxyRes.headers,
+            })
+        })
 
-        // Create an HTTP or HTTPS proxy server based on the hostProtocol
-        if (hostProtocol === "http:") {
-            http.createServer((req, res) => {
-                this.proxyServer.web(req, res)
-            }).listen(sourcePort, sourceHostname)
-        } else if (hostProtocol === "https:") {
-            https
-                .createServer((req, res) => {
-                    this.proxyServer.web(req, res)
-                })
-                .listen(sourcePort, sourceHostname)
-        } else {
-            console.error("Unsupported hostProtocol: " + hostProtocol)
-        }
+        this._proxyServer.on("proxyRes", (proxyRes, req, res) => {
+            res.setHeader("Access-Control-Allow-Origin", "*")
+            res.setHeader(
+                "Access-Control-Allow-Methods",
+                "GET,PUT,POST,DELETE,OPTIONS",
+            )
+            res.setHeader(
+                "Access-Control-Allow-Headers",
+                "Origin, X-Requested-With, Content-Type, Accept",
+            )
+        })
+
+        console.log("[Web2API] Proxy server created")
     }
 
-    /**
-     * Send a HTTP request.
-     * @param {string} source - The source where the proxy server will listen for incoming requests.
-     * @param {string} web2Request - Contains the target URL where the HTTP request will be sent.
-     * @param {string} targetPath - The targetPath.
-     * @param {string} targetMethod - The HTTP method that the proxy should call.
-     * @returns {Promise<any>} A HTTP promise.
-     */
-    sendHTTPRequest(
+    async sendHTTPRequest(
         source: string,
         web2Request: IWeb2Request,
         targetPath: string = "/",
         targetMethod: EnumWeb2Methods = EnumWeb2Methods.GET,
-        // TODO Need to type web2Result somehow
     ): Promise<any> {
-        console.log("sendHTTPRequest called")
+        required(web2Request.raw, "web2Request.raw")
+        required(web2Request.raw.url, "web2Request.raw.url")
 
-        const targetBody = web2Request.raw
-        this.target = web2Request.raw.url
-        this.createProxyServer(source, this.target)
-        // TODO Will need to take into consideration the case where the method is "GET" on the first hop.
-        if (!targetBody && !(targetMethod === "GET")) {
-            term.yellow.bold(
-                "[Web2API] No raw request attached. Is this right? \n",
-            )
-            // TODO Specify this as a parameter that users can set
-            this.dahr.web2Request.raw.minAttestations = 10
-            this.dahr.web2Request.raw.stage.hopNumber = 0
-        } else {
-            this.dahr.web2Request.raw = targetBody
-        }
+        const targetUrl = web2Request.raw.url
+        this.createProxyServer(targetUrl)
+
+        const { protocol, hostname, port } = this._parseUrl(targetUrl)
+        const fullUrl = `${protocol}//${hostname}${
+            port ? `:${port}` : ""
+        }${targetPath}`
 
         try {
-            return new Promise((resolve, reject) => {
-                console.log("Promise started")
-                const options = {
-                    hostname: this.targetHostname,
-                    baseURL: `${this.targetProtocol}//${this.targetHostname}`,
-                    // TODO Need to pass targetPort as a parameter
-                    /* port: this.targetPort || (this.targetProtocol === "https:" ? 443 : 80), */
-                    url: targetPath,
-                    method: targetMethod,
-                    headers: {
-                        "Content-Type": "application/json",
-                        "Content-Length": Buffer.byteLength(
-                            JSON.stringify(targetBody),
-                        ),
-                    },
-                    data: targetBody,
-                }
-
-                axios(options)
-                    .then(res => {
-                        console.log("Response received")
-                        console.log("Response ended")
-                        resolve(res.data)
-                    })
-                    .catch(error => {
-                        console.error("Request error", error)
-                        reject(error)
-                    })
-            }).catch(error => {
-                console.error("Error in Promise", error)
+            // TODO: Remove this when the target is HTTPS
+            const httpsAgent = new https.Agent({
+                rejectUnauthorized: false, // Note: This is not recommended for production
             })
+            const response = await axios({
+                method: targetMethod,
+                url: fullUrl,
+                headers: {
+                    ...web2Request.raw.headers,
+                    Host: new URL(targetUrl).host, // Ensure the correct Host header is set
+                },
+                httpsAgent,
+                data:
+                    targetMethod !== EnumWeb2Methods.GET
+                        ? web2Request.raw
+                        : undefined,
+            })
+
+            return {
+                status: response.status,
+                headers: response.headers,
+                data: response.data,
+            }
         } catch (error) {
             console.error("Error in sendHTTPRequest", error)
+            if (axios.isAxiosError(error)) {
+                console.error("Axios error details:", error.response?.data)
+                console.error("Axios error status:", error.response?.status)
+            }
+            throw error
         }
     }
 
     stopProxy(): void {
-        required(this.proxyServer, "Proxy server has not been started.")
-        term.yellow.bold(
-            "[Web2API] Stopping proxy server with target " + this.target,
-        )
+        required(this._proxyServer, "[Web2API] No proxy server to stop")
 
-        this.proxyServer.close()
+        console.log("[Web2API] Stopping proxy server")
+        this._proxyServer.close()
     }
-}
 
-function parseUrl(url: string) {
-    const parsedUrl = new URL(url)
-    const hostname = parsedUrl.hostname
-    const port = Number(parsedUrl.port)
-    const protocol = parsedUrl.protocol
-
-    return { protocol, hostname, port }
+    private _parseUrl(url: string) {
+        const parsedUrl = new URL(url)
+        return {
+            protocol: parsedUrl.protocol,
+            hostname: parsedUrl.hostname,
+            port: parsedUrl.port
+                ? Number(parsedUrl.port)
+                : parsedUrl.protocol === "https:"
+                ? 443
+                : parsedUrl.protocol === "http:"
+                ? 80
+                : undefined,
+        }
+    }
 }

@@ -1,5 +1,5 @@
+import { IWeb2Request } from "@kynesyslabs/demosdk/types"
 import { DAHR } from "src/features/web2/dahr/DAHR"
-
 import terminalKit from "terminal-kit"
 
 const term = terminalKit.terminal
@@ -9,60 +9,54 @@ const term = terminalKit.terminal
  */
 export class DAHRManager {
     private static _instance: DAHRManager
-    private static dahrs: Map<string, DAHR>
+    private dahrs: Map<string, DAHR> = new Map()
+    private idCounter = 0
 
-    /**
-     * A static property used as a counter to generate unique session IDs.
-     * @type {number}
-     */
-    private static progressive: 0
-  
     /**
      * Private constructor to prevent direct object creation.
      */
-    private constructor() {
-        DAHRManager.dahrs = new Map()
-    }
-  
+    private constructor() {}
+
     static get instance(): DAHRManager {
         if (!DAHRManager._instance) {
             term.yellow("[DAHRManager] Creating new DAHRManager instance\n")
-
             DAHRManager._instance = new DAHRManager()
         }
         return DAHRManager._instance
     }
-  
+
     /**
      * Get a DAHR instance by sessionId. If it doesn't exist, create a new one.
      * @param {string} sessionId - The session ID.
      * @returns {DAHR} The DAHR instance.
      */
-    getDAHR(sessionId: string): DAHR {
-        if (!sessionId) {
-            sessionId = String(DAHRManager.progressive)
-            DAHRManager.progressive += 1
+    getDAHR(sessionId: string, web2Request?: IWeb2Request): DAHR {
+        if (!this.dahrs.has(sessionId)) {
+            const id = (++this.idCounter).toString()
+            term.yellow("[DAHRManager] DAHR not found, creating new instance\n")
+            const newDAHR = new DAHR()
+            if (web2Request) {
+                newDAHR.web2Request = web2Request
+            }
+            this.dahrs.set(id, newDAHR)
+            return newDAHR
         }
 
-        if (!DAHRManager.dahrs.has(sessionId)) {
-            term.yellow("[DAHRManager] Creating new DAHR instance\n")
-
-            DAHRManager.dahrs.set(sessionId, new DAHR())
-        }
-
-        return DAHRManager.dahrs.get(sessionId)
+        return this.dahrs.get(sessionId)!
     }
 
     deleteDAHR(sessionId: string): void {
-        if (DAHRManager.dahrs.has(sessionId)) {
-            DAHRManager.dahrs.delete(sessionId)
-            console.log(`Instance sessionId ${sessionId} removed successfully.`)
+        if (this.dahrs.has(sessionId)) {
+            this.dahrs.delete(sessionId)
+            console.log(
+                `DAHR with sessionId ${sessionId} removed successfully.`,
+            )
         } else {
-            console.log(`No instance found with the name ${sessionId}.`)
+            console.log(`No DAHR found with sessionId ${sessionId}.`)
         }
     }
-  
+
     getAllDAHRs(): Array<[string, DAHR]> {
-      return Array.from(DAHRManager.dahrs)
+        return Array.from(this.dahrs)
     }
-  }
+}

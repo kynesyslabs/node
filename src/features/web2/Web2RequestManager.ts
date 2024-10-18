@@ -4,9 +4,7 @@ import { PeerManager } from "src/libs/peer"
 import required from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
 
-import {
-  IWeb2Attestation,
-} from "@kynesyslabs/demosdk/types"
+import { IWeb2Attestation } from "@kynesyslabs/demosdk/types"
 
 import { DAHR } from "./dahr/DAHR"
 
@@ -32,9 +30,11 @@ export class Web2RequestManager {
      * @param {Promise<any>} web2Promise - The HTTP promise to validate.
      * @returns {Promise<IWeb2Attestation>} The web2 attestation promise.
      */
-    async getAttestedResult(web2Promise: Promise<any>): Promise<IWeb2Attestation> {
+    async getAttestedResult(
+        web2Promise: Promise<any>,
+    ): Promise<IWeb2Attestation> {
         const attestedResult = this.validateWeb2Promise(web2Promise)
-        this.dahr.web2Request.raw.stage.hopNumber += 1 
+        this.dahr.web2Request.raw.stage.hop_number += 1
         return attestedResult
     }
 
@@ -43,7 +43,9 @@ export class Web2RequestManager {
      * @param {Promise<any>} web2Promise - The HTTP promise to validate.
      * @returns {Promise<IWeb2Attestation>} The web2 attestation promise.
      */
-    private async validateWeb2Promise(web2Promise: Promise<any>): Promise<IWeb2Attestation> {
+    private async validateWeb2Promise(
+        web2Promise: Promise<any>,
+    ): Promise<IWeb2Attestation> {
         term.yellow.bold("[Web2Parser] Validating...\n")
 
         const web2Result = await web2Promise
@@ -64,7 +66,6 @@ export class Web2RequestManager {
             identity: sharedState.getInstance().identity.ed25519.publicKey,
             signature: signature,
             valid: null,
-            result: web2Result,
         }
         term.bold("[Web2Parser] Attestation:\n")
         console.log(attestation)
@@ -89,7 +90,7 @@ export class Web2RequestManager {
     private async verifyWeb2Promise(): Promise<boolean> {
         required(this.dahr.web2Request, "Missing request")
         let valid = true
-        
+
         for (const key of Object.keys(this.dahr.web2Request.attestations)) {
             const attestation = this.dahr.web2Request.attestations[key]
             const stringifiedContent = JSON.stringify(this.dahr.web2Request.raw)
@@ -113,7 +114,7 @@ export class Web2RequestManager {
 
     async broadcastToNextPeer(): Promise<void> {
         required(this.dahr.web2Request, "Missing request")
-    
+
         const peerList = PeerManager.getInstance().getPeers()
         const peer = peerList[Math.floor(Math.random() * peerList.length)]
         // Forwarding the request to the selected peer
@@ -122,8 +123,8 @@ export class Web2RequestManager {
     }
 
     /**
-     * Wait for the attestations to arrive. The role of this method is to help the original rpc 
-     * receiving the web2 request to wait (with a customizable timeout) for the attestations to 
+     * Wait for the attestations to arrive. The role of this method is to help the original rpc
+     * receiving the web2 request to wait (with a customizable timeout) for the attestations to
      * arrive. The whole web2 on chain structure is designed to be as much asynchronous as possible,
      * so the receiving rpc needs to be able to wait without blocking all its services.
      *
@@ -134,7 +135,10 @@ export class Web2RequestManager {
      * @param {number} timeout - The timeout.
      * @returns {Promise<boolean>} Whether the quorum is reached.
      */
-    async quorumIsReached(quorum: number = 10, timeout: number = 9000): Promise<boolean> {
+    async quorumIsReached(
+        quorum: number = 10,
+        timeout: number = 9000,
+    ): Promise<boolean> {
         let reachedQuorum = false
         let timer = 0
         // NOTE We wait for timeout seconds before surrendering

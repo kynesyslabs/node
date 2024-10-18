@@ -12,65 +12,33 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 // REVIEW Pay attention to the return types (RPCResponse)
 
-import { handleWeb2 } from "src/features/web2/handleWeb2"
 import Chain from "src/libs/blockchain/chain"
 import Mempool, { MempoolData } from "src/libs/blockchain/mempool"
-import {
-    broadcastVerifiedNativeTransaction,
-    confirmTransaction,
-} from "src/libs/blockchain/routines/validateTransaction"
+import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
 import Transaction from "src/libs/blockchain/transaction"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
-import eggs from "src/libs/network/routines/eggs"
-import getBlockByHash from "src/libs/network/routines/nodecalls/getBlockByHash"
-import getBlockByNumber from "src/libs/network/routines/nodecalls/getBlockByNumber"
-import getBlockHeaderByHash from "src/libs/network/routines/nodecalls/getBlockHeaderByHash"
-import getBlockHeaderByNumber from "src/libs/network/routines/nodecalls/getBlockHeaderByNumber"
-import getPeerlist from "src/libs/network/routines/nodecalls/getPeerlist"
-import getPreviousHashFromBlockHash from "src/libs/network/routines/nodecalls/getPreviousHashFromBlockHash"
-import getPreviousHashFromBlockNumber from "src/libs/network/routines/nodecalls/getPreviousHashFromBlockNumber"
 import handleL2PS from "./routines/transactions/handleL2PS"
-import { normalizeWebBuffers } from "src/libs/network/routines/normalizeWebBuffers"
-import Sessions from "src/libs/network/routines/sessionManager"
-import { Peer } from "src/libs/peer"
-import { Blocks } from "src/model/entities/Blocks"
 import { getSharedState } from "src/utilities/sharedState"
-import _, { chain } from "lodash"
+import _ from "lodash"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
-
 import {
-    AddressInfo,
-    BundleContent,
     ExecutionResult,
-    IWeb2Attestation,
     IWeb2Request,
     ValidityData,
     XMScript,
     ConsensusRequest,
     RPCResponse,
 } from "@kynesyslabs/demosdk/types"
-
-import { EnumWeb2Methods } from "src/features/web2/dahr/Proxy"
-import GLS from "../blockchain/gls/gls"
-import { StatusNative } from "src/model/entities/StatusNative"
-import { DAHR } from "src/features/web2/dahr/DAHR"
-import Block from "../blockchain/block"
-import { BlockContent } from "../../../../sdks/src/types/blockchain/blocks"
-import getPeerInfo from "./routines/nodecalls/getPeerInfo"
-import forge from "node-forge"
-import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
 import { emptyResponse } from "./server_rpc"
 // SECTION Handlers for different types of transactions
-import handleWeb2Request from "./routines/transactions/handleWeb2Request"
 import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Rename to handleXMRequest
 
 // ? Note: this is to be implemented once demosWork is in place
-import { DemosWork } from "@kynesyslabs/demosdk/demoswork"
 import { DemoScript } from "@kynesyslabs/demosdk/types"
 import { ForgeToHex } from "../crypto/forgeUtils"
 
@@ -299,15 +267,13 @@ export default class ServerHandlers {
                 // TODO Add result.success handling
                 result.response = xm_result
                 break
-            case "web2Request":
-                // TODO Better types on answers
+            /*  case "web2Request":
                 payload = tx.content.data
                 var web2_result = await ServerHandlers.handleWeb2Request(
                     payload[1] as IWeb2Request,
                 )
-                // TODO Add result.success handling
                 result.response = web2_result
-                break
+                break */
             // SECTION End of legacy code
 
             case "demoswork":
@@ -393,66 +359,6 @@ export default class ServerHandlers {
         let response: RPCResponse = _.cloneDeep(emptyResponse)
         response = await handleDemosWorkRequest(content)
         return response
-    }
-
-    // Proxy method for handleWeb2Request
-    static async handleWeb2Request(
-        content: IWeb2Request,
-        senderSocket: any,
-    ): Promise<any> /*  Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
-        response = await handleWeb2Request(content) */ {
-        /* NOTE This workflow goeas as:
-         * The Web2 Operation is validated, executed and verified
-         * when applicable. Is then sent back once attested.
-         * A transaction is derived from the executed web2 operation.
-         * An operation is then created and pushed in the GLS.
-         * An operation for the gas is also pushed in the GLS.
-         * The tx is pushed in the mempool if applicable.
-         */
-        console.log("[SERVER] Received web2Request")
-        //console.log(JSON.stringify(request))
-
-        let extra: string | null = null,
-            require_reply = false
-        let response: IWeb2Attestation | null
-        // We get our connection string
-        // const currentPeerString = Identity.getInstance().getConnectionString()
-        // NOTE Switched to the new class
-
-        //console.log("[WEB2 CONTENT DUMP]")
-        //console.log(content)
-        const fullResponse = await handleWeb2(content)
-        console.log("[WEB2 CONTENT RESPONSE DUMP]")
-        console.log(fullResponse)
-
-        // Managing the results
-        if (fullResponse[0]) {
-            console.log("YES")
-            const DAHR = fullResponse[1] as DAHR
-            const localProxySource = "localhost:8000"
-            // TODO FE needs to receive a DAHR instance and call this method somehow
-            // TODO Create a interface to use as argument for the talkWithTarget method
-            response = await DAHR.talkWithTarget(
-                localProxySource,
-                content,
-                "/",
-                EnumWeb2Methods.GET,
-            )
-            const request = DAHR.web2Request
-
-            console.log("[handleWeb2] request:")
-            console.log(request)
-
-            console.log("[handleWeb2] web2Promise:")
-            console.log(response)
-        } else {
-            console.log("NO")
-            response = null
-            extra = fullResponse[1] as string
-        }
-
-        return { extra, require_reply, response }
     }
 
     // Proxy method for handleL2PS

@@ -6,7 +6,9 @@ import { IWeb2Request, XMScript } from "@kynesyslabs/demosdk/types"
 // SECTION Handlers
 import { INativePayload } from "node_modules/@kynesyslabs/demosdk/build/types/native"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
-import handleWeb2Request from "../handleWeb2Request"
+import { handleWeb2ProxyRequest } from "../handleWeb2ProxyRequest"
+import { isFullWeb2Request } from "src/features/web2/web2PayloadProcessor"
+import required from "src/utilities/required"
 // ? Remove this proxy if possible
 let handleXMRequest = multichainDispatcher
 
@@ -35,8 +37,12 @@ export default async function handleStep(step: WorkStep): Promise<StepResult> {
         let xmScript = task as XMScript
         result = await handleXMRequest.digest(xmScript)
     } else if (context === "web2") {
-        let web2Request = task as IWeb2Request
-        result = await handleWeb2Request(web2Request)
+        required(
+            isFullWeb2Request(task),
+            "Invalid Web2 request in DemosWork step",
+        )
+        const web2Request = task as IWeb2Request
+        result = await handleWeb2ProxyRequest(web2Request)
     } else if (context === "native") {
         let nativePayload = task as INativePayload
         // TODO: Implement the logic for native steps

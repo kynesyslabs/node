@@ -11,6 +11,7 @@ import fastify, {
 import {
     BrowserRequest,
     BundleContent,
+    IWeb2Payload,
     RPCRequest,
     RPCResponse,
 } from "@kynesyslabs/demosdk/types"
@@ -27,6 +28,9 @@ import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
 import { manageNodeCall, NodeCall } from "./manageNodeCall"
 import { registerMethodListingEndpoint } from "./methodListing"
 import { rpcSchema, setupOpenAPI } from "./openApiSpec"
+import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
+import { processWeb2Payload } from "src/features/web2/routines/web2PayloadProcessor"
+import required from "src/utilities/required"
 
 // Reading the port from sharedState
 
@@ -141,6 +145,16 @@ async function processPayload(
 
         case "consensus_routine": // ? Change in consensus once we have the new consensus mechanism
             return await manageConsensusRoutines(payload.params[0])
+
+        case "web2ProxyRequest": {
+            const rawPayload = payload.params[0] as IWeb2Payload
+            required(
+                rawPayload.message,
+                "Web2 proxy request message is required",
+            )
+            const web2Request = processWeb2Payload(rawPayload.message)
+            return await handleWeb2ProxyRequest(web2Request)
+        }
 
         default:
             log.warning(
