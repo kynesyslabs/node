@@ -107,6 +107,23 @@ export async function peerGossip() {
             " peers",
         false,
     )
+    if (differentPeerlistPeers.length === 0) {
+        log.custom("peerGossip", "No peers to sync with", true)
+        return
+    }
+    log.custom("peerGossip", "Different peerlist peers: " + differentPeerlistPeers.length, false)
+    // ANCHOR Merging the peerlists if needed
+    await peersGossipProcess(differentPeerlistPeers, peers)
+    // Reentry prevention
+    getSharedState.inPeerGossip = false
+    log.custom("peerGossip", "Peer gossip finished", true)
+    return
+}
+
+async function peersGossipProcess(
+    differentPeerlistPeers: Peer[],
+    ourPeerlist: Peer[],
+) {
     // ANCHOR Requesting the peerlist from the peers with different hashes
     // NOTE We don't need to send our peerlist too because the other peers will use the same approach
     let peerlistRequest: RPCRequest = {
@@ -124,22 +141,23 @@ export async function peerGossip() {
         "Requesting peerlist from peers with different hashes",
         false,
     )
+    var promises: Promise<RPCResponse>[] = []
     for (let peer of differentPeerlistPeers) {
         promises.push(peer.call(peerlistRequest))
     }
-    responses = await Promise.all(promises)
+    let responses = await Promise.all(promises)
     log.custom(
         "peerGossip",
         "Received peerlists from peers with different hashes",
         false,
     )
     // ANCHOR Merging the peerlists
-    let peerlists: Peer[][] = []
+    let peerlistsToMerge: Peer[][] = []
     for (let response of responses) {
-        peerlists.push(response.response)
+        peerlistsToMerge.push(response.response)
     }
     // Pushing our peerlist to the peerlists
-    peerlists.push(peers)
+    peerlistsToMerge.push(ourPeerlist)
     log.custom(
         "peerGossip",
         "Pushed our peerlist into the peerlists to merge",
@@ -147,12 +165,8 @@ export async function peerGossip() {
     )
     // Merging the peerlists
     log.custom("peerGossip", "Merging peerlists", false)
-    await mergePeerlists(peerlists)
+    await mergePeerlists(peerlistsToMerge)
     log.custom("peerGossip", "Peerlists merged", false)
-    // Reentry prevention
-    getSharedState.inPeerGossip = false
-    log.custom("peerGossip", "Peer gossip finished", true)
-    return
 }
 
 // Merging given peerlists into an ordered unique peerlist
