@@ -3,173 +3,86 @@ import Peer from "../Peer"
 import PeerManager from "../PeerManager"
 import { getSharedState } from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
-import Cryptography from "src/libs/crypto/cryptography"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
-import e from "express"
 
+const MAX_GOSSIP_PEERS = 10
+
+/**
+ * Initiates the peer gossip process.
+ * This function ensures that only one gossip process runs at a time.
+ */
 export async function peerGossip() {
-    // Reentry prevention
-    if (getSharedState.inPeerGossip) {
-        return
-    }
+    if (getSharedState.inPeerGossip) return
     getSharedState.inPeerGossip = true
-    log.custom("peerGossip", "Starting peer gossip", true)
-    let selectedPeers: Peer[] = []
-    // Getting our peerlist
-    let peers = PeerManager.getInstance().getPeers()
-    // NOTE If there are no peers to gossip with, we'll just return
-    if (peers.length === 0) {
+
+    try {
+        log.custom("peerGossip", "Starting peer gossip", true)
+        await performPeerGossip()
+    } finally {
+        getSharedState.inPeerGossip = false
+        log.custom("peerGossip", "Peer gossip finished", true)
+    }
+}
+
+/**
+ * Performs the main peer gossip process.
+ * This includes selecting peers, comparing peer lists, and syncing with peers that have different lists.
+ */
+async function performPeerGossip() {
+    const peerManager = PeerManager.getInstance()
+    const allPeers = peerManager.getPeers()
+    
+    if (allPeers.length === 0) {
         log.custom("peerGossip", "No peers to gossip with", true)
         return
     }
-    // NOTE If there are less than 10 peers, we'll gossip with all of them: else we select 10 random peers to gossip with
-    else if (peers.length < 10) {
-        log.custom(
-            "peerGossip",
-            "Less than 10 peers, gossiping with all of them",
-            true,
-        )
-        selectedPeers = peers
-    } else {
-        // We'll select a random subset of peers to send the peerlist hash request to
-        // TODO Use better parameters for this (round robin, active peers, ping (if we have it), etc.)
-        log.custom("peerGossip", "Selecting 10 random peers", false)
-        var randomIndices = []
-        for (let i = 0; i < 10; i++) {
-            randomIndices.push(Math.floor(Math.random() * peers.length))
-        }
-        for (let index of randomIndices) {
-            selectedPeers.push(peers[index])
-        }
-    }
-    // Ordering the peerlist in an alphanumeric way
-    peers.sort((a, b) => a.identity.localeCompare(b.identity))
-    selectedPeers.sort((a, b) => a.identity.localeCompare(b.identity))
-    log.custom("peerGossip", "Ordered our peerlist", false)
-    // Hashing the peerlist
-    let peersHash = Hashing.sha256(JSON.stringify(peers))
-    log.custom("peerGossip", "Hashed our peerlist: " + peersHash, false)
-    // ANCHOR Requesting the peerlist hashes to all peers
-    let peerlistHashRequest: RPCRequest = {
-        method: "nodeCall",
-        params: [
-            {
-                message: "getPeerlistHash",
-                data: null,
-                muid: null,
-            },
-        ],
-    }
-    // Sending the request to all peers
-    var promises: Promise<RPCResponse>[] = []
-    log.custom(
-        "peerGossip",
-        "Sending peerlist hash request to all peers",
-        false,
-    )
-    for (let peer of selectedPeers) {
-        promises.push(peer.call(peerlistHashRequest))
-    }
-    log.custom("peerGossip", "Requested peerlist hashes", false)
-    let responses = await Promise.all(promises)
-    log.custom("peerGossip", "Received peerlist hashes", false)
-    // Gathering the responses
-    var peerlistHashes = []
-    for (let response of responses) {
-        log.custom("peerGossip", "- Peerlist hash: " + response.response, false)
-        peerlistHashes.push(response.response)
-    }
 
-    // ANCHOR Checking if the peerlist hashes are the same
-    var differentPeerlistPeers: Peer[] = []
-    for (let i = 0; i < peerlistHashes.length; i++) {
-        if (peerlistHashes[i] !== peersHash) {
-            log.custom(
-                "peerGossip",
-                "[!] Peerlist hash mismatch, we will sync with this peer. Hash: " +
-                    peerlistHashes[i],
-                false,
-            )
-            differentPeerlistPeers.push(peers[i])
-        } else {
-            log.custom(
-                "peerGossip",
-                "[*] Peerlist hash match, we will not sync with this peer. Hash: " +
-                    peerlistHashes[i],
-                false,
-            )
-        }
-    }
-    log.custom(
-        "peerGossip",
-        "Checked peerlist hashes. We have to sync with " +
-            differentPeerlistPeers.length +
-            " peers",
-        false,
-    )
+    const selectedPeers = selectPeersForGossip(allPeers)
+    const orderedPeers = orderPeers(allPeers)
+    const peersHash = Hashing.sha256(JSON.stringify(orderedPeers))
+    
+    log.custom("peerGossip", `Hashed our peerlist: ${peersHash}`, false)
+
+    const peerHashResponses = await requestPeerlistHashes(selectedPeers)
+    const differentPeerlistPeers = identifyDifferentPeers(peerHashResponses, peersHash, selectedPeers)
+
     if (differentPeerlistPeers.length === 0) {
         log.custom("peerGossip", "No peers to sync with", true)
         return
     }
-    log.custom("peerGossip", "Different peerlist peers: " + differentPeerlistPeers.length, false)
-    // ANCHOR Merging the peerlists if needed
-    await peersGossipProcess(differentPeerlistPeers, peers)
-    // Reentry prevention
-    getSharedState.inPeerGossip = false
-    log.custom("peerGossip", "Peer gossip finished", true)
-    return
+
+    await peersGossipProcess(differentPeerlistPeers, orderedPeers)
 }
 
-async function peersGossipProcess(
-    differentPeerlistPeers: Peer[],
-    ourPeerlist: Peer[],
-) {
-    // ANCHOR Requesting the peerlist from the peers with different hashes
-    // NOTE We don't need to send our peerlist too because the other peers will use the same approach
-    let peerlistRequest: RPCRequest = {
+/**
+ * Processes gossip with peers that have different peer lists.
+ * Requests full peer lists from these peers and merges them.
+ * @param {Peer[]} differentPeerlistPeers - Peers with different peer list hashes.
+ * @param {Peer[]} ourPeerlist - Our current peer list.
+ */
+async function peersGossipProcess(differentPeerlistPeers: Peer[], ourPeerlist: Peer[]) {
+    const peerlistRequest: RPCRequest = {
         method: "nodeCall",
-        params: [
-            {
-                message: "getPeerlist",
-                data: null,
-                muid: null,
-            },
-        ],
+        params: [{ message: "getPeerlist", data: null, muid: null }],
     }
-    log.custom(
-        "peerGossip",
-        "Requesting peerlist from peers with different hashes",
-        false,
-    )
-    var promises: Promise<RPCResponse>[] = []
-    for (let peer of differentPeerlistPeers) {
-        promises.push(peer.call(peerlistRequest))
-    }
-    let responses = await Promise.all(promises)
-    log.custom(
-        "peerGossip",
-        "Received peerlists from peers with different hashes",
-        false,
-    )
-    // ANCHOR Merging the peerlists
-    let peerlistsToMerge: Peer[][] = []
-    for (let response of responses) {
-        peerlistsToMerge.push(response.response)
-    }
-    // Pushing our peerlist to the peerlists
+
+    log.custom("peerGossip", "Requesting peerlist from peers with different hashes", false)
+    const responses = await Promise.all(differentPeerlistPeers.map(peer => peer.call(peerlistRequest)))
+    log.custom("peerGossip", "Received peerlists from peers with different hashes", false)
+
+    const peerlistsToMerge = responses.map(response => response.response)
     peerlistsToMerge.push(ourPeerlist)
-    log.custom(
-        "peerGossip",
-        "Pushed our peerlist into the peerlists to merge",
-        false,
-    )
-    // Merging the peerlists
+
     log.custom("peerGossip", "Merging peerlists", false)
     await mergePeerlists(peerlistsToMerge)
     log.custom("peerGossip", "Peerlists merged", false)
 }
 
-// Merging given peerlists into an ordered unique peerlist
+/**
+ * Merges multiple peer lists into a single, ordered, unique peer list.
+ * @param {Peer[][]} peerlists - Array of peer lists to merge.
+ * @returns {Promise<boolean>} - Returns true when merge is complete.
+ */
 async function mergePeerlists(peerlists: Peer[][]): Promise<boolean> {
     let mergedPeerlist: Peer[] = []
     for (let peerlist of peerlists) {
@@ -179,9 +92,86 @@ async function mergePeerlists(peerlists: Peer[][]): Promise<boolean> {
             }
         }
     }
-    // Reordering the merged peerlist
     mergedPeerlist.sort((a, b) => a.identity.localeCompare(b.identity))
-    // Updating the peer manager
     PeerManager.getInstance().setPeers(mergedPeerlist)
     return true
+}
+
+/**
+ * Selects a subset of peers for gossip.
+ * @param {Peer[]} peers - All available peers.
+ * @returns {Peer[]} - Selected peers for gossip.
+ */
+function selectPeersForGossip(peers: Peer[]): Peer[] {
+    if (peers.length <= MAX_GOSSIP_PEERS) {
+        log.custom("peerGossip", `Less than ${MAX_GOSSIP_PEERS} peers, gossiping with all of them`, true)
+        return peers
+    }
+
+    log.custom("peerGossip", `Selecting ${MAX_GOSSIP_PEERS} random peers`, false)
+    return shuffleArray(peers).slice(0, MAX_GOSSIP_PEERS)
+}
+
+/**
+ * Orders peers based on their identity.
+ * @param {Peer[]} peers - Peers to order.
+ * @returns {Peer[]} - Ordered peers.
+ */
+function orderPeers(peers: Peer[]): Peer[] {
+    return [...peers].sort((a, b) => a.identity.localeCompare(b.identity))
+}
+
+/**
+ * Requests peer list hashes from selected peers.
+ * @param {Peer[]} peers - Peers to request hashes from.
+ * @returns {Promise<RPCResponse[]>} - Responses containing peer list hashes.
+ */
+async function requestPeerlistHashes(peers: Peer[]): Promise<RPCResponse[]> {
+    const peerlistHashRequest: RPCRequest = {
+        method: "nodeCall",
+        params: [{ message: "getPeerlistHash", data: null, muid: null }],
+    }
+
+    log.custom("peerGossip", "Sending peerlist hash request to selected peers", false)
+    const responses = await Promise.all(peers.map(peer => peer.call(peerlistHashRequest)))
+    log.custom("peerGossip", "Received peerlist hashes", false)
+
+    return responses
+}
+
+/**
+ * Identifies peers with different peer list hashes.
+ * @param {RPCResponse[]} responses - Responses containing peer list hashes.
+ * @param {string} ourHash - Hash of our peer list.
+ * @param {Peer[]} peers - Peers that were queried.
+ * @returns {Peer[]} - Peers with different peer list hashes.
+ */
+function identifyDifferentPeers(responses: RPCResponse[], ourHash: string, peers: Peer[]): Peer[] {
+    return responses.reduce((acc, response, index) => {
+        const peerHash = response.response
+        log.custom("peerGossip", `- Peerlist hash: ${peerHash}`, false)
+
+        if (peerHash !== ourHash) {
+            log.custom("peerGossip", `[!] Peerlist hash mismatch, we will sync with this peer. Hash: ${peerHash}`, false)
+            acc.push(peers[index])
+        } else {
+            log.custom("peerGossip", `[*] Peerlist hash match, we will not sync with this peer. Hash: ${peerHash}`, false)
+        }
+
+        return acc
+    }, [] as Peer[])
+}
+
+/**
+ * Shuffles an array using the Fisher-Yates shuffle algorithm.
+ * @param {T[]} array - Array to shuffle.
+ * @returns {T[]} - Shuffled array.
+ */
+function shuffleArray<T>(array: T[]): T[] {
+    const shuffled = [...array]
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+    }
+    return shuffled
 }
