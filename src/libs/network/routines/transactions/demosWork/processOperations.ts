@@ -25,7 +25,7 @@ export async function processOperations(
                 "[demosWork] [processOperations] Base operation detected: iterating over the works",
             )
 
-            for (const workId of operation.work) {
+            for (const workId of operation.id) {
                 const currentStep = script.steps[workId]
                 const stepResult = await handleStep(currentStep)
                 /* NOTE If a step fails, the operation is not successful and

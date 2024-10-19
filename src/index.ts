@@ -16,7 +16,7 @@ import * as dotenv from "dotenv"
 import * as fs from "fs"
 
 import { getSharedState } from "./utilities/sharedState"
-import { server_rpc } from "./libs/network"
+import { server_rpc } from "./libs/network" // NOTE This is started in warmup
 import terminalkit from "terminal-kit"
 
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
@@ -35,56 +35,32 @@ const term = terminalkit.terminal
 
 dotenv.config()
 
-// INFO Cleaning the logs directory (except custom logs)
-log.cleanLogs(false)
-
-log.info("[MAIN] Starting the node")
-
-let enough_peers = true // ? Review this
-// INFO Loading the known peers
-if (!fs.existsSync("./demos_peerlist.json")) {
-    enough_peers = false
-    console.log("No peers found, listening for peers...")
+// NOTE This is a global variable that will be used to store the warmup routine and the index needed variables
+let indexState: {
+    OVERRIDE_PORT: number | null
+    OVERRIDE_IS_TESTER: boolean | null
+    COMMANDLINE_MODE: boolean | null
+    RPC_FEE: number
+    SERVER_PORT: number
+    EXPOSED_URL: string
+    PG_PORT: number
+    enough_peers: boolean
+    PeerList: Peer[]
+    peerManager: PeerManager
+} = {
+    OVERRIDE_PORT: null,
+    OVERRIDE_IS_TESTER: null,
+    COMMANDLINE_MODE: null,
+    RPC_FEE: 10,
+    SERVER_PORT: 0,
+    EXPOSED_URL: "",
+    PG_PORT: 5332,
+    enough_peers: true,
+    PeerList: [],
+    peerManager: null,
 }
 
-// ANCHOR Overrides
-let OVERRIDE_PORT = null
-let OVERRIDE_IS_TESTER = null
-let COMMANDLINE_MODE = null
-
-let PeerList: Peer[]
-
-/* SECTION Environment variables loading and configuration */
-let RPC_FEE: number = parseInt(process.env.RPC_FEE) || 10
-// Allow overriding pg port through RPC_PG_PORT
-let PG_PORT: number = parseInt(process.env.RPC_PG_PORT, 10) || 5332
-// Allow overriding server port through RPC_PORT
-let SERVER_PORT: number = parseInt(process.env.RPC_PORT, 10) || 0
-if (SERVER_PORT == 0) {
-    SERVER_PORT = parseInt(process.env.SERVER_PORT, 10) || 53550
-}
-// Setting the server port to the shared state
-getSharedState.serverPort = SERVER_PORT
-// Exposed URL
-getSharedState.connectionString =
-    process.env.EXPOSED_URL || "http://localhost:" + SERVER_PORT
-/* !SECTION Environment variables loading and configuration */
-
-console.log("= Configured environment variables = \n")
-console.log("PG_PORT: " + PG_PORT)
-console.log("RPC_FEE: " + RPC_FEE)
-console.log("SERVER_PORT: " + SERVER_PORT)
-console.log("= End of Configuration = \n")
-// Configure the logs directory
-log.setLogsDir(SERVER_PORT)
-// ? REVIEW Starting the server_rpc: should we keep this async?
-// This should start the server_rpc without any other needed operation
-log.info("[MAIN] Starting the RPC server")
-server_rpc()
-
-// Instances of classes we need to keep in memory for the rest of the modules, as we use them as state containers which will be passed around
-const peerManager = PeerManager.getInstance()
-console.log("[MAIN] peerManager started")
+// SECTION Preparation methods
 
 // ANCHOR Calibrating the time
 async function calibrateTime() {
@@ -92,7 +68,6 @@ async function calibrateTime() {
     console.log("Timestamp correction: " + getSharedState.timestampCorrection)
     console.log("Network timestamp: " + getNetworkTimestamp())
 }
-
 // ANCHOR Routine to handle parameters in advanced mode
 async function digestArguments() {
     let args = process.argv
@@ -110,7 +85,7 @@ async function digestArguments() {
             switch (param[0]) {
                 case "port":
                     console.log("Overriding port")
-                    OVERRIDE_PORT = param[1]
+                    indexState.OVERRIDE_PORT = parseInt(param[1])
                     break
                 case "peerfile":
                     log.warning(
@@ -119,11 +94,11 @@ async function digestArguments() {
                     break
                 case "tester":
                     console.log("Starting in tester mode")
-                    OVERRIDE_IS_TESTER = true
+                    indexState.OVERRIDE_IS_TESTER = true
                     break
                 case "cli":
                     console.log("Starting in cli mode")
-                    COMMANDLINE_MODE = true
+                    indexState.COMMANDLINE_MODE = true
                     break
                 default:
                     console.log("Invalid parameter: " + param)
@@ -131,17 +106,68 @@ async function digestArguments() {
         }
     }
 }
+// ANCHOR Warmup method
+async function warmup() {
+    // INFO Cleaning the logs directory (except custom logs)
+    log.cleanLogs(false)
 
-// ANCHOR Entry point
-async function main() {
-    // INFO Calibrating the time at the start of the node
-    await calibrateTime()
-    // NOTE Overriding if necessary
-    if (OVERRIDE_PORT) {
-        SERVER_PORT = OVERRIDE_PORT
+    log.info("[MAIN] Starting the node")
+
+    indexState.enough_peers = true // ? Review this
+    // INFO Loading the known peers
+    if (!fs.existsSync("./demos_peerlist.json")) {
+        indexState.enough_peers = false
+        console.log("No peers found, listening for peers...")
     }
-    getSharedState.serverPort = SERVER_PORT // Sharing this with any module that needs it
-    getSharedState.rpcFee = RPC_FEE
+
+    // ANCHOR Overrides
+    indexState.OVERRIDE_PORT = null
+    indexState.OVERRIDE_IS_TESTER = null
+    indexState.COMMANDLINE_MODE = null
+
+    /* SECTION Environment variables loading and configuration */
+    indexState.RPC_FEE = parseInt(process.env.RPC_FEE) || 10
+    // Allow overriding pg port through RPC_PG_PORT
+    indexState.PG_PORT = parseInt(process.env.RPC_PG_PORT, 10) || 5332
+    // Allow overriding server port through RPC_PORT
+    indexState.SERVER_PORT = parseInt(process.env.RPC_PORT, 10) || 0
+    if (indexState.SERVER_PORT == 0) {
+        indexState.SERVER_PORT = parseInt(process.env.SERVER_PORT, 10) || 53550
+    }
+    // Setting the server port to the shared state
+    getSharedState.serverPort = indexState.SERVER_PORT
+    // Exposed URL
+    getSharedState.connectionString =
+        process.env.EXPOSED_URL || "http://localhost:" + indexState.SERVER_PORT
+    /* !SECTION Environment variables loading and configuration */
+
+    console.log("= Configured environment variables = \n")
+    console.log("PG_PORT: " + indexState.PG_PORT)
+    console.log("RPC_FEE: " + indexState.RPC_FEE)
+    console.log("SERVER_PORT: " + indexState.SERVER_PORT)
+    console.log("= End of Configuration = \n")
+    // Configure the logs directory
+    log.setLogsDir(indexState.SERVER_PORT)
+    // ? REVIEW Starting the server_rpc: should we keep this async?
+    // This should start the server_rpc without any other needed operation
+    log.info("[MAIN] Starting the RPC server")
+    server_rpc()
+
+    indexState.peerManager = PeerManager.getInstance()
+    console.log("[MAIN] peerManager started")
+
+    // Digest the arguments
+    await digestArguments()
+}
+// ANCHOR Preparing the main loop
+// ! Simplify this too
+async function preMainLoop() {
+    // NOTE Overriding if necessary
+    if (indexState.OVERRIDE_PORT) {
+        indexState.SERVER_PORT = indexState.OVERRIDE_PORT
+    }
+    getSharedState.serverPort = indexState.SERVER_PORT // Sharing this with any module that needs it
+    getSharedState.rpcFee = indexState.RPC_FEE
 
     // ANCHOR The whole first part of main ensures the environment is ready to run
     await getSharedState.identity.ensureIdentity() // ? Should we generate the identity option based too? (see SERVER_PORT and others    )
@@ -152,7 +178,7 @@ async function main() {
         "\n[MAIN] 🔗 WE ARE " + id.ed25519.publicKey.toString("hex") + " 🔗 \n",
     )
     // Creating ourselves as a peer // ? Should this be removed in production?
-    let ourselves = "http://127.0.0.1:" + SERVER_PORT
+    let ourselves = "http://127.0.0.1:" + indexState.SERVER_PORT
     getSharedState.connectionString = ourselves
     log.info("Our connection string is: " + ourselves)
     // And saves the public key file
@@ -162,10 +188,10 @@ async function main() {
 
     // ANCHOR Preparing the peer manager and loading the peer list
     PeerManager.getInstance().loadPeerList()
-    PeerList = PeerManager.getInstance().getPeers()
+    indexState.PeerList = PeerManager.getInstance().getPeers()
     term.green("[BOOTSTRAP] Loaded a list of peers:\n")
 
-    for (const peer of PeerList) {
+    for (const peer of indexState.PeerList) {
         console.log(peer.identity + " @ " + peer.connection.string)
     }
 
@@ -189,33 +215,44 @@ async function main() {
 
     // ANCHOR Bootstrapping the peers
     term.yellow("[BOOTSTRAP] 🌐 Bootstrapping peers...\n")
-    console.log(PeerList)
-    await peerBootstrap(PeerList)
-    // ? Remove the following code if it's not needed: peerManager.addPeer(peer) is called within peerBootstrap (hello_peer routines)
+    console.log(indexState.PeerList)
+    await peerBootstrap(indexState.PeerList)
+    // ? Remove the following code if it's not needed: indexState.peerManager.addPeer(peer) is called within peerBootstrap (hello_peer routines)
     /*for (const peer of peerList) {
         peerManager.addPeer(peer)
     }*/
 
     term.green(
-        "[BOOTSTRAP] 🌐 Peers loaded (" + peerManager.getPeers().length + ")\n",
+        "[BOOTSTRAP] 🌐 Peers loaded (" +
+            indexState.peerManager.getPeers().length +
+            ")\n",
     )
+}
 
-    //console.log(peerManager.getPeers())
+// ANCHOR Entry point
+async function main() {
+    // INFO Warming up the node (including arguments digesting)
+    await warmup()
+    // INFO Calibrating the time at the start of the node
+    await calibrateTime()
+    // INFO Preparing the main loop
+    await preMainLoop()
 
+    // ANCHOR Based on the above methods, we can now start the main loop
     // Checking for listening mode
-    if (peerManager.getPeers().length < 1) {
+    if (indexState.peerManager.getPeers().length < 1) {
         console.log("[WARNING] 🔍 No peers detected, listening...")
-        enough_peers = false
+        indexState.enough_peers = false
     }
     // TODO Enough_peers will be shared between modules so that can be checked async
-    if (enough_peers) {
+    if (indexState.enough_peers) {
         // INFO Testing the messaging endpoint
         // await message_test()
         // INFO Starting the sync loop
-        if (OVERRIDE_IS_TESTER) {
+        if (indexState.OVERRIDE_IS_TESTER) {
             // return await commandLine() // Testing mode is just for debugging or showcase purposes
         }
-        if (COMMANDLINE_MODE) {
+        if (indexState.COMMANDLINE_MODE) {
             // commandLine() // While doing the rest of the stuff needed, a comand line interface is available
         }
         term.yellow("[MAIN] ✅ Starting the background loop\n")
@@ -225,5 +262,4 @@ async function main() {
 }
 
 // INFO Starting the main routine
-digestArguments()
 main()

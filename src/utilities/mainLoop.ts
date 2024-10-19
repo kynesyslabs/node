@@ -16,8 +16,6 @@ async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
 }
 
-let hasSentNodeOnlineTx = false
-
 export default async function mainLoop() {
     log.info("[MAIN LOOP] ✅ Started")
     var cycleTimestamp: number
@@ -28,49 +26,47 @@ export default async function mainLoop() {
             "\n============================================================\n",
             true,
         )
-        // Get the current UTC time (set the currentUTCTime variable in sharedState)
+        // ANCHOR Get the current UTC time (set the currentUTCTime variable in sharedState)
         await getSharedState.getUTCTime()
         log.info(
             `[MAIN LOOP] Current UTC time: ${getSharedState.currentUTCTime}`,
         )
 
+        // Check if the main loop is paused
         if (getSharedState.mainLoopPaused) {
-            continue // Check if the main loop is paused
+            continue
         }
         // If it is not in pause, we set (or force set) the mainLoop flag to be on
         getSharedState.inMainLoop = true
 
-        // Diagnostic
+        // Diagnostic logging
         log.info("[MAIN LOOP] Logging current diagnostics", false)
         logCurrentDiagnostics()
 
-        // Execute the peer routine before the consensus loop
+        // ANCHOR Execute the peer routine before the consensus loop
         /* NOTE The peerRoutine also checks getOnlinePeers, so it works by waiting for
            getSharedState.peerRoutineRunning to be 0 so we don't get into conflicts while
            running the consensus routine. */
         let currentlyOnlinePeers: Peer[] = await peerRoutine()
         // we now have a list of online peers that can be used for consensus
 
-        // NOTE Syncing the blockchain
+        // ANCHOR Syncing the blockchain after the peer routine
         await fastSync() // REVIEW Test here
         log.info("[MAIN LOOP] Synced! 🟢", true)
-        // NOTE Using this as the timestamp of the current cycle
-        // eslint-disable-next-line no-unused-vars
-        cycleTimestamp = getSharedState.getTimestamp() // REVIEW Unused
-        // NOTE The following routine is capable of checking if the consensus time has been reached automatically with a 100 ms blocking period
 
         // SECTION Todo list for a typical consensus operation
 
-        // TODO Check if we have to forge the block now
+        // ANCHOR Check if we have to forge the block now
         let isConsensusTimeReached = await consensusTime.checkConsensusTime()
 
         log.info("[MAINLOOP]: about to check if its time for consensus", false)
 
-        if (!hasSentNodeOnlineTx && !isConsensusTimeReached) {
+        if (!isConsensusTimeReached) {
             log.info("[MAINLOOP]: is not consensus time", false)
             //await sendNodeOnlineTx()
-        }
+        } 
 
+        // ? Move this to a standalone method?
         // NOTE We need both the consensus time and the sync status to be true, to avoid
         // conflicts with the sync loop that would lead to a failure in the consensus mechanism.
         if (
@@ -97,6 +93,7 @@ export default async function mainLoop() {
                     break
                 }
             }
+            // ANCHOR Calling the consensus routine if is time for it
             await consensusRoutine()
         } else if (!getSharedState.syncStatus) {
             // ? This is a bit redundant, isn't it?
