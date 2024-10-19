@@ -5,6 +5,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import Cryptography from "src/libs/crypto/cryptography"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
+import e from "express"
 
 export async function peerGossip() {
     // Reentry prevention
@@ -85,13 +86,27 @@ export async function peerGossip() {
         if (peerlistHashes[i] !== peersHash) {
             log.custom(
                 "peerGossip",
-                "Peerlist hash mismatch, we will sync with this peer. Hash: " +
+                "[!] Peerlist hash mismatch, we will sync with this peer. Hash: " +
                     peerlistHashes[i],
                 false,
             )
             differentPeerlistPeers.push(peers[i])
+        } else {
+            log.custom(
+                "peerGossip",
+                "[*] Peerlist hash match, we will not sync with this peer. Hash: " +
+                    peerlistHashes[i],
+                false,
+            )
         }
     }
+    log.custom(
+        "peerGossip",
+        "Checked peerlist hashes. We have to sync with " +
+            differentPeerlistPeers.length +
+            " peers",
+        false,
+    )
     // ANCHOR Requesting the peerlist from the peers with different hashes
     // NOTE We don't need to send our peerlist too because the other peers will use the same approach
     let peerlistRequest: RPCRequest = {
@@ -112,7 +127,7 @@ export async function peerGossip() {
     for (let peer of differentPeerlistPeers) {
         promises.push(peer.call(peerlistRequest))
     }
-    await Promise.all(promises)
+    responses = await Promise.all(promises)
     log.custom(
         "peerGossip",
         "Received peerlists from peers with different hashes",
@@ -120,8 +135,8 @@ export async function peerGossip() {
     )
     // ANCHOR Merging the peerlists
     let peerlists: Peer[][] = []
-    for (let promise of promises) {
-        peerlists.push(promise.response)
+    for (let response of responses) {
+        peerlists.push(response.response)
     }
     // Pushing our peerlist to the peerlists
     peerlists.push(peers)
