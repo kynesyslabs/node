@@ -51,7 +51,13 @@ export async function peerGossip() {
     // ANCHOR Requesting the peerlist hashes to all peers
     let peerlistHashRequest: RPCRequest = {
         method: "nodeCall",
-        params: ["getPeerlistHash"],
+        params: [
+            {
+                message: "getPeerlistHash",
+                data: null,
+                muid: null,
+            },
+        ],
     }
     // Sending the request to all peers
     var promises = []
@@ -88,7 +94,13 @@ export async function peerGossip() {
     // NOTE We don't need to send our peerlist too because the other peers will use the same approach
     let peerlistRequest: RPCRequest = {
         method: "nodeCall",
-        params: ["getPeerlist"],
+        params: [
+            {
+                message: "getPeerlist",
+                data: null,
+                muid: null,
+            },
+        ],
     }
     log.custom(
         "peerGossip",
