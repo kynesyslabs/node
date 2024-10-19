@@ -4,7 +4,7 @@ import PeerManager from "../PeerManager"
 import { getSharedState } from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import Cryptography from "src/libs/crypto/cryptography"
-import { RPCRequest } from "@kynesyslabs/demosdk/types"
+import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 
 export async function peerGossip() {
     // Reentry prevention
@@ -13,7 +13,7 @@ export async function peerGossip() {
     }
     getSharedState.inPeerGossip = true
     log.custom("peerGossip", "Starting peer gossip", true)
-    let selectedPeers = []
+    let selectedPeers: Peer[] = []
     // Getting our peerlist
     let peers = PeerManager.getInstance().getPeers()
     // NOTE If there are no peers to gossip with, we'll just return
@@ -60,7 +60,7 @@ export async function peerGossip() {
         ],
     }
     // Sending the request to all peers
-    var promises = []
+    var promises: Promise<RPCResponse>[] = []
     log.custom(
         "peerGossip",
         "Sending peerlist hash request to all peers",
@@ -70,13 +70,15 @@ export async function peerGossip() {
         promises.push(peer.call(peerlistHashRequest))
     }
     log.custom("peerGossip", "Requested peerlist hashes", false)
-    await Promise.all(promises)
+    let responses = await Promise.all(promises)
     log.custom("peerGossip", "Received peerlist hashes", false)
     // Gathering the responses
     var peerlistHashes = []
-    for (let promise of promises) {
-        peerlistHashes.push(promise.response)
+    for (let response of responses) {
+        log.custom("peerGossip", "- Peerlist hash: " + response.response, false)
+        peerlistHashes.push(response.response)
     }
+
     // ANCHOR Checking if the peerlist hashes are the same
     var differentPeerlistPeers: Peer[] = []
     for (let i = 0; i < peerlistHashes.length; i++) {
