@@ -29,12 +29,14 @@ export default class Block {
         this.status = null
         this.content = {
             ordered_transactions: [],
-            encrypted_transactions: [], // REVIEW This should work already as it is not enforced in the database as a field
-            per_address_transactions: new Map(), // ?
+            encrypted_transactions_hashes: [], // REVIEW This should work already as it is not enforced in the database as a field
+            per_address_transaction_hashes: new Map(), // ?
             web2data: {}, // objects containing hashes of fetched web2data
             previousHash: null,
             timestamp: null,
             peerlist: [],
+            l2ps_partecipating_nodes: new Map(),
+            l2ps_banned_nodes: new Map(),
         }
         this.proposer = null
         this.validation_data = { signatures: {} }
@@ -56,7 +58,7 @@ export default class Block {
 
     // INFO Returning all the encrypted transactions for the block
     getEncryptedTransactions(): any {
-        return this.content.encrypted_transactions
+        return this.content.encrypted_transactions_hashes
     }
 
     // ANCHOR Setters

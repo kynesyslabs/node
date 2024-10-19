@@ -116,7 +116,7 @@ export class Subnet {
 
         var block = await Chain.getBlockByNumber(blockNumber)
         var blockContent: BlockContent = JSON.parse(block.content)
-        var encryptedTransactions = blockContent.encrypted_transactions
+        var encryptedTransactions = blockContent.encrypted_transactions_hashes
         response.response = encryptedTransactions
         return response
     }
