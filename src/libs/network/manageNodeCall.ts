@@ -20,6 +20,7 @@ import getBlockHeaderByHash from "./routines/nodecalls/getBlockHeaderByHash"
 import getBlockByNumber from "./routines/nodecalls/getBlockByNumber"
 import getBlockByHash from "./routines/nodecalls/getBlockByHash"
 import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
+import log from "src/utilities/logger"
 
 export interface NodeCall {
     message: string
@@ -52,6 +53,7 @@ export async function manageNodeCall(
         case "getPeerlistHash":
             var peerlist = await getPeerlist()
             response.response = Hashing.sha256(JSON.stringify(peerlist))
+            log.custom("manageNodeCall", "Peerlist hash: " + response.response, true)
             break
         // REVIEW Both below for getting the last hash (untested yet)
         case "getPreviousHashFromBlockNumber":
