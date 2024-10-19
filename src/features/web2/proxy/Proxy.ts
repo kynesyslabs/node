@@ -2,10 +2,11 @@ import https from "https"
 import http from "http"
 import forge from "node-forge"
 import httpProxy from "http-proxy"
-import required from "src/utilities/required"
-import axios from "axios"
 import { URL } from "url"
-import { DAHR } from "./DAHR"
+import axios, { AxiosResponseHeaders, RawAxiosResponseHeaders } from "axios"
+
+import required from "src/utilities/required"
+import { DAHR } from "../dahr/DAHR"
 
 // TODO Move this to the SDK
 export interface IParam {
@@ -52,11 +53,23 @@ export enum EnumWeb2Methods {
     PATCH = "PATCH",
 }
 
+// TODO Move this to the SDK
+export interface IWeb2Result {
+    status: number
+    statusText: string
+    headers: AxiosResponseHeaders | RawAxiosResponseHeaders
+    data: any
+}
+
 export class Proxy {
     private _proxyServer: httpProxy
 
-    constructor(private dahr: DAHR) {
-        required(this.dahr, "Missing DAHR instance")
+    constructor(
+        private readonly _sessionId: string,
+        private readonly _targetUrl: string,
+    ) {
+        required(this._sessionId, "Missing sessionId")
+        required(this._targetUrl, "Missing targetUrl")
     }
 
     private createProxyServer(target: string): void {
@@ -71,7 +84,7 @@ export class Proxy {
 
         if (protocol === "https:") {
             options.ssl = {
-                // Add your SSL options here if needed
+                // TODO Add your SSL options here if needed
                 rejectUnauthorized: false, // Use this only for development/testing
             }
         }
@@ -122,13 +135,16 @@ export class Proxy {
     }
 
     async sendHTTPRequest(
-        source: string,
         web2Request: IWeb2Request,
         targetPath: string = "/",
         targetMethod: EnumWeb2Methods = EnumWeb2Methods.GET,
-    ): Promise<any> {
+    ): Promise<IWeb2Result> {
         required(web2Request.raw, "web2Request.raw")
         required(web2Request.raw.url, "web2Request.raw.url")
+        required(
+            web2Request.raw.url === this._targetUrl,
+            "Proxy can only be used for its specific target URL",
+        )
 
         const targetUrl = web2Request.raw.url
         this.createProxyServer(targetUrl)
@@ -159,6 +175,7 @@ export class Proxy {
 
             return {
                 status: response.status,
+                statusText: response.statusText,
                 headers: response.headers,
                 data: response.data,
             }

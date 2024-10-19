@@ -1,5 +1,5 @@
 import { IWeb2Request } from "@kynesyslabs/demosdk/types"
-import { EnumWeb2Methods } from "src/features/web2/dahr/Proxy"
+import { EnumWeb2Methods } from "src/features/web2/proxy/Proxy"
 import required from "src/utilities/required"
 
 /**

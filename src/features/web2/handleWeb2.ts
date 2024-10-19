@@ -5,7 +5,7 @@ import required from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
 import { IWeb2Request } from "@kynesyslabs/demosdk-http/types"
 import { Web2RequestManager } from "./Web2RequestManager"
-import { DAHRManager } from "src/features/web2/dahr/DAHRManager"
+import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
 
 import terminalKit from "terminal-kit"
 import { DAHR } from "./dahr/DAHR"
@@ -18,33 +18,31 @@ const term = terminalKit.terminal
  * This function receives a request from a socket, attests and handles other attestations,
  * and then sends back to the client or to the origin rpc a DAHR instance promise.
  *
- * @param {IWeb2Request} payload - The Web2 request to handle.
+ * @param {IWeb2Request} web2Request - The Web2 request to handle.
  *
  * @returns {Promise<DAHR | string>} - Returns a DAHR instance or an error message.
  *
  * @throws Will throw an error if the operation fails.
  */
 export async function handleWeb2(
-    payload: IWeb2Request,
+    web2Request: IWeb2Request,
 ): Promise<string | DAHR> {
     // TODO Remember that web2 could need to be signed and could need a fee
     console.log("[PAYLOAD FOR WEB2] [*] Received a Web2 Payload.")
     console.log("[PAYLOAD FOR WEB2] [*] Beginning sanitization checks...")
 
-    const request: IWeb2Request = payload
     console.log(
         "[REQUEST FOR WEB2] [+] Found and loaded payload.message as expected...",
     )
 
     try {
-        const dahrManagerInstance = DAHRManager.instance
-        const dahr = dahrManagerInstance.getDAHR(payload.dahrId, payload)
-        dahr.web2Request = payload
+        const dahrFactoryInstance = DAHRFactory.instance
+        const { dahr, sessionId } = dahrFactoryInstance.createDAHR(web2Request)
         const web2RequestManager = new Web2RequestManager(dahr)
 
         console.log("[handleWeb2] DAHR instance created.")
 
-        const numOfAttestations = Object.keys(request.attestations).length
+        const numOfAttestations = Object.keys(web2Request.attestations).length
         const originalFlag = numOfAttestations === 1
         console.log("[handleWeb2] Number of attestations: " + numOfAttestations)
 

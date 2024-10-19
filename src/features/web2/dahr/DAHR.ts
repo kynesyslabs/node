@@ -1,43 +1,81 @@
-import { IRawWeb2Request, IWeb2Request } from "@kynesyslabs/demosdk/types"
+import {
+    IRawWeb2Request,
+    IWeb2Attestation,
+    IWeb2Request,
+    IWeb2Result,
+} from "@kynesyslabs/demosdk/types"
 import { Web2RequestManager } from "src/features/web2/Web2RequestManager"
-import { Proxy } from "src/features/web2/dahr/Proxy"
+import { Proxy } from "src/features/web2/proxy/Proxy"
+import { ProxyFactory } from "src/features/web2/proxy/ProxyFactory"
 import required from "src/utilities/required"
+import { generateUniqueId } from "src/utilities/generateUniqueId"
 
+//  TODO Move this to the SDK
+export interface IAttestationWithResponse extends IWeb2Attestation {
+    targetResponse: IWeb2Result
+}
+
+/**
+ * DAHR - Data Agnostic HTTPS Relay, class that handles the Web2 request and attestation process.
+ */
 export class DAHR {
-    private _proxy: Proxy
-    private _web2Request: IWeb2Request
+    private readonly _sessionId: string
+    private readonly _proxy: Proxy
 
-    constructor() {
-        this._proxy = new Proxy(this)
+    /**
+     * Constructor for the DAHR class.
+     *
+     * This constructor initializes a new DAHR (Data Agnostic HTTPS Relay) instance.
+     * It sets up the necessary components to handle Web2 requests and manage the attestation process.
+     *
+     * @param {IWeb2Request} web2Request - The Web2 request to handle. This object contains all the * necessary information about the request, including the raw request data, any existing       * results, attestations, and a hash of the request. It's used to initialize the DAHR instance * and guide its operations.
+     *
+     * The constructor performs the following actions:
+     * 1. Validates that a web2Request is provided (using the 'required' utility).
+     * 2. Creates a new Proxy instance using the ProxyFactory.
+     * 3. Generates a unique session ID for this DAHR instance.
+     *
+     * Note: The actual initialization of these components is done in the constructor body below.
+     */
+    constructor(private readonly _web2Request: IWeb2Request) {
+        required(this._web2Request, "web2Request")
+        this._sessionId = generateUniqueId()
+        this._proxy = ProxyFactory.createProxy(
+            this._sessionId,
+            this._web2Request.raw.url,
+        )
     }
 
     get web2Request(): IWeb2Request {
         return this._web2Request
     }
 
-    set web2Request(request: IWeb2Request) {
-        this._web2Request = request
+    get sessionId(): string {
+        return this._sessionId
     }
 
+    /**
+     * Talk with the target and return the attestation with the response.
+     * @param {string} path - The path to send the request to.
+     * @param {IRawWeb2Request["method"]} method - The method to send the request with.
+     * @returns {Promise<IAttestationWithResponse>} The attestation with the response.
+     */
     async talkWithTarget(
-        source: string,
         path: string,
         method: IRawWeb2Request["method"],
-    ): Promise<any> {
+    ): Promise<IAttestationWithResponse> {
         // Make sure we have a web2Request at this point
         required(this._web2Request, "web2Request")
 
         const web2RequestManager = new Web2RequestManager(this)
         const web2Response = await this._proxy.sendHTTPRequest(
-            source,
             this._web2Request,
             path,
             method,
         )
 
-        const attestedResult = await web2RequestManager.getAttestedResult(
-            web2Response,
-        )
+        const attestedResult =
+            web2RequestManager.getAttestedResult(web2Response)
 
         return {
             ...attestedResult,

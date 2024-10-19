@@ -5,6 +5,7 @@ import required from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
 
 import { IWeb2Attestation } from "@kynesyslabs/demosdk/types"
+import { IWeb2Result } from "./proxy/Proxy"
 
 import { DAHR } from "./dahr/DAHR"
 
@@ -17,8 +18,8 @@ export class Web2RequestManager {
         required(this.dahr, "Missing DAHR instance")
     }
 
-    get web2PromiseIsValid(): Promise<boolean> {
-        return this.verifyWeb2Promise()
+    get web2ResultIsValid(): boolean {
+        return this.verifyWeb2Result()
     }
 
     get numberOfAttestations(): number {
@@ -26,30 +27,25 @@ export class Web2RequestManager {
     }
 
     /**
-     * Increase hopNumber by one and return the web2 attestation promise.
-     * @param {Promise<any>} web2Promise - The HTTP promise to validate.
-     * @returns {Promise<IWeb2Attestation>} The web2 attestation promise.
+     * Increase hopNumber by one and return the web2 attestation result.
+     * @param {IWeb2Result} web2Result - The HTTP result to validate.
+     * @returns {IWeb2Attestation} The web2 attestation result.
      */
-    async getAttestedResult(
-        web2Promise: Promise<any>,
-    ): Promise<IWeb2Attestation> {
-        const attestedResult = this.validateWeb2Promise(web2Promise)
+    getAttestedResult(web2Result: IWeb2Result): IWeb2Attestation {
+        const attestedResult = this.validateWeb2Result(web2Result)
         this.dahr.web2Request.raw.stage.hop_number += 1
         return attestedResult
     }
 
     /**
      * Validate the web2 result.
-     * @param {Promise<any>} web2Promise - The HTTP promise to validate.
-     * @returns {Promise<IWeb2Attestation>} The web2 attestation promise.
+     * @param {IWeb2Result} web2Result - The HTTP result that is being validated.
+     * @returns {IWeb2Attestation} The web2 attestation.
      */
-    private async validateWeb2Promise(
-        web2Promise: Promise<any>,
-    ): Promise<IWeb2Attestation> {
+    private validateWeb2Result(web2Result: IWeb2Result): IWeb2Attestation {
         term.yellow.bold("[Web2Parser] Validating...\n")
 
-        const web2Result = await web2Promise
-        const stringedResult = JSON.stringify(await web2Promise)
+        const stringedResult = JSON.stringify(web2Result)
         const hashedResult = Hashing.sha256(stringedResult)
         this.dahr.web2Request.hash = hashedResult
         term.bold("[Web2Parser] Result:\n")
@@ -84,10 +80,10 @@ export class Web2RequestManager {
     }
 
     /**
-     * Verify the web2Promise based on the attestations. Checking attestations (one by one) and returning the result of the verification.
-     * @returns {Promise<boolean>} Whether the promise is valid.
+     * Verify the web2Result based on the attestations. Checking attestations (one by one) and returning the result of the verification.
+     * @returns {boolean} Whether the result is valid.
      */
-    private async verifyWeb2Promise(): Promise<boolean> {
+    private verifyWeb2Result(): boolean {
         required(this.dahr.web2Request, "Missing request")
         let valid = true
 

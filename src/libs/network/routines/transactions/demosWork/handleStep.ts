@@ -7,7 +7,7 @@ import { IWeb2Request, XMScript } from "@kynesyslabs/demosdk/types"
 import { INativePayload } from "node_modules/@kynesyslabs/demosdk/build/types/native"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { handleWeb2ProxyRequest } from "../handleWeb2ProxyRequest"
-import { isFullWeb2Request } from "src/features/web2/web2PayloadProcessor"
+import { isFullWeb2Request } from "src/features/web2/routines/web2PayloadProcessor"
 import required from "src/utilities/required"
 // ? Remove this proxy if possible
 let handleXMRequest = multichainDispatcher
