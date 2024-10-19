@@ -12,5 +12,7 @@ export default async function getPeerlist(): Promise<Peer[]> {
         // peer.connection.socket = null // ? What is this
         response.push(peer)
     }
+    // Ordering the peerlist in an alphanumeric way
+    response.sort((a, b) => a.identity.localeCompare(b.identity))
     return response
 }

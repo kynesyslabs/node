@@ -24,12 +24,7 @@ export async function peerlistCheck(local_list: Peer[]): Promise<Peer[]> {
 }
 
 // ANCHOR Main function
-// ! Add hostname support with autodiscovery on /info endpoint
-// ! About the above, check if thats also something we have to edit elsewhere
-/*
- ! We might want to change the hello_peer routine to also support hostname resolution
- ! Also we should probably add an environment variable for the exposed hostname
-*/
+
 export default async function peerBootstrap(
     local_list: Peer[],
 ): Promise<Peer[]> {

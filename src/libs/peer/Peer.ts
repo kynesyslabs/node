@@ -63,6 +63,25 @@ export default class Peer {
         p.status = peer.status
         return p
     }
+
+    // REVIEW Method to make the same call with multiple peers
+    static async multiCall(
+        request: RPCRequest,
+        isAuthenticated: boolean = true,
+        peers: Peer[],
+        timeout: number = 2000,
+    ): Promise<RPCResponse[]> {
+        let responses = []
+        for (let peer of peers) {
+            responses.push(peer.call(request, isAuthenticated))
+        }
+        // Waiting for all responses
+        let currentTimestamp = Date.now()
+        while (Date.now() - currentTimestamp < timeout) {
+            await new Promise(resolve => setTimeout(resolve, 100))
+        }
+        return responses
+    }
     
     // Methods to handle the peer
 

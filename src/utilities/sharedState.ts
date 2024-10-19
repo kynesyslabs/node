@@ -31,6 +31,7 @@ export default class sharedState {
     inConsensusLoop: boolean = false
     inSyncLoop: boolean = false
     inPeerRecheckLoop: boolean = false
+    inPeerGossip: boolean = false
     startingConsensus: boolean = false
     // States
     runMainLoop: boolean = true
