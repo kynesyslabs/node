@@ -4,7 +4,7 @@ import { PeerManager } from "src/libs/peer"
 import required from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
 
-import { IWeb2Attestation } from "@kynesyslabs/demosdk/types"
+import { IWeb2Attestation, IWeb2Request } from "@kynesyslabs/demosdk/types"
 import { IWeb2Result } from "./proxy/Proxy"
 
 import { DAHR } from "./dahr/DAHR"
@@ -19,7 +19,7 @@ export class Web2RequestManager {
     }
 
     get web2ResultIsValid(): boolean {
-        return this._verifyWeb2Result()
+        return this._verifyWeb2RequestAndResult()
     }
 
     get numberOfAttestations(): number {
@@ -27,63 +27,93 @@ export class Web2RequestManager {
     }
 
     /**
-     * Increase hopNumber by one and return the web2 attestation result.
-     * @param {IWeb2Result} web2Result - The HTTP result to validate.
-     * @returns {IWeb2Attestation} The web2 attestation result.
+     * Retrieves an attested result for a Web2 request.
+     *
+     * This method validates the Web2 request and its result, creates a combined attestation,
+     * increments the hop number, and returns the attestation.
+     *
+     * @param {IWeb2Result} web2Result - The result of the Web2 request to be attested.
+     * @returns {IWeb2Attestation} The combined attestation for the Web2 request and result.
      */
     getAttestedResult(web2Result: IWeb2Result): IWeb2Attestation {
-        const attestedResult = this._validateWeb2Result(web2Result)
+        const combinedAttestation = this._validateWeb2RequestAndResult(
+            this.dahr.web2Request,
+            web2Result,
+        )
+
         this.dahr.web2Request.raw.stage.hop_number += 1
-        return attestedResult
+
+        term.bold("[Web2Parser] Combined Attestation:\n")
+        console.log(combinedAttestation)
+
+        return combinedAttestation
     }
 
     /**
-     * Validate the web2 result.
-     * @param {IWeb2Result} web2Result - The HTTP result that is being validated.
+     * Validate the web2 request and result.
+     * @param {IWeb2Request} web2Request - The web2 request to validate.
+     * @param {IWeb2Result} web2Result - The web2 result to validate.
      * @returns {IWeb2Attestation} The web2 attestation.
      */
-    private _validateWeb2Result(web2Result: IWeb2Result): IWeb2Attestation {
-        term.yellow.bold("[Web2Parser] Validating...\n")
+    private _validateWeb2RequestAndResult(
+        web2Request: IWeb2Request,
+        web2Result: IWeb2Result,
+    ): IWeb2Attestation {
+        term.yellow.bold("[Web2Parser] Validating request and result...\n")
 
-        const stringedResult = JSON.stringify(web2Result)
-        const hashedResult = Hashing.sha256(stringedResult)
-        this.dahr.web2Request.hash = hashedResult
-        term.bold("[Web2Parser] Result:\n")
-        console.log(hashedResult)
+        // Combine request and result into a single object
+        const combinedData = {
+            request: web2Request.raw,
+            result: web2Result,
+        }
+
+        const stringedCombined = JSON.stringify(combinedData)
+        const hashedCombined = Hashing.sha256(stringedCombined)
+
+        term.bold("[Web2Parser] Combined hash:\n")
+        console.log(hashedCombined)
+
         const signature = Cryptography.sign(
-            hashedResult,
+            hashedCombined,
             sharedState.getInstance().identity.ed25519.privateKey,
         )
-        this.dahr.web2Request.signature = signature
 
         const attestation: IWeb2Attestation = {
-            hash: hashedResult,
+            hash: hashedCombined,
             timestamp: Date.now(),
             identity: sharedState.getInstance().identity.ed25519.publicKey,
             signature: signature,
             valid: null,
         }
-        term.bold("[Web2Parser] Attestation:\n")
+        term.bold("[Web2Parser] Combined Attestation:\n")
         console.log(attestation)
 
         const hexKey = sharedState
             .getInstance()
             .identity.ed25519.publicKey.toString("hex")
-        this.dahr.web2Request.attestations[hexKey] = attestation
-        term.bold("[Web2Parser] Added attestation to web2Request\n")
 
-        if (this.dahr.web2Request.result === undefined) {
-            this.dahr.web2Request.result = web2Result
+        // Store the attestation in the web2Request
+        web2Request.attestations[hexKey] = attestation
+
+        // Update the hash and signature of the web2Request
+        web2Request.hash = hashedCombined
+        web2Request.signature = signature
+
+        // Store the result in the web2Request if it's not already set
+        if (web2Request.result === undefined) {
+            web2Request.result = web2Result
         }
+
+        term.bold("[Web2Parser] Added combined attestation to web2Request\n")
 
         return attestation
     }
 
     /**
-     * Verify the web2Result based on the attestations. Checking attestations (one by one) and returning the result of the verification.
+     * Verify the web2Request and result based on the attestations. Checking attestations (one by one) and returning the result of the verification.
      * @returns {boolean} Whether the result is valid.
      */
-    private _verifyWeb2Result(): boolean {
+    private _verifyWeb2RequestAndResult(): boolean {
         required(this.dahr.web2Request, "Missing request")
         let valid = true
 
