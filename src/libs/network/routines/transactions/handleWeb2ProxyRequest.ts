@@ -1,4 +1,4 @@
-import { EnumWeb2Methods } from "src/features/web2/dahr/Proxy"
+import { EnumWeb2Methods } from "src/features/web2/proxy/Proxy"
 import { DAHR } from "src/features/web2/dahr/DAHR"
 import { IWeb2Request, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { handleWeb2 } from "src/features/web2/handleWeb2"
@@ -22,9 +22,8 @@ export async function handleWeb2ProxyRequest(
             return {
                 result: 200,
                 response: {
-                    sessionId: dahr.sessionId,
-                    attestation: response,
-                    targetResponse: response.targetResponse,
+                    dahr: dahr.toSerializable(),
+                    response,
                 },
                 require_reply: false,
                 extra: null,

@@ -12,7 +12,7 @@ import { generateUniqueId } from "src/utilities/generateUniqueId"
 
 //  TODO Move this to the SDK
 export interface IAttestationWithResponse extends IWeb2Attestation {
-    targetResponse: IWeb2Result
+    web2Response: IWeb2Result
 }
 
 /**
@@ -79,11 +79,31 @@ export class DAHR {
 
         return {
             ...attestedResult,
-            targetResponse: web2Response,
+            web2Response,
         }
     }
 
     stopTalkWithTarget(): void {
         this._proxy.stopProxy()
+    }
+
+    /**
+     * Convert the DAHR instance to a serializable object.
+     * @returns {{sessionId: string, web2Request: IWeb2Request}} A serializable object representing the DAHR instance.
+     */
+    toSerializable(): {
+        sessionId: string
+        web2Request: IWeb2Request
+    } {
+        return {
+            sessionId: this.sessionId,
+            web2Request: {
+                raw: this.web2Request.raw,
+                result: this.web2Request.result,
+                attestations: this.web2Request.attestations,
+                hash: this.web2Request.hash,
+                signature: this.web2Request.signature,
+            },
+        }
     }
 }

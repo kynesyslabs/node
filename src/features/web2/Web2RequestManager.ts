@@ -19,7 +19,7 @@ export class Web2RequestManager {
     }
 
     get web2ResultIsValid(): boolean {
-        return this.verifyWeb2Result()
+        return this._verifyWeb2Result()
     }
 
     get numberOfAttestations(): number {
@@ -32,7 +32,7 @@ export class Web2RequestManager {
      * @returns {IWeb2Attestation} The web2 attestation result.
      */
     getAttestedResult(web2Result: IWeb2Result): IWeb2Attestation {
-        const attestedResult = this.validateWeb2Result(web2Result)
+        const attestedResult = this._validateWeb2Result(web2Result)
         this.dahr.web2Request.raw.stage.hop_number += 1
         return attestedResult
     }
@@ -42,7 +42,7 @@ export class Web2RequestManager {
      * @param {IWeb2Result} web2Result - The HTTP result that is being validated.
      * @returns {IWeb2Attestation} The web2 attestation.
      */
-    private validateWeb2Result(web2Result: IWeb2Result): IWeb2Attestation {
+    private _validateWeb2Result(web2Result: IWeb2Result): IWeb2Attestation {
         term.yellow.bold("[Web2Parser] Validating...\n")
 
         const stringedResult = JSON.stringify(web2Result)
@@ -83,7 +83,7 @@ export class Web2RequestManager {
      * Verify the web2Result based on the attestations. Checking attestations (one by one) and returning the result of the verification.
      * @returns {boolean} Whether the result is valid.
      */
-    private verifyWeb2Result(): boolean {
+    private _verifyWeb2Result(): boolean {
         required(this.dahr.web2Request, "Missing request")
         let valid = true
 
