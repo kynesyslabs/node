@@ -202,6 +202,7 @@ export default class ShardManager {
         } // REVIEW We should wait a little if the call returns false as the node is not in the consensus loop yet and in general for all consensus_routine calls
         // Call every node in the shard that is not us to show we are in the consensus loop
         let promises = []
+        log.info("[shardManager] Shard peers: " + JSON.stringify(this.shard))
         for (let peer of this.shard) {
             if (peer.identity !== ourIdentity) {
                 promises.push(peer.longCall(statusCall, true))
