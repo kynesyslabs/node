@@ -214,8 +214,8 @@ async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
 async function mergePeerlistAndWait(shard: Peer[]): Promise<Peer[]> {
     const mergedPeerList = await mergePeerlist(shard)
     await updateValidatorStatus("mergedPeerlist", true, false, true)
-    return mergedPeerList
-    // return []
+    //return mergedPeerList
+    return []
 }
 
 // Merge and order the mempools between the shard and the local node
