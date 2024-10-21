@@ -101,7 +101,22 @@ async function peersGossipProcess(
         false,
     )
 
-    const peerlistsToMerge = responses.map(response => response.response)
+    const peerlistsToMerge = responses
+        // INFO: Filter out failed responses and convert lists to Peer objects
+        .filter(response => response.result === 200)
+        .map(response => {
+            return response.response.map((peer: Peer) => {
+                const peerInstance = new Peer()
+
+            peerInstance.identity = peer.identity
+            peerInstance.connection = peer.connection
+            peerInstance.verification = peer.verification
+            peerInstance.sync = peer.sync
+            peerInstance.status = peer.status
+
+            return peerInstance
+        })
+    })
     peerlistsToMerge.push(ourPeerlist)
 
     log.custom("peerGossip", "Merging peerlists", false)
