@@ -57,6 +57,7 @@ export default async function peerBootstrap(
         if (!verifiedPeer) {
             console.log("[PEERBOOTSTRAP] [FAILED] Failed to get peer identity: see above")
             peerManager.addOfflinePeer(blankPeer)
+            peerManager.removeOnlinePeer(blankPeer.identity)
             continue
         }
         console.log(
