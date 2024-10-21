@@ -118,6 +118,10 @@ async function mergePeerlists(peerlists: Peer[][]): Promise<boolean> {
     let mergedPeerlist: Peer[] = []
     for (let peerlist of peerlists) {
         for (let peer of peerlist) {
+            if (!peer) {
+                log.warning("[peerGossip] Peer is undefined, skipping")
+                continue
+            }
             if (!mergedPeerlist.includes(peer)) {
                 mergedPeerlist.push(peer)
             }
