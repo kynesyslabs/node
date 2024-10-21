@@ -22,6 +22,8 @@ export default async function mergePeerlist(shard: Peer[]): Promise<Peer[]> {
     await Promise.all(promises)
     // Now we should have a merged peerlist
     mergedPeerList = PeerManager.getInstance().getPeers()
-    // TODO
+    // Ordering the peerlist alphanumerically
+    mergedPeerList.sort((a, b) => a.identity.localeCompare(b.identity))
+    PeerManager.getInstance().setPeers(mergedPeerList)
     return mergedPeerList
 }

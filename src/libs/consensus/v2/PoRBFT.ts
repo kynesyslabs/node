@@ -215,9 +215,10 @@ async function mergePeerlistAndWait(shard: Peer[]): Promise<Peer[]> {
     const mergedPeerList = await mergePeerlist(shard)
     await updateValidatorStatus("mergedPeerlist", true, false, true)
     return mergedPeerList
+    // return []
 }
 
-// Merge and order the mempools between the shard and the local node    
+// Merge and order the mempools between the shard and the local node
 async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
     const ourMempool = await Mempool.getMempool()
     console.log("[consensusRoutine] Our mempool:")
@@ -230,7 +231,10 @@ async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
 }
 
 // Forge the block from the ordered transactions
-async function forgeBlock(orderedTransactions: Transaction[], peerlist: Peer[] = []): Promise<Block> {
+async function forgeBlock(
+    orderedTransactions: Transaction[],
+    peerlist: Peer[] = [],
+): Promise<Block> {
     const previousBlockHash = await Chain.getLastBlockHash()
     const lastBlockNumber = await Chain.getLastBlockNumber()
     const commonValidatorSeed = await getCommonValidatorSeed()
