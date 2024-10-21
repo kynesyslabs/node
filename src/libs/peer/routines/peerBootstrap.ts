@@ -44,52 +44,50 @@ export default async function peerBootstrap(
                 currentPublicKey,
         ) 
         // ANCHOR Connection test and hello_peer routine
-        let _currentPeerObject: Peer = new Peer(currentPeerUrl, currentPublicKey)
-        if (_currentPeerObject) {
+        const blankPeer = new Peer(currentPeerUrl, currentPublicKey)
             // Adding identity if any
-            console.log(
-                "[BOOTSTRAP] Testing " + currentPeerUrl + " identity",
-            )
-            // After this, the peer object will have an identity and thus will be verified
-            _currentPeerObject = await getPeerIdentity(
-                _currentPeerObject,
-                currentPublicKey,
-            )
-            if (!_currentPeerObject) {
-                console.log("[PEERBOOTSTRAP] [FAILED] Failed to get peer identity: see above")
-                peerManager.addOfflinePeer(_currentPeerObject)
-                continue
-            }
-            console.log(
-                "[BOOSTRAP: overriding connectionstring] " + currentPeerUrl,
-            )
-            console.log(_currentPeerObject)
-            // ! remove debug code
-            try {
-                _currentPeerObject.connection.string = currentPeerUrl // Adding this step
-            } catch (error) {
-                console.log("[PEERBOOTSTRAP] Error setting connection string: " + error)
-                log.critical("Error setting connection string: " + error)
-                continue
-            }
-            console.log(
-                "[BOOTSTRAP] OK: Valid peer " +
-                    currentPeerUrl +
-                    "\n",
-            )
-            log.info("[BOOTSTRAP] OK: Valid peer " + currentPeerUrl + "\n")
+        console.log(
+            "[BOOTSTRAP] Testing " + currentPeerUrl + " identity",
+        )
+        // After this, the peer object will have an identity and thus will be verified
+        let verifiedPeer = await getPeerIdentity(
+            blankPeer,
+            currentPublicKey,
+        )
+        if (!verifiedPeer) {
+            console.log("[PEERBOOTSTRAP] [FAILED] Failed to get peer identity: see above")
+            peerManager.addOfflinePeer(blankPeer)
+            continue
+        }
+        console.log(
+            "[BOOSTRAP: overriding connectionstring] " + currentPeerUrl,
+        )
+        console.log(verifiedPeer)
+        // ! remove debug code
+        try {
+            verifiedPeer.connection.string = currentPeerUrl // Adding this step
+        } catch (error) {
+            console.log("[PEERBOOTSTRAP] Error setting connection string: " + error)
+            log.critical("Error setting connection string: " + error)
+            continue
+        }
+        console.log(
+            "[BOOTSTRAP] OK: Valid peer " +
+                currentPeerUrl +
+                "\n",
+        )
+        log.info("[BOOTSTRAP] OK: Valid peer " + currentPeerUrl + "\n")
 
-            console.log("[BOOTSTRAP] _currentPeerObject", _currentPeerObject)
-            // This should automatically add the peer to the peer list or the offline list
-            let response =await _currentPeerObject.call({
-                method: "hello_peer",
-                params: [{
-                    url: _currentPeerObject.connection.string,
-                    publicKey: currentPublicKey,
-                }],
-            })
-            console.log("[BOOTSTRAP] Response: " + JSON.stringify(response, null, 2))
-        } 
+        console.log("[BOOTSTRAP] _currentPeerObject", verifiedPeer)
+        // This should automatically add the peer to the peer list or the offline list
+        let response =await verifiedPeer.call({
+            method: "hello_peer",
+            params: [{
+                url: verifiedPeer.connection.string,
+                publicKey: currentPublicKey,
+            }],
+        })
+        console.log("[BOOTSTRAP] Response: " + JSON.stringify(response, null, 2))
     }
     // Dying if there are no valid peers
     if (peerManager.getPeers().length == 0) {
