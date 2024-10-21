@@ -71,14 +71,18 @@ export default class Peer {
         peers: Peer[],
         timeout: number = 2000,
     ): Promise<RPCResponse[]> {
-        let responses = []
+        let promises = []
+        let responses: RPCResponse[] = []
         for (let peer of peers) {
-            responses.push(peer.call(request, isAuthenticated))
+            promises.push(peer.call(request, isAuthenticated))
         }
         // Waiting for all responses
-        let currentTimestamp = Date.now()
-        while (Date.now() - currentTimestamp < timeout) {
-            await new Promise(resolve => setTimeout(resolve, 100))
+        let start = Date.now()
+        while (Date.now() - start < timeout) {
+            responses = await Promise.all(promises)
+        }
+        if (responses.length !== promises.length) {
+            log.warning("[PEER] [MULTI CALL] Timeout reached, some responses were missed")
         }
         return responses
     }
@@ -242,7 +246,7 @@ export default class Peer {
         if (endpoint.startsWith("/")) {
             endpoint = endpoint.substring(1)
         }
-        if (this.connection.string.endsWith("/")) {
+        if (this.connection.string.endsWith("/")) { 
             this.connection.string = this.connection.string.slice(0, -1)
         }
         const url = this.connection.string + "/" + endpoint

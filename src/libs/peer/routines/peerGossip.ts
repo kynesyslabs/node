@@ -1,3 +1,17 @@
+/* INFO
+ * Peer Gossip Protocol Implementation
+ *
+ * This module manages the peer gossip process in a distributed network.
+ * It handles peer list synchronization through the following steps:
+ * 1. Initiates gossip with a subset of known peers
+ * 2. Compares peer list hashes to identify discrepancies
+ * 3. Requests full peer lists from peers with different hashes
+ * 4. Merges and updates the local peer list
+ *
+ * The process ensures network-wide consistency of peer information
+ * while minimizing unnecessary data transfer.
+ */
+
 import log from "src/utilities/logger"
 import Peer from "../Peer"
 import PeerManager from "../PeerManager"
@@ -31,7 +45,7 @@ export async function peerGossip() {
 async function performPeerGossip() {
     const peerManager = PeerManager.getInstance()
     const allPeers = peerManager.getPeers()
-    
+
     if (allPeers.length === 0) {
         log.custom("peerGossip", "No peers to gossip with", true)
         return
@@ -40,11 +54,15 @@ async function performPeerGossip() {
     const selectedPeers = selectPeersForGossip(allPeers)
     const orderedPeers = orderPeers(allPeers)
     const peersHash = Hashing.sha256(JSON.stringify(orderedPeers))
-    
+
     log.custom("peerGossip", `Hashed our peerlist: ${peersHash}`, false)
 
     const peerHashResponses = await requestPeerlistHashes(selectedPeers)
-    const differentPeerlistPeers = identifyDifferentPeers(peerHashResponses, peersHash, selectedPeers)
+    const differentPeerlistPeers = identifyDifferentPeers(
+        peerHashResponses,
+        peersHash,
+        selectedPeers,
+    )
 
     if (differentPeerlistPeers.length === 0) {
         log.custom("peerGossip", "No peers to sync with", true)
@@ -60,15 +78,28 @@ async function performPeerGossip() {
  * @param {Peer[]} differentPeerlistPeers - Peers with different peer list hashes.
  * @param {Peer[]} ourPeerlist - Our current peer list.
  */
-async function peersGossipProcess(differentPeerlistPeers: Peer[], ourPeerlist: Peer[]) {
+async function peersGossipProcess(
+    differentPeerlistPeers: Peer[],
+    ourPeerlist: Peer[],
+) {
     const peerlistRequest: RPCRequest = {
         method: "nodeCall",
         params: [{ message: "getPeerlist", data: null, muid: null }],
     }
 
-    log.custom("peerGossip", "Requesting peerlist from peers with different hashes", false)
-    const responses = await Promise.all(differentPeerlistPeers.map(peer => peer.call(peerlistRequest)))
-    log.custom("peerGossip", "Received peerlists from peers with different hashes", false)
+    log.custom(
+        "peerGossip",
+        "Requesting peerlist from peers with different hashes",
+        false,
+    )
+    const responses = await Promise.all(
+        differentPeerlistPeers.map(peer => peer.call(peerlistRequest)),
+    )
+    log.custom(
+        "peerGossip",
+        "Received peerlists from peers with different hashes",
+        false,
+    )
 
     const peerlistsToMerge = responses.map(response => response.response)
     peerlistsToMerge.push(ourPeerlist)
@@ -104,11 +135,19 @@ async function mergePeerlists(peerlists: Peer[][]): Promise<boolean> {
  */
 function selectPeersForGossip(peers: Peer[]): Peer[] {
     if (peers.length <= MAX_GOSSIP_PEERS) {
-        log.custom("peerGossip", `Less than ${MAX_GOSSIP_PEERS} peers, gossiping with all of them`, true)
+        log.custom(
+            "peerGossip",
+            `Less than ${MAX_GOSSIP_PEERS} peers, gossiping with all of them`,
+            true,
+        )
         return peers
     }
 
-    log.custom("peerGossip", `Selecting ${MAX_GOSSIP_PEERS} random peers`, false)
+    log.custom(
+        "peerGossip",
+        `Selecting ${MAX_GOSSIP_PEERS} random peers`,
+        false,
+    )
     return shuffleArray(peers).slice(0, MAX_GOSSIP_PEERS)
 }
 
@@ -132,8 +171,17 @@ async function requestPeerlistHashes(peers: Peer[]): Promise<RPCResponse[]> {
         params: [{ message: "getPeerlistHash", data: null, muid: null }],
     }
 
-    log.custom("peerGossip", "Sending peerlist hash request to selected peers", false)
-    const responses = await Promise.all(peers.map(peer => peer.call(peerlistHashRequest)))
+    log.custom(
+        "peerGossip",
+        "Sending peerlist hash request to selected peers",
+        false,
+    )
+    let promises = []
+    for (let peer of peers) {
+        console.log(`Sending peerlist hash request to ${peer.identity}`)
+        promises.push(peer.call(peerlistHashRequest))
+    }
+    const responses = await Promise.all(promises)
     log.custom("peerGossip", "Received peerlist hashes", false)
 
     return responses
@@ -146,16 +194,28 @@ async function requestPeerlistHashes(peers: Peer[]): Promise<RPCResponse[]> {
  * @param {Peer[]} peers - Peers that were queried.
  * @returns {Peer[]} - Peers with different peer list hashes.
  */
-function identifyDifferentPeers(responses: RPCResponse[], ourHash: string, peers: Peer[]): Peer[] {
+function identifyDifferentPeers(
+    responses: RPCResponse[],
+    ourHash: string,
+    peers: Peer[],
+): Peer[] {
     return responses.reduce((acc, response, index) => {
         const peerHash = response.response
         log.custom("peerGossip", `- Peerlist hash: ${peerHash}`, false)
 
         if (peerHash !== ourHash) {
-            log.custom("peerGossip", `[!] Peerlist hash mismatch, we will sync with this peer. Hash: ${peerHash}`, false)
+            log.custom(
+                "peerGossip",
+                `[!] Peerlist hash mismatch, we will sync with this peer. Hash: ${peerHash}`,
+                false,
+            )
             acc.push(peers[index])
         } else {
-            log.custom("peerGossip", `[*] Peerlist hash match, we will not sync with this peer. Hash: ${peerHash}`, false)
+            log.custom(
+                "peerGossip",
+                `[*] Peerlist hash match, we will not sync with this peer. Hash: ${peerHash}`,
+                false,
+            )
         }
 
         return acc
@@ -170,8 +230,8 @@ function identifyDifferentPeers(responses: RPCResponse[], ourHash: string, peers
 function shuffleArray<T>(array: T[]): T[] {
     const shuffled = [...array]
     for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
     }
     return shuffled
 }
