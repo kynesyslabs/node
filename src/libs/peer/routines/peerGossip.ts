@@ -178,6 +178,11 @@ async function requestPeerlistHashes(peers: Peer[]): Promise<RPCResponse[]> {
     )
     let promises = []
     for (let peer of peers) {
+        if (!peer.identity) {
+            log.custom("peerGossip", "Peer has no identity, skipping", false)
+            log.warning(`[peerGossip] Peer has no identity: ${peer}`)
+            continue
+        }
         console.log(`Sending peerlist hash request to ${peer.identity}`)
         promises.push(peer.call(peerlistHashRequest))
     }

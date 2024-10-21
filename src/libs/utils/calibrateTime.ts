@@ -1,5 +1,5 @@
 import * as ntpClient from "ntp-client"
-import { getSharedState } from "src/utilities/sharedState"
+import sharedState, { getSharedState } from "src/utilities/sharedState"
 
 const PRIMARY_NTP_SERVER = "pool.ntp.org"
 const FALLBACK_NTP_SERVERS = [
@@ -17,6 +17,8 @@ export default async function getTimestampCorrection(): Promise<number> {
 export function getNetworkTimestamp(): number {
     const correction = getSharedState.timestampCorrection
     const networkTimestamp = Math.floor(Date.now() / 1000) + correction
+    getSharedState.currentUTCTime = networkTimestamp
+    getSharedState.currentTimestamp = networkTimestamp
     return networkTimestamp
 }
 
