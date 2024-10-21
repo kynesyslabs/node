@@ -108,7 +108,7 @@ export async function consensusRoutine(): Promise<void> {
     const mempool = await mergeAndOrderMempools(shard)
 
     // REVIEW Merge the peerlist between the shard and the local node
-    const peerlist = await mergePeerlistAndWait(shard)
+    const peerlist = [] // await mergePeerlistAndWait(shard)
 
     log.info(
         "[consensusRoutine] mempool merged (aka ordered transactions)",
@@ -214,8 +214,7 @@ async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
 async function mergePeerlistAndWait(shard: Peer[]): Promise<Peer[]> {
     const mergedPeerList = await mergePeerlist(shard)
     await updateValidatorStatus("mergedPeerlist", true, false, true)
-    //return mergedPeerList
-    return []
+    return mergedPeerList
 }
 
 // Merge and order the mempools between the shard and the local node
