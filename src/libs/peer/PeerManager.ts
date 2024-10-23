@@ -189,10 +189,16 @@ export default class PeerManager {
 
     addOfflinePeer(peerInstance: Peer) {
         log.info("[PEERMANAGER] Adding offline peer " + peerInstance.connection.string, false)
-        if (this.offlinePeers[peerInstance.identity]) {
-            this.offlinePeers[peerInstance.identity] = peerInstance
-        }
+        // REVIEW: Why did we have an if here?
+        // if (this.offlinePeers[peerInstance.identity]) {
+        //     this.offlinePeers[peerInstance.identity] = peerInstance
+        // }
+        this.offlinePeers[peerInstance.identity] = peerInstance
         log.info("[PEERMANAGER] Offline peers: " + this.offlinePeers, false)
+    }
+
+    removeOnlinePeer(identity: string){
+        delete this.peerList[identity]
     }
 
     removeOfflinePeer(identity: string) {
@@ -255,6 +261,7 @@ export default class PeerManager {
                 false)
             //console.log(peer)
             PeerManager.getInstance().addPeer(peer)
+            PeerManager.getInstance().removeOfflinePeer(peer.identity)
         } else {
             log.info(
                 "[Hello Peer] Failed to connect to peer: " +
@@ -263,6 +270,7 @@ export default class PeerManager {
                 false)
             // Add the peer to the offline list
             PeerManager.getInstance().addOfflinePeer(peer)
+            PeerManager.getInstance().removeOnlinePeer(peer.identity)
         }
         getSharedState.peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
         //process.exit(0)
