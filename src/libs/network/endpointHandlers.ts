@@ -310,24 +310,18 @@ export default class ServerHandlers {
             case "demoswork":
                 var demosWorkPayload = tx.content.data
                 var demosWorkScript = demosWorkPayload[1] as DemoScript
-
-                var demoswork_result = await handleDemosWorkRequest(
-                    demosWorkScript,
-                )
-                result.response = demoswork_result
-                break
-
-            // ! The below code should be implemented in handleDemosWorkRequest
-            /*
-                var native_result = await broadcastVerifiedNativeTransaction(
-                    validatedData,
-                )
-                // NOTE We add the Transaction to the mempool as it looks valid
-                if (native_result[0]) {
-                    result.success = true
+                try {
+                    var demoswork_result = await handleDemosWorkRequest(
+                        demosWorkScript,
+                    )
+                    result.response = demoswork_result
+                } catch (e) {
+                    log.error("[handleExecuteTransaction] Error in demosWork: " + e)
+                    result.success = false
+                    result.response = e
+                    result.extra = "Error in demosWork"
                 }
-                // REVIEW Check if this is ok with types
-                result.response = native_result */
+                break
         }
         // Only if the transaction is valid we add it to the mempool
         if (result.success) {
