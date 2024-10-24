@@ -20,7 +20,7 @@ import { StatusNative } from "./entities/StatusNative"
 import { StatusProperties } from "./entities/StatusProperties"
 import { Transactions } from "./entities/Transactions"
 import { Validators } from "./entities/Validators"
-import { Identities } from "./entities/Identities"
+//import { Identities } from "./entities/Identities"
 
 class Datasource {
     private static instance: Datasource
@@ -45,7 +45,7 @@ class Datasource {
                 StatusNative,
                 Transactions,
                 Validators,
-                Identities,
+                //Identities,
             ],
             synchronize: true, // set this to false in production
             logging: false,

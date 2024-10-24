@@ -1,0 +1,99 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/24.7.17 Chrome/128.0.6613.36 Electron/32.0.1 Safari/537.36" version="24.7.17">
+  <diagram name="Pagina-1" id="nQ9tMS6J__yKkR4BQGX-">
+    <mxGraphModel dx="1115" dy="633" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-1" value="Local" style="swimlane;whiteSpace=wrap;html=1;rounded=1;fillColor=#60a917;fontColor=#ffffff;strokeColor=#2D7600;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="360" height="320" as="geometry" />
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-17" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;startArrow=classic;startFill=1;" edge="1" parent="vDSgWB9bGn45pBE5LcwN-1" source="vDSgWB9bGn45pBE5LcwN-13" target="vDSgWB9bGn45pBE5LcwN-16">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-13" value="User A" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="vDSgWB9bGn45pBE5LcwN-1">
+          <mxGeometry x="40" y="120" width="80" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-16" value="Demos&lt;br&gt;Wallet" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;rounded=1;" vertex="1" parent="vDSgWB9bGn45pBE5LcwN-1">
+          <mxGeometry x="170" y="130" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-22" value="4. Make the Solana Payment&lt;br&gt;After A&#39;s confirmation" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;curved=0;" edge="1" parent="vDSgWB9bGn45pBE5LcwN-1" target="vDSgWB9bGn45pBE5LcwN-10">
+          <mxGeometry x="0.1" relative="1" as="geometry">
+            <mxPoint x="250" y="190" as="sourcePoint" />
+            <mxPoint x="270" y="460" as="targetPoint" />
+            <Array as="points">
+              <mxPoint x="200" y="190" />
+              <mxPoint x="200" y="490" />
+            </Array>
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-2" value="Blockchain" style="swimlane;whiteSpace=wrap;html=1;rounded=1;fillColor=#1ba1e2;fontColor=#ffffff;strokeColor=#006EAF;" vertex="1" parent="1">
+          <mxGeometry x="400" y="40" width="360" height="320" as="geometry" />
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-19" value="2. Gets A&lt;br&gt;Solana&lt;br&gt;Identity" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;startArrow=classic;startFill=1;" edge="1" parent="vDSgWB9bGn45pBE5LcwN-2" source="vDSgWB9bGn45pBE5LcwN-4" target="vDSgWB9bGn45pBE5LcwN-5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-4" value="RPC" style="shape=cube;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;darkOpacity=0.05;darkOpacity2=0.1;" vertex="1" parent="vDSgWB9bGn45pBE5LcwN-2">
+          <mxGeometry x="70" y="110" width="80" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-5" value="Blockchain" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;" vertex="1" parent="vDSgWB9bGn45pBE5LcwN-2">
+          <mxGeometry x="240" y="110" width="80" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-28" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=oval;endFill=1;startArrow=classic;startFill=1;" edge="1" parent="vDSgWB9bGn45pBE5LcwN-2" source="vDSgWB9bGn45pBE5LcwN-24">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="140" y="265" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-24" value="&lt;span style=&quot;background-color: rgb(13, 13, 13);&quot;&gt;6. Execution&lt;/span&gt;" style="html=1;verticalLabelPosition=bottom;align=center;labelBackgroundColor=#ffffff;verticalAlign=top;strokeWidth=2;strokeColor=#0080F0;shadow=0;dashed=0;shape=mxgraph.ios7.icons.settings;" vertex="1" parent="vDSgWB9bGn45pBE5LcwN-2">
+          <mxGeometry x="265" y="250" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-6" value="StatusNative" style="swimlane;whiteSpace=wrap;html=1;rounded=1;fillColor=#1ba1e2;fontColor=#ffffff;strokeColor=#006EAF;" vertex="1" parent="1">
+          <mxGeometry x="827" y="100" width="200" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-7" value="Stored&lt;br&gt;Identities" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;" vertex="1" parent="vDSgWB9bGn45pBE5LcwN-6">
+          <mxGeometry x="60" y="50" width="80" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;startArrow=classic;startFill=0;" edge="1" parent="1" source="vDSgWB9bGn45pBE5LcwN-5" target="vDSgWB9bGn45pBE5LcwN-6">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-9" value="Remote Context" style="swimlane;whiteSpace=wrap;html=1;rounded=1;fillColor=#6a00ff;fontColor=#ffffff;strokeColor=#3700CC;" vertex="1" parent="1">
+          <mxGeometry x="260" y="430" width="270" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="vDSgWB9bGn45pBE5LcwN-9" source="vDSgWB9bGn45pBE5LcwN-10" target="vDSgWB9bGn45pBE5LcwN-11">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-10" value="A&#39;s wallet" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="vDSgWB9bGn45pBE5LcwN-9">
+          <mxGeometry x="30" y="60" width="80" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-11" value="Gas Tank" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="vDSgWB9bGn45pBE5LcwN-9">
+          <mxGeometry x="150" y="60" width="80" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-18" value="1. Requests&lt;br&gt;Tx&lt;br&gt;With Solana&lt;br&gt;Gas Payment" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="vDSgWB9bGn45pBE5LcwN-16" target="vDSgWB9bGn45pBE5LcwN-4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-21" value="3. Asks for a Solana Payment&lt;br&gt;to the Gas Tank" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;curved=0;" edge="1" parent="1" source="vDSgWB9bGn45pBE5LcwN-4" target="vDSgWB9bGn45pBE5LcwN-16">
+          <mxGeometry x="-0.0968" relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="520" y="270" />
+              <mxPoint x="270" y="270" />
+            </Array>
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-23" value="5. Checks and notify when the&lt;br&gt;Gas Tank has been paid by A" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;endArrow=none;endFill=0;startArrow=classic;startFill=1;curved=0;" edge="1" parent="1" source="vDSgWB9bGn45pBE5LcwN-4" target="vDSgWB9bGn45pBE5LcwN-11">
+          <mxGeometry x="-0.0909" relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="540" y="530" />
+            </Array>
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="vDSgWB9bGn45pBE5LcwN-29" value="&lt;h1 style=&quot;margin-top: 0px;&quot;&gt;Cross Context Identities&lt;/h1&gt;&lt;p&gt;In this example, Gas Tanks mechanism is built on the CCI framework powering Demos network identities management. By following the numbers, you will be able to see step by step what happens in such a workflow.&lt;/p&gt;" style="text;html=1;whiteSpace=wrap;overflow=hidden;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="760" y="440" width="290" height="120" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
