@@ -22,6 +22,7 @@ import Block from "./block"
 // INFO Singleton Mempool class
 import Transaction from "./transaction"
 import { ISignature } from "@kynesyslabs/demosdk/types"
+import log from "src/utilities/logger"
 
 export interface MempoolData {
     number: number
@@ -65,7 +66,9 @@ export default class Mempool {
                 .getDataSource()
                 .getRepository(MempoolEntity)
 
-            await mempoolRepository.save(newMempool)
+            const result = await mempoolRepository.save(newMempool)
+            log.info("[MEMPOOL MANAGER] New mempool created:")
+            log.info("[MEMPOOL MANAGER] Awaited mempool data: " + JSON.stringify(result))
 
             results = await mempoolRepository.findBy({ current: 1 })
         }
