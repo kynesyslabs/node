@@ -171,6 +171,9 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
             log.info("[fastSync] Asking for transactions in the block", true)
             let txs = await askTxsForBlock(block, highestBlockNumberPeer)
             log.info("[fastSync] Transactions received: " + txs.length, true)
+            
+            // ! Sync the native tables
+            await syncNativeTables()
 
             // REVIEW Insert the txs into the transactions database table
             if (txs.length > 0) {
@@ -196,6 +199,10 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
     }
     getSharedState.syncStatus = true
     return true
+}
+
+export async function syncNativeTables() {
+    // ! Implement this
 }
 
 // Helper function to ask for the transactions in a block
