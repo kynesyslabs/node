@@ -3,7 +3,7 @@ import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import required from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
-import { IWeb2Request } from "@kynesyslabs/demosdk-http/types"
+import { IWeb2Request } from "@kynesyslabs/demosdk/types"
 import { Web2RequestManager } from "./Web2RequestManager"
 import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
 
@@ -19,6 +19,7 @@ const term = terminalKit.terminal
  * and then sends back to the client or to the origin rpc a DAHR instance promise.
  *
  * @param {IWeb2Request} web2Request - The Web2 request to handle.
+ * @param {string} sessionId - The session ID.
  *
  * @returns {Promise<DAHR | string>} - Returns a DAHR instance or an error message.
  *
@@ -37,7 +38,7 @@ export async function handleWeb2(
 
     try {
         const dahrFactoryInstance = DAHRFactory.instance
-        const { dahr, sessionId } = dahrFactoryInstance.createDAHR(web2Request)
+        const dahr = dahrFactoryInstance.createDAHR(web2Request)
         const web2RequestManager = new Web2RequestManager(dahr)
 
         console.log("[handleWeb2] DAHR instance created.")

@@ -1,4 +1,4 @@
-import { IWeb2Request } from "@kynesyslabs/demosdk/types"
+import { IParam, IWeb2Request } from "@kynesyslabs/demosdk/types"
 import { EnumWeb2Methods } from "src/features/web2/proxy/Proxy"
 import required from "src/utilities/required"
 
@@ -6,10 +6,13 @@ import required from "src/utilities/required"
  * Represents a simplified payload for Web2 proxy requests.
  */
 interface ISimplifiedWeb2Payload {
-    dahrId?: string
+    action?: string
+    parameters?: IParam[]
+    requestedParameters?: [] | null
+    method: EnumWeb2Methods
     url: string
-    method?: EnumWeb2Methods
     headers?: Record<string, string>
+    sessionId: string
 }
 
 /**
@@ -55,6 +58,7 @@ function validateFullWeb2Request(request: IWeb2Request): void {
 
 function createFullWeb2Request(payload: ISimplifiedWeb2Payload): IWeb2Request {
     required(payload.url, "URL is required in simplified Web2 payload")
+    required(payload.method, "Method is required in simplified Web2 payload")
     const method = payload.method || EnumWeb2Methods.GET
     required(
         Object.values(EnumWeb2Methods).includes(method),
@@ -62,11 +66,10 @@ function createFullWeb2Request(payload: ISimplifiedWeb2Payload): IWeb2Request {
     )
 
     return {
-        dahrId: payload.dahrId,
         raw: {
-            action: method,
-            parameters: [],
-            requestedParameters: null,
+            action: payload.action || "",
+            parameters: payload.parameters || [],
+            requestedParameters: payload.requestedParameters || [],
             method: method,
             url: payload.url,
             headers: payload.headers || {},

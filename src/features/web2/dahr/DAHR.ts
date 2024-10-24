@@ -55,12 +55,12 @@ export class DAHR {
     }
 
     /**
-     * Talk with the target and return the attestation with the response.
+     * Start the proxy and return the attestation with the response.
      * @param {string} path - The path to send the request to.
      * @param {IRawWeb2Request["method"]} method - The method to send the request with.
      * @returns {Promise<IAttestationWithResponse>} The attestation with the response.
      */
-    async talkWithTarget(
+    async startProxy(
         path: string,
         method: IRawWeb2Request["method"],
     ): Promise<IAttestationWithResponse> {
@@ -83,7 +83,7 @@ export class DAHR {
         }
     }
 
-    stopTalkWithTarget(): void {
+    stopProxy(): void {
         this._proxy.stopProxy()
     }
 
@@ -94,6 +94,8 @@ export class DAHR {
     toSerializable(): {
         sessionId: string
         web2Request: IWeb2Request
+        startProxy: string
+        stopProxy: string
     } {
         return {
             sessionId: this.sessionId,
@@ -104,6 +106,8 @@ export class DAHR {
                 hash: this.web2Request.hash,
                 signature: this.web2Request.signature,
             },
+            startProxy: "web2ProxyRequest",
+            stopProxy: "web2ProxyRequest",
         }
     }
 }

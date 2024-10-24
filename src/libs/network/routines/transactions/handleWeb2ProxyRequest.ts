@@ -1,46 +1,103 @@
-import { EnumWeb2Methods } from "src/features/web2/proxy/Proxy"
 import { DAHR } from "src/features/web2/dahr/DAHR"
 import { IWeb2Request, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { handleWeb2 } from "src/features/web2/handleWeb2"
-import { processWeb2Payload } from "src/features/web2/routines/web2PayloadProcessor"
+import { EnumWeb2Methods } from "src/features/web2/proxy/Proxy"
+import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
 
+interface StartProxyParams {
+    sessionId: string
+    url: string
+    method: EnumWeb2Methods
+}
+
+/**
+ * Handles the web2 proxy request.
+ * @param request - The web2 request or start proxy parameters.
+ * @param action - The action to perform.
+ * @param sessionId - The session ID.
+ * @returns The RPC response.
+ */
 export async function handleWeb2ProxyRequest(
-    payload: IWeb2Request,
+    request: IWeb2Request | StartProxyParams,
+    action: "create" | "startProxy" | "stopProxy" = "create",
+    sessionId: string,
 ): Promise<RPCResponse> {
-    const request = processWeb2Payload(payload)
-
     try {
-        const dahrOrError = await handleWeb2(request)
+        switch (action) {
+            case "create": {
+                const isDahrOrError = await handleWeb2(request as IWeb2Request)
 
-        if (dahrOrError instanceof DAHR) {
-            const dahr = dahrOrError
-            const response = await dahr.talkWithTarget(
-                "/",
-                dahr.web2Request.raw.method as EnumWeb2Methods,
-            )
+                if (isDahrOrError instanceof DAHR) {
+                    const dahr = isDahrOrError
 
-            return {
-                result: 200,
-                response: {
-                    dahr: dahr.toSerializable(),
-                    response,
-                },
-                require_reply: false,
-                extra: null,
-            } as RPCResponse
-        } else {
-            const dahrError = dahrOrError
-            console.error(
-                "handleWeb2 did not return a DAHR instance:",
-                dahrOrError,
-            )
+                    return {
+                        result: 200,
+                        response: {
+                            dahr: dahr.toSerializable(),
+                        },
+                        require_reply: false,
+                        extra: null,
+                    } as RPCResponse
+                } else {
+                    console.error(
+                        "handleWeb2 did not return a DAHR instance:",
+                        isDahrOrError,
+                    )
+                    return {
+                        result: 400,
+                        response: isDahrOrError,
+                        require_reply: false,
+                        extra: "An error occurred while handling the web2 request",
+                    } as RPCResponse
+                }
+            }
 
-            return {
-                result: 400,
-                response: dahrError,
-                require_reply: false,
-                extra: "An error occurred while handling the web2 request",
-            } as RPCResponse
+            case "startProxy": {
+                const dahr = _getDAHRInstance(sessionId)
+                if (!dahr) {
+                    return {
+                        result: 400,
+                        response: null,
+                        require_reply: false,
+                        extra: "DAHR instance not found",
+                    } as RPCResponse
+                }
+                const { url, method } = request as StartProxyParams
+                const response = await dahr.startProxy(url, method)
+                return {
+                    result: 200,
+                    response: response,
+                    require_reply: false,
+                    extra: null,
+                } as RPCResponse
+            }
+
+            case "stopProxy": {
+                const dahr = _getDAHRInstance(sessionId)
+                if (!dahr) {
+                    return {
+                        result: 400,
+                        response: null,
+                        require_reply: false,
+                        extra: "DAHR instance not found",
+                    } as RPCResponse
+                }
+                dahr.stopProxy()
+                return {
+                    result: 200,
+                    response: { message: "Proxy stopped successfully" },
+                    require_reply: false,
+                    extra: null,
+                } as RPCResponse
+            }
+            default: {
+                return {
+                    result: 400,
+                    response: null,
+                    require_reply: false,
+                    extra: `Unsupported action: ${action}`,
+                } as RPCResponse
+            }
         }
     } catch (error: any) {
         console.error("Error in handleWeb2ProxyRequest:", error)
@@ -52,4 +109,18 @@ export async function handleWeb2ProxyRequest(
             extra: error.message,
         } as RPCResponse
     }
+}
+
+/**
+ * Retrieves the DAHR instance for the given session ID.
+ * @param sessionId - The session ID.
+ * @returns The DAHR instance or null if not found.
+ */
+function _getDAHRInstance(sessionId: string): DAHR | null {
+    const dahr = DAHRFactory.instance.getDAHR(sessionId)
+    if (!dahr) {
+        console.error(`DAHR instance not found for sessionId: ${sessionId}`)
+        return null
+    }
+    return dahr
 }

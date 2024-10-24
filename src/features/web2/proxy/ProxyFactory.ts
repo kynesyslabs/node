@@ -8,38 +8,38 @@ export class ProxyFactory {
 
     /**
      * Create a new Proxy instance.
-     * @param {string} sessionId - The session ID.
+     * @param {string} dahrSessionId - The session ID.
      * @param {string} targetUrl - The target URL.
      * @returns {Proxy} The created Proxy instance.
      */
-    static createProxy(sessionId: string, targetUrl: string): Proxy {
-        if (this._proxyInstances.has(sessionId)) {
-            return this._proxyInstances.get(sessionId)!
+    static createProxy(dahrSessionId: string, targetUrl: string): Proxy {
+        if (this._proxyInstances.has(dahrSessionId)) {
+            return this._proxyInstances.get(dahrSessionId)!
         }
 
-        const newProxy = new Proxy(sessionId, targetUrl)
-        this._proxyInstances.set(sessionId, newProxy)
+        const newProxy = new Proxy(dahrSessionId, targetUrl)
+        this._proxyInstances.set(dahrSessionId, newProxy)
         return newProxy
     }
 
     /**
      * Get a Proxy instance by sessionId.
-     * @param {string} sessionId - The session ID.
+     * @param {string} dahrSessionId - The session ID.
      * @returns {Proxy | undefined} The Proxy instance if found, undefined otherwise.
      */
-    static getProxy(sessionId: string): Proxy | undefined {
-        return this._proxyInstances.get(sessionId)
+    static getProxy(dahrSessionId: string): Proxy | undefined {
+        return this._proxyInstances.get(dahrSessionId)
     }
 
     /**
      * Remove a Proxy instance by sessionId.
-     * @param {string} sessionId - The session ID.
+     * @param {string} dahrSessionId - The session ID.
      */
-    static removeProxy(sessionId: string): void {
-        const proxy = this._proxyInstances.get(sessionId)
+    static removeProxy(dahrSessionId: string): void {
+        const proxy = this._proxyInstances.get(dahrSessionId)
         if (proxy) {
             proxy.stopProxy()
-            this._proxyInstances.delete(sessionId)
+            this._proxyInstances.delete(dahrSessionId)
         }
     }
 }

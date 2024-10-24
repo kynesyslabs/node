@@ -12,6 +12,7 @@ import {
     BrowserRequest,
     BundleContent,
     IWeb2Payload,
+    IWeb2Request,
     RPCRequest,
     RPCResponse,
 } from "@kynesyslabs/demosdk/types"
@@ -147,13 +148,19 @@ async function processPayload(
             return await manageConsensusRoutines(payload.params[0])
 
         case "web2ProxyRequest": {
-            const rawPayload = payload.params[0] as IWeb2Payload
+            const rawPayload = payload.params[0]
             required(
                 rawPayload.message,
                 "Web2 proxy request message is required",
             )
-            const web2Request = processWeb2Payload(rawPayload.message)
-            return await handleWeb2ProxyRequest(web2Request)
+            const { action, sessionId, ...messageData } = rawPayload.message
+            const web2Request = processWeb2Payload(messageData)
+
+            return await handleWeb2ProxyRequest(
+                web2Request,
+                action as "create" | "startProxy" | "stopProxy",
+                sessionId,
+            )
         }
 
         default:

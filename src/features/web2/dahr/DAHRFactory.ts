@@ -50,9 +50,9 @@ export class DAHRFactory {
     /**
      * Create a new DAHR instance.
      * @param {IWeb2Request} web2Request - The Web2 request to handle.
-     * @returns {sessionId: string, dahr: DAHR} The sessionId and DAHR instance.
+     * @returns {DAHR} The DAHR instance.
      */
-    createDAHR(web2Request: IWeb2Request): { sessionId: string; dahr: DAHR } {
+    createDAHR(web2Request: IWeb2Request): DAHR {
         this._cleanupExpired()
         const newDAHR = new DAHR(web2Request)
         const sessionId = newDAHR.sessionId // Get the sessionId from the DAHR instance
@@ -61,7 +61,7 @@ export class DAHRFactory {
         )
         this._dahrs.set(sessionId, { dahr: newDAHR, lastAccess: Date.now() })
 
-        return { sessionId, dahr: newDAHR }
+        return newDAHR
     }
 
     /**

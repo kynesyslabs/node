@@ -1,50 +1,13 @@
 import https from "https"
 import http from "http"
-import forge from "node-forge"
 import httpProxy from "http-proxy"
 import { URL } from "url"
 import axios, { AxiosResponseHeaders, RawAxiosResponseHeaders } from "axios"
+import { IWeb2Request } from "@kynesyslabs/demosdk/types"
 
 import required from "src/utilities/required"
-import { DAHR } from "../dahr/DAHR"
 
-// TODO Move this to the SDK
-export interface IParam {
-    name: string // Ignored in POST requests
-    value: any
-}
-
-// TODO Move this to the SDK
-export interface IRawWeb2Request {
-    action: string
-    parameters: IParam[]
-    requestedParameters: [] | null
-    method: EnumWeb2Methods
-    url: string
-    headers: any
-    minAttestations: number
-    // Handling the various stages of an IWeb2Request
-    stage: {
-        // The one that will handle the response too
-        origin: {
-            identity: forge.pki.ed25519.BinaryBuffer
-            connection_url: string
-        }
-        // Starting from 0, each attestation it is increased
-        hop_number: number
-    }
-}
-
-// TODO Move this to the SDK
-export interface IWeb2Request {
-    raw: IRawWeb2Request
-    result: any
-    attestations: {}
-    hash: string
-    signature?: forge.pki.ed25519.BinaryBuffer
-}
-
-// TODO Move this to the SDK
+// TODO Export this from the SDK
 export enum EnumWeb2Methods {
     GET = "GET",
     POST = "POST",
@@ -61,17 +24,24 @@ export interface IWeb2Result {
     data: any
 }
 
+/**
+ * The Proxy class is responsible for creating and managing the proxy server.
+ */
 export class Proxy {
     private _proxyServer: httpProxy
 
     constructor(
-        private readonly _sessionId: string,
+        private readonly _dahrSessionId: string,
         private readonly _targetUrl: string,
     ) {
-        required(this._sessionId, "Missing sessionId")
+        required(this._dahrSessionId, "Missing dahr session Id")
         required(this._targetUrl, "Missing targetUrl")
     }
 
+    /**
+     * Creates the proxy server.
+     * @param target - The target URL.
+     */
     private createProxyServer(target: string): void {
         console.log(`[Web2API] Creating a proxy server for target ${target}`)
 
@@ -134,10 +104,17 @@ export class Proxy {
         console.log("[Web2API] Proxy server created")
     }
 
+    /**
+     * Sends an HTTP request through the proxy.
+     * @param web2Request - The Web2 request.
+     * @param targetPath - The target path.
+     * @param targetMethod - The target method.
+     * @returns The Web2 result.
+     */
     async sendHTTPRequest(
         web2Request: IWeb2Request,
         targetPath: string = "/",
-        targetMethod: EnumWeb2Methods = EnumWeb2Methods.GET,
+        targetMethod: EnumWeb2Methods,
     ): Promise<IWeb2Result> {
         required(web2Request.raw, "web2Request.raw")
         required(web2Request.raw.url, "web2Request.raw.url")
@@ -155,18 +132,13 @@ export class Proxy {
         }${targetPath}`
 
         try {
-            // TODO: Remove this when the target is HTTPS
-            const httpsAgent = new https.Agent({
-                rejectUnauthorized: false, // Note: This is not recommended for production
-            })
             const response = await axios({
                 method: targetMethod,
                 url: fullUrl,
                 headers: {
                     ...web2Request.raw.headers,
-                    Host: new URL(targetUrl).host, // Ensure the correct Host header is set
+                    Host: new URL(targetUrl).host,
                 },
-                httpsAgent,
                 data:
                     targetMethod !== EnumWeb2Methods.GET
                         ? web2Request.raw
@@ -185,10 +157,23 @@ export class Proxy {
                 console.error("Axios error details:", error.response?.data)
                 console.error("Axios error status:", error.response?.status)
             }
+            if (
+                axios.isAxiosError(error) &&
+                error.code === "CERT_HAS_EXPIRED"
+            ) {
+                console.warn(
+                    "The target server has an expired SSL certificate:",
+                    targetUrl,
+                )
+                // Handle this case as needed, maybe return a specific error to the client
+            }
             throw error
         }
     }
 
+    /**
+     * Stops the proxy server.
+     */
     stopProxy(): void {
         required(this._proxyServer, "[Web2API] No proxy server to stop")
 
@@ -196,6 +181,11 @@ export class Proxy {
         this._proxyServer.close()
     }
 
+    /**
+     * Parses the URL to extract the protocol, hostname, and port.
+     * @param url - The URL to parse.
+     * @returns The parsed URL details.
+     */
     private _parseUrl(url: string) {
         const parsedUrl = new URL(url)
         return {
