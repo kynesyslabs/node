@@ -134,7 +134,8 @@ export default class Peer {
             // Sleep for sleepTime milliseconds
             await new Promise(resolve => setTimeout(resolve, sleepTime))
         }
-        log.error("[PEER] [LONG CALL] Max retries reached: " + response)
+        const methodString = request.params.length > 0 ? `${request.method}.${request.params[0].method}` : request.method
+        log.error("[PEER] [LONG CALL] Max retries reached for method: " + methodString + " - " + response)
         return {
             result: 400,
             response: "Max retries reached",
