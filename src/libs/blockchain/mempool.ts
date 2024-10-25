@@ -49,8 +49,9 @@ export default class Mempool {
             .getRepository(MempoolEntity)
 
         let results = await mempoolRepository.findBy({ current: 1 })
+        log.info("[MEMPOOL MANAGER] Mempool query result first try:")
+        log.info("mempool: " + JSON.stringify(results))
 
-        //console.log(results)
         // In case there is no current mempool, lets create it
         if (!results || results.length === 0) {
             console.log("[Mempool] No current mempool found, creating one...")
@@ -72,8 +73,8 @@ export default class Mempool {
 
             results = await mempoolRepository.findBy({ current: 1 })
         }
-        console.log("[MEMPOOL MANAGER] Mempool query result:")
-        //console.log(results)
+        log.info("[MEMPOOL MANAGER] Mempool query result second try:")
+        log.info("mempool: " + JSON.stringify(results))
 
         const firstResult = results[0]
 
