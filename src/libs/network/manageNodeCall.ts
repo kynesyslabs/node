@@ -21,6 +21,7 @@ import getBlockByNumber from "./routines/nodecalls/getBlockByNumber"
 import getBlockByHash from "./routines/nodecalls/getBlockByHash"
 import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
 import log from "src/utilities/logger"
+import HandleGCR from "../blockchain/gls/handleGCR"
 
 export interface NodeCall {
     message: string
@@ -29,9 +30,7 @@ export interface NodeCall {
 }
 
 // REVIEW Is this module too big?
-export async function manageNodeCall(
-    content: NodeCall,
-): Promise<RPCResponse> {
+export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
     // Basic Node API handling logic
     // ...
     let result: any // Storage for the result
@@ -42,18 +41,22 @@ export async function manageNodeCall(
     response.require_reply = false // Until proven otherwise
     response.extra = null // Until proven otherwise
     //console.log(typeof data)
-    console.log(JSON.stringify(content))        
+    console.log(JSON.stringify(content))
     switch (content.message) {
-        case "getPeerInfo": 
+        case "getPeerInfo":
             response.response = await getPeerInfo()
             break
         case "getPeerlist":
-            response.response = await getPeerlist()  
+            response.response = await getPeerlist()
             break
         case "getPeerlistHash":
             var peerlist = await getPeerlist()
             response.response = Hashing.sha256(JSON.stringify(peerlist))
-            log.custom("manageNodeCall", "Peerlist hash: " + response.response, true)
+            log.custom(
+                "manageNodeCall",
+                "Peerlist hash: " + response.response,
+                true,
+            )
             break
         // REVIEW Both below for getting the last hash (untested yet)
         case "getPreviousHashFromBlockNumber":
@@ -141,7 +144,8 @@ export async function manageNodeCall(
         // INFO Authentication listener
         case "getPeerIdentity":
             // NOTE We don't need to sign anything as the headers are signed already
-            response.response = getSharedState.identity.ed25519.publicKey.toString("hex")
+            response.response =
+                getSharedState.identity.ed25519.publicKey.toString("hex")
             //console.log(response)
             break
 
@@ -155,7 +159,7 @@ export async function manageNodeCall(
             try {
                 nStat = (await GLS.getGLSNativeStatus(
                     data.address,
-                )) as StatusNative  
+                )) as StatusNative
                 response = nStat //.toString() // REVIEW It works ?
             } catch (error) {
                 response.result = 400
@@ -179,6 +183,27 @@ export async function manageNodeCall(
         case "getAllTxs":
             var response_object = await Chain.getAllTxs()
             response.response = response_object
+            break
+
+        // REVIEW Implement native tables requests
+        // NOTE: ...(data.options ? [data.options] : []) is used to handle optional parameters. If the options are not provided, the function will use its default values.
+        case "getNativeStatus":
+            response = await HandleGCR.getNativeStatus(
+                data.address,
+                ...(data.options ? [data.options] : []),
+            )
+            break
+        case "getNativeProperties":
+            response = await HandleGCR.getNativeProperties(
+                data.address,
+                ...(data.options ? [data.options] : []),
+            )
+            break
+        case "getNativeSubnetsTxs":
+            response = await HandleGCR.getNativeSubnetsTxs(
+                data.subnetId,
+                ...(data.options ? [data.options] : []),
+            )
             break
 
         // NOTE Don't look past here, go away
