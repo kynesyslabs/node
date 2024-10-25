@@ -1,5 +1,5 @@
 import { Column, Entity, PrimaryColumn } from "typeorm"
-import { EncryptedTransaction } from "@kynesyslabs/demosdk/types"
+import type { EncryptedTransaction } from "@kynesyslabs/demosdk/types"
 /* INFO
     Subnet transactions (l2ps) are stored in a native table so they are synced with the rest of the chain.
     The transactions are indexed by the tx hash, the subnet id, the status and the block hash and number.
