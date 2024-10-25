@@ -69,9 +69,25 @@ export default class Mempool {
 
             const result = await mempoolRepository.save(newMempool)
             log.info("[MEMPOOL MANAGER] New mempool created:")
-            log.info("[MEMPOOL MANAGER] Awaited mempool data: " + JSON.stringify(result))
+            log.info(
+                "[MEMPOOL MANAGER] Awaited mempool data: " +
+                    JSON.stringify(result),
+            )
 
-            results = await mempoolRepository.findBy({ current: 1 })
+            let timeout = 1000
+
+            while (timeout > 0) {
+                results = await mempoolRepository.findBy({ current: 1 })
+                if (results.length > 0) {
+                    break
+                }
+
+                log.info(
+                    "[MEMPOOL MANAGER] Mempool not found, sleeping for 250ms...",
+                )
+                timeout -= 250
+                await new Promise(resolve => setTimeout(resolve, 250))
+            }
         }
         log.info("[MEMPOOL MANAGER] Mempool query result second try:")
         log.info("mempool: " + JSON.stringify(results))
