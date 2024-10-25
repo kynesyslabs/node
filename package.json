@@ -59,7 +59,7 @@
     "@fastify/swagger-ui": "^4.1.0",
     "@fortawesome/free-brands-svg-icons": "^6.5.2",
     "@fortawesome/free-solid-svg-icons": "^6.5.2",
-    "@kynesyslabs/demosdk": "1.5.0",
+    "@kynesyslabs/demosdk": "1.5.1",
     "@types/express": "^4.17.21",
     "@types/http-proxy": "^1.17.14",
     "@types/lodash": "^4.17.4",

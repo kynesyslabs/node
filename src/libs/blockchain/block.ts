@@ -11,7 +11,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { pki } from "node-forge"
 
-import { BlockContent } from "@kynesyslabs/demosdk/types"   
+import { BlockContent, NativeTablesHashes } from "@kynesyslabs/demosdk/types"   
 import { Peer } from "../peer"
 
 // NOTE Block class
@@ -29,14 +29,19 @@ export default class Block {
         this.status = null
         this.content = {
             ordered_transactions: [],
-            encrypted_transactions_hashes: [], // REVIEW This should work already as it is not enforced in the database as a field
-            per_address_transaction_hashes: new Map(), // ?
+            encrypted_transactions_hashes: new Map(), // REVIEW This should work already as it is not enforced in the database as a field
+            per_address_transactions: new Map(), // ?
             web2data: {}, // objects containing hashes of fetched web2data
             previousHash: null,
             timestamp: null,
             peerlist: [],
             l2ps_partecipating_nodes: new Map(),
             l2ps_banned_nodes: new Map(),
+            native_tables_hashes: {
+                native_status: "placeholder",
+                native_properties: "placeholder",
+                native_subnets_txs: "placeholder",
+            },
         }
         this.proposer = null
         this.validation_data = { signatures: {} }

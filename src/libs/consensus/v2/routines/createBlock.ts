@@ -1,4 +1,5 @@
 import Block from "src/libs/blockchain/block"
+import { NativeTablesHashes } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import Cryptography from "src/libs/crypto/cryptography"
@@ -26,8 +27,8 @@ export async function createBlock(
     block.content.peerlist = peerlist
     block.proposer = commonValidatorSeed // This is the shard identifier
     block.number = blockNumber
+    block.content.native_tables_hashes = await hashNativeTables()
     block.hash = Hashing.sha256(JSON.stringify(block.content))
-    // ! Add native tables hashes
     // Signing the block and adding the signature to the block validation data
     let blockSignature = Cryptography.sign(
         block.hash,
@@ -48,4 +49,15 @@ export async function createBlock(
     // Add the candidate to the shared state
     getSharedState.candidateBlock = block
     return block
+}
+
+// ! This is a placeholder for the actual hashing function for the three native tables
+export async function hashNativeTables(): Promise<NativeTablesHashes> {
+    let hashes: NativeTablesHashes = {
+        native_status: "placeholder",
+        native_properties: "placeholder",
+        native_subnets_txs: "placeholder",
+    }
+    // TODO
+    return hashes
 }
