@@ -9,6 +9,7 @@ import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import handleWeb2Request from "../handleWeb2Request"
 import handleL2PS from "../handleL2PS"
 import { L2PSMessage } from "src/libs/l2ps/parallelNetworks"
+import _ from "lodash"
 // ? Remove this proxy if possible
 let handleXMRequest = multichainDispatcher
 
@@ -63,7 +64,7 @@ export default async function handleStep(step: WorkStep): Promise<StepResult> {
     }
     // Compile the step result
     // ? Check typing with jeff
-    step.output = result
+    step.output[step.id] = result // REVIEW Is this the correct way to do this?
     stepResult.step = step
     return stepResult
 }
