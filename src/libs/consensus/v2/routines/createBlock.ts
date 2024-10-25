@@ -27,7 +27,7 @@ export async function createBlock(
     block.proposer = commonValidatorSeed // This is the shard identifier
     block.number = blockNumber
     block.hash = Hashing.sha256(JSON.stringify(block.content))
-    // ! Check if we need other fields (probably)
+    // ! Add native tables hashes
     // Signing the block and adding the signature to the block validation data
     let blockSignature = Cryptography.sign(
         block.hash,
