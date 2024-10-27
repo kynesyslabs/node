@@ -74,20 +74,20 @@ export default class Mempool {
                     JSON.stringify(result),
             )
 
-            let timeout = 1000
+            results = await mempoolRepository.findBy({ current: 1 })
+            // let timeout = 1000
 
-            while (timeout > 0) {
-                results = await mempoolRepository.findBy({ current: 1 })
-                if (results.length > 0) {
-                    break
-                }
+            // while (timeout > 0) {
+            //     if (results.length > 0) {
+            //         break
+            //     }
 
-                log.info(
-                    "[MEMPOOL MANAGER] Mempool not found, sleeping for 250ms...",
-                )
-                timeout -= 250
-                await new Promise(resolve => setTimeout(resolve, 250))
-            }
+            //     log.info(
+            //         "[MEMPOOL MANAGER] Mempool not found, sleeping for 250ms...",
+            //     )
+            //     timeout -= 250
+            //     await new Promise(resolve => setTimeout(resolve, 250))
+            // }
         }
         log.info("[MEMPOOL MANAGER] Mempool query result second try:")
         log.info("mempool: " + JSON.stringify(results))
@@ -113,10 +113,16 @@ export default class Mempool {
 
     // INFO Cleaning the mempool
     public static async clean(): Promise<void> {
+        log.info("[MEMPOOL MANAGER] Cleaning the mempool")
+
         const db = await Datasource.getInstance()
         const mempoolRepository = db
             .getDataSource()
             .getRepository(MempoolEntity)
+        
+        const mempool = await mempoolRepository.findBy({ current: 1 })
+        log.info("[MEMPOOL MANAGER] Mempool to be deleted:")
+        log.info(JSON.stringify(mempool))
 
         await mempoolRepository.delete({ current: 1 })
     }

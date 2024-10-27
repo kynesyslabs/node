@@ -305,25 +305,25 @@ export default class Chain {
             .getDataSource()
             .getRepository(Transactions)
 
-        console.log("[insertBlock] Attempting to insert a block with hash: " + block.hash)
-        console.log("[insertBlock] Block to be inserted: ")
-        console.log(block)
+        log.info("[insertBlock] Attempting to insert a block with hash: " + block.hash)
+        log.info("[insertBlock] Block to be inserted: ")
+        log.info(JSON.stringify(block))
         // Convert the transactions strings back to Transaction objects
-        console.log("[insertBlock] Extracting transactions from block")
+        log.info("[insertBlock] Extracting transactions from block")
         // ! FIXME The below fails when a tx like a web2Request is inserted
         let orderedTransactionsHashes = block.content.ordered_transactions
-        console.log(orderedTransactionsHashes)  
+        log.info(JSON.stringify(orderedTransactionsHashes))  
         // Fetch transaction entities from the repository based on ordered transaction hashes
         const transactionEntities = await Promise.all(
             orderedTransactionsHashes.map(async txHash => {
-                console.log("[insertBlock] Fetching transaction with hash: " + txHash)
+                log.info("[insertBlock] Fetching transaction with hash: " + txHash)
                 /*
                 // Why do we look into the transactions repository? Shouldn't be in the mempool yet?
                 const rawTransaction = await transactionRepository.findOneBy({
                     hash: txHash,
                 }) // This returns null
-                console.log("[insertBlock] Transaction fetched: ")
-                console.log(rawTransaction)
+                log.info("[insertBlock] Transaction fetched: ")
+                log.info(rawTransaction)
                 return Transaction.fromRawTransaction(rawTransaction) */
                 let mempoolData = await Mempool.getMempool()
                 let tx = mempoolData.transactions.find(tx => tx.hash === txHash)
@@ -333,9 +333,9 @@ export default class Chain {
 
         let newBlock = new Blocks()
         // Set block properties here...
-        console.log("[CHAIN] reading hash")
-        console.log(transactionEntities)
-        console.log("[CHAIN] bork")
+        log.info("[CHAIN] reading hash")
+        log.info(JSON.stringify(transactionEntities))
+        log.info("[CHAIN] bork")
         newBlock.hash = block.hash
         newBlock.number = block.number
         newBlock.proposer = block.proposer
@@ -349,24 +349,24 @@ export default class Chain {
 
         // Check if the position is provided and if a block with that position exists
         let existingBlock = null
-        console.log(
+        log.info(
             "[ChainDB] [ INFO ]: Checking if block with hash " +
                 block.hash +
                 " already exists",
         )
         if (position) {
-            console.log("Block has a position passed as arg")
+            log.info("Block has a position passed as arg")
             existingBlock = await blockRepository.findOneBy({
                 hash: ILike(block.hash),
             })
         } else {
-            console.log(
+            log.info(
                 "[ChainDB] [ INFO ]: Found block with null hash, possibly genesis block",
             )
         }
 
         if (existingBlock) {
-            console.log(
+            log.info(
                 "[ChainDB] [ INFO ]: Block with position " +
                     position +
                     " does exist: updating a new block",
@@ -378,16 +378,16 @@ export default class Chain {
             existingBlock.status = block.status
             existingBlock.proposer = block.proposer
             existingBlock.validation_data = block.validation_data
-            console.log("about to save block")
+            log.info("about to save block")
             return await blockRepository.save(existingBlock)
         } else {
-            console.log(
+            log.info(
                 "[ChainDB] [ INFO ]: Block with position " +
                     position +
                     " does not exist: inserting a new block",
             )
             let result = await blockRepository.save(newBlock)
-            //console.log(result)
+            //log.info(result)
 
             // REVIEW We then add the transactions to the Transactions repository   
             for (let i = 0; i < transactionEntities.length; i++) {
