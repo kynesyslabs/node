@@ -23,6 +23,7 @@ import Block from "./block"
 import Transaction from "./transaction"
 import { ISignature } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
+import { getSharedState } from "src/utilities/sharedState"
 
 export interface MempoolData {
     number: number
@@ -43,6 +44,20 @@ export interface SerializedMempoolData {
 export default class Mempool {
     // INFO Reading the whole current mempool
     public static async getMempool(): Promise<MempoolData> {
+        let timeout = 3000
+        while (getSharedState.inGetMempool) {
+            if (timeout <= 0) {
+                throw new Error(
+                    "[MEMPOOL MANAGER] Timeout while waiting for the mempool",
+                )
+            }
+
+            log.info("[MEMPOOL MANAGER] getMempool is locked, waiting...")
+            timeout -= 250
+            await new Promise(resolve => setTimeout(resolve, 250))
+        }
+
+        getSharedState.inGetMempool = true
         const db = await Datasource.getInstance()
         const mempoolRepository = db
             .getDataSource()
@@ -50,7 +65,7 @@ export default class Mempool {
 
         let results = await mempoolRepository.findBy({ current: 1 })
         log.info("[MEMPOOL MANAGER] Mempool query result first try:")
-        log.info("mempool: " + JSON.stringify(results))
+        log.info("[MEMPOOL MANAGER] mempool: " + JSON.stringify(results))
 
         // In case there is no current mempool, lets create it
         if (!results || results.length === 0) {
@@ -73,21 +88,7 @@ export default class Mempool {
                 "[MEMPOOL MANAGER] Awaited mempool data: " +
                     JSON.stringify(result),
             )
-
             results = await mempoolRepository.findBy({ current: 1 })
-            // let timeout = 1000
-
-            // while (timeout > 0) {
-            //     if (results.length > 0) {
-            //         break
-            //     }
-
-            //     log.info(
-            //         "[MEMPOOL MANAGER] Mempool not found, sleeping for 250ms...",
-            //     )
-            //     timeout -= 250
-            //     await new Promise(resolve => setTimeout(resolve, 250))
-            // }
         }
         log.info("[MEMPOOL MANAGER] Mempool query result second try:")
         log.info("mempool: " + JSON.stringify(results))
@@ -106,8 +107,10 @@ export default class Mempool {
             proposedBlock: JSON.parse(firstResult.proposedBlock),
             timestamp: new Date().getTime(),
         }
-        console.log("Mempool retrieved:")
-        console.log(result)
+        log.info("[MEMPOOL MANAGER] Mempool retrieved:")
+        log.info("[MEMPOOL MANAGER] mempool: " + JSON.stringify(result))
+
+        getSharedState.inGetMempool = false
         return result
     }
 
@@ -119,7 +122,7 @@ export default class Mempool {
         const mempoolRepository = db
             .getDataSource()
             .getRepository(MempoolEntity)
-        
+
         const mempool = await mempoolRepository.findBy({ current: 1 })
         log.info("[MEMPOOL MANAGER] Mempool to be deleted:")
         log.info(JSON.stringify(mempool))
