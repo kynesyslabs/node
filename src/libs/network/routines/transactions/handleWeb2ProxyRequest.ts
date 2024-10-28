@@ -1,14 +1,7 @@
 import { DAHR } from "src/features/web2/dahr/DAHR"
 import { IWeb2Request, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { handleWeb2 } from "src/features/web2/handleWeb2"
-import { EnumWeb2Methods } from "src/features/web2/proxy/Proxy"
 import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
-
-interface StartProxyParams {
-    sessionId: string
-    url: string
-    method: EnumWeb2Methods
-}
 
 /**
  * Handles the web2 proxy request.
@@ -18,14 +11,14 @@ interface StartProxyParams {
  * @returns The RPC response.
  */
 export async function handleWeb2ProxyRequest(
-    request: IWeb2Request | StartProxyParams,
+    request: IWeb2Request,
     action: "create" | "startProxy" | "stopProxy" = "create",
     sessionId: string,
 ): Promise<RPCResponse> {
     try {
         switch (action) {
             case "create": {
-                const isDahrOrError = await handleWeb2(request as IWeb2Request)
+                const isDahrOrError = await handleWeb2(request)
 
                 if (isDahrOrError instanceof DAHR) {
                     const dahr = isDahrOrError
@@ -62,8 +55,10 @@ export async function handleWeb2ProxyRequest(
                         extra: "DAHR instance not found",
                     } as RPCResponse
                 }
-                const { url, method } = request as StartProxyParams
-                const response = await dahr.startProxy(url, method)
+                console.log("REQUEST", request)
+
+                const { method } = request.raw
+                const response = await dahr.startProxy(method)
                 return {
                     result: 200,
                     response: response,

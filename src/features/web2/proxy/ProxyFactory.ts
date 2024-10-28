@@ -9,17 +9,16 @@ export class ProxyFactory {
     /**
      * Create a new Proxy instance.
      * @param {string} dahrSessionId - The session ID.
-     * @param {string} targetUrl - The target URL.
      * @returns {Proxy} The created Proxy instance.
      */
-    static createProxy(dahrSessionId: string, targetUrl: string): Proxy {
+    static createProxy(dahrSessionId: string): Proxy {
         if (this._proxyInstances.has(dahrSessionId)) {
             return this._proxyInstances.get(dahrSessionId)!
         }
 
-        const newProxy = new Proxy(dahrSessionId, targetUrl)
-        this._proxyInstances.set(dahrSessionId, newProxy)
-        return newProxy
+        const proxy = new Proxy(dahrSessionId)
+        this._proxyInstances.set(dahrSessionId, proxy)
+        return proxy
     }
 
     /**

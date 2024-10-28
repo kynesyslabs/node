@@ -28,7 +28,10 @@ export class DAHR {
      * This constructor initializes a new DAHR (Data Agnostic HTTPS Relay) instance.
      * It sets up the necessary components to handle Web2 requests and manage the attestation process.
      *
-     * @param {IWeb2Request} web2Request - The Web2 request to handle. This object contains all the * necessary information about the request, including the raw request data, any existing       * results, attestations, and a hash of the request. It's used to initialize the DAHR instance * and guide its operations.
+     * @param {IWeb2Request} _web2Request - The Web2 request to handle. This object contains all
+     * the necessary information about the request, including the raw request data, any existing
+     * results, attestations, and a hash of the request. It's used to initialize the DAHR instance
+     * and guide its operations.
      *
      * The constructor performs the following actions:
      * 1. Validates that a web2Request is provided (using the 'required' utility).
@@ -40,10 +43,7 @@ export class DAHR {
     constructor(private readonly _web2Request: IWeb2Request) {
         required(this._web2Request, "web2Request")
         this._sessionId = generateUniqueId()
-        this._proxy = ProxyFactory.createProxy(
-            this._sessionId,
-            this._web2Request.raw.url,
-        )
+        this._proxy = ProxyFactory.createProxy(this._sessionId)
     }
 
     get web2Request(): IWeb2Request {
@@ -56,12 +56,10 @@ export class DAHR {
 
     /**
      * Start the proxy and return the attestation with the response.
-     * @param {string} path - The path to send the request to.
      * @param {IRawWeb2Request["method"]} method - The method to send the request with.
      * @returns {Promise<IAttestationWithResponse>} The attestation with the response.
      */
     async startProxy(
-        path: string,
         method: IRawWeb2Request["method"],
     ): Promise<IAttestationWithResponse> {
         // Make sure we have a web2Request at this point
@@ -70,7 +68,6 @@ export class DAHR {
         const web2RequestManager = new Web2RequestManager(this)
         const web2Response = await this._proxy.sendHTTPRequest(
             this._web2Request,
-            path,
             method,
         )
 

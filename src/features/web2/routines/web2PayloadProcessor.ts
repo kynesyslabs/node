@@ -1,5 +1,8 @@
-import { IParam, IWeb2Request } from "@kynesyslabs/demosdk/types"
-import { EnumWeb2Methods } from "src/features/web2/proxy/Proxy"
+import {
+    IParam,
+    IWeb2Request,
+    EnumWeb2Methods,
+} from "@kynesyslabs/demosdk/types"
 import required from "src/utilities/required"
 
 /**
@@ -85,5 +88,6 @@ function createFullWeb2Request(payload: ISimplifiedWeb2Payload): IWeb2Request {
         result: "",
         attestations: {},
         hash: "",
+        signature: undefined,
     }
 }
