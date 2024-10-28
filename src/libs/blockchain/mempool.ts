@@ -45,7 +45,9 @@ export default class Mempool {
     // INFO Reading the whole current mempool
     public static async getMempool(): Promise<MempoolData> {
         let timeout = 3000
+        let waiting = false
         while (getSharedState.inGetMempool) {
+            waiting = true
             if (timeout <= 0) {
                 throw new Error(
                     "[MEMPOOL MANAGER] Timeout while waiting for the mempool",
@@ -57,7 +59,13 @@ export default class Mempool {
             await new Promise(resolve => setTimeout(resolve, 250))
         }
 
+        // If we were waiting, we can also see if the mempool has been cached
+        if (waiting && getSharedState.mempoolCache) {
+            return getSharedState.mempoolCache
+        }
+
         getSharedState.inGetMempool = true
+        getSharedState.mempoolCache = null
         const db = await Datasource.getInstance()
         const mempoolRepository = db
             .getDataSource()
@@ -111,6 +119,7 @@ export default class Mempool {
         log.info("[MEMPOOL MANAGER] mempool: " + JSON.stringify(result))
 
         getSharedState.inGetMempool = false
+        getSharedState.mempoolCache = result
         return result
     }
 

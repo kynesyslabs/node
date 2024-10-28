@@ -7,6 +7,7 @@ import { Identity } from "src/libs/identity"
 // eslint-disable-next-line no-unused-vars
 import * as ntpClient from "ntp-client"
 import { Peer, PeerManager } from "src/libs/peer"
+import { MempoolData } from "src/libs/blockchain/mempool"
 
 dotenv.config()
 
@@ -34,6 +35,8 @@ export default class sharedState {
     inPeerGossip: boolean = false
     startingConsensus: boolean = false
     inGetMempool: boolean = false
+    // REVIEW Mempool caching
+    mempoolCache: MempoolData | null = null
     // States
     runMainLoop: boolean = true
     mainLoopPaused: boolean = false
