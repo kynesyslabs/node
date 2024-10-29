@@ -34,9 +34,13 @@ export default class sharedState {
     inPeerRecheckLoop: boolean = false
     inPeerGossip: boolean = false
     startingConsensus: boolean = false
+
+    // Mempool
     inGetMempool: boolean = false
+    inCleanMempool: boolean = false
     // REVIEW Mempool caching
     mempoolCache: MempoolData | null = null
+
     // States
     runMainLoop: boolean = true
     mainLoopPaused: boolean = false
