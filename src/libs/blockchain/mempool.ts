@@ -46,7 +46,8 @@ export default class Mempool {
     public static async getMempool(): Promise<MempoolData> {
         let timeout = 3000
         let waiting = false
-        while (getSharedState.inGetMempool) {
+
+        while (getSharedState.inGetMempool || getSharedState.inCleanMempool) {
             waiting = true
             if (timeout <= 0) {
                 throw new Error(
@@ -61,82 +62,115 @@ export default class Mempool {
 
         // If we were waiting, we can also see if the mempool has been cached
         if (waiting && getSharedState.mempoolCache) {
+            log.info("[MEMPOOL MANAGER] Returning cached mempool")
             return getSharedState.mempoolCache
         }
 
-        getSharedState.inGetMempool = true
-        getSharedState.mempoolCache = null
-        const db = await Datasource.getInstance()
-        const mempoolRepository = db
-            .getDataSource()
-            .getRepository(MempoolEntity)
+        let mempool: MempoolData = null
 
-        let results = await mempoolRepository.findBy({ current: 1 })
-        log.info("[MEMPOOL MANAGER] Mempool query result first try:")
-        log.info("[MEMPOOL MANAGER] mempool: " + JSON.stringify(results))
-
-        // In case there is no current mempool, lets create it
-        if (!results || results.length === 0) {
-            console.log("[Mempool] No current mempool found, creating one...")
-            let newMempool: SerializedMempoolData = {
-                number: 0,
-                current: 1,
-                transactions: JSON.stringify([]),
-                proposedBlock: null,
-                timestamp: new Date().getTime(),
-            }
+        try {
+            getSharedState.inGetMempool = true
+            getSharedState.mempoolCache = null
             const db = await Datasource.getInstance()
             const mempoolRepository = db
                 .getDataSource()
                 .getRepository(MempoolEntity)
 
-            const result = await mempoolRepository.save(newMempool)
-            log.info("[MEMPOOL MANAGER] New mempool created:")
-            log.info(
-                "[MEMPOOL MANAGER] Awaited mempool data: " +
-                    JSON.stringify(result),
-            )
-            results = await mempoolRepository.findBy({ current: 1 })
+            let results = await mempoolRepository.findBy({ current: 1 })
+            log.info("[MEMPOOL MANAGER] Mempool query result first try:")
+            log.info("[MEMPOOL MANAGER] mempool: " + JSON.stringify(results))
+
+            // In case there is no current mempool, lets create it
+            if (!results || results.length === 0) {
+                console.log(
+                    "[Mempool] No current mempool found, creating one...",
+                )
+                let newMempool: SerializedMempoolData = {
+                    number: 0,
+                    current: 1,
+                    transactions: JSON.stringify([]),
+                    proposedBlock: null,
+                    timestamp: new Date().getTime(),
+                }
+                const db = await Datasource.getInstance()
+                const mempoolRepository = db
+                    .getDataSource()
+                    .getRepository(MempoolEntity)
+
+                const result = await mempoolRepository.save(newMempool)
+                log.info("[MEMPOOL MANAGER] New mempool created:")
+                log.info(
+                    "[MEMPOOL MANAGER] Awaited mempool data: " +
+                        JSON.stringify(result),
+                )
+                results = await mempoolRepository.findBy({ current: 1 })
+            }
+            log.info("[MEMPOOL MANAGER] Mempool query result second try:")
+            log.info("mempool: " + JSON.stringify(results))
+
+            const firstResult = results[0]
+
+            // Else we take the object itself
+
+            console.log("[MEMPOOL MANAGER] Normalized mempool query result:")
+            //console.log(firstResult)
+            // Serializing
+            mempool = {
+                number: firstResult.number,
+                current: firstResult.current,
+                transactions: JSON.parse(firstResult.transactions),
+                proposedBlock: JSON.parse(firstResult.proposedBlock),
+                timestamp: new Date().getTime(),
+            }
+            log.info("[MEMPOOL MANAGER] Mempool retrieved:")
+            log.info("[MEMPOOL MANAGER] mempool: " + JSON.stringify(mempool))
+
+            getSharedState.mempoolCache = mempool
+        } finally {
+            getSharedState.inGetMempool = false
         }
-        log.info("[MEMPOOL MANAGER] Mempool query result second try:")
-        log.info("mempool: " + JSON.stringify(results))
 
-        const firstResult = results[0]
-
-        // Else we take the object itself
-
-        console.log("[MEMPOOL MANAGER] Normalized mempool query result:")
-        //console.log(firstResult)
-        // Serializing
-        let result: MempoolData = {
-            number: firstResult.number,
-            current: firstResult.current,
-            transactions: JSON.parse(firstResult.transactions),
-            proposedBlock: JSON.parse(firstResult.proposedBlock),
-            timestamp: new Date().getTime(),
-        }
-        log.info("[MEMPOOL MANAGER] Mempool retrieved:")
-        log.info("[MEMPOOL MANAGER] mempool: " + JSON.stringify(result))
-
-        getSharedState.inGetMempool = false
-        getSharedState.mempoolCache = result
-        return result
+        return mempool
     }
 
     // INFO Cleaning the mempool
     public static async clean(): Promise<void> {
-        log.info("[MEMPOOL MANAGER] Cleaning the mempool")
+        let timeout = 3000
 
-        const db = await Datasource.getInstance()
-        const mempoolRepository = db
-            .getDataSource()
-            .getRepository(MempoolEntity)
+        while (getSharedState.inGetMempool || getSharedState.inCleanMempool) {
+            if (timeout <= 0) {
+                throw new Error(
+                    "[MEMPOOL MANAGER] Timeout while waiting to delete mempool",
+                )
+            }
 
-        const mempool = await mempoolRepository.findBy({ current: 1 })
-        log.info("[MEMPOOL MANAGER] Mempool to be deleted:")
-        log.info(JSON.stringify(mempool))
+            log.info(
+                `[MEMPOOL MANAGER] inGetMempool: ${getSharedState.inGetMempool}, inCleanMempool: ${getSharedState.inCleanMempool}. Waiting...`,
+                false,
+            )
 
-        await mempoolRepository.delete({ current: 1 })
+            timeout -= 250
+            await new Promise(resolve => setTimeout(resolve, 250))
+        }
+
+        try {
+            getSharedState.inCleanMempool = true
+
+            log.info("[MEMPOOL MANAGER] Cleaning the mempool")
+
+            const db = await Datasource.getInstance()
+            const mempoolRepository = db
+                .getDataSource()
+                .getRepository(MempoolEntity)
+
+            const mempool = await mempoolRepository.findBy({ current: 1 })
+            log.info("[MEMPOOL MANAGER] Mempool to be deleted:")
+            log.info(JSON.stringify(mempool))
+
+            await mempoolRepository.delete({ current: 1 })
+        } finally {
+            getSharedState.inCleanMempool = false
+        }
     }
 
     // INFO Writing a transaction to the mempool
