@@ -1,12 +1,12 @@
 import { emptyResponse } from "./../../network/server_rpc"
 import _ from "lodash"
 // NOTE This will replace gls.ts methods for calling the native tables
-import { StatusSubnetsTxs } from "src/model/entities/StatusSubnetsTxs" // TODO Put this in the sdk when done
-import { StatusNative } from "src/model/entities/StatusNative"
-import { StatusProperties } from "src/model/entities/StatusProperties"
-import { StatusHashes } from "src/model/entities/StatusHashes"
+import { GCRSubnetsTxs } from "src/model/entities/GCR/GCRSubnetsTxs" // TODO Put this in the sdk when done
+import { GCRHashes } from "src/model/entities/GCR/GCRHashes"
+import { GCRExtended } from "src/model/entities/GCR/GCRExtended"
 import { EncryptedTransaction, RPCResponse } from "@kynesyslabs/demosdk/types"
 import Datasource from "src/model/datasource"
+import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -32,7 +32,7 @@ export default class HandleGCR {
     // TODO Implement this
 
     static async getNativeStatus(
-        address: string,
+        publicKey: string,
         options: GetNativeStatusOptions = {
             balance: true,
             nonce: true,
@@ -43,43 +43,48 @@ export default class HandleGCR {
         var response: RPCResponse = _.cloneDeep(emptyResponse)
         // Getting the datasource
         const db = await Datasource.getInstance()
-        const statusNativeRepository = db
+        const GlobalChangeRegistryRepository = db
             .getDataSource()
-            .getRepository(StatusNative)
+            .getRepository(GlobalChangeRegistry)
         // Getting the status native data
-        const statusNative = await statusNativeRepository.findOneBy({ address })
-        if (!statusNative) {
+        const GlobalChangeRegistrySearch =
+            await GlobalChangeRegistryRepository.findOneBy({
+                publicKey: publicKey,
+            })
+        if (!GlobalChangeRegistrySearch) {
             response.response = "Address not found"
             response.result = 404
             return response
         }
         // Preparing the response
-        let statusNativeData: StatusNative = {
-            address: statusNative.address,
-            balance: null,
-            nonce: null,
-            tx_list: null,
-            identities: null,
+        let GlobalChangeRegistryData: GlobalChangeRegistry = {
+            id: GlobalChangeRegistrySearch.id,
+            publicKey: GlobalChangeRegistrySearch.publicKey,
+            details: GlobalChangeRegistrySearch.details,
         }
         // Selecting only the requested data
         if (options.balance) {
-            statusNativeData.balance = statusNative.balance
+            GlobalChangeRegistryData.details.content.balance =
+                GlobalChangeRegistrySearch.details.content.balance
         }
         if (options.nonce) {
-            statusNativeData.nonce = statusNative.nonce
+            GlobalChangeRegistryData.details.content.nonce =
+                GlobalChangeRegistrySearch.details.content.nonce
         }
         if (options.txList) {
-            statusNativeData.tx_list = statusNative.tx_list
+            GlobalChangeRegistryData.details.content.txs =
+                GlobalChangeRegistrySearch.details.content.txs
         }
         if (options.identities) {
-            statusNativeData.identities = statusNative.identities
+            GlobalChangeRegistryData.details.content.identities =
+                GlobalChangeRegistrySearch.details.content.identities
         }
-        response.response = statusNativeData
+        response.response = GlobalChangeRegistryData
         return response
     }
 
     static async getNativeProperties(
-        address: string,
+        publicKey: string,
         options: GetNativePropertiesOptions = {
             tokens: true,
             nfts: true,
@@ -91,37 +96,41 @@ export default class HandleGCR {
         var response: RPCResponse = _.cloneDeep(emptyResponse)
         // Getting the datasource
         const db = await Datasource.getInstance()
-        const statusPropertiesRepository = db.getDataSource().getRepository(StatusProperties)
+        const GCRExtendedRepository = db
+            .getDataSource()
+            .getRepository(GCRExtended)
         // Getting the status properties data
-        const statusProperties = await statusPropertiesRepository.findOneBy({ address })
-        if (!statusProperties) {
+        const GCRExtendedSearch = await GCRExtendedRepository.findOneBy({
+            publicKey: publicKey,
+        })
+        if (!GCRExtendedSearch) {
             response.response = "Address not found"
             response.result = 404
             return response
         }
         // Preparing the response
-        let statusPropertiesData: StatusProperties = {
-            address: statusProperties.address,
-            tokens: null,
-            nfts: null,
-            xm: null,
-            web2: null,
-            other: null,
+        let GCRExtendedData: GCRExtended = {
+            publicKey: GCRExtendedSearch.publicKey,
+            tokens: GCRExtendedSearch.tokens,
+            nfts: GCRExtendedSearch.nfts,
+            xm: GCRExtendedSearch.xm,
+            web2: GCRExtendedSearch.web2,
+            other: GCRExtendedSearch.other,
         }
         // Selecting only the requested data
         if (options.tokens) {
-            statusPropertiesData.tokens = statusProperties.tokens
+            GCRExtendedData.tokens = GCRExtendedSearch.tokens
         }
         if (options.nfts) {
-            statusPropertiesData.nfts = statusProperties.nfts
+            GCRExtendedData.nfts = GCRExtendedSearch.nfts
         }
         if (options.xm) {
-            statusPropertiesData.xm = statusProperties.xm
+            GCRExtendedData.xm = GCRExtendedSearch.xm
         }
         if (options.web2) {
-            statusPropertiesData.web2 = statusProperties.web2
+            GCRExtendedData.web2 = GCRExtendedSearch.web2
         }
-        response.response = statusPropertiesData
+        response.response = GCRExtendedData
         return response
     }
 
@@ -133,24 +142,28 @@ export default class HandleGCR {
     ): Promise<RPCResponse> {
         var response: RPCResponse = _.cloneDeep(emptyResponse)
         const db = await Datasource.getInstance()
-        const statusSubnetsTxsRepository = db.getDataSource().getRepository(StatusSubnetsTxs)
+        const GCRSubnetsTxsRepository = db
+            .getDataSource()
+            .getRepository(GCRSubnetsTxs)
         // Getting the status subnets txs data
-        const statusSubnetsTxs = await statusSubnetsTxsRepository.findBy({ subnet_id: subnetId })
-        if (!statusSubnetsTxs) {
+        const GCRSubnetsTxsSearch = await GCRSubnetsTxsRepository.findBy({
+            subnet_id: subnetId,
+        })
+        if (!GCRSubnetsTxsSearch) {
             response.response = "Subnet not found"
             response.result = 404
             return response
         }
         // Preparing the response
-        let statusSubnetsTxsData: StatusSubnetsTxs[] = []
+        let GCRSubnetsTxsData: GCRSubnetsTxs[] = []
         // Selecting only the requested data
         if (!options.txData) {
-            for (const tx of statusSubnetsTxs) {
+            for (const tx of GCRSubnetsTxsSearch) {
                 tx.tx_data = null
-                statusSubnetsTxsData.push(tx)
+                GCRSubnetsTxsData.push(tx)
             }
         }
-        response.response = statusSubnetsTxsData
+        response.response = GCRSubnetsTxsData
         return response
     }
 }

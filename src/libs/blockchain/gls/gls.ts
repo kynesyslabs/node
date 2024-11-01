@@ -46,19 +46,22 @@ KyneSys Labs: https://www.kynesys.xyz/
 import * as fs from "fs"
 import Hashing from "src/libs/crypto/hashing"
 import Datasource from "src/model/datasource"
-import { StatusNative } from "src/model/entities/StatusNative"
-import { StatusProperties } from "src/model/entities/StatusProperties"
+import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
+import { GCRExtended } from "src/model/entities/GCR/GCRExtended"
 import { Validators } from "src/model/entities/Validators"
 import terminalkit from "terminal-kit"
 import { LessThanOrEqual } from "typeorm"
 
-import { Operation, OperationRegistrySlot, OperationResult } from "@kynesyslabs/demosdk/types"
+import {
+    Operation,
+    OperationRegistrySlot,
+    OperationResult,
+} from "@kynesyslabs/demosdk/types"
 
 import Chain from "../chain"
 import executeOperations, { Actor } from "../routines/executeOperations"
 
 const term = terminalkit.terminal
-
 
 export class OperationsRegistry {
     path: string = "data/operations.json"
@@ -117,41 +120,41 @@ export default class GLS {
 
     static async getGLSStatusNativeTable() {
         const db = await Datasource.getInstance()
-        const statusNativeRepository = db
+        const GCRRepository = db
             .getDataSource()
-            .getRepository(StatusNative)
-        return await statusNativeRepository.find()
+            .getRepository(GlobalChangeRegistry)
+        return await GCRRepository.find()
     }
 
     static async getGLSStatusPropertiesTable() {
         const db = await Datasource.getInstance()
-        const statusPropertiesRepository = db
+        const GCRExtendedRepository = db
             .getDataSource()
-            .getRepository(StatusProperties)
-        return await statusPropertiesRepository.find()
+            .getRepository(GCRExtended)
+        return await GCRExtendedRepository.find()
     }
 
     static async getGLSNativeFor(address: string) {
         const db = await Datasource.getInstance()
-        const statusNativeRepository = db
+        const GCRRepository = db
             .getDataSource()
-            .getRepository(StatusNative)
-        return await statusNativeRepository.findOne({
-            where: { address },
+            .getRepository(GlobalChangeRegistry)
+        return await GCRRepository.findOne({
+            where: { publicKey: address },
         })
     }
 
     static async getGLSPropertiesFor(
         address: string,
-        field: keyof StatusProperties,
+        field: keyof GCRExtended,
     ) {
         const db = await Datasource.getInstance()
-        const statusPropertiesRepository = db
+        const GCRExtendedRepository = db
             .getDataSource()
-            .getRepository(StatusProperties)
-        return await statusPropertiesRepository.findOne({
+            .getRepository(GCRExtended)
+        return await GCRExtendedRepository.findOne({
             select: [field],
-            where: { address },
+            where: { publicKey: address },
         })
     }
 
@@ -159,16 +162,16 @@ export default class GLS {
 
     static async getGLSNativeBalance(address: string) {
         const db = await Datasource.getInstance()
-        const statusNativeRepository = db
+        const GCRRepository = db
             .getDataSource()
-            .getRepository(StatusNative)
+            .getRepository(GlobalChangeRegistry)
 
         try {
-            const response = await statusNativeRepository.findOne({
-                select: ["balance"],
-                where: { address },
+            const response = await GCRRepository.findOne({
+                select: ["details"],
+                where: { publicKey: address },
             })
-            return response ? response.balance : 0
+            return response ? response.details.content.balance : 0
         } catch (e) {
             term.yellow("[GET BALANCE] No balance for: " + address + "\n")
             return 0
@@ -177,14 +180,14 @@ export default class GLS {
 
     static async getGLSTokenBalance(address: string, token_address: string) {
         const db = await Datasource.getInstance()
-        const statusPropertiesRepository = db
+        const GCRExtendedRepository = db
             .getDataSource()
-            .getRepository(StatusProperties)
+            .getRepository(GCRExtended)
 
         try {
-            const response = await statusPropertiesRepository.findOne({
+            const response = await GCRExtendedRepository.findOne({
                 select: ["tokens"],
-                where: { address },
+                where: { publicKey: address },
             })
             return response && response.tokens
                 ? response.tokens[token_address]
@@ -196,14 +199,14 @@ export default class GLS {
 
     static async getGLSNFTBalance(address: string, nft_address: string) {
         const db = await Datasource.getInstance()
-        const statusPropertiesRepository = db
+        const GCRExtendedRepository = db
             .getDataSource()
-            .getRepository(StatusProperties)
+            .getRepository(GCRExtended)
 
         try {
-            const response = await statusPropertiesRepository.findOne({
+            const response = await GCRExtendedRepository.findOne({
                 select: ["nfts"],
-                where: { address },
+                where: { publicKey: address },
             })
             return response && response.nfts ? response.nfts[nft_address] : 0
         } catch (e) {
@@ -225,12 +228,12 @@ export default class GLS {
         const db = await Datasource.getInstance()
         const statusPropertiesRepository = db
             .getDataSource()
-            .getRepository(StatusProperties)
+            .getRepository(GCRExtended)
 
         try {
             const response = await statusPropertiesRepository.findOne({
                 select: ["other"],
-                where: { address: "DEMOS Network" },
+                where: { publicKey: "DEMOS Network" },
             })
             return response ? response.other : null
         } catch (e) {
@@ -335,22 +338,32 @@ export default class GLS {
 
     // !SECTION Getters
 
-    static async getGLSNativeStatus(address: string): Promise<StatusNative> {
+    static async getGLSNativeStatus(address: string): Promise<GlobalChangeRegistry> {
         const db = await Datasource.getInstance()
-        const statusNativeRepository = db
+        const GCRRepository = db
             .getDataSource()
-            .getRepository(StatusNative)
-        let nativeStatus: any
+            .getRepository(GlobalChangeRegistry)
+        let nativeStatus: GlobalChangeRegistry
         try {
-            nativeStatus = await statusNativeRepository.findOne({
-                where: { address },
+            nativeStatus = await GCRRepository.findOne({
+                where: { publicKey: address },
             })
         } catch (e) {
             nativeStatus = {
-                address,
-                balance: "0",
-                nonce: 0,
-                tx_list: "",
+                id: 0,
+                publicKey: address,
+                details: {
+                    hash: "",
+                    content: {
+                        balance: 0,
+                        identities: {
+                            xm: new Map(),
+                            web2: new Map(),
+                        },
+                        txs: [],
+                        nonce: 0,
+                    },
+                },
             }
         }
         return nativeStatus
@@ -358,15 +371,15 @@ export default class GLS {
 
     static async getGLSStatusProperties(
         address: string,
-    ): Promise<StatusProperties> {
+    ): Promise<GCRExtended> {
         const db = await Datasource.getInstance()
         const statusPropertiesRepository = db
             .getDataSource()
-            .getRepository(StatusProperties)
-        let statusProperties: any
+            .getRepository(GCRExtended)
+        let statusProperties: GCRExtended
         try {
             statusProperties = await statusPropertiesRepository.findOne({
-                where: { address },
+                where: { publicKey: address },
             })
         } catch (e) {
             statusProperties = null
@@ -387,20 +400,20 @@ export default class GLS {
             message: "",
         }
         try {
-            let statusProperties: any
+            let statusProperties: GCRExtended
             // Getting the table
             const db = await Datasource.getInstance()
             const statusPropertiesRepository = db
                 .getDataSource()
-                .getRepository(StatusProperties)
-            statusProperties = statusPropertiesRepository.findOne({
+                .getRepository(GCRExtended)
+            statusProperties = await statusPropertiesRepository.findOne({
                 select: ["xm"],
-                where: { address },
+                where: { publicKey: address },
             })
             // Or creating it if it doesn't exist
             if (!statusProperties) {
-                statusProperties = new StatusProperties()
-                statusProperties.address = address
+                statusProperties = new GCRExtended()
+                statusProperties.publicKey = address
                 statusProperties.xm = "[]"
             }
             // Loading the object
@@ -408,7 +421,7 @@ export default class GLS {
             jStatusProperties.push(xm_hash)
             // And updating it
             statusProperties.xm = JSON.stringify(jStatusProperties)
-            await statusProperties.update()
+            await statusPropertiesRepository.save(statusProperties)
             result.success = true
         } catch (e) {
             result.message = JSON.stringify(e)
@@ -431,15 +444,15 @@ export default class GLS {
             const db = await Datasource.getInstance()
             const statusPropertiesRepository = db
                 .getDataSource()
-                .getRepository(StatusProperties)
-            statusProperties = statusPropertiesRepository.findOne({
+                .getRepository(GCRExtended)
+            statusProperties = await statusPropertiesRepository.findOne({
                 select: ["web2"],
-                where: { address },
+                where: { publicKey: address },
             })
             // Or creating it if it doesn't exist
             if (!statusProperties) {
-                statusProperties = new StatusProperties()
-                statusProperties.address = address
+                statusProperties = new GCRExtended()
+                statusProperties.publicKey = address
                 statusProperties.web2 = "[]"
             }
             // Loading the object
@@ -447,7 +460,7 @@ export default class GLS {
             jStatusProperties.push(web2_hash)
             // And updating it
             statusProperties.web2 = JSON.stringify(jStatusProperties)
-            await statusProperties.update()
+            await statusPropertiesRepository.save(statusProperties)
             result.success = true
         } catch (e) {
             result.success = false
@@ -478,36 +491,51 @@ export default class GLS {
         tx_hash: string,
     ): Promise<boolean> {
         const db = await Datasource.getInstance()
-        const statusNativeRepository = db
+        const GCRRepository = db
             .getDataSource()
-            .getRepository(StatusNative)
+            .getRepository(GlobalChangeRegistry)
 
         try {
-            let nativeStatus = await statusNativeRepository.findOne({
-                select: ["tx_list"],
-                where: { address },
+            let nativeStatus = await GCRRepository.findOne({
+                select: ["details"],
+                where: { publicKey: address },
             })
 
             if (!nativeStatus) {
                 console.log("Creating new native status")
-                nativeStatus = statusNativeRepository.create({
-                    address: address,
-                    balance: 0,
+                nativeStatus = GCRRepository.create({
+                    publicKey: address,
+                    details: {
+                        hash: "",
+                        content: {
+                            balance: 0,
+                            identities: {
+                                xm: new Map(),
+                                web2: new Map(),
+                            },
+                    txs: [],
                     nonce: 0,
-                    tx_list: JSON.stringify([]),
+                        },
+                    },
                 })
-                await statusNativeRepository.save(nativeStatus)
+                await GCRRepository.save(nativeStatus)
             }
 
-            //console.log(nativeStatus.tx_list)
-            let tx_list = JSON.parse(nativeStatus.tx_list || "[]")
+            //console.log(nativeStatus.details.txs)
+            let tx_list = nativeStatus.details.content.txs || []
             tx_list.push(tx_hash)
 
-            await statusNativeRepository.update(
-                { address },
+            await GCRRepository.update(
+                { publicKey: address },
                 {
-                    balance: native,
-                    tx_list: JSON.stringify(tx_list),
+                    details: {
+                        hash: "",
+                        content: {
+                            balance: native,
+                            txs: tx_list,
+                            nonce: nativeStatus.details.content.nonce,
+                        },
+                    },
                 },
             )
 

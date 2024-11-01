@@ -12,19 +12,21 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import Datasource from "src/model/datasource"
 import { Blocks } from "src/model/entities/Blocks"
-import { StatusHashes } from "src/model/entities/StatusHashes"
-import { StatusNative } from "src/model/entities/StatusNative"
-import { StatusProperties } from "src/model/entities/StatusProperties"
+import { GCRHashes } from "src/model/entities/GCR/GCRHashes"
+import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
+import { GCRExtended } from "src/model/entities/GCR/GCRExtended"
 import { Transactions } from "src/model/entities/Transactions"
 import { MoreThan, ILike } from "typeorm"
 
 import {
-    AddressInfo, Operation, StatusNative as StatusNativeType,
-    StatusProperties as StatusPropertiesType, TransactionContent,
+    AddressInfo,
+    Operation,
+    StatusNative as StatusNativeType,
+    StatusProperties as StatusPropertiesType,
+    TransactionContent,
 } from "@kynesyslabs/demosdk/types"
 
 import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
-
 
 import Block from "./block"
 import manageNative from "./routines/gls_routines/manageNative"
@@ -32,7 +34,6 @@ import Transaction from "./transaction"
 import { Peer } from "../peer"
 import Mempool from "./mempool"
 import log from "src/utilities/logger"
-
 
 export default class Chain {
     private static instance: Chain
@@ -79,7 +80,7 @@ export default class Chain {
                     hash: ILike(hash),
                 }),
             )
-        } catch (error) {   
+        } catch (error) {
             console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(error))
             console.error(error)
             throw error // It does not crash the node, as it is caught by the endpoint handler
@@ -176,26 +177,28 @@ export default class Chain {
 
     // REVIEW Giving back all the properties of an address
 
-    static async getAddressInfo(address: string): Promise<AddressInfo> {
+    static async getAddressInfo(
+        address: string,
+    ): Promise<{ native: GlobalChangeRegistry; properties: GCRExtended }> {
         const db = await Datasource.getInstance()
-        const nativeStateRepository = db
+        const GCRRepository = db
             .getDataSource()
-            .getRepository(StatusNative)
+            .getRepository(GlobalChangeRegistry)
 
-        const propertiesStateRepository = db
+        const GCRExtendedRepository = db
             .getDataSource()
-            .getRepository(StatusProperties)
+            .getRepository(GCRExtended)
 
-        const nativeState = (await nativeStateRepository.findOneBy({
-            address: ILike(address),
-        })) as StatusNativeType
-        const propertiesState = (await propertiesStateRepository.findOneBy({
-            address: ILike(address),
-        })) as StatusPropertiesType
+        const GCRSearch = (await GCRRepository.findOneBy({
+            publicKey: ILike(address),
+        })) as GlobalChangeRegistry
+        const GCRExtendedSearch = (await GCRExtendedRepository.findOneBy({
+            publicKey: ILike(address),
+        })) as GCRExtended
 
         return {
-            native: nativeState,
-            properties: propertiesState,
+            native: GCRSearch,
+            properties: GCRExtendedSearch,
         }
     }
 
@@ -218,9 +221,7 @@ export default class Chain {
     }
 
     // ! FIXME Rewrite this to return a peer list
-    static async getOnlinePeersForLastThreeBlocks(): Promise<
-        Peer[]
-    > {
+    static async getOnlinePeersForLastThreeBlocks(): Promise<Peer[]> {
         const lastBlockNumber = await this.getLastBlockNumber()
 
         if (lastBlockNumber < 3) {
@@ -255,7 +256,11 @@ export default class Chain {
                         )
                     // Extract the peer list from the transactions
                     let onlinePeersInBlock: Peer[] = []
-                    for (let i = 0; i < onlinePeersInBlockTransactions.length; i++) {
+                    for (
+                        let i = 0;
+                        i < onlinePeersInBlockTransactions.length;
+                        i++
+                    ) {
                         const onlineTxRaw = onlinePeersInBlockTransactions[i]
                         const onlineTx = JSON.parse(onlineTxRaw[0])
                         // ? This typization is totally random for now
@@ -305,18 +310,23 @@ export default class Chain {
             .getDataSource()
             .getRepository(Transactions)
 
-        log.info("[insertBlock] Attempting to insert a block with hash: " + block.hash)
+        log.info(
+            "[insertBlock] Attempting to insert a block with hash: " +
+                block.hash,
+        )
         log.info("[insertBlock] Block to be inserted: ")
         log.info(JSON.stringify(block))
         // Convert the transactions strings back to Transaction objects
         log.info("[insertBlock] Extracting transactions from block")
         // ! FIXME The below fails when a tx like a web2Request is inserted
         let orderedTransactionsHashes = block.content.ordered_transactions
-        log.info(JSON.stringify(orderedTransactionsHashes))  
+        log.info(JSON.stringify(orderedTransactionsHashes))
         // Fetch transaction entities from the repository based on ordered transaction hashes
         const transactionEntities = await Promise.all(
             orderedTransactionsHashes.map(async txHash => {
-                log.info("[insertBlock] Fetching transaction with hash: " + txHash)
+                log.info(
+                    "[insertBlock] Fetching transaction with hash: " + txHash,
+                )
                 /*
                 // Why do we look into the transactions repository? Shouldn't be in the mempool yet?
                 const rawTransaction = await transactionRepository.findOneBy({
@@ -389,7 +399,7 @@ export default class Chain {
             let result = await blockRepository.save(newBlock)
             //log.info(result)
 
-            // REVIEW We then add the transactions to the Transactions repository   
+            // REVIEW We then add the transactions to the Transactions repository
             for (let i = 0; i < transactionEntities.length; i++) {
                 let tx = transactionEntities[i]
                 await this.insertTransaction(tx)
@@ -399,9 +409,7 @@ export default class Chain {
 
             return result
         }
-
     }
-
 
     // INFO Generate the genesis block
     static async generateGenesisBlock(genesis_data: any): Promise<Block> {
@@ -421,7 +429,7 @@ export default class Chain {
             type: "ed25519",
             data: new Uint8Array(Buffer.from("0x0", "hex")),
         }.data.toString()
-        
+
         genesis_tx.signature = {
             type: "ed25519",
             data: new Uint8Array(Buffer.from("0x0", "hex")),
@@ -452,7 +460,7 @@ export default class Chain {
         genesis_block.hash = Hashing.sha256(
             JSON.stringify(genesis_block.content),
         )
-        
+
         // REVIEW Create a GLS Operation and execute it
         let genesis_op: Operation = {
             operator: "genesis",
@@ -518,7 +526,9 @@ export default class Chain {
         transaction: Transaction,
         status: string = "confirmed",
     ): Promise<boolean> {
-        console.log("[insertTransaction] Inserting transaction: " + transaction.hash)
+        console.log(
+            "[insertTransaction] Inserting transaction: " + transaction.hash,
+        )
         const rawTransaction = Transaction.toRawTransaction(transaction, status)
         console.log("[insertTransaction] Raw transaction: ")
         console.log(rawTransaction)
@@ -530,13 +540,20 @@ export default class Chain {
             await transactionRepository.save(rawTransaction)
             return true
         } catch (e) {
-            log.error("[insertTransaction] Error inserting transaction (" + transaction.hash + "): " + e)
+            log.error(
+                "[insertTransaction] Error inserting transaction (" +
+                    transaction.hash +
+                    "): " +
+                    e,
+            )
             return false
         }
     }
 
     // Wrapper for inserting multiple transactions
-    static async insertTransactions(transactions: Transaction[]): Promise<boolean> {
+    static async insertTransactions(
+        transactions: Transaction[],
+    ): Promise<boolean> {
         let success = true
         for (let tx of transactions) {
             success = await this.insertTransaction(tx)
@@ -553,39 +570,37 @@ export default class Chain {
     static async statusOf(
         address: string,
         type: number,
-    ): Promise<StatusNativeType | StatusPropertiesType | null> {
+    ): Promise<GlobalChangeRegistry | GCRExtended | null> {
         if (type === 0) {
             const db = await Datasource.getInstance()
-            const statusNativeRepository = db
+            const GCRRepository = db
                 .getDataSource()
-                .getRepository(StatusNative)
+                .getRepository(GlobalChangeRegistry)
 
-            return (await statusNativeRepository.findOneBy({
-                address: ILike(address),
-            })) as StatusNativeType
+            return (await GCRRepository.findOneBy({
+                publicKey: ILike(address),
+            })) as GlobalChangeRegistry
         } else if (type === 1) {
             const db = await Datasource.getInstance()
-            const statusPropertiesRepository = db
+            const GCRExtendedRepository = db
                 .getDataSource()
-                .getRepository(StatusProperties)
+                .getRepository(GCRExtended)
 
-            return (await statusPropertiesRepository.findOneBy({
-                address: ILike(address),
-            })) as StatusPropertiesType
+            return (await GCRExtendedRepository.findOneBy({
+                publicKey: ILike(address),
+            })) as GCRExtended
         }
         return null
     } // TODO Implement specific time-saving operations to get specific data (see the tables in the db)
     // INFO Getting the hash of the status at a given block
     static async statusHashAt(block_number: number) {
         const db = await Datasource.getInstance()
-        const statusHashesRepository = db
-            .getDataSource()
-            .getRepository(StatusHashes)
+        const GCRHashesRepository = db.getDataSource().getRepository(GCRHashes)
 
-        const statusHashRecord = await statusHashesRepository.findOneBy({
+        const GCRHashesSearch = await GCRHashesRepository.findOneBy({
             block: block_number,
         })
-        return statusHashRecord ? statusHashRecord.hash : null
+        return GCRHashesSearch ? GCRHashesSearch.hash : null
     }
     // !SECTION Maintennance operations
 

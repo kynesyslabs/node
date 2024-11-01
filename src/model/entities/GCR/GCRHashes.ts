@@ -1,7 +1,7 @@
 import { Column, Entity, PrimaryColumn, PrimaryGeneratedColumn } from "typeorm"
 
-@Entity("status_hashes")
-export class StatusHashes {
+@Entity("gcr_hashes")
+export class GCRHashes {
     @PrimaryGeneratedColumn({ type: "integer", name: "id" })
     id: number
 

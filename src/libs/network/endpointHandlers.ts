@@ -52,7 +52,7 @@ import {
 } from "@kynesyslabs/demosdk/types"
 
 import GLS from "../blockchain/gls/gls"
-import { StatusNative } from "src/model/entities/StatusNative"
+import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import Block from "../blockchain/block"
 import { BlockContent } from "../../../../sdks/src/types/blockchain/blocks"
 import getPeerInfo from "./routines/nodecalls/getPeerInfo"
@@ -316,7 +316,9 @@ export default class ServerHandlers {
                     )
                     result.response = demoswork_result
                 } catch (e) {
-                    log.error("[handleExecuteTransaction] Error in demosWork: " + e)
+                    log.error(
+                        "[handleExecuteTransaction] Error in demosWork: " + e,
+                    )
                     result.success = false
                     result.response = e
                     result.extra = "Error in demosWork"

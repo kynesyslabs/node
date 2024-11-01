@@ -1,5 +1,6 @@
+import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
 import Datasource from "src/model/datasource"
-import { StatusNative } from "src/model/entities/StatusNative"
+import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 
 // import Block from "../../block"
 // import Chain from "../../chain"
@@ -12,32 +13,49 @@ import { StatusNative } from "src/model/entities/StatusNative"
 // SECTION Balance management
 
 // INFO Get the balance of a user
-async function balance(address: string): Promise<number> {
+async function balance(PublicKey: string): Promise<number> {
     const db = await Datasource.getInstance()
-    const StatusNativeRepository = db
+    const GCRRepository = db
         .getDataSource()
-        .getRepository(StatusNative)
-    const status = await StatusNativeRepository.findOneBy({ address })
-    return status.balance
+        .getRepository(GlobalChangeRegistry)
+    const status = await GCRRepository.findOneBy({ publicKey: PublicKey })
+    return status.details.content.balance
 }
 
 // INFO Arbitrary function to set the balance of a user
 async function setBalance(
-    address: string,
+    publicKey: string,
     balance: number,
 ): Promise<[boolean, string]> {
-    const rawData = {
-        address: address,
-        balance: balance,
-        nonce: 0,
-        tx_list: "[]",
+    const rawData: GlobalChangeRegistry = {
+        id: null,
+        publicKey: publicKey,
+        details: {
+            hash: "",
+            content: {
+                balance: balance,
+                nonce: null,
+                identities: null,
+                txs: null,
+            },
+        },
+
     }
 
     const db = await Datasource.getInstance()
-    const StatusNativeRepository = db
+    const GCRRepository = db
         .getDataSource()
-        .getRepository(StatusNative)
-    await StatusNativeRepository.save(rawData)
+        .getRepository(GlobalChangeRegistry)
+    const GCRSearch = await GCRRepository.findOneBy({ publicKey: publicKey })
+    // Keeping the things we need and just updating the balance
+    let GCRUpdate = GCRSearch
+    GCRUpdate.details.content.balance = balance
+    // Hashing the GCR
+    GCRUpdate.details.hash = Hashing.sha256(
+        JSON.stringify(GCRUpdate.details.content),
+    )
+    // Saving the GCR
+    await GCRRepository.save(GCRUpdate)
     return [true, ""]
 }
 

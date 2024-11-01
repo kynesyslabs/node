@@ -22,6 +22,8 @@ import getBlockByHash from "./routines/nodecalls/getBlockByHash"
 import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gls/handleGCR"
+import { GCRExtended } from "src/model/entities/GCR/GCRExtended"
+import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 
 export interface NodeCall {
     message: string
@@ -159,7 +161,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             try {
                 nStat = (await GLS.getGLSNativeStatus(
                     data.address,
-                )) as StatusNative
+                )) as GlobalChangeRegistry
                 response = nStat //.toString() // REVIEW It works ?
             } catch (error) {
                 response.result = 400
@@ -173,8 +175,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "No address specified"
                 break
             }
-            nStat = (await GLS.getGLSNativeStatus(data.address)) as StatusNative
-            response.response = nStat.nonce
+            nStat = (await GLS.getGLSNativeStatus(data.address)) as GlobalChangeRegistry
+            response.response = nStat.details.content.nonce
             break
         case "getPeerTime":
             response.response = new Date().getTime()

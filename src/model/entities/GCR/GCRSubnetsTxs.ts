@@ -6,8 +6,8 @@ import type { EncryptedTransaction } from "@kynesyslabs/demosdk/types"
     This allows for a quick lookup to the transaction details and the block they were included in.
 */
 
-@Entity("status_subnets_txs")
-export class StatusSubnetsTxs {
+@Entity("global_change_registry_subnets_txs")
+export class GCRSubnetsTxs {
     @PrimaryColumn("text", { name: "tx_hash" })
     tx_hash: string
 

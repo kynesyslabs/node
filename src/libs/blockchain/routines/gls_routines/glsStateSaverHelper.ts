@@ -2,7 +2,7 @@
 import { Hash } from "crypto"
 import Hashing from "src/libs/crypto/hashing"
 import Datasource from "src/model/datasource"
-import { StatusHashes } from "src/model/entities/StatusHashes"
+import { GCRHashes } from "src/model/entities/GCR/GCRHashes"
 
 // which is set by the validators during the consensus and is an hash of all the applicable operations for that block.
 import Chain from "../../chain"
@@ -15,15 +15,16 @@ import { Operation } from "@kynesyslabs/demosdk/types"
 export default class glsStateSave {
     constructor() {}
 
+    // ! Rewrite this to avoid operations and hash the whole GCR
     static async postConsensusEngraving(ops: Operation[]) {
         let hashed_ops = Hashing.sha256(JSON.stringify(ops)) // REVIEW Stringify?
         const db = await Datasource.getInstance()
-        const StatusHashesRepository = db
+        const GCRHashesRepository = db
             .getDataSource()
-            .getRepository(StatusHashes)
+            .getRepository(GCRHashes)
         // Adding the hash to the database
-        await StatusHashesRepository.insert(
-            StatusHashesRepository.create({
+        await GCRHashesRepository.insert(
+            GCRHashesRepository.create({
                 hash: hashed_ops,
             }),
         ) // REVIEW Test it

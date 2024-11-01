@@ -124,6 +124,8 @@ export async function consensusRoutine(): Promise<void> {
     // REVIEW Set last consensus time to the current block timestamp
     getSharedState.lastConsensusTime = block.content.timestamp
 
+    // ! Where do we insert the GCR hash and in general update the native tables?
+
     // Vote on the block by broadcasting the block hash to the shard
     const [pro, con] = await voteOnBlock(block, shard)
 
