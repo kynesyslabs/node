@@ -9,7 +9,7 @@ import GLS from "../gls/gls"
 import Genesis from "../types/genesisTypes"
 // NOTE Due to the modularity of the code, many routines will be stored in their own modules
 // TODO Move everything there if possible
-import glsRoutines from "./gls_routines"
+import glsRoutines from "./grc_routines"
 
 // REVIEW Is this working?
 export default class subOperations {
