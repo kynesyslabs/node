@@ -9,7 +9,7 @@ import GCR from "../gcr/gcr"
 import Genesis from "../types/genesisTypes"
 // NOTE Due to the modularity of the code, many routines will be stored in their own modules
 // TODO Move everything there if possible
-import gcrRoutines from "../gcr/grc_routines"
+import gcrRoutines from "../gcr/gcr_routines"
 
 // REVIEW Is this working?
 export default class subOperations {
