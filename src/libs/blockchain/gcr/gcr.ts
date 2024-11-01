@@ -1,3 +1,5 @@
+// ! Unify this and handleGCR.ts methods
+
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0

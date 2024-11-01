@@ -1,6 +1,6 @@
 import { Operation, OperationResult } from "@kynesyslabs/demosdk/types"
 
-import GCR from "../../gcr/gcr"
+import GCR from "../gcr"
 export async function assignWeb2(
     operation: Operation,
 ): Promise<OperationResult> {

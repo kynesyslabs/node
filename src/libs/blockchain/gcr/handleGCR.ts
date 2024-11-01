@@ -1,3 +1,5 @@
+// ! Unify this and gcr.ts methods
+
 import { emptyResponse } from "./../../network/server_rpc"
 import _ from "lodash"
 // NOTE This will replace gcr.ts methods for calling the native tables

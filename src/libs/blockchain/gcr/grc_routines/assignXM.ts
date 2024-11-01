@@ -1,6 +1,6 @@
 import { Operation, OperationResult } from "@kynesyslabs/demosdk/types"
 
-import GCR from "../../gcr/gcr"
+import GCR from "../gcr"
 
 export async function assignXM(operation: Operation): Promise<OperationResult> {
     let { address, xm_hash } = operation.params

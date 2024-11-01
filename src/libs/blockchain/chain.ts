@@ -29,7 +29,7 @@ import {
 import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
 
 import Block from "./block"
-import manageNative from "./routines/grc_routines/manageNative"
+import manageNative from "./gcr/grc_routines/manageNative"
 import Transaction from "./transaction"
 import { Peer } from "../peer"
 import Mempool from "./mempool"
