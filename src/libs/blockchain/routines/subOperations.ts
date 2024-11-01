@@ -5,15 +5,15 @@ import { Operation, OperationResult } from "@kynesyslabs/demosdk/types"
 
 import Block from "../block"
 import Chain from "../chain"
-import GLS from "../gls/gls"
+import GCR from "../gcr/gcr"
 import Genesis from "../types/genesisTypes"
 // NOTE Due to the modularity of the code, many routines will be stored in their own modules
 // TODO Move everything there if possible
-import glsRoutines from "./grc_routines"
+import gcrRoutines from "./grc_routines"
 
 // REVIEW Is this working?
 export default class subOperations {
-    public static glsRoutines = glsRoutines
+    public static gcrRoutines = gcrRoutines
 
     private static result: OperationResult = {
         success: true,
@@ -30,7 +30,7 @@ export default class subOperations {
             success: true,
             message: "No error occurred",
         }
-        // NOTE Insert blindly stuff into the GLS if no genesis is present
+        // NOTE Insert blindly stuff into the GCR if no genesis is present
         // Using the genesis schema it is easy to follow the structure of the genesis file
         console.log(operation.params)
         let genesis_content: Genesis = operation.params
@@ -65,7 +65,7 @@ export default class subOperations {
             let balance_operation = balances[i]
             let receiver = balance_operation[0]
             let amount = balance_operation[1]
-            await GLS.setGLSNativeBalance(
+            await GCR.setGCRNativeBalance(
                 receiver,
                 parseInt(amount),
                 operation.hash,
@@ -89,8 +89,8 @@ export default class subOperations {
                 message: "Invalid amount",
             }
         }
-        let balance_from = await GLS.getGLSNativeBalance(from)
-        let balance_to = await GLS.getGLSNativeBalance(to)
+        let balance_from = await GCR.getGCRNativeBalance(from)
+        let balance_to = await GCR.getGCRNativeBalance(to)
         // Sanity checks
 
         if (amount == 0) {
@@ -108,8 +108,8 @@ export default class subOperations {
         // If we are here, we have a valid operation
         let new_balance_from = balance_from - amount
         let new_balance_to = balance_to + amount
-        await GLS.setGLSNativeBalance(from, new_balance_from, operation.hash)
-        await GLS.setGLSNativeBalance(to, new_balance_to, operation.hash)
+        await GCR.setGCRNativeBalance(from, new_balance_from, operation.hash)
+        await GCR.setGCRNativeBalance(to, new_balance_to, operation.hash)
         // Returning success
         return {
             success: true,
@@ -121,7 +121,7 @@ export default class subOperations {
     static async addNative(operation: Operation): Promise<OperationResult> {
         let to: string = operation.params.to
         let amount: string = operation.params.amount
-        let balance_to = await GLS.getGLSNativeBalance(to)
+        let balance_to = await GCR.getGCRNativeBalance(to)
         // Sanity checks
         if (amount == "0") {
             return {
@@ -132,7 +132,7 @@ export default class subOperations {
         // TODO
         // If we are here, we have a valid operation
         let new_balance_to = balance_to + parseInt(amount)
-        await GLS.setGLSNativeBalance(to, new_balance_to, operation.hash)
+        await GCR.setGCRNativeBalance(to, new_balance_to, operation.hash)
         return subOperations.result
     }
 
@@ -140,7 +140,7 @@ export default class subOperations {
     static async removeNative(operation: Operation): Promise<OperationResult> {
         let to: string = operation.params.to
         let amount: string = operation.params.amount
-        let balance_to = await GLS.getGLSNativeBalance(to)
+        let balance_to = await GCR.getGCRNativeBalance(to)
         // Sanity checks
         if (amount == "0") {
             return {
@@ -156,7 +156,7 @@ export default class subOperations {
         // TODO
         // If we are here, we have a valid operation
         let new_balance_to = balance_to - parseInt(amount)
-        await GLS.setGLSNativeBalance(to, new_balance_to, operation.hash)
+        await GCR.setGCRNativeBalance(to, new_balance_to, operation.hash)
         return subOperations.result
     }
 

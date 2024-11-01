@@ -5,7 +5,7 @@ import socket from "socket.io"
 import io from "socket.io-client"
 import Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
-import GLS from "src/libs/blockchain/gls/gls"
+import GCR from "src/libs/blockchain/gcr/gcr"
 import Mempool from "src/libs/blockchain/mempool"
 import Transaction from "src/libs/blockchain/transaction"
 import Cryptography from "src/libs/crypto/cryptography"
@@ -30,7 +30,7 @@ export default class testingEnvironment {
         },
         singletons: {
             Mempool: Mempool,
-            GLS: GLS,
+            GCR: GCR,
             Chain: Chain,
             sharedState: getSharedState,
             PeerManager: PeerManager,

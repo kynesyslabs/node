@@ -4,20 +4,18 @@ import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistr
 
 // import Block from "../../block"
 // import Chain from "../../chain"
-// import GLS from "../../gls/gls"
+// import GCR from "../../gcr/gcr"
 // import Genesis from "../../types/genesisTypes"
 // import { OperationResult } from "../executeOperations"
 
-// TODO Implement other properties of the GLS object to be fetched and set from the database
+// TODO Implement other properties of the GCR object to be fetched and set from the database
 
 // SECTION Balance management
 
 // INFO Get the balance of a user
 async function balance(PublicKey: string): Promise<number> {
     const db = await Datasource.getInstance()
-    const GCRRepository = db
-        .getDataSource()
-        .getRepository(GlobalChangeRegistry)
+    const GCRRepository = db.getDataSource().getRepository(GlobalChangeRegistry)
     const status = await GCRRepository.findOneBy({ publicKey: PublicKey })
     return status.details.content.balance
 }
@@ -39,13 +37,10 @@ async function setBalance(
                 txs: null,
             },
         },
-
     }
 
     const db = await Datasource.getInstance()
-    const GCRRepository = db
-        .getDataSource()
-        .getRepository(GlobalChangeRegistry)
+    const GCRRepository = db.getDataSource().getRepository(GlobalChangeRegistry)
     let GCRSearch = await GCRRepository.findOneBy({ publicKey: publicKey })
     if (!GCRSearch) {
         GCRSearch = {

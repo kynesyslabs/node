@@ -2,12 +2,12 @@ import { getSharedState } from "src/utilities/sharedState"
 import sizeOf from "src/utilities/sizeOf"
 
 import Chain from "../chain"
-import GLS from "../gls/gls"
+import GCR from "../gcr/gcr"
 import Transaction from "../transaction"
 
 // INFO Calculating transaction fees based on the size of the transaction and the status of the chain
 async function calculateComposedGas(): Promise<number> {
-    let lastblock_basegas: number = await GLS.getGLSLastBlockBaseGas()
+    let lastblock_basegas: number = await GCR.getGCRLastBlockBaseGas()
     // Congestion check
     let factor = await adaptGasToCongestion()
     let adapted_gas = lastblock_basegas * factor
@@ -43,13 +43,15 @@ async function adaptGasToCongestion(): Promise<number> {
     let factor: number = 1
     if (difference > block_time) {
         let drift = difference - block_time
-        factor = 1 + (1.5 * drift / block_time) // REVIEW Is this correct?
+        factor = 1 + (1.5 * drift) / block_time // REVIEW Is this correct?
     }
     return factor
 }
 
 // REVIEW Why is this just a nested call
-export default async function calculateCurrentGas(payload: any): Promise<number> {
+export default async function calculateCurrentGas(
+    payload: any,
+): Promise<number> {
     let payload_size = sizeOf(payload)
     let composed_gas_price = await calculateComposedGas()
     let transaction_fee = payload_size * composed_gas_price

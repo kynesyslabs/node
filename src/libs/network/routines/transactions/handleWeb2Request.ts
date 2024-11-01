@@ -13,8 +13,8 @@ export default async function handleWeb2Request(
      * The Web2 Operation is validated, executed and verified
      * when applicable. Is then sent back once attested.
      * A transaction is derived from the executed web2 operation.
-     * An operation is then created and pushed in the GLS.
-     * An operation for the gas is also pushed in the GLS.
+     * An operation is then created and pushed in the GCR.
+     * An operation for the gas is also pushed in the GCR.
      * The tx is pushed in the mempool if applicable.
      */
     console.log("[SERVER] Received web2Request")

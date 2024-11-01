@@ -11,7 +11,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { pki } from "node-forge"
 import Chain from "src/libs/blockchain/chain"
-import GLS from "src/libs/blockchain/gls/gls"
+import GCR from "src/libs/blockchain/gcr/gcr"
 import calculateCurrentGas from "src/libs/blockchain/routines/calculateCurrentGas"
 import executeNativeTransaction from "src/libs/blockchain/routines/executeNativeTransaction"
 import Transaction from "src/libs/blockchain/transaction"
@@ -46,12 +46,14 @@ export async function confirmTransaction(
         data: {
             valid: false,
             reference_block: reference_block,
-            message: "[Native Tx Validation] [NOT PROCESSED] Transaction yet to be processed\n",
+            message:
+                "[Native Tx Validation] [NOT PROCESSED] Transaction yet to be processed\n",
             gas_operation: null,
             transaction: tx,
         },
         signature: null,
-        rpc_public_key: getSharedState.identity.ed25519.publicKey as pki.ed25519.BinaryBuffer,
+        rpc_public_key: getSharedState.identity.ed25519
+            .publicKey as pki.ed25519.BinaryBuffer,
     }
     let gas_operation: Operation
     let gas_calculus = await defineGas(tx, validityData, privateKey)
@@ -68,7 +70,8 @@ export async function confirmTransaction(
     }
     let hasNonce = await assignNonce(tx)
     if (!hasNonce) {
-        validityData.data.message = "[Native Tx Validation] [NONCE ERROR] Nonce not assigned\n"
+        validityData.data.message =
+            "[Native Tx Validation] [NONCE ERROR] Nonce not assigned\n"
         validityData.data.valid = false
         validityData = await signValidityData(validityData)
         return validityData
@@ -80,7 +83,8 @@ export async function confirmTransaction(
         publicKey as pki.ed25519.BinaryBuffer,
     ) // REVIEW Are the buffers ok?
     if (!verified) {
-        validityData.data.message = "[Native Tx Validation] [SIGNATURE ERROR] Transaction signature not verified\n"
+        validityData.data.message =
+            "[Native Tx Validation] [SIGNATURE ERROR] Transaction signature not verified\n"
         validityData.data.valid = false
         validityData = await signValidityData(validityData)
         return validityData
@@ -88,7 +92,8 @@ export async function confirmTransaction(
     console.log(
         "[Native Tx Validation] Transaction validity verified, compiling ValidityData\n",
     )
-    validityData.data.message = "[Native Tx Validation] Transaction signature verified\n"
+    validityData.data.message =
+        "[Native Tx Validation] Transaction signature verified\n"
     validityData.data.valid = true
     validityData = await signValidityData(validityData)
     return validityData
@@ -138,7 +143,7 @@ async function defineGas(
     }
     let fromBalance = 0
     try {
-        fromBalance = await GLS.getGLSNativeBalance(from)
+        fromBalance = await GCR.getGCRNativeBalance(from)
     } catch (e) {
         term.red.bold(
             "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " +
@@ -216,7 +221,7 @@ export async function broadcastVerifiedNativeTransaction(
 ): Promise<[boolean, string, Operation[]?]> {
     // REVIEW Execute or Revert the transaction
     // NOTE executeTransaction returns an array of [success, message, operations]
-    // The operations are the Operation objects that are executed in the GLS after the consensus
+    // The operations are the Operation objects that are executed in the GCR after the consensus
     // has confirmed the transaction in the block.
 
     let execution = await executeNativeTransaction(
@@ -226,19 +231,19 @@ export async function broadcastVerifiedNativeTransaction(
         return [false, "Execution failed: " + execution[1]]
     }
 
-    // ANCHOR TX Pre-execution, operation derivation and GLS Operation registry update are defined here
+    // ANCHOR TX Pre-execution, operation derivation and GCR Operation registry update are defined here
 
     // NOTE Now we can save the gas operation as the tx is set to be executed
     // and the gas will be deducted anyway
-    console.log("[TX RECEIVED] Gas Operation added to the GLS\n")
-    GLS.getInstance().operations.push(validityData.data.gas_operation)
+    console.log("[TX RECEIVED] Gas Operation added to the GCR\n")
+    GCR.getInstance().operations.push(validityData.data.gas_operation)
 
-    // Finally, we add all the derived operations to the GLS
+    // Finally, we add all the derived operations to the GCR
     for (let i = 0; i < execution[2].length; i++) {
         console.log("[TX RECEIVED] Operation derived")
         //console.log(execution[2][i])
-        GLS.getInstance().operations.push(execution[2][i])
-        console.log("[TX RECEIVED] Operation added to the GLS\n")
+        GCR.getInstance().operations.push(execution[2][i])
+        console.log("[TX RECEIVED] Operation added to the GCR\n")
     }
     return execution
 }

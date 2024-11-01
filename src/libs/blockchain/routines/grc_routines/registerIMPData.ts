@@ -1,6 +1,6 @@
 // INFO To safely transition from L2 (IMP) to L1 (DEMOS) it is necessary to have a wrapper that interprets the results
 import { Hash } from "crypto"
-// The outcome of this method can be feed to GLS.addToGLSIMPData
+// The outcome of this method can be feed to GCR.addToGCRIMPData
 import { IMMessage } from "src/features/InstantMessagingProtocol/types/IMSession"
 import Cryptography from "src/libs/crypto/cryptography"
 import { ForgeToHex, HexToForge } from "src/libs/crypto/forgeUtils"
@@ -34,6 +34,6 @@ export default async function registerIMPData(
         }
     }
     // TODO Derive a final value (or create an hash or anything similar depending on data)
-    // TODO Write the value to the GLS
+    // TODO Write the value to the GCR
     return [status, message]
 }

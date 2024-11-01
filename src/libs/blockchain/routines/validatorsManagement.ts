@@ -2,7 +2,7 @@
 
 import forge from "node-forge"
 
-import GLS from "../gls/gls"
+import GCR from "../gcr/gcr"
 import Transaction from "../transaction"
 
 let MIN_TO_STAKE = 10000000000000000000000000 // TODO Defined in genesis
@@ -28,14 +28,14 @@ export default class validatorsManagement {
         publicKey: forge.pki.ed25519.BinaryBuffer,
     ) {
         let hexKey = publicKey.toString("hex")
-        let validator = await GLS.getGLSValidatorStatus(hexKey)
+        let validator = await GCR.getGCRValidatorStatus(hexKey)
         let connectionString = validator["connection_string"]
         // TODO connection test
     }
 
     static async isValidatorActive(publicKey: forge.pki.ed25519.BinaryBuffer) {
         let hexKey = publicKey.toString("hex")
-        let validator = await GLS.getGLSValidatorStatus(hexKey)
+        let validator = await GCR.getGCRValidatorStatus(hexKey)
         // 2 means valid
         return Number(validator["status"]) === 2
     }

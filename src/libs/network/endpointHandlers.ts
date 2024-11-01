@@ -51,7 +51,7 @@ import {
     RPCResponse,
 } from "@kynesyslabs/demosdk/types"
 
-import GLS from "../blockchain/gls/gls"
+import GCR from "../blockchain/gcr/gcr"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import Block from "../blockchain/block"
 import { BlockContent } from "../../../../sdks/src/types/blockchain/blocks"
@@ -337,7 +337,7 @@ export default class ServerHandlers {
             console.log(
                 "[handleExecuteTransaction] Transaction added to mempool",
             )
-            // TODO Check if Operation(s) are added to the GLS too
+            // TODO Check if Operation(s) are added to the GCR too
             // FIXME Add an operation for the nonce or anyway a way to manage the nonce
         }
         // TODO Broadcast the tx to the other peers (or maybe not, consensus should take care of it)
@@ -355,8 +355,8 @@ export default class ServerHandlers {
          * The XM Operation is validated, executed and verified
          * when applicable.
          * A transaction is derived from the executed operation.
-         * An operation is then created and pushed in the GLS.
-         * An operation for the gas is also pushed it pn the GLS.
+         * An operation is then created and pushed in the GCR.
+         * An operation for the gas is also pushed it pn the GCR.
          * The tx is pushed in the mempool if applicable.
          */
         console.log("[XMChain] Handling XM Chain Operation...")

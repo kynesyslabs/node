@@ -6,7 +6,7 @@ import Transaction from "../blockchain/transaction"
 import { AddressInfo } from "@kynesyslabs/demosdk/types"
 import Chain from "../blockchain/chain"
 import { StatusNative } from "@kynesyslabs/demosdk/types"
-import GLS from "../blockchain/gls/gls"
+import GCR from "../blockchain/gcr/gcr"
 import eggs from "./routines/eggs"
 import { getSharedState } from "src/utilities/sharedState"
 import _ from "lodash"
@@ -21,7 +21,7 @@ import getBlockByNumber from "./routines/nodecalls/getBlockByNumber"
 import getBlockByHash from "./routines/nodecalls/getBlockByHash"
 import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
 import log from "src/utilities/logger"
-import HandleGCR from "../blockchain/gls/handleGCR"
+import HandleGCR from "../blockchain/gcr/handleGCR"
 import { GCRExtended } from "src/model/entities/GCR/GCRExtended"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 
@@ -159,7 +159,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 break
             }
             try {
-                nStat = (await GLS.getGLSNativeStatus(
+                nStat = (await GCR.getGCRNativeStatus(
                     data.address,
                 )) as GlobalChangeRegistry
                 response = nStat //.toString() // REVIEW It works ?
@@ -175,7 +175,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "No address specified"
                 break
             }
-            nStat = (await GLS.getGLSNativeStatus(data.address)) as GlobalChangeRegistry
+            nStat = (await GCR.getGCRNativeStatus(data.address)) as GlobalChangeRegistry
             response.response = nStat.details.content.nonce
             break
         case "getPeerTime":

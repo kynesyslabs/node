@@ -10,13 +10,13 @@
         <mxCell id="kYlBuoQv7y_qrkEEZKRV-2" value="Forged block" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;rounded=1;shadow=1;" vertex="1" parent="kYlBuoQv7y_qrkEEZKRV-1">
           <mxGeometry y="30" width="140" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="kYlBuoQv7y_qrkEEZKRV-3" value="GLS Operations" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;rounded=1;shadow=1;" vertex="1" parent="kYlBuoQv7y_qrkEEZKRV-1">
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-3" value="GCR Operations" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;rounded=1;shadow=1;" vertex="1" parent="kYlBuoQv7y_qrkEEZKRV-1">
           <mxGeometry y="60" width="140" height="30" as="geometry" />
         </mxCell>
         <mxCell id="kYlBuoQv7y_qrkEEZKRV-4" value="Validation Data" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;rounded=1;shadow=1;" vertex="1" parent="kYlBuoQv7y_qrkEEZKRV-1">
           <mxGeometry y="90" width="140" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="kYlBuoQv7y_qrkEEZKRV-5" value="GLS Native&lt;br&gt;GLS Properties" style="shape=card;whiteSpace=wrap;html=1;rounded=1;shadow=1;" vertex="1" parent="1">
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-5" value="GCR Native&lt;br&gt;GCR Properties" style="shape=card;whiteSpace=wrap;html=1;rounded=1;shadow=1;" vertex="1" parent="1">
           <mxGeometry x="70" y="319" width="116" height="100" as="geometry" />
         </mxCell>
         <mxCell id="kYlBuoQv7y_qrkEEZKRV-6" value="Executed by all the clients" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;shadow=1;" edge="1" parent="1" source="kYlBuoQv7y_qrkEEZKRV-3" target="kYlBuoQv7y_qrkEEZKRV-5">
@@ -35,7 +35,7 @@
             <mxPoint as="offset" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="kYlBuoQv7y_qrkEEZKRV-12" value="GLS Hashes" style="shape=card;whiteSpace=wrap;html=1;rounded=1;shadow=1;" vertex="1" parent="1">
+        <mxCell id="kYlBuoQv7y_qrkEEZKRV-12" value="GCR Hashes" style="shape=card;whiteSpace=wrap;html=1;rounded=1;shadow=1;" vertex="1" parent="1">
           <mxGeometry x="207" y="319" width="116" height="100" as="geometry" />
         </mxCell>
         <mxCell id="kYlBuoQv7y_qrkEEZKRV-14" value="Hashed and stored" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0;entryDx=15;entryDy=15;entryPerimeter=0;shadow=1;" edge="1" parent="1" source="kYlBuoQv7y_qrkEEZKRV-3" target="kYlBuoQv7y_qrkEEZKRV-12">

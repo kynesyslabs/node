@@ -10,11 +10,11 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 /* NOTE
-    executeTransaction is called BEFORE the transaction is reflected in the GLS, which happens AFTER the
+    executeTransaction is called BEFORE the transaction is reflected in the GCR, which happens AFTER the
     consensus has confirmed the transaction in the block.
 */
 
-import GLS from "../gls/gls"
+import GCR from "../gcr/gcr"
 import Transaction from "../transaction"
 import { Operation } from "@kynesyslabs/demosdk/types"
 
@@ -23,13 +23,13 @@ import { Operation } from "@kynesyslabs/demosdk/types"
 Rationale: transactions arrives with a nonce and a timestamp.
 
 The operations contained in a transaction are calculated by executeTransaction, the output is stored
-as Operation objects in the GLS.
+as Operation objects in the GCR.
 
-Each block, the nodes execute the Operation objects ordering them by their timestamp and nonce (see GLS).
+Each block, the nodes execute the Operation objects ordering them by their timestamp and nonce (see GCR).
 
 */
 
-// INFO Given a transaction, use GLS to see if it is executable and return a result
+// INFO Given a transaction, use GCR to see if it is executable and return a result
 export default async function executeNativeTransaction(
     transaction: Transaction,
 ): Promise<[boolean, string, Operation[]?]> {
@@ -41,10 +41,10 @@ export default async function executeNativeTransaction(
     if (transaction.content.amount > 0) {
         let operation: Operation
         let sender = transaction.content.from.toString("hex")
-        let sender_balance = await GLS.getGLSNativeBalance(sender)
+        let sender_balance = await GCR.getGCRNativeBalance(sender)
         let receiver = transaction.content.to.toString("hex")
-        let receiver_balance = await GLS.getGLSNativeBalance(receiver)
-        // Refuse transaction if GLS is not in shape
+        let receiver_balance = await GCR.getGCRNativeBalance(receiver)
+        // Refuse transaction if GCR is not in shape
         if (sender_balance < transaction.content.amount) {
             success = false
             message = "Insufficient funds"

@@ -2,7 +2,7 @@ import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 
-import GLS from "../../blockchain/gls/gls"
+import GCR from "../../blockchain/gcr/gcr"
 import Mempool from "../../blockchain/mempool"
 import { Operation } from "@kynesyslabs/demosdk/types"
 /* eslint-disable no-unused-vars */
@@ -53,8 +53,8 @@ export async function deriveMempoolOperation(
     if (insert) {
         // ANCHOR Inserting the operation in the next mempool session with the proper data
         Mempool.addTransaction(derivedTx)
-        // ANCHOR And we do the same for the derived operation, inserting it in the GLS
-        GLS.getInstance().operations.push(derivedOperation)
+        // ANCHOR And we do the same for the derived operation, inserting it in the GCR
+        GCR.getInstance().operations.push(derivedOperation)
     }
     // TODO Size limit?
     return [derivedTx.hash, derivedOperation] // REVIEW Is this ok?
@@ -130,7 +130,7 @@ export async function createOperation(
     }
 
     operation.operator = "Web2Certification" // FIXME New method bls
-    operation.nonce = 0 // TODO Get it from chain or gls or whatever it is
+    operation.nonce = 0 // TODO Get it from chain or gcr or whatever it is
     operation.timestamp = transaction.content.timestamp
     operation.params = transaction.content.data
     operation.status = true // TODO Get it from the content itself somehow
@@ -174,8 +174,7 @@ export async function createTransaction(
     transaction.content.type = derivable.type
     // REVIEW Why? Should be done differently I guess
     // Setting us as the sender
-    transaction.content.from =
-        getSharedState.identity.ed25519.publicKey
+    transaction.content.from = getSharedState.identity.ed25519.publicKey
     transaction.content.to = derivable.to
     transaction.content.amount = 0
     transaction.content.nonce = 0

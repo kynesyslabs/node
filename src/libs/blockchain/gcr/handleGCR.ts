@@ -1,6 +1,6 @@
 import { emptyResponse } from "./../../network/server_rpc"
 import _ from "lodash"
-// NOTE This will replace gls.ts methods for calling the native tables
+// NOTE This will replace gcr.ts methods for calling the native tables
 import { GCRSubnetsTxs } from "src/model/entities/GCR/GCRSubnetsTxs" // TODO Put this in the sdk when done
 import { GCRHashes } from "src/model/entities/GCR/GCRHashes"
 import { GCRExtended } from "src/model/entities/GCR/GCRExtended"

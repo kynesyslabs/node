@@ -28,11 +28,11 @@ export default class fungibleToken {
     // TODO We can either create a new token or load an existing one
     static async getToken(tokenAddress: string): Promise<fungibleToken> {
         let token = new fungibleToken()
-        // TODO Load the token from the gls table if any and give back an instance of this class
+        // TODO Load the token from the gcr table if any and give back an instance of this class
         return token
     }
 
-    // INFO Creating a new class, off chain. This will be written to the gls table once deployed and approved.
+    // INFO Creating a new class, off chain. This will be written to the gcr table once deployed and approved.
     static async createNewToken(
         tokenName: string,
         symbol: string,

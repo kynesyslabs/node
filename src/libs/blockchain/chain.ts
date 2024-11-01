@@ -298,7 +298,7 @@ export default class Chain {
     // SECTION  Setters
     // INFO Insert a block into the database
     // NOTE Inserting a block is done after the consensus, so that together
-    // with the block, we can write the GLS status changes to the chain.
+    // with the block, we can write the GCR status changes to the chain.
     static async insertBlock(
         block: Block,
         operations: Operation[] = [],
@@ -461,7 +461,7 @@ export default class Chain {
             JSON.stringify(genesis_block.content),
         )
 
-        // REVIEW Create a GLS Operation and execute it
+        // REVIEW Create a GCR Operation and execute it
         let genesis_op: Operation = {
             operator: "genesis",
             actor: "DEMOS Network",

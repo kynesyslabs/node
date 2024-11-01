@@ -3,11 +3,11 @@ import { assignXM } from "./assignXM"
 import hashGCRTables from "./hashGCR"
 import native from "./manageNative"
 
-let glsRoutines = {
+let gcrRoutines = {
     assignWeb2: assignWeb2,
     assignXM: assignXM,
     native: native,
     hashGCRTables: hashGCRTables,
 }
 
-export default glsRoutines
+export default gcrRoutines

@@ -1,10 +1,9 @@
 import { Operation, OperationResult } from "@kynesyslabs/demosdk/types"
 
-import GLS from "../../gls/gls"
-
+import GCR from "../../gcr/gcr"
 export async function assignWeb2(
     operation: Operation,
 ): Promise<OperationResult> {
     let { address, web2_hash } = operation.params
-    return await GLS.addToGLSWeb2(address, web2_hash)
+    return await GCR.addToGCRWeb2(address, web2_hash)
 }

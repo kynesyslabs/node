@@ -43,7 +43,7 @@ export interface Actor {
     operations: Map<Operation, OperationResult>
 }
 
-// ANCHOR Execute operations and merge GLS registry into the chain based on the status
+// ANCHOR Execute operations and merge GCR registry into the chain based on the status
 export default async function executeOperations(
     operations: Operation[],
     block: Block = null,
@@ -121,11 +121,11 @@ async function executeSequence(
             // REVIEW
             // TODO Harmonize with deriveMempoolOperation
             case "assign_xm":
-                result = await subOperations.glsRoutines.assignXM(operations[i])
+                result = await subOperations.gcrRoutines.assignXM(operations[i])
                 results.operations.set(operations[i], result)
                 break
             case "assign_web2":
-                result = await subOperations.glsRoutines.assignWeb2(
+                result = await subOperations.gcrRoutines.assignWeb2(
                     operations[i],
                 )
                 results.operations.set(operations[i], result)

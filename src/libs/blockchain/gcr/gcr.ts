@@ -9,20 +9,20 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-/* INFO GLS
- * While the GLS is not part of the blockchain itself, that does not mean that
+/* INFO GCR
+ * While the GCR is not part of the blockchain itself, that does not mean that
  * blockchain security does not apply to it. Even if a DEMOS Node does not store
- * the GLS as part of the blockchain (mainly due to its mutable nature), every
- * GLS property can and is traced back to the corresponding set of Operations.
+ * the GCR as part of the blockchain (mainly due to its mutable nature), every
+ * GCR property can and is traced back to the corresponding set of Operations.
  * From there, finding the corresponding Transaction for each Operation is trivial.
- * This ensures that even if it is a separate table, the GLS remains cryptographically secure.
- * The specifications to achieve this grade of security requires nodes to store GLS
+ * This ensures that even if it is a separate table, the GCR remains cryptographically secure.
+ * The specifications to achieve this grade of security requires nodes to store GCR
  * data along with the corresponding on-chain data to be able to verify it at any time.
  *
  */
 
 /* INFO Operations
- * An Operation is a modification of the GLS derived from a transaction
+ * An Operation is a modification of the GCR derived from a transaction
  * While in transactions like "transfer X tokens to Y" the Operation is
  * a simple transfer, one could think that Operation = Transaction but
  * it is very likely and very possible that from a Transaction multiple
@@ -30,17 +30,17 @@ KyneSys Labs: https://www.kynesys.xyz/
  * that the sender will pay gas so another Operation: "pay Z gas".
  *
  * Operations are useful because while Transactions store in the Blockchain
- * everything that happens, Operations quickly update the Blockchain GLS
+ * everything that happens, Operations quickly update the Blockchain GCR
  * with all the necessary references to the corresponding Transactions
- * without having to load and parse every single Transaction to verify the GLS.
+ * without having to load and parse every single Transaction to verify the GCR.
  *
  * Basically, Operations have the role of a quick reference index to modify, derive
- * and trace back the GLS modifications efficiently.
+ * and trace back the GCR modifications efficiently.
  *
  */
 
 // TODO genesis.json: see how it is stored on chain and make a method to
-// TODO insert it in the gls automatically so that the parameters of the
+// TODO insert it in the gcr automatically so that the parameters of the
 // TODO chain are both immutable and editable at the same time
 
 import * as fs from "fs"
@@ -93,9 +93,9 @@ export class OperationsRegistry {
     }
 }
 
-// INFO Besides the static methods, the GLS store all the operations to be done in the current block so that they can be executed in order
-export default class GLS {
-    private static instance: GLS
+// INFO Besides the static methods, the GCR store all the operations to be done in the current block so that they can be executed in order
+export default class GCR {
+    private static instance: GCR
     operations: Operation[] // TODO It will become the above implementation
 
     private constructor() {
@@ -103,9 +103,9 @@ export default class GLS {
     }
 
     // Singleton logic
-    static getInstance(): GLS {
+    static getInstance(): GCR {
         if (!this.instance) {
-            this.instance = new GLS()
+            this.instance = new GCR()
         }
         return this.instance
     }
@@ -118,7 +118,7 @@ export default class GLS {
         return result
     }
 
-    static async getGLSStatusNativeTable() {
+    static async getGCRStatusNativeTable() {
         const db = await Datasource.getInstance()
         const GCRRepository = db
             .getDataSource()
@@ -126,7 +126,7 @@ export default class GLS {
         return await GCRRepository.find()
     }
 
-    static async getGLSStatusPropertiesTable() {
+    static async getGCRStatusPropertiesTable() {
         const db = await Datasource.getInstance()
         const GCRExtendedRepository = db
             .getDataSource()
@@ -134,7 +134,7 @@ export default class GLS {
         return await GCRExtendedRepository.find()
     }
 
-    static async getGLSNativeFor(address: string) {
+    static async getGCRNativeFor(address: string) {
         const db = await Datasource.getInstance()
         const GCRRepository = db
             .getDataSource()
@@ -144,7 +144,7 @@ export default class GLS {
         })
     }
 
-    static async getGLSPropertiesFor(
+    static async getGCRPropertiesFor(
         address: string,
         field: keyof GCRExtended,
     ) {
@@ -160,7 +160,7 @@ export default class GLS {
 
     // ANCHOR Balances retrieval
 
-    static async getGLSNativeBalance(address: string) {
+    static async getGCRNativeBalance(address: string) {
         const db = await Datasource.getInstance()
         const GCRRepository = db
             .getDataSource()
@@ -178,7 +178,7 @@ export default class GLS {
         }
     }
 
-    static async getGLSTokenBalance(address: string, token_address: string) {
+    static async getGCRTokenBalance(address: string, token_address: string) {
         const db = await Datasource.getInstance()
         const GCRExtendedRepository = db
             .getDataSource()
@@ -197,7 +197,7 @@ export default class GLS {
         }
     }
 
-    static async getGLSNFTBalance(address: string, nft_address: string) {
+    static async getGCRNFTBalance(address: string, nft_address: string) {
         const db = await Datasource.getInstance()
         const GCRExtendedRepository = db
             .getDataSource()
@@ -214,17 +214,17 @@ export default class GLS {
         }
     }
 
-    static async getGLSLastBlockBaseGas(): Promise<number> {
+    static async getGCRLastBlockBaseGas(): Promise<number> {
         // TODO Implement and make it dynamic
-        /* let chainProperties = await GLS.getGLSChainProperties()
+        /* let chainProperties = await GCR.getGCRChainProperties()
         return chainProperties.gas_multiplier */
         return 1
     }
 
-    // INFO In the GLS properties table, the special row "DEMOS Network" defines, in the other
+    // INFO In the GCR properties table, the special row "DEMOS Network" defines, in the other
     // field, the properties of the chain itself shared by all its members.
     // TODO Maybe implement it at genesis or retrieve the genesis from chain?
-    static async getGLSChainProperties(): Promise<any> {
+    static async getGCRChainProperties(): Promise<any> {
         const db = await Datasource.getInstance()
         const statusPropertiesRepository = db
             .getDataSource()
@@ -238,14 +238,14 @@ export default class GLS {
             return response ? response.other : null
         } catch (e) {
             // Handle the error appropriately
-            console.error("Error fetching GLS chain properties:", e)
+            console.error("Error fetching GCR chain properties:", e)
         }
     }
 
     // SECTION Validators management
 
     // INFO The following getter is used to retrieve the hashed form of the sum of all the stakes at block N
-    static async getGLSHashedStakes(n: number = null) {
+    static async getGCRHashedStakes(n: number = null) {
         if (!n) {
             n = await Chain.getLastBlockNumber() // Ensure this method is also ported to TypeORM if necessary
         }
@@ -269,12 +269,12 @@ export default class GLS {
 
             return Hashing.sha256(total.toString()) // Ensure Hashing.sha256 is defined and works as expected
         } catch (e) {
-            console.error("Error fetching GLS hashed stakes:", e)
+            console.error("Error fetching GCR hashed stakes:", e)
         }
     }
 
     // INFO The following getter is used to retrieve the list of all validators at a given block
-    static async getGLSValidatorsAtBlock(
+    static async getGCRValidatorsAtBlock(
         blockNumber: number = null,
     ): Promise<unknown[]> {
         const db = await Datasource.getInstance()
@@ -299,14 +299,14 @@ export default class GLS {
 
             return blockNodes || []
         } catch (e) {
-            console.error("Error fetching GLS validators at block:", e)
+            console.error("Error fetching GCR validators at block:", e)
             return [] // or handle the error as needed
         }
     }
 
     // INFO Get a validator (or a public key anyway) status in the staking
     // NOTE While accepting a blockNumber, it defaults to the last one
-    static async getGLSValidatorStatus(
+    static async getGCRValidatorStatus(
         publicKeyHex: string,
         blockNumber: number = null,
     ) {
@@ -338,7 +338,7 @@ export default class GLS {
 
     // !SECTION Getters
 
-    static async getGLSNativeStatus(address: string): Promise<GlobalChangeRegistry> {
+    static async getGCRNativeStatus(address: string): Promise<GlobalChangeRegistry> {
         const db = await Datasource.getInstance()
         const GCRRepository = db
             .getDataSource()
@@ -369,7 +369,7 @@ export default class GLS {
         return nativeStatus
     }
 
-    static async getGLSStatusProperties(
+    static async getGCRStatusProperties(
         address: string,
     ): Promise<GCRExtended> {
         const db = await Datasource.getInstance()
@@ -391,7 +391,7 @@ export default class GLS {
     // NOTE For consistency, setters should return a Promise<boolean>
 
     // INFO Assigning a XM Transaction to an address
-    static async addToGLSXM(
+    static async addToGCRXM(
         address: string,
         xm_hash: string,
     ): Promise<OperationResult> {
@@ -430,7 +430,7 @@ export default class GLS {
     }
 
     // INFO Assigning a Web2 Transaction to an address
-    static async addToGLSWeb2(
+    static async addToGCRWeb2(
         address: string,
         web2_hash: string,
     ): Promise<OperationResult> {
@@ -470,7 +470,7 @@ export default class GLS {
     }
 
     // INFO Assigning a IMPData hash to an address or to the L1 itself
-    static async addToGLSIMPData(
+    static async addToGCRIMPData(
         address: string,
         IMPDataHash: string,
     ): Promise<OperationResult> {
@@ -485,7 +485,7 @@ export default class GLS {
         return result
     }
 
-    static async setGLSNativeBalance(
+    static async setGCRNativeBalance(
         address: string,
         native: number,
         tx_hash: string,
@@ -544,8 +544,8 @@ export default class GLS {
             // Note: The original function returns responses from Chain.write, consider what you need to return here.
             return true // Adjust the return value as needed based on your requirements.
         } catch (e) {
-            console.error("Error setting GLS native balance:", e)
-            console.log("[GLS ERROR: NATIVE] ")
+            console.error("Error setting GCR native balance:", e)
+            console.log("[GCR ERROR: NATIVE] ")
             console.log(e)
             return false
         }
