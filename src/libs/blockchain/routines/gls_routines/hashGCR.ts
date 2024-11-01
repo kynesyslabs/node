@@ -1,10 +1,10 @@
 import { EntityTarget, Repository, FindOptionsOrder } from "typeorm"
-import Datasource from "../datasource"
+import Datasource from "../../../../model/datasource"
 import Hashing from "src/libs/crypto/hashing"
-import { GCRSubnetsTxs } from "../entities/GCR/GCRSubnetsTxs"
-import { GlobalChangeRegistry } from "../entities/GCR/GlobalChangeRegistry"
-import { GCRExtended } from "../entities/GCR/GCRExtended"
-import { GCRHashes } from "../entities/GCR/GCRHashes"
+import { GCRSubnetsTxs } from "../../../../model/entities/GCR/GCRSubnetsTxs"
+import { GlobalChangeRegistry } from "../../../../model/entities/GCR/GlobalChangeRegistry"
+import { GCRExtended } from "../../../../model/entities/GCR/GCRExtended"
+import { GCRHashes } from "../../../../model/entities/GCR/GCRHashes"
 import Chain from "src/libs/blockchain/chain"
 
 /**
