@@ -46,7 +46,14 @@ async function setBalance(
     const GCRRepository = db
         .getDataSource()
         .getRepository(GlobalChangeRegistry)
-    const GCRSearch = await GCRRepository.findOneBy({ publicKey: publicKey })
+    let GCRSearch = await GCRRepository.findOneBy({ publicKey: publicKey })
+    if (!GCRSearch) {
+        GCRSearch = {
+            id: null,
+            publicKey: publicKey,
+            details: rawData.details,
+        }
+    }
     // Keeping the things we need and just updating the balance
     let GCRUpdate = GCRSearch
     GCRUpdate.details.content.balance = balance
