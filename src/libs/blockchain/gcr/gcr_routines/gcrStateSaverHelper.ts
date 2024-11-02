@@ -7,6 +7,8 @@ import { GCRHashes } from "src/model/entities/GCR/GCRHashes"
 // which is set by the validators during the consensus and is an hash of all the applicable operations for that block.
 import Chain from "../../chain"
 import { Operation } from "@kynesyslabs/demosdk/types"
+import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
+import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 
 // REVIEW This could be avoided probably, by using inline hashes instead of hashing the whole table
 // TODO Expand the operation registry (if any) to support inlining of hashes into GCR states.
@@ -31,4 +33,29 @@ export default class gcrStateSave {
     static getLastConsenusStateHash() {
         // TODO Get the last consensus state hash from the database (see the above method)
     }
+
+    // Updating the GCR tracker for a given public key
+    static async updateGCRTracker(publicKey: string) {
+        // TODO Update the GCR tracker for a given public key
+        const db = await Datasource.getInstance()
+        const GCRTrackerRepository = db.getDataSource().getRepository(GCRTracker)
+        const GCRRepository = db.getDataSource().getRepository(GlobalChangeRegistry)
+        const userData = await GCRRepository.findOne({
+            where: { publicKey: publicKey },
+        })
+        if (!userData) {
+            throw new Error("User data not found")
+        }
+        const hash = Hashing.sha256(JSON.stringify(userData))
+        // Creating or updating the GCR tracker using upsert
+        await GCRTrackerRepository.upsert({
+            publicKey: publicKey,
+            hash: hash,
+        }, {
+            conflictPaths: ["publicKey"],
+        })
+    }
+
+
 }
+

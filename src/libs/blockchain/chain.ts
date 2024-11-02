@@ -14,7 +14,7 @@ import Datasource from "src/model/datasource"
 import { Blocks } from "src/model/entities/Blocks"
 import { GCRHashes } from "src/model/entities/GCR/GCRHashes"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
-import { GCRExtended } from "src/model/entities/GCR/GCRExtended"
+import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { Transactions } from "src/model/entities/Transactions"
 import { MoreThan, ILike } from "typeorm"
 
@@ -179,26 +179,19 @@ export default class Chain {
 
     static async getAddressInfo(
         address: string,
-    ): Promise<{ native: GlobalChangeRegistry; properties: GCRExtended }> {
+    ): Promise<{ native: GlobalChangeRegistry }> {
         const db = await Datasource.getInstance()
         const GCRRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
 
-        const GCRExtendedRepository = db
-            .getDataSource()
-            .getRepository(GCRExtended)
 
         const GCRSearch = (await GCRRepository.findOneBy({
             publicKey: ILike(address),
         })) as GlobalChangeRegistry
-        const GCRExtendedSearch = (await GCRExtendedRepository.findOneBy({
-            publicKey: ILike(address),
-        })) as GCRExtended
 
         return {
             native: GCRSearch,
-            properties: GCRExtendedSearch,
         }
     }
 
@@ -582,13 +575,13 @@ export default class Chain {
             })) as GlobalChangeRegistry
         } else if (type === 1) {
             const db = await Datasource.getInstance()
-            const GCRExtendedRepository = db
+            const GCRRepository = db
                 .getDataSource()
-                .getRepository(GCRExtended)
+                .getRepository(GlobalChangeRegistry)
 
-            return (await GCRExtendedRepository.findOneBy({
+            return (await GCRRepository.findOneBy({
                 publicKey: ILike(address),
-            })) as GCRExtended
+            })) as GlobalChangeRegistry
         }
         return null
     } // TODO Implement specific time-saving operations to get specific data (see the tables in the db)

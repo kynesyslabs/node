@@ -3,9 +3,9 @@ import Datasource from "../../../../model/datasource"
 import Hashing from "src/libs/crypto/hashing"
 import { GCRSubnetsTxs } from "../../../../model/entities/GCR/GCRSubnetsTxs"
 import { GlobalChangeRegistry } from "../../../../model/entities/GCR/GlobalChangeRegistry"
-import { GCRExtended } from "../../../../model/entities/GCR/GCRExtended"
 import { GCRHashes } from "../../../../model/entities/GCR/GCRHashes"
 import Chain from "src/libs/blockchain/chain"
+import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
 
 /**
  * Generates a SHA-256 hash for tables that use 'publicKey' as their identifier.
@@ -69,15 +69,13 @@ export async function hashSubnetsTxsTable(): Promise<string> {
 export default async function hashGCRTables(): Promise<string> {
     
     // Get all individual hashes
-    const gcrHash = await hashPublicKeyTable(GlobalChangeRegistry)
-    const gcrExtendedHash = await hashPublicKeyTable(GCRExtended)
+    const gcrHash = await hashPublicKeyTable(GCRTracker) // Tracking the GCR hashes as they are hashes of the GCR itself
     const subnetsTxsHash = await hashSubnetsTxsTable()
 
     // Combine all hashes in a deterministic order using a JSON object
     // The object keys are sorted alphabetically to ensure consistent ordering
     const combinedString = JSON.stringify({
         gcr: gcrHash,
-        gcrExtended: gcrExtendedHash,
         subnets: subnetsTxsHash,
     })
 

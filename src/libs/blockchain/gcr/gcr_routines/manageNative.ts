@@ -37,6 +37,13 @@ async function setBalance(
                 txs: null,
             },
         },
+        extended: {
+            tokens: [],
+            nfts: [],
+            xm: [],
+            web2: [],
+            other: [],
+        },
     }
 
     const db = await Datasource.getInstance()
@@ -47,6 +54,7 @@ async function setBalance(
             id: null,
             publicKey: publicKey,
             details: rawData.details,
+            extended: rawData.extended,
         }
     }
     // Keeping the things we need and just updating the balance

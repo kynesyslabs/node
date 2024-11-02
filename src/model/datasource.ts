@@ -16,12 +16,13 @@ import { Consensus } from "./entities/Consensus"
 import { Mempool } from "./entities/Mempool"
 import { PgpKeyServer } from "./entities/PgpKeyServer"
 import { GCRHashes } from "./entities/GCR/GCRHashes"
-import { GCRExtended } from "./entities/GCR/GCRExtended"
 import { Transactions } from "./entities/Transactions"
 import { Validators } from "./entities/Validators"
 //import { Identities } from "./entities/Identities"
 import { GlobalChangeRegistry } from "./entities/GCR/GlobalChangeRegistry"
 import { GCRSubnetsTxs } from "./entities/GCR/GCRSubnetsTxs"
+import { GCRTracker } from "./entities/GCR/GCRTracker"
+
 class Datasource {
     private static instance: Datasource
     private dataSource: DataSource
@@ -41,12 +42,12 @@ class Datasource {
                 Consensus,
                 PgpKeyServer,
                 GCRHashes,
-                GCRExtended,
                 GCRSubnetsTxs,
                 Transactions,
                 Validators,
                 //Identities,
                 GlobalChangeRegistry,
+                GCRTracker,
             ],
             synchronize: true, // set this to false in production
             logging: false,

@@ -22,8 +22,7 @@ import getBlockByHash from "./routines/nodecalls/getBlockByHash"
 import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
-import { GCRExtended } from "src/model/entities/GCR/GCRExtended"
-import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
+import { GlobalChangeRegistry, GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
 
 export interface NodeCall {
     message: string

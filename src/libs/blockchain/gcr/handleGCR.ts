@@ -5,16 +5,17 @@ import _ from "lodash"
 // NOTE This will replace gcr.ts methods for calling the native tables
 import { GCRSubnetsTxs } from "src/model/entities/GCR/GCRSubnetsTxs" // TODO Put this in the sdk when done
 import { GCRHashes } from "src/model/entities/GCR/GCRHashes"
-import { GCRExtended } from "src/model/entities/GCR/GCRExtended"
 import { EncryptedTransaction, RPCResponse } from "@kynesyslabs/demosdk/types"
 import Datasource from "src/model/datasource"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
+import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
     nonce?: boolean
     txList?: boolean
     identities?: boolean
+    extended?: boolean
 }
 
 export type GetNativePropertiesOptions = {
@@ -40,6 +41,7 @@ export default class HandleGCR {
             nonce: true,
             txList: false,
             identities: true,
+            extended: false,
         },
     ): Promise<RPCResponse> {
         var response: RPCResponse = _.cloneDeep(emptyResponse)
@@ -63,6 +65,7 @@ export default class HandleGCR {
             id: GlobalChangeRegistrySearch.id,
             publicKey: GlobalChangeRegistrySearch.publicKey,
             details: GlobalChangeRegistrySearch.details,
+            extended: GlobalChangeRegistrySearch.extended,
         }
         // Selecting only the requested data
         if (options.balance) {
@@ -80,6 +83,10 @@ export default class HandleGCR {
         if (options.identities) {
             GlobalChangeRegistryData.details.content.identities =
                 GlobalChangeRegistrySearch.details.content.identities
+        }
+        if (options.extended) {
+            GlobalChangeRegistryData.extended =
+                GlobalChangeRegistrySearch.extended
         }
         response.response = GlobalChangeRegistryData
         return response
@@ -100,11 +107,12 @@ export default class HandleGCR {
         const db = await Datasource.getInstance()
         const GCRExtendedRepository = db
             .getDataSource()
-            .getRepository(GCRExtended)
+            .getRepository(GlobalChangeRegistry)
         // Getting the status properties data
-        const GCRExtendedSearch = await GCRExtendedRepository.findOneBy({
+        const RepositorySearch = await GCRExtendedRepository.findOneBy({
             publicKey: publicKey,
         })
+        const GCRExtendedSearch = RepositorySearch.extended
         if (!GCRExtendedSearch) {
             response.response = "Address not found"
             response.result = 404
@@ -112,7 +120,6 @@ export default class HandleGCR {
         }
         // Preparing the response
         let GCRExtendedData: GCRExtended = {
-            publicKey: GCRExtendedSearch.publicKey,
             tokens: GCRExtendedSearch.tokens,
             nfts: GCRExtendedSearch.nfts,
             xm: GCRExtendedSearch.xm,
