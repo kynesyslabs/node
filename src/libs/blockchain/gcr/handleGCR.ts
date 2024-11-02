@@ -1,4 +1,17 @@
 // ! Unify this and gcr.ts methods
+/** TODO
+ * 1. Port here the following methods from gcr.ts:
+ *      - assignXM
+ *      - assignWeb2
+ * 2. Ensure no file calls gcr.ts methods and if so, port them here
+ * 3. Add methods for the following:
+ *      - update of balance, nonce, txs
+ *      - update for tokens, nfts, xm, web2, other
+ *      - a parser for GCR updates that calls the above methods
+ *      - not necessarily here: txs <-> operations (the parsed above)
+ * 4. Ensure GCRJsonbHandler is used for all JSONB operations
+ * 5. Ensure GCRTracker is updated for all operations pertaining to an address
+ */
 
 import { emptyResponse } from "./../../network/server_rpc"
 import _ from "lodash"
@@ -9,6 +22,12 @@ import { EncryptedTransaction, RPCResponse } from "@kynesyslabs/demosdk/types"
 import Datasource from "src/model/datasource"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
+import hashGCRTables from "./gcr_routines/hashGCR"
+import * as GCRJsonbHandler from "./gcr_routines/gcrJSONBHandler"
+import ensureGCRForUser from "./gcr_routines/ensureGCRForUser"
+import gcrStateSave from "./gcr_routines/gcrStateSaverHelper"
+import { assignXM } from "./gcr_routines/assignXM"
+import { assignWeb2 } from "./gcr_routines/assignWeb2"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -175,4 +194,33 @@ export default class HandleGCR {
         response.response = GCRSubnetsTxsData
         return response
     }
+
+    // Routines
+
+    // Assign methods
+    // ! We have to port these methods from gcr.ts, now they are just proxies
+    assign = {
+        xm: assignXM,
+        web2: assignWeb2,
+    }
+
+    // Utilities
+    utilities = {
+        ensureGCRForUser,
+    }
+
+    // State save methods
+    save = gcrStateSave
+
+    // Hash methods
+    hash = {
+        tables: hashGCRTables,
+    }
+
+    // JSONB methods
+    jsonb = {
+        get: GCRJsonbHandler.getJSONBValue,
+        update: GCRJsonbHandler.updateJSONBValue,
+    }
+
 }
