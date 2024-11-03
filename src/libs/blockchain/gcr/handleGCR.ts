@@ -8,9 +8,15 @@
  *      - update of balance, nonce, txs
  *      - update for tokens, nfts, xm, web2, other
  *      - a parser for GCR updates that calls the above methods
- *      - not necessarily here: txs <-> operations (the parsed above)
+ *      - Use txToOperations to convert transactions to operations
  * 4. Ensure GCRJsonbHandler is used for all JSONB operations
  * 5. Ensure GCRTracker is updated for all operations pertaining to an address
+ */
+
+/** NOTE
+ * To implement the assign calls, see txToGCR.drawio.png schema to have an idea of how to
+ * convert a demosWork in a GCROperation and how to change the GCR with that operation.
+ * - Also implement the new GCROperation structure replacing the old Operation one
  */
 
 import { emptyResponse } from "./../../network/server_rpc"
@@ -28,6 +34,7 @@ import ensureGCRForUser from "./gcr_routines/ensureGCRForUser"
 import gcrStateSave from "./gcr_routines/gcrStateSaverHelper"
 import { assignXM } from "./gcr_routines/assignXM"
 import { assignWeb2 } from "./gcr_routines/assignWeb2"
+import { txToGCROperation } from "./gcr_routines/txToGCROperation"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -222,5 +229,4 @@ export default class HandleGCR {
         get: GCRJsonbHandler.getJSONBValue,
         update: GCRJsonbHandler.updateJSONBValue,
     }
-
 }
