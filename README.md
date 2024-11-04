@@ -1,31 +1,31 @@
 # Demos Network RPC Software
 
-***Extremely Important Note:*** Before opening any issues, please ensure you have read this README.md file and have followed all the instructions. Focus especially on the [Usage](#usage) section.
+**_Extremely Important Note:_** Before opening any issues, please ensure you have read this README.md file and have followed all the instructions. Focus especially on the [Usage](#usage) section.
 
-***Disclaimer:*** This software is currently in an early development stage and is not yet ready for production use. The software is not stable and is missing many features that are essential for a production-ready node. Use at your own risk.
+**_Disclaimer:_** This software is currently in an early development stage and is not yet ready for production use. The software is not stable and is missing many features that are essential for a production-ready node. Use at your own risk.
 
 # Table of Contents
 
-- [Demos Network RPC Software](#demos-network-rpc-software)
-- [Table of Contents](#table-of-contents)
-  - [Description](#description)
-  - [Hardware and software requirements](#hardware-and-software-requirements)
-    - [Hardware](#hardware)
-      - [Minimum](#minimum)
-      - [Recommended](#recommended)
-    - [Software and System](#software-and-system)
-      - [Tips for a correct installation](#tips-for-a-correct-installation)
-  - [Usage](#usage)
-    - [Preparation](#preparation)
-      - [The .env file](#the-env-file)
-      - [The demos\_peerlist.json file](#the-demos_peerlistjson-file)
-    - [Running](#running)
-  - [Troubleshooting](#troubleshooting)
-    - [Node software not starting](#node-software-not-starting)
-    - [Cleaning the database](#cleaning-the-database)
-    - [Clearing and reinstalling dependencies](#clearing-and-reinstalling-dependencies)
-  - [License](#license)
-
+-   [Demos Network RPC Software](#demos-network-rpc-software)
+-   [Table of Contents](#table-of-contents)
+    -   [Description](#description)
+    -   [Hardware and software requirements](#hardware-and-software-requirements)
+        -   [Hardware](#hardware)
+            -   [Minimum](#minimum)
+            -   [Recommended](#recommended)
+        -   [Software and System](#software-and-system)
+        -   [Quick installation](#quick-installation)
+            -   [Tips for a correct installation](#tips-for-a-correct-installation)
+    -   [Usage](#usage)
+        -   [Preparation](#preparation)
+            -   [The .env file](#the-env-file)
+            -   [The demos_peerlist.json file](#the-demos_peerlistjson-file)
+        -   [Running](#running)
+    -   [Troubleshooting](#troubleshooting)
+        -   [Node software not starting](#node-software-not-starting)
+        -   [Cleaning the database](#cleaning-the-database)
+        -   [Clearing and reinstalling dependencies](#clearing-and-reinstalling-dependencies)
+    -   [License](#license)
 
 ## Description
 
@@ -38,29 +38,51 @@ The included software follows the Demos Network specifications and can be used a
 
 #### Minimum
 
-- 4GB RAM
-- 4 modern CPU cores (min 2ghz, physical cores or vcpu)
-- A modern SSD
-- 200mbit/s down/up internet connection
+-   4GB RAM
+-   4 modern CPU cores (min 2ghz, physical cores or vcpu)
+-   A modern SSD
+-   200mbit/s down/up internet connection
 
 #### Recommended
 
-- 8gb RAM
-- 6 modern CPU cores (min 2ghz, physical cores)
-- A modern SSD
-- 1gbit/s down/up internet connection
+-   8gb RAM
+-   6 modern CPU cores (min 2ghz, physical cores)
+-   A modern SSD
+-   1gbit/s down/up internet connection
 
 ### Software and System
 
-- Linux, MacOS or WSL2 on Windows (Ubuntu LTS > 22.04 recommended)
-- Node.js 20.x or later (might work on other versions, but this is the only one that is guaranteed to work)
-- Yarn (npm might work, but yarn is recommended)
-- Docker and docker compose
-- Port 5332 free
+-   Linux, MacOS or WSL2 on Windows (Ubuntu LTS > 22.04 recommended)
+-   Node.js 20.x or later (might work on other versions, but this is the only one that is guaranteed to work)
+-   Yarn (npm might work, but yarn is recommended)
+-   Docker and docker compose
+-   Port 5332 free
+
+### Quick installation
+
+You can install the needed software by running the following command:
+
+```bash
+./install
+```
+
+This will install the needed software and configure the node software.
+Specifically, it will:
+
+-   Install the needed dependencies
+-   Install Docker and docker compose for non-root users
+-   Install Node.js 20
+-   Install Bun (if possible)
+-   Install Yarn
+-   Install the node software
+-   Generate a new identity if it does not exist
+-   Save the public key in `public.key` and the private key in `.demos_identity` (if the files already exist, they will be used and the key will not be generated from scratch)
+
+Please ensure that you have the needed permissions to install the software and that you have a correct internet connection. Also please ensure that the above steps and everything else in the script won't break your system.
 
 #### Tips for a correct installation
 
-- To ensure the Node.js version is correct, you can run the following command:
+-   To ensure the Node.js version is correct, you can run the following command:
 
 ```bash
 npm install -g n
@@ -73,8 +95,8 @@ n 20
 
 The client uses two main files that are required for its functioning:
 
-- `.env`
-- `demos_peerlist.json`
+-   `.env`
+-   `demos_peerlist.json`
 
 You can copy `env.example` and `demos_peerlist.json.example` to `.env` and `demos_peerlist.json` respectively.
 
@@ -82,11 +104,11 @@ You can copy `env.example` and `demos_peerlist.json.example` to `.env` and `demo
 
 This file contains the environment variables for the node software. You can probably leave most of them as they are, but you will need to change the following:
 
-- `EXPOSED_URL`: This is the URL that the node software will be exposed to the network. This should be a public URL that points to the machine running the node software. If you are running the node software on the same machine as the client, you can use `http://localhost:53550`. If you are running the node software on a different machine, you can use the public IP address of that machine (for example `http://1.2.3.4:53550`). If you are running the node behind a reverse proxy, you can use the public URL of the proxy server (as in `https://demos.example.com`). *IMPORTANT NOTE: The URL must start with `http://` or `https://` and the port must be included if needed. Setting this value incorrectly will make the node software unable to connect to the network.*
+-   `EXPOSED_URL`: This is the URL that the node software will be exposed to the network. This should be a public URL that points to the machine running the node software. If you are running the node software on the same machine as the client, you can use `http://localhost:53550`. If you are running the node software on a different machine, you can use the public IP address of that machine (for example `http://1.2.3.4:53550`). If you are running the node behind a reverse proxy, you can use the public URL of the proxy server (as in `https://demos.example.com`). _IMPORTANT NOTE: The URL must start with `http://` or `https://` and the port must be included if needed. Setting this value incorrectly will make the node software unable to connect to the network._
 
 #### The demos_peerlist.json file
 
-This file contains the list of peers that the node software will try to connect to. If you want to test the node locally (connecting to yourself), you can start the node software and, upon the first run, replace the ***identity*** key in the file with the public key of your node (found in `publickey_yourkey`). Else, you should add the peers you know to the file and, once the node software is started, it will automatically connect to the peers (format: `"publickey": "connectionstring"`).
+This file contains the list of peers that the node software will try to connect to. If you want to test the node locally (connecting to yourself), you can start the node software and, upon the first run, replace the **_identity_** key in the file with the public key of your node (found in `publickey_yourkey`). Else, you should add the peers you know to the file and, once the node software is started, it will automatically connect to the peers (format: `"publickey": "connectionstring"`).
 
 Example:
 
@@ -96,7 +118,6 @@ Example:
 }
 ```
 
-
 ### Running
 
 Run the following command:
@@ -105,6 +126,7 @@ Run the following command:
 yarn # To install the dependencies
 ./run # To both start the database and the node software
 ```
+
 You must ensure that the port for the node software and the postgres database are free.
 By default, the node software will run on port 53550 and the postgres database will run on port 5332.
 By following the instructions below, you can run multiple nodes on the same machine for testing purposes too.
@@ -112,16 +134,16 @@ You can change the port for the node software and the postgres database by using
 
 `./run [-p <port> -d <postgres port> -i <identity file> -c -n]`
 
-- `-p <port>`: The port for the node software
-- `-d <postgres port>`: The port for the postgres database
-- `-i <identity file>`: The identity file to use
-- `-c`: Cleans the database
-- `-n`: Does not perform a git pull, useful if you want to use a custom branch or want to avoid pulling the latest changes from the repository
+-   `-p <port>`: The port for the node software
+-   `-d <postgres port>`: The port for the postgres database
+-   `-i <identity file>`: The identity file to use
+-   `-c`: Cleans the database
+-   `-n`: Does not perform a git pull, useful if you want to use a custom branch or want to avoid pulling the latest changes from the repository
 
-***NOTE:*** Without arguments, the default port (and folder) for the postgres database is 5332.
-***NOTE:*** Without arguments, the default port for the node software is 53550.
-***NOTE:*** Without arguments, the default identity file is `.demos_identity`. If the file does not exist, it will be created.
-***NOTE:*** Without the `-n` flag, the repository will be updated to the latest changes every time the script is run (recommended behavior)
+**_NOTE:_** Without arguments, the default port (and folder) for the postgres database is 5332.
+**_NOTE:_** Without arguments, the default port for the node software is 53550.
+**_NOTE:_** Without arguments, the default identity file is `.demos_identity`. If the file does not exist, it will be created.
+**_NOTE:_** Without the `-n` flag, the repository will be updated to the latest changes every time the script is run (recommended behavior)
 
 While the script should be able to manage both the database and the node software, in case of any issue you might want to stop the database manually once the node software is terminated:
 

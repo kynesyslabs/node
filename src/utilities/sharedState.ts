@@ -22,6 +22,9 @@ export default class sharedState {
     currentUTCTime: number = 0
     lastTimestamp: number = 0
 
+    // NOTE See calibrateTime.ts for this value
+    timestampCorrection: number = 0
+
     // SECTION shared state variables
     // Modes
     inMainLoop: boolean = false

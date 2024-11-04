@@ -470,4 +470,27 @@ export default class ServerHandlers {
         const response = await Mempool.receive(content.data as MempoolData)
         return { extra, require_reply, response }
     }
+
+    // REVIEW Add a method to handle the reception of a peerlist
+    static async handlePeerlist(content: Peer[]): Promise<any> {
+        // Basic peerlist handling logic
+        let ourPeerList = PeerManager.getInstance().getPeers()
+        // Create a new peerlist with only unique peers (readable)
+        let mergedPeerList: Peer[] = []
+        for (const peer of content) {
+            if (!mergedPeerList.includes(peer)) {
+                mergedPeerList.push(peer)
+            }
+        }
+        // Order the peerlist by alphanumeric
+        let orderedPeerList = mergedPeerList.sort((a, b) =>
+            a.identity.localeCompare(b.identity),
+        )
+        // Set the peerlist to the peer manager and discard the current one
+        PeerManager.getInstance().setPeers(orderedPeerList, true)
+        let extra = { peerlistState: "merged" }
+        let require_reply = false
+        let response = true
+        return { extra, require_reply, response }
+    }
 }

@@ -50,6 +50,8 @@ docker/node_2/data/chain.db
 .vscode/settings.json
 documentation/schemas/.*
 pnpm-lock.yaml
+public.key
+private.key
 
 # DB Files
 postgres/data

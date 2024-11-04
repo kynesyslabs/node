@@ -15,6 +15,7 @@ import {
     ValidationData,
 } from "./interfaces"
 import { mergeMempools } from "./routines/mergeMempools"
+import mergePeerlist from "./routines/mergePeerlist"
 import { createBlock } from "./routines/createBlock"
 import { orderTransactions } from "./routines/orderTransactions"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
@@ -25,6 +26,7 @@ import ShardManager, {
     ValidatorStatus,
     getShardManager,
 } from "./routines/shardManager"
+import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 
 /* INFO
 
@@ -105,6 +107,9 @@ export async function consensusRoutine(): Promise<void> {
     // Merge and order the mempools between the shard and the local node
     const mempool = await mergeAndOrderMempools(shard)
 
+    // REVIEW Merge the peerlist between the shard and the local node
+    const peerlist = await mergePeerlistAndWait(shard)
+
     log.info(
         "[consensusRoutine] mempool merged (aka ordered transactions)",
         true,
@@ -115,7 +120,7 @@ export async function consensusRoutine(): Promise<void> {
     )
 
     // Forge the block from the ordered transactions
-    const block = await forgeBlock(mempool)
+    const block = await forgeBlock(mempool, peerlist)
     // REVIEW Set last consensus time to the current block timestamp
     getSharedState.lastConsensusTime = block.content.timestamp
 
@@ -157,7 +162,7 @@ function initializeConsensusState(): void {
     log.info("[consensusRoutine] Starting the consensus routine")
     getSharedState.consensusMode = true
     getSharedState.inConsensusLoop = true
-    getSharedState.lastTimestamp = Date.now()
+    getSharedState.lastTimestamp = getNetworkTimestamp()
     // Reset the startingConsensus flag
     getSharedState.startingConsensus = false
 }
@@ -205,6 +210,13 @@ async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
     await updateValidatorStatus("synchronizedTime", true, false, true)
 }
 
+// Merge the peerlist between the shard and the local node
+async function mergePeerlistAndWait(shard: Peer[]): Promise<Peer[]> {
+    const mergedPeerList = await mergePeerlist(shard)
+    await updateValidatorStatus("mergedPeerlist", true, false, true)
+    return mergedPeerList
+}
+
 // Merge and order the mempools between the shard and the local node    
 async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
     const ourMempool = await Mempool.getMempool()
@@ -218,7 +230,7 @@ async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
 }
 
 // Forge the block from the ordered transactions
-async function forgeBlock(orderedTransactions: Transaction[]): Promise<Block> {
+async function forgeBlock(orderedTransactions: Transaction[], peerlist: Peer[] = []): Promise<Block> {
     const previousBlockHash = await Chain.getLastBlockHash()
     const lastBlockNumber = await Chain.getLastBlockNumber()
     const commonValidatorSeed = await getCommonValidatorSeed()
@@ -228,6 +240,7 @@ async function forgeBlock(orderedTransactions: Transaction[]): Promise<Block> {
         commonValidatorSeed,
         previousBlockHash,
         lastBlockNumber + 1,
+        peerlist,
     )
 
     await updateValidatorStatus("forgedBlock", true, false, true)

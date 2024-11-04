@@ -1,4 +1,5 @@
 import Chain from "src/libs/blockchain/chain"
+import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
@@ -20,7 +21,7 @@ export async function checkConsensusTime(
     let lastBlock = await Chain.getLastBlock()
     let lastTimestamp = lastBlock.content.timestamp
     // REVIEW Using the UTC timestamp as per mainLoop.ts settings
-    let currentTimestamp = getSharedState.currentUTCTime // Date.now()
+    let currentTimestamp = getNetworkTimestamp() // Date.now()
     let delta = currentTimestamp - lastTimestamp
     let consensusIntervalTime =
         getSharedState.getConsensusTime() || 10 // 10 seconds, use 10000 for 10 seconds in ms

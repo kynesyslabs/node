@@ -20,6 +20,7 @@
     "upgrade_sdk": "yarn upgrade @kynesyslabs/demosdk --latest",
     "upgrade_deps": "yarn upgrade-interactive --latest",
     "upgrade_deps:force": "ncu -u && yarn",
+    "keygen": "tsx -r tsconfig-paths/register src/libs/utils/keyMaker.ts",
     "test:chains": "jest --testMatch '**/tests/**/*.ts' --testPathIgnorePatterns src/* tests/utils/* tests/**/_template*  --verbose"
   },
   "devDependencies": {
@@ -58,7 +59,7 @@
     "@fastify/swagger-ui": "^4.1.0",
     "@fortawesome/free-brands-svg-icons": "^6.5.2",
     "@fortawesome/free-solid-svg-icons": "^6.5.2",
-    "@kynesyslabs/demosdk": "1.5.2",
+    "@kynesyslabs/demosdk": "1.4.8",
     "@types/express": "^4.17.21",
     "@types/http-proxy": "^1.17.14",
     "@types/lodash": "^4.17.4",
@@ -101,6 +102,7 @@
     "npm-check-updates": "^16.14.18",
     "nprogress": "^0.2.0",
     "ntp-client": "^0.5.3",
+    "ntp-time": "^2.0.6",
     "ntru": "^4.0.4",
     "object-sizeof": "^2.6.3",
     "openpgp": "^5.11.0",

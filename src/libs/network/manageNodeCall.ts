@@ -76,6 +76,9 @@ export async function manageNodeCall(
             console.log("[CHAIN.ts] Received reply from the database") // REVIEW Debug
             //console.log(response)
             break
+        case "getLastBlock":
+            response.response = await Chain.getLastBlock()
+            break
         case "getLastBlockHash":
             response.response = await Chain.getLastBlockHash()
             break
