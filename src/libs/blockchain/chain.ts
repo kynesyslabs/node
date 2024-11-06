@@ -296,12 +296,13 @@ export default class Chain {
         block: Block,
         operations: Operation[] = [],
         position?: number,
+        cleanMempool: boolean = true,
     ): Promise<any> {
         const db = await Datasource.getInstance()
         const blockRepository = db.getDataSource().getRepository(Blocks)
-        const transactionRepository = db
-            .getDataSource()
-            .getRepository(Transactions)
+        // const transactionRepository = db
+        //     .getDataSource()
+        //     .getRepository(Transactions)
 
         log.info(
             "[insertBlock] Attempting to insert a block with hash: " +
@@ -398,8 +399,9 @@ export default class Chain {
                 await this.insertTransaction(tx)
             }
             // REVIEW And we clean the mempool
-            await Mempool.clean()
-
+            if (cleanMempool) {
+                await Mempool.clean()
+            }
             return result
         }
     }

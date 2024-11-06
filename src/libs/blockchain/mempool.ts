@@ -167,7 +167,9 @@ export default class Mempool {
             log.info("[MEMPOOL MANAGER] Mempool to be deleted:")
             log.info(JSON.stringify(mempool))
 
-            await mempoolRepository.delete({ current: 1 })
+            if (mempool.length > 0) {
+                await mempoolRepository.delete({ current: 1 })
+            }
         } finally {
             getSharedState.inCleanMempool = false
         }
