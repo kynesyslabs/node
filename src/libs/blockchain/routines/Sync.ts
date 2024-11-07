@@ -162,7 +162,7 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
                 "[fastSync] Block response received for block: " + blockToAsk,
             )
             let block = blockResponse.response as Block
-            Chain.insertBlock(block)
+            Chain.insertBlock(block, [], null, false)
             // REVIEW Merge the peerlist
             log.info("[fastSync] Merging peers from block: " + block.hash)
             let mergedPeerlist = await mergePeerlist(block)
