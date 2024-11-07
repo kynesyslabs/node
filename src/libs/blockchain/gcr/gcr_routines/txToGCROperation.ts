@@ -4,6 +4,15 @@ import GCROperation from "src/libs/blockchain/gcr/types/GCROperations" // ! Put 
 import { ForgeToHex } from "src/libs/crypto/forgeUtils"
 import calculateCurrentGas from "../../routines/calculateCurrentGas"
 
+/** NOTE
+ * Once a block is forged, the createBlock method hash the two GCR tables and adds the hashes to the block
+ */
+
+/** TODO
+ * Make so in the PoRBFT routine, before generating the block, the operations are applied to the state
+ * Consequently, the PoRBFT routine should check the state hashes alongside the block hash
+ */
+
 // REVIEW This should convert a transaction to an operation
 export async function txToGCROperation(tx: Transaction): Promise<GCROperation> {
     let operation: GCROperation = {

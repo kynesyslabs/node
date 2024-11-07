@@ -7,6 +7,7 @@ import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import Peer from "src/libs/peer/Peer"
+import hashGCRTables from "src/libs/blockchain/gcr/gcr_routines/hashGCR"
 
 export async function createBlock(
     orderedTransactions: Transaction[],
@@ -16,13 +17,17 @@ export async function createBlock(
     peerlist: Peer[],
 ): Promise<Block> {
     if (getSharedState.candidateBlock) {
-        log.warning("Candidate block already exists: we should not overwrite it (returning the existing one)")
+        log.warning(
+            "Candidate block already exists: we should not overwrite it (returning the existing one)",
+        )
         // ? Number check?
         return getSharedState.candidateBlock
     }
     // Creating the block
     var block = new Block()
-    block.content.ordered_transactions = orderedTransactions.map(transaction => transaction.hash)
+    block.content.ordered_transactions = orderedTransactions.map(
+        transaction => transaction.hash,
+    )
     block.content.previousHash = previousBlockHash
     block.content.peerlist = peerlist
     block.proposer = commonValidatorSeed // This is the shard identifier
@@ -34,12 +39,12 @@ export async function createBlock(
         block.hash,
         getSharedState.identity.ed25519.privateKey,
     )
-    
+
     // ? Probably to remove once we have the mechanism working for v2
     if (!block.validation_data) {
         block.validation_data = { signatures: {} }
     }
-    
+
     block.validation_data.signatures[ // ! Define a decent type for validation_data
         getSharedState.identity.ed25519.publicKey.toString("hex")
     ] = blockSignature.toString("hex")
@@ -51,13 +56,10 @@ export async function createBlock(
     return block
 }
 
-// ! This is a placeholder for the actual hashing function for the three native tables
+// NOTE Proxy for hashGCRTables
 export async function hashNativeTables(): Promise<NativeTablesHashes> {
-    let hashes: NativeTablesHashes = {
-        native_status: "placeholder",
-        native_properties: "placeholder",
-        native_subnets_txs: "placeholder",
-    }
+    // TODO
+    let hashes: NativeTablesHashes = await hashGCRTables()
     // TODO
     return hashes
 }

@@ -11,7 +11,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { pki } from "node-forge"
 
-import { BlockContent, NativeTablesHashes } from "@kynesyslabs/demosdk/types"   
+import { BlockContent } from "@kynesyslabs/demosdk/types"   
 import { Peer } from "../peer"
 
 // NOTE Block class
@@ -38,8 +38,7 @@ export default class Block {
             l2ps_partecipating_nodes: new Map(),
             l2ps_banned_nodes: new Map(),
             native_tables_hashes: {
-                native_status: "placeholder",
-                native_properties: "placeholder",
+                native_gcr: "placeholder",
                 native_subnets_txs: "placeholder",
             },
         }

@@ -6,6 +6,7 @@ import { GlobalChangeRegistry } from "../../../../model/entities/GCR/GlobalChang
 import { GCRHashes } from "../../../../model/entities/GCR/GCRHashes"
 import Chain from "src/libs/blockchain/chain"
 import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
+import { NativeTablesHashes } from "@kynesyslabs/demosdk/types"
 
 /**
  * Generates a SHA-256 hash for tables that use 'publicKey' as their identifier.
@@ -66,21 +67,15 @@ export async function hashSubnetsTxsTable(): Promise<string> {
  * 
  * @returns Promise<string> - Combined SHA-256 hash of all GCR tables
  */
-export default async function hashGCRTables(): Promise<string> {
+export default async function hashGCRTables(): Promise<NativeTablesHashes> {
     
     // Get all individual hashes
     const gcrHash = await hashPublicKeyTable(GCRTracker) // Tracking the GCR hashes as they are hashes of the GCR itself
     const subnetsTxsHash = await hashSubnetsTxsTable()
-
-    // Combine all hashes in a deterministic order using a JSON object
-    // The object keys are sorted alphabetically to ensure consistent ordering
-    const combinedString = JSON.stringify({
-        gcr: gcrHash,
-        subnets: subnetsTxsHash,
-    })
-
-    // Create final hash of the combined string
-    return Hashing.sha256(combinedString)
+    return {
+        native_gcr: gcrHash,
+        native_subnets_txs: subnetsTxsHash,
+    }
 }
 
 /**
@@ -90,7 +85,7 @@ export default async function hashGCRTables(): Promise<string> {
  * @param hash - Optional: SHA-256 hash of the GCR tables
  * @returns Promise<void>
  */
-export async function insertGCRHash(hash?: string): Promise<void> {
+export async function insertGCRHash(hash?: NativeTablesHashes): Promise<void> {
     const db = await Datasource.getInstance()
     const repository = db.getDataSource().getRepository(GCRHashes)
 

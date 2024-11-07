@@ -17,29 +17,20 @@ import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistr
 export default class gcrStateSave {
     constructor() {}
 
-    // ! Rewrite this to avoid operations and hash the whole GCR
-    static async postConsensusEngraving(ops: Operation[]) {
-        let hashed_ops = Hashing.sha256(JSON.stringify(ops)) // REVIEW Stringify?
-        const db = await Datasource.getInstance()
-        const GCRHashesRepository = db.getDataSource().getRepository(GCRHashes)
-        // Adding the hash to the database
-        await GCRHashesRepository.insert(
-            GCRHashesRepository.create({
-                hash: hashed_ops,
-            }),
-        ) // REVIEW Test it
-    }
-
     static getLastConsenusStateHash() {
-        // TODO Get the last consensus state hash from the database (see the above method)
+        // TODO Get the last consensus state hash from the database (see the below methods)
     }
 
     // Updating the GCR tracker for a given public key
     static async updateGCRTracker(publicKey: string) {
         // TODO Update the GCR tracker for a given public key
         const db = await Datasource.getInstance()
-        const GCRTrackerRepository = db.getDataSource().getRepository(GCRTracker)
-        const GCRRepository = db.getDataSource().getRepository(GlobalChangeRegistry)
+        const GCRTrackerRepository = db
+            .getDataSource()
+            .getRepository(GCRTracker)
+        const GCRRepository = db
+            .getDataSource()
+            .getRepository(GlobalChangeRegistry)
         const userData = await GCRRepository.findOne({
             where: { publicKey: publicKey },
         })
@@ -48,14 +39,14 @@ export default class gcrStateSave {
         }
         const hash = Hashing.sha256(JSON.stringify(userData))
         // Creating or updating the GCR tracker using upsert
-        await GCRTrackerRepository.upsert({
-            publicKey: publicKey,
-            hash: hash,
-        }, {
-            conflictPaths: ["publicKey"],
-        })
+        await GCRTrackerRepository.upsert(
+            {
+                publicKey: publicKey,
+                hash: hash,
+            },
+            {
+                conflictPaths: ["publicKey"],
+            },
+        )
     }
-
-
 }
-

@@ -16,7 +16,7 @@ import {
 } from "./interfaces"
 import { mergeMempools } from "./routines/mergeMempools"
 import mergePeerlist from "./routines/mergePeerlist"
-import { createBlock } from "./routines/createBlock"
+import { createBlock, hashNativeTables } from "./routines/createBlock"
 import { orderTransactions } from "./routines/orderTransactions"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
 import averageTimestamps from "./routines/averageTimestamp"
@@ -120,11 +120,11 @@ export async function consensusRoutine(): Promise<void> {
     )
 
     // Forge the block from the ordered transactions
+    // ! TODO Apply the operations to the state before this as the GCR Hash is needed to forge the block
     const block = await forgeBlock(mempool, peerlist)
     // REVIEW Set last consensus time to the current block timestamp
     getSharedState.lastConsensusTime = block.content.timestamp
 
-    // ! Where do we insert the GCR hash and in general update the native tables?
 
     // Vote on the block by broadcasting the block hash to the shard
     const [pro, con] = await voteOnBlock(block, shard)
@@ -240,6 +240,7 @@ async function forgeBlock(
     const lastBlockNumber = await Chain.getLastBlockNumber()
     const commonValidatorSeed = await getCommonValidatorSeed()
 
+    // REVIEW Add the GCR hash to the block should be done in createBlock
     const block = await createBlock(
         orderedTransactions,
         commonValidatorSeed,
@@ -283,7 +284,7 @@ function isBlockValid(pro: number, totalVotes: number): boolean {
 async function finalizeBlock(block: Block, pro: number): Promise<void> {
     log.info(`[consensusRoutine] Block is valid with ${pro} votes`)
     console.log(block)
-    await Chain.insertBlock(block)
+    await Chain.insertBlock(block) // NOTE Transactions are added to the Transactions table here
     //getSharedState.consensusMode = false
     ///getSharedState.inConsensusLoop = false
     log.info("[consensusRoutine] Block added to the chain")

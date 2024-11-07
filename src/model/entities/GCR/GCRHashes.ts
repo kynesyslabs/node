@@ -1,3 +1,4 @@
+import { NativeTablesHashes } from "@kynesyslabs/demosdk/types"
 import { Column, Entity, PrimaryColumn, PrimaryGeneratedColumn } from "typeorm"
 
 @Entity("gcr_hashes")
@@ -9,5 +10,5 @@ export class GCRHashes {
     block: number | null
 
     @Column("text", { name: "hash" })
-    hash: string | null
+    hash: NativeTablesHashes | null
 }
