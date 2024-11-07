@@ -73,3 +73,8 @@ documentation/*.zip
 demos_peers_remote
 documentation/schemas/org_circles.drawio.png
 documentation/export
+
+
+# Bun files
+.bun
+bun.lockb
