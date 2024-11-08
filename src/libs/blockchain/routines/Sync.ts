@@ -201,8 +201,8 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
     return true
 }
 
+// TODO Implement this
 export async function syncNativeTables() {
-    // ! Implement this
     // TODO Call the endpoint to sync the native tables
     // TODO Add the results to the database in the native tables
 }

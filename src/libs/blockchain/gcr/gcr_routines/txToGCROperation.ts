@@ -8,9 +8,9 @@ import calculateCurrentGas from "../../routines/calculateCurrentGas"
  * Once a block is forged, the createBlock method hash the two GCR tables and adds the hashes to the block
  */
 
-/** TODO
- * Make so in the PoRBFT routine, before generating the block, the operations are applied to the state
- * Consequently, the PoRBFT routine should check the state hashes alongside the block hash
+/** REVIEW
+ * In the PoRBFT routine, before generating the block, the operations are applied to the state
+ * Consequently, the PoRBFT routine check the state hashes and add them to the block.
  */
 
 // REVIEW This should convert a transaction to an operation

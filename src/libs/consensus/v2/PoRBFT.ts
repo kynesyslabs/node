@@ -27,6 +27,8 @@ import ShardManager, {
     getShardManager,
 } from "./routines/shardManager"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
+import applyGCROperation from "src/libs/blockchain/gcr/gcr_routines/applyGCROperation"
+import { txToGCROperation } from "src/libs/blockchain/gcr/gcr_routines/txToGCROperation"
 
 /* INFO
 
@@ -119,9 +121,17 @@ export async function consensusRoutine(): Promise<void> {
         true,
     )
 
+    /** REVIEW
+     * Here we apply the GCR operations to the state before forging the block
+     * so that the GCR hash is included in the block.
+     * A list of successful and failed GCR operations is returned.
+     * NOTE A mandatory validator status is updated to reflect that the GCR operations have been applied
+     * */ 
+    // ! Not here but check Sync.ts (syncNativeTables) and make it work with the GCR (syncing the states)
+    await applyGCRForNewBlock(mempool)
+
     // Forge the block from the ordered transactions
-    // ! TODO Apply the operations to the state before this as the GCR Hash is needed to forge the block
-    const block = await forgeBlock(mempool, peerlist)
+    const block = await forgeBlock(mempool, peerlist) // NOTE The GCR hash is calculated here and added to the block
     // REVIEW Set last consensus time to the current block timestamp
     getSharedState.lastConsensusTime = block.content.timestamp
 
@@ -290,6 +300,25 @@ async function finalizeBlock(block: Block, pro: number): Promise<void> {
     log.info("[consensusRoutine] Block added to the chain")
     const lastBlock = await Chain.getLastBlock()
     console.log(lastBlock)
+}
+
+// REVIEW Apply the GCR operations to the state
+async function applyGCRForNewBlock(mempool: Transaction[]): Promise<[string[], string[]]> {
+    let successfulTxs: string[] = []
+    let failedTxs: string[] = []
+    for (const tx of mempool) {
+        const operation = await txToGCROperation(tx)
+        let success = await applyGCROperation(operation)
+        if (success) {
+            successfulTxs.push(tx.hash)
+        } else {
+            failedTxs.push(tx.hash)
+        }
+    }
+    log.info(`[consensusRoutine] Successful GCR operations: ${successfulTxs}`)
+    log.info(`[consensusRoutine] Failed GCR operations: ${failedTxs}`)
+    await updateValidatorStatus("appliedGCR", true, false, true)
+    return [successfulTxs, failedTxs]
 }
 
 // Cleanup the consensus state
