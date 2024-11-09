@@ -1,4 +1,5 @@
 import { RPCRequest } from "@kynesyslabs/demosdk/types"
+import _ from "lodash"
 import { Peer } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
@@ -59,7 +60,7 @@ export default class ShardManager {
         this.shardStatus = new Map<string, ValidatorStatus>()
         // Init to empty validator status
         for (let peer of this.shard) {
-            this.shardStatus.set(peer.identity, emptyValidatorStatus)
+            this.shardStatus.set(peer.identity, _.cloneDeep(emptyValidatorStatus))
         }
         // Logging the shard
         log.custom(
