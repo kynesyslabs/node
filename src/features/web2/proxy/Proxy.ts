@@ -3,17 +3,12 @@ import http from "http"
 import httpProxy from "http-proxy"
 import { URL } from "url"
 import net from "net"
-import { AxiosResponseHeaders, RawAxiosResponseHeaders } from "axios"
-import { IWeb2Request, EnumWeb2Methods } from "@kynesyslabs/demosdk/types"
+import {
+    IWeb2Request,
+    EnumWeb2Methods,
+    IWeb2Result,
+} from "@kynesyslabs/demosdk/types"
 import required from "src/utilities/required"
-
-// TODO Move this to the SDK
-export interface IWeb2Result {
-    status: number
-    statusText: string
-    headers: AxiosResponseHeaders | RawAxiosResponseHeaders
-    data: any
-}
 
 /**
  * A proxy server class that handles HTTP/HTTPS requests by creating a local proxy server.
@@ -34,14 +29,16 @@ export class Proxy {
 
     /**
      * Sends an HTTP/HTTPS request through the proxy.
-     * @param web2Request - The request details including URL and headers
-     * @param targetMethod - The HTTP method to use (GET, POST, etc)
-     * @returns Promise resolving to the response data
-     * @throws Error if the proxy server fails to start or if the request fails
+     * @param {IWeb2Request} web2Request - The request details including URL and headers
+     * @param {EnumWeb2Methods} targetMethod - The HTTP method to use (GET, POST, etc)
+     * @param {IWeb2Request["raw"]["headers"]} targetHeaders - The headers to send with the request
+     * @returns {Promise<IWeb2Result>} Promise resolving to the response data
+     * @throws {Error} if the proxy server fails to start or if the request fails
      */
     async sendHTTPRequest(
         web2Request: IWeb2Request,
         targetMethod: EnumWeb2Methods,
+        targetHeaders: IWeb2Request["raw"]["headers"],
     ): Promise<IWeb2Result> {
         required(web2Request.raw, "web2Request.raw")
         required(web2Request.raw.url, "web2Request.raw.url")
@@ -63,11 +60,13 @@ export class Proxy {
             const { targetProtocol, targetHostname, targetPort } =
                 this._parseUrl(targetUrl)
 
+            console.log("targetHeaders", targetHeaders)
+
             const headers = {
-                ...web2Request.raw.headers,
                 Host: `${targetHostname}:${targetPort}`,
                 "x-dahr-session-id": this._dahrSessionId,
                 Connection: "keep-alive",
+                ...targetHeaders,
             }
 
             const req = http.request({
@@ -174,8 +173,8 @@ export class Proxy {
 
     /**
      * Starts the proxy server if it's not already running.
-     * @param targetUrl - The target URL to proxy requests to.
-     * @returns Promise resolving when the server is created.
+     * @param {string} targetUrl - The target URL to proxy requests to.
+     * @returns {Promise<void>} Promise resolving when the server is created.
      */
     private _startProxyServer(targetUrl: string): Promise<void> {
         // Don't create a new server if one is already running
@@ -242,6 +241,14 @@ export class Proxy {
 
             // Handle HTTPS CONNECT
             this._server.on("connect", (req, clientSocket, head) => {
+                if (!this._isAuthorizedRequest(req)) {
+                    clientSocket.write(
+                        "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nUnauthorized request",
+                    )
+                    clientSocket.destroy()
+                    return
+                }
+
                 const [targetHost, targetPort] = req.url.split(":")
                 const targetSocket = net.connect(
                     parseInt(targetPort) || 443,

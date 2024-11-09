@@ -1,5 +1,4 @@
 import {
-    IRawWeb2Request,
     IWeb2Attestation,
     IWeb2Request,
     IWeb2Result,
@@ -56,11 +55,13 @@ export class DAHR {
 
     /**
      * Start the proxy and return the attestation with the response.
-     * @param {IRawWeb2Request["method"]} method - The method to send the request with.
+     * @param {IWeb2Request["raw"]["method"]} method - The method to send the request with.
+     * @param {IWeb2Request["raw"]["headers"]} headers - The headers to send with the request.
      * @returns {Promise<IAttestationWithResponse>} The attestation with the response.
      */
     async startProxy(
-        method: IRawWeb2Request["method"],
+        method: IWeb2Request["raw"]["method"],
+        headers: IWeb2Request["raw"]["headers"],
     ): Promise<IAttestationWithResponse> {
         // Make sure we have a web2Request at this point
         required(this._web2Request, "web2Request")
@@ -69,6 +70,7 @@ export class DAHR {
         const web2Response = await this._proxy.sendHTTPRequest(
             this._web2Request,
             method,
+            headers,
         )
 
         const attestedResult =

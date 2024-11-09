@@ -1,21 +1,19 @@
 import {
-    IParam,
     IWeb2Request,
     EnumWeb2Methods,
 } from "@kynesyslabs/demosdk/types"
 import required from "src/utilities/required"
+import { skeletons } from "@kynesyslabs/demosdk/websdk"
 
 /**
  * Represents a simplified payload for Web2 proxy requests.
  */
 interface ISimplifiedWeb2Payload {
     action?: string
-    parameters?: IParam[]
-    requestedParameters?: [] | null
     method: EnumWeb2Methods
     url: string
     headers?: Record<string, string>
-    sessionId: string
+    sessionId?: string
 }
 
 /**
@@ -62,32 +60,20 @@ function validateFullWeb2Request(request: IWeb2Request): void {
 function createFullWeb2Request(payload: ISimplifiedWeb2Payload): IWeb2Request {
     required(payload.url, "URL is required in simplified Web2 payload")
     required(payload.method, "Method is required in simplified Web2 payload")
-    const method = payload.method || EnumWeb2Methods.GET
     required(
-        Object.values(EnumWeb2Methods).includes(method),
+        Object.values(EnumWeb2Methods).includes(payload.method),
         "Invalid HTTP method",
     )
 
-    return {
-        raw: {
-            action: payload.action || "",
-            parameters: payload.parameters || [],
-            requestedParameters: payload.requestedParameters || [],
-            method: method,
-            url: payload.url,
-            headers: payload.headers || {},
-            minAttestations: 5,
-            stage: {
-                origin: {
-                    identity: "",
-                    connection_url: "",
-                },
-                hop_number: 0,
-            },
-        },
-        result: "",
-        attestations: {},
-        hash: "",
-        signature: undefined,
+    const web2Request = { ...skeletons.web2_request }
+
+    web2Request.raw = {
+        ...web2Request.raw,
+        action: payload.action || "create",
+        method: payload.method,
+        url: payload.url,
+        headers: payload.headers || {},
     }
+
+    return web2Request
 }

@@ -5,15 +5,17 @@ import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
 
 /**
  * Handles the web2 proxy request.
- * @param request - The web2 request or start proxy parameters.
- * @param action - The action to perform.
- * @param sessionId - The session ID.
- * @returns The RPC response.
+ * @param {IWeb2Request} request - The web2 request or start proxy parameters.
+ * @param {string} action - The action to perform.
+ * @param {string} sessionId - The session ID.
+ * @param {IWeb2Request["raw"]["headers"]} headers - The headers to send with the request.
+ * @returns {Promise<RPCResponse>} The RPC response.
  */
 export async function handleWeb2ProxyRequest(
     request: IWeb2Request,
     action: "create" | "startProxy" | "stopProxy" = "create",
-    sessionId: string,
+    sessionId: string = "",
+    headers: IWeb2Request["raw"]["headers"] = {},
 ): Promise<RPCResponse> {
     try {
         switch (action) {
@@ -55,10 +57,8 @@ export async function handleWeb2ProxyRequest(
                         extra: "DAHR instance not found",
                     } as RPCResponse
                 }
-                console.log("REQUEST", request)
-
                 const { method } = request.raw
-                const response = await dahr.startProxy(method)
+                const response = await dahr.startProxy(method, headers)
                 return {
                     result: 200,
                     response: response,

@@ -4,9 +4,11 @@ import { PeerManager } from "src/libs/peer"
 import required from "src/utilities/required"
 import sharedState from "src/utilities/sharedState"
 
-import { IWeb2Attestation, IWeb2Request } from "@kynesyslabs/demosdk/types"
-import { IWeb2Result } from "./proxy/Proxy"
-
+import {
+    IWeb2Attestation,
+    IWeb2Request,
+    IWeb2Result,
+} from "@kynesyslabs/demosdk/types"
 import { DAHR } from "./dahr/DAHR"
 
 import terminalKit from "terminal-kit"
