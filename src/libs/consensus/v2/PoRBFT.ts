@@ -96,7 +96,7 @@ export async function consensusRoutine(): Promise<void> {
     await initializeShardManager(shard)
 
     // ! Using the secretary to update the local statuses
-    await _updateValidatorStatus("initializedShard", false, false, true)
+    await _updateValidatorStatus("initializedShardManager", true, false, true)
 
     // Here we wait that the shard is ready by checking the validators statuses and if they are in consensus loop
     // We can't continue until the shard is ready and synced to our validator status
@@ -195,6 +195,7 @@ async function initializeShardManager(shard: Peer[]): Promise<void> {
         getSharedState.identity.ed25519.publicKey.toString("hex")
     let validatorStatus = getShardManager.shardStatus.get(ourIdentity)
     validatorStatus.inConsensusLoop = true
+    await _updateValidatorStatus("inConsensusLoop", true, false, true)
     getShardManager.setValidatorStatus(ourIdentity, validatorStatus)
     await getShardManager.transmitOurValidatorStatus()
 }
@@ -223,7 +224,7 @@ async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
     }
     getSharedState.lastConsensusTime = averageTimestamp
     // Using the secretary to update the local statuses
-    await _updateValidatorStatus("synchronizedTime", false, false, true)
+    await _updateValidatorStatus("synchronizedTime", true, false, true)
 }
 
 // Merge the peerlist between the shard and the local node
@@ -231,7 +232,7 @@ async function mergePeerlistAndWait(shard: Peer[]): Promise<Peer[]> {
     const mergedPeerList = await mergePeerlist(shard)
     await updateValidatorStatus("mergedPeerlist", true, false, true)
     // ! Using the secretary to update the local statuses
-    await _updateValidatorStatus("mergedPeerlist", false, false, true)
+    await _updateValidatorStatus("mergedPeerlist", true, false, true)
     return mergedPeerList
 }
 
@@ -245,7 +246,7 @@ async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
     log.info("[consensusRoutine] Mempools have been merged")
     await updateValidatorStatus("mergedMempool", true, false, true)
     // ! Using the secretary to update the local statuses
-    await _updateValidatorStatus("mergedMempool", false, false, true)
+    await _updateValidatorStatus("mergedMempool", true, false, true)
     return await orderTransactions(mergedMempool)
 }
 
@@ -269,7 +270,7 @@ async function forgeBlock(
 
     await updateValidatorStatus("forgedBlock", true, false, true)
     // ! Using the secretary to update the local statuses
-    await _updateValidatorStatus("forgedBlock", false, false, true)
+    await _updateValidatorStatus("forgedBlock", true, false, true)
     return block
 }
 
@@ -284,7 +285,7 @@ async function voteOnBlock(
     const [pro, con] = await broadcastBlockHash(block, shard)
     await updateValidatorStatus("votedForBlock", true, false, true)
     // ! Using the secretary to update the local statuses
-    await _updateValidatorStatus("votedForBlock", false, false, true)
+    await _updateValidatorStatus("votedForBlock", true, false, true)
 
     log.info(
         `[consensusRoutine] Block hash broadcasted to the shard: ${block.hash}`,
@@ -333,13 +334,13 @@ async function applyGCRForNewBlock(
     log.info(`[consensusRoutine] Failed GCR operations: ${failedTxs}`)
     await updateValidatorStatus("appliedGCR", true, false, true)
     // ! Using the secretary to update the local statuses
-    await _updateValidatorStatus("appliedGCR", false, false, true)
+    await _updateValidatorStatus("appliedGCR", true, false, true)
     return [successfulTxs, failedTxs]
 }
 
 // SECTION New secretary system
 
-/** TODO 
+/** TODO
  * - Check if the wait logic in updateValidatorStatus is working as expected
  * - Replace the current updateValidatorStatus method with the new one (_updateValidatorStatus)
  * - Implement the get logic too when is needed
@@ -437,17 +438,20 @@ async function getShardStatus(): Promise<Map<string, ValidatorStatus>> {
 // REVIEW This method will be used instead of the current one to work with the secretary system
 async function _updateValidatorStatus(
     status: string,
-    // Below args are just for compatibility with the current updateValidatorStatus method
     wait: boolean = true,
+    // Below args are just for compatibility with the current updateValidatorStatus method
     pull: boolean = false,
     stream: boolean = true,
 ): Promise<boolean> {
     // Inferring the shard secretary
     const secretary: Peer = getShardManager.getShard()[0]
     // Getting the current status of the local node and updating it
-    var currentStatus = getShardManager.ourStatus
+    var currentStatus = getShardManager.getOurValidatorStatus()
     currentStatus[status] = true // NOTE We are using this to update the status locally and then transmit it to the secretary
-
+    getShardManager.setValidatorStatus(
+        getSharedState.identity.ed25519.publicKey.toString("hex"),
+        currentStatus,
+    )
     // Checking if the secretary is the local node
     if (
         secretary.identity ===
@@ -504,6 +508,7 @@ async function _updateValidatorStatus(
     // REVIEW Wait logic
     // ? Move this to a new method?
     if (wait) {
+        console.log("[updateValidatorStatus] Waiting for the shard to be ready...")
         let timeout = 3000
         let startTime = Date.now()
         let curTime = startTime
@@ -511,24 +516,37 @@ async function _updateValidatorStatus(
         let ourStatus = getShardManager.getOurValidatorStatus()
         let all_synced = false
         while (!all_synced) {
+            all_synced = true
             // Updating the current shard status and our status
             shardStatus = await getShardStatus()
             ourStatus = getShardManager.getOurValidatorStatus()
             curTime = Date.now()
             if (curTime - startTime > timeout) {
                 log.warning(
-                    "[updateValidatorStatus] [ERROR] Shard is not ready: " + status,
+                    "[updateValidatorStatus] [ERROR] Shard is not ready: " +
+                        status,
                 )
                 return false
             }
-            all_synced = true
+            // Checking each status in the shard to see if it is the same as our status
             for (const status of shardStatus.values()) {
-                if (!(ourStatus === status)) {
+                let theirStatusHash = Hashing.sha256(JSON.stringify(status))
+                console.log("theirStatusHash: " + theirStatusHash)
+                let ourStatusHash = Hashing.sha256(JSON.stringify(ourStatus))
+                console.log("ourStatusHash: " + ourStatusHash)
+                if (theirStatusHash !== ourStatusHash) {
                     all_synced = false
                     log.info(
-                        `[updateValidatorStatus] [WAIT] Statuses are not synced (specifically our status is not equal to a status in the shard, peer has: ${status})`,
+                        "[updateValidatorStatus] [WAIT] Statuses are not synced (specifically our status is not equal to a status in the shard, us:",
                         true,
                     )
+                    log.info(JSON.stringify(ourStatus, null, 2))
+                    log.info("[updateValidatorStatus] [WAIT] Theirs:")
+                    log.info(JSON.stringify(status, null, 2))
+
+                    // Waiting 500ms before trying again
+                    await new Promise((resolve) => setTimeout(resolve, 500))
+                    break
                 }
             }
         }
