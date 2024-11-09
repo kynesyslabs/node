@@ -451,7 +451,7 @@ async function _updateValidatorStatus(
     getShardManager.setValidatorStatus(
         getSharedState.identity.ed25519.publicKey.toString("hex"),
         currentStatus,
-    )
+    ) // Here we ensure that the status is updated in the singleton too so we can use it to check if the shard is ready
     // Checking if the secretary is the local node
     if (
         secretary.identity ===
