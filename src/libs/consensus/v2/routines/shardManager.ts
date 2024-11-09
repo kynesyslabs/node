@@ -3,7 +3,6 @@ import _ from "lodash"
 import { Peer } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
-import _ from "lodash"
 
 export interface ValidatorStatus {
     inConsensusLoop: boolean
@@ -60,7 +59,10 @@ export default class ShardManager {
         this.shardStatus = new Map<string, ValidatorStatus>()
         // Init to empty validator status
         for (let peer of this.shard) {
-            this.shardStatus.set(peer.identity, _.cloneDeep(emptyValidatorStatus))
+            this.shardStatus.set(
+                peer.identity,
+                _.cloneDeep(emptyValidatorStatus),
+            )
         }
         // Logging the shard
         log.custom(
