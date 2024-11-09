@@ -2,23 +2,28 @@ import { RPCRequest } from "@kynesyslabs/demosdk/types"
 import { Peer } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
+import _ from "lodash"
 
 export interface ValidatorStatus {
     inConsensusLoop: boolean
+    initializedShardManager: boolean
     synchronizedTime: boolean
     mergedMempool: boolean
     forgedBlock: boolean
     votedForBlock: boolean
     mergedPeerlist: boolean
+    appliedGCR: boolean
 }
 
-const emptyValidatorStatus: ValidatorStatus = {
+export const emptyValidatorStatus: ValidatorStatus = {
     inConsensusLoop: false,
+    initializedShardManager: false,
     synchronizedTime: false,
     mergedMempool: false,
     forgedBlock: false,
     votedForBlock: false,
     mergedPeerlist: false,
+    appliedGCR: false,
 }
 
 // This class is used to manage the shard and the validator statuses during the consensus routine.
@@ -30,8 +35,11 @@ export default class ShardManager {
 
     // Each node has a status that we can track and query
     public shardStatus: Map<string, ValidatorStatus> // The status of the nodes in the shard
+    public ourStatus: ValidatorStatus // The status of the local node
 
-    private constructor() {}
+    private constructor() {
+        this.ourStatus = _.cloneDeep(emptyValidatorStatus)
+    }
 
     // Singleton logic
     public static getInstance(): ShardManager {

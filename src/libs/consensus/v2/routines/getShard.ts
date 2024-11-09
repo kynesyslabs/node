@@ -17,6 +17,7 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     const random = Alea(seed)
     const availablePeers = [...peers]
     // REVIEW: check if this is the right way to do it
+    // NOTE Choosing the secretary by randomly ordering the list: the first one is the secretary
     for (let i = 0; i < maxShardSize && availablePeers.length > 0; i++) {
         const index = Math.floor(random() * availablePeers.length)
         shard.push(availablePeers[index])

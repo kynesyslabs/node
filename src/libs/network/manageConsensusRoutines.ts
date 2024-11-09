@@ -12,6 +12,7 @@ import { ValidatorStatus, getShardManager } from "../consensus/v2/routines/shard
 import { checkConsensusTime } from "../consensus/routines/consensusTime"
 import { consensusRoutine, isConsensusAlreadyRunning } from "../consensus/v2/PoRBFT"
 import log from "src/utilities/logger"
+import Secretary from "../consensus/v2/routines/secretary"
 
 export interface ConsensusMethod {
     method:
@@ -24,6 +25,8 @@ export interface ConsensusMethod {
         | "getShard"
         | "setValidatorStatus"
         | "getValidatorStatus"
+        | "setSecretaryStatus"
+        | "getSecretaryStatus"
     params: any[]
 }
 
@@ -90,7 +93,19 @@ export default async function manageConsensusRoutines(
                 payload.params[0].timestamp,
             )
         */
+
         // ANCHOR New methods for consensus v2
+
+        // REVIEW Secretary system
+        case "setSecretaryStatus":
+            response.result = 200
+            response.response = Secretary.getInstance().setStatus(payload.params[0] as string, payload.params[1] as ValidatorStatus)
+            break
+        case "getSecretaryStatus":
+            response.result = 200
+            response.response = Secretary.getInstance().getStatus(payload.params[0] as string)
+            break
+
         case "getValidatorTimestamp":
             response.result = 200
             // REVIEW Using the current UTC time as the validator timestamp (affect average time of the blocks)

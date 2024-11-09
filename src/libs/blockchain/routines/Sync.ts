@@ -203,7 +203,7 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
 
 // TODO Implement this
 export async function syncNativeTables() {
-    // TODO Call the endpoint to sync the native tables
+    // TODO Call the endpoint to sync the native tables (manageNodeCall.ts has them)
     // TODO Add the results to the database in the native tables
 }
 
