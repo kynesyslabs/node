@@ -19,11 +19,26 @@ export class Proxy {
     private _server: http.Server | https.Server | null = null
     private _proxyPort = 0
     private _isInitialized = false
+    private _authorizationConfig: {
+        requireAuthForAll: boolean
+        exceptions: Array<{ urlPattern: RegExp; methods: EnumWeb2Methods[] }>
+    }
 
     constructor(
         private readonly _dahrSessionId: string,
         private readonly _proxyHost: string = "localhost",
+        authorizationConfig?: {
+            requireAuthForAll: boolean
+            exceptions: Array<{
+                urlPattern: RegExp
+                methods: EnumWeb2Methods[]
+            }>
+        },
     ) {
+        this._authorizationConfig = authorizationConfig || {
+            requireAuthForAll: false, // TODO: Set to true before production
+            exceptions: [],
+        }
         required(this._dahrSessionId, "Missing dahr session Id")
     }
 
@@ -32,6 +47,8 @@ export class Proxy {
      * @param {IWeb2Request} web2Request - The request details including URL and headers
      * @param {EnumWeb2Methods} targetMethod - The HTTP method to use (GET, POST, etc)
      * @param {IWeb2Request["raw"]["headers"]} targetHeaders - The headers to send with the request
+     * @param {any} payload - The payload to send with the request
+     * @param {string} targetAuthorization - The authorization token to send with the request
      * @returns {Promise<IWeb2Result>} Promise resolving to the response data
      * @throws {Error} if the proxy server fails to start or if the request fails
      */
@@ -39,6 +56,8 @@ export class Proxy {
         web2Request: IWeb2Request,
         targetMethod: EnumWeb2Methods,
         targetHeaders: IWeb2Request["raw"]["headers"],
+        payload: any,
+        targetAuthorization: string,
     ): Promise<IWeb2Result> {
         required(web2Request.raw, "web2Request.raw")
         required(web2Request.raw.url, "web2Request.raw.url")
@@ -59,22 +78,21 @@ export class Proxy {
         return new Promise((resolve, reject) => {
             const { targetProtocol, targetHostname, targetPort } =
                 this._parseUrl(targetUrl)
-
-            console.log("targetHeaders", targetHeaders)
-
-            const headers = {
-                Host: `${targetHostname}:${targetPort}`,
-                "x-dahr-session-id": this._dahrSessionId,
-                Connection: "keep-alive",
-                ...targetHeaders,
-            }
+            const headers = this._createHeaders(
+                targetHostname,
+                targetPort,
+                targetMethod,
+                targetHeaders,
+                targetAuthorization,
+                targetUrl,
+            )
 
             const req = http.request({
                 hostname: this._proxyHost,
                 port: this._proxyPort,
                 method: targetProtocol === "https:" ? "CONNECT" : targetMethod,
                 path: `${targetHostname}:${targetPort}`,
-                headers: headers,
+                headers,
                 timeout: 30000,
                 agent: false,
             })
@@ -97,7 +115,7 @@ export class Proxy {
                     method: targetMethod,
                     path:
                         new URL(targetUrl).pathname + new URL(targetUrl).search,
-                    headers: web2Request.raw.headers,
+                    headers,
                     socket: socket,
                     agent: false,
                 }
@@ -121,8 +139,11 @@ export class Proxy {
                     reject(err)
                 })
 
-                if (targetMethod !== EnumWeb2Methods.GET && web2Request.raw) {
-                    httpsReq.write(JSON.stringify(web2Request.raw))
+                if (
+                    targetMethod !== EnumWeb2Methods.GET &&
+                    targetMethod !== EnumWeb2Methods.DELETE
+                ) {
+                    httpsReq.write(JSON.stringify(payload))
                 }
 
                 httpsReq.end()
@@ -353,5 +374,82 @@ export class Proxy {
                 ? 80
                 : undefined,
         }
+    }
+
+    /**
+     * Creates the headers for a request.
+     * @param targetHostname - The hostname of the target URL.
+     * @param targetPort - The port of the target URL.
+     * @param targetMethod - The HTTP method to use.
+     * @param targetHeaders - The headers to send with the request.
+     * @param targetAuthorization - The authorization token to send with the request.
+     * @param targetUrl - The URL of the target.
+     * @returns The headers for the request.
+     */
+    private _createHeaders(
+        targetHostname: string,
+        targetPort: number,
+        targetMethod: EnumWeb2Methods,
+        targetHeaders: IWeb2Request["raw"]["headers"],
+        targetAuthorization: string,
+        targetUrl: string,
+    ): IWeb2Request["raw"]["headers"] {
+        // Base headers
+        const headers: IWeb2Request["raw"]["headers"] = {
+            Host: `${targetHostname}:${targetPort}`,
+            "x-dahr-session-id": this._dahrSessionId,
+            Connection: "keep-alive",
+        }
+
+        // Convert all targetHeaders values to strings
+        for (const [key, value] of Object.entries(targetHeaders)) {
+            if (Array.isArray(value)) {
+                headers[key] = value.join(", ")
+            } else if (value !== undefined) {
+                headers[key] = value.toString()
+            }
+        }
+
+        // Add Content-Type for methods with a body
+        if (
+            [
+                EnumWeb2Methods.POST,
+                EnumWeb2Methods.PUT,
+                EnumWeb2Methods.PATCH,
+            ].includes(targetMethod)
+        ) {
+            headers["Content-Type"] = "application/json"
+        }
+
+        // Add Authorization if required
+        if (this._requiresAuthorization(targetUrl, targetMethod)) {
+            headers["Authorization"] = `Bearer ${targetAuthorization}`
+        }
+
+        return headers
+    }
+
+    /**
+     * Checks if the request requires authorization based on the configuration.
+     * @param url - The URL of the target.
+     * @param method - The HTTP method to use.
+     * @returns True if the request requires authorization, false otherwise.
+     */
+    private _requiresAuthorization(
+        url: string,
+        method: EnumWeb2Methods,
+    ): boolean {
+        if (this._authorizationConfig.requireAuthForAll) {
+            for (const exception of this._authorizationConfig.exceptions) {
+                if (
+                    exception.urlPattern.test(url) &&
+                    exception.methods.includes(method)
+                ) {
+                    return false
+                }
+            }
+            return true
+        }
+        return false
     }
 }

@@ -9,16 +9,18 @@ import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
  * @param {string} action - The action to perform.
  * @param {string} sessionId - The session ID.
  * @param {IWeb2Request["raw"]["headers"]} headers - The headers to send with the request.
+ * @param {any} payload - The payload to send with the request.
+ * @param {string} authorization - The authorization token to send with the request.
  * @returns {Promise<RPCResponse>} The RPC response.
  */
 export async function handleWeb2ProxyRequest(
     request: IWeb2Request,
-    action: "create" | "startProxy" | "stopProxy" = "create",
     sessionId: string = "",
-    headers: IWeb2Request["raw"]["headers"] = {},
+    payload: any = {},
+    authorization: string = "",
 ): Promise<RPCResponse> {
     try {
-        switch (action) {
+        switch (request.raw.action) {
             case "create": {
                 const isDahrOrError = await handleWeb2(request)
 
@@ -57,8 +59,13 @@ export async function handleWeb2ProxyRequest(
                         extra: "DAHR instance not found",
                     } as RPCResponse
                 }
-                const { method } = request.raw
-                const response = await dahr.startProxy(method, headers)
+                const { method, headers } = request.raw
+                const response = await dahr.startProxy(
+                    method,
+                    headers,
+                    payload,
+                    authorization,
+                )
                 return {
                     result: 200,
                     response: response,
@@ -90,7 +97,7 @@ export async function handleWeb2ProxyRequest(
                     result: 400,
                     response: null,
                     require_reply: false,
-                    extra: `Unsupported action: ${action}`,
+                    extra: `Unsupported action: ${request.raw.action}`,
                 } as RPCResponse
             }
         }

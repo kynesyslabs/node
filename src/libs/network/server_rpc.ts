@@ -156,15 +156,19 @@ async function processPayload(
                 rawPayload.message,
                 "Web2 proxy request message is required",
             )
-            const { action, sessionId, headers, ...messageData } =
-                rawPayload.message
+            const {
+                sessionId,
+                payload: payloadData,
+                authorization,
+                ...messageData
+            } = rawPayload.message
             const web2Request = processWeb2Payload(messageData)
 
             return await handleWeb2ProxyRequest(
                 web2Request,
-                action as "create" | "startProxy" | "stopProxy",
                 sessionId,
-                headers,
+                payloadData,
+                authorization,
             )
         }
 
