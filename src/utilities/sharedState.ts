@@ -22,6 +22,7 @@ export default class sharedState {
     currentTimestamp: number = 0
     currentUTCTime: number = 0
     lastTimestamp: number = 0
+    lastShardSeed: string = ""
 
     // NOTE See calibrateTime.ts for this value
     timestampCorrection: number = 0
@@ -62,8 +63,7 @@ export default class sharedState {
     identityFile: string = process.env.IDENTITY_FILE || ".demos_identity"
     peerListFile: string = process.env.PEER_LIST_FILE || "demos_peerlist.json"
     connectionString: string = "http://localhost:" + this.serverPort
-    exposedUrl: string =
-        process.env.EXPOSED_URL || this.connectionString
+    exposedUrl: string = process.env.EXPOSED_URL || this.connectionString
     PROD: boolean = false
     // !SECTION Configuration
 

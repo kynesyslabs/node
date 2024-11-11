@@ -95,7 +95,9 @@ export async function consensusRoutine(): Promise<void> {
     // Initialize the shard manager transmitting that we are in consensus loop
     await initializeShardManager(shard)
 
-    // ! Using the secretary to update the local statuses
+    // Using the secretary to update the local statuses
+    // ? Without waiting for the secretary to update the statuses? Because we are at the beginning of the consensus routine
+    await _updateValidatorStatus("inConsensusLoop", true, false, true)
     await _updateValidatorStatus("initializedShardManager", true, false, true)
 
     // Here we wait that the shard is ready by checking the validators statuses and if they are in consensus loop
@@ -508,7 +510,9 @@ async function _updateValidatorStatus(
     // REVIEW Wait logic
     // ? Move this to a new method?
     if (wait) {
-        console.log("[updateValidatorStatus] Waiting for the shard to be ready...")
+        console.log(
+            "[updateValidatorStatus] Waiting for the shard to be ready...",
+        )
         let timeout = 3000
         let startTime = Date.now()
         let curTime = startTime
@@ -545,7 +549,7 @@ async function _updateValidatorStatus(
                     log.info(JSON.stringify(status, null, 2))
 
                     // Waiting 500ms before trying again
-                    await new Promise((resolve) => setTimeout(resolve, 500))
+                    await new Promise(resolve => setTimeout(resolve, 500))
                     break
                 }
             }

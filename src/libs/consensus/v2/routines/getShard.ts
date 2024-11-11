@@ -14,6 +14,8 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     }
     console.log("[getShard] maxShardSize: ", maxShardSize)
     const shard: Peer[] = []
+    log.custom("last_shard", "Shard seed is: " + seed)
+    getSharedState.lastShardSeed = seed
     const random = Alea(seed)
     const availablePeers = [...peers]
     // REVIEW: check if this is the right way to do it
@@ -29,5 +31,6 @@ export default async function getShard(seed: string): Promise<Peer[]> {
         log.warning("There are less than 3 peers in the last shard: this could be a security issue")
     }
     log.info(`Last shard: ${getSharedState.lastShard}`)
+    log.custom("last_shard", JSON.stringify(getSharedState.lastShard, null, 2), false, true)
     return shard
 }
