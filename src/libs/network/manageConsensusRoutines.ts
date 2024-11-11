@@ -103,7 +103,7 @@ export default async function manageConsensusRoutines(
             break
         case "getSecretaryStatus":
             response.result = 200
-            response.response = Secretary.getInstance().getStatus(payload.params[0] as string)
+            response.response = Secretary.getInstance().getAllStatus()
             break
 
         case "getValidatorTimestamp":

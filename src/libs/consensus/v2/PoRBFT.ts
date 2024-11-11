@@ -420,7 +420,7 @@ async function getShardStatus(): Promise<Map<string, ValidatorStatus>> {
             ],
         }
         let response = await secretary.call(jsonCall)
-        statusMap = response.response as Map<string, ValidatorStatus>
+        statusMap = new Map(Object.entries(response.response)) as Map<string, ValidatorStatus>
         syncedTimestamp = response.extra
     }
     log.info("[getShardStatus] Status of the whole shard retrieved")
@@ -496,9 +496,8 @@ async function _updateValidatorStatus(
                 `[updateValidatorStatus] Secretary held status is: ${response.response}`,
             )
             // Updating the local statuses from the secretary response
-            Secretary.getInstance().setAllStatus(
-                response.response as Map<string, ValidatorStatus>,
-            )
+            const statusMap = new Map(Object.entries(response.response)) as Map<string, ValidatorStatus>
+            Secretary.getInstance().setAllStatus(statusMap)
             log.info(
                 "[updateValidatorStatus] All statuses updated locally from the secretary response",
             )
