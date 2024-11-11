@@ -27,6 +27,7 @@ export interface ConsensusMethod {
         | "getValidatorStatus"
         | "setSecretaryStatus"
         | "getSecretaryStatus"
+        | "getSingleSecretaryStatus"
     params: any[]
 }
 
@@ -104,6 +105,11 @@ export default async function manageConsensusRoutines(
         case "getSecretaryStatus":
             response.result = 200
             response.response = Secretary.getInstance().getAllStatus()
+            break
+
+        case "getSingleSecretaryStatus":
+            response.result = 200
+            response.response = Secretary.getInstance().getStatus(payload.params[0] as string)
             break
 
         case "getValidatorTimestamp":
