@@ -6,7 +6,8 @@ import { IWeb2Request, XMScript } from "@kynesyslabs/demosdk/types"
 // SECTION Handlers
 import { INativePayload } from "node_modules/@kynesyslabs/demosdk/build/types/native"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
-import handleWeb2Request from "../handleWeb2Request"
+import { handleWeb2ProxyRequest } from "../handleWeb2ProxyRequest"
+import required from "src/utilities/required"
 import handleL2PS from "../handleL2PS"
 import { L2PSMessage } from "src/libs/l2ps/parallelNetworks"
 import _ from "lodash"
@@ -38,13 +39,12 @@ export default async function handleStep(step: WorkStep): Promise<StepResult> {
         let xmScript = task as XMScript
         result = await handleXMRequest.digest(xmScript)
     } else if (context === "web2") {
-        let web2Request = task as IWeb2Request
-        result = await handleWeb2Request(web2Request)
-    } 
-    else if (context === "l2ps") {
+        const web2Request = task as IWeb2Request
+        result = await handleWeb2ProxyRequest(web2Request)
+    } else if (context === "l2ps") {
         let l2psScript = task as unknown as L2PSMessage // ! Add typing in the SDK
         result = await handleL2PS(l2psScript) // TODO: Follow and implement the logic
-    }   
+    }
     // ? // TODO: Add the other contexts
     else if (context === "activitypub") {
         let activitypubScript = task as unknown // Add typing (e.g. ActivityPubMessage)

@@ -75,7 +75,6 @@ export default class PeerManager {
         return this._getActors(true, false)
     }
 
-
     getAll(): Peer[] {
         return this._getActors(true, true)
     }

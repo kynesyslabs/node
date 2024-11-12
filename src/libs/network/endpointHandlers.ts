@@ -14,43 +14,23 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import Chain from "src/libs/blockchain/chain"
 import Mempool, { MempoolData } from "src/libs/blockchain/mempool"
-import {
-    broadcastVerifiedNativeTransaction,
-    confirmTransaction,
-} from "src/libs/blockchain/routines/validateTransaction"
+import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
 import Transaction from "src/libs/blockchain/transaction"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
-import eggs from "src/libs/network/routines/eggs"
-import getBlockByHash from "src/libs/network/routines/nodecalls/getBlockByHash"
-import getBlockByNumber from "src/libs/network/routines/nodecalls/getBlockByNumber"
-import getBlockHeaderByHash from "src/libs/network/routines/nodecalls/getBlockHeaderByHash"
-import getBlockHeaderByNumber from "src/libs/network/routines/nodecalls/getBlockHeaderByNumber"
-import getPeerlist from "src/libs/network/routines/nodecalls/getPeerlist"
-import getPreviousHashFromBlockHash from "src/libs/network/routines/nodecalls/getPreviousHashFromBlockHash"
-import getPreviousHashFromBlockNumber from "src/libs/network/routines/nodecalls/getPreviousHashFromBlockNumber"
 import handleL2PS from "./routines/transactions/handleL2PS"
-import { normalizeWebBuffers } from "src/libs/network/routines/normalizeWebBuffers"
-import Sessions from "src/libs/network/routines/sessionManager"
-import { Peer } from "src/libs/peer"
-import { Blocks } from "src/model/entities/Blocks"
 import { getSharedState } from "src/utilities/sharedState"
-import _, { chain } from "lodash"
+import _ from "lodash"
 // NOTE Terminal kit for useful logging
 import terminalkit from "terminal-kit"
-
 import {
-    AddressInfo,
-    BundleContent,
     ExecutionResult,
-    IWeb2Payload,
     IWeb2Request,
     ValidityData,
     XMScript,
     ConsensusRequest,
     RPCResponse,
 } from "@kynesyslabs/demosdk/types"
-
 import GCR from "../blockchain/gcr/gcr"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import Block from "../blockchain/block"
@@ -61,18 +41,16 @@ import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
 import { emptyResponse } from "./server_rpc"
 // SECTION Handlers for different types of transactions
-import handleWeb2Request from "./routines/transactions/handleWeb2Request"
 import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
 import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Rename to handleXMRequest
 
 // ? Note: this is to be implemented once demosWork is in place
-import { DemosWork } from "@kynesyslabs/demosdk/demoswork"
 import { DemoScript } from "@kynesyslabs/demosdk/types"
 import { ForgeToHex } from "../crypto/forgeUtils"
 
 /* // ! Note: this will be removed once demosWork is in place
-import { 
+import {
     NativePayload,
     StringifiedPayload,
     Web2Payload,
@@ -296,15 +274,13 @@ export default class ServerHandlers {
                 // TODO Add result.success handling
                 result.response = xm_result
                 break
-            case "web2Request":
-                // TODO Better types on answers
+            /*  case "web2Request":
                 payload = tx.content.data
                 var web2_result = await ServerHandlers.handleWeb2Request(
                     payload[1] as IWeb2Request,
                 )
-                // TODO Add result.success handling
                 result.response = web2_result
-                break
+                break */
             // SECTION End of legacy code
 
             case "demoswork":
@@ -385,15 +361,6 @@ export default class ServerHandlers {
     static async handleDemosWorkRequest(content: DemoScript) {
         let response: RPCResponse = _.cloneDeep(emptyResponse)
         response = await handleDemosWorkRequest(content)
-        return response
-    }
-
-    // Proxy method for handleWeb2Request
-    static async handleWeb2Request(
-        content: IWeb2Request,
-    ): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
-        response = await handleWeb2Request(content)
         return response
     }
 

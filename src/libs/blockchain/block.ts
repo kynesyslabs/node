@@ -11,7 +11,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { pki } from "node-forge"
 
-import { BlockContent } from "@kynesyslabs/demosdk/types"   
+import { BlockContent } from "@kynesyslabs/demosdk/types"
 import { Peer } from "../peer"
 
 // NOTE Block class

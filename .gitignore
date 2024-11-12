@@ -78,3 +78,6 @@ documentation/export
 # Bun files
 .bun
 bun.lockb
+/.env.orig
+/src/libs/blockchain/*_BACKUP_*.ts
+/src/libs/blockchain/block_REMOTE_224733.ts
