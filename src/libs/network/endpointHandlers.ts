@@ -48,6 +48,7 @@ import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Ren
 // ? Note: this is to be implemented once demosWork is in place
 import { DemoScript } from "@kynesyslabs/demosdk/types"
 import { ForgeToHex } from "../crypto/forgeUtils"
+import { Peer } from "../peer"
 
 /* // ! Note: this will be removed once demosWork is in place
 import {

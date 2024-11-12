@@ -1,8 +1,8 @@
 import { IWeb2Request } from "@kynesyslabs/demosdk/types"
-import handleWeb2 from "src/features/web2/Web2Dispatcher"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "../../server_rpc"
 import _ from "lodash"
+import { handleWeb2 } from "src/features/web2/handleWeb2"
 
 // ? Can we avoid calling another function pls?
 
