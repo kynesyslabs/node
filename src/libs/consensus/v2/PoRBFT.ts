@@ -233,7 +233,7 @@ async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
 async function mergePeerlistAndWait(shard: Peer[]): Promise<Peer[]> {
     const mergedPeerList = await mergePeerlist(shard)
     await updateValidatorStatus("mergedPeerlist", true, false, true)
-    // ! Using the secretary to update the local statuses
+    // Using the secretary to update the local statuses
     await _updateValidatorStatus("mergedPeerlist", true, false, true)
     return mergedPeerList
 }
@@ -247,7 +247,7 @@ async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
     const mergedMempool = await mergeMempools(ourMempool, shard)
     log.info("[consensusRoutine] Mempools have been merged")
     await updateValidatorStatus("mergedMempool", true, false, true)
-    // ! Using the secretary to update the local statuses
+    // Using the secretary to update the local statuses
     await _updateValidatorStatus("mergedMempool", true, false, true)
     return await orderTransactions(mergedMempool)
 }
@@ -271,7 +271,7 @@ async function forgeBlock(
     )
 
     await updateValidatorStatus("forgedBlock", true, false, true)
-    // ! Using the secretary to update the local statuses
+    // Using the secretary to update the local statuses
     await _updateValidatorStatus("forgedBlock", true, false, true)
     return block
 }
@@ -286,7 +286,7 @@ async function voteOnBlock(
     )
     const [pro, con] = await broadcastBlockHash(block, shard)
     await updateValidatorStatus("votedForBlock", true, false, true)
-    // ! Using the secretary to update the local statuses
+    // Using the secretary to update the local statuses
     await _updateValidatorStatus("votedForBlock", true, false, true)
 
     log.info(
@@ -335,7 +335,7 @@ async function applyGCRForNewBlock(
     log.info(`[consensusRoutine] Successful GCR operations: ${successfulTxs}`)
     log.info(`[consensusRoutine] Failed GCR operations: ${failedTxs}`)
     await updateValidatorStatus("appliedGCR", true, false, true)
-    // ! Using the secretary to update the local statuses
+    // Using the secretary to update the local statuses
     await _updateValidatorStatus("appliedGCR", true, false, true)
     return [successfulTxs, failedTxs]
 }
@@ -420,7 +420,10 @@ async function getShardStatus(): Promise<Map<string, ValidatorStatus>> {
             ],
         }
         let response = await secretary.call(jsonCall)
-        statusMap = new Map(Object.entries(response.response)) as Map<string, ValidatorStatus>
+        statusMap = new Map(Object.entries(response.response)) as Map<
+            string,
+            ValidatorStatus
+        >
         syncedTimestamp = response.extra
     }
     log.info("[getShardStatus] Status of the whole shard retrieved")
@@ -496,7 +499,10 @@ async function _updateValidatorStatus(
                 `[updateValidatorStatus] Secretary held status is: ${response.response}`,
             )
             // Updating the local statuses from the secretary response
-            const statusMap = new Map(Object.entries(response.response)) as Map<string, ValidatorStatus>
+            const statusMap = new Map(Object.entries(response.response)) as Map<
+                string,
+                ValidatorStatus
+            >
             Secretary.getInstance().setAllStatus(statusMap)
             log.info(
                 "[updateValidatorStatus] All statuses updated locally from the secretary response",
