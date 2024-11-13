@@ -7,8 +7,12 @@ import {
     emptyValidatorStatus,
     getShardManager,
     ValidatorStatus,
+    ValidatorPhase,
+    emptyValidatorPhase,
 } from "./shardManager"
 import log from "src/utilities/logger"
+import { Cryptography } from "node_modules/@kynesyslabs/demosdk/build/encryption"
+import { HexToForge } from "src/libs/crypto/forgeUtils"
 
 /** NOTE
  * This class is used both by the secretary itself and the other shard partecipants.
@@ -19,6 +23,10 @@ class Secretary {
     private static instance: Secretary
     private secretary: Peer
     private status: Map<string, ValidatorStatus> = new Map()
+
+    // REVIEW The below variables are used to avoid premature consensus end and to avoid nodes being left behind
+    private waitStatus: Map<string, ValidatorPhase> = new Map() // Map of the shard partecipants
+    public consensusEnded: boolean = false
 
     constructor() {
         this.secretary = getShardManager.getShard()[0]
@@ -47,6 +55,8 @@ class Secretary {
                     _.cloneDeep(emptyValidatorStatus),
                 )
             }
+            // Initializing the waitStatus map
+            this.waitStatus.set(peer.identity, _.cloneDeep(emptyValidatorPhase))
         }
     }
 
@@ -57,6 +67,84 @@ class Secretary {
         return Secretary.instance
     }
 
+    // REVIEW Authenticated endpoint to update the last seen time of a shard partecipant
+    public updateLastSeen(peerKey: string, signature: string): void {
+        // Checking the signature against the peerKey
+        let isValid = Cryptography.verify(
+            peerKey,
+            HexToForge(signature),
+            HexToForge(peerKey),
+        )
+        if (!isValid) {
+            return
+        }
+        // Updating the last seen time
+        // Updating the enteredConsensus flag and the consensusEnterTime, as well as the lastSeen time
+        if (this.waitStatus.get(peerKey).waitStatus) {
+            if (!this.waitStatus.get(peerKey).enteredConsensus) {
+                log.custom(
+                    "secretary",
+                    "The validator " +
+                        peerKey +
+                        " has entered consensus at " +
+                        getSharedState.currentTimestamp,
+                )
+                this.waitStatus.get(peerKey).enteredConsensus = true
+                this.waitStatus.get(peerKey).consensusEnterTime =
+                    getSharedState.currentTimestamp
+            }
+            log.custom(
+                "secretary",
+                "The validator " +
+                    peerKey +
+                    " last seen time has been updated to " +
+                    getSharedState.currentTimestamp,
+                true,
+                false,
+            )
+            this.waitStatus.get(peerKey).lastSeen =
+                getSharedState.currentTimestamp
+        }
+    }
+
+    // REVIEW Authenticated endpoint to set the waitStatus of a shard partecipant
+    public setWaitStatus(
+        peerKey: string,
+        waitStatus: boolean,
+        signature: string,
+    ): Boolean {
+        console.log(
+            "[setWaitStatus] Received setWaitStatus request: processing",
+        )
+        // Checking the signature against the peerKey
+        let isValid = Cryptography.verify(
+            peerKey,
+            HexToForge(signature),
+            HexToForge(peerKey),
+        )
+        if (!isValid) {
+            log.warning(
+                `[setWaitStatus] Invalid signature for peer ${peerKey}`,
+                true,
+            )
+            return false
+        }
+        console.log("[setWaitStatus] The wait status request seems valid")
+        this.waitStatus.get(peerKey).waitStatus = waitStatus
+        log.custom(
+            "secretary",
+            "The wait status has been updated for " +
+                peerKey +
+                " to " +
+                waitStatus,
+            true,
+            false,
+        )
+        return true
+    }
+
+    // Setting the status of a shard partecipant
+    // ! We need authentication for this
     public setStatus(peerKey: string, status: ValidatorStatus): RPCResponse {
         let response: RPCResponse = _.cloneDeep(emptyResponse)
         // Creating a deep copy of the status if it is not yet in the map
@@ -80,6 +168,8 @@ class Secretary {
         return response
     }
 
+    // Setting the status of all the shard partecipants
+    // ! We need authentication for this
     public setAllStatus(
         status: Map<string, ValidatorStatus>,
     ): Map<string, ValidatorStatus> {
@@ -94,6 +184,8 @@ class Secretary {
         return this.getAllStatus()
     }
 
+    // Getting the status of a shard partecipant
+    // ! We need authentication for this
     public getStatus(peerKey: string): ValidatorStatus {
         log.custom(
             "secretary",
@@ -107,15 +199,88 @@ class Secretary {
         return this.status.get(peerKey)
     }
 
+    // Getting the status of all the shard partecipants
+    // ! We need authentication for this
     public getAllStatus(): Map<string, ValidatorStatus> {
         log.custom(
             "secretary",
-            "The status has been retrieved for all the shard with the following status: " +
-                JSON.stringify(this.status, null, 2),
-            false,
+            "The status has been retrieved for all the shard with the following status: ",
+            true,
             true,
         )
+        console.log(this.status)
         return this.status
+    }
+
+    /* SECTION Control methods */
+
+    // REVIEW This will be used to check if the consensus has ended by all the shard partecipants
+    public isConsensusEnded(): [boolean, string[]] {
+        // Returns a boolean and the list of validators that have not ended the consensus
+        // TODO Implement this
+        let notEndedValidators: string[] = []
+        if (this.consensusEnded) {
+            return [true, notEndedValidators]
+        }
+        // Checking if there are any validators that have not ended the consensus
+        for (const [index, phase] of this.waitStatus.entries()) {
+            let validatorKey = Array.from(this.waitStatus.keys())[index]
+            if (!phase.readyToEndConsensus) {
+                notEndedValidators.push(validatorKey)
+            }
+        }
+        log.custom(
+            "secretary",
+            "The list of validators that have not ended the consensus is: " +
+                JSON.stringify(notEndedValidators, null, 2),
+        )
+        // If there are no validators that have not ended the consensus, the consensus has ended
+        if (notEndedValidators.length === 0) {
+            this.consensusEnded = true
+            return [true, notEndedValidators]
+        }
+        // If there are validators that have not ended the consensus, return false and the list of validators that have not ended the consensus
+        return [false, notEndedValidators]
+    }
+
+    // REVIEW This will be used to check if there is someone waiting for the status update
+    public isSomeoneWaiting(): [boolean, string[]] {
+        let waitingValidators: string[] = []
+        for (const [index, phase] of this.waitStatus.entries()) {
+            let validatorKey = Array.from(this.waitStatus.keys())[index]
+            if (phase.waitStatus) {
+                waitingValidators.push(validatorKey)
+            }
+        }
+        log.custom(
+            "secretary",
+            "The list of validators that are waiting for the status update is: " +
+                JSON.stringify(waitingValidators, null, 2),
+        )
+        return [waitingValidators.length > 0, waitingValidators]
+    }
+
+    // REVIEW This will be used to end the consensus for a shard partecipant
+    public readyToEndConsensus(peerKey: string, signature: string): boolean {
+        // Checking the signature against the peerKey
+        let isValid = Cryptography.verify(
+            peerKey,
+            HexToForge(signature),
+            HexToForge(peerKey),
+        )
+        if (!isValid) {
+            return false
+        }
+        // Setting the readyToEndConsensus flag to true
+        this.waitStatus.get(peerKey).readyToEndConsensus = true
+        // ? Do we need to put here the check for the consensus ended that will make the Secretary broadcast the consensus ended message?
+        log.custom(
+            "secretary",
+            "The ready to end consensus flag has been updated for " +
+                peerKey +
+                " to true",
+        )
+        return true
     }
 }
 

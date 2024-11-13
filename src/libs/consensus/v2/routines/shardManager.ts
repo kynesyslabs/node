@@ -4,6 +4,22 @@ import { Peer } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 
+export interface ValidatorPhase {
+    waitStatus: boolean // Whether the validator is waiting for the status update
+    enteredConsensus: boolean
+    consensusEnterTime: number // Timestamp of the consensus enter time
+    lastSeen: number // Timestamp of the last seen time (updated each time a status is received or sent)
+    readyToEndConsensus: boolean // Whether the validator is ready to end the consensus
+}
+
+export const emptyValidatorPhase: ValidatorPhase = {
+    waitStatus: false,
+    enteredConsensus: false,
+    consensusEnterTime: 0,
+    lastSeen: 0,
+    readyToEndConsensus: false,
+}
+
 export interface ValidatorStatus {
     inConsensusLoop: boolean
     initializedShardManager: boolean

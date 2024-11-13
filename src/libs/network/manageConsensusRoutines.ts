@@ -8,9 +8,15 @@ import getShard from "../consensus/v2/routines/getShard"
 import { Peer } from "../peer"
 import manageProposeBlockHash from "../consensus/v2/routines/manageProposeBlockHash"
 import { ValidationData } from "../consensus/v2/interfaces"
-import { ValidatorStatus, getShardManager } from "../consensus/v2/routines/shardManager"
+import {
+    ValidatorStatus,
+    getShardManager,
+} from "../consensus/v2/routines/shardManager"
 import { checkConsensusTime } from "../consensus/routines/consensusTime"
-import { consensusRoutine, isConsensusAlreadyRunning } from "../consensus/v2/PoRBFT"
+import {
+    consensusRoutine,
+    isConsensusAlreadyRunning,
+} from "../consensus/v2/PoRBFT"
 import log from "src/utilities/logger"
 import Secretary from "../consensus/v2/routines/secretary"
 
@@ -28,6 +34,10 @@ export interface ConsensusMethod {
         | "setSecretaryStatus"
         | "getSecretaryStatus"
         | "getSingleSecretaryStatus"
+        | "setWaitStatus"
+        | "updateLastSeen"
+        | "broadcastedConsensusEnd"
+        | "readyToEndConsensus"
     params: any[]
 }
 
@@ -52,7 +62,8 @@ export default async function manageConsensusRoutines(
     if (!inConsensus) {
         log.error("[manageConsensusRoutines] Consensus time not reached")
         response.result = 400
-        response.response = "Consensus time not reached (checked by manageConsensusRoutines)"
+        response.response =
+            "Consensus time not reached (checked by manageConsensusRoutines)"
         response.extra = "not in consensus"
         return response // ? Should we add some info about our delta time?
     } else {
@@ -60,13 +71,14 @@ export default async function manageConsensusRoutines(
             //log.info("[manageConsensusRoutines] Starting the consensus routine as we are in consensus time window but not in consensus mode yet")
             consensusRoutine() // Asynchronous function     to avoid blocking the main thread
         }
-        log.info("[manageConsensusRoutines] We are within the consensus time window")
+        log.info(
+            "[manageConsensusRoutines] We are within the consensus time window",
+        )
     }
 
     // Also refuses the routine if we are not in the shard
     const shard = await getShard(getSharedState.currentValidatorSeed)
-    const ourId = getSharedState
-        .identity.ed25519.publicKey.toString("hex")
+    const ourId = getSharedState.identity.ed25519.publicKey.toString("hex")
     let isInShard = false
     for (const peer of shard) {
         if (peer.identity == ourId) {
@@ -98,10 +110,56 @@ export default async function manageConsensusRoutines(
         // ANCHOR New methods for consensus v2
 
         // REVIEW Secretary system
+
+        /* SECTION Secretary control methods */
+
+        // Authenticated endpoint to set the wait status
+        case "setWaitStatus":
+            response.result = 200
+            log.custom(
+                "secretary",
+                "Received setWaitStatus request from " +
+                    payload.params[0] +
+                    " with wait status " +
+                    payload.params[1] +
+                    " and signature " +
+                    payload.params[2],
+                true,
+                false,
+            )
+            response.response = Secretary.getInstance().setWaitStatus(
+                payload.params[0] as string, // Public key of the peer
+                payload.params[1] as boolean, // Wait status
+                payload.params[2] as string, // Signature of the public key
+            )
+            break
+        // Authenticated endpoint to update the last seen time
+        case "updateLastSeen":
+            response.result = 200
+            response.response = Secretary.getInstance().updateLastSeen(
+                payload.params[0] as string, // Public key of the peer
+                payload.params[1] as string, // Signature of the public key
+            )
+            break
+
+        // Authenticated endpoint to set our ready to end consensus status
+        case "readyToEndConsensus":
+            response.result = 200
+            response.response = Secretary.getInstance().readyToEndConsensus(
+                payload.params[0] as string, // Public key of the peer
+                payload.params[1] as string, // Signature of the public key
+            )
+            break
+
+        // ! We need authentication for this
         case "setSecretaryStatus":
             response.result = 200
-            response.response = Secretary.getInstance().setStatus(payload.params[0] as string, payload.params[1] as ValidatorStatus)
+            response.response = Secretary.getInstance().setStatus(
+                payload.params[0] as string,
+                payload.params[1] as ValidatorStatus,
+            )
             break
+        // ! We need authentication for this
         case "getSecretaryStatus":
             response.result = 200
             response.response = Secretary.getInstance().getAllStatus()
@@ -109,8 +167,23 @@ export default async function manageConsensusRoutines(
 
         case "getSingleSecretaryStatus":
             response.result = 200
-            response.response = Secretary.getInstance().getStatus(payload.params[0] as string)
+            response.response = Secretary.getInstance().getStatus(
+                payload.params[0] as string,
+            )
             break
+
+        /* SECTION Secretary local methods */
+
+        /** TODO
+         * This method is called by the secretary when the consensus has ended for all shard partecipants
+         * Once received, the shard partecipant will be able to tell that everyone has ended the consensus and will proceed
+         */
+        case "broadcastedConsensusEnd":
+            response.result = 200
+            // TODO Implement this
+            break
+
+        /* SECTION Consensus methods */
 
         case "getValidatorTimestamp":
             response.result = 200
@@ -148,7 +221,10 @@ export default async function manageConsensusRoutines(
         case "setValidatorStatus":
             console.log("[Consensus Message Received] setValidatorStatus")
             // This call requires public key as string and status as ValidatorStatus
-            var setResult = getShardManager.setValidatorStatus(payload.params[0] as string, payload.params[1] as ValidatorStatus)
+            var setResult = getShardManager.setValidatorStatus(
+                payload.params[0] as string,
+                payload.params[1] as ValidatorStatus,
+            )
             if (setResult[0]) {
                 response.result = 200
                 response.response = "Validator status set"
@@ -160,8 +236,12 @@ export default async function manageConsensusRoutines(
         case "getValidatorStatus":
             //console.log("[Consensus Message Received] getValidatorStatus")
             response.result = 200
-            response.response = getShardManager.getValidatorStatus(payload.params[0] as string)
-            console.log("[Consensus Message Received] getValidatorStatus sent back")
+            response.response = getShardManager.getValidatorStatus(
+                payload.params[0] as string,
+            )
+            console.log(
+                "[Consensus Message Received] getValidatorStatus sent back",
+            )
             break
     }
 
