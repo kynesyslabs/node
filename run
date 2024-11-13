@@ -94,15 +94,6 @@ START_COMMAND="yarn start"
 
 echo "Starting the node with $START_COMMAND"
 
-echo "Debug: Current directory: $(pwd)"
-echo "Debug: Content of package.json:"
-cat package.json
-
-echo "Debug: Running yarn --verbose"
-yarn --verbose
-
-echo "Debug: Running start command"
-yarn start --verbose
 
 # PG_PORT and IDENTITY_FILE are exported for both docker and yarn
 export PG_PORT=$PG_PORT
