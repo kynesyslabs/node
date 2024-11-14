@@ -25,7 +25,7 @@ class Secretary {
     private status: Map<string, ValidatorStatus> = new Map()
 
     // REVIEW The below variables are used to avoid premature consensus end and to avoid nodes being left behind
-    private waitStatus: Map<string, ValidatorPhase> = new Map() // Map of the shard partecipants
+    private phaseStatus: Map<string, ValidatorPhase> = new Map() // Map of the shard partecipants
     public consensusEnded: boolean = false
 
     constructor() {
@@ -56,7 +56,10 @@ class Secretary {
                 )
             }
             // Initializing the waitStatus map
-            this.waitStatus.set(peer.identity, _.cloneDeep(emptyValidatorPhase))
+            this.phaseStatus.set(
+                peer.identity,
+                _.cloneDeep(emptyValidatorPhase),
+            )
         }
     }
 
@@ -80,8 +83,8 @@ class Secretary {
         }
         // Updating the last seen time
         // Updating the enteredConsensus flag and the consensusEnterTime, as well as the lastSeen time
-        if (this.waitStatus.get(peerKey).waitStatus) {
-            if (!this.waitStatus.get(peerKey).enteredConsensus) {
+        if (this.phaseStatus.get(peerKey).waitStatus) {
+            if (!this.phaseStatus.get(peerKey).enteredConsensus) {
                 log.custom(
                     "secretary",
                     "The validator " +
@@ -89,8 +92,8 @@ class Secretary {
                         " has entered consensus at " +
                         getSharedState.currentTimestamp,
                 )
-                this.waitStatus.get(peerKey).enteredConsensus = true
-                this.waitStatus.get(peerKey).consensusEnterTime =
+                this.phaseStatus.get(peerKey).enteredConsensus = true
+                this.phaseStatus.get(peerKey).consensusEnterTime =
                     getSharedState.currentTimestamp
             }
             log.custom(
@@ -102,7 +105,7 @@ class Secretary {
                 true,
                 false,
             )
-            this.waitStatus.get(peerKey).lastSeen =
+            this.phaseStatus.get(peerKey).lastSeen =
                 getSharedState.currentTimestamp
         }
     }
@@ -130,7 +133,11 @@ class Secretary {
             return false
         }
         console.log("[setWaitStatus] The wait status request seems valid")
-        this.waitStatus.get(peerKey).waitStatus = waitStatus
+        // Ensuring the peerKey is in the statuses
+        if (!this.phaseStatus.has(peerKey)) {
+            this.phaseStatus.set(peerKey, _.cloneDeep(emptyValidatorPhase))
+        }
+        this.phaseStatus.get(peerKey).waitStatus = waitStatus
         log.custom(
             "secretary",
             "The wait status has been updated for " +
@@ -223,8 +230,8 @@ class Secretary {
             return [true, notEndedValidators]
         }
         // Checking if there are any validators that have not ended the consensus
-        for (const [index, phase] of this.waitStatus.entries()) {
-            let validatorKey = Array.from(this.waitStatus.keys())[index]
+        for (const [index, phase] of this.phaseStatus.entries()) {
+            let validatorKey = Array.from(this.phaseStatus.keys())[index]
             if (!phase.readyToEndConsensus) {
                 notEndedValidators.push(validatorKey)
             }
@@ -246,8 +253,8 @@ class Secretary {
     // REVIEW This will be used to check if there is someone waiting for the status update
     public isSomeoneWaiting(): [boolean, string[]] {
         let waitingValidators: string[] = []
-        for (const [index, phase] of this.waitStatus.entries()) {
-            let validatorKey = Array.from(this.waitStatus.keys())[index]
+        for (const [index, phase] of this.phaseStatus.entries()) {
+            let validatorKey = Array.from(this.phaseStatus.keys())[index]
             if (phase.waitStatus) {
                 waitingValidators.push(validatorKey)
             }
@@ -272,7 +279,7 @@ class Secretary {
             return false
         }
         // Setting the readyToEndConsensus flag to true
-        this.waitStatus.get(peerKey).readyToEndConsensus = true
+        this.phaseStatus.get(peerKey).readyToEndConsensus = true
         // ? Do we need to put here the check for the consensus ended that will make the Secretary broadcast the consensus ended message?
         log.custom(
             "secretary",
