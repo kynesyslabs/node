@@ -429,7 +429,7 @@ export default class ServerHandlers {
 
         switch (request.message) {
             case "getMempool":
-                response.response = await Mempool.getMempool()
+                response.response = await Mempool.getMempool("ServerHandlers.getMempool")
                 //console.log(response)
                 response.result = 200
                 response.require_reply = false
@@ -467,12 +467,18 @@ export default class ServerHandlers {
     static async handleMempool(content: any): Promise<any> {
         // Basic message handling logic
         // ...
-        console.log("[handleMempool] Received a message")
-        console.log(content)
+        log.info("[handleMempool] Received a message")
+        log.info(content)
         let extra: any
         let require_reply = false
         const response = await Mempool.receive(content.data as MempoolData)
-        return { extra, require_reply, response }
+
+        return {
+            result: response ? 200 : 400,
+            response: response,
+            extra: response ? "Mempool received" : "Mempool not merged",
+            require_reply: false,
+        }
     }
 
     // REVIEW Add a method to handle the reception of a peerlist

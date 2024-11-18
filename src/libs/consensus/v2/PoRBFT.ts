@@ -240,7 +240,7 @@ async function mergePeerlistAndWait(shard: Peer[]): Promise<Peer[]> {
 
 // Merge and order the mempools between the shard and the local node
 async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
-    const ourMempool = await Mempool.getMempool()
+    const ourMempool = await Mempool.getMempool("mergeAndOrderMempools")
     console.log("[consensusRoutine] Our mempool:")
     console.log(ourMempool)
     log.info("[consensusRoutine] Our mempool has been retrieved")

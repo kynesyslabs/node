@@ -329,7 +329,7 @@ export default class Chain {
                 log.info("[insertBlock] Transaction fetched: ")
                 log.info(rawTransaction)
                 return Transaction.fromRawTransaction(rawTransaction) */
-                let mempoolData = await Mempool.getMempool()
+                let mempoolData = await Mempool.getMempool("insertBlock")
                 let tx = mempoolData.transactions.find(tx => tx.hash === txHash)
                 return tx
             }),

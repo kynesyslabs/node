@@ -43,19 +43,23 @@ export interface SerializedMempoolData {
 
 export default class Mempool {
     // INFO Reading the whole current mempool
-    public static async getMempool(): Promise<MempoolData> {
+    public static async getMempool(from: string = ""): Promise<MempoolData> {
+        log.info(`[MEMPOOL MANAGER] Entering getMempool from ${from}`)
         let timeout = 3000
         let waiting = false
 
         while (getSharedState.inGetMempool || getSharedState.inCleanMempool) {
             waiting = true
             if (timeout <= 0) {
+                log.error(
+                    `Timeout: inGetMempool: ${getSharedState.inGetMempool}, inCleanMempool: ${getSharedState.inCleanMempool}`,
+                )
                 throw new Error(
-                    "[MEMPOOL MANAGER] Timeout while waiting for the mempool",
+                    `[MEMPOOL MANAGER] Timeout while waiting for the mempool from ${from}`,
                 )
             }
 
-            log.info("[MEMPOOL MANAGER] getMempool is locked, waiting...")
+            log.info(`[MEMPOOL MANAGER] getMempool is locked, waiting from ${from}...`)
             timeout -= 250
             await new Promise(resolve => setTimeout(resolve, 250))
         }
@@ -82,7 +86,7 @@ export default class Mempool {
 
             // In case there is no current mempool, lets create it
             if (!results || results.length === 0) {
-                console.log(
+                log.info(
                     "[Mempool] No current mempool found, creating one...",
                 )
                 let newMempool: SerializedMempoolData = {
@@ -112,8 +116,8 @@ export default class Mempool {
 
             // Else we take the object itself
 
-            console.log("[MEMPOOL MANAGER] Normalized mempool query result:")
-            //console.log(firstResult)
+            log.info("[MEMPOOL MANAGER] Normalized mempool query result:")
+            //log.info(firstResult)
             // Serializing
             mempool = {
                 number: firstResult.number,
@@ -126,7 +130,11 @@ export default class Mempool {
             log.info("[MEMPOOL MANAGER] mempool: " + JSON.stringify(mempool))
 
             getSharedState.mempoolCache = mempool
+        } catch (error) {
+            log.error(`[MEMPOOL MANAGER] Error retrieving mempool from ${from}:`)
+            log.error(error)
         } finally {
+            log.info(`[MEMPOOL MANAGER] Exiting getMempool, inGetMempool set to false from ${from}`)
             getSharedState.inGetMempool = false
         }
 
@@ -183,8 +191,8 @@ export default class Mempool {
     public static async addTransaction(
         transaction: Transaction,
     ): Promise<void> {
-        let mempool = await this.getMempool()
-        console.log(
+        let mempool = await this.getMempool("Mempool.addTransaction")
+        log.info(
             "adding transaction with hash " +
                 transaction.hash +
                 " to the mempool",
@@ -197,7 +205,7 @@ export default class Mempool {
             process.exit(1)
         }
 
-        //console.log(mempool)
+        //log.info(mempool)
         mempool.transactions.push(transaction) // REVIEW What if it is empty?
 
         const db = await Datasource.getInstance()
@@ -219,7 +227,7 @@ export default class Mempool {
     public static async removeTransaction(
         transaction: Transaction,
     ): Promise<void> {
-        let mempool = await this.getMempool()
+        let mempool = await this.getMempool("Mempool.removeTransaction")
 
         let index = mempool.transactions.indexOf(transaction)
         if (index > -1) {
@@ -251,7 +259,7 @@ export default class Mempool {
 
         try {
             // Getting the current mempool
-            let mempool = await this.getMempool() // Assuming getMempool is updated to work with TypeORM
+            let mempool = await this.getMempool("Mempool.nextMempool") // Assuming getMempool is updated to work with TypeORM
             let next_number = mempool.number + 1
 
             // Archiving the current mempool
@@ -294,14 +302,14 @@ export default class Mempool {
     public static async receive(mempool: MempoolData): Promise<boolean> {
         // REVIEW and expand: parse, verify and call merge
         // Basic features that must be identical to us
-        let local_mempool = await Mempool.getMempool()
+        let local_mempool = await Mempool.getMempool("Mempool.receive")
         // We need to have the same forecasted block number, of course
-        console.log("local mempool:")
-        console.log(local_mempool)
-        console.log("remote mempool:")
-        console.log(mempool)
+        log.info("local mempool:")
+        log.info(JSON.stringify(local_mempool))
+        log.info("remote mempool:")
+        log.info(JSON.stringify(mempool))
         if (local_mempool.number != mempool.number) {
-            console.log("[MEMPOOL VERIFICATION] The block numbers do not match")
+            log.info("[MEMPOOL VERIFICATION] The block numbers do not match")
             return false
         }
         // Checking all the txs one by one for the signatures
@@ -309,26 +317,26 @@ export default class Mempool {
             let tx = mempool.transactions[i]
             // NOTE Verifying the hash of the transaction
             let tx_hash = tx.hash
-            console.log(
+            log.info(
                 "[MEMPOOL VERIFICATION] Verifying the hash of the transaction: " +
                     tx_hash,
             )
-            console.log(JSON.stringify(tx.content))
+            log.info(JSON.stringify(tx.content))
             let calculated_hash = Hashing.sha256(JSON.stringify(tx.content))
-            console.log(
+            log.info(
                 "[MEMPOOL VERIFICATION] Calculated hash: " + calculated_hash,
             )
             if (calculated_hash != tx_hash) {
-                console.log(
+                log.info(
                     "[X] [MEMPOOL VERIFICATION] The hash of the transaction is invalid",
                 )
                 return false
             }
-            console.log(
+            log.info(
                 "[+] [MEMPOOL VERIFICATION] The hash of the transaction is valid",
             )
             // NOTE Verifying the signature against the verified hash using from as public key
-            console.log("[MEMPOOL VERIFICATION] Verifying the signature")
+            log.info("[MEMPOOL VERIFICATION] Verifying the signature")
 
             let signature = tx.signature // TODO Sometimes there is a nested type / data structure (see below)
             // REVIEW Ugly patch for the above TODO
@@ -337,20 +345,20 @@ export default class Mempool {
                 if (!signature_data.data || !signature_data.type) {
                     throw new Error("[*] Signature fix failed successfully!")
                 }
-                console.log("[+] Signature fixed successfully!")
+                log.info("[+] Signature fixed successfully!")
                 signature = signature_data
             } catch (error) {
-                console.log(
+                log.info(
                     "[+] [MEMPOOL VERIFICATION] Signature did not need to be fixed",
                 )
             }
 
-            console.log(
+            log.info(
                 "[MEMPOOL VERIFICATION] Signature: " +
                     signature.data.toString("hex"),
             )
             let public_key = tx.content.from as any
-            console.log(
+            log.info(
                 "[MEMPOOL VERIFICATION] Public key: " +
                     public_key.data.toString("hex"),
             )
@@ -360,27 +368,27 @@ export default class Mempool {
                 public_key,
             )
             if (!signature_valid) {
-                console.log(
+                log.info(
                     "[X] [MEMPOOL VERIFICATION] The signature is invalid",
                 )
                 return false
             }
         }
-        console.log("[+] [MEMPOOL VERIFICATION] The signature is valid")
+        log.info("[+] [MEMPOOL VERIFICATION] The signature is valid")
         // If everything is fine, we can merge the mempool
-        console.log("[MEMPOOL MERGING] Merging the mempool")
+        log.info("[MEMPOOL MERGING] Merging the mempool")
         let success = await Mempool.merge(mempool)
         if (success) {
-            console.log("[+] [MEMPOOL MERGING] The mempool has been merged")
+            log.info("[+] [MEMPOOL MERGING] The mempool has been merged")
         } else {
-            console.log("[X] [MEMPOOL MERGING] The mempool has not been merged")
+            log.info("[X] [MEMPOOL MERGING] The mempool has not been merged")
         }
         return success
     }
 
     // INFO Merging the mempool received (second step)
     public static async merge(received_mempool: MempoolData): Promise<boolean> {
-        let mempool = await Mempool.getMempool()
+        let mempool = await Mempool.getMempool("Mempool.merge")
         // REVIEW Checking and excluding duplicates
         for (let i = 0; i < received_mempool.transactions.length; i++) {
             let tx = received_mempool.transactions[i]
@@ -398,8 +406,8 @@ export default class Mempool {
             .getDataSource()
             .getRepository(MempoolEntity)
 
-        console.log("[MEMPOOL]: Updating transactions in mempool: ")
-        console.log(JSON.stringify(mempool.transactions))
+        log.info("[MEMPOOL]: Updating transactions in mempool: ")
+        log.info(JSON.stringify(mempool.transactions))
 
         try {
             await mempoolRepository.update(
@@ -452,7 +460,7 @@ export default class Mempool {
         tx: Transaction,
         replace: boolean = true,
     ): Promise<MempoolData> {
-        let local_mempool = await Mempool.getMempool()
+        let local_mempool = await Mempool.getMempool("Mempool.checkNonce")
         for (let i = 0; i < local_mempool.transactions.length; i++) {
             let pooled_tx = local_mempool.transactions[i]
             if (
