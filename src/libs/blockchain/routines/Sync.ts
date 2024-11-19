@@ -80,6 +80,8 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
                     " has last block number: " +
                     response[1].response,
             )
+        } else {
+            peerLastBlockNumbers.push(0)
         }
     }
     log.info("[fastSync] Peer last block numbers: " + peerLastBlockNumbers)

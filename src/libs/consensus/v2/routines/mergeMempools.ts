@@ -22,7 +22,7 @@ export async function mergeMempools(
     await Promise.all(promises) // ! Add error handling
     log.info("[mergeMempools] Merging mempools is complete")
     // We call getMempool again to make sure we have the latest version that should have the merged mempools
-    let mergedMempool = await Mempool.getMempool()
+    let mergedMempool = await Mempool.getMempool("mergeMempools")
     console.log("[mergeMempools] Merged mempool:")
     console.log(mergedMempool)
     return mergedMempool
