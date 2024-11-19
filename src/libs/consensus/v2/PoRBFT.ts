@@ -642,6 +642,7 @@ async function _updateValidatorStatus(
 }
 
 // REVIEW Wait logic using the new secretary methods
+// ? Replace setWaitStatus with the new secretary method?
 async function waitUntilShardIsReady(
     secretary: Peer,
     targetStatus: ValidatorStatus,

@@ -1,4 +1,4 @@
-import { RPCResponse } from "@kynesyslabs/demosdk/types"
+import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "src/utilities/sharedState"
 import { emptyResponse } from "src/libs/network/server_rpc"
 import _ from "lodash"
@@ -288,6 +288,47 @@ class Secretary {
                 " to true",
         )
         return true
+    }
+
+    // REVIEW This will be used to broadcast the status of the shard members to the waiting shard members
+    public async hitWaitingShardMembers(): Promise<[boolean, string[]]> { // Success + peers hit
+        let waitingShardMembers: Peer[] = []
+        let waitingShardMembersRequest = this.isSomeoneWaiting()
+        let routineResponse: [boolean, string[]] = [true, []]
+        // If there are shard members waiting for the status update, we hit them
+        if (!waitingShardMembersRequest[0]) {
+            return routineResponse
+        }
+        // Extracting the keys of the shard members that are waiting
+            let waitingShardMembersKeys = waitingShardMembersRequest[1]
+            // Getting the shard members
+            let shardMembers = getShardManager.getShard()
+            // Finding the shard members that are waiting and adding them to the list as Peer objects
+            for (const peerKey of waitingShardMembersKeys) {
+                let peer = shardMembers.find(peer => peer.identity === peerKey)
+                waitingShardMembers.push(peer)
+            }
+            let currentStatus = this.getAllStatus()
+            // Preparing the json call to broadcast the status of the shard members to the waiting shard members
+            let jsonCall: RPCRequest = {
+                method: "consensus_routine",
+                params: [
+                    {
+                        method: "broadcastShardStatus",
+                        params: [currentStatus],
+                    },
+                ],
+            }
+            // Broadcasting the status of the shard members to the waiting shard members
+            let promises: Promise<RPCResponse>[] = []
+            for (const peer of waitingShardMembers) {
+                promises.push(peer.authenticatedCall(jsonCall))
+                routineResponse[1].push(peer.identity)
+            }
+        // ? Do we need a check here to see the responses?
+        // Waiting for the calls to finish and returning a recap of what happened
+        await Promise.all(promises)
+        return routineResponse
     }
 }
 

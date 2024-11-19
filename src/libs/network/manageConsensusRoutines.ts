@@ -19,6 +19,8 @@ import {
 } from "../consensus/v2/PoRBFT"
 import log from "src/utilities/logger"
 import Secretary from "../consensus/v2/routines/secretary"
+import Cryptography from "../crypto/cryptography"
+import { HexToForge } from "../crypto/forgeUtils"
 
 export interface ConsensusMethod {
     method:
@@ -116,9 +118,9 @@ export default async function manageConsensusRoutines(
 
         // Authenticated endpoint to set the wait status
         /** REVIEW Shard members will use this endpoint to set their status into a waiting state.
-         * This should allow the secretary to know when all the shard members are ready to proceed and use 
+         * This should allow the secretary to know when all the shard members are ready to proceed and use
          * the broadcastedConsensusEnd or broadcastShardStatus methods to control other members' behaviour.
-        */
+         */
         /**
          * @param payload.params[0] - The public key of the peer
          * @param payload.params[1] - The wait status
@@ -184,6 +186,9 @@ export default async function manageConsensusRoutines(
 
         /* SECTION Secretary local methods */
 
+        /* SECTION Secretary communication methods */
+        // REVIEW The secretary should be able to communicate with the other shard members through these methods
+
         /** TODO
          * This method is called by the secretary when the consensus has ended for all shard partecipants
          * Once received, the shard partecipant will be able to tell that everyone has ended the consensus and will proceed
@@ -192,14 +197,46 @@ export default async function manageConsensusRoutines(
             response.result = 200
             // TODO Implement this
             break
-        
 
-        /* SECTION Secretary communication methods */
-        // REVIEW The secretary should be able to communicate with the other shard members through these methods
-
+        // REVIEW Receiving a broadcasted shard status (Map<string, ValidatorStatus>)
+        /** NOTE
+         * This endpoint is hit by the secretary when a shard member is waiting for something
+         * and the secretary is broadcasting the status of the shard members to let it know that
+         * the shard members are ready to proceed (or not).
+         */
         case "broadcastShardStatus":
-            // REVIEW Receiving a broadcasted shard status (Map<string, ValidatorStatus>)
-            var receivedStatus = payload.params[0] as Map<string, ValidatorStatus>
+            // The status is received from the secretary so we need to verify the signature
+            var receivedKey = payload.params[0] as string
+            var receivedSignature = payload.params[1] as string
+            // Getting the secretary public key
+            var currentShard = await getShard(
+                getSharedState.currentValidatorSeed,
+            ) // REVIEW Is this correct?
+            var secretaryKey = currentShard[0].identity
+            // First we verify the key corresponds to the secretary
+            if (receivedKey !== secretaryKey) {
+                response.result = 400
+                response.response = "invalid key"
+                response.extra = "Secretary key mismatch"
+                return response
+            }
+            // Verifying the signature
+            var isSignatureValid = await Cryptography.verify(
+                secretaryKey,
+                HexToForge(receivedSignature),
+                HexToForge(secretaryKey),
+            )
+            if (!isSignatureValid) {
+                response.result = 400
+                response.response = "invalid signature"
+                response.extra = "Signature verification failed"
+                return response
+            }
+            // Ingesting the payload
+            var receivedStatus = payload.params[1] as Map<
+                string,
+                ValidatorStatus
+            >
             // TODO Implement this
             response.result = 400
             response.response = "Not implemented"
