@@ -38,6 +38,7 @@ export interface ConsensusMethod {
         | "updateLastSeen"
         | "broadcastedConsensusEnd"
         | "readyToEndConsensus"
+        | "broadcastShardStatus"
     params: any[]
 }
 
@@ -114,6 +115,15 @@ export default async function manageConsensusRoutines(
         /* SECTION Secretary control methods */
 
         // Authenticated endpoint to set the wait status
+        /** REVIEW Shard members will use this endpoint to set their status into a waiting state.
+         * This should allow the secretary to know when all the shard members are ready to proceed and use 
+         * the broadcastedConsensusEnd or broadcastShardStatus methods to control other members' behaviour.
+        */
+        /**
+         * @param payload.params[0] - The public key of the peer
+         * @param payload.params[1] - The wait status
+         * @param payload.params[2] - The signature of the public key
+         */
         case "setWaitStatus":
             response.result = 200
             log.custom(
@@ -181,6 +191,18 @@ export default async function manageConsensusRoutines(
         case "broadcastedConsensusEnd":
             response.result = 200
             // TODO Implement this
+            break
+        
+
+        /* SECTION Secretary communication methods */
+        // REVIEW The secretary should be able to communicate with the other shard members through these methods
+
+        case "broadcastShardStatus":
+            // REVIEW Receiving a broadcasted shard status (Map<string, ValidatorStatus>)
+            var receivedStatus = payload.params[0] as Map<string, ValidatorStatus>
+            // TODO Implement this
+            response.result = 400
+            response.response = "Not implemented"
             break
 
         /* SECTION Consensus methods */

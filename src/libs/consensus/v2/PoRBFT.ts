@@ -630,18 +630,42 @@ async function _updateValidatorStatus(
 
                     break
                 }
-            }
+
+            } 
         }
 
         // REVIEW End the wait logic
         await setWaitStatus(secretary, false)
+
     }
     return true
 }
 
-// TODO Wait logic using the new secretary methods
-async function waitUntilShardIsReady(): Promise<void> {
-    // TODO Implement this
+// REVIEW Wait logic using the new secretary methods
+async function waitUntilShardIsReady(
+    secretary: Peer,
+    targetStatus: ValidatorStatus,
+): Promise<void> {
+    // We want a status to wait for and we build the json call to wait for that status
+    let jsonCall: RPCRequest = {
+        method: "consensus_routine",
+        params: [
+            {
+                method: "setWaitStatus",
+                params: [
+                    targetStatus,
+                ],
+            },
+        ],
+    }
+    // REVIEW We have to call the secretary endpoint to set the wait status
+    /** NOTE We use the authenticated call to send the request: it adds the public key and the signature to the request
+     * This will add the public key at the beginning of the params and the signature at the end of the params
+     * Example: [public_key, targetStatus, signature]
+    */
+    const response = await secretary.authenticatedCall(jsonCall)
+    // TODO We have to wait for the secretary to broadcast that the shard is ready
+    // TODO We have to call the secretary endpoint to set the wait status to false and continue with the consensus
 }
 
 // SECTION Old updateValidatorStatus method and related functions

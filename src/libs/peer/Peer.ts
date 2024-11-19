@@ -144,6 +144,33 @@ export default class Peer {
         }
     }
 
+    // Returning the authenticated call without sending the request
+    /** NOTE This method is used to add the public key and the signature to the request
+     * This is to ensure that the secretary can identify the sender of the request and validate its signature
+     * Example: a request with params like [...params] will become [public_key, ...params, signature]
+    */
+    async authenticatedCallMaker(request: RPCRequest): Promise<RPCRequest> {
+        // Signing our identity to send the request
+        const bufferSignature = await Cryptography.sign( 
+            getSharedState.identity.ed25519.publicKey.toString("hex"),
+            getSharedState.identity.ed25519.privateKey,
+        )
+        // Adding the public key at the beginning of the params
+        request.params.unshift(getSharedState.identity.ed25519.publicKey.toString("hex"))
+        // Adding the signature at the end of the params
+        request.params.push(bufferSignature.toString("hex"))
+        return request
+    }
+
+    // Authenticated call
+    async authenticatedCall(request: RPCRequest): Promise<RPCResponse> {
+        // Generating the authenticated request
+        let authenticatedRequest = await this.authenticatedCallMaker(request)
+        // Sending the request
+        let response = await this.call(authenticatedRequest, true)
+        return response
+    }
+
     // New method to make an arbitrary RPC call
     async call(
         request: RPCRequest,
