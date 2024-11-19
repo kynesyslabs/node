@@ -25,6 +25,72 @@ import { ISignature } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 
+class MempoolLock {
+    locked: boolean
+    waitQueue: {
+        resolve: (from: string) => void
+        reject: (reason?: any) => void
+        timeoutId: NodeJS.Timeout
+        from: string
+    }[]
+    timeout: number
+
+    constructor(timeout: number = 3000) {
+        this.locked = false
+        this.waitQueue = []
+        this.timeout = timeout
+    }
+
+    async acquire(from: string) {
+        // If not locked, acquire immediately
+        if (!this.locked) {
+            this.locked = true
+            log.info(`[MEMPOOL LOCK] Acquired lock from ${from}`)
+            return true
+        }
+
+        // Create a promise that will be resolved when it's this caller's turn
+        return new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+                // Remove from queue if timeout occurs
+                const index = this.waitQueue.findIndex(
+                    waiter => waiter.from === from,
+                )
+                if (index !== -1) {
+                    this.waitQueue.splice(index, 1)
+                }
+                reject(new Error(`[MEMPOOL LOCK] acquisition timeout from ${from}`))
+            }, this.timeout)
+
+            // Add to queue
+            this.waitQueue.push({
+                resolve,
+                reject,
+                timeoutId,
+                from,
+            })
+        })
+    }
+
+    release(from: string) {
+        if (!this.locked) {
+            return
+        }
+
+        // Get next waiter from queue
+        const nextWaiter = this.waitQueue.shift()
+
+        if (nextWaiter) {
+            clearTimeout(nextWaiter.timeoutId)
+            nextWaiter.resolve(from)
+        } else {
+            this.locked = false
+            log.info(`[MEMPOOL LOCK] Released lock from ${from}`)
+        }
+        // Note: lock remains true as it's being passed to next waiter
+    }
+}
+
 export interface MempoolData {
     number: number
     current: number
@@ -42,38 +108,23 @@ export interface SerializedMempoolData {
 }
 
 export default class Mempool {
+    private static lock: MempoolLock = new MempoolLock()
+
     // INFO Reading the whole current mempool
     public static async getMempool(from: string = ""): Promise<MempoolData> {
+        from += `_${Math.floor(Math.random() * 1000)}`
         log.info(`[MEMPOOL MANAGER] Entering getMempool from ${from}`)
-        let timeout = 3000
-        let waiting = false
-
-        while (getSharedState.inGetMempool || getSharedState.inCleanMempool) {
-            waiting = true
-            if (timeout <= 0) {
-                log.error(
-                    `Timeout: inGetMempool: ${getSharedState.inGetMempool}, inCleanMempool: ${getSharedState.inCleanMempool}`,
-                )
-                throw new Error(
-                    `[MEMPOOL MANAGER] Timeout while waiting for the mempool from ${from}`,
-                )
-            }
-
-            log.info(`[MEMPOOL MANAGER] getMempool is locked, waiting from ${from}...`)
-            timeout -= 250
-            await new Promise(resolve => setTimeout(resolve, 250))
-        }
-
-        // If we were waiting, we can also see if the mempool has been cached
-        if (waiting && getSharedState.mempoolCache) {
-            log.info("[MEMPOOL MANAGER] Returning cached mempool")
-            return getSharedState.mempoolCache
-        }
-
-        let mempool: MempoolData = null
+        let waiting = this.lock.locked
 
         try {
-            getSharedState.inGetMempool = true
+            await this.lock.acquire(from)
+
+            // If we were waiting, we can also see if the mempool has been cached
+            if (waiting && getSharedState.mempoolCache) {
+                log.info("[MEMPOOL MANAGER] Returning cached mempool")
+                return getSharedState.mempoolCache
+            }
+
             getSharedState.mempoolCache = null
             const db = await Datasource.getInstance()
             const mempoolRepository = db
@@ -86,9 +137,7 @@ export default class Mempool {
 
             // In case there is no current mempool, lets create it
             if (!results || results.length === 0) {
-                log.info(
-                    "[Mempool] No current mempool found, creating one...",
-                )
+                log.info("[Mempool] No current mempool found, creating one...")
                 let newMempool: SerializedMempoolData = {
                     number: 0,
                     current: 1,
@@ -119,7 +168,7 @@ export default class Mempool {
             log.info("[MEMPOOL MANAGER] Normalized mempool query result:")
             //log.info(firstResult)
             // Serializing
-            mempool = {
+            const mempool: MempoolData = {
                 number: firstResult.number,
                 current: firstResult.current,
                 transactions: JSON.parse(firstResult.transactions),
@@ -130,39 +179,22 @@ export default class Mempool {
             log.info("[MEMPOOL MANAGER] mempool: " + JSON.stringify(mempool))
 
             getSharedState.mempoolCache = mempool
+            return mempool
         } catch (error) {
-            log.error(`[MEMPOOL MANAGER] Error retrieving mempool from ${from}:`)
+            log.error(
+                `[MEMPOOL MANAGER] Error retrieving mempool from ${from}:`,
+            )
             log.error(error)
         } finally {
-            log.info(`[MEMPOOL MANAGER] Exiting getMempool, inGetMempool set to false from ${from}`)
-            getSharedState.inGetMempool = false
+            log.info(`[MEMPOOL MANAGER] Exiting getMempool from ${from}`)
+            this.lock.release(from)
         }
-
-        return mempool
     }
 
     // INFO Cleaning the mempool
     public static async clean(): Promise<void> {
-        let timeout = 3000
-
-        while (getSharedState.inGetMempool || getSharedState.inCleanMempool) {
-            if (timeout <= 0) {
-                throw new Error(
-                    "[MEMPOOL MANAGER] Timeout while waiting to delete mempool",
-                )
-            }
-
-            log.info(
-                `[MEMPOOL MANAGER] inGetMempool: ${getSharedState.inGetMempool}, inCleanMempool: ${getSharedState.inCleanMempool}. Waiting...`,
-                false,
-            )
-
-            timeout -= 250
-            await new Promise(resolve => setTimeout(resolve, 250))
-        }
-
         try {
-            getSharedState.inCleanMempool = true
+            await this.lock.acquire("Mempool.clean")
 
             log.info("[MEMPOOL MANAGER] Cleaning the mempool")
 
@@ -179,7 +211,7 @@ export default class Mempool {
                 await mempoolRepository.delete({ current: 1 })
             }
         } finally {
-            getSharedState.inCleanMempool = false
+            this.lock.release("Mempool.clean")
         }
     }
 
@@ -368,9 +400,7 @@ export default class Mempool {
                 public_key,
             )
             if (!signature_valid) {
-                log.info(
-                    "[X] [MEMPOOL VERIFICATION] The signature is invalid",
-                )
+                log.info("[X] [MEMPOOL VERIFICATION] The signature is invalid")
                 return false
             }
         }
