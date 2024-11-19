@@ -59,7 +59,11 @@ class MempoolLock {
                 if (index !== -1) {
                     this.waitQueue.splice(index, 1)
                 }
-                reject(new Error(`[MEMPOOL LOCK] acquisition timeout from ${from}`))
+                reject(
+                    new Error(
+                        `[MEMPOOL LOCK] acquisition timeout from ${from}`,
+                    ),
+                )
             }, this.timeout)
 
             // Add to queue
@@ -126,7 +130,9 @@ export default class Mempool {
             }
 
             getSharedState.mempoolCache = null
-            log.info("[MEMPOOL MANAGER] Connecting to the database from " + from)
+            log.info(
+                "[MEMPOOL MANAGER] Connecting to the database from " + from,
+            )
             const db = await Datasource.getInstance()
             log.info("[MEMPOOL MANAGER] Database connected from " + from)
 
@@ -188,7 +194,7 @@ export default class Mempool {
             log.error(
                 `[MEMPOOL MANAGER] Error retrieving mempool from ${from}:`,
             )
-            log.error(error)
+            log.error(error as string)
         } finally {
             log.info(`[MEMPOOL MANAGER] Exiting getMempool from ${from}`)
             this.lock.release(from)
