@@ -126,11 +126,15 @@ export default class Mempool {
             }
 
             getSharedState.mempoolCache = null
+            log.info("[MEMPOOL MANAGER] Connecting to the database from " + from)
             const db = await Datasource.getInstance()
+            log.info("[MEMPOOL MANAGER] Database connected from " + from)
+
             const mempoolRepository = db
                 .getDataSource()
                 .getRepository(MempoolEntity)
 
+            log.info("[MEMPOOL MANAGER] Querying the database from " + from)
             let results = await mempoolRepository.findBy({ current: 1 })
             log.info("[MEMPOOL MANAGER] Mempool query result first try:")
             log.info("[MEMPOOL MANAGER] mempool: " + JSON.stringify(results))
