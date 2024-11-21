@@ -606,7 +606,7 @@ async function _updateValidatorStatus(
         await updateLastSeen(secretary)
     }
     // Wait logic
-    // ! Move this to a new method + rewrite the logic using the new secretary methods (setWaitStatus, updateLastSeen and related)
+    // TODO Implement the new wait logic
     if (wait) {
         // REVIEW Setting the wait status
         await setWaitStatus(secretary, true)
@@ -618,6 +618,7 @@ async function _updateValidatorStatus(
 }
 
 // REVIEW Wait logic using the new secretary methods
+// ? Should we take advantage of things like updateLastSeen?
 async function waitForSecretaryGreenLight(
     secretary: Peer,
     targetStatus: ValidatorStatus,
