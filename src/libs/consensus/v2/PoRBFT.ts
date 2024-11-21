@@ -95,6 +95,22 @@ export async function consensusRoutine(): Promise<void> {
     // Initialize the shard manager transmitting that we are in consensus loop
     await initializeShardManager(shard)
 
+    // REVIEW If we are the secretary, we start the secretary routine
+    if (
+        getSharedState.identity.ed25519_hex.publicKey ===
+        getShardManager.getShard()[0].identity
+    ) {
+        log.custom("secretary", "We are the secretary, starting the routine")
+        /** REVIEW
+         * This is called without await to avoid blocking the consensus routine.
+         * This should start checking if shard members are waiting for something.
+         * Once a shard member is waiting, this routine will check if it can proceed by comparing the statuses.
+         * If the shard member can proceed, it will hit the validator to let it know that it can continue.
+         * It should have a 250ms delay between each check.
+         */
+        Secretary.getInstance().secretaryRoutine()
+    }
+
     // Using the secretary to update the local statuses
     // ? Without waiting for the secretary to update the statuses? Because we are at the beginning of the consensus routine
     await _updateValidatorStatus("inConsensusLoop", true, false, true)
@@ -469,6 +485,12 @@ async function updateLastSeen(secretary: Peer): Promise<RPCResponse> {
 }
 
 // REVIEW Authenticated method calling the secretary endpoint to set the wait status
+/** REVIEW
+ * This method will be ingested by the secretary routine to set the wait status of a validator.
+ * This works closely with the secretary routine to coordinate the shard members.
+ * It should be ingested by the secretary routine and will set the wait status to true with a target status.
+ * Then, when the secretary routine detects that the shard member has finished its task, it will set the wait status to false.
+ */
 async function setWaitStatus(
     secretary: Peer,
     waitStatus: boolean,
@@ -496,12 +518,17 @@ async function setWaitStatus(
         log.warning(
             `[setWaitStatus] Failed to set the wait status: ${response.response}`,
         )
+    } else {
+        // Setting a variable to check if we have received the green light from the secretary
+        // NOTE This is used to block the consensus routine until the secretary gives the green light
+        getSharedState.waitingForSecretaryGreenLight = waitStatus
     }
     return response
 }
 
 // This method updates the validator status and waits for the shard to be ready
 // NOTE It contains the logic to update the last seen time and set the wait status too
+// ! Move the wait logic to the new secretary methods
 async function _updateValidatorStatus(
     status: string,
     wait: boolean = true,
@@ -583,91 +610,95 @@ async function _updateValidatorStatus(
     if (wait) {
         // REVIEW Setting the wait status
         await setWaitStatus(secretary, true)
-        // Waiting for the shard to be ready
-        console.log(
-            "[updateValidatorStatus] Waiting for the shard to be ready...",
-        )
-        let timeout = 3000
-        let startTime = Date.now()
-        let curTime = startTime
-        let shardStatus = await getShardStatus()
-        let ourStatus = getShardManager.getOurValidatorStatus()
-        let all_synced = false
-        while (!all_synced) {
-            all_synced = true
-            // Updating the current shard status and our status
-            shardStatus = await getShardStatus()
-            ourStatus = getShardManager.getOurValidatorStatus()
-            curTime = Date.now()
-            if (curTime - startTime > timeout) {
-                log.warning(
-                    "[updateValidatorStatus] [ERROR] Shard is not ready: " +
-                        status,
-                )
-                return false
-            }
-            // Checking each status in the shard to see if it is the same as our status
-            for (const status of shardStatus.values()) {
-                let theirStatusHash = Hashing.sha256(JSON.stringify(status))
-                console.log("theirStatusHash: " + theirStatusHash)
-                let ourStatusHash = Hashing.sha256(JSON.stringify(ourStatus))
-                console.log("ourStatusHash: " + ourStatusHash)
-                if (theirStatusHash !== ourStatusHash) {
-                    all_synced = false
-                    log.info(
-                        "[updateValidatorStatus] [WAIT] Statuses are not synced (specifically our status is not equal to a status in the shard, us:",
-                        true,
-                    )
-                    log.info(JSON.stringify(ourStatus, null, 2))
-                    log.info("[updateValidatorStatus] [WAIT] Theirs:")
-                    log.info(JSON.stringify(status, null, 2))
-
-                    // Waiting 500ms before trying again
-                    await new Promise(resolve => setTimeout(resolve, 500))
-
-                    // REVIEW Update last seen logic
-                    await updateLastSeen(secretary)
-
-                    break
-                }
-
-            } 
-        }
-
-        // REVIEW End the wait logic
-        await setWaitStatus(secretary, false)
-
+        // return await waitForSecretaryGreenLight(secretary, currentStatus)
+        // ! Remove this once we have the new wait logic
+        return await _oldWaitLogic(secretary, currentStatus)
     }
     return true
 }
 
 // REVIEW Wait logic using the new secretary methods
-// ? Replace setWaitStatus with the new secretary method?
-async function waitUntilShardIsReady(
+async function waitForSecretaryGreenLight(
     secretary: Peer,
     targetStatus: ValidatorStatus,
-): Promise<void> {
-    // We want a status to wait for and we build the json call to wait for that status
-    let jsonCall: RPCRequest = {
-        method: "consensus_routine",
-        params: [
-            {
-                method: "setWaitStatus",
-                params: [
-                    targetStatus,
-                ],
-            },
-        ],
+): Promise<boolean> {
+    // REVIEW Implement the new wait logic
+    // REVIEW See manageConsensusRoutines.ts for the secretary endpoint that sets this variable to false
+    // REVIEW We need to set a timeout, anyway
+    let timeout = 3000
+    let startTime = Date.now()
+    let curTime = startTime
+    // REVIEW Using a while loop to wait for the green light
+    // Using getSharedState.waitingForSecretaryGreenLight to check if we have received the green light
+    while (getSharedState.waitingForSecretaryGreenLight) {
+        curTime = Date.now()
+        if (curTime - startTime > timeout) {
+            log.warning("[waitForSecretaryGreenLight] Timeout")
+            // ! The timeout here has no effects except disrupting the whole consensus routine
+            // ! Make so that the secretary is warned about the timeout, or find a better way to do this
+            return false
+        }
     }
-    // REVIEW We have to call the secretary endpoint to set the wait status
-    /** NOTE We use the authenticated call to send the request: it adds the public key and the signature to the request
-     * This will add the public key at the beginning of the params and the signature at the end of the params
-     * Example: [public_key, targetStatus, signature]
-    */
-    const response = await secretary.authenticatedCall(jsonCall)
-    // TODO We have to wait for the secretary to broadcast that the shard is ready
-    // TODO We have to call the secretary endpoint to set the wait status to false and continue with the consensus
+    return true
 }
+
+// TODO Remove this if we are not using it anymore
+async function _oldWaitLogic(secretary: Peer, status: ValidatorStatus): Promise<boolean> {
+    // Waiting for the shard to be ready
+    console.log(
+        "[updateValidatorStatus] Waiting for the shard to be ready...",
+    )
+    let timeout = 3000
+    let startTime = Date.now()
+    let curTime = startTime
+    let shardStatus = await getShardStatus()
+    let ourStatus = getShardManager.getOurValidatorStatus()
+    let all_synced = false
+    while (!all_synced) {
+        all_synced = true
+        // Updating the current shard status and our status
+        shardStatus = await getShardStatus()
+        ourStatus = getShardManager.getOurValidatorStatus()
+        curTime = Date.now()
+        if (curTime - startTime > timeout) {
+            log.warning(
+                "[updateValidatorStatus] [ERROR] Shard is not ready: " +
+                    status,
+            )
+            return false
+        }
+        // Checking each status in the shard to see if it is the same as our status
+        for (const status of shardStatus.values()) {
+            let theirStatusHash = Hashing.sha256(JSON.stringify(status))
+            console.log("theirStatusHash: " + theirStatusHash)
+            let ourStatusHash = Hashing.sha256(JSON.stringify(ourStatus))
+            console.log("ourStatusHash: " + ourStatusHash)
+            if (theirStatusHash !== ourStatusHash) {
+                all_synced = false
+                log.info(
+                    "[updateValidatorStatus] [WAIT] Statuses are not synced (specifically our status is not equal to a status in the shard, us:",
+                    true,
+                )
+                log.info(JSON.stringify(ourStatus, null, 2))
+                log.info("[updateValidatorStatus] [WAIT] Theirs:")
+                log.info(JSON.stringify(status, null, 2))
+
+                // Waiting 500ms before trying again
+                await new Promise(resolve => setTimeout(resolve, 500))
+
+                // REVIEW Update last seen logic
+                await updateLastSeen(secretary)
+
+                break
+            }
+
+        } 
+    }
+    // REVIEW End the wait logic
+    await setWaitStatus(secretary, false)
+    return true
+}
+
 
 // SECTION Old updateValidatorStatus method and related functions
 

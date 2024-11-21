@@ -28,6 +28,10 @@ class Secretary {
     private phaseStatus: Map<string, ValidatorPhase> = new Map() // Map of the shard partecipants
     public consensusEnded: boolean = false
 
+    // SECTION Secretary routine controls
+    private isSecretaryRoutineRunning: boolean = false
+    private stopSecretaryRoutine: boolean = false
+
     constructor() {
         this.secretary = getShardManager.getShard()[0]
         log.custom(
@@ -291,7 +295,8 @@ class Secretary {
     }
 
     // REVIEW This will be used to broadcast the status of the shard members to the waiting shard members
-    public async hitWaitingShardMembers(): Promise<[boolean, string[]]> { // Success + peers hit
+    public async hitWaitingShardMembers(): Promise<[boolean, string[]]> {
+        // Success + peers hit
         let waitingShardMembers: Peer[] = []
         let waitingShardMembersRequest = this.isSomeoneWaiting()
         let routineResponse: [boolean, string[]] = [true, []]
@@ -300,35 +305,145 @@ class Secretary {
             return routineResponse
         }
         // Extracting the keys of the shard members that are waiting
-            let waitingShardMembersKeys = waitingShardMembersRequest[1]
-            // Getting the shard members
-            let shardMembers = getShardManager.getShard()
-            // Finding the shard members that are waiting and adding them to the list as Peer objects
-            for (const peerKey of waitingShardMembersKeys) {
-                let peer = shardMembers.find(peer => peer.identity === peerKey)
-                waitingShardMembers.push(peer)
-            }
-            let currentStatus = this.getAllStatus()
-            // Preparing the json call to broadcast the status of the shard members to the waiting shard members
-            let jsonCall: RPCRequest = {
-                method: "consensus_routine",
-                params: [
-                    {
-                        method: "broadcastShardStatus",
-                        params: [currentStatus],
-                    },
-                ],
-            }
-            // Broadcasting the status of the shard members to the waiting shard members
-            let promises: Promise<RPCResponse>[] = []
-            for (const peer of waitingShardMembers) {
-                promises.push(peer.authenticatedCall(jsonCall))
-                routineResponse[1].push(peer.identity)
-            }
+        let waitingShardMembersKeys = waitingShardMembersRequest[1]
+        // Getting the shard members
+        let shardMembers = getShardManager.getShard()
+        // Finding the shard members that are waiting and adding them to the list as Peer objects
+        for (const peerKey of waitingShardMembersKeys) {
+            let peer = shardMembers.find(peer => peer.identity === peerKey)
+            waitingShardMembers.push(peer)
+        }
+        let currentStatus = this.getAllStatus()
+        // Preparing the json call to broadcast the status of the shard members to the waiting shard members
+        let jsonCall: RPCRequest = {
+            method: "consensus_routine",
+            params: [
+                {
+                    method: "broadcastShardStatus",
+                    params: [currentStatus],
+                },
+            ],
+        }
+        // Broadcasting the status of the shard members to the waiting shard members
+        let promises: Promise<RPCResponse>[] = []
+        for (const peer of waitingShardMembers) {
+            promises.push(peer.authenticatedCall(jsonCall))
+            routineResponse[1].push(peer.identity)
+        }
         // ? Do we need a check here to see the responses?
         // Waiting for the calls to finish and returning a recap of what happened
         await Promise.all(promises)
         return routineResponse
+    }
+
+    // REVIEW This will be used to hit a validator with a green light
+    // NOTE This is to be called only by the secretary (it will fail on authentication otherwise)
+    public hitValidator(peerKey: string): void {
+        let allStatuses = this.getAllStatus()
+        let currentStatus = this.getStatus(peerKey)
+        // Broadcasting the status of the shard members to the waiting shard members
+        let jsonCall: RPCRequest = {
+            method: "consensus_routine",
+            params: [
+                {
+                    method: "broadcastShardStatus",
+                    params: [allStatuses],
+                },
+            ],
+        }
+        // Hitting the validator
+        let response = this.secretary.authenticatedCall(jsonCall)
+    }
+
+    // REVIEW This will start an async loop that the secretary will use to send statuses to the waiting shard members
+    // REVIEW Call this without await
+    // TODO This must start as soon as the secretary is initialized and decided
+    public async secretaryRoutine(): Promise<void> {
+        // Soft fail if we are not secretary
+        if (
+            this.secretary.identity !==
+            getSharedState.identity.ed25519_hex.publicKey
+        ) {
+            log.warning(
+                "[SECRETARY ROUTINE] Not the secretary, skipping routine",
+            )
+            return
+        }
+        // Also reentrant check
+        if (this.isSecretaryRoutineRunning) {
+            log.warning("[SECRETARY ROUTINE] Already running, skipping routine")
+            return
+        }
+        // Setting the routine as running
+        this.isSecretaryRoutineRunning = true
+        // Logging
+        if (!this.isSecretaryRoutineRunning) {
+            log.custom("secretary", "The secretary routine has been started")
+        }
+        // Starting the loop
+        while (!this.stopSecretaryRoutine && getSharedState.inConsensusLoop) {
+            // Sleeping for a while
+            await new Promise(resolve => setTimeout(resolve, 250)) // 250ms
+            // Checking all the waiting shard members
+            let waitingShardMembers = this.isSomeoneWaiting()
+            // If there are no waiting shard members, we can continue with the routine
+            if (!waitingShardMembers[0]) {
+                continue
+            }
+            // REVIEW Implement the management of the waiting shard members
+            for (const peer of waitingShardMembers[1]) {
+                this.checkIfValidatorCanProceed(peer) // NOTE Called without await to avoid blocking the loop
+            }
+        }
+        // Logging
+        if (!this.stopSecretaryRoutine) {
+        log.custom(
+            "secretary",
+            "The secretary routine has been stopped manually",
+            )
+        } else if (!getSharedState.inConsensusLoop) {
+            log.custom(
+                "secretary",
+                "The consensus loop has ended: stopping the secretary routine",
+            )
+        }
+        // We are out of the loop, we can set the stopSecretaryRoutine to false as it is already stopped
+        this.stopSecretaryRoutine = false
+        this.isSecretaryRoutineRunning = false
+    }
+
+    // REVIEW This will be used to check if a validator can proceed with the consensus
+    // NOTE Call this without await
+    private async checkIfValidatorCanProceed(peerKey: string): Promise<void> {
+        // TODO Implement this
+        // Determining the target status of the validator
+        let targetStatus = this.getStatus(peerKey)
+        let targetStatusReached: boolean = true
+        // Checking if all the validators have the same status
+        for (const [index, status] of this.status.entries()) {
+            let validatorKey = Array.from(this.status.keys())[index]
+            if (status !== targetStatus) {
+                targetStatusReached = false
+                log.custom(
+                    "secretary",
+                    "The validator " +
+                        validatorKey +
+                        " has not reached the target status, the validator " +
+                        peerKey +
+                        " will not be hit with a green light",
+                )
+                break
+            }
+        }
+        // If the target status has been reached, we can hit the validator
+        // ANCHOR We hit the validator with the status of the other shard members (which works as a green light)
+        if (targetStatusReached) {
+            log.custom(
+                "secretary",
+                "The validator " + peerKey + " can proceed with the consensus",
+            )
+            this.hitValidator(peerKey)
+        }
     }
 }
 

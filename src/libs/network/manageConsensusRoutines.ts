@@ -237,9 +237,11 @@ export default async function manageConsensusRoutines(
                 string,
                 ValidatorStatus
             >
-            // TODO Implement this
-            response.result = 400
-            response.response = "Not implemented"
+            // ? We need to check if the statuses are the same as the ones we have or not? Theoretically not, as the secretary did it
+            // REVIEW Setting the waiting for green light variable to false
+            getSharedState.waitingForSecretaryGreenLight = false
+            response.result = 200
+            response.response = "Shard status received"
             break
 
         /* SECTION Consensus methods */

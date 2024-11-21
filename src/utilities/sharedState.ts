@@ -56,6 +56,7 @@ export default class sharedState {
     lastConsensusTime: number = 0
     // SECTION Consensus states
     candidateBlock: Block
+    waitingForSecretaryGreenLight: boolean = false
 
     // SECTION Configuration
     rpcFee: number = parseInt(process.env.RPC_FEE_PERCENT) // TODO Implement // Percentage of the fee to be charged for the rpc
