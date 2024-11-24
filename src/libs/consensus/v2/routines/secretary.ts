@@ -1,3 +1,5 @@
+// ! This file is deprecated: move everything to SecretaryManager.ts
+
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "src/utilities/sharedState"
 import { emptyResponse } from "src/libs/network/server_rpc"

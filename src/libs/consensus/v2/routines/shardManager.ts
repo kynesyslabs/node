@@ -1,3 +1,6 @@
+// ! This file is deprecated: move everything to SecretaryManager.ts
+
+
 import { RPCRequest } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
 import { Peer } from "src/libs/peer"
