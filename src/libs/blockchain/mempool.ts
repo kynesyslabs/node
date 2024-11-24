@@ -35,7 +35,7 @@ class MempoolLock {
     }[]
     timeout: number
 
-    constructor(timeout: number = 3000) {
+    constructor(timeout: number = 30000) {
         this.locked = false
         this.waitQueue = []
         this.timeout = timeout
