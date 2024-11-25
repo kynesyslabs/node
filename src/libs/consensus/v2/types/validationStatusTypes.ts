@@ -19,8 +19,9 @@
 // The status of each phase of the consensus
 export type ValidationPhaseStatus =
     | "enteredConsensus"
-    | "exchangedMempool"
+    | "synchronizedTime"
     | "mergedMempool"
+    | "appliedGCR"
     | "forgedBlock"
     | "votedOnBlock"
     | "readyToEndConsensus"
@@ -41,11 +42,14 @@ export const emptyValidationPhase: ValidationPhase = {
     currentPhase: 0,
     phases: {
         1: ["enteredConsensus", false],
-        2: ["exchangedMempool", false],
+        2: ["synchronizedTime", false],
         3: ["mergedMempool", false],
-        4: ["forgedBlock", false],
-        5: ["votedOnBlock", false],
-        6: ["readyToEndConsensus", false],
+        4: ["appliedGCR", false],
+        5: ["forgedBlock", false],
+        6: ["votedOnBlock", false],
+        7: ["readyToEndConsensus", false],
+        // IMPORTANT: If you add a new phase, update SecretaryManager.receiveValidatorPhase
+        // to use the new phase number for checking the last step
     },
     blockReferenced: 0,
 }

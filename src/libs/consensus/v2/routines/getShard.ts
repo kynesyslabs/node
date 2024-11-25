@@ -18,6 +18,8 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     getSharedState.lastShardSeed = seed
     const random = Alea(seed)
     const availablePeers = [...peers]
+
+    log.debug("availablePeers: " + JSON.stringify(availablePeers))
     // REVIEW: check if this is the right way to do it
     // NOTE Choosing the secretary by randomly ordering the list: the first one is the secretary
     for (let i = 0; i < maxShardSize && availablePeers.length > 0; i++) {

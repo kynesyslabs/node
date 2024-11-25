@@ -19,13 +19,13 @@ async function sleep(time: number) {
 
 export default async function mainLoop() {
     log.info("[MAIN LOOP] ✅ Started")
+    // return await consensusRoutine()
     while (getSharedState.runMainLoop) {
         await mainLoopCycle()
     }
 }
 
 async function mainLoopCycle() {
-
     await sleep(500) // Sleep for 500 ms
     log.info(
         "\n============================================================\n",
@@ -148,7 +148,7 @@ async function peerRoutine(): Promise<Peer[]> {
     }
 
     // ! TODO Peer gossiping here
-    peerGossip() // ? Await or not? I'd say not because it's good to have it in the background having anyway a reentry prevention
+    // peerGossip() // ? Await or not? I'd say not because it's good to have it in the background having anyway a reentry prevention
 
     log.info("[MAINLOOP]: family:", true)
     let famLen = currentlyOnlinePeers.length

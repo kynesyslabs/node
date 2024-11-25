@@ -200,6 +200,9 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
         blockToAsk++
     }
     getSharedState.syncStatus = true
+
+    const lastBlockNumber = await Chain.getLastBlockNumber()
+    log.info("[fastSync] Last block number after sync: " + lastBlockNumber)
     return true
 }
 

@@ -1,4 +1,4 @@
-import { TimeoutError } from "src/errors"
+import { TimeoutError } from "../exceptions"
 import log from "./logger"
 
 type WaitEntry = {
@@ -31,7 +31,7 @@ export class Waiter {
      */
     static async wait<T = any>(
         id: string,
-        timeout: number = 30000,
+        timeout: number = 10000,
     ): Promise<T> {
         if (Waiter.waitList.has(id)) {
             throw new Error(`[WAITER] Already waiting for id: ${id}`)

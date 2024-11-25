@@ -9,6 +9,11 @@ import log from "src/utilities/logger"
 export default async function getCommonValidatorSeed(): Promise<string> {
     var lastThreeBlocks: Blocks[] = []
     const lastBlockNumber = await Chain.getLastBlockNumber()
+    log.debug("LAST BLOCK NUMBER: " + lastBlockNumber)
+    log.debug("--------------------------------")
+    const lastBlock = await Chain.getLastBlock()
+    log.debug("LAST BLOCK: " + lastBlock.hash)
+    log.debug("--------------------------------")
     // If we have less than 3 blocks, the hash is calculated from the last block // ? Maybe we should revamp this a little
     if (lastBlockNumber < 3) {
         const block = await Chain.getBlockByNumber(lastBlockNumber)
@@ -25,6 +30,12 @@ export default async function getCommonValidatorSeed(): Promise<string> {
     const hashes = lastThreeBlocks.map(block => block.hash)
     const validationDatas = lastThreeBlocks.map(block => block.validation_data)
     const lastTimestamps = lastThreeBlocks.map(block => block.content.timestamp)
+
+    log.debug("proposers: " + JSON.stringify(proposers))
+    log.debug("hashes: " + JSON.stringify(hashes))
+    log.debug("validationDatas: " + JSON.stringify(validationDatas))
+    log.debug("lastTimestamps: " + JSON.stringify(lastTimestamps))
+    log.debug("--------------------------------")
     // Hash everything
     const hashedProposers = Hashing.sha256(JSON.stringify(proposers))
     const hashedHashes = Hashing.sha256(JSON.stringify(hashes))
@@ -32,10 +43,17 @@ export default async function getCommonValidatorSeed(): Promise<string> {
         JSON.stringify(validationDatas),
     )
     const hashedTimestamps = Hashing.sha256(JSON.stringify(lastTimestamps))
+
+    log.debug("hashedProposers: " + hashedProposers)
+    log.debug("hashedHashes: " + hashedHashes)
+    log.debug("hashedValidationDatas: " + hashedValidationDatas)
+    log.debug("hashedTimestamps: " + hashedTimestamps)
     // Get the common validator seed
     const commonValidatorSeed = Hashing.sha256(
         hashedProposers + hashedHashes + hashedValidationDatas + hashedTimestamps,
     )
+
+
     // NOTE The common validator seed is set in the sharedState as soon as it is computed
     getSharedState.currentValidatorSeed = commonValidatorSeed
     log.info(`Common validator seed: ${commonValidatorSeed}`)

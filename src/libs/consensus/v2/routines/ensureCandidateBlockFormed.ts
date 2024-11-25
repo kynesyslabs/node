@@ -1,7 +1,7 @@
 import { getSharedState } from "src/utilities/sharedState"
 import { consensusRoutine } from "../PoRBFT"
 import log from "src/utilities/logger"
-import { getShardManager } from "./shardManager"
+// import { getShardManager } from "./shardManager"
 
 export default async function ensureCandidateBlockFormed(): Promise<boolean> {
     let success = false
@@ -18,12 +18,12 @@ export default async function ensureCandidateBlockFormed(): Promise<boolean> {
         }
     }
 
-    const ourValidatorStatus = getShardManager.shardStatus.get(
-        getSharedState.identity.ed25519.publicKey.toString("hex"),
-    )
-    log.info(
-        "Our validator status: " + JSON.stringify(ourValidatorStatus, null, 2),
-    )
+    // const ourValidatorStatus = getShardManager.shardStatus.get(
+    //     getSharedState.identity.ed25519.publicKey.toString("hex"),
+    // )
+    // log.info(
+    //     "Our validator status: " + JSON.stringify(ourValidatorStatus, null, 2),
+    // )
 
     if (getSharedState.candidateBlock) {
         success = true

@@ -21,6 +21,7 @@ import log from "src/utilities/logger"
 import Secretary from "../consensus/v2/routines/secretary"
 import Cryptography from "../crypto/cryptography"
 import { HexToForge } from "../crypto/forgeUtils"
+import SecretaryManager from "../consensus/v2/types/secretaryManager"
 
 export interface ConsensusMethod {
     method:
@@ -41,6 +42,9 @@ export interface ConsensusMethod {
         | "broadcastedConsensusEnd"
         | "readyToEndConsensus"
         | "broadcastShardStatus"
+        // REVIEW: Remove deprecated methods
+        | "setValidatorPhase"
+        | "greenlight"
     params: any[]
 }
 
@@ -257,11 +261,23 @@ export default async function manageConsensusRoutines(
             console.log("Validation Data: ", payload.params[1])
             // TODO
             // compare the block hash with the one we have and reply
-            return await manageProposeBlockHash(
-                payload.params[0],
-                payload.params[1] as ValidationData,
-                payload.params[2] as string,
-            )
+            try {
+                response = await manageProposeBlockHash(
+                    payload.params[0],
+                    payload.params[1] as ValidationData,
+                    payload.params[2] as string,
+                )
+            } catch (error) {
+                console.error(error)
+                log.error("[manageConsensusRoutines] Error proposing block hash: " + error)
+            }
+
+            // const r= manageProposeBlockHash(
+            //     payload.params[0],
+            //     payload.params[1] as ValidationData,
+            //     payload.params[2] as string,
+            // )
+            break
         case "broadcastBlock": // For non shard members to get the block from the shard
             // TODO: Check if the block contains the validation data of the shard -> if it does, reply true and add the block to the chain
             break
@@ -303,6 +319,35 @@ export default async function manageConsensusRoutines(
             console.log(
                 "[Consensus Message Received] getValidatorStatus sent back",
             )
+            break
+
+        case "setValidatorPhase":
+            const isUs = payload.params[0] === getSharedState.identity.ed25519.publicKey.toString("hex")
+            log.warning(
+                "[Consensus Message Received] setValidatorPhase from: " +
+                    payload.params[0],
+            )
+            log.debug("Is us: " + isUs)
+
+            log.info(
+                "SHARD VALIDATOR PHASE: " +
+                    JSON.stringify(
+                        SecretaryManager.getInstance().shard.validationPhases,
+                        null,
+                        2,
+                    ),
+            )
+            const [peerKey, phase] = payload.params
+            SecretaryManager.getInstance().receiveValidatorPhase(peerKey, phase)
+            response.result = 200
+            response.response = "Validator phase set"
+            break
+
+        case "greenlight":
+            log.warning("[Consensus Message Received] greenlight")
+            SecretaryManager.getInstance().receiveGreenLight()
+            response.result = 200
+            response.response = "Greenlight sent"
             break
     }
 
