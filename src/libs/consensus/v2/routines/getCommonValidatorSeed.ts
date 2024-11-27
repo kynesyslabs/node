@@ -6,7 +6,10 @@ import Hashing from "src/libs/crypto/hashing"
 import log from "src/utilities/logger"
 
 // REVIEW Probably to improve entropy
-export default async function getCommonValidatorSeed(): Promise<string> {
+export default async function getCommonValidatorSeed(): Promise<{
+    commonValidatorSeed: string
+    lastBlockNumber: number
+}> {
     var lastThreeBlocks: Blocks[] = []
     const lastBlockNumber = await Chain.getLastBlockNumber()
     log.debug("LAST BLOCK NUMBER: " + lastBlockNumber)
@@ -28,7 +31,19 @@ export default async function getCommonValidatorSeed(): Promise<string> {
     // Getting the proposers of the last three blocks
     const proposers = lastThreeBlocks.map(block => block.proposer)
     const hashes = lastThreeBlocks.map(block => block.hash)
-    const validationDatas = lastThreeBlocks.map(block => block.validation_data)
+    const validationDatas = lastThreeBlocks.map(block => {
+        // Sort the signatures by the key and create a string
+        try {
+            const signatures = JSON.parse(block.validation_data)["signatures"]
+            const sortedSignatures = Object.keys(signatures)
+                .sort()
+                .map(key => key + signatures[key])
+                .join("")
+            return sortedSignatures
+        } catch (error) {
+            return block.validation_data
+        }
+    })
     const lastTimestamps = lastThreeBlocks.map(block => block.content.timestamp)
 
     log.debug("proposers: " + JSON.stringify(proposers))
@@ -50,12 +65,14 @@ export default async function getCommonValidatorSeed(): Promise<string> {
     log.debug("hashedTimestamps: " + hashedTimestamps)
     // Get the common validator seed
     const commonValidatorSeed = Hashing.sha256(
-        hashedProposers + hashedHashes + hashedValidationDatas + hashedTimestamps,
+        hashedProposers +
+            hashedHashes +
+            hashedValidationDatas +
+            hashedTimestamps,
     )
-
 
     // NOTE The common validator seed is set in the sharedState as soon as it is computed
     getSharedState.currentValidatorSeed = commonValidatorSeed
     log.info(`Common validator seed: ${commonValidatorSeed}`)
-    return commonValidatorSeed
+    return { commonValidatorSeed, lastBlockNumber }
 }

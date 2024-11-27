@@ -22,6 +22,7 @@ import Secretary from "../consensus/v2/routines/secretary"
 import Cryptography from "../crypto/cryptography"
 import { HexToForge } from "../crypto/forgeUtils"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
+import { Waiter } from "src/utilities/waiter"
 
 export interface ConsensusMethod {
     method:
@@ -44,7 +45,9 @@ export interface ConsensusMethod {
         | "broadcastShardStatus"
         // REVIEW: Remove deprecated methods
         | "setValidatorPhase"
+        | "getValidatorPhase"
         | "greenlight"
+        | "getBlockTimestamp"
     params: any[]
 }
 
@@ -269,7 +272,10 @@ export default async function manageConsensusRoutines(
                 )
             } catch (error) {
                 console.error(error)
-                log.error("[manageConsensusRoutines] Error proposing block hash: " + error)
+                log.error(
+                    "[manageConsensusRoutines] Error proposing block hash: " +
+                        error,
+                )
             }
 
             // const r= manageProposeBlockHash(
@@ -322,30 +328,60 @@ export default async function manageConsensusRoutines(
             break
 
         case "setValidatorPhase":
-            const isUs = payload.params[0] === getSharedState.identity.ed25519.publicKey.toString("hex")
-            log.warning(
-                "[Consensus Message Received] setValidatorPhase from: " +
-                    payload.params[0],
-            )
-            log.debug("Is us: " + isUs)
+            try {
+                const [peerKey, phase] = payload.params
+                const manager = SecretaryManager.getInstance()
 
-            log.info(
-                "SHARD VALIDATOR PHASE: " +
-                    JSON.stringify(
-                        SecretaryManager.getInstance().shard.validationPhases,
-                        null,
-                        2,
-                    ),
-            )
-            const [peerKey, phase] = payload.params
-            SecretaryManager.getInstance().receiveValidatorPhase(peerKey, phase)
+                // INFO: If we receive a setValidatorPhase request, and the secretary routine has not started
+                // Wait for it to start
+                if (!manager.runSecretaryRoutine) {
+                    await Waiter.wait(
+                        peerKey + Waiter.keys.WAIT_FOR_SECRETARY_ROUTINE,
+                        3000,
+                    )
+                }
+
+                const isUs =
+                    peerKey ===
+                    getSharedState.identity.ed25519.publicKey.toString("hex")
+                log.warning(
+                    "[Consensus Message Received] setValidatorPhase from: " +
+                        peerKey,
+                )
+                log.debug("Is us: " + isUs)
+
+                log.info(
+                    "SHARD VALIDATOR PHASE: " +
+                        JSON.stringify(manager.shard.validationPhases, null, 2),
+                )
+                manager.receiveValidatorPhase(peerKey, phase)
+                response.result = 200
+                response.response = "Validator phase set"
+            } catch (error) {
+                // INFO: Node is secretary, but hasn't started the secretary routine yet!
+                // REVIEW: Should we start the secretary routine here?
+                console.error(error)
+                log.error(
+                    "[manageConsensusRoutines] Error setting the validator phase: " +
+                        error,
+                )
+                response.result = 500
+                response.response = "Error setting the validator phase"
+            }
+            break
+
+        case "getValidatorPhase":
             response.result = 200
-            response.response = "Validator phase set"
+            const manager = SecretaryManager.getInstance()
+            response.response = [manager.ourValidatorPhase.currentPhase]
             break
 
         case "greenlight":
             log.warning("[Consensus Message Received] greenlight")
-            SecretaryManager.getInstance().receiveGreenLight()
+            const secretaryBlockTimestamp = payload.params[0] as number
+            SecretaryManager.getInstance().receiveGreenLight(
+                secretaryBlockTimestamp,
+            )
             response.result = 200
             response.response = "Greenlight sent"
             break

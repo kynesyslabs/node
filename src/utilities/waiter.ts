@@ -19,6 +19,7 @@ export class Waiter {
         GREEN_LIGHT: "greenLight",
         SHARD_READY: "shardReady",
         SET_WAIT_STATUS: "setWaitStatus",
+        WAIT_FOR_SECRETARY_ROUTINE: "waitForSecretaryRoutine",
         // etc
     }
 

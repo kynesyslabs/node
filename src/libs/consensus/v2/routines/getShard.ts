@@ -17,9 +17,14 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     log.custom("last_shard", "Shard seed is: " + seed)
     getSharedState.lastShardSeed = seed
     const random = Alea(seed)
-    const availablePeers = [...peers]
+    let availablePeers = [...peers]
 
-    log.debug("availablePeers: " + JSON.stringify(availablePeers))
+    // REVIEW: sort available peers by .identity (which is a hex string)
+    // before choosing the peers for a uniform sample across nodes
+    availablePeers.sort((a, b) => a.identity.localeCompare(b.identity))
+    log.debug(
+        "availablePeers: " + JSON.stringify(availablePeers.map(p => p.identity)),
+    )
     // REVIEW: check if this is the right way to do it
     // NOTE Choosing the secretary by randomly ordering the list: the first one is the secretary
     for (let i = 0; i < maxShardSize && availablePeers.length > 0; i++) {
@@ -28,11 +33,18 @@ export default async function getShard(seed: string): Promise<Peer[]> {
         availablePeers.splice(index, 1)
     }
     // Setting the last shard
-    getSharedState.lastShard = shard.map((peer) => peer.identity)
+    getSharedState.lastShard = shard.map(peer => peer.identity)
     if (getSharedState.lastShard.length < 3) {
-        log.warning("There are less than 3 peers in the last shard: this could be a security issue")
+        log.warning(
+            "There are less than 3 peers in the last shard: this could be a security issue",
+        )
     }
     log.info(`Last shard: ${getSharedState.lastShard}`)
-    log.custom("last_shard", JSON.stringify(getSharedState.lastShard, null, 2), false, true)
+    log.custom(
+        "last_shard",
+        JSON.stringify(getSharedState.lastShard, null, 2),
+        false,
+        true,
+    )
     return shard
 }

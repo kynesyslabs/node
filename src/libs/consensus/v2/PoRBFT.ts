@@ -79,10 +79,12 @@ export async function consensusRoutine(): Promise<void> {
         return
     }
 
-    // await fastSync()
-    // Initialize the consensus state and check if the local node is in the shard
     await initializeConsensusState()
-    const shard = await initializeShard()
+    await fastSync()
+    // Initialize the consensus state and check if the local node is in the shard
+
+    const manager = SecretaryManager.getInstance()
+    await initializeShard()
 
     // if (
     //     getSharedState.identity.ed25519_hex.publicKey ===
@@ -99,7 +101,7 @@ export async function consensusRoutine(): Promise<void> {
     //     Secretary.getInstance().secretaryRoutine()
     // }
 
-    if (!isInShard(shard)) {
+    if (!isInShard(manager.shard.members)) {
         log.info(
             "[consensusRoutine] We are not in the shard, waiting for the block",
         )
@@ -107,10 +109,24 @@ export async function consensusRoutine(): Promise<void> {
     }
 
     log.info("[consensusRoutine] We are in the shard, creating the block")
-    log.info(`[consensusRoutine] shard: ${shard}`, false)
+    log.info(
+        `[consensusRoutine] shard: ${JSON.stringify(manager.shard, null, 2)}`,
+        false,
+    )
 
     // Initialize the shard manager transmitting that we are in consensus loop
-    await _updateValidatorStatus(1, true, false, true)
+    // INFO: First validator status update will resolve with the secretary block timestamp
+    const secretaryBlockTimestamp: number = await _updateValidatorStatus(
+        1,
+        true,
+        false,
+        true,
+    )
+    log.debug(
+        "[consensusRoutine] Secretary block timestamp: " +
+            secretaryBlockTimestamp,
+    )
+    getSharedState.lastConsensusTime = secretaryBlockTimestamp
     // await initializeShardManager(shard)
 
     // REVIEW If we are the secretary, we start the secretary routine
@@ -131,9 +147,11 @@ export async function consensusRoutine(): Promise<void> {
     // log.info("[consensusRoutine] Shard readiness is: " + shardIsReady)
 
     // synchronize and average the time between the shard and the local node
-    await synchronizeAndAverageTime(shard)
+    // NOTE: Instead of averaging the time, we'll use the secretary timestamp
+    // await synchronizeAndAverageTime(shard)
+
     // Merge and order the mempools between the shard and the local node
-    const mempool = await mergeAndOrderMempools(shard)
+    const mempool = await mergeAndOrderMempools(manager.shard.members)
 
     // REVIEW Merge the peerlist between the shard and the local node
     const peerlist = [] // await mergePeerlistAndWait(shard)
@@ -162,10 +180,10 @@ export async function consensusRoutine(): Promise<void> {
     getSharedState.lastConsensusTime = block.content.timestamp
 
     // Vote on the block by broadcasting the block hash to the shard
-    const [pro, con] = await voteOnBlock(block, shard)
+    const [pro, con] = await voteOnBlock(block, manager.shard.members)
 
     // Check if the block is valid using BFT
-    if (isBlockValid(pro, shard.length)) {
+    if (isBlockValid(pro, manager.shard.members.length)) {
         log.info(
             "[consensusRoutine] [result] Block is valid with " + pro + " votes",
         )
@@ -209,10 +227,14 @@ async function initializeConsensusState(): Promise<void> {
 // SECTION Initalizations
 
 async function initializeShard(): Promise<Peer[]> {
-    const commonValidatorSeed = await getCommonValidatorSeed()
+    const { commonValidatorSeed, lastBlockNumber } =
+        await getCommonValidatorSeed()
     // return await getShard(commonValidatorSeed)
-    return SecretaryManager.getInstance().initializeShard(commonValidatorSeed)
+
+    const manager = SecretaryManager.getInstance()
+    return await manager.initializeShard(commonValidatorSeed, lastBlockNumber)
 }
+
 // Initialize the shard manager
 async function initializeShardManager(shard: Peer[]): Promise<void> {
     // getShardManager.setShard(shard)
@@ -543,11 +565,16 @@ async function _updateValidatorStatus(
     pull: boolean = false,
     stream: boolean = true,
     updateLastSeenFlag: boolean = true,
-): Promise<boolean> {
+): Promise<any> {
     // Inferring the shard secretary
     const manager = SecretaryManager.getInstance()
     await manager.setOurValidatorPhase(status, true)
-    return await manager.setWaitStatus()
+
+    // INFO: If it's the first phase, the secretary might not have started
+    // the consensus routine yet, so we increase the number of retries
+    // So: Increase retry steps to 10 to wait for the secretary to start
+    const retries = status === 1 ? 10 : 3
+    return await manager.sendOurValidatorPhaseToSecretary(retries)
 
     const secretary: Peer = getShardManager.getShard()[0]
     // Getting the current status of the local node and updating it
@@ -655,11 +682,12 @@ async function waitForSecretaryGreenLight(
 }
 
 // TODO Remove this if we are not using it anymore
-async function _oldWaitLogic(secretary: Peer, status: ValidatorStatus): Promise<boolean> {
+async function _oldWaitLogic(
+    secretary: Peer,
+    status: ValidatorStatus,
+): Promise<boolean> {
     // Waiting for the shard to be ready
-    console.log(
-        "[updateValidatorStatus] Waiting for the shard to be ready...",
-    )
+    console.log("[updateValidatorStatus] Waiting for the shard to be ready...")
     let timeout = 3000
     let startTime = Date.now()
     let curTime = startTime
@@ -674,8 +702,7 @@ async function _oldWaitLogic(secretary: Peer, status: ValidatorStatus): Promise<
         curTime = Date.now()
         if (curTime - startTime > timeout) {
             log.warning(
-                "[updateValidatorStatus] [ERROR] Shard is not ready: " +
-                    status,
+                "[updateValidatorStatus] [ERROR] Shard is not ready: " + status,
             )
             return false
         }
@@ -703,14 +730,12 @@ async function _oldWaitLogic(secretary: Peer, status: ValidatorStatus): Promise<
 
                 break
             }
-
-        } 
+        }
     }
     // REVIEW End the wait logic
     await setWaitStatus(secretary, false)
     return true
 }
-
 
 // SECTION Old updateValidatorStatus method and related functions
 
