@@ -63,17 +63,21 @@ async function mainLoopCycle() {
 
     // ANCHOR Check if we have to forge the block now
     let isConsensusTimeReached = await consensusTime.checkConsensusTime()
-
-    log.info("[MAINLOOP]: about to check if its time for consensus", false)
+    log.info("[MAINLOOP]: about to check if its time for consensus")
 
     if (!isConsensusTimeReached) {
-        log.info("[MAINLOOP]: is not consensus time", false)
+        log.info("[MAINLOOP]: is not consensus time")
         //await sendNodeOnlineTx()
-    } 
+    }
 
     // ? Move this to a standalone method?
     // NOTE We need both the consensus time and the sync status to be true, to avoid
-    // conflicts with the sync loop that would lead to a failure in the consensus mechanism.
+    // conflicts with the sync loop that would alead to a failure in the consensus mechanism.
+    log.debug("[MAINLOOP]: isConsensusTimeReached: " + isConsensusTimeReached)
+    log.debug("[MAINLOOP]: getSharedState.syncStatus: " + getSharedState.syncStatus)
+    log.debug("[MAINLOOP]: startingConsensus: " + getSharedState.startingConsensus)
+    log.debug("[MAINLOOP]: getSharedState.inConsensusLoop: " + getSharedState.inConsensusLoop)
+
     if (
         isConsensusTimeReached &&
         getSharedState.syncStatus &&

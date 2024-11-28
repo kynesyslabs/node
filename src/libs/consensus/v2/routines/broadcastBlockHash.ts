@@ -42,13 +42,14 @@ export async function broadcastBlockHash(block: Block, shard: Peer[]): Promise<[
                 console.log("[consensusRoutine] Block hash not confirmed from the validator: " + response.response)
                 // ! We have: 
                 /* [WARNING] [2024-08-27T21:31:41.139Z] [RPC Call] [consensus_routine] [2024-08-27T21:31:41.100Z] Response not OK: Consensus mode is not active - 400
-                   [consensusRoutine] response from a validator received.
-                   [consensusRoutine] Block hash not confirmed from the validator: Consensus mode is not active
+                [consensusRoutine] response from a validator received.
+                [consensusRoutine] Block hash not confirmed from the validator: Consensus mode is not active
                 // ! With the timestamp being 41 on the second node running and 37 on the first (the time interval taken to run the second node is indeed 3 seconds)
                 */
-                console.log("[consensusRoutine] Block hash proposed: ", block.hash)
-                console.log("[consensusRoutine] Response received: ", response.extra)
-                con++
+               console.log("[consensusRoutine] Block hash proposed: ", block.hash)
+               console.log("[consensusRoutine] Response received: ", response.extra)
+               con++
+               process.exit(1)
             }
         })
     }

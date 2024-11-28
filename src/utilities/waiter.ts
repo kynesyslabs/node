@@ -4,6 +4,7 @@ import log from "./logger"
 type WaitEntry = {
     resolve: (value: any) => void
     reject: (reason?: any) => void
+    promise: Promise<any>
     timeoutId: NodeJS.Timeout
     id: string
 
@@ -38,7 +39,7 @@ export class Waiter {
             throw new Error(`[WAITER] Already waiting for id: ${id}`)
         }
 
-        return new Promise<T>((resolve, reject) => {
+        const promise = new Promise<T>((resolve, reject) => {
             const timeoutId = setTimeout(() => {
                 Waiter.waitList.delete(id)
                 reject(
@@ -53,10 +54,14 @@ export class Waiter {
                 reject,
                 timeoutId,
                 id,
+                promise: null
             })
 
             log.debug(`[WAITER] Created wait entry for ${id}`)
         })
+
+        Waiter.waitList.get(id).promise = promise
+        return promise
     }
 
     /**

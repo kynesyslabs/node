@@ -84,6 +84,12 @@ export async function consensusRoutine(): Promise<void> {
     // Initialize the consensus state and check if the local node is in the shard
 
     const manager = SecretaryManager.getInstance()
+
+    if (manager.shard && manager.shard.CVSA){
+        log.debug("WE ARE ALREADY IN ANOTHER CONSENSUS ROUND. Killing node")
+        process.exit(0)
+    }
+
     await initializeShard()
 
     // if (
@@ -126,7 +132,15 @@ export async function consensusRoutine(): Promise<void> {
         "[consensusRoutine] Secretary block timestamp: " +
             secretaryBlockTimestamp,
     )
-    getSharedState.lastConsensusTime = secretaryBlockTimestamp
+
+    if (secretaryBlockTimestamp === undefined){
+        log.debug("[consensusRoutine] Secretary block timestamp is undefined, stopping the node ...")
+        process.exit(1)
+    }
+
+    if (secretaryBlockTimestamp) {
+        getSharedState.lastConsensusTime = secretaryBlockTimestamp
+    }
     // await initializeShardManager(shard)
 
     // REVIEW If we are the secretary, we start the secretary routine
@@ -745,6 +759,9 @@ function cleanupConsensusState(): void {
     getSharedState.lastConsensusTime = getSharedState.currentUTCTime // REVIEW Using the current UTC time as the last consensus time
     getSharedState.inConsensusLoop = false
     getSharedState.consensusMode = false
+
+    // INFO: Somehow this is not reset when starting a consensus??
+    getSharedState.startingConsensus = false
 }
 
 /* TODO Remove this if we are not using it anymore  

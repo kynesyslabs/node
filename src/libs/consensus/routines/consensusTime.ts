@@ -33,7 +33,7 @@ export async function checkConsensusTime(
 
     // If the delta is greater than the consensus interval time, then the consensus time has passed
     log.info("[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime, false)
-    if (delta > consensusIntervalTime) {
+    if (delta >= consensusIntervalTime) {
         isConsensusTime = true
         log.info("[CONSENSUS TIME] Consensus time reached", true)
     } else {

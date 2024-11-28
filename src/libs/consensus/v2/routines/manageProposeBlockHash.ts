@@ -34,6 +34,8 @@ export default async function manageProposeBlockHash(
     log.debug("[manageProposeBlockHash] Candidate block formed: " + JSON.stringify(candidateBlockFormed, null, 2))
     if (!candidateBlockFormed) {
         log.error("[manageProposeBlockHash] Candidate block not formed: refusing the block hash")
+        process.exit(0)
+
         response.result = 401
         response.response = getSharedState.identity.ed25519.publicKey.toString("hex")
         response.extra = "Candidate block not formed"

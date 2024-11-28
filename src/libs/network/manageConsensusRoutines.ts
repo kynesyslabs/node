@@ -378,9 +378,11 @@ export default async function manageConsensusRoutines(
 
         case "greenlight":
             log.warning("[Consensus Message Received] greenlight")
-            const secretaryBlockTimestamp = payload.params[0] as number
+            console.log("payload.params: ", payload.params)
+
+            const [timestamp, validatorPhase] = payload.params as [number, number]
             SecretaryManager.getInstance().receiveGreenLight(
-                secretaryBlockTimestamp,
+                timestamp, validatorPhase,
             )
             response.result = 200
             response.response = "Greenlight sent"

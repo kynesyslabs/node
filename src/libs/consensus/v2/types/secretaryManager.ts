@@ -106,9 +106,15 @@ export default class SecretaryManager {
 
         while (this.runSecretaryRoutine) {
             try {
-                log.debug("[SECRETARY ROUTINE] Waiting for the set wait status")
-                await Waiter.wait(Waiter.keys.SET_WAIT_STATUS)
-                log.debug("[SECRETARY ROUTINE] SET_WAIT_STATUS Lock resolved")
+                if (Waiter.isWaiting(Waiter.keys.SET_WAIT_STATUS)) {
+                    log.debug("[SECRETARY ROUTINE] Existing SET_WAIT_STATUS waiter found. Waiting for that one ...")
+                    await Waiter.waitList.get(Waiter.keys.SET_WAIT_STATUS).promise
+                } else {
+                    log.debug("[SECRETARY ROUTINE] Waiting for the set wait status")
+                    await Waiter.wait(Waiter.keys.SET_WAIT_STATUS)
+                    log.debug("[SECRETARY ROUTINE] SET_WAIT_STATUS Lock resolved")
+                }
+
             } catch (error) {
                 log.error(
                     "[SECRETARY ROUTINE] Error waiting for SET_WAIT_STATUS:",
@@ -139,9 +145,11 @@ export default class SecretaryManager {
      * @param waitingMembers The list of known waiting members
      */
     public async handleNodesGoneOffline(waitingMembers: string[]) {
+        log.debug("[SECRETARY ROUTINE] Handling nodes gone offline")
         const maybeOfflineMembers = this.shard.members.filter(
             m => !waitingMembers.includes(m.identity),
         )
+        log.debug("Maybe offline members: " + maybeOfflineMembers.map(m => m.identity))
 
         for (const member of maybeOfflineMembers) {
             const isStillThere = await member.connect()
@@ -171,6 +179,7 @@ export default class SecretaryManager {
      * If it's not, we elect the second node as the new secretary
      */
     public async handleSecretaryGoneOffline() {
+        log.debug("[SECRETARY ROUTINE] Handling secretary going offline")
         const isOnline = await this.secretary.connect()
 
         if (isOnline) {
@@ -336,6 +345,10 @@ export default class SecretaryManager {
         this.shard.validationPhases[memberKey].phases[phase][1] = true
         this.shard.validationPhases[memberKey].waitStatus = true
 
+        if (!this.checkIfWeAreSecretary()){
+            return
+        }
+
         // INFO: Check if node is behind us
         if (phase < this.ourValidatorPhase.currentPhase) {
             log.debug(
@@ -396,11 +409,12 @@ export default class SecretaryManager {
                 params: [
                     {
                         method: "greenlight",
-                        params: [this.blockTimestamp],
+                        params: [this.blockTimestamp, this.ourValidatorPhase.currentPhase],
                     },
                 ],
             }
 
+            log.debug(`[SECRETARY ROUTINE] Sending greenlight to ${pubKey} with timestamp ${this.blockTimestamp} and phase ${this.ourValidatorPhase.currentPhase}`)
             // INFO: Update the wait status of the member to false
             this.shard.validationPhases[pubKey].waitStatus = false
 
@@ -412,8 +426,21 @@ export default class SecretaryManager {
         await Promise.all(promises)
     }
 
-    public async receiveGreenLight(secretaryBlockTimestamp?: number) {
-        Waiter.resolve(Waiter.keys.GREEN_LIGHT, secretaryBlockTimestamp)
+    public async receiveGreenLight(secretaryBlockTimestamp?: number, validatorPhase?: number) {
+        log.debug("Received green light for phase: " + validatorPhase)
+        const waiterKey = Waiter.keys.GREEN_LIGHT + validatorPhase
+        if (!this.ourValidatorPhase){
+            log.debug("Our phase is undefined, doing nothing")
+            return
+        }
+
+        log.debug("Our phase: " + this.ourValidatorPhase.currentPhase)
+        if (validatorPhase !== this.ourValidatorPhase.currentPhase) {
+            log.debug("We are not in the same phase, stopping the node ...")
+            process.exit(1)
+        }
+
+        Waiter.resolve(waiterKey, secretaryBlockTimestamp)
         this.ourValidatorPhase.waitStatus = false
     }
 
@@ -441,13 +468,15 @@ export default class SecretaryManager {
      * Sends our local validator phase to the secretary and waits for the green light
      */
     public async sendOurValidatorPhaseToSecretary(retries: number = 3) {
-        if (this.ourValidatorPhase.currentPhase == 4) {
-            log.debug(
-                "We are deep in the consensus, try: simulating a node going offline",
-            )
-            // await this.simulateNormalNodeGoingOffline()
-            // await this.simulateSecretaryGoingOffline()
-        }
+        // if (this.ourValidatorPhase.currentPhase == 4) {
+        //     log.debug(
+        //         "We are deep in the consensus, try: simulating a node going offline",
+        //     )
+        //     // await this.simulateNormalNodeGoingOffline()
+        //     // await this.simulateSecretaryGoingOffline()
+        // }
+        const waiterKey = Waiter.keys.GREEN_LIGHT + this.ourValidatorPhase.currentPhase
+        const greenlight = Waiter.wait(waiterKey)
 
         const sendStatus = async () => {
             const request: RPCRequest = {
@@ -470,21 +499,36 @@ export default class SecretaryManager {
             return await this.secretary.longCall(request, true, 1000, retries)
         }
 
-        const res = await sendStatus()
-        console.log(res)
+        sendStatus().then(async(res) => {
+            log.debug("Set validator phase response: " + res)
+
+            if (res.result == 500 || res.result == 400) {
+                if (!Waiter.isWaiting(waiterKey)){
+                    log.debug("[SECRETARY ROUTINE] Key has already been resolved, doing nothing")
+                    return
+                }
+
+                await this.handleSecretaryGoneOffline()
+                await sendStatus()
+            }
+        })
+
+        // const res = await sendStatus()
+        // console.log(res)
 
         // INFO: If secretary is offline, or longCall failed!
-        if (res.result == 500 || res.result == 400) {
-            await this.handleSecretaryGoneOffline()
-            const res = await sendStatus()
-            console.log(res)
-        }
+        // if (res.result == 500 || res.result == 400) {
+        //     await this.handleSecretaryGoneOffline()
+        //     const res = await sendStatus()
+        //     console.log(res)
+        // }
 
         // FIXME: Handle the secretary not being in the consensus routine
 
         try {
             // INFO: Wait for the green light
-            return await Waiter.wait(Waiter.keys.GREEN_LIGHT)
+            log.debug("[SECRETARY ROUTINE] Waiting for the green light")
+            return await greenlight
         } catch (error) {
             log.error("Error waiting for the green light: " + error)
             if (error instanceof TimeoutError) {
@@ -500,6 +544,14 @@ export default class SecretaryManager {
 
     public async endConsensusRoutine() {
         SecretaryManager.instance = null
+
+        if (Waiter.isWaiting(Waiter.keys.GREEN_LIGHT)){
+            Waiter.resolve(Waiter.keys.GREEN_LIGHT)
+        }
+
+        if (Waiter.isWaiting(Waiter.keys.SET_WAIT_STATUS)){
+            Waiter.resolve(Waiter.keys.SET_WAIT_STATUS)
+        }
     }
 
     // TODO Routine to check for waiting validators and update their status / give them green light
