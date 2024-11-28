@@ -1,4 +1,3 @@
-// TODO Move shardManager and secretary to this class
 import {
     ValidationPhase,
     emptyValidationPhase,
@@ -19,7 +18,6 @@ import { TimeoutError } from "src/exceptions"
 // ANCHOR SecretaryManager
 export default class SecretaryManager {
     private static instance: SecretaryManager
-    private static secretaryVotes: string[] = []
 
     // Internal variables
     public shard: Shard
@@ -34,8 +32,13 @@ export default class SecretaryManager {
 
     constructor() {}
 
-    // Creating a shard from the CVSA
-    // ! Replace the old method called in PoRBFT.ts with this one as we will use this class to manage the shard
+    /**
+     * Initializes the shard, including the members and the validation phases.
+     *
+     * @param CVSA The CVSA string
+     * @param lastBlockNumber The last block number
+     * @returns The list of shard members
+     */
     async initializeShard(CVSA: string, lastBlockNumber: number) {
         this.shard = {
             CVSA: CVSA,
@@ -66,7 +69,12 @@ export default class SecretaryManager {
         return this.initializeValidationPhases()
     }
 
-    // Initializing the validation phases for each member of the shard to the empty validation phase
+    /**
+     * Initializes the validation phases for each member of the shard
+     * to an empty validation phase, including the current node's. (this.ourValidatorPhase)
+     *
+     * @returns The list of shard members
+     */
     public initializeValidationPhases() {
         for (const member of this.shard.members) {
             this.shard.validationPhases[member.identity] =
@@ -87,16 +95,36 @@ export default class SecretaryManager {
         )
     }
 
+    /**
+     * The secretary routine
+     *
+     * Sets up a while loop that will be continue when nodes submit their validator phase
+     * or when the secretary times out.
+     *
+     * A timeout means that either:
+     * - a node went offline
+     * - a node is stuck in a past validator phase
+     * - a node was unable to submit its validator phase due to a network issue.
+     *
+     * In the case of a timeout, the secretary will:
+     * - try to ping offline nodes, and if they are offline, remove them from the shard
+     * - release the waiting members
+     *
+     * The loop will restart, until we dispatch the readyToEndConsensus greenlight and end the consensus routine.
+     */
     async secretaryRoutine() {
         required(
             this.checkIfWeAreSecretary(),
             "Only the Secretary can run this routine",
         )
+
         this.runSecretaryRoutine = true
         for (const member of this.shard.members) {
             const waiterId =
                 member.identity + Waiter.keys.WAIT_FOR_SECRETARY_ROUTINE
 
+            // INFO: If there are waiting nodes, waiting for the secretary routine, release them.
+            // Their waiter is set on the handler for "setValidatorPhase" in manageConsensusRoutines.ts
             if (Waiter.isWaiting(waiterId)) {
                 Waiter.resolve(waiterId)
             }
@@ -107,14 +135,20 @@ export default class SecretaryManager {
         while (this.runSecretaryRoutine) {
             try {
                 if (Waiter.isWaiting(Waiter.keys.SET_WAIT_STATUS)) {
-                    log.debug("[SECRETARY ROUTINE] Existing SET_WAIT_STATUS waiter found. Waiting for that one ...")
-                    await Waiter.waitList.get(Waiter.keys.SET_WAIT_STATUS).promise
+                    log.debug(
+                        "[SECRETARY ROUTINE] Existing SET_WAIT_STATUS waiter found. Waiting for that one ...",
+                    )
+                    await Waiter.waitList.get(Waiter.keys.SET_WAIT_STATUS)
+                        .promise
                 } else {
-                    log.debug("[SECRETARY ROUTINE] Waiting for the set wait status")
+                    log.debug(
+                        "[SECRETARY ROUTINE] Waiting for the set wait status",
+                    )
                     await Waiter.wait(Waiter.keys.SET_WAIT_STATUS)
-                    log.debug("[SECRETARY ROUTINE] SET_WAIT_STATUS Lock resolved")
+                    log.debug(
+                        "[SECRETARY ROUTINE] SET_WAIT_STATUS Lock resolved",
+                    )
                 }
-
             } catch (error) {
                 log.error(
                     "[SECRETARY ROUTINE] Error waiting for SET_WAIT_STATUS:",
@@ -123,6 +157,12 @@ export default class SecretaryManager {
                 log.error(error as string)
 
                 if (error instanceof TimeoutError) {
+                    // INFO: If the secretary routine times out, we need to handle the nodes that are gone offline
+                    // Then release the waiting members
+                    // NOTE: To give time for the secretary to check for offline nodes,
+                    // we need to give SET_WAIT_STATUS less time than the GREEN_LIGHT waiter
+                    // TODO: Adjust the timeouts and test them.
+
                     log.error(
                         "[SECRETARY ROUTINE] Timeout waiting for SET_WAIT_STATUS",
                     )
@@ -138,6 +178,7 @@ export default class SecretaryManager {
 
     /**
      * Handles the nodes that are gone offline
+     *
      * INFO: Receives a list of known waiting members
      * We filter the shard members to get the ones that are not in the waiting list
      * We then ping them to check if they are still online
@@ -149,7 +190,10 @@ export default class SecretaryManager {
         const maybeOfflineMembers = this.shard.members.filter(
             m => !waitingMembers.includes(m.identity),
         )
-        log.debug("Maybe offline members: " + maybeOfflineMembers.map(m => m.identity))
+        log.debug(
+            "Maybe offline members: " +
+                maybeOfflineMembers.map(m => m.identity),
+        )
 
         for (const member of maybeOfflineMembers) {
             const isStillThere = await member.connect()
@@ -183,7 +227,8 @@ export default class SecretaryManager {
         const isOnline = await this.secretary.connect()
 
         if (isOnline) {
-            log.debug("Secretary is online, nothing to do")
+            // REVIEW: Is that it?
+            log.debug("Secretary is still online, nothing to do")
             return
         }
 
@@ -191,11 +236,10 @@ export default class SecretaryManager {
             "Secretary is offline, electing the second node as the new secretary",
         )
 
-        const areWeSecond = this.shard.members[1].identity === this.ourKey
+        const weAreSecond = this.shard.members[1].identity === this.ourKey
 
-        if (areWeSecond) {
+        if (weAreSecond) {
             const exSecretary = this.secretary.identity
-
             this.shard.secretaryKey = this.shard.members[1].identity
             // remove secretary from the list of members
             this.shard.members = this.shard.members.filter(
@@ -244,10 +288,21 @@ export default class SecretaryManager {
 
                 const phase = res.response[0] as number
                 this.receiveValidatorPhase(member.identity, phase)
+                // TODO: Check if we can release the waiting nodes
             }
+        } else {
+            // TODO: Handle the case where the secretary is offline and we are not the second node
+            // Send the validator phase to the new secretary
+
+            log.debug("We are not the second node. Panicking ...")
+            process.exit(0)
         }
     }
 
+    /**
+     * Simulates the secretary going offline.
+     * If we're forging block x = 5, kill the node if it's the secretary
+     */
     public async simulateSecretaryGoingOffline() {
         const weAreForgingBlock = this.shard.blockRef == 5
         const weAreSecretary = this.checkIfWeAreSecretary()
@@ -260,9 +315,9 @@ export default class SecretaryManager {
     }
 
     /**
-     * Simulates a normal node going offline
+     * Simulates a normal node going offline.
      *
-     * If we're forging block #10, kill normal this node if it's not the secretary
+     * If we're forging block x = 5, kill normal this node if it's not the secretary
      */
     public async simulateNormalNodeGoingOffline() {
         const weAreForgingBlock10 = this.shard.blockRef == 5
@@ -276,64 +331,10 @@ export default class SecretaryManager {
     }
 
     public async simulateNodeBeingLate() {
+        // TODO: Delay sending of the validator phase to the secretary
+        // and see what happens. Then handle it.
         return
     }
-
-    /**
-     * Setting the current phase for a specific member
-     *
-     * @param memberKey The public key of the member
-     * @param currentPhase The current phase to set, a ValidationPhaseStatus or a number
-     * @param waitingForStatus The member's wait status
-     */
-    // public setCurrentPhase(
-    //     memberKey: string,
-    //     currentPhase: ValidationPhaseStatus | number,
-    //     waitingForStatus: boolean = false,
-    // ) {
-    //     if (!this.checkIfWeAreSecretary()) {
-    //         throw new Error("Only the Secretary can set the current phase")
-    //     }
-
-    //     // Setting the current phase
-    //     if (typeof currentPhase === "number") {
-    //         this.shard.validationPhases[memberKey].currentPhase = currentPhase
-    //     } else {
-    //         // Inferring the current phase number from the string
-    //         let currentPhaseNumber = 0
-    //         let found = false
-    //         for (const phase of Object.values(emptyValidationPhase.phases)) {
-    //             currentPhaseNumber++
-    //             if (phase[0] === currentPhase) {
-    //                 found = true
-    //                 break
-    //             }
-    //         }
-    //         if (!found) {
-    //             throw new Error("Current phase not found") // REVIEW Handle nicely
-    //         }
-    //         this.shard.validationPhases[memberKey].currentPhase =
-    //             currentPhaseNumber
-    //     }
-
-    //     // Setting the wait status
-    //     this.shard.validationPhases[memberKey].waitStatus = waitingForStatus
-    // }
-
-    /**
-     * Receives the wait status from a validator. Called from the endpoint handler.
-     *
-     * @param memberKey The public key of the member
-     * @param waitStatus The wait status to set
-     */
-    // public async receiveWaitStatus(memberKey: string, waitStatus: boolean) {
-    //     required(
-    //         this.checkIfWeAreSecretary(),
-    //         "Only the Secretary can receive the wait status",
-    //     )
-
-    //     this.shard.validationPhases[memberKey].waitStatus = waitStatus
-    // }
 
     public async receiveValidatorPhase(memberKey: string, phase: number) {
         log.debug("OUR PHASE: " + this.ourValidatorPhase.currentPhase)
@@ -345,7 +346,7 @@ export default class SecretaryManager {
         this.shard.validationPhases[memberKey].phases[phase][1] = true
         this.shard.validationPhases[memberKey].waitStatus = true
 
-        if (!this.checkIfWeAreSecretary()){
+        if (!this.checkIfWeAreSecretary()) {
             return
         }
 
@@ -395,6 +396,11 @@ export default class SecretaryManager {
         return true
     }
 
+    /**
+     * Sends a greenlight to the waiting members. Pass a list of public keys to release specific members.
+     *
+     * @param waitingMembers The list of members to release
+     */
     public async releaseWaitingMembers(waitingMembers: string[] = []) {
         // INFO: Release the waiting members
         // When members are provided, skip check
@@ -409,12 +415,17 @@ export default class SecretaryManager {
                 params: [
                     {
                         method: "greenlight",
-                        params: [this.blockTimestamp, this.ourValidatorPhase.currentPhase],
+                        params: [
+                            this.blockTimestamp,
+                            this.ourValidatorPhase.currentPhase,
+                        ],
                     },
                 ],
             }
 
-            log.debug(`[SECRETARY ROUTINE] Sending greenlight to ${pubKey} with timestamp ${this.blockTimestamp} and phase ${this.ourValidatorPhase.currentPhase}`)
+            log.debug(
+                `[SECRETARY ROUTINE] Sending greenlight to ${pubKey} with timestamp ${this.blockTimestamp} and phase ${this.ourValidatorPhase.currentPhase}`,
+            )
             // INFO: Update the wait status of the member to false
             this.shard.validationPhases[pubKey].waitStatus = false
 
@@ -426,16 +437,26 @@ export default class SecretaryManager {
         await Promise.all(promises)
     }
 
-    public async receiveGreenLight(secretaryBlockTimestamp?: number, validatorPhase?: number) {
+    /**
+     * Receives the green light from a validator. Called from the endpoint handler.
+     *
+     * @param secretaryBlockTimestamp The timestamp of the block proposed by the secretary
+     * @param validatorPhase The phase number
+     */
+    public async receiveGreenLight(
+        secretaryBlockTimestamp?: number,
+        validatorPhase?: number,
+    ) {
         log.debug("Received green light for phase: " + validatorPhase)
         const waiterKey = Waiter.keys.GREEN_LIGHT + validatorPhase
-        if (!this.ourValidatorPhase){
+        if (!this.ourValidatorPhase) {
             log.debug("Our phase is undefined, doing nothing")
             return
         }
 
         log.debug("Our phase: " + this.ourValidatorPhase.currentPhase)
         if (validatorPhase !== this.ourValidatorPhase.currentPhase) {
+            // INFO: This node has already timed out
             log.debug("We are not in the same phase, stopping the node ...")
             process.exit(1)
         }
@@ -468,6 +489,7 @@ export default class SecretaryManager {
      * Sends our local validator phase to the secretary and waits for the green light
      */
     public async sendOurValidatorPhaseToSecretary(retries: number = 3) {
+        // INFO: Enable code to simulate node failures
         // if (this.ourValidatorPhase.currentPhase == 4) {
         //     log.debug(
         //         "We are deep in the consensus, try: simulating a node going offline",
@@ -475,7 +497,8 @@ export default class SecretaryManager {
         //     // await this.simulateNormalNodeGoingOffline()
         //     // await this.simulateSecretaryGoingOffline()
         // }
-        const waiterKey = Waiter.keys.GREEN_LIGHT + this.ourValidatorPhase.currentPhase
+        const waiterKey =
+            Waiter.keys.GREEN_LIGHT + this.ourValidatorPhase.currentPhase
         const greenlight = Waiter.wait(waiterKey)
 
         const sendStatus = async () => {
@@ -499,12 +522,14 @@ export default class SecretaryManager {
             return await this.secretary.longCall(request, true, 1000, retries)
         }
 
-        sendStatus().then(async(res) => {
+        sendStatus().then(async res => {
             log.debug("Set validator phase response: " + res)
 
             if (res.result == 500 || res.result == 400) {
-                if (!Waiter.isWaiting(waiterKey)){
-                    log.debug("[SECRETARY ROUTINE] Key has already been resolved, doing nothing")
+                if (!Waiter.isWaiting(waiterKey)) {
+                    log.debug(
+                        "[SECRETARY ROUTINE] Key has already been resolved, doing nothing",
+                    )
                     return
                 }
 
@@ -512,16 +537,6 @@ export default class SecretaryManager {
                 await sendStatus()
             }
         })
-
-        // const res = await sendStatus()
-        // console.log(res)
-
-        // INFO: If secretary is offline, or longCall failed!
-        // if (res.result == 500 || res.result == 400) {
-        //     await this.handleSecretaryGoneOffline()
-        //     const res = await sendStatus()
-        //     console.log(res)
-        // }
 
         // FIXME: Handle the secretary not being in the consensus routine
 
@@ -545,24 +560,20 @@ export default class SecretaryManager {
     public async endConsensusRoutine() {
         SecretaryManager.instance = null
 
-        if (Waiter.isWaiting(Waiter.keys.GREEN_LIGHT)){
+        // INFO: Resolve all hanging waiters
+        if (Waiter.isWaiting(Waiter.keys.GREEN_LIGHT)) {
+            log.debug(
+                "GREEN_LIGHT waiter found WHEN ENDING THE CONSENSUS ..., resolving it",
+            )
             Waiter.resolve(Waiter.keys.GREEN_LIGHT)
         }
 
-        if (Waiter.isWaiting(Waiter.keys.SET_WAIT_STATUS)){
+        if (Waiter.isWaiting(Waiter.keys.SET_WAIT_STATUS)) {
+            log.debug(
+                "SET_WAIT_STATUS waiter found WHEN ENDING THE CONSENSUS ..., resolving it",
+            )
             Waiter.resolve(Waiter.keys.SET_WAIT_STATUS)
         }
-    }
-
-    // TODO Routine to check for waiting validators and update their status / give them green light
-    async checkForWaitingValidators() {
-        // REVIEW Must be called asynchronously to avoid blocking the thread
-        // ! Implement
-        // TODO Cycle through all the members and check if they are waiting for a status
-        // TODO If they are, check which phase they are waiting for
-        // TODO Then, check all the other members if they have already reached the phase they are waiting for
-        // TODO If they have, update the waiting validator's status to false and give the green light
-        // TODO If they haven't, do nothing and wait; then repeat the check after a while
     }
 
     // SECTION Methods called by the shard members
@@ -573,17 +584,14 @@ export default class SecretaryManager {
      * @param status The boolean value to set
      */
     async setOurValidatorPhase(phase: number, status: boolean) {
-        console.log("phase", phase)
+        log.debug("[setOurValidatorPhase] Setting our phase to: " + phase)
         // INFO: Update the current phase and the status of the phase
-        console.log(this.ourValidatorPhase.phases)
-        console.log(this.ourValidatorPhase.phases[phase])
         this.ourValidatorPhase.currentPhase = phase
         this.ourValidatorPhase.phases[phase][1] = status
         this.ourValidatorPhase.waitStatus = true
     }
 
     // SECTION Public methods
-
     public async getSecretaryKey() {
         return this.shard.secretaryKey
     }

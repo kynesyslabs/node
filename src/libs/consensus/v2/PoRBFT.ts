@@ -86,10 +86,14 @@ export async function consensusRoutine(): Promise<void> {
     const manager = SecretaryManager.getInstance()
 
     if (manager.shard && manager.shard.CVSA){
+        // INFO: Testing if we start a new consensus round while the previous one is not over
+        // TODO: Remove this block after when opening the PR
         log.debug("WE ARE ALREADY IN ANOTHER CONSENSUS ROUND. Killing node")
         process.exit(0)
     }
 
+    // INFO: We won't use the shard returned by initializeShard
+    // as it can change through the consensus routine
     await initializeShard()
 
     // if (
@@ -133,8 +137,9 @@ export async function consensusRoutine(): Promise<void> {
             secretaryBlockTimestamp,
     )
 
-    if (secretaryBlockTimestamp === undefined){
-        log.debug("[consensusRoutine] Secretary block timestamp is undefined, stopping the node ...")
+    if (!secretaryBlockTimestamp){
+        log.debug("SECRETARY BLOCK TIMESTAMP: " + secretaryBlockTimestamp)
+        log.debug("[consensusRoutine] Secretary block timestamp is invalid, stopping the node ...")
         process.exit(1)
     }
 
@@ -168,7 +173,8 @@ export async function consensusRoutine(): Promise<void> {
     const mempool = await mergeAndOrderMempools(manager.shard.members)
 
     // REVIEW Merge the peerlist between the shard and the local node
-    const peerlist = [] // await mergePeerlistAndWait(shard)
+    const peerlist = [] 
+    // await mergePeerlistAndWait(shard)
 
     log.info(
         "[consensusRoutine] mempool merged (aka ordered transactions)",
@@ -209,7 +215,7 @@ export async function consensusRoutine(): Promise<void> {
     }
 
     await _updateValidatorStatus(7, true, false, true)
-    SecretaryManager.getInstance().endConsensusRoutine()
+    manager.endConsensusRoutine()
     // Cleanup the consensus state
     cleanupConsensusState()
     // Destroy the shard manager to free it up for the next consensus routine
@@ -584,9 +590,8 @@ async function _updateValidatorStatus(
     const manager = SecretaryManager.getInstance()
     await manager.setOurValidatorPhase(status, true)
 
-    // INFO: If it's the first phase, the secretary might not have started
-    // the consensus routine yet, so we increase the number of retries
-    // So: Increase retry steps to 10 to wait for the secretary to start
+    // INFO: If it's the first phase, the secretary might not have started the consensus routine yet,
+    // Increase retry steps to 10 to wait for the secretary to start
     const retries = status === 1 ? 10 : 3
     return await manager.sendOurValidatorPhaseToSecretary(retries)
 
