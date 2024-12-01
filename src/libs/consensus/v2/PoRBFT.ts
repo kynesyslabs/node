@@ -126,26 +126,26 @@ export async function consensusRoutine(): Promise<void> {
 
     // Initialize the shard manager transmitting that we are in consensus loop
     // INFO: First validator status update will resolve with the secretary block timestamp
-    const secretaryBlockTimestamp: number = await _updateValidatorStatus(
+    await _updateValidatorStatus(
         1,
         true,
         false,
         true,
     )
-    log.debug(
-        "[consensusRoutine] Secretary block timestamp: " +
-            secretaryBlockTimestamp,
-    )
+    // log.debug(
+    //     "[consensusRoutine] Secretary block timestamp: " +
+    //         secretaryBlockTimestamp,
+    // )
 
-    if (!secretaryBlockTimestamp){
-        log.debug("SECRETARY BLOCK TIMESTAMP: " + secretaryBlockTimestamp)
-        log.debug("[consensusRoutine] Secretary block timestamp is invalid, stopping the node ...")
-        process.exit(1)
-    }
+    // if (!secretaryBlockTimestamp){
+    //     log.debug("SECRETARY BLOCK TIMESTAMP: " + secretaryBlockTimestamp)
+    //     log.debug("[consensusRoutine] Secretary block timestamp is invalid, stopping the node ...")
+    //     process.exit(1)
+    // }
 
-    if (secretaryBlockTimestamp) {
-        getSharedState.lastConsensusTime = secretaryBlockTimestamp
-    }
+    // if (secretaryBlockTimestamp) {
+    //     getSharedState.lastConsensusTime = secretaryBlockTimestamp
+    // }
     // await initializeShardManager(shard)
 
     // REVIEW If we are the secretary, we start the secretary routine
@@ -193,6 +193,22 @@ export async function consensusRoutine(): Promise<void> {
      * */
     // ! Not here but check Sync.ts (syncNativeTables) and make it work with the GCR (syncing the states)
     await applyGCRForNewBlock(mempool)
+
+    if (manager.blockTimestamp){
+        getSharedState.lastConsensusTime = manager.blockTimestamp
+    } else {
+        // INFO: This should never happen
+        // If it does, request the block timestamp from the secretary
+        log.debug("[CONSENSUS ROUTINE] Secretary block timestamp not received yet, requesting it ...")
+        const blockTimestamp = await manager.getSecretaryBlockTimestamp()
+
+        if (blockTimestamp){
+            getSharedState.lastConsensusTime = blockTimestamp
+        } else {
+            log.error("[CONSENSUS ROUTINE] Block timestamp is not set, stopping the node ...")
+            process.exit(1)
+        }
+    }
 
     // Forge the block from the ordered transactions
     const block = await forgeBlock(mempool, peerlist) // NOTE The GCR hash is calculated here and added to the block

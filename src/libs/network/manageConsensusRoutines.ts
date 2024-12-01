@@ -387,6 +387,11 @@ export default async function manageConsensusRoutines(
             response.result = 200
             response.response = "Greenlight sent"
             break
+
+        case "getBlockTimestamp":
+            response.result = 200
+            response.response = [SecretaryManager.getInstance().blockTimestamp]
+            break
     }
 
     return response

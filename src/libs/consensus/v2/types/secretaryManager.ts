@@ -8,7 +8,7 @@ import { Peer } from "src/libs/peer"
 import { getSharedState } from "src/utilities/sharedState"
 import getShard from "../routines/getShard"
 import _ from "lodash"
-import { ForgeToHex, HexToForge } from "src/libs/crypto/forgeUtils"
+import { ForgeToHex } from "src/libs/crypto/forgeUtils"
 import { Waiter } from "src/utilities/waiter"
 import { _required as required } from "@kynesyslabs/demosdk/websdk"
 import { RPCRequest } from "@kynesyslabs/demosdk/types"
@@ -130,7 +130,15 @@ export default class SecretaryManager {
             }
         }
 
-        this.blockTimestamp = Math.floor(Date.now() / 1000)
+        if (!this.blockTimestamp){
+            // INFO: If the block timestamp is not set, initialize it
+            // INFO: This should only happen when starting the consensus
+            // If we elect this node to be secretary, after the original secretary
+            // went offline, it should already have the original secretary's block timestamp
+            log.debug("[SECRETARY ROUTINE] Initializing the block timestamp FOR THE FIRST TIME")
+            this.blockTimestamp = Math.floor(Date.now() / 1000)
+            log.debug("[SECRETARY ROUTINE] Block timestamp: " + this.blockTimestamp)
+        }
 
         while (this.runSecretaryRoutine) {
             try {
@@ -236,17 +244,15 @@ export default class SecretaryManager {
             "Secretary is offline, electing the second node as the new secretary",
         )
 
-        const weAreSecond = this.shard.members[1].identity === this.ourKey
+        const exSecretary = this.secretary.identity
+        this.shard.secretaryKey = this.shard.members[1].identity
+        // remove secretary from the list of members
+        this.shard.members = this.shard.members.filter(
+            m => m.identity !== exSecretary,
+        )
+        delete this.shard.validationPhases[exSecretary]
 
-        if (weAreSecond) {
-            const exSecretary = this.secretary.identity
-            this.shard.secretaryKey = this.shard.members[1].identity
-            // remove secretary from the list of members
-            this.shard.members = this.shard.members.filter(
-                m => m.identity !== exSecretary,
-            )
-            delete this.shard.validationPhases[exSecretary]
-
+        if (this.checkIfWeAreSecretary()) {
             // Start the secretary routine
             this.runSecretaryRoutine = true
             this.secretaryRoutine()
@@ -288,9 +294,10 @@ export default class SecretaryManager {
 
                 const phase = res.response[0] as number
                 this.receiveValidatorPhase(member.identity, phase)
-                // TODO: Check if we can release the waiting nodes
             }
-        } else {
+        }
+
+        else {
             // TODO: Handle the case where the secretary is offline and we are not the second node
             // Send the validator phase to the new secretary
 
@@ -336,28 +343,38 @@ export default class SecretaryManager {
         return
     }
 
-    public async receiveValidatorPhase(memberKey: string, phase: number) {
+    public async receiveValidatorPhase(memberKey: string, theirPhase: number) {
         log.debug("OUR PHASE: " + this.ourValidatorPhase.currentPhase)
-        log.debug("RECEIVED PHASE: " + phase)
+        log.debug("RECEIVED PHASE: " + theirPhase)
 
         log.debug(JSON.stringify(this.shard, null, 2))
 
-        this.shard.validationPhases[memberKey].currentPhase = phase
-        this.shard.validationPhases[memberKey].phases[phase][1] = true
+        this.shard.validationPhases[memberKey].currentPhase = theirPhase
+        this.shard.validationPhases[memberKey].phases[theirPhase][1] = true
         this.shard.validationPhases[memberKey].waitStatus = true
 
         if (!this.checkIfWeAreSecretary()) {
+            // INFO: Only the secretary should receive this function call!
+            // INFO: We should never get in here!
             return
         }
 
         // INFO: Check if node is behind us
-        if (phase < this.ourValidatorPhase.currentPhase) {
+        if (theirPhase < this.ourValidatorPhase.currentPhase) {
             log.debug(
                 `[SECRETARY ROUTINE] Releasing ${memberKey} as they are behind us`,
             )
-            this.releaseWaitingMembers([memberKey])
+            return await this.releaseWaitingMembers([memberKey])
         }
 
+        await this.releaseWaitingRoutine(true)
+    }
+
+
+    /**
+     * A routine that releases waiting members if it's time to do so
+     */
+    public async releaseWaitingRoutine(resolveWaiter: boolean = false){
         const shouldRelease = this.shouldReleaseWaitingMembers()
         log.debug(
             `[SECRETARY ROUTINE] Should release the waiting members? ${shouldRelease}`,
@@ -370,8 +387,11 @@ export default class SecretaryManager {
                 this.runSecretaryRoutine = false
             }
 
-            // INFO: Release the waiting members
-            Waiter.resolve(Waiter.keys.SET_WAIT_STATUS)
+            if (resolveWaiter){
+                // INFO: Release the waiting members
+                Waiter.resolve(Waiter.keys.SET_WAIT_STATUS)
+            }
+
             await this.releaseWaitingMembers()
             log.debug("[SECRETARY ROUTINE] Released the waiting members")
         }
@@ -454,6 +474,10 @@ export default class SecretaryManager {
             return
         }
 
+        if (secretaryBlockTimestamp && this.ourValidatorPhase.currentPhase < 5){
+            this.blockTimestamp = secretaryBlockTimestamp
+        }
+
         log.debug("Our phase: " + this.ourValidatorPhase.currentPhase)
         if (validatorPhase !== this.ourValidatorPhase.currentPhase) {
             // INFO: This node has already timed out
@@ -527,6 +551,8 @@ export default class SecretaryManager {
 
             if (res.result == 500 || res.result == 400) {
                 if (!Waiter.isWaiting(waiterKey)) {
+                    // INFO: The secretary sent the green light for the phase before
+                    // the setValidatorPhase request returned.
                     log.debug(
                         "[SECRETARY ROUTINE] Key has already been resolved, doing nothing",
                     )
@@ -610,5 +636,26 @@ export default class SecretaryManager {
             SecretaryManager.instance = new SecretaryManager()
         }
         return SecretaryManager.instance
+    }
+
+    /**
+     * Gets the block timestamp from the secretary
+     *
+     * @returns The block timestamp or null if there was an error
+     */
+    public async getSecretaryBlockTimestamp(){
+        const request: RPCRequest = {
+            method: "consensus_routine",
+            params: [{method: "getBlockTimestamp"}]
+        }
+
+        const res = await this.secretary.call(request)
+
+        if (res.result == 200){
+            return res.response[0] as number
+        }
+
+        log.error("[SECRETARY MANAGER] Error getting the block timestamp from the secretary: " + res.result)
+        return null
     }
 }
