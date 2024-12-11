@@ -327,18 +327,29 @@ export default async function manageConsensusRoutines(
             )
             break
 
+        // SECTION: New Secretary Manager class handlers
         case "setValidatorPhase":
             try {
+                // REVIEW: We should validate this peer key!
+                // Should we use an authenticated call?
+
                 const [peerKey, phase] = payload.params
                 const manager = SecretaryManager.getInstance()
 
                 // INFO: If we receive a setValidatorPhase request, and the secretary routine has not started
                 // Wait for it to start
                 if (!manager.runSecretaryRoutine) {
-                    await Waiter.wait(
-                        peerKey + Waiter.keys.WAIT_FOR_SECRETARY_ROUTINE,
-                        3000,
-                    )
+                    try {
+                        await Waiter.wait(
+                            peerKey + Waiter.keys.WAIT_FOR_SECRETARY_ROUTINE,
+                        3000)
+                    } catch (error) {
+                        log.error("[manageConsensusRoutines] Error waiting for the secretary routine to start: " + error)
+
+                        response.result = 500
+                        response.response = "Error waiting for the secretary routine to start"
+                        return response
+                    }
                 }
 
                 const isUs =
@@ -349,14 +360,14 @@ export default async function manageConsensusRoutines(
                         peerKey,
                 )
                 log.debug("Is us: " + isUs)
-
-                log.info(
-                    "SHARD VALIDATOR PHASE: " +
-                        JSON.stringify(manager.shard.validationPhases, null, 2),
-                )
-                manager.receiveValidatorPhase(peerKey, phase)
+                const data = await manager.receiveValidatorPhase(peerKey, phase)
                 response.result = 200
-                response.response = "Validator phase set"
+                response.response = `Validator phase set to ${phase}`
+
+                // INFO: Returning the greenlight status
+                data['timestamp'] = manager.blockTimestamp
+                data['blockRef'] = manager.shard.blockRef
+                response.extra = data
             } catch (error) {
                 // INFO: Node is secretary, but hasn't started the secretary routine yet!
                 // REVIEW: Should we start the secretary routine here?
@@ -381,11 +392,13 @@ export default async function manageConsensusRoutines(
             console.log("payload.params: ", payload.params)
 
             const [timestamp, validatorPhase] = payload.params as [number, number]
-            SecretaryManager.getInstance().receiveGreenLight(
+            const greenLightReceived = SecretaryManager.getInstance().receiveGreenLight(
                 timestamp, validatorPhase,
             )
-            response.result = 200
-            response.response = "Greenlight sent"
+            response.result = greenLightReceived ? 200 : 400
+            response.response = greenLightReceived
+                ? `Greenlight for phase: ${validatorPhase} received with block timestamp: ${timestamp}`
+                : "Error receiving greenlight"
             break
 
         case "getBlockTimestamp":

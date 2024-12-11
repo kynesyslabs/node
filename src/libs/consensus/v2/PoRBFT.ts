@@ -80,7 +80,7 @@ export async function consensusRoutine(): Promise<void> {
     }
 
     await initializeConsensusState()
-    await fastSync()
+    // await fastSync([], "consensusRoutine")
     // Initialize the consensus state and check if the local node is in the shard
 
     const manager = SecretaryManager.getInstance()
@@ -296,7 +296,7 @@ function isInShard(shard: Peer[]): boolean {
 
 // Synchronize and average the time between the shard and the local node
 async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
-    await fastSync(shard)
+    await fastSync(shard, "synchronizeAndAverageTime")
     var averageTimestamp = await averageTimestamps(shard)
     // Strip the decimal part
     if (!Number.isInteger(averageTimestamp)) {
@@ -339,8 +339,8 @@ async function forgeBlock(
     peerlist: Peer[] = [],
 ): Promise<Block> {
     const previousBlockHash = await Chain.getLastBlockHash()
-    const lastBlockNumber = await Chain.getLastBlockNumber()
-    const commonValidatorSeed = await getCommonValidatorSeed()
+    // const lastBlockNumber = await Chain.getLastBlockNumber()
+    const { commonValidatorSeed, lastBlockNumber } = await getCommonValidatorSeed()
 
     // REVIEW Add the GCR hash to the block should be done in createBlock
     const block = await createBlock(
@@ -609,7 +609,11 @@ async function _updateValidatorStatus(
     // INFO: If it's the first phase, the secretary might not have started the consensus routine yet,
     // Increase retry steps to 10 to wait for the secretary to start
     const retries = status === 1 ? 10 : 3
-    return await manager.sendOurValidatorPhaseToSecretary(retries)
+    const res = await manager.sendOurValidatorPhaseToSecretary(retries)
+
+    log.debug(`[_updateValidatorStatus 🎉] Validator phase ${status} resolved with value: ${JSON.stringify(res, null, 2)}`)
+
+    return res
 
     const secretary: Peer = getShardManager.getShard()[0]
     // Getting the current status of the local node and updating it

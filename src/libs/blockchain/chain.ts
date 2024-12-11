@@ -89,25 +89,30 @@ export default class Chain {
 
     // INFO Get the last block number
     static async getLastBlockNumber(): Promise<number> {
+        log.debug("[getLastBlockNumber] Enter getLastBlockNumber")
         const db = await Datasource.getInstance()
+        log.debug("[getLastBlockNumber] Get the block repository")
         const blockRepository = db.getDataSource().getRepository(Blocks)
+        log.debug("[getLastBlockNumber] Get the last block")
         const lastBlock = await blockRepository
             .createQueryBuilder("block")
             .orderBy("block.number", "DESC")
             .getOne()
-
+        log.debug("[getLastBlockNumber] Returning the last block number: " + lastBlock.number)
         return lastBlock ? lastBlock.number : 0
     }
     // INFO Get the last block hash
     static async getLastBlockHash() {
+        log.debug("[getLastBlockHash] Enter getLastBlockHash")
         const db = await Datasource.getInstance()
+        log.debug("[getLastBlockHash] Get the block repository")
         const blockRepository = db.getDataSource().getRepository(Blocks)
-
+        log.debug("[getLastBlockHash] Get the last block")
         const lastBlock = await blockRepository
             .createQueryBuilder("block")
             .orderBy("block.number", "DESC")
             .getOne()
-
+        log.debug("[getLastBlockHash] Returning the last block hash: " + lastBlock.hash)
         return lastBlock?.hash
     }
     // INFO Get any block by its number

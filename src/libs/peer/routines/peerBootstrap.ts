@@ -81,13 +81,13 @@ export default async function peerBootstrap(
 
         console.log("[BOOTSTRAP] _currentPeerObject", verifiedPeer)
         // This should automatically add the peer to the peer list or the offline list
-        let response =await verifiedPeer.call({
+        let response = await verifiedPeer.longCall({
             method: "hello_peer",
             params: [{
                 url: verifiedPeer.connection.string,
                 publicKey: currentPublicKey,
             }],
-        })
+        }, true, 250, 3)
         console.log("[BOOTSTRAP] Response: " + JSON.stringify(response, null, 2))
     }
     // Dying if there are no valid peers

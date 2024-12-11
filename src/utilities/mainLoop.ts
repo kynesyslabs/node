@@ -56,7 +56,7 @@ async function mainLoopCycle() {
     // we now have a list of online peers that can be used for consensus
 
     // ANCHOR Syncing the blockchain after the peer routine
-    await fastSync() // REVIEW Test here
+    await fastSync([], 'mainloop') // REVIEW Test here
     log.info("[MAIN LOOP] Synced! 🟢", true)
 
     // SECTION Todo list for a typical consensus operation
@@ -152,7 +152,7 @@ async function peerRoutine(): Promise<Peer[]> {
     }
 
     // ! TODO Peer gossiping here
-    // peerGossip() // ? Await or not? I'd say not because it's good to have it in the background having anyway a reentry prevention
+    peerGossip() // ? Await or not? I'd say not because it's good to have it in the background having anyway a reentry prevention
 
     log.info("[MAINLOOP]: family:", true)
     let famLen = currentlyOnlinePeers.length

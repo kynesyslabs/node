@@ -17,6 +17,10 @@ export default async function getCommonValidatorSeed(): Promise<{
     const lastBlock = await Chain.getLastBlock()
     log.debug("LAST BLOCK: " + lastBlock.hash)
     log.debug("--------------------------------")
+
+    getSharedState.currentValidatorSeed = lastBlock.number.toString()
+    return { commonValidatorSeed: lastBlock.number.toString(), lastBlockNumber }
+
     // If we have less than 3 blocks, the hash is calculated from the last block // ? Maybe we should revamp this a little
     if (lastBlockNumber < 3) {
         const block = await Chain.getBlockByNumber(lastBlockNumber)
@@ -37,7 +41,7 @@ export default async function getCommonValidatorSeed(): Promise<{
             const signatures = JSON.parse(block.validation_data)["signatures"]
             const sortedSignatures = Object.keys(signatures)
                 .sort()
-                .map(key => key + signatures[key])
+                .map(key => "key:" + key + "signature:" + signatures[key] + ";")
                 .join("")
             return sortedSignatures
         } catch (error) {
