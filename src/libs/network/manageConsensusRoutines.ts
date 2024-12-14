@@ -342,12 +342,17 @@ export default async function manageConsensusRoutines(
                     try {
                         await Waiter.wait(
                             peerKey + Waiter.keys.WAIT_FOR_SECRETARY_ROUTINE,
-                        3000)
+                            3000,
+                        )
                     } catch (error) {
-                        log.error("[manageConsensusRoutines] Error waiting for the secretary routine to start: " + error)
+                        log.error(
+                            "[manageConsensusRoutines] Error waiting for the secretary routine to start: " +
+                                error,
+                        )
 
                         response.result = 500
-                        response.response = "Error waiting for the secretary routine to start"
+                        response.response =
+                            "Error waiting for the secretary routine to start"
                         return response
                     }
                 }
@@ -365,8 +370,8 @@ export default async function manageConsensusRoutines(
                 response.response = `Validator phase set to ${phase}`
 
                 // INFO: Returning the greenlight status
-                data['timestamp'] = manager.blockTimestamp
-                data['blockRef'] = manager.shard.blockRef
+                data["timestamp"] = manager.blockTimestamp
+                data["blockRef"] = manager.shard.blockRef
                 response.extra = data
             } catch (error) {
                 // INFO: Node is secretary, but hasn't started the secretary routine yet!
@@ -383,17 +388,52 @@ export default async function manageConsensusRoutines(
 
         case "getValidatorPhase":
             response.result = 200
-            const manager = SecretaryManager.getInstance()
-            response.response = [manager.ourValidatorPhase.currentPhase]
+            response.response = [
+                SecretaryManager.getInstance().ourValidatorPhase.currentPhase,
+            ]
             break
 
         case "greenlight":
-            log.warning("[Consensus Message Received] greenlight")
+            const [
+                secretarySignature,
+                senderKey,
+                timestamp,
+                validatorPhase,
+            ] = payload.params as [string, string, number, number]
+
+            log.warning(
+                "[Consensus Message Received] greenlight from: " + senderKey,
+            )
             console.log("payload.params: ", payload.params)
 
-            const [timestamp, validatorPhase] = payload.params as [number, number]
-            const greenLightReceived = SecretaryManager.getInstance().receiveGreenLight(
-                timestamp, validatorPhase,
+            const manager = SecretaryManager.getInstance()
+
+            log.debug("Our secretary identity: " + manager.secretary.identity)
+            log.debug("Received secretary signature: " + secretarySignature)
+            log.debug("shard: " + manager.shard.members.map(m => m.identity))
+
+            const isOurSecretary = Cryptography.verify(
+                manager.secretary.identity,
+                secretarySignature,
+                manager.secretary.identity,
+            )
+
+            log.debug("Is our secretary: " + isOurSecretary)
+
+            if (!isOurSecretary) {
+                response.result = 400
+                response.response = "Greenlight not accepted"
+                response.extra = "Secretary identity mismatch"
+                response.require_reply = false
+                return response
+            }
+
+            // TODO: Find a better to implement this guard
+            // REVIEW: authenticatedCall?
+
+            const greenLightReceived = manager.receiveGreenLight(
+                timestamp,
+                validatorPhase,
             )
             response.result = greenLightReceived ? 200 : 400
             response.response = greenLightReceived
