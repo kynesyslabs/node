@@ -69,11 +69,11 @@ export default class SecretaryManager {
         )
         log.debug("SECRETARY: " + this.secretary.identity)
 
-        // if (this.shard.members.length < 3 && this.shard.blockRef > 10) {
-        //     // INFO: If we are the only node in the shard kill node for debugging!
-        //     log.debug("Only one member in the shard. Exiting ...")
-        //     process.exit(0)
-        // }
+        if (this.shard.members.length < 4 && this.shard.blockRef > 10) {
+            // INFO: If we are the only node in the shard kill node for debugging!
+            log.debug("Only one member in the shard. Exiting ...")
+            process.exit(0)
+        }
 
         // INFO: Start the secretary routine
         if (this.checkIfWeAreSecretary()) {
