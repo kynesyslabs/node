@@ -572,7 +572,7 @@ export default class SecretaryManager {
         for (const [index, result] of results.entries()) {
             const pubKey = waitingMembers[index]
 
-            if (result.result == 400 && phase == 7) {
+            if (result.result == 400) {
                 log.debug(
                     "[SECRETARY ROUTINE] Received a 400: Consensus not reached",
                 )
