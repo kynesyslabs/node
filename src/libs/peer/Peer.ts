@@ -262,6 +262,9 @@ export default class Peer {
                     "] Error making RPC call:" +
                     error,
             )
+            log.error("CONNECTION URL: " + connectionUrl)
+            log.error("REQUEST PAYLOAD: " + JSON.stringify(request, null, 2))
+
             return {
                 result: 500,
                 response: error,

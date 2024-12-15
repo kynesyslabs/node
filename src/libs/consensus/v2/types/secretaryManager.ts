@@ -683,7 +683,7 @@ export default class SecretaryManager {
 
         const waiterKey =
             Waiter.keys.GREEN_LIGHT + this.ourValidatorPhase.currentPhase
-        const greenlight: Promise<null> = Waiter.wait(waiterKey)
+        const greenlight: Promise<null> = Waiter.wait(waiterKey, 15000)
 
         const sendStatus = async () => {
             const request: RPCRequest = {
