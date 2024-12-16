@@ -35,6 +35,7 @@ import gcrStateSave from "./gcr_routines/gcrStateSaverHelper"
 import { assignXM } from "./gcr_routines/assignXM"
 import { assignWeb2 } from "./gcr_routines/assignWeb2"
 import { txToGCROperation } from "./gcr_routines/txToGCROperation"
+import IdentityManager from "./gcr_routines/identityManager"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -209,6 +210,10 @@ export default class HandleGCR {
     assign = {
         xm: assignXM,
         web2: assignWeb2,
+        identity: {
+            assignFromWrite: IdentityManager.inferIdentityFromWrite,
+            assignFromSignature: IdentityManager.inferIdentityFromSignature,
+        },
     }
 
     // Utilities

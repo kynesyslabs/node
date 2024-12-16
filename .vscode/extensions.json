@@ -19,6 +19,14 @@
         "pmneo.tsimporter",
         "mylesmurphy.prettify-ts",
         "isotechnics.commentlinks",
-        "kisstkondoros.typelens"
+        "kisstkondoros.typelens",
+        "byi8220.indented-block-highlighting",
+        "imagio.vscode-dimmer-block",
+        "sirtori.indenticator",
+        "evondev.indent-rainbow-palettes",
+        "martinlaregina.clear-view-indent",
+        "polymermallard.box-comment",
+        "slysherz.comment-box",
+        "gruntfuggly.todo-tree"
     ]
 }

@@ -81,3 +81,11 @@ bun.lockb
 /.env.orig
 /src/libs/blockchain/*_BACKUP_*.ts
 /src/libs/blockchain/block_REMOTE_224733.ts
+GPATH
+GRTAGS
+GTAGS
+.vscode/settings.json
+src/GPATH
+src/GRTAGS
+src/GTAGS
+.vscode/settings.json

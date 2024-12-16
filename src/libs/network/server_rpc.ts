@@ -23,6 +23,7 @@ import { PeerManager } from "../peer"
 import ServerHandlers from "./endpointHandlers"
 import { AuthMessage, manageAuth } from "./manageAuth"
 import manageConsensusRoutines from "./manageConsensusRoutines"
+import manageGCRRoutines from "./manageGCRRoutines"
 import { manageExecution } from "./manageExecution"
 import { HelloPeerRequest, manageHelloPeer } from "./manageHelloPeer"
 import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
@@ -149,6 +150,9 @@ async function processPayload(
 
         case "consensus_routine": // ? Change in consensus once we have the new consensus mechanism
             return await manageConsensusRoutines(payload.params[0])
+
+        case "gcr_routine":
+            return await manageGCRRoutines(payload.params[0])
 
         case "web2ProxyRequest": {
             const rawPayload = payload.params[0]
