@@ -153,6 +153,7 @@ export default async function manageConsensusRoutines(
             try {
                 const [peerSignature, peerKey, phase] = payload.params
 
+                // INFO: Authenticate the request
                 const isSignatureValid = Cryptography.verify(
                     peerKey,
                     peerSignature,
@@ -168,8 +169,8 @@ export default async function manageConsensusRoutines(
 
                 const manager = SecretaryManager.getInstance()
 
-                // INFO: If we receive a setValidatorPhase request, and the secretary routine has not started
-                // Wait for it to start
+                // INFO: If we receive a setValidatorPhase request, and the
+                // secretary routine has not started, wait for it to start
                 if (!manager.runSecretaryRoutine) {
                     try {
                         await Waiter.wait(
@@ -202,6 +203,7 @@ export default async function manageConsensusRoutines(
                 response.response = `Validator phase set to ${phase}`
 
                 // INFO: Returning the greenlight status
+                // NOTE: We also attach the block timestamp to the response
                 data["timestamp"] = manager.blockTimestamp
                 data["blockRef"] = manager.shard.blockRef
                 response.extra = data
@@ -226,14 +228,16 @@ export default async function manageConsensusRoutines(
             log.warning(
                 "[Consensus Message Received] greenlight from: " + senderKey,
             )
-            console.log("payload.params: ", payload.params)
-
+            log.info(
+                "payload.params: " + JSON.stringify(payload.params, null, 2),
+            )
             const manager = SecretaryManager.getInstance()
 
             log.debug("Our secretary identity: " + manager.secretary.identity)
             log.debug("Received secretary signature: " + secretarySignature)
             log.debug("shard: " + manager.shard.members.map(m => m.identity))
 
+            // INFO: Check if the request came from our secretary
             const isOurSecretary = Cryptography.verify(
                 manager.secretary.identity,
                 secretarySignature,
@@ -250,6 +254,7 @@ export default async function manageConsensusRoutines(
                 return response
             }
 
+            // INFO: Act on the greenlight
             const greenLightReceived = manager.receiveGreenLight(
                 timestamp,
                 validatorPhase,
@@ -261,6 +266,8 @@ export default async function manageConsensusRoutines(
             break
         }
 
+        // SECTION: Getter handlers
+        // NOTE: Ideally, we should never need to use these methods
         case "getValidatorPhase": {
             const manager = SecretaryManager.getInstance()
             response.result = 200

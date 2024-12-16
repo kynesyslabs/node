@@ -1,11 +1,6 @@
-import {
-    ValidationPhase,
-    emptyValidationPhase,
-    ValidationPhaseStatus,
-} from "./validationStatusTypes"
+import { ValidationPhase, emptyValidationPhase } from "./validationStatusTypes"
 import { Shard } from "./shardTypes"
-import { Peer } from "src/libs/peer"
-import sharedState, { getSharedState } from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import getShard from "../routines/getShard"
 import _ from "lodash"
 import { ForgeToHex } from "src/libs/crypto/forgeUtils"
@@ -528,18 +523,6 @@ export default class SecretaryManager {
         }
         const promises = []
 
-        const isOurSignatureValid = Cryptography.verify(
-            this.ourKey,
-            this.ourSignature,
-            this.ourKey,
-        )
-
-        log.debug("is our signature: " + isOurSignatureValid)
-
-        if (!isOurSignatureValid) {
-            process.exit(1)
-        }
-
         for (const pubKey of waitingMembers) {
             const request: RPCRequest = {
                 method: "consensus_routine",
@@ -825,24 +808,12 @@ export default class SecretaryManager {
         this.ourValidatorPhase.waitStatus = true
     }
 
-    // SECTION Public methods
-    public async getSecretaryKey() {
-        return this.shard.secretaryKey
-    }
-
-    public async getCurrentPhase(memberKey: string) {
-        return this.shard.validationPhases[memberKey].currentPhase
-    }
-
-    public async getWaitStatus(memberKey: string) {
-        return this.shard.validationPhases[memberKey].waitStatus
-    }
-
     // ANCHOR Singleton logic
     public static getInstance(): SecretaryManager {
         if (!SecretaryManager.instance) {
             SecretaryManager.instance = new SecretaryManager()
         }
+
         return SecretaryManager.instance
     }
 
