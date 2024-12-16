@@ -1,26 +1,18 @@
-import { RPCResponse, VoteRequest } from "@kynesyslabs/demosdk/types"
+import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorSeed"
 import { emptyResponse } from "./server_rpc"
 import _ from "lodash"
-import ServerHandlers from "./endpointHandlers"
-import sharedState, { getSharedState } from "src/utilities/sharedState"
+import { getSharedState } from "src/utilities/sharedState"
 import getShard from "../consensus/v2/routines/getShard"
-import { Peer } from "../peer"
 import manageProposeBlockHash from "../consensus/v2/routines/manageProposeBlockHash"
 import { ValidationData } from "../consensus/v2/interfaces"
-import {
-    ValidatorStatus,
-    getShardManager,
-} from "../consensus/v2/routines/shardManager"
 import { checkConsensusTime } from "../consensus/routines/consensusTime"
 import {
     consensusRoutine,
     isConsensusAlreadyRunning,
 } from "../consensus/v2/PoRBFT"
 import log from "src/utilities/logger"
-import Secretary from "../consensus/v2/routines/secretary"
 import Cryptography from "../crypto/cryptography"
-import { HexToForge } from "../crypto/forgeUtils"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { Waiter } from "src/utilities/waiter"
 
@@ -32,17 +24,6 @@ export interface ConsensusMethod {
         | "broadcastBlock"
         | "getCommonValidatorSeed"
         | "getValidatorTimestamp"
-        | "getShard"
-        | "setValidatorStatus"
-        | "getValidatorStatus"
-        | "setSecretaryStatus"
-        | "getSecretaryStatus"
-        | "getSingleSecretaryStatus"
-        | "setWaitStatus"
-        | "updateLastSeen"
-        | "broadcastedConsensusEnd"
-        | "readyToEndConsensus"
-        | "broadcastShardStatus"
         // REVIEW: Remove deprecated methods
         | "setValidatorPhase"
         | "getValidatorPhase"
@@ -121,135 +102,8 @@ export default async function manageConsensusRoutines(
 
         // REVIEW Secretary system
 
-        /* SECTION Secretary control methods */
-
-        // Authenticated endpoint to set the wait status
-        /** REVIEW Shard members will use this endpoint to set their status into a waiting state.
-         * This should allow the secretary to know when all the shard members are ready to proceed and use
-         * the broadcastedConsensusEnd or broadcastShardStatus methods to control other members' behaviour.
-         */
-        /**
-         * @param payload.params[0] - The public key of the peer
-         * @param payload.params[1] - The wait status
-         * @param payload.params[2] - The signature of the public key
-         */
-        case "setWaitStatus":
-            response.result = 200
-            log.custom(
-                "secretary",
-                "Received setWaitStatus request from " +
-                    payload.params[0] +
-                    " with wait status " +
-                    payload.params[1] +
-                    " and signature " +
-                    payload.params[2],
-                true,
-                false,
-            )
-            response.response = Secretary.getInstance().setWaitStatus(
-                payload.params[0] as string, // Public key of the peer
-                payload.params[1] as boolean, // Wait status
-                payload.params[2] as string, // Signature of the public key
-            )
-            break
-        // Authenticated endpoint to update the last seen time
-        case "updateLastSeen":
-            response.result = 200
-            response.response = Secretary.getInstance().updateLastSeen(
-                payload.params[0] as string, // Public key of the peer
-                payload.params[1] as string, // Signature of the public key
-            )
-            break
-
-        // Authenticated endpoint to set our ready to end consensus status
-        case "readyToEndConsensus":
-            response.result = 200
-            response.response = Secretary.getInstance().readyToEndConsensus(
-                payload.params[0] as string, // Public key of the peer
-                payload.params[1] as string, // Signature of the public key
-            )
-            break
-
-        // ! We need authentication for this
-        case "setSecretaryStatus":
-            response.result = 200
-            response.response = Secretary.getInstance().setStatus(
-                payload.params[0] as string,
-                payload.params[1] as ValidatorStatus,
-            )
-            break
-        // ! We need authentication for this
-        case "getSecretaryStatus":
-            response.result = 200
-            response.response = Secretary.getInstance().getAllStatus()
-            break
-
-        case "getSingleSecretaryStatus":
-            response.result = 200
-            response.response = Secretary.getInstance().getStatus(
-                payload.params[0] as string,
-            )
-            break
-
-        /* SECTION Secretary local methods */
-
         /* SECTION Secretary communication methods */
         // REVIEW The secretary should be able to communicate with the other shard members through these methods
-
-        /** TODO
-         * This method is called by the secretary when the consensus has ended for all shard partecipants
-         * Once received, the shard partecipant will be able to tell that everyone has ended the consensus and will proceed
-         */
-        case "broadcastedConsensusEnd":
-            response.result = 200
-            // TODO Implement this
-            break
-
-        // REVIEW Receiving a broadcasted shard status (Map<string, ValidatorStatus>)
-        /** NOTE
-         * This endpoint is hit by the secretary when a shard member is waiting for something
-         * and the secretary is broadcasting the status of the shard members to let it know that
-         * the shard members are ready to proceed (or not).
-         */
-        case "broadcastShardStatus":
-            // The status is received from the secretary so we need to verify the signature
-            var receivedKey = payload.params[0] as string
-            var receivedSignature = payload.params[1] as string
-            // Getting the secretary public key
-            var currentShard = await getShard(
-                getSharedState.currentValidatorSeed,
-            ) // REVIEW Is this correct?
-            var secretaryKey = currentShard[0].identity
-            // First we verify the key corresponds to the secretary
-            if (receivedKey !== secretaryKey) {
-                response.result = 400
-                response.response = "invalid key"
-                response.extra = "Secretary key mismatch"
-                return response
-            }
-            // Verifying the signature
-            var isSignatureValid = await Cryptography.verify(
-                secretaryKey,
-                HexToForge(receivedSignature),
-                HexToForge(secretaryKey),
-            )
-            if (!isSignatureValid) {
-                response.result = 400
-                response.response = "invalid signature"
-                response.extra = "Signature verification failed"
-                return response
-            }
-            // Ingesting the payload
-            var receivedStatus = payload.params[1] as Map<
-                string,
-                ValidatorStatus
-            >
-            // ? We need to check if the statuses are the same as the ones we have or not? Theoretically not, as the secretary did it
-            // REVIEW Setting the waiting for green light variable to false
-            getSharedState.waitingForSecretaryGreenLight = false
-            response.result = 200
-            response.response = "Shard status received"
-            break
 
         /* SECTION Consensus methods */
 
@@ -258,6 +112,7 @@ export default async function manageConsensusRoutines(
             // REVIEW Using the current UTC time as the validator timestamp (affect average time of the blocks)
             response.response = getSharedState.currentUTCTime //.lastTimestamp
             return response
+
         case "proposeBlockHash": // For shard members to vote on a block hash
             console.log("[Consensus Message Received] Propose Block Hash")
             console.log("Block Hash: ", payload.params[0])
@@ -293,47 +148,24 @@ export default async function manageConsensusRoutines(
             response.response = getSharedState.currentValidatorSeed
             break
 
-        // SECTION Shard management
-        // ! Add authentication to these methods
-        case "getShard":
-            //console.log("[Consensus Message Received] getShard")
-            response.result = 200
-            response.response = getShardManager.getShard()
-            console.log("[Consensus Message Received] getShard sent back")
-            break
-        case "setValidatorStatus":
-            console.log("[Consensus Message Received] setValidatorStatus")
-            // This call requires public key as string and status as ValidatorStatus
-            var setResult = getShardManager.setValidatorStatus(
-                payload.params[0] as string,
-                payload.params[1] as ValidatorStatus,
-            )
-            if (setResult[0]) {
-                response.result = 200
-                response.response = "Validator status set"
-            } else {
-                response.result = 400
-                response.response = setResult[1]
-            }
-            break
-        case "getValidatorStatus":
-            //console.log("[Consensus Message Received] getValidatorStatus")
-            response.result = 200
-            response.response = getShardManager.getValidatorStatus(
-                payload.params[0] as string,
-            )
-            console.log(
-                "[Consensus Message Received] getValidatorStatus sent back",
-            )
-            break
-
         // SECTION: New Secretary Manager class handlers
-        case "setValidatorPhase":
+        case "setValidatorPhase": {
             try {
-                // REVIEW: We should validate this peer key!
-                // Should we use an authenticated call?
+                const [peerSignature, peerKey, phase] = payload.params
 
-                const [peerKey, phase] = payload.params
+                const isSignatureValid = Cryptography.verify(
+                    peerKey,
+                    peerSignature,
+                    peerKey,
+                )
+
+                if (!isSignatureValid) {
+                    response.result = 401
+                    response.response = "Invalid signature"
+                    response.extra = "Signature verification failed"
+                    return response
+                }
+
                 const manager = SecretaryManager.getInstance()
 
                 // INFO: If we receive a setValidatorPhase request, and the secretary routine has not started
@@ -385,21 +217,11 @@ export default async function manageConsensusRoutines(
                 response.response = "Error setting the validator phase"
             }
             break
+        }
 
-        case "getValidatorPhase":
-            response.result = 200
-            response.response = [
-                SecretaryManager.getInstance().ourValidatorPhase.currentPhase,
-            ]
-            break
-
-        case "greenlight":
-            const [
-                secretarySignature,
-                senderKey,
-                timestamp,
-                validatorPhase,
-            ] = payload.params as [string, string, number, number]
+        case "greenlight": {
+            const [secretarySignature, senderKey, timestamp, validatorPhase] =
+                payload.params as [string, string, number, number]
 
             log.warning(
                 "[Consensus Message Received] greenlight from: " + senderKey,
@@ -421,15 +243,12 @@ export default async function manageConsensusRoutines(
             log.debug("Is our secretary: " + isOurSecretary)
 
             if (!isOurSecretary) {
-                response.result = 400
+                response.result = 401
                 response.response = "Greenlight not accepted"
                 response.extra = "Secretary identity mismatch"
                 response.require_reply = false
                 return response
             }
-
-            // TODO: Find a better to implement this guard
-            // REVIEW: authenticatedCall?
 
             const greenLightReceived = manager.receiveGreenLight(
                 timestamp,
@@ -440,11 +259,20 @@ export default async function manageConsensusRoutines(
                 ? `Greenlight for phase: ${validatorPhase} received with block timestamp: ${timestamp}`
                 : "Error receiving greenlight"
             break
+        }
 
-        case "getBlockTimestamp":
+        case "getValidatorPhase": {
+            const manager = SecretaryManager.getInstance()
+            response.result = 200
+            response.response = [manager.ourValidatorPhase.currentPhase]
+            break
+        }
+
+        case "getBlockTimestamp": {
             response.result = 200
             response.response = [SecretaryManager.getInstance().blockTimestamp]
             break
+        }
     }
 
     return response

@@ -1,39 +1,24 @@
 import Transaction from "src/libs/blockchain/transaction"
 import getCommonValidatorSeed from "./routines/getCommonValidatorSeed"
-import getShard from "./routines/getShard"
-import Mempool, { MempoolData } from "src/libs/blockchain/mempool"
+import Mempool from "src/libs/blockchain/mempool"
 import Block from "src/libs/blockchain/block"
-import Hashing from "src/libs/crypto/hashing"
-import Cryptography from "src/libs/crypto/cryptography"
 import Chain from "src/libs/blockchain/chain"
 import { getSharedState } from "src/utilities/sharedState"
 import { Peer } from "src/libs/peer"
 import log from "src/utilities/logger"
-import {
-    ConsensusHashVote,
-    ConsensusHashResponse,
-    ValidationData,
-} from "./interfaces"
 import { mergeMempools } from "./routines/mergeMempools"
 import mergePeerlist from "./routines/mergePeerlist"
-import { createBlock, hashNativeTables } from "./routines/createBlock"
+import { createBlock } from "./routines/createBlock"
 import { orderTransactions } from "./routines/orderTransactions"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
 import averageTimestamps from "./routines/averageTimestamp"
 import { fastSync } from "src/libs/blockchain/routines/Sync"
-import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
-import ShardManager, {
-    ValidatorStatus,
-    getShardManager,
-} from "./routines/shardManager"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import applyGCROperation from "src/libs/blockchain/gcr/gcr_routines/applyGCROperation"
 import { txToGCROperation } from "src/libs/blockchain/gcr/gcr_routines/txToGCROperation"
-import Secretary from "./routines/secretary"
 import SecretaryManager from "./types/secretaryManager"
 
 /* INFO
-
 # Semaphore system
 
  The consensus routine is the main function that runs the consensus algorithm.
@@ -66,7 +51,6 @@ import SecretaryManager from "./types/secretaryManager"
 
  This allows to have a precise time synchronization between the nodes in the shard within
  a +/-2 second range.
- 
 */
 
 // Main consensus routine calling all the subroutines
@@ -85,7 +69,7 @@ export async function consensusRoutine(): Promise<void> {
 
     const manager = SecretaryManager.getInstance()
 
-    if (manager.shard && manager.shard.CVSA){
+    if (manager.shard && manager.shard.CVSA) {
         // INFO: Testing if we start a new consensus round while the previous one is not over
         // TODO: Remove this block after when opening the PR
         log.debug("WE ARE ALREADY IN ANOTHER CONSENSUS ROUND. Killing node")
@@ -95,21 +79,6 @@ export async function consensusRoutine(): Promise<void> {
     // INFO: We won't use the shard returned by initializeShard
     // as it can change through the consensus routine
     await initializeShard()
-
-    // if (
-    //     getSharedState.identity.ed25519_hex.publicKey ===
-    //     getShardManager.getShard()[0].identity
-    // ) {
-    //     log.custom("secretary", "We are the secretary, starting the routine")
-    //     /** REVIEW
-    //      * This is called without await to avoid blocking the consensus routine.
-    //      * This should start checking if shard members are waiting for something.
-    //      * Once a shard member is waiting, this routine will check if it can proceed by comparing the statuses.
-    //      * If the shard member can proceed, it will hit the validator to let it know that it can continue.
-    //      * It should have a 250ms delay between each check.
-    //      */
-    //     Secretary.getInstance().secretaryRoutine()
-    // }
 
     if (!isInShard(manager.shard.members)) {
         log.info(
@@ -124,47 +93,7 @@ export async function consensusRoutine(): Promise<void> {
         false,
     )
 
-    // Initialize the shard manager transmitting that we are in consensus loop
-    // INFO: First validator status update will resolve with the secretary block timestamp
-    await _updateValidatorStatus(
-        1,
-        true,
-        false,
-        true,
-    )
-    // log.debug(
-    //     "[consensusRoutine] Secretary block timestamp: " +
-    //         secretaryBlockTimestamp,
-    // )
-
-    // if (!secretaryBlockTimestamp){
-    //     log.debug("SECRETARY BLOCK TIMESTAMP: " + secretaryBlockTimestamp)
-    //     log.debug("[consensusRoutine] Secretary block timestamp is invalid, stopping the node ...")
-    //     process.exit(1)
-    // }
-
-    // if (secretaryBlockTimestamp) {
-    //     getSharedState.lastConsensusTime = secretaryBlockTimestamp
-    // }
-    // await initializeShardManager(shard)
-
-    // REVIEW If we are the secretary, we start the secretary routine
-
-    // Using the secretary to update the local statuses
-    // ? Without waiting for the secretary to update the statuses? Because we are at the beginning of the consensus routine
-    // await _updateValidatorStatus("inConsensusLoop", true, false, true)
-    // await _updateValidatorStatus("initializedShardManager", true, false, true)
-
-    // Here we wait that the shard is ready by checking the validators statuses and if they are in consensus loop
-    // We can't continue until the shard is ready and synced to our validator status
-    // ? Should we use updateValidatorStatus instead of waitUntilShardIsReady directly?
-    // let shardIsReady = await getShardManager.waitUntilShardIsReady(
-    //     getShardManager.getOurValidatorStatus(),
-    // )
-    // See ShardManager.ts -> waitUntilShardIsReady for the above call
-    // TODO Do something with the shardIsReady variable
-    // log.info("[consensusRoutine] Shard readiness is: " + shardIsReady)
-
+    await updateValidatorPhase(1)
     // synchronize and average the time between the shard and the local node
     // NOTE: Instead of averaging the time, we'll use the secretary timestamp
     // await synchronizeAndAverageTime(shard)
@@ -173,7 +102,7 @@ export async function consensusRoutine(): Promise<void> {
     const mempool = await mergeAndOrderMempools(manager.shard.members)
 
     // REVIEW Merge the peerlist between the shard and the local node
-    const peerlist = [] 
+    const peerlist = []
     // await mergePeerlistAndWait(shard)
 
     log.info(
@@ -194,18 +123,22 @@ export async function consensusRoutine(): Promise<void> {
     // ! Not here but check Sync.ts (syncNativeTables) and make it work with the GCR (syncing the states)
     await applyGCRForNewBlock(mempool)
 
-    if (manager.blockTimestamp){
+    if (manager.blockTimestamp) {
         getSharedState.lastConsensusTime = manager.blockTimestamp
     } else {
         // INFO: This should never happen
         // If it does, request the block timestamp from the secretary
-        log.debug("[CONSENSUS ROUTINE] Secretary block timestamp not received yet, requesting it ...")
+        log.debug(
+            "[CONSENSUS ROUTINE] Secretary block timestamp not received yet, requesting it ...",
+        )
         const blockTimestamp = await manager.getSecretaryBlockTimestamp()
 
-        if (blockTimestamp){
+        if (blockTimestamp) {
             getSharedState.lastConsensusTime = blockTimestamp
         } else {
-            log.error("[CONSENSUS ROUTINE] Block timestamp is not set, stopping the node ...")
+            log.error(
+                "[CONSENSUS ROUTINE] Block timestamp is not set, stopping the node ...",
+            )
             process.exit(1)
         }
     }
@@ -230,14 +163,15 @@ export async function consensusRoutine(): Promise<void> {
         )
     }
 
-    await _updateValidatorStatus(7, true, false, true)
+    // INFO: Ending the consensus!
+    await updateValidatorPhase(7)
     manager.endConsensusRoutine()
     // Cleanup the consensus state
     cleanupConsensusState()
-    // Destroy the shard manager to free it up for the next consensus routine
-    // ShardManager.destroy()
-    log.info("[consensusRoutine] Consensus routine ended")
+    log.debug("[consensusRoutine] CONSENSUS ROUTINE ENDED 🔥🔥🔥")
 }
+
+// SECTION: Consensus functions!
 
 // Safeguard to prevent multiple consensus loops from running
 export function isConsensusAlreadyRunning(): boolean {
@@ -271,18 +205,6 @@ async function initializeShard(): Promise<Peer[]> {
     return await manager.initializeShard(commonValidatorSeed, lastBlockNumber)
 }
 
-// Initialize the shard manager
-async function initializeShardManager(shard: Peer[]): Promise<void> {
-    // getShardManager.setShard(shard)
-    // const ourIdentity =
-    //     getSharedState.identity.ed25519.publicKey.toString("hex")
-    // let validatorStatus = getShardManager.shardStatus.get(ourIdentity)
-    // validatorStatus.inConsensusLoop = true
-    await _updateValidatorStatus(1, true, false, true)
-    // getShardManager.setValidatorStatus(ourIdentity, validatorStatus)
-    // await getShardManager.transmitOurValidatorStatus()
-}
-
 // SECTION Checks
 
 // Check if the local node is in the shard
@@ -307,7 +229,7 @@ async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
     }
     getSharedState.lastConsensusTime = averageTimestamp
     // Using the secretary to update the local statuses
-    await _updateValidatorStatus(2, true, false, true)
+    await updateValidatorPhase(2)
 }
 
 // Merge the peerlist between the shard and the local node
@@ -315,7 +237,7 @@ async function mergePeerlistAndWait(shard: Peer[]): Promise<Peer[]> {
     const mergedPeerList = await mergePeerlist(shard)
     //await updateValidatorStatus("mergedPeerlist", true, false, true)
     // Using the secretary to update the local statuses
-    await _updateValidatorStatus("mergedPeerlist", true, false, true)
+    await updateValidatorPhase("mergedPeerlist", true, false, true)
     return mergedPeerList
 }
 
@@ -329,7 +251,7 @@ async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
     log.info("[consensusRoutine] Mempools have been merged")
     // await updateValidatorStatus("mergedMempool", true, false, true)
     // Using the secretary to update the local statuses
-    await _updateValidatorStatus(3, true, false, true)
+    await updateValidatorPhase(3)
     return await orderTransactions(mergedMempool)
 }
 
@@ -340,7 +262,8 @@ async function forgeBlock(
 ): Promise<Block> {
     const previousBlockHash = await Chain.getLastBlockHash()
     // const lastBlockNumber = await Chain.getLastBlockNumber()
-    const { commonValidatorSeed, lastBlockNumber } = await getCommonValidatorSeed()
+    const { commonValidatorSeed, lastBlockNumber } =
+        await getCommonValidatorSeed()
 
     // REVIEW Add the GCR hash to the block should be done in createBlock
     const block = await createBlock(
@@ -353,7 +276,7 @@ async function forgeBlock(
 
     // await updateValidatorStatus("forgedBlock", true, false, true)
     // Using the secretary to update the local statuses
-    await _updateValidatorStatus(5, true, false, true)
+    await updateValidatorPhase(5)
     return block
 }
 
@@ -368,7 +291,7 @@ async function voteOnBlock(
     const [pro, con] = await broadcastBlockHash(block, shard)
     // await updateValidatorStatus("votedForBlock", true, false, true)
     // Using the secretary to update the local statuses
-    await _updateValidatorStatus(6, true, false, true)
+    await updateValidatorPhase(6)
 
     log.info(
         `[consensusRoutine] Block hash broadcasted to the shard: ${block.hash}`,
@@ -417,366 +340,35 @@ async function applyGCRForNewBlock(
     log.info(`[consensusRoutine] Failed GCR operations: ${failedTxs}`)
     // await updateValidatorStatus("appliedGCR", true, false, true)
     // Using the secretary to update the local statuses
-    await _updateValidatorStatus(4, true, false, true)
+    await updateValidatorPhase(4)
     return [successfulTxs, failedTxs]
 }
 
-// SECTION New secretary system
-
-/** TODO
- * - Check if the wait logic in updateValidatorStatus is working as expected
- * - Replace the current updateValidatorStatus method with the new one (_updateValidatorStatus)
- * - Implement the get logic too when is needed
- * - Implement fallback to the second secretary when the first one is not available
- * ? Moving the secretary logic to a new class or unifying it with the current one?
+/**
+ * Sends our validator phase to the secretary, and waits for the greenlight.
+ *
+ * @param phase - Our cleared phase number
+ * @returns The block timestamp returned by the secretary
  */
-
-// REVIEW This method and the below one will be used to get the status of a node or the whole shard
-async function getValidatorStatus(peerKey: string): Promise<ValidatorStatus> {
-    const secretary: Peer = getShardManager.getShard()[0]
-    let status: ValidatorStatus
-    let syncedTimestamp: number
-    if (
-        secretary.identity ==
-        getSharedState.identity.ed25519.publicKey.toString("hex")
-    ) {
-        log.info(
-            `[getValidatorStatus] Getting the status of the node: ${peerKey} from ourselves as we are the secretary`,
-        )
-        status = Secretary.getInstance().getStatus(peerKey)
-        syncedTimestamp = getSharedState.currentTimestamp
-    } else {
-        log.info(
-            `[getValidatorStatus] Getting the status of the node: ${peerKey} from the secretary (${secretary.identity})`,
-        )
-        let jsonCall: RPCRequest = {
-            method: "consensus_routine",
-            params: [
-                {
-                    method: "getSecretaryStatus",
-                    params: [peerKey],
-                },
-            ],
-        }
-        let response = await secretary.call(jsonCall)
-        status = response.response as ValidatorStatus
-        syncedTimestamp = response.extra
-    }
-    log.info(`[getValidatorStatus] Status of the node: ${peerKey} retrieved`)
-    // Setting the local status for the peer to the one in the response
-    Secretary.getInstance().setStatus(peerKey, status)
-    // Setting the current timestamp to the one in the response
-    log.info(
-        `[getValidatorStatus] Setting the current timestamp to the one in the response: ${syncedTimestamp}`,
-    )
-    getSharedState.currentTimestamp = syncedTimestamp
-    return status
-}
-
-async function getShardStatus(): Promise<Map<string, ValidatorStatus>> {
-    const secretary: Peer = getShardManager.getShard()[0]
-    let statusMap: Map<string, ValidatorStatus>
-    let syncedTimestamp: number
-    if (
-        secretary.identity ==
-        getSharedState.identity.ed25519.publicKey.toString("hex")
-    ) {
-        log.info(
-            "[getShardStatus] Getting the status of the whole shard from ourselves as we are the secretary",
-        )
-
-        statusMap = Secretary.getInstance().getAllStatus()
-        syncedTimestamp = getSharedState.currentTimestamp
-    } else {
-        log.info(
-            `[getShardStatus] Getting the status of the whole shard from the secretary (${secretary.identity})`,
-        )
-        let jsonCall: RPCRequest = {
-            method: "consensus_routine",
-            params: [
-                {
-                    method: "getSecretaryStatus",
-                    params: [],
-                },
-            ],
-        }
-        let response = await secretary.call(jsonCall)
-        statusMap = new Map(Object.entries(response.response)) as Map<
-            string,
-            ValidatorStatus
-        >
-        syncedTimestamp = response.extra
-    }
-    log.info("[getShardStatus] Status of the whole shard retrieved")
-    // Updating the local statuses from the secretary response
-    Secretary.getInstance().setAllStatus(statusMap)
-    log.info(
-        "[getShardStatus] All statuses updated locally from the secretary response",
-    )
-    // Setting the current timestamp to the one in the response
-    log.info(
-        `[getShardStatus] Setting the current timestamp to the one in the response: ${syncedTimestamp}`,
-    )
-    getSharedState.currentTimestamp = syncedTimestamp
-    return statusMap
-}
-
-// REVIEW Authenticated method calling the secretary endpoint to update the last seen time
-async function updateLastSeen(secretary: Peer): Promise<RPCResponse> {
-    const bufferSignature = await Cryptography.sign(
-        getSharedState.identity.ed25519.publicKey.toString("hex"),
-        getSharedState.identity.ed25519.privateKey,
-    )
-    const signature = bufferSignature.toString("hex")
-    var baseCall: RPCRequest = {
-        method: "consensus_routine",
-        params: [
-            {
-                method: "updateLastSeen",
-                params: [
-                    getSharedState.identity.ed25519.publicKey.toString("hex"),
-                    signature,
-                ],
-            },
-        ],
-    }
-    const response = await secretary.call(baseCall)
-    if (response.result !== 200) {
-        log.warning(
-            `[updateLastSeen] Failed to update the last seen time: ${response.response}`,
-        )
-    }
-    return response
-}
-
-// REVIEW Authenticated method calling the secretary endpoint to set the wait status
-/** REVIEW
- * This method will be ingested by the secretary routine to set the wait status of a validator.
- * This works closely with the secretary routine to coordinate the shard members.
- * It should be ingested by the secretary routine and will set the wait status to true with a target status.
- * Then, when the secretary routine detects that the shard member has finished its task, it will set the wait status to false.
- */
-async function setWaitStatus(
-    secretary: Peer,
-    waitStatus: boolean,
-): Promise<RPCResponse> {
-    const bufferSignature = await Cryptography.sign(
-        getSharedState.identity.ed25519.publicKey.toString("hex"),
-        getSharedState.identity.ed25519.privateKey,
-    )
-    const signature = bufferSignature.toString("hex")
-    var baseCall: RPCRequest = {
-        method: "consensus_routine",
-        params: [
-            {
-                method: "setWaitStatus",
-                params: [
-                    getSharedState.identity.ed25519.publicKey.toString("hex"),
-                    waitStatus,
-                    signature,
-                ],
-            },
-        ],
-    }
-    const response = await secretary.call(baseCall)
-    if (response.result !== 200) {
-        log.warning(
-            `[setWaitStatus] Failed to set the wait status: ${response.response}`,
-        )
-    } else {
-        // Setting a variable to check if we have received the green light from the secretary
-        // NOTE This is used to block the consensus routine until the secretary gives the green light
-        getSharedState.waitingForSecretaryGreenLight = waitStatus
-    }
-    return response
-}
-
-// This method updates the validator status and waits for the shard to be ready
-// NOTE It contains the logic to update the last seen time and set the wait status too
-// ! Move the wait logic to the new secretary methods
-async function _updateValidatorStatus(
-    status: number,
-    wait: boolean = true,
-    // Below args are just for compatibility with the current updateValidatorStatus method
-    pull: boolean = false,
-    stream: boolean = true,
-    updateLastSeenFlag: boolean = true,
-): Promise<any> {
-    // Inferring the shard secretary
+async function updateValidatorPhase(phase: number): Promise<any> {
     const manager = SecretaryManager.getInstance()
-    await manager.setOurValidatorPhase(status, true)
+    await manager.setOurValidatorPhase(phase, true)
 
     // INFO: If it's the first phase, the secretary might not have started the consensus routine yet,
     // Increase retry steps to 10 to wait for the secretary to start
-    const retries = status === 1 ? 10 : 3
+    const retries = phase === 1 ? 10 : 3
     const res = await manager.sendOurValidatorPhaseToSecretary(retries)
 
-    log.debug(`[_updateValidatorStatus 🎉] Validator phase ${status} resolved with value: ${JSON.stringify(res, null, 2)}`)
+    log.debug(
+        `[updateValidatorStatus 🎉] Validator phase ${phase} resolved with value: ${JSON.stringify(
+            res,
+            null,
+            2,
+        )}`,
+    )
 
     return res
-
-    const secretary: Peer = getShardManager.getShard()[0]
-    // Getting the current status of the local node and updating it
-    var currentStatus = getShardManager.getOurValidatorStatus()
-    currentStatus[status] = true // NOTE We are using this to update the status locally and then transmit it to the secretary
-    getShardManager.setValidatorStatus(
-        getSharedState.identity.ed25519.publicKey.toString("hex"),
-        currentStatus,
-    ) // Here we ensure that the status is updated in the singleton too so we can use it to check if the shard is ready
-    // Checking if the secretary is the local node
-    if (
-        secretary.identity ===
-        getSharedState.identity.ed25519.publicKey.toString("hex")
-    ) {
-        log.info("[updateValidatorStatus] Updating the status locally", true)
-        // Updating the status locally
-        Secretary.getInstance().setStatus(
-            getSharedState.identity.ed25519.publicKey.toString("hex"),
-            currentStatus,
-        )
-    } else {
-        log.info(
-            "[updateValidatorStatus] Sending the status update to the secretary",
-            true,
-        )
-        // Sending the status update to the secretary
-        var jsonCall: RPCRequest = {
-            method: "consensus_routine",
-            params: [
-                {
-                    method: "setSecretaryStatus",
-                    params: [
-                        getSharedState.identity.ed25519.publicKey.toString(
-                            "hex",
-                        ),
-                        currentStatus,
-                    ],
-                },
-            ],
-        }
-        const response = await secretary.call(jsonCall)
-        if (response.result !== 200) {
-            log.warning(
-                `[updateValidatorStatus] [ERROR] Failed to set the secretary status: ${response.response}`,
-            )
-            return false
-        } else {
-            log.info(
-                `[updateValidatorStatus] Secretary held status is: ${response.response}`,
-            )
-            // Updating the local statuses from the secretary response
-            const statusMap = new Map(Object.entries(response.response)) as Map<
-                string,
-                ValidatorStatus
-            >
-            Secretary.getInstance().setAllStatus(statusMap)
-            log.info(
-                "[updateValidatorStatus] All statuses updated locally from the secretary response",
-            )
-            // Handle the response and update the local timestamp with the secretary's timestamp
-            getSharedState.currentTimestamp = response.extra
-        }
-    }
-    log.info("[updateValidatorStatus] Status updated")
-    // REVIEW Update last seen logic
-    if (updateLastSeenFlag) {
-        await updateLastSeen(secretary)
-    }
-    // Wait logic
-    // TODO Implement the new wait logic
-    if (wait) {
-        // REVIEW Setting the wait status
-        await setWaitStatus(secretary, true)
-        // return await waitForSecretaryGreenLight(secretary, currentStatus)
-        // ! Remove this once we have the new wait logic
-        return await _oldWaitLogic(secretary, currentStatus)
-    }
-    return true
 }
-
-// REVIEW Wait logic using the new secretary methods
-// ? Should we take advantage of things like updateLastSeen?
-async function waitForSecretaryGreenLight(
-    secretary: Peer,
-    targetStatus: ValidatorStatus,
-): Promise<boolean> {
-    // REVIEW Implement the new wait logic
-    // REVIEW See manageConsensusRoutines.ts for the secretary endpoint that sets this variable to false
-    // REVIEW We need to set a timeout, anyway
-    let timeout = 3000
-    let startTime = Date.now()
-    let curTime = startTime
-    // REVIEW Using a while loop to wait for the green light
-    // Using getSharedState.waitingForSecretaryGreenLight to check if we have received the green light
-    while (getSharedState.waitingForSecretaryGreenLight) {
-        curTime = Date.now()
-        if (curTime - startTime > timeout) {
-            log.warning("[waitForSecretaryGreenLight] Timeout")
-            // ! The timeout here has no effects except disrupting the whole consensus routine
-            // ! Make so that the secretary is warned about the timeout, or find a better way to do this
-            return false
-        }
-    }
-    return true
-}
-
-// TODO Remove this if we are not using it anymore
-async function _oldWaitLogic(
-    secretary: Peer,
-    status: ValidatorStatus,
-): Promise<boolean> {
-    // Waiting for the shard to be ready
-    console.log("[updateValidatorStatus] Waiting for the shard to be ready...")
-    let timeout = 3000
-    let startTime = Date.now()
-    let curTime = startTime
-    let shardStatus = await getShardStatus()
-    let ourStatus = getShardManager.getOurValidatorStatus()
-    let all_synced = false
-    while (!all_synced) {
-        all_synced = true
-        // Updating the current shard status and our status
-        shardStatus = await getShardStatus()
-        ourStatus = getShardManager.getOurValidatorStatus()
-        curTime = Date.now()
-        if (curTime - startTime > timeout) {
-            log.warning(
-                "[updateValidatorStatus] [ERROR] Shard is not ready: " + status,
-            )
-            return false
-        }
-        // Checking each status in the shard to see if it is the same as our status
-        for (const status of shardStatus.values()) {
-            let theirStatusHash = Hashing.sha256(JSON.stringify(status))
-            console.log("theirStatusHash: " + theirStatusHash)
-            let ourStatusHash = Hashing.sha256(JSON.stringify(ourStatus))
-            console.log("ourStatusHash: " + ourStatusHash)
-            if (theirStatusHash !== ourStatusHash) {
-                all_synced = false
-                log.info(
-                    "[updateValidatorStatus] [WAIT] Statuses are not synced (specifically our status is not equal to a status in the shard, us:",
-                    true,
-                )
-                log.info(JSON.stringify(ourStatus, null, 2))
-                log.info("[updateValidatorStatus] [WAIT] Theirs:")
-                log.info(JSON.stringify(status, null, 2))
-
-                // Waiting 500ms before trying again
-                await new Promise(resolve => setTimeout(resolve, 500))
-
-                // REVIEW Update last seen logic
-                await updateLastSeen(secretary)
-
-                break
-            }
-        }
-    }
-    // REVIEW End the wait logic
-    await setWaitStatus(secretary, false)
-    return true
-}
-
-// SECTION Old updateValidatorStatus method and related functions
 
 // Cleanup the consensus state
 function cleanupConsensusState(): void {
@@ -788,43 +380,3 @@ function cleanupConsensusState(): void {
     // INFO: Somehow this is not reset when starting a consensus??
     getSharedState.startingConsensus = false
 }
-
-/* TODO Remove this if we are not using it anymore  
-// REVIEW This function updates and transmits the validator status to the shard
-// NOTE If wait is true, the function will try to wait for the shard to be ready
-// before returning with a timeout to prevent the consensus routine from getting stuck
-// NOTE If pull is true, the function will try to pull the status from each node
-// in the shard before returning to ensure the status is up to date
-async function updateValidatorStatus(
-    status: string,
-    wait: boolean = true,
-    pull: boolean = false,
-    stream: boolean = true,
-): Promise<boolean> {
-    const ourIdentity =
-        getSharedState.identity.ed25519.publicKey.toString("hex")
-    let validatorStatus = getShardManager.shardStatus.get(ourIdentity)
-    validatorStatus[status] = true
-    getShardManager.setValidatorStatus(ourIdentity, validatorStatus)
-    if (stream) {
-        await getShardManager.transmitOurValidatorStatus()
-    }
-    // If not specified otherwise, we wait for the shard to be ready
-    let ourStatus = getShardManager.getOurValidatorStatus()
-    if (wait) {
-        let shardIsReady = await getShardManager.waitUntilShardIsReady(
-            ourStatus,
-            3000,
-            pull,
-        )
-        if (!shardIsReady) {
-            log.warning(
-                "[updateValidatorStatus] [ERROR] Shard is not ready: " + status,
-            )
-            return false
-        }
-        return true
-    }
-    return true
-}
-*/

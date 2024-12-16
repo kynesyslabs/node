@@ -691,9 +691,8 @@ export default class SecretaryManager {
                 params: [
                     {
                         method: "setValidatorPhase",
-                        // REVIEW: Do we need to send our public key?
-                        // What if a malicious node sends the wrong key?
                         params: [
+                            this.ourSignature,
                             this.ourKey,
                             this.ourValidatorPhase.currentPhase,
                         ],
