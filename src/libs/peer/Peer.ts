@@ -89,7 +89,10 @@ export default class Peer {
     
     // Methods to handle the peer
 
-    // INFO Connect to a peer
+    /**
+     * Connect to a peer
+     * @returns True if the peer is online, false otherwise
+     */
     async connect(): Promise<boolean> {
         console.log(
             "[PEER] Testing connection to peer: " + this.connection.string,
@@ -259,6 +262,9 @@ export default class Peer {
                     "] Error making RPC call:" +
                     error,
             )
+            log.error("CONNECTION URL: " + connectionUrl)
+            log.error("REQUEST PAYLOAD: " + JSON.stringify(request, null, 2))
+
             return {
                 result: 500,
                 response: error,

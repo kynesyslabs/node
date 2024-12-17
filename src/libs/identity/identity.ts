@@ -50,6 +50,10 @@ export default class Identity {
     }
 
     async ensureIdentity(): Promise<void> {
+        // const newfile = cryptography.new()
+        // await cryptography.save(newfile, "./demos_identity2")
+        // term.red("Generated new identity: " + newfile.publicKey.toString("hex"))
+
         if (fs.existsSync(getSharedState.identityFile)) {
             // Loading the identity
             // TODO Add load with cryptography

@@ -19,13 +19,13 @@ async function sleep(time: number) {
 
 export default async function mainLoop() {
     log.info("[MAIN LOOP] ✅ Started")
+    // return await consensusRoutine()
     while (getSharedState.runMainLoop) {
         await mainLoopCycle()
     }
 }
 
 async function mainLoopCycle() {
-
     await sleep(500) // Sleep for 500 ms
     log.info(
         "\n============================================================\n",
@@ -56,24 +56,28 @@ async function mainLoopCycle() {
     // we now have a list of online peers that can be used for consensus
 
     // ANCHOR Syncing the blockchain after the peer routine
-    await fastSync() // REVIEW Test here
+    await fastSync([], 'mainloop') // REVIEW Test here
     log.info("[MAIN LOOP] Synced! 🟢", true)
 
     // SECTION Todo list for a typical consensus operation
 
     // ANCHOR Check if we have to forge the block now
     let isConsensusTimeReached = await consensusTime.checkConsensusTime()
-
-    log.info("[MAINLOOP]: about to check if its time for consensus", false)
+    log.info("[MAINLOOP]: about to check if its time for consensus")
 
     if (!isConsensusTimeReached) {
-        log.info("[MAINLOOP]: is not consensus time", false)
+        log.info("[MAINLOOP]: is not consensus time")
         //await sendNodeOnlineTx()
-    } 
+    }
 
     // ? Move this to a standalone method?
     // NOTE We need both the consensus time and the sync status to be true, to avoid
-    // conflicts with the sync loop that would lead to a failure in the consensus mechanism.
+    // conflicts with the sync loop that would alead to a failure in the consensus mechanism.
+    log.debug("[MAINLOOP]: isConsensusTimeReached: " + isConsensusTimeReached)
+    log.debug("[MAINLOOP]: getSharedState.syncStatus: " + getSharedState.syncStatus)
+    log.debug("[MAINLOOP]: startingConsensus: " + getSharedState.startingConsensus)
+    log.debug("[MAINLOOP]: getSharedState.inConsensusLoop: " + getSharedState.inConsensusLoop)
+
     if (
         isConsensusTimeReached &&
         getSharedState.syncStatus &&

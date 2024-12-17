@@ -237,10 +237,13 @@ export default class PeerManager {
             signature: signed_connection_string.toString("hex"),
         }
         // Not awaiting the response to not block the main thread
-        peer.call({
+        peer.longCall({
             method: "hello_peer",
             params: [hello_request],
-        }).then(response => {
+        },
+        true,   250,
+        3
+        ).then(response => {
             PeerManager.helloPeerCallback(response, peer)
         })
         log.info("[Hello Peer] Hello request sent: waiting for response", false)

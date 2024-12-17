@@ -35,19 +35,24 @@ async function sleep(time: number) {
 }
 
 // ? Modularize this function
-export async function fastSync(peers: Peer[] = []): Promise<boolean> {
+export async function fastSync(peers: Peer[] = [], from: string): Promise<boolean> {
     // Getting all the peers if not specified
     if (peers.length === 0) {
         peers = peerManager.getPeers()
     }
     // Getting our data
+    log.debug("[fastSync] Getting our last block number and hash from: " + from)
     let ourLastBlockNumber = await Chain.getLastBlockNumber()
+    log.debug("[fastSync] Our last block number: " + ourLastBlockNumber + " from: " + from)
     let ourLastBlockHash = await Chain.getLastBlockHash()
+    log.debug("[fastSync] Our last block hash: " + ourLastBlockHash + " from: " + from)
     log.info(
         "[fastSync] Our last block number is " +
             ourLastBlockNumber +
             " and our last block hash is " +
-            ourLastBlockHash,
+            ourLastBlockHash +
+            " from: " +
+            from,
     )
     // Asking the peers for the last block number
     let peerLastBlockNumbers = []
@@ -78,13 +83,15 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
                 "[fastSync] Peer " +
                     response[0] +
                     " has last block number: " +
-                    response[1].response,
+                    response[1].response +
+                    " from: " +
+                    from,
             )
         } else {
             peerLastBlockNumbers.push(0)
         }
     }
-    log.info("[fastSync] Peer last block numbers: " + peerLastBlockNumbers)
+    log.info("[fastSync] Peer last block numbers: " + peerLastBlockNumbers + " from: " + from)
     // REVIEW Choose the peer with the highest last block number
     let highestBlockNumber = peerLastBlockNumbers.reduce(
         (max, peer) => Math.max(max, peer),
@@ -93,7 +100,7 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
 
     // If we have the same block number as the highest block number peer, we are already synced
     if (highestBlockNumber === ourLastBlockNumber) {
-        log.info("[fastSync] We are already synced with the peer")
+        log.info("[fastSync] We are already synced with the peer from: " + from)
         getSharedState.syncStatus = true
         return true
     }
@@ -106,7 +113,9 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
         "[fastSync] Peer with highest last block number: " +
             highestBlockNumberPeer.identity +
             " with block number: " +
-            highestBlockNumber,
+            highestBlockNumber +
+            " from: " +
+            from,
     )
     // Verify if the last block hash is coherent
     let lastSyncedBlockRequest: RPCRequest = {
@@ -124,7 +133,7 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
         false,
     )
     if (lastSyncedBlockResponse.result === 200) {
-        console.log("[fastSync] Last synced block response received")
+        console.log("[fastSync] Last synced block response received from: " + from)
         let lastSyncedBlock = lastSyncedBlockResponse.response as Block
         if (lastSyncedBlock.hash !== ourLastBlockHash) {
             log.info("[fastSync] Hash is not coherent")
@@ -135,7 +144,9 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
         }
         console.log(
             "[fastSync] Hash is coherent: we can sync with: " +
-                highestBlockNumberPeer.identity,
+                highestBlockNumberPeer.identity +
+                " from: " +
+                from,
         )
     }
     // REVIEW: lowest or highest?
@@ -143,7 +154,7 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
     // ? Way more error handling needed
     let blockToAsk = ourLastBlockNumber + 1
     while (blockToAsk <= highestBlockNumber) {
-        console.log("[fastSync] Asking peer for block: " + blockToAsk)
+        console.log("[fastSync] Asking peer for block: " + blockToAsk + " from: " + from)
         let blockRequest: RPCRequest = {
             method: "nodeCall",
             params: [
@@ -161,12 +172,12 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
 
         if (blockResponse.result === 200) {
             console.log(
-                "[fastSync] Block response received for block: " + blockToAsk,
+                "[fastSync] Block response received for block: " + blockToAsk + " from: " + from,
             )
             let block = blockResponse.response as Block
             Chain.insertBlock(block, [], null, false)
             // REVIEW Merge the peerlist
-            log.info("[fastSync] Merging peers from block: " + block.hash)
+            log.info("[fastSync] Merging peers from block: " + block.hash + " from: " + from)
             let mergedPeerlist = await mergePeerlist(block)
             log.info("[fastSync] Merged peers from block: " + mergedPeerlist)   
             // REVIEW Parse the txs hashes in the block
@@ -200,6 +211,9 @@ export async function fastSync(peers: Peer[] = []): Promise<boolean> {
         blockToAsk++
     }
     getSharedState.syncStatus = true
+
+    const lastBlockNumber = await Chain.getLastBlockNumber()
+    log.info("[fastSync] Last block number after sync: " + lastBlockNumber + " from: " + from)
     return true
 }
 

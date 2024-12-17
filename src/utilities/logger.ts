@@ -14,6 +14,11 @@ export default class log {
     static LOG_CRITICAL_FILE = this.LOGS_DIR + "/critical.log"
     static LOG_CUSTOM_PREFIX = this.LOGS_DIR + "/custom_"
 
+    // Overide switch for logging to terminal
+    static logToTerminal = {
+        peerGossip: true,
+    }
+
     static setLogsDir(port?: number) {
         if (!port) {
             port = getSharedState.serverPort
@@ -74,9 +79,10 @@ export default class log {
         cleanFile: boolean = false,
     ) {
         const logEntry = `[INFO] [${this.getTimestamp()}] ${message}\n`
-        if (logToTerminal) {
+        if (this.logToTerminal[logfile] && logToTerminal) {
             term.bold(logEntry.trim())
         }
+
         if (cleanFile) {
             fs.rmSync(this.LOG_CUSTOM_PREFIX + logfile + ".log", {
                 force: true,

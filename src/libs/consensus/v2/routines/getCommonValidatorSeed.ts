@@ -6,9 +6,21 @@ import Hashing from "src/libs/crypto/hashing"
 import log from "src/utilities/logger"
 
 // REVIEW Probably to improve entropy
-export default async function getCommonValidatorSeed(): Promise<string> {
+export default async function getCommonValidatorSeed(): Promise<{
+    commonValidatorSeed: string
+    lastBlockNumber: number
+}> {
     var lastThreeBlocks: Blocks[] = []
     const lastBlockNumber = await Chain.getLastBlockNumber()
+    log.debug("LAST BLOCK NUMBER: " + lastBlockNumber)
+    log.debug("--------------------------------")
+    const lastBlock = await Chain.getLastBlock()
+    log.debug("LAST BLOCK: " + lastBlock.hash)
+    log.debug("--------------------------------")
+
+    getSharedState.currentValidatorSeed = lastBlock.number.toString()
+    return { commonValidatorSeed: lastBlock.number.toString(), lastBlockNumber }
+
     // If we have less than 3 blocks, the hash is calculated from the last block // ? Maybe we should revamp this a little
     if (lastBlockNumber < 3) {
         const block = await Chain.getBlockByNumber(lastBlockNumber)
@@ -23,8 +35,26 @@ export default async function getCommonValidatorSeed(): Promise<string> {
     // Getting the proposers of the last three blocks
     const proposers = lastThreeBlocks.map(block => block.proposer)
     const hashes = lastThreeBlocks.map(block => block.hash)
-    const validationDatas = lastThreeBlocks.map(block => block.validation_data)
+    const validationDatas = lastThreeBlocks.map(block => {
+        // Sort the signatures by the key and create a string
+        try {
+            const signatures = JSON.parse(block.validation_data)["signatures"]
+            const sortedSignatures = Object.keys(signatures)
+                .sort()
+                .map(key => "key:" + key + "signature:" + signatures[key] + ";")
+                .join("")
+            return sortedSignatures
+        } catch (error) {
+            return block.validation_data
+        }
+    })
     const lastTimestamps = lastThreeBlocks.map(block => block.content.timestamp)
+
+    log.debug("proposers: " + JSON.stringify(proposers))
+    log.debug("hashes: " + JSON.stringify(hashes))
+    log.debug("validationDatas: " + JSON.stringify(validationDatas))
+    log.debug("lastTimestamps: " + JSON.stringify(lastTimestamps))
+    log.debug("--------------------------------")
     // Hash everything
     const hashedProposers = Hashing.sha256(JSON.stringify(proposers))
     const hashedHashes = Hashing.sha256(JSON.stringify(hashes))
@@ -32,12 +62,21 @@ export default async function getCommonValidatorSeed(): Promise<string> {
         JSON.stringify(validationDatas),
     )
     const hashedTimestamps = Hashing.sha256(JSON.stringify(lastTimestamps))
+
+    log.debug("hashedProposers: " + hashedProposers)
+    log.debug("hashedHashes: " + hashedHashes)
+    log.debug("hashedValidationDatas: " + hashedValidationDatas)
+    log.debug("hashedTimestamps: " + hashedTimestamps)
     // Get the common validator seed
     const commonValidatorSeed = Hashing.sha256(
-        hashedProposers + hashedHashes + hashedValidationDatas + hashedTimestamps,
+        hashedProposers +
+            hashedHashes +
+            hashedValidationDatas +
+            hashedTimestamps,
     )
+
     // NOTE The common validator seed is set in the sharedState as soon as it is computed
     getSharedState.currentValidatorSeed = commonValidatorSeed
     log.info(`Common validator seed: ${commonValidatorSeed}`)
-    return commonValidatorSeed
+    return { commonValidatorSeed, lastBlockNumber }
 }

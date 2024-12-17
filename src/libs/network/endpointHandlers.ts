@@ -429,7 +429,9 @@ export default class ServerHandlers {
 
         switch (request.message) {
             case "getMempool":
-                response.response = await Mempool.getMempool("ServerHandlers.getMempool")
+                response.response = await Mempool.getMempool(
+                    "ServerHandlers.getMempool",
+                )
                 //console.log(response)
                 response.result = 200
                 response.require_reply = false
@@ -473,10 +475,14 @@ export default class ServerHandlers {
         let require_reply = false
         const response = await Mempool.receive(content.data as MempoolData)
 
+        const ourId = getSharedState.identity.ed25519.publicKey.toString("hex")
+        const ourDate = new Date().toISOString()
         return {
             result: response ? 200 : 400,
             response: response,
-            extra: response ? "Mempool received" : "Mempool not merged",
+            extra:
+                (response ? "Mempool received by" : "Mempool not merged") +
+                ` by: ${ourId} at ${ourDate}`,
             require_reply: false,
         }
     }

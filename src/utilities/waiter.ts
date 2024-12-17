@@ -1,9 +1,10 @@
-import { TimeoutError } from "src/errors"
+import { TimeoutError } from "../exceptions"
 import log from "./logger"
 
 type WaitEntry = {
     resolve: (value: any) => void
     reject: (reason?: any) => void
+    promise: Promise<any>
     timeoutId: NodeJS.Timeout
     id: string
 
@@ -14,11 +15,13 @@ type WaitEntry = {
 }
 
 export class Waiter {
+    static preHeld: Map<string, null> = new Map()
     static waitList: Map<string, WaitEntry> = new Map()
     static keys = {
         GREEN_LIGHT: "greenLight",
         SHARD_READY: "shardReady",
         SET_WAIT_STATUS: "setWaitStatus",
+        WAIT_FOR_SECRETARY_ROUTINE: "waitForSecretaryRoutine",
         // etc
     }
 
@@ -31,13 +34,19 @@ export class Waiter {
      */
     static async wait<T = any>(
         id: string,
-        timeout: number = 30000,
+        timeout: number = 10000,
     ): Promise<T> {
         if (Waiter.waitList.has(id)) {
             throw new Error(`[WAITER] Already waiting for id: ${id}`)
         }
 
-        return new Promise<T>((resolve, reject) => {
+        if (Waiter.preHeld.has(id)) {
+            log.debug(`[WAITER] Found pre-held key: ${id}`)
+            Waiter.preHeld.delete(id)
+            return null
+        }
+
+        const promise = new Promise<T>((resolve, reject) => {
             const timeoutId = setTimeout(() => {
                 Waiter.waitList.delete(id)
                 reject(
@@ -52,10 +61,14 @@ export class Waiter {
                 reject,
                 timeoutId,
                 id,
+                promise: null
             })
 
             log.debug(`[WAITER] Created wait entry for ${id}`)
         })
+
+        Waiter.waitList.get(id).promise = promise
+        return promise
     }
 
     /**
@@ -64,17 +77,24 @@ export class Waiter {
      * @param id - The id of the promise to resolve
      * @param data - The data to resolve the promise with
      */
-    static resolve(id: string, data?: any) {
+    static resolve<T = null>(id: string, data: T = null): T {
         const entry = Waiter.waitList.get(id)
         if (!entry) {
             log.warning(`[WAITER] No wait entry found for ${id}`)
-            return
+            return null
         }
 
         clearTimeout(entry.timeoutId)
+        Waiter.preHeld.delete(id)
         Waiter.waitList.delete(id)
         entry.resolve(data)
         log.debug(`[WAITER] Resolved wait entry for ${id}`)
+
+        return data || null
+    }
+
+    static preHold(id: string) {
+        Waiter.preHeld.set(id, null)
     }
 
     /**

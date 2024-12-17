@@ -25,15 +25,15 @@ export async function checkConsensusTime(
     let delta = currentTimestamp - lastTimestamp
     let consensusIntervalTime =
         getSharedState.getConsensusTime() || 10 // 10 seconds, use 10000 for 10 seconds in ms
-    log.info("[CONSENSUS TIME] lastTimestamp: " + lastTimestamp, false)
-    log.info("[CONSENSUS TIME] currentTimestamp: " + currentTimestamp, false)
-    log.info("[CONSENSUS TIME] delta: " + delta, false)
-    log.info("[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime, false)
+    log.info("[CONSENSUS TIME] lastTimestamp: " + lastTimestamp, true)
+    log.info("[CONSENSUS TIME] currentTimestamp: " + currentTimestamp, true)
+    log.info("[CONSENSUS TIME] delta: " + delta, true)
+    log.info("[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime, true)
     //process.exit(0)
 
     // If the delta is greater than the consensus interval time, then the consensus time has passed
     log.info("[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime, false)
-    if (delta > consensusIntervalTime) {
+    if (delta >= consensusIntervalTime) {
         isConsensusTime = true
         log.info("[CONSENSUS TIME] Consensus time reached", true)
     } else {
