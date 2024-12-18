@@ -1,3 +1,6 @@
+/**
+ * Thrown when a Waiter event times out
+ */
 export class TimeoutError extends Error {
     constructor(message: string) {
         super(message)
@@ -5,9 +8,12 @@ export class TimeoutError extends Error {
     }
 }
 
-export class WaiterIndexError extends Error {
+/**
+ * Thrown when a Waiter event is aborted
+ */
+export class AbortError extends Error {
     constructor(message: string) {
         super(message)
-        this.name = "WaiterIndexError"
+        this.name = "AbortError"
     }
 }
