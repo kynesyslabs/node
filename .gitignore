@@ -12,6 +12,7 @@ data/evmChains/*.json
 data/chain.db
 docker/node_base
 last_crash_memory_usage.txt
+node[0-9]*
 
 .vscode
 

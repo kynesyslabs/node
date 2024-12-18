@@ -1,1 +1,0 @@
-sudo ./run -u http://127.0.0.1:53550 -c true
