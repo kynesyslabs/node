@@ -50,9 +50,22 @@ export default class Identity {
     }
 
     async ensureIdentity(): Promise<void> {
+        // const filename = ".demos_identity2"
         // const newfile = cryptography.new()
-        // await cryptography.save(newfile, "./demos_identity2")
-        // term.red("Generated new identity: " + newfile.publicKey.toString("hex"))
+        // await cryptography.save(newfile, filename)
+
+        // console.error("New identity file: " + filename + "\n")
+        // console.error(
+        //     "Generated private key: " +
+        //         "0x" +
+        //         newfile.privateKey.toString("hex") +
+        //         "\n",
+        // )
+        // console.error(
+        //     "Generated public key: " + newfile.publicKey.toString("hex") + "\n",
+        // )
+
+        // process.exit(0)
 
         if (fs.existsSync(getSharedState.identityFile)) {
             // Loading the identity

@@ -1,1 +1,0 @@
-sudo ./run -u http://127.0.0.1:53559 -d 5339 -p 53559 -c true -i .demos_identity2
