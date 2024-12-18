@@ -8,7 +8,7 @@ import { Waiter } from "src/utilities/waiter"
 import { _required as required } from "@kynesyslabs/demosdk/websdk"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
-import { TimeoutError } from "src/exceptions"
+import { TimeoutError, AbortError } from "src/exceptions"
 import Cryptography from "src/libs/crypto/cryptography"
 
 // ANCHOR SecretaryManager
@@ -64,15 +64,19 @@ export default class SecretaryManager {
         )
         log.debug("SECRETARY: " + this.secretary.identity)
 
+        // INFO: If some nodes crash, kill the node for debugging!
         if (this.shard.members.length < 4 && this.shard.blockRef > 10) {
-            // INFO: If we are the only node in the shard kill node for debugging!
-            log.debug("Only one member in the shard. Exiting ...")
+            log.debug(
+                `Only ${this.shard.members.length} members in the shard. Exiting ...`,
+            )
             process.exit(0)
         }
 
         // INFO: Start the secretary routine
         if (this.checkIfWeAreSecretary()) {
-            this.secretaryRoutine()
+            this.secretaryRoutine().then(() => {
+                log.debug("[SECRETARY ROUTINE] Secretary routine finished 🎉")
+            })
         }
 
         // INFO: Initializing the validation phases
@@ -203,6 +207,14 @@ export default class SecretaryManager {
                         null,
                         "secretaryRoutine_TIMEOUT",
                     )
+                }
+
+                if (error instanceof AbortError) {
+                    log.debug(
+                        "[SECRETARY ROUTINE] AbortError for SET_WAIT_STATUS caught, exiting the secretary routine",
+                    )
+
+                    return
                 }
             }
         }
@@ -746,8 +758,6 @@ export default class SecretaryManager {
         // INFO: Send the request and handle the response non-blocking
         sendStatus().then(handleSendStatusRes)
 
-        // FIXME: Handle the secretary not being in the consensus routine
-
         try {
             // INFO: Wait for the green light
             log.debug("[SEND OUR VALIDATOR PHASE] Waiting for the green light")
@@ -765,6 +775,14 @@ export default class SecretaryManager {
                 )
             }
 
+            if (error instanceof AbortError) {
+                log.debug(
+                    "[SEND OUR VALIDATOR PHASE] AbortError caught, resolving with null",
+                )
+
+                return null
+            }
+
             await this.handleSecretaryGoneOffline()
 
             // INFO: Resend the request and handle the response
@@ -777,19 +795,21 @@ export default class SecretaryManager {
         SecretaryManager.instance.runSecretaryRoutine = false
         SecretaryManager.instance = null
 
+        // TODO: Abort all waiters
+
         // INFO: Resolve all hanging waiters
         if (Waiter.isWaiting(Waiter.keys.GREEN_LIGHT)) {
             log.debug(
                 "GREEN_LIGHT waiter found WHEN ENDING THE CONSENSUS ..., resolving it",
             )
-            Waiter.resolve(Waiter.keys.GREEN_LIGHT)
+            Waiter.abort(Waiter.keys.GREEN_LIGHT)
         }
 
         if (Waiter.isWaiting(Waiter.keys.SET_WAIT_STATUS)) {
             log.debug(
                 "SET_WAIT_STATUS waiter found WHEN ENDING THE CONSENSUS ..., resolving it",
             )
-            Waiter.resolve(Waiter.keys.SET_WAIT_STATUS)
+            Waiter.abort(Waiter.keys.SET_WAIT_STATUS)
         }
     }
 

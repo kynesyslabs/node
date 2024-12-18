@@ -20,6 +20,10 @@ To understand how the `SecretaryManager` class works, please follow the followin
     - "setValidatorPhase" handler: How the secretary receives a validator phase from a node.
     - "greenlight" handler: How a node receives a greenlight from the secretary.
 
+
+> !TIP
+> See `@/libs/consensus/v2/types/shardTypes.ts` and `@/libs/consensus/v2/types/validationStatusTypes.ts` for the shard and validation phase types.
+
 ## The Secretary Routine
 
 The secretary routine is a while loop that runs until the consensus ends. The secretary routine runs as follows:
