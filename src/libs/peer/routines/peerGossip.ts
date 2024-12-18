@@ -66,6 +66,7 @@ async function performPeerGossip() {
 
     if (differentPeerlistPeers.length === 0) {
         log.custom("peerGossip", "No peers to sync with", true)
+        // process.exit(0)
         return
     }
 
@@ -105,18 +106,22 @@ async function peersGossipProcess(
         // INFO: Filter out failed responses and convert lists to Peer objects
         .filter(response => response.result === 200)
         .map(response => {
+            log.debug(
+                "[peerGossip] response: " + JSON.stringify(response, null, 2),
+            )
             return response.response.map((peer: Peer) => {
                 const peerInstance = new Peer()
 
-            peerInstance.identity = peer.identity
-            peerInstance.connection = peer.connection
-            peerInstance.verification = peer.verification
-            peerInstance.sync = peer.sync
-            peerInstance.status = peer.status
+                peerInstance.identity = peer.identity
+                peerInstance.connection = peer.connection
+                peerInstance.verification = peer.verification
+                peerInstance.sync = peer.sync
+                peerInstance.status = peer.status
 
-            return peerInstance
+                return peerInstance
+            })
         })
-    })
+
     peerlistsToMerge.push(ourPeerlist)
 
     log.custom("peerGossip", "Merging peerlists", false)
@@ -130,18 +135,44 @@ async function peersGossipProcess(
  * @returns {Promise<boolean>} - Returns true when merge is complete.
  */
 async function mergePeerlists(peerlists: Peer[][]): Promise<boolean> {
-    let mergedPeerlist: Peer[] = []
+    // let mergedPeerlist: Peer[] = []
+    const peerMap = new Map<string, Peer>()
+
     for (let peerlist of peerlists) {
         for (let peer of peerlist) {
             if (!peer) {
                 log.warning("[peerGossip] Peer is undefined, skipping")
                 continue
             }
-            if (!mergedPeerlist.includes(peer)) {
-                mergedPeerlist.push(peer)
+
+            if (peerMap.has(peer.identity)) {
+                const existingPeer = peerMap.get(peer.identity)
+                // INFO: Update the peer
+                if (peer.sync.block > existingPeer.sync.block) {
+                    existingPeer.sync.block = peer.sync.block
+                    existingPeer.sync.block_hash = peer.sync.block_hash
+                    existingPeer.sync.status = peer.sync.status
+                }
+                continue
             }
+
+            peerMap.set(peer.identity, peer)
+
+            // if (!mergedPeerlist.includes(peer)) {
+            //     mergedPeerlist.push(peer)
+            // }
         }
     }
+
+    const mergedPeerlist = Array.from(peerMap.values())
+
+    // for (let peer of mergedPeerlist) {
+    //     if (!peer.sync.block_hash) {
+    //         log.debug("found invalid sync status")
+    //         process.exit(0)
+    //     }
+    // }
+
     mergedPeerlist.sort((a, b) => a.identity.localeCompare(b.identity))
     PeerManager.getInstance().setPeers(mergedPeerlist)
     return true

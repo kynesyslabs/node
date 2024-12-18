@@ -46,10 +46,7 @@ export default class PeerManager {
 
     // Loading the peer list from the demos_peer.json
     loadPeerList() {
-        let rawPeerList = fs.readFileSync(
-            getSharedState.peerListFile,
-            "utf8",
-        )
+        let rawPeerList = fs.readFileSync(getSharedState.peerListFile, "utf8")
         let peerList = JSON.parse(rawPeerList)
         // Creating a peer object for each peer in the peer list, assigning the connection string and adding it to the peer list
         for (const peer in peerList) {
@@ -87,9 +84,11 @@ export default class PeerManager {
         console.log("[PeerManager] Getting all peers...")
         console.log("[PeerManager] peers: " + peers)
         console.log("[PeerManager] connections: " + connections)
+
         const actorList: Peer[] = []
         const connectedList: Peer[] = []
         const authenticatedList: Peer[] = []
+
         //console.log(this.peerList)
         for (const peer in this.peerList) {
             console.log("[PeerManager] Getting peer " + peer)
@@ -108,13 +107,16 @@ export default class PeerManager {
                 connectedList.push(_peer)
             }
         }
+
         // Merging and returning
         if (peers) {
             actorList.push(...authenticatedList)
         }
+
         if (connections) {
             actorList.push(...connectedList)
         }
+
         console.log(
             "[PEERMANAGER] Retrieved and filtered actor list length: " +
                 actorList.length,
@@ -149,8 +151,13 @@ export default class PeerManager {
             peerInstance.connection.string = _peer.connection.string
             log.info(
                 "[PEERMANAGER] Checking online status of peer " +
-                    peerInstance.identity, false)
-            if (peerInstance.identity == getSharedState.identity.ed25519.publicKey.toString("hex")) {
+                    peerInstance.identity,
+                false,
+            )
+            if (
+                peerInstance.identity ==
+                getSharedState.identity.ed25519.publicKey.toString("hex")
+            ) {
                 log.info("[PEERMANAGER] Peer is us: skipping", false)
                 continue
             }
@@ -163,31 +170,78 @@ export default class PeerManager {
     addPeer(peer: Peer) {
         log.info("[PEERMANAGER] Adding peer", false)
         if (peer.identity === "placeholder") {
-            log.warning("[PEERMANAGER] No identity detected: refusing to add peer", true)
-            log.info("[PEERMANAGER] Peer: " + JSON.stringify(peer, null, 2), false)
+            log.warning(
+                "[PEERMANAGER] No identity detected: refusing to add peer",
+                true,
+            )
+            log.info(
+                "[PEERMANAGER] Peer: " + JSON.stringify(peer, null, 2),
+                false,
+            )
             return false
         }
+
         // REVIEW check for duplicates
         const identity = peer.identity
         let action = "added"
-        if (this.peerList[identity]) {
+        const existingPeer = this.peerList[identity]
+
+        if (existingPeer) {
             console.log("[PEERMANAGER] Peer already exists: updating it")
             action = "updated"
+
+            const { block, status } = existingPeer.sync
+            const { timestamp, ready, online } = existingPeer.status
+
+            // INFO: When overwriting an existing peer, only update properties
+            // if the new peer has data && data is more recent
+            if (peer.sync.block > block && peer.sync.status !== status) {
+                existingPeer.sync.block = peer.sync.block
+                existingPeer.sync.block_hash = peer.sync.block_hash
+                existingPeer.sync.status = peer.sync.status
+            }
+
+            if (peer.status.timestamp > timestamp) {
+                existingPeer.status.timestamp = peer.status.timestamp
+                existingPeer.status.ready = peer.status.ready
+                existingPeer.status.online = peer.status.online
+            }
         } else {
             log.info("[PEERMANAGER] Adding new peer: " + peer.identity, true)
+            this.peerList[identity] = peer
         }
-        this.peerList[identity] = peer
+
         log.info("[PEERMANAGER] Peer " + action, false)
         log.info("[PEERMANAGER] Identity: " + peer.identity, false)
-        log.info("[PEERMANAGER] Connection string: " + peer.connection.string, false)
+        log.info(
+            "[PEERMANAGER] Connection string: " + peer.connection.string,
+            false,
+        )
         if (!peer.connection.string) {
             log.warning("[PEERMANAGER] No connection string detected", true)
         }
         return true
     }
 
+    /**
+     * Updates the sync data for our peer in the peerlist
+     */
+    updateOurPeerSyncData() {
+        const identity =
+            getSharedState.identity.ed25519.publicKey.toString("hex")
+        const peer = this.peerList[identity]
+
+        peer.sync.status = getSharedState.syncStatus
+        peer.sync.block = getSharedState.lastBlockNumber
+        peer.sync.block_hash = getSharedState.lastBlockHash
+    }
+
     addOfflinePeer(peerInstance: Peer) {
-        log.info("[PEERMANAGER] Adding offline peer " + peerInstance.connection.string, false)
+        log.info(
+            "[PEERMANAGER] Adding offline peer " +
+                peerInstance.connection.string,
+            false,
+        )
         // REVIEW: Why did we have an if here?
         // if (this.offlinePeers[peerInstance.identity]) {
         //     this.offlinePeers[peerInstance.identity] = peerInstance
@@ -196,7 +250,7 @@ export default class PeerManager {
         log.info("[PEERMANAGER] Offline peers: " + this.offlinePeers, false)
     }
 
-    removeOnlinePeer(identity: string){
+    removeOnlinePeer(identity: string) {
         delete this.peerList[identity]
     }
 
@@ -225,10 +279,15 @@ export default class PeerManager {
             connection_string,
             getSharedState.identity.ed25519.privateKey,
         )
-        log.info("[Hello Peer] Signing connection string: " + connection_string, false)
+        log.info(
+            "[Hello Peer] Signing connection string: " + connection_string,
+            false,
+        )
         log.info(
             "[Hello Peer] Signed connection string: " +
-                ForgeToHex(signed_connection_string), false)
+                ForgeToHex(signed_connection_string),
+            false,
+        )
 
         // Sending the transmission to the peer
         const hello_request: HelloPeerRequest = {
@@ -237,12 +296,14 @@ export default class PeerManager {
             signature: signed_connection_string.toString("hex"),
         }
         // Not awaiting the response to not block the main thread
-        peer.longCall({
-            method: "hello_peer",
-            params: [hello_request],
-        },
-        true,   250,
-        3
+        peer.longCall(
+            {
+                method: "hello_peer",
+                params: [hello_request],
+            },
+            true,
+            250,
+            3,
         ).then(response => {
             PeerManager.helloPeerCallback(response, peer)
         })
@@ -251,7 +312,10 @@ export default class PeerManager {
 
     // Callback for the hello peer
     static helloPeerCallback(response: RPCResponse, peer: Peer) {
-        log.info("[Hello Peer] Response received from peer: " + peer.identity, false)
+        log.info(
+            "[Hello Peer] Response received from peer: " + peer.identity,
+            false,
+        )
         //console.log(response) // ? Delete this if not needed
         // TODO Test and Finish this
         // REVIEW is the message the response itself?
@@ -260,7 +324,8 @@ export default class PeerManager {
         if (response.result === 200) {
             log.info(
                 "[Hello Peer] Peer is online, replied and recognized us. Adding to peer list",
-                false)
+                false,
+            )
             //console.log(peer)
             PeerManager.getInstance().addPeer(peer)
             PeerManager.getInstance().removeOfflinePeer(peer.identity)
@@ -269,7 +334,8 @@ export default class PeerManager {
                 "[Hello Peer] Failed to connect to peer: " +
                     peer.identity +
                     ". Adding to offline list",
-                false)
+                false,
+            )
             // Add the peer to the offline list
             PeerManager.getInstance().addOfflinePeer(peer)
             PeerManager.getInstance().removeOnlinePeer(peer.identity)

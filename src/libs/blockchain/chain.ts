@@ -34,6 +34,7 @@ import Transaction from "./transaction"
 import { Peer } from "../peer"
 import Mempool from "./mempool"
 import log from "src/utilities/logger"
+import { getSharedState } from "src/utilities/sharedState"
 
 export default class Chain {
     private static instance: Chain
@@ -98,7 +99,10 @@ export default class Chain {
             .createQueryBuilder("block")
             .orderBy("block.number", "DESC")
             .getOne()
-        log.debug("[getLastBlockNumber] Returning the last block number: " + lastBlock.number)
+        log.debug(
+            "[getLastBlockNumber] Returning the last block number: " +
+                lastBlock.number,
+        )
         return lastBlock ? lastBlock.number : 0
     }
     // INFO Get the last block hash
@@ -112,7 +116,10 @@ export default class Chain {
             .createQueryBuilder("block")
             .orderBy("block.number", "DESC")
             .getOne()
-        log.debug("[getLastBlockHash] Returning the last block hash: " + lastBlock.hash)
+        log.debug(
+            "[getLastBlockHash] Returning the last block hash: " +
+                lastBlock.hash,
+        )
         return lastBlock?.hash
     }
     // INFO Get any block by its number
@@ -189,7 +196,6 @@ export default class Chain {
         const GCRRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
-
 
         const GCRSearch = (await GCRRepository.findOneBy({
             publicKey: ILike(address),
@@ -396,6 +402,8 @@ export default class Chain {
                     " does not exist: inserting a new block",
             )
             let result = await blockRepository.save(newBlock)
+            getSharedState.lastBlockNumber = block.number
+            getSharedState.lastBlockHash = block.hash
             //log.info(result)
 
             // REVIEW We then add the transactions to the Transactions repository

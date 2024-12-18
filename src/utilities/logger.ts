@@ -17,6 +17,7 @@ export default class log {
     // Overide switch for logging to terminal
     static logToTerminal = {
         peerGossip: true,
+        last_shard: true
     }
 
     static setLogsDir(port?: number) {

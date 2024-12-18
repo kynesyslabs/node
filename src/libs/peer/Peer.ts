@@ -86,7 +86,7 @@ export default class Peer {
         }
         return responses
     }
-    
+
     // Methods to handle the peer
 
     /**

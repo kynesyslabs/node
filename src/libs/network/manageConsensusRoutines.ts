@@ -52,6 +52,7 @@ export default async function manageConsensusRoutines(
     const inConsensus = isConsensusTime || isConsensusRunning
     if (!inConsensus) {
         log.error("[manageConsensusRoutines] Consensus time not reached")
+        log.error("payload: " + JSON.stringify(payload, null, 2))
         response.result = 400
         response.response =
             "Consensus time not reached (checked by manageConsensusRoutines)"

@@ -46,7 +46,19 @@ export default class sharedState {
     runMainLoop: boolean = true
     mainLoopPaused: boolean = false
     consensusMode: boolean = false
-    syncStatus: boolean = false
+
+    // Sync
+    _syncStatus: boolean = false
+    set syncStatus(value: boolean) {
+        this._syncStatus = value
+        // INFO: Update our peer object when we get a new sync status
+        PeerManager.getInstance().updateOurPeerSyncData()
+    }
+
+    get syncStatus(): boolean {
+        return this._syncStatus
+    }
+
     peerRoutineRunning: number = 0
     // SECTION shared state variables
     shard: Peer[]
@@ -54,9 +66,21 @@ export default class sharedState {
     currentValidatorSeed: string
     identity: Identity
     lastConsensusTime: number = 0
+
     // SECTION Consensus states
     candidateBlock: Block
-    waitingForSecretaryGreenLight: boolean = false
+    lastBlockNumber: number = 0
+    _lastBlockHash: string = ""
+
+    set lastBlockHash(value: string) {
+        this._lastBlockHash = value
+        // INFO: Update our peer object when we get a new block
+        PeerManager.getInstance().updateOurPeerSyncData()
+    }
+
+    get lastBlockHash(): string {
+        return this._lastBlockHash
+    }
 
     // SECTION Configuration
     rpcFee: number = parseInt(process.env.RPC_FEE_PERCENT) // TODO Implement // Percentage of the fee to be charged for the rpc

@@ -35,7 +35,10 @@ async function sleep(time: number) {
 }
 
 // ? Modularize this function
-export async function fastSync(peers: Peer[] = [], from: string): Promise<boolean> {
+export async function fastSync(
+    peers: Peer[] = [],
+    from: string,
+): Promise<boolean> {
     // Getting all the peers if not specified
     if (peers.length === 0) {
         peers = peerManager.getPeers()
@@ -43,9 +46,19 @@ export async function fastSync(peers: Peer[] = [], from: string): Promise<boolea
     // Getting our data
     log.debug("[fastSync] Getting our last block number and hash from: " + from)
     let ourLastBlockNumber = await Chain.getLastBlockNumber()
-    log.debug("[fastSync] Our last block number: " + ourLastBlockNumber + " from: " + from)
+    log.debug(
+        "[fastSync] Our last block number: " +
+            ourLastBlockNumber +
+            " from: " +
+            from,
+    )
     let ourLastBlockHash = await Chain.getLastBlockHash()
-    log.debug("[fastSync] Our last block hash: " + ourLastBlockHash + " from: " + from)
+    log.debug(
+        "[fastSync] Our last block hash: " +
+            ourLastBlockHash +
+            " from: " +
+            from,
+    )
     log.info(
         "[fastSync] Our last block number is " +
             ourLastBlockNumber +
@@ -91,7 +104,12 @@ export async function fastSync(peers: Peer[] = [], from: string): Promise<boolea
             peerLastBlockNumbers.push(0)
         }
     }
-    log.info("[fastSync] Peer last block numbers: " + peerLastBlockNumbers + " from: " + from)
+    log.info(
+        "[fastSync] Peer last block numbers: " +
+            peerLastBlockNumbers +
+            " from: " +
+            from,
+    )
     // REVIEW Choose the peer with the highest last block number
     let highestBlockNumber = peerLastBlockNumbers.reduce(
         (max, peer) => Math.max(max, peer),
@@ -102,6 +120,7 @@ export async function fastSync(peers: Peer[] = [], from: string): Promise<boolea
     if (highestBlockNumber === ourLastBlockNumber) {
         log.info("[fastSync] We are already synced with the peer from: " + from)
         getSharedState.syncStatus = true
+        peerManager.updateOurPeerSyncData()
         return true
     }
     // Otherwise, we need to sync
@@ -133,7 +152,9 @@ export async function fastSync(peers: Peer[] = [], from: string): Promise<boolea
         false,
     )
     if (lastSyncedBlockResponse.result === 200) {
-        console.log("[fastSync] Last synced block response received from: " + from)
+        console.log(
+            "[fastSync] Last synced block response received from: " + from,
+        )
         let lastSyncedBlock = lastSyncedBlockResponse.response as Block
         if (lastSyncedBlock.hash !== ourLastBlockHash) {
             log.info("[fastSync] Hash is not coherent")
@@ -154,7 +175,15 @@ export async function fastSync(peers: Peer[] = [], from: string): Promise<boolea
     // ? Way more error handling needed
     let blockToAsk = ourLastBlockNumber + 1
     while (blockToAsk <= highestBlockNumber) {
-        console.log("[fastSync] Asking peer for block: " + blockToAsk + " from: " + from)
+        log.debug("[fastSync] Sleeping for 1 second")
+        await sleep(1000)
+        log.debug(
+            "[fastSync] Asking peer for block: " +
+                blockToAsk +
+                " from: " +
+                from,
+        )
+
         let blockRequest: RPCRequest = {
             method: "nodeCall",
             params: [
@@ -172,14 +201,22 @@ export async function fastSync(peers: Peer[] = [], from: string): Promise<boolea
 
         if (blockResponse.result === 200) {
             console.log(
-                "[fastSync] Block response received for block: " + blockToAsk + " from: " + from,
+                "[fastSync] Block response received for block: " +
+                    blockToAsk +
+                    " from: " +
+                    from,
             )
             let block = blockResponse.response as Block
             Chain.insertBlock(block, [], null, false)
             // REVIEW Merge the peerlist
-            log.info("[fastSync] Merging peers from block: " + block.hash + " from: " + from)
+            log.info(
+                "[fastSync] Merging peers from block: " +
+                    block.hash +
+                    " from: " +
+                    from,
+            )
             let mergedPeerlist = await mergePeerlist(block)
-            log.info("[fastSync] Merged peers from block: " + mergedPeerlist)   
+            log.info("[fastSync] Merged peers from block: " + mergedPeerlist)
             // REVIEW Parse the txs hashes in the block
             log.info("[fastSync] Asking for transactions in the block", true)
             let txs = await askTxsForBlock(block, highestBlockNumberPeer)
@@ -210,10 +247,16 @@ export async function fastSync(peers: Peer[] = [], from: string): Promise<boolea
         }
         blockToAsk++
     }
+
     getSharedState.syncStatus = true
 
     const lastBlockNumber = await Chain.getLastBlockNumber()
-    log.info("[fastSync] Last block number after sync: " + lastBlockNumber + " from: " + from)
+    log.info(
+        "[fastSync] Last block number after sync: " +
+            lastBlockNumber +
+            " from: " +
+            from,
+    )
     return true
 }
 

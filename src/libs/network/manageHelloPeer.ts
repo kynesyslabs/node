@@ -39,7 +39,10 @@ export async function manageHelloPeer(
     log.info("[Hello Peer Listener] Building peer object...")
     let peerObject = new Peer()
     peerObject.identity = content.publicKey
-    if (peerObject.identity == getSharedState.identity.ed25519.publicKey.toString("hex")) {
+    if (
+        peerObject.identity ==
+        getSharedState.identity.ed25519.publicKey.toString("hex")
+    ) {
         console.log("[Hello Peer Listener] Peer is us: skipping")
         response.result = 200
         response.response = true
@@ -67,7 +70,7 @@ export async function manageHelloPeer(
         response.response = false
         response.extra = "invalid authentication info"
         return response
-    } 
+    }
 
     // Add the peer as authenticated
     peerObject.verification.status = true

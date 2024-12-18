@@ -6,7 +6,9 @@ import log from "src/utilities/logger"
 
 export default async function getShard(seed: string): Promise<Peer[]> {
     // ! we need to get the peers from the last 3 blocks too
-    const peers = await PeerManager.getInstance().getOnlinePeers()
+    const allPeers = await PeerManager.getInstance().getOnlinePeers()
+    const peers = allPeers.filter(peer => peer.sync.status)
+
     // Select up to 10 peers from the list using the seed as a source of randomness
     let maxShardSize = 10
     if (peers.length < 10) {
@@ -22,9 +24,7 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     // REVIEW: sort available peers by .identity (which is a hex string)
     // before choosing the peers for a uniform sample across nodes
     availablePeers.sort((a, b) => a.identity.localeCompare(b.identity))
-    log.debug(
-        "availablePeers: " + JSON.stringify(availablePeers.map(p => p.identity)),
-    )
+    log.debug("availablePeers: " + JSON.stringify(availablePeers, null, 2))
     // REVIEW: check if this is the right way to do it
     // NOTE Choosing the secretary by randomly ordering the list: the first one is the secretary
     for (let i = 0; i < maxShardSize && availablePeers.length > 0; i++) {
