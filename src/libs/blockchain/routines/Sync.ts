@@ -417,8 +417,8 @@ export async function fastSync(
     peers: Peer[] = [],
     from: string,
 ): Promise<boolean> {
-    await fastSyncRoutine(peers)
-    getSharedState.syncStatus = true
+    const synced = await fastSyncRoutine(peers)
+    getSharedState.syncStatus = synced
 
     const lastBlockNumber = await Chain.getLastBlockNumber()
     log.info(
