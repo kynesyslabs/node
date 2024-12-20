@@ -224,6 +224,14 @@ export default class PeerManager {
                 existingPeer.status.ready = peer.status.ready
                 existingPeer.status.online = peer.status.online
             }
+
+            if (peer.connection.string !== existingPeer.connection.string) {
+                log.debug("[PEERMANAGER] Updating connection string")
+                log.debug("[PEERMANAGER] Existing connection string: " + existingPeer.connection.string)
+                log.debug("[PEERMANAGER] New connection string: " + peer.connection.string)
+                existingPeer.connection.string = peer.connection.string
+
+            }
         } else {
             log.info("[PEERMANAGER] Adding new peer: " + peer.identity, true)
             this.peerList[identity] = peer
