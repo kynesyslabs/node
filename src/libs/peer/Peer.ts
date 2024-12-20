@@ -5,6 +5,12 @@ import { getSharedState } from "src/utilities/sharedState"
 import Cryptography from "../crypto/cryptography"
 import { NodeCall } from "../network/manageNodeCall"
 
+export interface SyncData {
+    status: boolean
+    block: number
+    block_hash: string
+}
+
 export default class Peer {
     // connection informations
     public connection: {

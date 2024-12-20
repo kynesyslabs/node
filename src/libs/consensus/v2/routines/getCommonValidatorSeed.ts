@@ -18,8 +18,8 @@ export default async function getCommonValidatorSeed(): Promise<{
     log.debug("LAST BLOCK: " + lastBlock.hash)
     log.debug("--------------------------------")
 
-    getSharedState.currentValidatorSeed = lastBlock.number.toString()
-    return { commonValidatorSeed: lastBlock.number.toString(), lastBlockNumber }
+    // getSharedState.currentValidatorSeed = lastBlock.number.toString()
+    // return { commonValidatorSeed: lastBlock.number.toString(), lastBlockNumber }
 
     // If we have less than 3 blocks, the hash is calculated from the last block // ? Maybe we should revamp this a little
     if (lastBlockNumber < 3) {

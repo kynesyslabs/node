@@ -9,7 +9,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import Peer from "./Peer"
+import Peer, { SyncData } from "./Peer"
 import log from "src/utilities/logger"
 import Cryptography from "../crypto/cryptography"
 import { getSharedState } from "src/utilities/sharedState"
@@ -35,6 +35,13 @@ export default class PeerManager {
     private constructor() {
         this.peerList = {}
         this.offlinePeers = {}
+    }
+
+    get ourSyncData() {
+        const identity =
+            getSharedState.identity.ed25519.publicKey.toString("hex")
+        const peer = this.peerList[identity]
+        return peer.sync
     }
 
     static getInstance(): PeerManager {
@@ -70,6 +77,14 @@ export default class PeerManager {
 
     getPeers(): Peer[] {
         return this._getActors(true, false)
+    }
+
+    getPeer(identity: string): Peer {
+        const peer = this.peerList[identity]
+
+        log.debug("[PeerManager] Peer: " + JSON.stringify(peer, null, 2))
+
+        return peer
     }
 
     getAll(): Peer[] {
@@ -195,7 +210,10 @@ export default class PeerManager {
 
             // INFO: When overwriting an existing peer, only update properties
             // if the new peer has data && data is more recent
-            if (peer.sync.block > block && peer.sync.status !== status) {
+            if (
+                peer.sync.block > block ||
+                (peer.sync.block == block && peer.sync.status !== status)
+            ) {
                 existingPeer.sync.block = peer.sync.block
                 existingPeer.sync.block_hash = peer.sync.block_hash
                 existingPeer.sync.status = peer.sync.status
@@ -279,6 +297,7 @@ export default class PeerManager {
             connection_string,
             getSharedState.identity.ed25519.privateKey,
         )
+
         log.info(
             "[Hello Peer] Signing connection string: " + connection_string,
             false,
@@ -294,6 +313,11 @@ export default class PeerManager {
             url: connection_string,
             publicKey: our_id.toString("hex"),
             signature: signed_connection_string.toString("hex"),
+            syncData: {
+                block: getSharedState.lastBlockNumber,
+                block_hash: getSharedState.lastBlockHash,
+                status: getSharedState.syncStatus,
+            },
         }
         // Not awaiting the response to not block the main thread
         peer.longCall(
@@ -326,7 +350,24 @@ export default class PeerManager {
                 "[Hello Peer] Peer is online, replied and recognized us. Adding to peer list",
                 false,
             )
-            //console.log(peer)
+            log.info(
+                "[Hello Peer] Received message: " + response.extra.msg,
+                false,
+            )
+            log.info(
+                "[Hello Peer] Received sync data: " + response.extra.syncData,
+                false,
+            )
+
+            if (response.extra.syncData) {
+                peer.sync = response.extra.syncData
+            }
+
+            log.debug(
+                "[Hello Peer] Final Peer sync data: " +
+                    JSON.stringify(peer.sync, null, 2),
+            )
+
             PeerManager.getInstance().addPeer(peer)
             PeerManager.getInstance().removeOfflinePeer(peer.identity)
         } else {

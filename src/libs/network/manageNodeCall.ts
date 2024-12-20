@@ -22,7 +22,10 @@ import getBlockByHash from "./routines/nodecalls/getBlockByHash"
 import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
-import { GlobalChangeRegistry, GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
+import {
+    GlobalChangeRegistry,
+    GCRExtended,
+} from "src/model/entities/GCR/GlobalChangeRegistry"
 
 export interface NodeCall {
     message: string
@@ -95,10 +98,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             break
         case "getBlockByNumber":
             console.log(`get block by number ${data.blockNumber}`)
-            result = await getBlockByNumber(data)
-            response.response = result.response
-            response.extra = result.extra
-            break
+            return await getBlockByNumber(data)
         case "getBlockByHash":
             // Check if we have .hash or .blockHash
             if (data.hash) {
@@ -174,7 +174,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "No address specified"
                 break
             }
-            nStat = (await GCR.getGCRNativeStatus(data.address)) as GlobalChangeRegistry
+            nStat = (await GCR.getGCRNativeStatus(
+                data.address,
+            )) as GlobalChangeRegistry
             response.response = nStat.details.content.nonce
             break
         case "getPeerTime":
