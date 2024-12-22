@@ -227,10 +227,24 @@ export default class PeerManager {
 
             if (peer.connection.string !== existingPeer.connection.string) {
                 log.debug("[PEERMANAGER] Updating connection string")
-                log.debug("[PEERMANAGER] Existing connection string: " + existingPeer.connection.string)
-                log.debug("[PEERMANAGER] New connection string: " + peer.connection.string)
-                existingPeer.connection.string = peer.connection.string
+                log.debug(
+                    "[PEERMANAGER] Existing connection string: " +
+                        existingPeer.connection.string,
+                )
+                log.debug(
+                    "[PEERMANAGER] New connection string: " +
+                        peer.connection.string,
+                )
 
+                log.debug(
+                    "[PEERMANAGER] Existing peer: " +
+                        JSON.stringify(existingPeer, null, 2),
+                )
+                log.debug(
+                    "[PEERMANAGER] New peer: " + JSON.stringify(peer, null, 2),
+                )
+                existingPeer.connection.string = peer.connection.string
+                process.exit(1)
             }
         } else {
             log.info("[PEERMANAGER] Adding new peer: " + peer.identity, true)
@@ -298,7 +312,7 @@ export default class PeerManager {
         getSharedState.peerRoutineRunning += 1 // Adding one to the peer routine running counter
 
         // TODO test and finalize this method
-        log.info("[Hello Peer] Saying hello to peer " + peer.identity, false)
+        log.debug("[Hello Peer] Saying hello to peer " + peer.identity)
         const our_id = getSharedState.identity.ed25519.publicKey
         let connection_string = getSharedState.exposedUrl // ? Are we sure about this
         let signed_connection_string = Cryptography.sign(
@@ -306,14 +320,12 @@ export default class PeerManager {
             getSharedState.identity.ed25519.privateKey,
         )
 
-        log.info(
+        log.debug(
             "[Hello Peer] Signing connection string: " + connection_string,
-            false,
         )
-        log.info(
+        log.debug(
             "[Hello Peer] Signed connection string: " +
                 ForgeToHex(signed_connection_string),
-            false,
         )
 
         // Sending the transmission to the peer
@@ -327,6 +339,8 @@ export default class PeerManager {
                 status: getSharedState.syncStatus,
             },
         }
+
+        log.debug("[Hello Peer] Hello request: " + JSON.stringify(hello_request, null, 2))
         // Not awaiting the response to not block the main thread
         peer.longCall(
             {
@@ -339,7 +353,7 @@ export default class PeerManager {
         ).then(response => {
             PeerManager.helloPeerCallback(response, peer)
         })
-        log.info("[Hello Peer] Hello request sent: waiting for response", false)
+        log.debug("[Hello Peer] Hello request sent: waiting for response")
     }
 
     // Callback for the hello peer

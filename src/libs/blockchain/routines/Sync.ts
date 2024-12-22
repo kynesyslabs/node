@@ -210,7 +210,7 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
             },
         ],
     }
-    let blockResponse = await peer.longCall(blockRequest, false, 250, 3)
+    let blockResponse = await peer.longCall(blockRequest, false, 250, 3, [404])
 
     // INFO: Handle max retries reached
     if (blockResponse.result === 400) {
@@ -276,11 +276,23 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
     return false
 }
 
-async function requestBlocks(
-    peer: Peer,
-    blockToAsk: number,
-    highestBlockNumber: number,
-) {
+async function waitForNextBlock(peer: Peer) {
+    log.debug("[waitForNextBlock] Waiting for next block")
+    const latestBlock = () =>
+        peerManager
+            .getAll()
+            .reduce((max, peer) => Math.max(max, peer.sync.block), 0)
+
+    while (getSharedState.lastBlockNumber >= latestBlock()) {
+        await sleep(250)
+    }
+
+    log.debug("[waitForNextBlock] NEXT BLOCK GENERATED. DOWNLOADING...")
+
+    return await downloadBlock(peer, getSharedState.lastBlockNumber + 1)
+}
+
+async function requestBlocks(peer: Peer) {
     // REVIEW: lowest or highest?
     // Sync the blocks one by one starting from the lowest block number that we do not have
     // ? Way more error handling needed
@@ -299,7 +311,7 @@ async function requestBlocks(
     ) {
         const blockToAsk = getSharedState.lastBlockNumber + 1
         // log.debug("[fastSync] Sleeping for 1 second")
-        // await sleep(1000)
+        // await sleep(250)
 
         log.debug("[fastSync] Asking peer for block: " + blockToAsk)
         try {
@@ -405,12 +417,13 @@ async function fastSyncRoutine(peers: Peer[] = []) {
         return false
     }
 
-    let blockToAsk = ourLastBlockNumber + 1
-    return await requestBlocks(
-        highestBlockNumberPeer,
-        blockToAsk,
-        highestBlockNumber,
-    )
+    const synced = await requestBlocks(highestBlockNumberPeer)
+
+    if (synced && getSharedState.fastSyncCount === 0) {
+        await waitForNextBlock(highestBlockNumberPeer)
+    }
+
+    return synced
 }
 
 export async function fastSync(

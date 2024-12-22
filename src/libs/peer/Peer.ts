@@ -131,12 +131,13 @@ export default class Peer {
         isAuthenticated: boolean = true,
         sleepTime: number = 1000,
         retries: number = 3,
+        allowedErrors: number[] = [],
     ): Promise<RPCResponse> {
         let tries = 0
         let response = null
         while (tries < retries) {
             response = await this.call(request, isAuthenticated)
-            if (response.result === 200) {
+            if (response.result === 200 || allowedErrors.includes(response.result)) {
                 return response
             }
             tries++
@@ -260,6 +261,7 @@ export default class Peer {
             }
             return response.data
         } catch (error) {
+            console.error(error)
             log.error(
                 "[RPC Call] [" +
                     method +

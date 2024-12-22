@@ -50,6 +50,7 @@ export default async function manageConsensusRoutines(
     const isConsensusTime = await checkConsensusTime(true, 2)
     const isConsensusRunning = isConsensusAlreadyRunning()
     const inConsensus = isConsensusTime || isConsensusRunning
+
     if (!inConsensus) {
         log.error("[manageConsensusRoutines] Consensus time not reached")
         log.error("payload: " + JSON.stringify(payload, null, 2))
@@ -61,6 +62,7 @@ export default async function manageConsensusRoutines(
     } else {
         if (!isConsensusAlreadyRunning()) {
             //log.info("[manageConsensusRoutines] Starting the consensus routine as we are in consensus time window but not in consensus mode yet")
+            log.debug("[manageConsensusRoutines] STARTING COSENSUS FROM CONSENSUS HANDLER")
             consensusRoutine() // Asynchronous function     to avoid blocking the main thread
         }
         log.info(

@@ -48,11 +48,16 @@ export default class sharedState {
     consensusMode: boolean = false
 
     // Sync
+    fastSyncCount: number = 0
     _syncStatus: boolean = false
-    set syncStatus(value: boolean) {
-        this._syncStatus = value
+    set syncStatus(synced: boolean) {
+        this._syncStatus = synced
         // INFO: Update our peer object when we get a new sync status
         PeerManager.getInstance().updateOurPeerSyncData()
+
+        if (synced) {
+            this.fastSyncCount += 1
+        }
     }
 
     get syncStatus(): boolean {
