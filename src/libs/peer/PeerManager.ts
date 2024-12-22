@@ -235,16 +235,7 @@ export default class PeerManager {
                     "[PEERMANAGER] New connection string: " +
                         peer.connection.string,
                 )
-
-                log.debug(
-                    "[PEERMANAGER] Existing peer: " +
-                        JSON.stringify(existingPeer, null, 2),
-                )
-                log.debug(
-                    "[PEERMANAGER] New peer: " + JSON.stringify(peer, null, 2),
-                )
                 existingPeer.connection.string = peer.connection.string
-                process.exit(1)
             }
         } else {
             log.info("[PEERMANAGER] Adding new peer: " + peer.identity, true)
