@@ -261,7 +261,6 @@ export default class Peer {
             }
             return response.data
         } catch (error) {
-            console.error(error)
             log.error(
                 "[RPC Call] [" +
                     method +
