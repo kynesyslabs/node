@@ -5,18 +5,31 @@ import { Blocks } from "src/model/entities/Blocks"
 import Hashing from "src/libs/crypto/hashing"
 import log from "src/utilities/logger"
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
 // REVIEW Probably to improve entropy
 export default async function getCommonValidatorSeed(): Promise<{
     commonValidatorSeed: string
     lastBlockNumber: number
 }> {
     var lastThreeBlocks: Blocks[] = []
-    const lastBlockNumber = await Chain.getLastBlockNumber()
-    log.debug("LAST BLOCK NUMBER: " + lastBlockNumber)
+    let lastBlock = await Chain.getLastBlock()
+
+    log.debug("LAST BLOCK NUMBER: " + lastBlock.number)
     log.debug("--------------------------------")
-    const lastBlock = await Chain.getLastBlock()
     log.debug("LAST BLOCK: " + lastBlock.hash)
     log.debug("--------------------------------")
+
+    if (lastBlock.number !== getSharedState.lastBlockNumber) {
+        await sleep(250)
+
+        lastBlock = await Chain.getLastBlock()
+        log.debug("SLEPT LAST BLOCK NUMBER: " + lastBlock.number)
+        log.debug("--------------------------------")
+        log.debug("SLEPT LAST BLOCK: " + lastBlock.hash)
+        log.debug("--------------------------------")
+    }
+    const lastBlockNumber = lastBlock.number
 
     // getSharedState.currentValidatorSeed = lastBlock.number.toString()
     // return { commonValidatorSeed: lastBlock.number.toString(), lastBlockNumber }
