@@ -19,16 +19,6 @@ export default async function getCommonValidatorSeed(): Promise<{
     log.debug("--------------------------------")
     log.debug("LAST BLOCK: " + lastBlock.hash)
     log.debug("--------------------------------")
-
-    if (lastBlock.number !== getSharedState.lastBlockNumber) {
-        await sleep(250)
-
-        lastBlock = await Chain.getLastBlock()
-        log.debug("SLEPT LAST BLOCK NUMBER: " + lastBlock.number)
-        log.debug("--------------------------------")
-        log.debug("SLEPT LAST BLOCK: " + lastBlock.hash)
-        log.debug("--------------------------------")
-    }
     const lastBlockNumber = lastBlock.number
 
     // getSharedState.currentValidatorSeed = lastBlock.number.toString()

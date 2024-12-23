@@ -36,6 +36,8 @@ import Mempool from "./mempool"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
 export default class Chain {
     private static instance: Chain
 
@@ -216,10 +218,19 @@ export default class Chain {
     static async getLastBlock(): Promise<Blocks> {
         const db = await Datasource.getInstance()
         const blockRepository = db.getDataSource().getRepository(Blocks)
-        const lastBlock = await blockRepository
+        let lastBlock = await blockRepository
             .createQueryBuilder("block")
             .orderBy("block.number", "DESC")
             .getOne()
+
+        if (lastBlock.number !== getSharedState.lastBlockNumber) {
+            log.error("[getLastBlock] Last block number mismatch")
+            await sleep(250)
+            lastBlock = await blockRepository
+                .createQueryBuilder("block")
+                .orderBy("block.number", "DESC")
+                .getOne()
+        }
 
         return lastBlock
     }
@@ -404,6 +415,14 @@ export default class Chain {
             let result = await blockRepository.save(newBlock)
             getSharedState.lastBlockNumber = block.number
             getSharedState.lastBlockHash = block.hash
+
+            log.debug(
+                "[insertBlock] lastBlockNumber: " +
+                    getSharedState.lastBlockNumber,
+            )
+            log.debug(
+                "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
+            )
             //log.info(result)
 
             // REVIEW We then add the transactions to the Transactions repository

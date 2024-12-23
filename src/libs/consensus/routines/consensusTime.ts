@@ -19,6 +19,10 @@ export async function checkConsensusTime(
     // Using the average timestamp set in the last block
     //let lastTimestamp = await getSharedState.getLastConsensusTime() // ? Should we check it from the blockchain each time?
     let lastBlock = await Chain.getLastBlock()
+    log.debug("LAST BLOCK NUMBER: " + lastBlock.number)
+    log.debug("--------------------------------")
+    log.debug("LAST BLOCK: " + lastBlock.hash)
+    log.debug("--------------------------------")
     let lastTimestamp = lastBlock.content.timestamp
     // REVIEW Using the UTC timestamp as per mainLoop.ts settings
     let currentTimestamp = getNetworkTimestamp() // Date.now()
