@@ -14,6 +14,20 @@ export default async function getPeerlist(): Promise<Peer[]> {
     for (let peer of socketized_response) {
         // peer.connection.socket = null // ? What is this
         response.push(peer)
+
+        if (
+            peer.identity ===
+                getSharedState.identity.ed25519.publicKey.toString("hex") &&
+            peer.connection.string.startsWith("http://127.0.0.1")
+        ) {
+            log.debug("Was returning local connection string")
+            log.debug(JSON.stringify(peer, null, 2))
+            log.debug("getSharedState.exposedUrl: " + getSharedState.exposedUrl)
+
+            peer.connection.string = getSharedState.exposedUrl
+            log.debug(JSON.stringify(peer, null, 2))
+            // process.exit(0)
+        }
     }
 
     // Ordering the peerlist in an alphanumeric way

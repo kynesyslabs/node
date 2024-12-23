@@ -262,6 +262,11 @@ export default class PeerManager {
             getSharedState.identity.ed25519.publicKey.toString("hex")
         const peer = this.peerList[identity]
 
+        if (!peer) {
+            log.error("[PEERMANAGER] Peer not found: " + identity)
+            return
+        }
+
         peer.sync.status = getSharedState.syncStatus
         peer.sync.block = getSharedState.lastBlockNumber
         peer.sync.block_hash = getSharedState.lastBlockHash

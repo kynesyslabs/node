@@ -2,6 +2,7 @@
 
 PG_PORT=5332
 GIT_PULL=true
+PEER_LIST_FILE="demos_peerlist.json"
 
 # trap ctrl-c and call ctrl_c()
 trap ctrl_c INT
@@ -57,12 +58,13 @@ CLEAN="false"
 PORT=53550
 
 # Getting arguments
-while getopts "p:d:c:i:n:u:" opt; do
+while getopts "p:d:c:i:n:u:l:" opt; do
     case $opt in
         p) PORT=$OPTARG;;
         d) PG_PORT=$OPTARG;;
         c) CLEAN=$OPTARG;;
         i) IDENTITY_FILE=$OPTARG;;
+        l) PEER_LIST_FILE=$OPTARG;;
         n) GIT_PULL=false;;
         u) EXPOSED_URL=$OPTARG;;
         #...
@@ -81,6 +83,7 @@ echo "PORT=$PORT"
 echo "PG_PORT=$PG_PORT"
 echo "IDENTITY_FILE=$IDENTITY_FILE"
 echo "EXPOSED_URL=$EXPOSED_URL"
+echo "PEER_LIST_FILE=$PEER_LIST_FILE"
 
 # Check if Bun is available and set the start command
 if command -v bun &> /dev/null; then
@@ -99,6 +102,8 @@ echo "Starting the node with $START_COMMAND"
 export PG_PORT=$PG_PORT
 export IDENTITY_FILE=$IDENTITY_FILE
 export EXPOSED_URL=$EXPOSED_URL
+export PEER_LIST_FILE=$PEER_LIST_FILE
+
 # Database management with proper folder based on the port
 PG_FOLDER="postgres_${PG_PORT}"
 if [ ! -d "$PG_FOLDER" ]; then
