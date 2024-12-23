@@ -154,7 +154,14 @@ export default async function manageConsensusRoutines(
         // SECTION: New Secretary Manager class handlers
         case "setValidatorPhase": {
             try {
-                const [peerSignature, peerKey, phase] = payload.params
+                const [peerSignature, peerKey, phase, seed] = payload.params
+
+                const manager = SecretaryManager.getInstance()
+
+                if (seed !== manager.shard.CVSA){
+                    log.error("Invalid seed detected")
+                    process.exit(0)
+                }
 
                 // INFO: Authenticate the request
                 const isSignatureValid = Cryptography.verify(
@@ -170,7 +177,6 @@ export default async function manageConsensusRoutines(
                     return response
                 }
 
-                const manager = SecretaryManager.getInstance()
 
                 // INFO: If we receive a setValidatorPhase request, and the
                 // secretary routine has not started, wait for it to start

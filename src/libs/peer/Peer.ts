@@ -300,3 +300,5 @@ export default class Peer {
         return await this.fetch("info")
     }
 }
+
+// TODO: Use internal connection string for local node in Peer.call
