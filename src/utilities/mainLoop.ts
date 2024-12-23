@@ -59,6 +59,7 @@ async function mainLoopCycle() {
     await fastSync([], 'mainloop') // REVIEW Test here
     log.info("[MAIN LOOP] Synced! 🟢", true)
 
+    await PeerManager.getInstance().sayHelloToAllPeers()
     // SECTION Todo list for a typical consensus operation
 
     // ANCHOR Check if we have to forge the block now
@@ -165,6 +166,7 @@ async function peerRoutine(): Promise<Peer[]> {
     // Returns the list of currently online peers
     return currentlyOnlinePeers
 }
+
 
 // Diagnostic
 

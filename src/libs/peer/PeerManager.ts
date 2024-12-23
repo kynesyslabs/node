@@ -336,7 +336,10 @@ export default class PeerManager {
             },
         }
 
-        log.debug("[Hello Peer] Hello request: " + JSON.stringify(hello_request, null, 2))
+        log.debug(
+            "[Hello Peer] Hello request: " +
+                JSON.stringify(hello_request, null, 2),
+        )
         // Not awaiting the response to not block the main thread
         peer.longCall(
             {
@@ -401,5 +404,13 @@ export default class PeerManager {
         }
         getSharedState.peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
         //process.exit(0)
+    }
+
+    async sayHelloToAllPeers() {
+        const allPeers = this.getPeers()
+
+        await Promise.all(
+            allPeers.map(peer => PeerManager.sayHelloToPeer(peer)),
+        )
     }
 }
