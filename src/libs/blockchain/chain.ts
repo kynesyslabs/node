@@ -223,15 +223,6 @@ export default class Chain {
             .orderBy("block.number", "DESC")
             .getOne()
 
-        if (lastBlock.number !== getSharedState.lastBlockNumber) {
-            log.error("[getLastBlock] Last block number mismatch")
-            await sleep(250)
-            lastBlock = await blockRepository
-                .createQueryBuilder("block")
-                .orderBy("block.number", "DESC")
-                .getOne()
-        }
-
         return lastBlock
     }
 

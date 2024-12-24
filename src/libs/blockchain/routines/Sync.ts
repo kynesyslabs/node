@@ -234,7 +234,7 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
             return false
         }
 
-        Chain.insertBlock(block, [], null, false)
+        await Chain.insertBlock(block, [], null, false)
         console.log(
             "[fastSync] Block inserted successfully at the head of the chain!",
         )
