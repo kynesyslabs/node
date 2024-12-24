@@ -62,7 +62,9 @@ export default async function manageConsensusRoutines(
     } else {
         if (!isConsensusAlreadyRunning()) {
             //log.info("[manageConsensusRoutines] Starting the consensus routine as we are in consensus time window but not in consensus mode yet")
-            log.debug("[manageConsensusRoutines] STARTING COSENSUS FROM CONSENSUS HANDLER")
+            log.debug(
+                "[manageConsensusRoutines] STARTING COSENSUS FROM CONSENSUS HANDLER",
+            )
             consensusRoutine() // Asynchronous function     to avoid blocking the main thread
         }
         log.info(
@@ -158,9 +160,18 @@ export default async function manageConsensusRoutines(
 
                 const manager = SecretaryManager.getInstance()
 
-                if (seed !== manager.shard.CVSA){
-                    log.error("Invalid seed detected")
-                    process.exit(0)
+                if (seed !== manager.shard.CVSA) {
+                    setTimeout(() => {
+                        log.error("Invalid seed detected")
+                        process.exit(0)
+                    }, 500)
+
+                    return {
+                        result: 200,
+                        response: "Invalid seed detected",
+                        extra: 450,
+                        require_reply: false,
+                    }
                 }
 
                 // INFO: Authenticate the request
@@ -176,7 +187,6 @@ export default async function manageConsensusRoutines(
                     response.extra = "Signature verification failed"
                     return response
                 }
-
 
                 // INFO: If we receive a setValidatorPhase request, and the
                 // secretary routine has not started, wait for it to start

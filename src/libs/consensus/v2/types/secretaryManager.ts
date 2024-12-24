@@ -742,6 +742,11 @@ export default class SecretaryManager {
                     JSON.stringify(res, null, 2),
             )
 
+            if (res.extra == 450) {
+                log.debug("[SEND OUR VALIDATOR PHASE] Invalid seed detected")
+                process.exit(0)
+            }
+
             // INFO: Extract the greenlight status and resolve the waiter
             const greenlight = res.extra.greenlight
             const timestamp = res.extra.timestamp
