@@ -256,6 +256,7 @@ export default class Peer {
                         identity: pubkey,
                         signature: signature,
                     },
+                    timeout: 3000,
                 },
             )
             log.info(
