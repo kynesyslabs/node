@@ -162,6 +162,8 @@ export default async function manageConsensusRoutines(
 
                 if (seed !== manager.shard.CVSA) {
                     setTimeout(() => {
+                        log.debug("our seed: " + manager.shard.CVSA)
+                        log.debug("payload params: " + JSON.stringify(payload.params, null, 2))
                         log.error("Invalid seed detected")
                         process.exit(0)
                     }, 500)
