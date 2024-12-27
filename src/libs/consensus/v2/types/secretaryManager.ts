@@ -696,7 +696,8 @@ export default class SecretaryManager {
                             this.ourSignature,
                             this.ourKey,
                             this.ourValidatorPhase.currentPhase,
-                            this.shard.CVSA
+                            this.shard.CVSA,
+                            this.shard.blockRef
                         ],
                     },
                 ],

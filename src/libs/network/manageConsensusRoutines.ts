@@ -156,14 +156,22 @@ export default async function manageConsensusRoutines(
         // SECTION: New Secretary Manager class handlers
         case "setValidatorPhase": {
             try {
-                const [peerSignature, peerKey, phase, seed] = payload.params
+                const [peerSignature, peerKey, phase, seed, blockRef] =
+                    payload.params
 
                 const manager = SecretaryManager.getInstance()
 
-                if (seed !== manager.shard.CVSA) {
+                if (
+                    manager.shard.blockRef == blockRef &&
+                    seed !== manager.shard.CVSA
+                ) {
+                    // TODO: Remove this block after testing!
                     setTimeout(() => {
                         log.debug("our seed: " + manager.shard.CVSA)
-                        log.debug("payload params: " + JSON.stringify(payload.params, null, 2))
+                        log.debug(
+                            "payload params: " +
+                                JSON.stringify(payload.params, null, 2),
+                        )
                         log.error("Invalid seed detected")
                         process.exit(0)
                     }, 500)
