@@ -5,21 +5,24 @@ import { Blocks } from "src/model/entities/Blocks"
 import Hashing from "src/libs/crypto/hashing"
 import log from "src/utilities/logger"
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
 // REVIEW Probably to improve entropy
 export default async function getCommonValidatorSeed(): Promise<{
     commonValidatorSeed: string
     lastBlockNumber: number
 }> {
     var lastThreeBlocks: Blocks[] = []
-    const lastBlockNumber = await Chain.getLastBlockNumber()
-    log.debug("LAST BLOCK NUMBER: " + lastBlockNumber)
+    let lastBlock = await Chain.getLastBlock()
+
+    log.debug("LAST BLOCK NUMBER: " + lastBlock.number)
     log.debug("--------------------------------")
-    const lastBlock = await Chain.getLastBlock()
     log.debug("LAST BLOCK: " + lastBlock.hash)
     log.debug("--------------------------------")
+    const lastBlockNumber = lastBlock.number
 
-    getSharedState.currentValidatorSeed = lastBlock.number.toString()
-    return { commonValidatorSeed: lastBlock.number.toString(), lastBlockNumber }
+    // getSharedState.currentValidatorSeed = lastBlock.number.toString()
+    // return { commonValidatorSeed: lastBlock.number.toString(), lastBlockNumber }
 
     // If we have less than 3 blocks, the hash is calculated from the last block // ? Maybe we should revamp this a little
     if (lastBlockNumber < 3) {

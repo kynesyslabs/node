@@ -513,16 +513,7 @@ export default class SecretaryManager {
         src?: string,
     ) {
         required(this.checkIfWeAreSecretary(), "We are not the secretary")
-
         log.debug("RELEASING WAITING MEMBERS FROM: " + src)
-        log.debug(
-            "SHARD MEMBERS: " +
-                JSON.stringify(
-                    this.shard.members.map(m => m.identity),
-                    null,
-                    2,
-                ),
-        )
 
         if (!phase) {
             phase = this.ourValidatorPhase.currentPhase
@@ -533,6 +524,8 @@ export default class SecretaryManager {
         if (waitingMembers.length == 0) {
             waitingMembers = this.getWaitingMembers()
         }
+
+        log.debug("WAITING MEMBERS: " + JSON.stringify(waitingMembers, null, 2))
         const promises = []
 
         for (const pubKey of waitingMembers) {
@@ -551,21 +544,33 @@ export default class SecretaryManager {
                 ],
             }
 
-            log.debug(
-                `[SECRETARY ROUTINE] Sending greenlight to ${pubKey} with timestamp ${this.blockTimestamp} and phase ${phase}`,
-            )
             // INFO: Update the wait status of the member to false
             this.shard.validationPhases[pubKey].waitStatus = false
-
-            log.debug(`[SECRETARY ROUTINE] Sending greenlight to ${pubKey}`)
             const member = this.shard.members.find(m => m.identity === pubKey)
-            promises.push(member.longCall(request, true, 250, 8))
+
+            log.debug(
+                `[SECRETARY ROUTINE] Sending greenlight to ${member.identity}`,
+            )
+
+            log.debug(
+                "Peer to receive greenlight: " +
+                    JSON.stringify(member, null, 2),
+            )
+            log.debug(
+                `[SECRETARY ROUTINE] Sending greenlight to ${member.identity} with timestamp ${this.blockTimestamp} and phase ${phase}`,
+            )
+            promises.push(member.longCall(request, true, 250, 4))
         }
 
         const results = await Promise.all(promises)
 
         for (const [index, result] of results.entries()) {
             const pubKey = waitingMembers[index]
+            const member = this.shard.members.find(m => m.identity === pubKey)
+            log.debug(
+                "Peer who received greenlight: " +
+                    JSON.stringify(member, null, 2),
+            )
 
             if (result.result == 400) {
                 log.debug(
@@ -579,6 +584,7 @@ export default class SecretaryManager {
 
             if (result.result == 200) {
                 log.debug("[SECRETARY ROUTINE] Greenlight sent to " + pubKey)
+                log.debug("Response: " + JSON.stringify(result, null, 2))
                 continue
             }
 
@@ -690,6 +696,8 @@ export default class SecretaryManager {
                             this.ourSignature,
                             this.ourKey,
                             this.ourValidatorPhase.currentPhase,
+                            this.shard.CVSA,
+                            this.shard.blockRef
                         ],
                     },
                 ],
@@ -734,6 +742,11 @@ export default class SecretaryManager {
                 "[SEND OUR VALIDATOR PHASE] SendStatus callback got response: " +
                     JSON.stringify(res, null, 2),
             )
+
+            if (res.extra == 450) {
+                log.debug("[SEND OUR VALIDATOR PHASE] Invalid seed detected")
+                process.exit(0)
+            }
 
             // INFO: Extract the greenlight status and resolve the waiter
             const greenlight = res.extra.greenlight

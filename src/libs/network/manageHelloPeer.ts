@@ -5,12 +5,14 @@ import { PeerManager, Peer } from "../peer"
 import log from "src/utilities/logger"
 import _ from "lodash"
 import * as forge from "node-forge"
-import { Cryptography } from "node_modules/@kynesyslabs/demosdk/build/encryption"
+import Cryptography from "../crypto/cryptography"
+import { SyncData } from "../peer/Peer"
 
 export interface HelloPeerRequest {
     url: string
     publicKey: string
     signature: string
+    syncData: SyncData
 }
 
 // Hello Peer takes the request of an already authenticated client and treat the client as a peer
@@ -19,42 +21,39 @@ export async function manageHelloPeer(
     content: HelloPeerRequest,
     sender: string,
 ): Promise<RPCResponse> {
+    log.debug("[manageHelloPeer] Content: " + JSON.stringify(content, null, 2))
     // Prepare the response
     let response: RPCResponse = _.cloneDeep(emptyResponse)
 
-    console.log("[Handle Hello Peer] Handling hello peer...")
-
-    // Refusing to add ourselves
-    /*if (
-        content.publicKey ===
-        getSharedState.identity.ed25519.publicKey.toString("hex")
-    ) {
-        console.log(
-            "[Hello Peer Listener] Refusing to add ourselves, proceeding anyway",
-        )
-        response.result = 200
-        response.extra = "Cannot a: ", JSON.stringify(peerObject, null, 2)dd ourselves: not blocking anyway"
-        return response
-    } */
+    log.info("[Handle Hello Peer] Handling hello peer...")
     log.info("[Hello Peer Listener] Building peer object...")
     let peerObject = new Peer()
     peerObject.identity = content.publicKey
-    if (peerObject.identity == getSharedState.identity.ed25519.publicKey.toString("hex")) {
+
+    if (
+        peerObject.identity ==
+        getSharedState.identity.ed25519.publicKey.toString("hex")
+    ) {
         console.log("[Hello Peer Listener] Peer is us: skipping")
         response.result = 200
         response.response = true
-        response.extra = "Peer is us: skipping"
+        response.extra = {
+            msg: "Peer is us: skipping",
+        }
         return response
     }
+
     peerObject.connection.string = content.url
-    console.log(
+    log.info(
         "[Hello Peer Listener] Extracted peer with connection string: " +
             peerObject.connection.string,
     )
 
     // Check if the authentication info is valid based on the sender info from the headers
-    console.log("[Hello Peer Listener] Verifying authentication info...")
-    let isValid = sender === content.publicKey
+    log.info("[Hello Peer Listener] Verifying authentication info...")
+    let isValid =
+        sender === content.publicKey &&
+        Cryptography.verify(content.url, content.signature, content.publicKey)
 
     if (!isValid) {
         log.error(
@@ -65,9 +64,11 @@ export async function manageHelloPeer(
         )
         response.result = 401
         response.response = false
-        response.extra = "invalid authentication info"
+        response.extra = {
+            msg: "invalid authentication info",
+        }
         return response
-    } 
+    }
 
     // Add the peer as authenticated
     peerObject.verification.status = true
@@ -77,20 +78,36 @@ export async function manageHelloPeer(
     peerObject.status.online = true
     peerObject.status.timestamp = Date.now()
 
-    // If we are here, the peer is connected
-    response.result = 200
-    response.response = true
-    response.extra = "Peer connected"
+    // INFO: Write the sync data for the peer
+    peerObject.sync = content.syncData
 
-    console.log(
+    log.debug(
+        "[Hello Peer Listener] Sender sync data: " +
+            JSON.stringify(peerObject.sync, null, 2),
+    )
+
+    const peerManager = PeerManager.getInstance()
+
+    // If we are here, the peer is connected
+    log.info(
         "[Hello Peer Listener] Adding peer with id: " + peerObject.identity,
     )
-    let isAddedToPeerlist = PeerManager.getInstance().addPeer(peerObject)
+    let isAddedToPeerlist = peerManager.addPeer(peerObject)
     if (!isAddedToPeerlist) {
         response.result = 400
         response.response = false
-        response.extra = "Error while adding peer to peerlist"
+        response.extra = {
+            msg: "Error while adding peer to peerlist",
+        }
         return response
     }
+
+    response.result = 200
+    response.response = true
+    response.extra = {
+        msg: "Peer connected",
+        syncData: peerManager.ourSyncData,
+    }
+
     return response
 }

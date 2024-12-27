@@ -5,6 +5,12 @@ import { getSharedState } from "src/utilities/sharedState"
 import Cryptography from "../crypto/cryptography"
 import { NodeCall } from "../network/manageNodeCall"
 
+export interface SyncData {
+    status: boolean
+    block: number
+    block_hash: string
+}
+
 export default class Peer {
     // connection informations
     public connection: {
@@ -28,6 +34,13 @@ export default class Peer {
         online: boolean // is the peer online
         timestamp: number // timestamp of the last online status check
         ready: boolean // is the peer ready to be used (aka 1. synced, 2. verified, 3. online, 4. not in an error state)  // TODO Implement
+    }
+
+    get isLocalNode(): boolean {
+        return (
+            this.identity ===
+            getSharedState.identity.ed25519.publicKey.toString("hex")
+        )
     }
 
     // Creating an empty peer
@@ -82,11 +95,13 @@ export default class Peer {
             responses = await Promise.all(promises)
         }
         if (responses.length !== promises.length) {
-            log.warning("[PEER] [MULTI CALL] Timeout reached, some responses were missed")
+            log.warning(
+                "[PEER] [MULTI CALL] Timeout reached, some responses were missed",
+            )
         }
         return responses
     }
-    
+
     // Methods to handle the peer
 
     /**
@@ -125,20 +140,32 @@ export default class Peer {
         isAuthenticated: boolean = true,
         sleepTime: number = 1000,
         retries: number = 3,
+        allowedErrors: number[] = [],
     ): Promise<RPCResponse> {
         let tries = 0
         let response = null
         while (tries < retries) {
             response = await this.call(request, isAuthenticated)
-            if (response.result === 200) {
+            if (
+                response.result === 200 ||
+                allowedErrors.includes(response.result)
+            ) {
                 return response
             }
             tries++
             // Sleep for sleepTime milliseconds
             await new Promise(resolve => setTimeout(resolve, sleepTime))
         }
-        const methodString = request.params.length > 0 ? `${request.method}.${request.params[0].method}` : request.method
-        log.error("[PEER] [LONG CALL] Max retries reached for method: " + methodString + " - " + response)
+        const methodString =
+            request.params.length > 0
+                ? `${request.method}.${request.params[0].method}`
+                : request.method
+        log.error(
+            "[PEER] [LONG CALL] Max retries reached for method: " +
+                methodString +
+                " - " +
+                response,
+        )
         return {
             result: 400,
             response: "Max retries reached",
@@ -151,15 +178,17 @@ export default class Peer {
     /** NOTE This method is used to add the public key and the signature to the request
      * This is to ensure that the secretary can identify the sender of the request and validate its signature
      * Example: a request with params like [...params] will become [public_key, ...params, signature]
-    */
+     */
     async authenticatedCallMaker(request: RPCRequest): Promise<RPCRequest> {
         // Signing our identity to send the request
-        const bufferSignature = await Cryptography.sign( 
+        const bufferSignature = await Cryptography.sign(
             getSharedState.identity.ed25519.publicKey.toString("hex"),
             getSharedState.identity.ed25519.privateKey,
         )
         // Adding the public key at the beginning of the params
-        request.params.unshift(getSharedState.identity.ed25519.publicKey.toString("hex"))
+        request.params.unshift(
+            getSharedState.identity.ed25519.publicKey.toString("hex"),
+        )
         // Adding the signature at the end of the params
         request.params.push(bufferSignature.toString("hex"))
         return request
@@ -201,7 +230,13 @@ export default class Peer {
             ).toString("hex")
         }
         // REVIEW Using the connection string as the url with the new format
-        const connectionUrl = this.connection.string
+        let connectionUrl = this.connection.string
+
+        // INFO: If the peer is the local node, we use the internal connection string
+        if (this.isLocalNode) {
+            connectionUrl = getSharedState.connectionString
+        }
+
         log.info(
             "[RPC Call] [" +
                 method +
@@ -221,6 +256,7 @@ export default class Peer {
                         identity: pubkey,
                         signature: signature,
                     },
+                    timeout: 3000,
                 },
             )
             log.info(
@@ -280,7 +316,7 @@ export default class Peer {
         if (endpoint.startsWith("/")) {
             endpoint = endpoint.substring(1)
         }
-        if (this.connection.string.endsWith("/")) { 
+        if (this.connection.string.endsWith("/")) {
             this.connection.string = this.connection.string.slice(0, -1)
         }
         const url = this.connection.string + "/" + endpoint

@@ -17,3 +17,17 @@ export class AbortError extends Error {
         this.name = "AbortError"
     }
 }
+
+export class BlockNotFoundError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "BlockNotFoundError"
+    }
+}
+
+export class PeerOfflineError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "PeerOfflineError"
+    }
+}

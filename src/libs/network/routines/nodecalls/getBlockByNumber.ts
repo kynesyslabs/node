@@ -1,30 +1,37 @@
+import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
 
-export default async function getBlockByNumber(data: any) {
+export default async function getBlockByNumber(
+    data: any,
+): Promise<RPCResponse> {
+    const blockNumber: number = data.blockNumber
 
-    let response: any = null
-    let extra: any = ""
-
-    if (
-        data.blockNumber === undefined ||
-        data.blockNumber === null
-    ) {
+    if (!blockNumber) {
         console.log("[SERVER ERROR] Missing blockNumber 💀")
-        response = "error"
-        extra = "Missing blockNumber"
-        return { response, extra }
+        return {
+            result: 400,
+            response: "error",
+            extra: "Block number not provided",
+            require_reply: false,
+        }
     } else {
-        console.log(
-            "[SERVER] Received getBlockByNumber: " +
-                data.blockNumber,
-        )
-        response = await Chain.getBlockByNumber(data.blockNumber)
+        console.log("[SERVER] Received getBlockByNumber: " + data.blockNumber)
+        const block = await Chain.getBlockByNumber(data.blockNumber)
 
-        // REVIEW Debug lines
-        //console.log(response)
-        //response = JSON.stringify(response)
-        //console.log(response)
+        if (block) {
+            return {
+                result: 200,
+                response: block,
+                require_reply: false,
+                extra: "",
+            }
+        }
+
+        return {
+            result: 404,
+            response: "error",
+            extra: "Block not found",
+            require_reply: false,
+        }
     }
-
-    return { response, extra }
 }

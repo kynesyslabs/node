@@ -50,8 +50,10 @@ export default async function manageConsensusRoutines(
     const isConsensusTime = await checkConsensusTime(true, 2)
     const isConsensusRunning = isConsensusAlreadyRunning()
     const inConsensus = isConsensusTime || isConsensusRunning
+
     if (!inConsensus) {
         log.error("[manageConsensusRoutines] Consensus time not reached")
+        log.error("payload: " + JSON.stringify(payload, null, 2))
         response.result = 400
         response.response =
             "Consensus time not reached (checked by manageConsensusRoutines)"
@@ -60,6 +62,9 @@ export default async function manageConsensusRoutines(
     } else {
         if (!isConsensusAlreadyRunning()) {
             //log.info("[manageConsensusRoutines] Starting the consensus routine as we are in consensus time window but not in consensus mode yet")
+            log.debug(
+                "[manageConsensusRoutines] STARTING COSENSUS FROM CONSENSUS HANDLER",
+            )
             consensusRoutine() // Asynchronous function     to avoid blocking the main thread
         }
         log.info(
@@ -151,7 +156,33 @@ export default async function manageConsensusRoutines(
         // SECTION: New Secretary Manager class handlers
         case "setValidatorPhase": {
             try {
-                const [peerSignature, peerKey, phase] = payload.params
+                const [peerSignature, peerKey, phase, seed, blockRef] =
+                    payload.params
+
+                const manager = SecretaryManager.getInstance()
+
+                if (
+                    manager.shard.blockRef == blockRef &&
+                    seed !== manager.shard.CVSA
+                ) {
+                    // TODO: Remove this block after testing!
+                    setTimeout(() => {
+                        log.debug("our seed: " + manager.shard.CVSA)
+                        log.debug(
+                            "payload params: " +
+                                JSON.stringify(payload.params, null, 2),
+                        )
+                        log.error("Invalid seed detected")
+                        process.exit(0)
+                    }, 500)
+
+                    return {
+                        result: 200,
+                        response: "Invalid seed detected",
+                        extra: 450,
+                        require_reply: false,
+                    }
+                }
 
                 // INFO: Authenticate the request
                 const isSignatureValid = Cryptography.verify(
@@ -166,8 +197,6 @@ export default async function manageConsensusRoutines(
                     response.extra = "Signature verification failed"
                     return response
                 }
-
-                const manager = SecretaryManager.getInstance()
 
                 // INFO: If we receive a setValidatorPhase request, and the
                 // secretary routine has not started, wait for it to start
