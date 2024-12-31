@@ -74,7 +74,7 @@ export default async function getCommonValidatorSeed(): Promise<{
     const commonValidatorSeed = Hashing.sha256(
         hashedProposers +
             hashedHashes +
-            hashedValidationDatas +
+            // hashedValidationDatas +
             hashedTimestamps,
     )
 
