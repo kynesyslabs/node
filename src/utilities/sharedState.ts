@@ -94,7 +94,7 @@ export default class sharedState {
     peerListFile: string = process.env.PEER_LIST_FILE || "demos_peerlist.json"
     connectionString: string = "http://localhost:" + this.serverPort
     exposedUrl: string = process.env.EXPOSED_URL || this.connectionString
-    PROD: boolean = false
+    PROD: boolean = (process.env.PROD === "true") || true
     // !SECTION Configuration
 
     // TODO The following variables should be in the genesis
