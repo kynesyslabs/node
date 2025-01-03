@@ -53,6 +53,9 @@ export async function broadcastBlockHash(block: Block, shard: Peer[]): Promise<[
             }
         })
     }
+
+    // TODO: Transmit received votes to the other nodes
+    // to help with failures
     await Promise.all(promises)
     log.info("[broadcastBlockHash] Block hash broadcasted to the shard: votes: " + pro + " rejections: " + con)
     return [pro, con]

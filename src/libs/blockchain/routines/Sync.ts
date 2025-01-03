@@ -33,7 +33,13 @@ async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
 }
 
-// ? Modularize this function
+
+/**
+ * Get the highest block number and peer from the network. If we're synced
+ * we return null for the peer.
+ * 
+ * @param peers - If specified, we only get the data from these peers.
+ */
 async function getHigestBlockPeerData(peers: Peer[] = []) {
     // Getting all the peers if not specified
     if (peers.length === 0) {
@@ -162,6 +168,15 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     }
 }
 
+
+/**
+ * Verify if our last block is coherent with the same block from the peer.
+ * 
+ * @param peer - The peer to cross-check with
+ * @param ourLastBlockNumber - Our last block number
+ * @param ourLastBlockHash - Our last block hash
+ * @returns True if the last block hash is coherent, false otherwise
+ */
 async function verifyLastBlockIntegrity(
     peer: Peer,
     ourLastBlockNumber: number,
@@ -215,6 +230,7 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
     // INFO: Handle max retries reached
     if (blockResponse.result === 400) {
         log.info("[fastSync] Peer is offline")
+        // TODO: Test this!
         throw new PeerOfflineError("Peer is offline")
     }
 
@@ -276,6 +292,12 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
     return false
 }
 
+/**
+ * Wait for the next block to be generated and download it
+ * 
+ * @param peer - The peer to wait for the next block
+ * @returns True if the block was downloaded successfully, false otherwise
+ */
 async function waitForNextBlock(peer: Peer) {
     log.debug("[waitForNextBlock] Waiting for next block")
     const latestBlock = () =>
@@ -292,6 +314,12 @@ async function waitForNextBlock(peer: Peer) {
     return await downloadBlock(peer, getSharedState.lastBlockNumber + 1)
 }
 
+/**
+ * Request the blocks from the peer
+ * 
+ * @param peer - The peer to request the blocks from
+ * @returns True if the blocks were requested successfully, false otherwise
+ */
 async function requestBlocks(peer: Peer) {
     // REVIEW: lowest or highest?
     // Sync the blocks one by one starting from the lowest block number that we do not have
