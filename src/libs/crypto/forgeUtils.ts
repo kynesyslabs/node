@@ -1,5 +1,5 @@
 // INFO forgeBuffer comes in as the raw result of forge methods
-export function ForgeToHex(forgeBuffer: any) {
+export function ForgeToHex(forgeBuffer: any): string {
     try {
         if (forgeBuffer.type == "Buffer") {
             forgeBuffer = forgeBuffer.data
@@ -15,7 +15,7 @@ export function ForgeToHex(forgeBuffer: any) {
 
 // INFO finalArray must come out as an acceptable input for forge methods
 // NOTE The above and the below must be revertible with each other
-export function HexToForge(forgeString: string) {
+export function HexToForge(forgeString: string): Uint8Array {
     /*if (forgeString.startsWith("0x")) {
         forgeString = forgeString.slice(2)
     }*/
