@@ -473,7 +473,13 @@ export default class ServerHandlers {
         log.info(content)
         let extra: any
         let require_reply = false
-        const response = await Mempool.receive(content.data as MempoolData)
+        
+        try {
+            const response = await Mempool.receive(content.data as MempoolData)
+        } catch (error) {
+            console.error(error)
+            process.exit(0)
+        }
 
         const ourId = getSharedState.identity.ed25519.publicKey.toString("hex")
         const ourDate = new Date().toISOString()
