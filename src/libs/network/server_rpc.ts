@@ -131,7 +131,7 @@ async function processPayload(
             log.info(
                 "[RPC Call] Received mempool merge request from: " + sender,
             )
-            const res = await ServerHandlers.handleMempool(payload.params[0])
+            var res = await ServerHandlers.handleMempool(payload.params[0])
             log.info("[RPC Call] Merged mempool from: " + sender)
             log.info(JSON.stringify(res, null, 2))
             return res
