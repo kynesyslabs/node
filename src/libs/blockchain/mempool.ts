@@ -24,6 +24,7 @@ import Transaction from "./transaction"
 import { ISignature } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
+import { ForgeToHex, HexToForge } from "../crypto/forgeUtils"
 
 class MempoolLock {
     locked: boolean
@@ -406,7 +407,7 @@ export default class Mempool {
             )
             let signature_valid = Cryptography.verify(
                 tx_hash,
-                signature.data.toString("hex"),
+                ForgeToHex(signature.data), // signature.data.toString("hex")
                 public_key,
             )
             if (!signature_valid) {
