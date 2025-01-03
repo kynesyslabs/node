@@ -471,18 +471,18 @@ export default class ServerHandlers {
         // ...
         log.info("[handleMempool] Received a message")
         log.info(content)
-        let extra: any
-        let require_reply = false
-        
+        let response = false
+
         try {
-            const response = await Mempool.receive(content.data as MempoolData)
+            response = await Mempool.receive(content.data as MempoolData)
         } catch (error) {
             console.error(error)
-            process.exit(0)
+            response = false
         }
 
         const ourId = getSharedState.identity.ed25519.publicKey.toString("hex")
         const ourDate = new Date().toISOString()
+
         return {
             result: response ? 200 : 400,
             response: response,
