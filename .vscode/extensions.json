@@ -27,6 +27,9 @@
         "martinlaregina.clear-view-indent",
         "polymermallard.box-comment",
         "slysherz.comment-box",
-        "gruntfuggly.todo-tree"
+        "gruntfuggly.todo-tree",
+        "strigo.linear",
+        "linear.linear-connect",
+        "linearflow.linear-flow"
     ]
 }
