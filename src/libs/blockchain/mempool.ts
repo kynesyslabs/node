@@ -438,14 +438,26 @@ export default class Mempool {
     // INFO Merging the mempool received (second step)
     public static async merge(received_mempool: MempoolData): Promise<boolean> {
         let mempool = await Mempool.getMempool("Mempool.merge")
+        let existing_txs = new Map<string, boolean>()
+
+        for (let i = 0; i < mempool.transactions.length; i++) {
+            let tx = mempool.transactions[i]
+            existing_txs.set(tx.hash, true)
+        }
+
         // REVIEW Checking and excluding duplicates
         for (let i = 0; i < received_mempool.transactions.length; i++) {
             let tx = received_mempool.transactions[i]
-            let index = mempool.transactions.indexOf(tx)
-            if (index != -1) {
-                mempool.transactions.splice(index, 1)
+
+            if (existing_txs.has(tx.hash)) {
+                log.debug(
+                    "[MEMPOOL MERGING] Transaction already in mempool: " +
+                        tx.hash,
+                )
+                mempool.transactions.splice(i, 1)
             }
         }
+
         // Merge the mempool with our one
         mempool.transactions = mempool.transactions.concat(
             received_mempool.transactions,

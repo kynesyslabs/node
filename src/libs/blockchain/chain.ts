@@ -329,7 +329,7 @@ export default class Chain {
         let orderedTransactionsHashes = block.content.ordered_transactions
         log.info(JSON.stringify(orderedTransactionsHashes))
         // Fetch transaction entities from the repository based on ordered transaction hashes
-        const transactionEntities = await Promise.all(
+        let transactionEntities = await Promise.all(
             orderedTransactionsHashes.map(async txHash => {
                 log.info(
                     "[insertBlock] Fetching transaction with hash: " + txHash,
@@ -347,12 +347,13 @@ export default class Chain {
                 return tx
             }),
         )
+        transactionEntities = transactionEntities.filter(tx => tx !== undefined)
 
         let newBlock = new Blocks()
-        // Set block properties here...
         log.info("[CHAIN] reading hash")
         log.info(JSON.stringify(transactionEntities))
         log.info("[CHAIN] bork")
+
         newBlock.hash = block.hash
         newBlock.number = block.number
         newBlock.proposer = block.proposer

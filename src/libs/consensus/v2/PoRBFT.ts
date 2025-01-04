@@ -62,13 +62,6 @@ export async function consensusRoutine(): Promise<void> {
 
     const manager = SecretaryManager.getInstance()
 
-    if (manager.shard && manager.shard.CVSA) {
-        // INFO: Testing if we start a new consensus round while the previous one is not over
-        // TODO: Remove this block after when opening the PR
-        log.debug("WE ARE ALREADY IN ANOTHER CONSENSUS ROUND. Killing node")
-        process.exit(0)
-    }
-
     // INFO: We won't use the shard returned by initializeShard
     // as it can change through the consensus routine
     // INFO: CONSENSUS ACTION 1: Initialize the shard
@@ -291,6 +284,7 @@ async function applyGCRForNewBlock(
             failedTxs.push(tx.hash)
         }
     }
+
     log.info(`[consensusRoutine] Successful GCR operations: ${successfulTxs}`)
     log.info(`[consensusRoutine] Failed GCR operations: ${failedTxs}`)
     // await updateValidatorStatus("appliedGCR", true, false, true)
