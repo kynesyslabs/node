@@ -206,7 +206,7 @@ export default class HandleGCR {
     // Routines
 
     // Assign methods
-    // ! We have to port these methods from gcr.ts, now they are just proxies
+    // TODO We have to port these methods from gcr.ts, now they are just proxies
     assign = {
         xm: assignXM,
         web2: assignWeb2,
