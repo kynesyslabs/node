@@ -307,15 +307,15 @@ async function waitForNextBlock() {
         await sleep(250)
         const elapsedTime = Date.now() - startTime
 
-        if (elapsedTime > getSharedState.getConsensusTime() * 1000 * 3) {
-            log.error("[waitForNextBlock] Timeout waiting for next block")
-            log.debug("[waitForNextBlock] Elapsed time: " + elapsedTime)
-            log.debug(
-                "[waitForNextBlock] Peerlist: " +
-                    JSON.stringify(peerManager.getAll(), null, 2),
-            )
-            process.exit(1)
-        }
+        // if (elapsedTime > getSharedState.getConsensusTime() * 1000 * 3) {
+        //     log.error("[waitForNextBlock] Timeout waiting for next block")
+        //     log.debug("[waitForNextBlock] Elapsed time: " + elapsedTime)
+        //     log.debug(
+        //         "[waitForNextBlock] Peerlist: " +
+        //             JSON.stringify(peerManager.getAll(), null, 2),
+        //     )
+        //     process.exit(1)
+        // }
     }
 
     const highestBlockPeer = peerManager
