@@ -309,7 +309,7 @@ async function waitForNextBlock(peer: Peer) {
         await sleep(250)
     }
 
-    log.debug("[waitForNextBlock] NEXT BLOCK GENERATED. DOWNLOADING...")
+    log.debug("[waitForNextBlock] NEXT BLOCK (#" + latestBlock() + ") GENERATED. DOWNLOADING...")
 
     return await downloadBlock(peer, getSharedState.lastBlockNumber + 1)
 }
