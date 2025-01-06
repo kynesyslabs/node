@@ -307,7 +307,7 @@ async function waitForNextBlock() {
         await sleep(250)
         const elapsedTime = Date.now() - startTime
 
-        if (elapsedTime > getSharedState.getConsensusTime() * 1000 * 1.5) {
+        if (elapsedTime > getSharedState.getConsensusTime() * 1000 * 3) {
             log.error("[waitForNextBlock] Timeout waiting for next block")
             log.debug("[waitForNextBlock] Elapsed time: " + elapsedTime)
             log.debug(
