@@ -348,7 +348,7 @@ export default class PeerManager {
             },
             true,
             250,
-            3,
+            4,
         ).then(response => {
             PeerManager.helloPeerCallback(response, peer)
         })
@@ -392,15 +392,20 @@ export default class PeerManager {
             PeerManager.getInstance().addPeer(peer)
             PeerManager.getInstance().removeOfflinePeer(peer.identity)
         } else {
-            log.info(
+            log.error(
                 "[Hello Peer] Failed to connect to peer: " +
                     peer.identity +
                     ". Adding to offline list",
                 false,
             )
+            log.error(
+                "[Hello Peer] Peer response: " +
+                    JSON.stringify(response, null, 2),
+                false,
+            )
             // Add the peer to the offline list
             PeerManager.getInstance().addOfflinePeer(peer)
-            PeerManager.getInstance().removeOnlinePeer(peer.identity)
+            // PeerManager.getInstance().removeOnlinePeer(peer.identity)
         }
         getSharedState.peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
         //process.exit(0)
