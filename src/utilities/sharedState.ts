@@ -49,7 +49,7 @@ export default class sharedState {
 
     // Sync
     fastSyncCount: number = 0
-    _syncStatus: boolean = false
+    _syncStatus: boolean = true
     set syncStatus(synced: boolean) {
         this._syncStatus = synced
         // INFO: Update our peer object when we get a new sync status
