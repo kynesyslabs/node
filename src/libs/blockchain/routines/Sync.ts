@@ -33,11 +33,10 @@ async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
 }
 
-
 /**
  * Get the highest block number and peer from the network. If we're synced
  * we return null for the peer.
- * 
+ *
  * @param peers - If specified, we only get the data from these peers.
  */
 async function getHigestBlockPeerData(peers: Peer[] = []) {
@@ -168,10 +167,9 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     }
 }
 
-
 /**
  * Verify if our last block is coherent with the same block from the peer.
- * 
+ *
  * @param peer - The peer to cross-check with
  * @param ourLastBlockNumber - Our last block number
  * @param ourLastBlockHash - Our last block hash
@@ -294,11 +292,10 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
 
 /**
  * Wait for the next block to be generated and download it
- * 
- * @param peer - The peer to wait for the next block
+ *
  * @returns True if the block was downloaded successfully, false otherwise
  */
-async function waitForNextBlock(peer: Peer) {
+async function waitForNextBlock() {
     log.debug("[waitForNextBlock] Waiting for next block")
     const latestBlock = () =>
         peerManager
@@ -309,14 +306,29 @@ async function waitForNextBlock(peer: Peer) {
         await sleep(250)
     }
 
-    log.debug("[waitForNextBlock] NEXT BLOCK (#" + latestBlock() + ") GENERATED. DOWNLOADING...")
+    const highestBlockPeer = peerManager
+        .getAll()
+        .find(peer => peer.sync.block === latestBlock())
 
-    return await downloadBlock(peer, getSharedState.lastBlockNumber + 1)
+    log.debug(
+        "[waitForNextBlock] NEXT BLOCK (#" +
+            latestBlock() +
+            ") GENERATED. DOWNLOADING...",
+    )
+    log.debug(
+        "[waitForNextBlock] Highest block peer: " +
+            JSON.stringify(highestBlockPeer, null, 2),
+    )
+
+    return await downloadBlock(
+        highestBlockPeer,
+        getSharedState.lastBlockNumber + 1,
+    )
 }
 
 /**
  * Request the blocks from the peer
- * 
+ *
  * @param peer - The peer to request the blocks from
  * @returns True if the blocks were requested successfully, false otherwise
  */
@@ -448,7 +460,7 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     const synced = await requestBlocks(highestBlockNumberPeer)
 
     if (synced && getSharedState.fastSyncCount === 0) {
-        await waitForNextBlock(highestBlockNumberPeer)
+        await waitForNextBlock()
     }
 
     return synced
