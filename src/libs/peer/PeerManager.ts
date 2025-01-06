@@ -444,14 +444,5 @@ export default class PeerManager {
         peer.sync.block_hash = blockHash
         log.debug("[PEERMANAGER] New block number: " + peer.sync.block)
         log.debug("[PEERMANAGER] New block hash: " + peer.sync.block_hash)
-
-        if (
-            peer.identity ===
-            getSharedState.identity.ed25519.publicKey.toString("hex")
-        ) {
-            return
-        }
-
-        process.exit(0)
     }
 }
