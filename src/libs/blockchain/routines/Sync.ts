@@ -456,6 +456,7 @@ async function fastSyncRoutine(peers: Peer[] = []) {
         return true
     }
 
+    getSharedState.syncStatus = false
     // INFO: Check if block match across peers
     const verified = await verifyLastBlockIntegrity(
         highestBlockNumberPeer,
@@ -465,7 +466,6 @@ async function fastSyncRoutine(peers: Peer[] = []) {
 
     if (!verified) {
         log.error("[fastSync] Last block is not coherent")
-        getSharedState.syncStatus = false
         return false
     }
 
