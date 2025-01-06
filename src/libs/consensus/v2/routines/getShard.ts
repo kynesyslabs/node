@@ -29,7 +29,7 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     // REVIEW: sort available peers by .identity (which is a hex string)
     // before choosing the peers for a uniform sample across nodes
     availablePeers.sort((a, b) => a.identity.localeCompare(b.identity))
-    log.log.debug("availablePeers: " + JSON.stringify(availablePeers, null, 2))
+    log.debug("availablePeers: " + JSON.stringify(availablePeers, null, 2))
     // REVIEW: check if this is the right way to do it
     // NOTE Choosing the secretary by randomly ordering the list: the first one is the secretary
     for (let i = 0; i < maxShardSize && availablePeers.length > 0; i++) {

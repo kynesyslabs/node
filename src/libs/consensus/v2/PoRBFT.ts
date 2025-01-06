@@ -69,6 +69,8 @@ export async function consensusRoutine(): Promise<void> {
     try {
         await initializeShard()
     } catch (e) {
+        console.error("Error in initializeShard")
+        console.error(e)
         if (e instanceof NotInShardError) {
             log.info(
                 "[consensusRoutine] We are not in the shard, waiting for the block",
