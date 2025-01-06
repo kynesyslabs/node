@@ -282,12 +282,12 @@ export default class PeerManager {
         // if (this.offlinePeers[peerInstance.identity]) {
         //     this.offlinePeers[peerInstance.identity] = peerInstance
         // }
-        this.offlinePeers[peerInstance.identity] = peerInstance
-        log.info("[PEERMANAGER] Offline peers: " + this.offlinePeers, false)
+        // this.offlinePeers[peerInstance.identity] = peerInstance
+        // log.info("[PEERMANAGER] Offline peers: " + this.offlinePeers, false)
     }
 
     removeOnlinePeer(identity: string) {
-        delete this.peerList[identity]
+        // delete this.peerList[identity]
     }
 
     removeOfflinePeer(identity: string) {
