@@ -309,6 +309,7 @@ async function waitForNextBlock() {
 
         if (elapsedTime > getSharedState.getConsensusTime() * 1000 * 1.5) {
             log.error("[waitForNextBlock] Timeout waiting for next block")
+            log.debug("[waitForNextBlock] Elapsed time: " + elapsedTime)
             log.debug(
                 "[waitForNextBlock] Peerlist: " +
                     JSON.stringify(peerManager.getAll(), null, 2),
