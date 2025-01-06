@@ -4,7 +4,7 @@ import Mempool from "src/libs/blockchain/mempool"
 import Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
 import { getSharedState } from "src/utilities/sharedState"
-import { Peer } from "src/libs/peer"
+import { Peer, PeerManager } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { mergeMempools } from "./routines/mergeMempools"
 import mergePeerlist from "./routines/mergePeerlist"
@@ -148,6 +148,7 @@ export async function consensusRoutine(): Promise<void> {
         log.info(
             "[consensusRoutine] [result] Block is valid with " + pro + " votes",
         )
+        await bumpProPeersLastBlock()
         await finalizeBlock(block, pro)
     } else {
         log.info(
@@ -394,6 +395,25 @@ async function finalizeBlock(block: Block, pro: number): Promise<void> {
     log.info("[consensusRoutine] Block added to the chain")
     const lastBlock = await Chain.getLastBlock()
     console.log(lastBlock)
+}
+
+/**
+ * Bump the last block number of the peers that voted for the block
+ * in PeerManager
+ */
+async function bumpProPeersLastBlock() {
+    // REVIEW: Is this useful?
+
+    const signatures =
+        getSharedState.candidateBlock.validation_data["signatures"]
+
+    for (const [identity, signature] of Object.entries(signatures)) {
+        PeerManager.getInstance().setPeerBlockNumber(
+            identity,
+            getSharedState.candidateBlock.number,
+            getSharedState.candidateBlock.hash,
+        )
+    }
 }
 
 /**

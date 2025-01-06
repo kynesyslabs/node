@@ -418,4 +418,40 @@ export default class PeerManager {
             allPeers.map(peer => PeerManager.sayHelloToPeer(peer)),
         )
     }
+
+    /**
+     * Set the block number and hash for a peer. Used to bump the block number of the peers that voted for the block
+     *
+     * @param identity - The identity of the peer
+     * @param blockNumber - The block number to set
+     * @param blockHash - The block hash to set
+     */
+    setPeerBlockNumber(
+        identity: string,
+        blockNumber: number,
+        blockHash: string,
+    ) {
+        log.debug(
+            "[PEERMANAGER] Setting peer block number: " +
+                identity +
+                " to " +
+                blockNumber,
+        )
+        const peer = this.peerList[identity]
+        log.debug("[PEERMANAGER] Old block number: " + peer.sync.block)
+        log.debug("[PEERMANAGER] Old block hash: " + peer.sync.block_hash)
+        peer.sync.block = blockNumber
+        peer.sync.block_hash = blockHash
+        log.debug("[PEERMANAGER] New block number: " + peer.sync.block)
+        log.debug("[PEERMANAGER] New block hash: " + peer.sync.block_hash)
+
+        if (
+            peer.identity ===
+            getSharedState.identity.ed25519.publicKey.toString("hex")
+        ) {
+            return
+        }
+
+        process.exit(0)
+    }
 }
