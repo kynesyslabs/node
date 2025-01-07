@@ -12,6 +12,7 @@ export default async function manageGCRRoutines(
     payload: GCRRoutinePayload,
 ): Promise<RPCResponse> {
     let response = _.cloneDeep(emptyResponse)
+    response.result = 200
     // Handle the payload
     const { method, params } = payload
     switch (method) {

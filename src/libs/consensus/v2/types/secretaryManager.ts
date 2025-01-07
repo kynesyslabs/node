@@ -10,12 +10,14 @@ import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { TimeoutError, AbortError, NotInShardError } from "src/exceptions"
 import Cryptography from "src/libs/crypto/cryptography"
+import { PeerManager } from "src/libs/peer"
 
 // ANCHOR SecretaryManager
 export default class SecretaryManager {
     private static instance: SecretaryManager
 
     // Internal variables
+    public removedPeers: Map<string, ValidationPhase> = new Map()
     public shard: Shard
     public get secretary() {
         return this.shard.members[0]
@@ -102,6 +104,7 @@ export default class SecretaryManager {
         }
 
         this.ourValidatorPhase = _.cloneDeep(emptyValidationPhase)
+        this.ourValidatorPhase.currentPhase = 1
         return this.shard.members
     }
 
@@ -265,6 +268,11 @@ export default class SecretaryManager {
                 this.shard.members = this.shard.members.filter(
                     m => m.identity !== member.identity,
                 )
+
+                this.removedPeers.set(
+                    member.identity,
+                    this.shard.validationPhases[member.identity],
+                )
                 delete this.shard.validationPhases[member.identity]
             }
         }
@@ -407,7 +415,30 @@ export default class SecretaryManager {
             greenlight: false,
         }
 
-        if (!this.shard.validationPhases[memberKey]) {
+        let wasRemoved = false
+
+        if (this.removedPeers.has(memberKey)) {
+            log.debug("Member was removed from the shard. Adding them back ...")
+            log.debug("Member key: " + memberKey)
+            log.debug("Their phase: " + theirPhase)
+            log.debug("Our phase: " + this.ourValidatorPhase.currentPhase)
+            log.debug(
+                "SHARD MEMBERS: " +
+                    JSON.stringify(
+                        this.shard.members.map(m => m.identity),
+                        null,
+                        2,
+                    ),
+            )
+
+            this.shard.validationPhases[memberKey] =
+                this.removedPeers.get(memberKey)
+            this.removedPeers.delete(memberKey)
+            this.shard.members.push(
+                PeerManager.getInstance().getPeer(memberKey),
+            )
+            wasRemoved = true
+        } else if (!this.shard.validationPhases[memberKey]) {
             // INFO: This happens when a node enters an ongoing consensus
             log.debug(
                 "New member trying to enter an ongoing consensus. Doing nothing ...",
@@ -441,13 +472,16 @@ export default class SecretaryManager {
         }
 
         // INFO: Check if node is behind us
-        if (theirPhase < this.ourValidatorPhase.currentPhase) {
+        if (theirPhase < this.ourValidatorPhase.currentPhase || wasRemoved) {
+            const releasePhase = wasRemoved
+                ? theirPhase
+                : this.shard.validationPhases[memberKey].currentPhase
             log.debug(
                 `[SECRETARY ROUTINE] Releasing ${memberKey} as they are behind us`,
             )
             this.releaseWaitingMembers(
                 [memberKey],
-                theirPhase,
+                releasePhase,
                 "receiveValidatorPhase",
             )
 
@@ -500,7 +534,8 @@ export default class SecretaryManager {
         for (const [pubKey, phase] of Object.entries(
             this.shard.validationPhases,
         )) {
-            if (phase.currentPhase !== ourPhase || !phase.waitStatus) {
+            // if (phase.currentPhase !== ourPhase || !phase.waitStatus) {
+            if (phase.currentPhase < ourPhase) {
                 return false
             }
         }
@@ -680,13 +715,29 @@ export default class SecretaryManager {
      */
     public async sendOurValidatorPhaseToSecretary(retries: number = 3) {
         // INFO: Enable code to simulate node failures
-        // if (this.ourValidatorPhase.currentPhase == 4) {
-        //     log.debug(
-        //         "We are deep in the consensus, try: simulating a node going offline",
-        //     )
-        //     // await this.simulateNormalNodeGoingOffline()
-        //     // await this.simulateSecretaryGoingOffline()
-        // }
+        if (
+            this.shard.blockRef == 12 &&
+            this.ourValidatorPhase.currentPhase == 3
+        ) {
+            log.debug(
+                "We are deep in the consensus, try: simulating a node going offline",
+            )
+            // INFO: Test peer going offline and coming back online
+            if (this.checkIfWeAreSecretary()) {
+                log.debug("We are the secretary, removing the second peer")
+                // remove second peer
+                const peer2Identity = this.shard.members[1].identity
+                this.shard.members.splice(1, 1)
+                this.removedPeers.set(
+                    peer2Identity,
+                    this.shard.validationPhases[peer2Identity],
+                )
+                delete this.shard.validationPhases[peer2Identity]
+            }
+
+            // await this.simulateNormalNodeGoingOffline()
+            // await this.simulateSecretaryGoingOffline()
+        }
 
         const waiterKey =
             Waiter.keys.GREEN_LIGHT + this.ourValidatorPhase.currentPhase

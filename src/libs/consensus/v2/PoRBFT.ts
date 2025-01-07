@@ -437,7 +437,6 @@ async function bumpProPeersLastBlock() {
  */
 async function updateValidatorPhase(phase: number): Promise<any> {
     const manager = SecretaryManager.getInstance()
-    await manager.setOurValidatorPhase(phase, true)
 
     // INFO: If it's the first phase, the secretary might not have started the consensus routine yet,
     // Increase retry steps to 10 to wait for the secretary to start
@@ -452,6 +451,7 @@ async function updateValidatorPhase(phase: number): Promise<any> {
         )}`,
     )
 
+    await manager.setOurValidatorPhase(phase, true)
     return res
 }
 
