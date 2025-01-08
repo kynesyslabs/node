@@ -210,6 +210,19 @@ export default class PeerManager {
 
             // INFO: When overwriting an existing peer, only update properties
             // if the new peer has data && data is more recent
+            log.debug(
+                "[PEERMANAGER] Updating peer sync data for peer: " +
+                    peer.identity,
+            )
+            log.debug(
+                "[PEERMANAGER] Existing peer sync data: " +
+                    JSON.stringify(existingPeer.sync, null, 2),
+            )
+            log.debug(
+                "[PEERMANAGER] New peer sync data: " +
+                    JSON.stringify(peer.sync, null, 2),
+            )
+
             if (
                 peer.sync.block > block ||
                 (peer.sync.block == block && peer.sync.status !== status)
