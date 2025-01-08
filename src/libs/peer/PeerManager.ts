@@ -227,6 +227,14 @@ export default class PeerManager {
                 newPeer.sync.block > block ||
                 (newPeer.sync.block == block && newPeer.sync.status !== status)
             ) {
+                log.info(
+                    "[PEERMANAGER] Updating peer sync data for peer: " +
+                        newPeer.identity +
+                        "old block number: " +
+                        block +
+                        "new block number: " +
+                        newPeer.sync.block,
+                )
                 if (newPeer.sync.block < block) {
                     process.exit(0)
                 }
