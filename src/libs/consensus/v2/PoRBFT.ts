@@ -4,7 +4,7 @@ import Mempool from "src/libs/blockchain/mempool"
 import Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
 import { getSharedState } from "src/utilities/sharedState"
-import { Peer, PeerManager } from "src/libs/peer"
+import { Peer } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { mergeMempools } from "./routines/mergeMempools"
 import mergePeerlist from "./routines/mergePeerlist"
@@ -17,7 +17,6 @@ import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import applyGCROperation from "src/libs/blockchain/gcr/gcr_routines/applyGCROperation"
 import { txToGCROperation } from "src/libs/blockchain/gcr/gcr_routines/txToGCROperation"
 import SecretaryManager from "./types/secretaryManager"
-import { NotInShardError } from "src/exceptions"
 
 /* INFO
 # Semaphore system
@@ -66,26 +65,14 @@ export async function consensusRoutine(): Promise<void> {
     // INFO: We won't use the shard returned by initializeShard
     // as it can change through the consensus routine
     // INFO: CONSENSUS ACTION 1: Initialize the shard
-    try {
-        await initializeShard()
-    } catch (e) {
-        console.error("Error in initializeShard")
-        console.error(e)
-        if (e instanceof NotInShardError) {
-            log.info(
-                "[consensusRoutine] We are not in the shard, waiting for the block",
-            )
-            await manager.endConsensusRoutine()
-            return
-        }
-    }
+    await initializeShard()
 
-    // if (!isInShard(manager.shard.members)) {
-    //     log.info(
-    //         "[consensusRoutine] We are not in the shard, waiting for the block",
-    //     )
-    //     return
-    // }
+    if (!isInShard(manager.shard.members)) {
+        log.info(
+            "[consensusRoutine] We are not in the shard, waiting for the block",
+        )
+        return
+    }
 
     log.info("[consensusRoutine] We are in the shard, creating the block")
     log.info(
@@ -161,7 +148,6 @@ export async function consensusRoutine(): Promise<void> {
         log.info(
             "[consensusRoutine] [result] Block is valid with " + pro + " votes",
         )
-        await bumpProPeersLastBlock()
         await finalizeBlock(block, pro)
     } else {
         log.info(
@@ -225,17 +211,17 @@ async function initializeShard(): Promise<Peer[]> {
 
 // SECTION Checks
 
-// /**
-//  * Check if the local node is in the shard
-//  *
-//  * @param shard - The shard members
-//  * @returns True if the local node is in the shard, false otherwise
-//  */
-// function isInShard(shard: Peer[]): boolean {
-//     const ourIdentity =
-//         getSharedState.identity.ed25519.publicKey.toString("hex")
-//     return shard.some(peer => peer.identity === ourIdentity)
-// }
+/**
+ * Check if the local node is in the shard
+ *
+ * @param shard - The shard members
+ * @returns True if the local node is in the shard, false otherwise
+ */
+function isInShard(shard: Peer[]): boolean {
+    const ourIdentity =
+        getSharedState.identity.ed25519.publicKey.toString("hex")
+    return shard.some(peer => peer.identity === ourIdentity)
+}
 
 // SECTION Routines
 
@@ -411,25 +397,6 @@ async function finalizeBlock(block: Block, pro: number): Promise<void> {
 }
 
 /**
- * Bump the last block number of the peers that voted for the block
- * in PeerManager
- */
-async function bumpProPeersLastBlock() {
-    // REVIEW: Is this useful?
-
-    const signatures =
-        getSharedState.candidateBlock.validation_data["signatures"]
-
-    for (const [identity, signature] of Object.entries(signatures)) {
-        PeerManager.getInstance().setPeerBlockNumber(
-            identity,
-            getSharedState.candidateBlock.number,
-            getSharedState.candidateBlock.hash,
-        )
-    }
-}
-
-/**
  * Sends our validator phase to the secretary, and waits for the greenlight.
  *
  * @param phase - Our cleared phase number
@@ -437,6 +404,7 @@ async function bumpProPeersLastBlock() {
  */
 async function updateValidatorPhase(phase: number): Promise<any> {
     const manager = SecretaryManager.getInstance()
+    await manager.setOurValidatorPhase(phase, true)
 
     // INFO: If it's the first phase, the secretary might not have started the consensus routine yet,
     // Increase retry steps to 10 to wait for the secretary to start
@@ -451,7 +419,6 @@ async function updateValidatorPhase(phase: number): Promise<any> {
         )}`,
     )
 
-    await manager.setOurValidatorPhase(phase, true)
     return res
 }
 

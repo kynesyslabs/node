@@ -182,22 +182,22 @@ export default class PeerManager {
         return this.getPeers() // REVIEW is this working?
     }
 
-    addPeer(newPeer: Peer) {
+    addPeer(peer: Peer) {
         log.info("[PEERMANAGER] Adding peer", false)
-        if (newPeer.identity === "placeholder") {
+        if (peer.identity === "placeholder") {
             log.warning(
                 "[PEERMANAGER] No identity detected: refusing to add peer",
                 true,
             )
             log.info(
-                "[PEERMANAGER] Peer: " + JSON.stringify(newPeer, null, 2),
+                "[PEERMANAGER] Peer: " + JSON.stringify(peer, null, 2),
                 false,
             )
             return false
         }
 
         // REVIEW check for duplicates
-        const identity = newPeer.identity
+        const identity = peer.identity
         let action = "added"
         const existingPeer = this.peerList[identity]
 
@@ -210,47 +210,22 @@ export default class PeerManager {
 
             // INFO: When overwriting an existing peer, only update properties
             // if the new peer has data && data is more recent
-            log.debug(
-                "[PEERMANAGER] Updating peer sync data for peer: " +
-                    newPeer.identity,
-            )
-            log.debug(
-                "[PEERMANAGER] Existing peer sync data: " +
-                    JSON.stringify(existingPeer.sync, null, 2),
-            )
-            log.debug(
-                "[PEERMANAGER] New peer sync data: " +
-                    JSON.stringify(newPeer.sync, null, 2),
-            )
-
             if (
-                newPeer.sync.block > block ||
-                (newPeer.sync.block == block && newPeer.sync.status !== status)
+                peer.sync.block > block ||
+                (peer.sync.block == block && peer.sync.status !== status)
             ) {
-                log.info(
-                    "[PEERMANAGER] Updating peer sync data for peer: " +
-                        newPeer.identity +
-                        "old block number: " +
-                        block +
-                        "new block number: " +
-                        newPeer.sync.block,
-                )
-                if (newPeer.sync.block < block) {
-                    process.exit(0)
-                }
-                existingPeer.sync.block = newPeer.sync.block
-                existingPeer.sync.block_hash = newPeer.sync.block_hash
-                existingPeer.sync.status = newPeer.sync.status
+                existingPeer.sync.block = peer.sync.block
+                existingPeer.sync.block_hash = peer.sync.block_hash
+                existingPeer.sync.status = peer.sync.status
             }
 
-            if (newPeer.status.timestamp > timestamp) {
-                log.info("[PEERMANAGER] Updating peer status")
-                existingPeer.status.timestamp = newPeer.status.timestamp
-                existingPeer.status.ready = newPeer.status.ready
-                existingPeer.status.online = newPeer.status.online
+            if (peer.status.timestamp > timestamp) {
+                existingPeer.status.timestamp = peer.status.timestamp
+                existingPeer.status.ready = peer.status.ready
+                existingPeer.status.online = peer.status.online
             }
 
-            if (newPeer.connection.string !== existingPeer.connection.string) {
+            if (peer.connection.string !== existingPeer.connection.string) {
                 log.debug("[PEERMANAGER] Updating connection string")
                 log.debug(
                     "[PEERMANAGER] Existing connection string: " +
@@ -258,22 +233,22 @@ export default class PeerManager {
                 )
                 log.debug(
                     "[PEERMANAGER] New connection string: " +
-                        newPeer.connection.string,
+                        peer.connection.string,
                 )
-                existingPeer.connection.string = newPeer.connection.string
+                existingPeer.connection.string = peer.connection.string
             }
         } else {
-            log.info("[PEERMANAGER] Adding new peer: " + newPeer.identity, true)
-            this.peerList[identity] = newPeer
+            log.info("[PEERMANAGER] Adding new peer: " + peer.identity, true)
+            this.peerList[identity] = peer
         }
 
         log.info("[PEERMANAGER] Peer " + action, false)
-        log.info("[PEERMANAGER] Identity: " + newPeer.identity, false)
+        log.info("[PEERMANAGER] Identity: " + peer.identity, false)
         log.info(
-            "[PEERMANAGER] Connection string: " + newPeer.connection.string,
+            "[PEERMANAGER] Connection string: " + peer.connection.string,
             false,
         )
-        if (!newPeer.connection.string) {
+        if (!peer.connection.string) {
             log.warning("[PEERMANAGER] No connection string detected", true)
         }
         return true
@@ -373,7 +348,7 @@ export default class PeerManager {
             },
             true,
             250,
-            4,
+            3,
         ).then(response => {
             PeerManager.helloPeerCallback(response, peer)
         })
@@ -417,20 +392,15 @@ export default class PeerManager {
             PeerManager.getInstance().addPeer(peer)
             PeerManager.getInstance().removeOfflinePeer(peer.identity)
         } else {
-            log.error(
+            log.info(
                 "[Hello Peer] Failed to connect to peer: " +
                     peer.identity +
                     ". Adding to offline list",
                 false,
             )
-            log.error(
-                "[Hello Peer] Peer response: " +
-                    JSON.stringify(response, null, 2),
-                false,
-            )
             // Add the peer to the offline list
             PeerManager.getInstance().addOfflinePeer(peer)
-            // PeerManager.getInstance().removeOnlinePeer(peer.identity)
+            PeerManager.getInstance().removeOnlinePeer(peer.identity)
         }
         getSharedState.peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
         //process.exit(0)
@@ -442,32 +412,5 @@ export default class PeerManager {
         await Promise.all(
             allPeers.map(peer => PeerManager.sayHelloToPeer(peer)),
         )
-    }
-
-    /**
-     * Set the block number and hash for a peer. Used to bump the block number of the peers that voted for the block
-     *
-     * @param identity - The identity of the peer
-     * @param blockNumber - The block number to set
-     * @param blockHash - The block hash to set
-     */
-    setPeerBlockNumber(
-        identity: string,
-        blockNumber: number,
-        blockHash: string,
-    ) {
-        log.debug(
-            "[PEERMANAGER] Setting peer block number: " +
-                identity +
-                " to " +
-                blockNumber,
-        )
-        const peer = this.peerList[identity]
-        log.debug("[PEERMANAGER] Old block number: " + peer.sync.block)
-        log.debug("[PEERMANAGER] Old block hash: " + peer.sync.block_hash)
-        peer.sync.block = blockNumber
-        peer.sync.block_hash = blockHash
-        log.debug("[PEERMANAGER] New block number: " + peer.sync.block)
-        log.debug("[PEERMANAGER] New block hash: " + peer.sync.block_hash)
     }
 }
