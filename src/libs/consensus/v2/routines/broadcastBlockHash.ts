@@ -4,6 +4,7 @@ import Block from "src/libs/blockchain/block"
 import { Peer } from "src/libs/peer"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
+import Cryptography from "src/libs/crypto/cryptography"
 
 export async function broadcastBlockHash(
     block: Block,
@@ -11,16 +12,11 @@ export async function broadcastBlockHash(
 ): Promise<[number, number]> {
     var pro = 0
     var con = 0
-    // var promises = []
-
+    var promises = []
     const ourId = getSharedState.identity.ed25519.publicKey.toString("hex")
     const proposeParams = [block.hash, block.validation_data, ourId]
-
-    let promises: Map<string, Promise<RPCResponse>> = new Map()
-
     for (const peer of shard) {
-        promises.set(
-            peer.identity,
+        promises.push(
             peer.longCall({
                 method: "consensus_routine",
                 params: [
@@ -32,28 +28,44 @@ export async function broadcastBlockHash(
             }), // REVIEW  We should wait a little if the call returns false as the node is not in the consensus loop yet and in general for all consensus_routine calls
         )
     }
-
     // See manageConsensusRoutine.ts for more details on the response format and mechanism
-    for (const [identity, promise] of promises) {
+    for (const promise of promises) {
         // Work asynchronously
         promise.then((response: RPCResponse) => {
             log.info("[broadcastBlockHash] response from a validator received.")
             if (response.result === 200) {
-                let peerId = response.response
-                let peerValidationData = response.extra.signatures[peerId]
-
                 log.info(
                     "[broadcastBlockHash] Block hash confirmation received from the validator: " +
-                        peerId,
+                        response.response,
                 )
                 // Add the validation data to the block
                 // ? Should we check if the peer is in the shard? Theoretically we checked before
-                log.info(
-                    "[broadcastBlockHash] Peer validation data: ",
-                    peerValidationData,
-                )
-                block.validation_data.signatures[response.response] =
-                    peerValidationData
+                // let peerValidationData =
+                //     response.extra.signatures[response.response]
+                // log.info(
+                //     "[broadcastBlockHash] Peer validation data: ",
+                //     peerValidationData,
+                // )
+                // block.validation_data.signatures[response.response] =
+                //     peerValidationData
+
+                const incomingValidationData = response.extra.signatures
+                for (const identity in incomingValidationData) {
+                    if (block.validation_data.signatures[identity]) {
+                        continue
+                    }
+
+                    const signature = incomingValidationData[identity]
+                    const isSignatureValid = Cryptography.verify(
+                        block.hash,
+                        signature,
+                        identity,
+                    )
+
+                    if (isSignatureValid) {
+                        block.validation_data.signatures[identity] = signature
+                    }
+                }
                 pro++
             } else {
                 log.error(
@@ -88,8 +100,10 @@ export async function broadcastBlockHash(
             con,
     )
     // return [pro, con]
-    const validationDataCount = Object.keys(
+
+    let validationDataCount = Object.keys(
         block.validation_data.signatures,
     ).length
+
     return [validationDataCount, shard.length - validationDataCount]
 }
