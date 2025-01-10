@@ -11,6 +11,7 @@ import required from "src/utilities/required"
 import handleL2PS from "../handleL2PS"
 import { L2PSMessage } from "src/libs/l2ps/parallelNetworks"
 import _ from "lodash"
+import handleNativeRequest from "../handleNativeRequest"
 // ? Remove this proxy if possible
 let handleXMRequest = multichainDispatcher
 
@@ -53,10 +54,7 @@ export default async function handleStep(step: WorkStep): Promise<StepResult> {
         stepResult.success = false
     } else if (context === "native") {
         let nativePayload = task as INativePayload
-        // TODO: Implement the logic for native steps
-        result = "Not implemented"
-        stepResult.error = "Not implemented"
-        stepResult.success = false
+        result = await handleNativeRequest(nativePayload)
     } else {
         result = "Unknown context: " + context
         stepResult.error = "Unknown context: " + context

@@ -283,7 +283,7 @@ export default class ServerHandlers {
                 )
                 result.response = web2_result
                 break */
-            // SECTION End of legacy code
+            // ! SECTION End of legacy code
 
             case "demoswork":
                 var demosWorkPayload = tx.content.data
@@ -305,7 +305,20 @@ export default class ServerHandlers {
         }
         // Only if the transaction is valid we add it to the mempool
         if (result.success) {
-            // REVIEW We add the transaction to the mempool
+            // NOTE Deriving an Operation from the Transaction to edit the GCR accordingly
+            // TODO Derive a GCREdit (see handleGCR.ts); GCREdit is declared in the sdk (see below)
+            // LINK sdks/src/types/blockchain/GCREdit.ts
+            // LINK sdks/src/types/blockchain/Transaction.ts
+            /**
+             * NOTE: Operations should be derived based on the type of the transaction
+             * Native transactions (and also Gas operations) edit the GCR balance, for example
+             * XM and Web2 transactions edit the GCR txs list and are assigned
+             * The nonce is always edited
+             */
+            // TODO Add the Operation to the Transaction // ? Should we edit the Transaction object?
+            // The Operation is executed in // LINK src/libs/blockchain/gcr/handleGCR.ts
+
+            // We add the transaction to the mempool
             console.log(
                 "[handleExecuteTransaction] Adding tx with hash: " +
                     queriedTx.hash +
@@ -315,10 +328,8 @@ export default class ServerHandlers {
             console.log(
                 "[handleExecuteTransaction] Transaction added to mempool",
             )
-            // TODO Check if Operation(s) are added to the GCR too
-            // FIXME Add an operation for the nonce or anyway a way to manage the nonce
+            // FIXME Add an operation for the nonce or anyway a way to manage the nonce (see above about the GCR)
         }
-        // TODO Broadcast the tx to the other peers (or maybe not, consensus should take care of it)
         // Response is then sent back automatically as a reply (with our validation)
         // Returning the state of the transaction including operations
         return result

@@ -1,9 +1,9 @@
 import { EntityTarget, Repository, FindOptionsOrder } from "typeorm"
 import Datasource from "../../../../model/datasource"
 import Hashing from "src/libs/crypto/hashing"
-import { GCRSubnetsTxs } from "../../../../model/entities/GCR/GCRSubnetsTxs"
+import { GCRSubnetsTxs } from "../../../../model/entities/GCRv2/GCRSubnetsTxs"
 import { GlobalChangeRegistry } from "../../../../model/entities/GCR/GlobalChangeRegistry"
-import { GCRHashes } from "../../../../model/entities/GCR/GCRHashes"
+import { GCRHashes } from "../../../../model/entities/GCRv2/GCRHashes"
 import Chain from "src/libs/blockchain/chain"
 import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
 import { NativeTablesHashes } from "@kynesyslabs/demosdk/types"
@@ -14,7 +14,7 @@ import { NativeTablesHashes } from "@kynesyslabs/demosdk/types"
  * 1. Ordering all records by publicKey (ASC)
  * 2. Converting the ordered records to JSON
  * 3. Creating a SHA-256 hash of the JSON string
- * 
+ *
  * @param entity - The TypeORM entity to hash (must have a publicKey property)
  * @returns Promise<string> - SHA-256 hash of the table contents
  */
@@ -38,7 +38,7 @@ export async function hashPublicKeyTable<T extends { publicKey: string }>(
  * Generates a SHA-256 hash specifically for the GCRSubnetsTxs table.
  * Similar to hashPublicKeyTable, but orders by tx_hash instead of publicKey.
  * Used separately because GCRSubnetsTxs has a different primary key structure.
- * 
+ *
  * @returns Promise<string> - SHA-256 hash of the GCRSubnetsTxs table contents
  */
 export async function hashSubnetsTxsTable(): Promise<string> {
@@ -61,14 +61,13 @@ export async function hashSubnetsTxsTable(): Promise<string> {
  * 1. Gets individual hashes for each GCR table
  * 2. Combines them in a deterministic order using a JSON object
  * 3. Creates a final SHA-256 hash of the combined string
- * 
+ *
  * This ensures that any change in any GCR table will result in a different final hash.
  * The deterministic ordering ensures consistency across different runs.
- * 
+ *
  * @returns Promise<string> - Combined SHA-256 hash of all GCR tables
  */
 export default async function hashGCRTables(): Promise<NativeTablesHashes> {
-    
     // Get all individual hashes
     const gcrHash = await hashPublicKeyTable(GCRTracker) // Tracking the GCR hashes as they are hashes of the GCR itself
     const subnetsTxsHash = await hashSubnetsTxsTable()
@@ -81,7 +80,7 @@ export default async function hashGCRTables(): Promise<NativeTablesHashes> {
 /**
  * Inserts a GCR hash into the database.
  * If no hash is provided, it will generate a new one using hashGCRTables().
- * 
+ *
  * @param hash - Optional: SHA-256 hash of the GCR tables
  * @returns Promise<void>
  */

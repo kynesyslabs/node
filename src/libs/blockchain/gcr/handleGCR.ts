@@ -22,9 +22,9 @@
 import { emptyResponse } from "./../../network/server_rpc"
 import _ from "lodash"
 // NOTE This will replace gcr.ts methods for calling the native tables
-import { GCRSubnetsTxs } from "src/model/entities/GCR/GCRSubnetsTxs" // TODO Put this in the sdk when done
-import { GCRHashes } from "src/model/entities/GCR/GCRHashes"
-import { EncryptedTransaction, RPCResponse } from "@kynesyslabs/demosdk/types"
+import { GCRSubnetsTxs } from "src/model/entities/GCRv2/GCRSubnetsTxs" // TODO Put this in the sdk when done
+import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
+import { EncryptedTransaction, RPCResponse, Transaction } from "@kynesyslabs/demosdk/types"
 import Datasource from "src/model/datasource"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
@@ -36,6 +36,12 @@ import { assignXM } from "./gcr_routines/assignXM"
 import { assignWeb2 } from "./gcr_routines/assignWeb2"
 import { txToGCROperation } from "./gcr_routines/txToGCROperation"
 import IdentityManager from "./gcr_routines/identityManager"
+import manageNative from "./gcr_routines/manageNative"
+import { GCREdit } from "@kynesyslabs/demosdk/types"
+
+// REVIEW Trying to use the new GCRv2
+import { GCR_Main } from "src/model/entities/GCRv2/GCR_Main"
+import { GCR_Tracker } from "src/model/entities/GCRv2/GCR_Tracker"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -205,7 +211,53 @@ export default class HandleGCR {
 
     // Routines
 
+    // ! IMPORTANT
+    /** NOTE How the GCR is managed when a transaction is executed
+     * Each tx generates an Operation, see handleExecuteTransaction in // LINK src/libs/network/endpointHandlers.ts
+     * TODO The Operation es executed in this file
+     * At consensus, the pack of operations should be sent/merged and included in the block in // LINK src/libs/consensus/v2/PoRBFT.ts
+     * Each time a sync is made, the pack of Operations (the sql queries) are executed in // LINK src/libs/blockchain/routines/Sync.ts
+     *
+     * ? Try to cleanup the code and remove the old methods from gcr.ts
+     */
+
+    // TODO Implement the execution of GCREdit objects
+    // ! Add this both after the tx is executed and after the tx is synced in Sync.ts and in the consensus
+    // NOTE Once this is implemented, we can remove the old methods from gcr.ts and the other methods that overlap with this one
+    static async apply(GCREdit: GCREdit, tx: Transaction): Promise<[boolean, string]> {
+        // 1. Check if the GCREdit is valid (check if the txhash is valid) // REVIEW see if this is enough
+        if (tx.hash !== GCREdit.txhash) {
+            return [false, "Invalid txhash"]
+        }
+        /**
+         * 2. Check if the GCREdit is already applied (check if the txhash is already applied) // ? see how to do this
+         * 3. Apply the GCREdit to the GCR using the appropriate method to edit the database
+         */
+        switch (GCREdit.type) {
+            case "balance":
+                console.log("Applying GCREdit balance: ", GCREdit.operation, GCREdit.amount, GCREdit.account)
+                break
+            case "nonce":
+                console.log("Applying GCREdit nonce: ", GCREdit.operation, GCREdit.amount, GCREdit.account)
+                break
+            case "assign":
+                console.log("Assigning GCREdit context: ", GCREdit.context, GCREdit.account)
+                break
+            case "identity":
+                console.log("Assigning GCREdit identity: ", GCREdit.identity, GCREdit.account)
+                break
+            case "subnetsTx":
+                console.log("Assigning GCREdit subnetsTx: ", GCREdit.txhash, GCREdit.account)
+                break
+        }
+        // TODO Implement the actual application of the GCREdit above
+        return [true, "GCREdit applied"]
+    }
+
     // Assign methods
+
+    
+
     // TODO We have to port these methods from gcr.ts, now they are just proxies
     assign = {
         xm: assignXM,
@@ -215,6 +267,9 @@ export default class HandleGCR {
             assignFromSignature: IdentityManager.inferIdentityFromSignature,
         },
     }
+
+    // This is a proxy to the manageNative methods for simplicity
+    native = manageNative
 
     // Utilities
     utilities = {
