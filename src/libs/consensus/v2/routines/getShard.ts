@@ -3,11 +3,29 @@ import { Peer } from "src/libs/peer"
 import Alea from "alea"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
+import Chain from "src/libs/blockchain/chain"
 
 export default async function getShard(seed: string): Promise<Peer[]> {
     // ! we need to get the peers from the last 3 blocks too
     const allPeers = await PeerManager.getInstance().getOnlinePeers()
     const peers = allPeers.filter(peer => peer.sync.status)
+
+    const peerIdentites = peers.map(peer => peer.identity)
+
+    const lastBlock = await Chain.getLastBlock()
+
+    // INFO: Include the validators from the last block
+    // REVIEW: Do we include all peers from the last N blocks or only the validators?
+    for (const identity of Object.keys(
+        lastBlock.validation_data["signatures"],
+    )) {
+        if (peerIdentites.includes(identity)) {
+            continue
+        }
+
+        log.debug(`Peer ${identity} not in the shard, adding it`)
+        peers.push(PeerManager.getInstance().getPeer(identity))
+    }
 
     // Select up to 10 peers from the list using the seed as a source of randomness
     let maxShardSize = 10
