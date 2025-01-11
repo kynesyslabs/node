@@ -14,7 +14,7 @@ export async function broadcastBlockHash(
     var con = 0
     var promises = []
     const ourId = getSharedState.identity.ed25519.publicKey.toString("hex")
-    const proposeParams = [block.hash, block.validation_data, ourId]
+    const proposeParams = [block.hash, "", ourId]
     for (const peer of shard) {
         promises.push(
             peer.longCall({
@@ -31,13 +31,14 @@ export async function broadcastBlockHash(
     // See manageConsensusRoutine.ts for more details on the response format and mechanism
     for (const promise of promises) {
         // Work asynchronously
-        promise.then(async (response: RPCResponse) => {
+        promise.then((response: RPCResponse) => {
             log.info("[broadcastBlockHash] response from a validator received.")
             if (response.result === 200) {
                 log.info(
                     "[broadcastBlockHash] Block hash confirmation received from the validator: " +
                         response.response,
                 )
+                log.debug("[broadcastBlockHash] response: " + JSON.stringify(response, null, 2))
                 // Add the validation data to the block
                 // ? Should we check if the peer is in the shard? Theoretically we checked before
                 let peerValidationData =
@@ -55,7 +56,7 @@ export async function broadcastBlockHash(
                 for (const [identity, signature] of Object.entries(
                     incomingSignatures,
                 )) {
-                    const isValid = await Cryptography.verify(
+                    const isValid = Cryptography.verify(
                         block.hash,
                         signature,
                         identity,

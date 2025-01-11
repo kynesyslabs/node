@@ -32,8 +32,15 @@ export default async function getShard(seed: string): Promise<Peer[]> {
             continue
         }
 
-        log.debug(`Peer ${identity} not in the shard, adding it`)
-        peers.push(PeerManager.getInstance().getPeer(identity))
+        const peer = PeerManager.getInstance().getPeer(identity)
+        log.debug(
+            `Peer result for ${identity}: ${JSON.stringify(peer, null, 2)}`,
+        )
+
+        if (peer) {
+            log.debug(`Peer ${identity} not in the shard, adding it`)
+            peers.push(peer)
+        }
     }
 
     // Select up to 10 peers from the list using the seed as a source of randomness
