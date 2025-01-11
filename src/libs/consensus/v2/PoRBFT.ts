@@ -17,6 +17,7 @@ import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import applyGCROperation from "src/libs/blockchain/gcr/gcr_routines/applyGCROperation"
 import { txToGCROperation } from "src/libs/blockchain/gcr/gcr_routines/txToGCROperation"
 import SecretaryManager from "./types/secretaryManager"
+import { NotInShardError } from "src/exceptions"
 
 /* INFO
 # Semaphore system
@@ -65,13 +66,15 @@ export async function consensusRoutine(): Promise<void> {
     // INFO: We won't use the shard returned by initializeShard
     // as it can change through the consensus routine
     // INFO: CONSENSUS ACTION 1: Initialize the shard
-    await initializeShard()
-
-    if (!isInShard(manager.shard.members)) {
-        log.info(
-            "[consensusRoutine] We are not in the shard, waiting for the block",
-        )
-        return
+    try {
+        await initializeShard()
+    } catch (error) {
+        if (error instanceof NotInShardError) {
+            log.info(
+                "[consensusRoutine] We are not in the shard, waiting for the block",
+            )
+            return
+        }
     }
 
     log.info("[consensusRoutine] We are in the shard, creating the block")

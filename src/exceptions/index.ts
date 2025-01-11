@@ -31,3 +31,10 @@ export class PeerOfflineError extends Error {
         this.name = "PeerOfflineError"
     }
 }
+
+export class NotInShardError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "NotInShardError"
+    }
+}
