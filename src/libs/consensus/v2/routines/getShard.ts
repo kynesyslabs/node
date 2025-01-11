@@ -14,11 +14,20 @@ export default async function getShard(seed: string): Promise<Peer[]> {
 
     const lastBlock = await Chain.getLastBlock()
 
+    log.debug(
+        "typeof lastBlock.validation_data: " + typeof lastBlock.validation_data,
+    )
+    log.debug(`Last block: ${lastBlock.validation_data}`)
+
+    let signatures: { [key: string]: string } = {}
+
+    if (lastBlock.validation_data !== "genesis") {
+        signatures = JSON.parse(lastBlock.validation_data)["signatures"]
+    }
+
     // INFO: Include the validators from the last block
     // REVIEW: Do we include all peers from the last N blocks or only the validators?
-    for (const identity of Object.keys(
-        lastBlock.validation_data["signatures"],
-    )) {
+    for (const identity of Object.keys(signatures)) {
         if (peerIdentites.includes(identity)) {
             continue
         }
