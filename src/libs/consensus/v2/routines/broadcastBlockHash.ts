@@ -14,7 +14,7 @@ export async function broadcastBlockHash(
     var con = 0
     var promises = []
     const ourId = getSharedState.identity.ed25519.publicKey.toString("hex")
-    const proposeParams = [block.hash, "", ourId]
+    const proposeParams = [block.hash, block.validation_data, ourId]
     for (const peer of shard) {
         promises.push(
             peer.longCall({
