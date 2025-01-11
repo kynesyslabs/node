@@ -21,6 +21,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import required from "src/utilities/required"
+import { ForgeToHex } from "src/libs/crypto/forgeUtils"
 const term = terminalkit.terminal
 
 // INFO Cryptographically validate a transaction and calculate gas
@@ -124,7 +125,7 @@ async function defineGas(
         if (typeof tx.content.from === "string") {
             from = tx.content.from
         } else {
-            from = tx.content.from.toString("hex")
+            from = ForgeToHex(tx.content.from)
         }
         console.log(
             "[Native Tx Validation] Calculating gas for: " + from + "\n",
