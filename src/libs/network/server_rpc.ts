@@ -11,8 +11,6 @@ import fastify, {
 import {
     BrowserRequest,
     BundleContent,
-    IWeb2Payload,
-    IWeb2Request,
     RPCRequest,
     RPCResponse,
 } from "@kynesyslabs/demosdk/types"
@@ -30,9 +28,12 @@ import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
 import { manageNodeCall, NodeCall } from "./manageNodeCall"
 import { registerMethodListingEndpoint } from "./methodListing"
 import { rpcSchema, setupOpenAPI } from "./openApiSpec"
-import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
-import { processWeb2Payload } from "src/features/web2/routines/web2PayloadProcessor"
+import {
+    handleWeb2ProxyRequest,
+    IHandleWeb2ProxyRequestParams,
+} from "./routines/transactions/handleWeb2ProxyRequest"
 import required from "src/utilities/required"
+import { skeletons } from "@kynesyslabs/demosdk/websdk"
 
 // Reading the port from sharedState
 
@@ -172,14 +173,21 @@ async function processPayload(
                 authorization,
                 ...messageData
             } = rawPayload.message
-            const web2Request = processWeb2Payload(messageData)
+            const web2Request = { ...skeletons.web2_request }
+            web2Request.raw = {
+                ...web2Request.raw,
+                ...messageData.web2Request.raw,
+            }
 
-            return await handleWeb2ProxyRequest(
-                web2Request,
+            // TODO: Get type from SDK
+            const params: IHandleWeb2ProxyRequestParams = {
+                request: web2Request,
                 sessionId,
-                payloadData,
+                payload: payloadData,
                 authorization,
-            )
+            }
+
+            return await handleWeb2ProxyRequest(params)
         }
 
         default:
