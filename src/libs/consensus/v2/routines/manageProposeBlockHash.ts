@@ -66,7 +66,7 @@ export default async function manageProposeBlockHash(
         for (const [identity, signature] of Object.entries(
             validationData["signatures"],
         )) {
-            const isValid = await Cryptography.verify(
+            const isValid = Cryptography.verify(
                 getSharedState.candidateBlock.hash,
                 signature,
                 identity,
@@ -93,6 +93,7 @@ export default async function manageProposeBlockHash(
         response.extra = getSharedState.candidateBlock.validation_data
         return response
     }
+
     log.info(
         "[manageProposeBlockHash] Hash does not correspond to our candidate block",
     )
