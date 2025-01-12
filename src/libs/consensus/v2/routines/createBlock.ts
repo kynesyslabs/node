@@ -3,12 +3,10 @@ import { NativeTablesHashes } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import Cryptography from "src/libs/crypto/cryptography"
-import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import Peer from "src/libs/peer/Peer"
 import hashGCRTables from "src/libs/blockchain/gcr/gcr_routines/hashGCR"
-import forge from "node-forge"
 
 export async function createBlock(
     orderedTransactions: Transaction[],
@@ -41,8 +39,6 @@ export async function createBlock(
         getSharedState.identity.ed25519.privateKey,
     )
 
-    console.error("blockSignature: ", blockSignature)
-
     // ? Probably to remove once we have the mechanism working for v2
     if (!block.validation_data) {
         block.validation_data = { signatures: {} }
@@ -51,11 +47,6 @@ export async function createBlock(
     block.validation_data.signatures[ // ! Define a decent type for validation_data
         getSharedState.identity.ed25519.publicKey.toString("hex")
     ] = blockSignature.toString("hex")
-
-    log.debug(
-        "[createBlock] Block signature: " +
-            forge.util.binary.hex.encode(blockSignature),
-    )
 
     /* NOTE - The block timestamp is the average timestamp of the shard 
     see averageTimestamp.ts for more details */

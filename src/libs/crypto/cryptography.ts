@@ -144,7 +144,9 @@ export default class Cryptography {
         // REVIEW Test HexToForge support
         if (privateKey.type == "string") {
             console.log("[HexToForge] Deriving a buffer from privateKey...")
-            privateKey = HexToForge(privateKey)
+            // privateKey = HexToForge(privateKey)
+            privateKey = forge.util.binary.hex.decode(privateKey)
+            process.exit(0)
         }
 
         return forge.pki.ed25519.sign({
@@ -166,12 +168,17 @@ export default class Cryptography {
         console.log("publicKey: " + publicKey) */
         // REVIEW Test HexToForge support
         if (typeof signature == "string") {
-            console.log("[HexToForge] Deriving a buffer from signature: " + signature)
-            signature = HexToForge(signature)
+            console.log(
+                "[HexToForge] Deriving a buffer from signature: " + signature,
+            )
+            // signature = HexToForge(signature)
+            signature = forge.util.binary.hex.decode(signature)
         }
+
         if (typeof publicKey == "string") {
             console.log("[HexToForge] Deriving a buffer from publicKey...")
-            publicKey = HexToForge(publicKey)
+            // publicKey = HexToForge(publicKey)
+            publicKey = forge.util.binary.hex.decode(publicKey)
         }
 
         // Also, we have to sanitize buffers so that they are forge compatible
@@ -188,9 +195,24 @@ export default class Cryptography {
 
         //console.log(publicKey)
 
-        console.log("[Cryptography] Verifying the signature of: (" + typeof signed + ") " + signed)
-        console.log("[Cryptography] Using the signature: (" + typeof signature + ") " + ForgeToHex(signature))
-        console.log("[Cryptography] And the public key: (" + typeof publicKey + ") " + ForgeToHex(publicKey))
+        console.log(
+            "[Cryptography] Verifying the signature of: (" +
+                typeof signed +
+                ") " +
+                signed,
+        )
+        console.log(
+            "[Cryptography] Using the signature: (" +
+                typeof signature +
+                ") " +
+                ForgeToHex(signature),
+        )
+        console.log(
+            "[Cryptography] And the public key: (" +
+                typeof publicKey +
+                ") " +
+                ForgeToHex(publicKey),
+        )
         //console.log(publicKey)
         return forge.pki.ed25519.verify({
             message: signed,
@@ -206,9 +228,7 @@ export default class Cryptography {
         derive: (): forge.pki.rsa.KeyPair => {
             let md = forge.md.sha256.create()
             md.update(
-                JSON.stringify(
-                    getSharedState.identity.ed25519.privateKey,
-                ),
+                JSON.stringify(getSharedState.identity.ed25519.privateKey),
             )
             let seed = md.digest().toHex()
             let pnrg = forge.random.createInstance()
