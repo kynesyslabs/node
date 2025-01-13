@@ -24,7 +24,11 @@ import _ from "lodash"
 // NOTE This will replace gcr.ts methods for calling the native tables
 import { GCRSubnetsTxs } from "src/model/entities/GCRv2/GCRSubnetsTxs" // TODO Put this in the sdk when done
 import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
-import { EncryptedTransaction, RPCResponse, Transaction } from "@kynesyslabs/demosdk/types"
+import {
+    EncryptedTransaction,
+    RPCResponse,
+    Transaction,
+} from "@kynesyslabs/demosdk/types"
 import Datasource from "src/model/datasource"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
@@ -42,6 +46,8 @@ import { GCREdit } from "@kynesyslabs/demosdk/types"
 // REVIEW Trying to use the new GCRv2
 import { GCR_Main } from "src/model/entities/GCRv2/GCR_Main"
 import { GCR_Tracker } from "src/model/entities/GCRv2/GCR_Tracker"
+import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
+import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -221,42 +227,89 @@ export default class HandleGCR {
      * ? Try to cleanup the code and remove the old methods from gcr.ts
      */
 
-    // TODO Implement the execution of GCREdit objects
-    // ! Add this both after the tx is executed and after the tx is synced in Sync.ts and in the consensus
+    // TODO Implement the creation of GCREdit objects from a Transaction (as called by 
+    // LINK src/libs/network/endpointHandlers.ts
+    //  handleValidateTransaction)
+    static async generate(tx: Transaction): Promise<GCREdit[]> {
+        let gcrEdits: GCREdit[] = []
+        let content = tx.content
+        // ? Should we move gas calculations here?
+        // TODO Based on the tx, generate the GCREdit objects (balance, nonce, assign, identity, subnetsTx...)
+        return gcrEdits
+    }
+
+    // REVIEW Implement the execution of GCREdit objects
+    // ! Add this both after the tx is executed (handleExecuteTransaction) and after the tx is synced in Sync.ts and in the consensus
     // NOTE Once this is implemented, we can remove the old methods from gcr.ts and the other methods that overlap with this one
-    static async apply(GCREdit: GCREdit, tx: Transaction): Promise<[boolean, string]> {
+    static async apply(
+        editOperation: GCREdit,
+        tx: Transaction,
+    ): Promise<[boolean, string]> {
         // 1. Check if the GCREdit is valid (check if the txhash is valid) // REVIEW see if this is enough
-        if (tx.hash !== GCREdit.txhash) {
+        if (tx.hash !== editOperation.txhash) {
             return [false, "Invalid txhash"]
         }
+
+        const db = await Datasource.getInstance()
+        const GCRMainRepository = db.getDataSource().getRepository(GCR_Main)
+        const GCRHashesRepository = db.getDataSource().getRepository(GCRHashes)
+        const GCRSubnetsTxsRepository = db
+            .getDataSource()
+            .getRepository(GCRSubnetsTxs)
+        const GCRTrackerRepository = db
+            .getDataSource()
+            .getRepository(GCR_Tracker)
         /**
          * 2. Check if the GCREdit is already applied (check if the txhash is already applied) // ? see how to do this
          * 3. Apply the GCREdit to the GCR using the appropriate method to edit the database
          */
-        switch (GCREdit.type) {
+        var result: [boolean, string] = [false, "Invalid GCREdit type"]
+        // REVIEW Test the single case for each type
+        switch (editOperation.type) {
             case "balance":
-                console.log("Applying GCREdit balance: ", GCREdit.operation, GCREdit.amount, GCREdit.account)
+                result = await GCRBalanceRoutines.apply(
+                    editOperation,
+                    GCRMainRepository,
+                )
                 break
             case "nonce":
-                console.log("Applying GCREdit nonce: ", GCREdit.operation, GCREdit.amount, GCREdit.account)
+                result = await GCRNonceRoutines.apply(
+                    editOperation,
+                    GCRMainRepository,
+                )
                 break
             case "assign":
-                console.log("Assigning GCREdit context: ", GCREdit.context, GCREdit.account)
+                // TODO Implement this
+                console.log(
+                    "Assigning GCREdit context: ",
+                    editOperation.context,
+                    editOperation.account,
+                )
+                result = [false, "Not implemented"]
                 break
             case "identity":
-                console.log("Assigning GCREdit identity: ", GCREdit.identity, GCREdit.account)
+                // TODO Implement this
+                console.log(
+                    "Assigning GCREdit identity: ",
+                    editOperation.identity,
+                    editOperation.account,
+                )
+                result = [false, "Not implemented"]
                 break
             case "subnetsTx":
-                console.log("Assigning GCREdit subnetsTx: ", GCREdit.txhash, GCREdit.account)
+                // TODO Implement this
+                console.log(
+                    "Assigning GCREdit subnetsTx: ",
+                    editOperation.txhash,
+                    editOperation.account,
+                )
+                result = [false, "Not implemented"]
                 break
         }
-        // TODO Implement the actual application of the GCREdit above
-        return [true, "GCREdit applied"]
+        return result
     }
 
     // Assign methods
-
-    
 
     // TODO We have to port these methods from gcr.ts, now they are just proxies
     assign = {

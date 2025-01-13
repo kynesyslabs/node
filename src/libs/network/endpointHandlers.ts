@@ -50,6 +50,7 @@ import { DemoScript } from "@kynesyslabs/demosdk/types"
 import { ForgeToHex } from "../crypto/forgeUtils"
 import { Peer } from "../peer"
 import { response } from "express"
+import HandleGCR from "../blockchain/gcr/handleGCR"
 
 /* // ! Note: this will be removed once demosWork is in place
 import {
@@ -81,6 +82,13 @@ export default class ServerHandlers {
              */
             //console.log(fname + "Validating transaction...")
             validationData = await confirmTransaction(tx)
+
+            // REVIEW Add the GCREdit into the Transaction object at this point
+            let gcrEdits = await HandleGCR.generate(tx)
+            tx.content.gcr_edits = gcrEdits
+            // REVIEW Recalculate the Transaction hash too
+            tx.hash = Hashing.sha256(JSON.stringify(tx.content))
+
             //console.log(fname + "Fetching result...")
         } catch (e) {
             term.red.bold("[TX VALIDATION ERROR] 💀 : ")
@@ -92,6 +100,7 @@ export default class ServerHandlers {
                     message:
                         "An error occurred while validating the transaction",
                     gas_operation: null,
+
                     transaction: null,
                 },
                 signature: null,
