@@ -19,6 +19,8 @@ async function sleep(time: number) {
 
 export default async function mainLoop() {
     log.info("[MAIN LOOP] ✅ Started")
+    await fastSync([], 'mainloop') // REVIEW Test here
+
     // return await consensusRoutine()
     while (getSharedState.runMainLoop) {
         await mainLoopCycle()
@@ -56,7 +58,6 @@ async function mainLoopCycle() {
     // we now have a list of online peers that can be used for consensus
 
     // ANCHOR Syncing the blockchain after the peer routine
-    await fastSync([], 'mainloop') // REVIEW Test here
     log.info("[MAIN LOOP] Synced! 🟢", true)
 
     await PeerManager.getInstance().sayHelloToAllPeers()
@@ -166,7 +167,6 @@ async function peerRoutine(): Promise<Peer[]> {
     // Returns the list of currently online peers
     return currentlyOnlinePeers
 }
-
 
 // Diagnostic
 
