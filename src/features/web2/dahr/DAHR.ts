@@ -9,9 +9,17 @@ import { ProxyFactory } from "src/features/web2/proxy/ProxyFactory"
 import required from "src/utilities/required"
 import { generateUniqueId } from "src/utilities/generateUniqueId"
 
-//  TODO Move this to the SDK
+//  TODO Fetch from sdks
 export interface IAttestationWithResponse extends IWeb2Attestation {
     web2Response: IWeb2Result
+}
+
+//  TODO Fetch from sdks
+interface IDAHRStartProxyParams {
+    method: IWeb2Request["raw"]["method"]
+    headers: IWeb2Request["raw"]["headers"]
+    payload?: unknown
+    authorization?: string
 }
 
 /**
@@ -45,39 +53,53 @@ export class DAHR {
         this._proxy = ProxyFactory.createProxy(this._sessionId)
     }
 
+    /**
+     * Get the web2 request.
+     * @returns {IWeb2Request} The web2 request.
+     */
     get web2Request(): IWeb2Request {
         return this._web2Request
     }
 
+    /**
+     * Get the session ID.
+     * @returns {string} The session ID.
+     */
     get sessionId(): string {
         return this._sessionId
     }
 
     /**
      * Start the proxy and return the attestation with the response.
-     * @param {IWeb2Request["raw"]["method"]} method - The method to send the request with.
-     * @param {IWeb2Request["raw"]["headers"]} headers - The headers to send with the request.
-     * @param {any} payload - The payload to send with the request.
-     * @param {string} authorization - The authorization token to send with the request.
      * @returns {Promise<IAttestationWithResponse>} The attestation with the response.
      */
-    async startProxy(
-        method: IWeb2Request["raw"]["method"],
-        headers: IWeb2Request["raw"]["headers"],
-        payload: any,
-        authorization: string,
-    ): Promise<IAttestationWithResponse> {
+    async startProxy({
+        method,
+        headers,
+        payload = {},
+        authorization = "",
+    }: IDAHRStartProxyParams): Promise<IAttestationWithResponse> {
         // Make sure we have a web2Request at this point
         required(this._web2Request, "web2Request")
 
-        const web2RequestManager = new Web2RequestManager(this)
-        const web2Response = await this._proxy.sendHTTPRequest(
-            this._web2Request,
+        //Update the web2Request with the new method, headers, and url
+        this._web2Request.raw = {
+            ...this._web2Request.raw,
             method,
             headers,
+            url: this._web2Request.raw.url,
+        }
+
+        console.log("[DAHR] this._web2Request:", this._web2Request)
+
+        const web2RequestManager = new Web2RequestManager(this)
+        const web2Response = await this._proxy.sendHTTPRequest({
+            web2Request: this._web2Request,
+            targetMethod: method,
+            targetHeaders: headers,
             payload,
-            authorization,
-        )
+            targetAuthorization: authorization,
+        })
 
         const attestedResult =
             web2RequestManager.getAttestedResult(web2Response)
@@ -88,6 +110,9 @@ export class DAHR {
         }
     }
 
+    /**
+     * Stop the proxy.
+     */
     stopProxy(): void {
         this._proxy.stopProxy()
     }

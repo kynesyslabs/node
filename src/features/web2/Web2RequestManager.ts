@@ -15,15 +15,27 @@ import terminalKit from "terminal-kit"
 
 const term = terminalKit.terminal
 
+/**
+ * The Web2RequestManager class is responsible for managing the Web2 request and its result.
+ * It provides methods for validating the request and result, broadcasting the request to the next * peer, and waiting for the attestations to arrive.
+ */
 export class Web2RequestManager {
     constructor(private dahr: DAHR) {
         required(this.dahr, "Missing DAHR instance")
     }
 
+    /**
+     * Get the web2 result validity.
+     * @returns {boolean} Whether the web2 result is valid.
+     */
     get web2ResultIsValid(): boolean {
         return this._verifyWeb2RequestAndResult()
     }
 
+    /**
+     * Get the number of attestations.
+     * @returns {number} The number of attestations.
+     */
     get numberOfAttestations(): number {
         return Object.keys(this.dahr.web2Request.attestations).length
     }
@@ -51,12 +63,6 @@ export class Web2RequestManager {
         return combinedAttestation
     }
 
-    /**
-     * Validate the web2 request and result.
-     * @param {IWeb2Request} web2Request - The web2 request to validate.
-     * @param {IWeb2Result} web2Result - The web2 result to validate.
-     * @returns {IWeb2Attestation} The web2 attestation.
-     */
     private _validateWeb2RequestAndResult(
         web2Request: IWeb2Request,
         web2Result: IWeb2Result,
@@ -111,10 +117,6 @@ export class Web2RequestManager {
         return attestation
     }
 
-    /**
-     * Verify the web2Request and result based on the attestations. Checking attestations (one by one) and returning the result of the verification.
-     * @returns {boolean} Whether the result is valid.
-     */
     private _verifyWeb2RequestAndResult(): boolean {
         required(this.dahr.web2Request, "Missing request")
         let valid = true
@@ -140,6 +142,10 @@ export class Web2RequestManager {
         return valid
     }
 
+    /**
+     * Broadcast the web2 request to the next peer.
+     * @returns {Promise<void>}
+     */
     async broadcastToNextPeer(): Promise<void> {
         required(this.dahr.web2Request, "Missing request")
 
