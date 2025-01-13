@@ -233,7 +233,39 @@ export default class HandleGCR {
     static async generate(tx: Transaction): Promise<GCREdit[]> {
         let gcrEdits: GCREdit[] = []
         let content = tx.content
+        switch (content.type) {
+            case "demoswork":
+                // TODO Implement this
+                // ? Should we do the iteration over the items here? If so, create and call a proper module for this
+                break
+            // NOTE Both web2Request and crosschainOperation produce the same "assign" operation as GCREdit
+            case "web2Request":
+            case "crosschainOperation":
+                var assignGCREdit: GCREdit = {
+                    type: "assign",
+                    account: content.from as string, // REVIEW We need to be sure this is a string
+                    context: // NOTE Assigning the right context for the operation based on the type of the tx
+                        content.type === "web2Request"
+                            ? "web2"
+                            : "xm",
+                    txhash: tx.hash,
+                }
+                gcrEdits.push(assignGCREdit)
+                break
+            case "genesis":
+                // TODO Implement this
+                break
+        }
         // ? Should we move gas calculations here?
+        // Increasing the nonce of the sender
+        let nonceGCREdit: GCREdit = {
+            type: "nonce",
+            operation: "add",
+            account: content.from as string, // REVIEW We need to be sure this is a string
+            amount: 1,
+            txhash: tx.hash,
+        }
+        gcrEdits.push(nonceGCREdit)
         // TODO Based on the tx, generate the GCREdit objects (balance, nonce, assign, identity, subnetsTx...)
         return gcrEdits
     }

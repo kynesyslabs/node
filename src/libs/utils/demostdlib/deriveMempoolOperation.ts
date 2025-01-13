@@ -157,6 +157,7 @@ export async function createTransaction(
             to: null,
             amount: null,
             data: ["demoswork", null], // type as string and content in hex string
+            gcr_edits: [],
             nonce: null, // Increments every time a transaction is sent from the same account
             timestamp: null, // Is the registered unix timestamp when the transaction was sent the first time
             transaction_fee: {
