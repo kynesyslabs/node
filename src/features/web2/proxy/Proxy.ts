@@ -7,30 +7,10 @@ import {
     IWeb2Request,
     EnumWeb2Methods,
     IWeb2Result,
+    IAuthorizationConfig,
+    ISendHTTPRequestParams,
 } from "@kynesyslabs/demosdk/types"
 import required from "src/utilities/required"
-
-//TODO: fetch from sdks
-interface ISendHTTPRequestParams {
-    web2Request: IWeb2Request
-    targetMethod: EnumWeb2Methods
-    targetHeaders: IWeb2Request["raw"]["headers"]
-    payload: unknown
-    targetAuthorization: string
-}
-
-//TODO: fetch from sdks
-interface IAuthorizationException {
-    urlPattern: RegExp
-    methods: EnumWeb2Methods[]
-}
-
-//TODO: fetch from sdks
-interface IAuthorizationConfig {
-    requireAuthForAll: boolean
-    exceptions: IAuthorizationException[]
-    authTimeout?: number
-}
 
 /**
  * A proxy server class that handles HTTP/HTTPS requests by creating a local proxy server.
