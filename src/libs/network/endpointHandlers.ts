@@ -314,19 +314,16 @@ export default class ServerHandlers {
         }
         // Only if the transaction is valid we add it to the mempool
         if (result.success) {
-            // NOTE Deriving an Operation from the Transaction to edit the GCR accordingly
-            // TODO Derive a GCREdit (see handleGCR.ts); GCREdit is declared in the sdk (see below)
-            // LINK sdks/src/types/blockchain/GCREdit.ts
-            // LINK sdks/src/types/blockchain/Transaction.ts
-            /**
-             * NOTE: Operations should be derived based on the type of the transaction
-             * Native transactions (and also Gas operations) edit the GCR balance, for example
-             * XM and Web2 transactions edit the GCR txs list and are assigned
-             * The nonce is always edited
-             */
-            // TODO Add the Operation to the Transaction // ? Should we edit the Transaction object?
-            // The Operation is executed in // LINK src/libs/blockchain/gcr/handleGCR.ts
-
+            // NOTE We apply the GCREdit to the GCR and check if it is successful. If not, we return an error
+            let editsResults = await HandleGCR.applyToTx(queriedTx)
+            if (!editsResults[0]) {
+                log.error("[handleExecuteTransaction] Failed to apply GCREdit")
+                result.success = false
+                result.response = false
+                result.extra = "Failed to apply GCREdit: " + editsResults[1]
+                return result
+            }
+            
             // We add the transaction to the mempool
             console.log(
                 "[handleExecuteTransaction] Adding tx with hash: " +
@@ -337,7 +334,6 @@ export default class ServerHandlers {
             console.log(
                 "[handleExecuteTransaction] Transaction added to mempool",
             )
-            // FIXME Add an operation for the nonce or anyway a way to manage the nonce (see above about the GCR)
         }
         // Response is then sent back automatically as a reply (with our validation)
         // Returning the state of the transaction including operations

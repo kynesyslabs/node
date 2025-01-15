@@ -42,12 +42,14 @@ import { txToGCROperation } from "./gcr_routines/txToGCROperation"
 import IdentityManager from "./gcr_routines/identityManager"
 import manageNative from "./gcr_routines/manageNative"
 import { GCREdit } from "@kynesyslabs/demosdk/types"
+import log from "src/utilities/logger"
 
 // REVIEW Trying to use the new GCRv2
 import { GCR_Main } from "src/model/entities/GCRv2/GCR_Main"
 import { GCR_Tracker } from "src/model/entities/GCRv2/GCR_Tracker"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
+import { HandleNativeOperations } from "./gcr_routines/handleNativeOperations"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -67,6 +69,11 @@ export type GetNativePropertiesOptions = {
 
 export type GetNativeSubnetsTxsOptions = {
     txData?: boolean
+}
+
+export type GCRResult = {
+    success: boolean
+    message: string
 }
 
 // ? Maybe sanitize the options?
@@ -227,121 +234,145 @@ export default class HandleGCR {
      * ? Try to cleanup the code and remove the old methods from gcr.ts
      */
 
-    // TODO Implement the creation of GCREdit objects from a Transaction (as called by 
+    // SECTION GCREdit methods
+
+    // TODO Implement the creation of GCREdit objects from a Transaction (as called by
     // LINK src/libs/network/endpointHandlers.ts
     //  handleValidateTransaction)
+    /**
+     * Generates GCR (Global Change Registry) edits from a transaction
+     * @param tx The transaction to generate edits from
+     * @returns Array of GCR edits to be applied
+     */
     static async generate(tx: Transaction): Promise<GCREdit[]> {
-        let gcrEdits: GCREdit[] = []
-        let content = tx.content
+        const gcrEdits: GCREdit[] = []
+        const { content } = tx
+
+        // Handle main transaction edits
         switch (content.type) {
             case "demoswork":
                 // TODO Implement this
-                // ? Should we do the iteration over the items here? If so, create and call a proper module for this
                 break
-            // NOTE Both web2Request and crosschainOperation produce the same "assign" operation as GCREdit
+            case "native":
+                var nativeEdits = await HandleNativeOperations.handle(tx)
+                gcrEdits.push(...nativeEdits)
+                break
             case "web2Request":
             case "crosschainOperation":
-                var assignGCREdit: GCREdit = {
-                    type: "assign",
-                    account: content.from as string, // REVIEW We need to be sure this is a string
-                    context: // NOTE Assigning the right context for the operation based on the type of the tx
-                        content.type === "web2Request"
-                            ? "web2"
-                            : "xm",
-                    txhash: tx.hash,
-                }
-                gcrEdits.push(assignGCREdit)
+                gcrEdits.push(this.createAssignEdit(content, tx.hash))
                 break
             case "genesis":
                 // TODO Implement this
                 break
         }
-        // ? Should we move gas calculations here?
-        // Increasing the nonce of the sender
-        let nonceGCREdit: GCREdit = {
-            type: "nonce",
-            operation: "add",
-            account: content.from as string, // REVIEW We need to be sure this is a string
-            amount: 1,
-            txhash: tx.hash,
-        }
-        gcrEdits.push(nonceGCREdit)
-        // TODO Based on the tx, generate the GCREdit objects (balance, nonce, assign, identity, subnetsTx...)
+
+        // Add nonce increment edit
+        gcrEdits.push(this.createNonceEdit(content.from as string, tx.hash))
         return gcrEdits
     }
 
+    /**
+     * Creates an assignment edit for web2 requests and crosschain operations
+     * @param content Transaction content containing type and sender information
+     * @param txHash Transaction hash for verification
+     * @returns GCREdit object for assignment operations
+     */
+    private static createAssignEdit(content: any, txHash: string): GCREdit {
+        return {
+            type: "assign",
+            account: content.from as string,
+            context: content.type === "web2Request" ? "web2" : "xm",
+            txhash: txHash,
+        }
+    }
+
+    /**
+     * Creates a nonce increment edit for the given account
+     * @param account The account address to increment nonce for
+     * @param txHash Transaction hash for verification
+     * @returns GCREdit object for nonce increment
+     */
+    private static createNonceEdit(account: string, txHash: string): GCREdit {
+        return {
+            type: "nonce",
+            operation: "add",
+            account,
+            amount: 1,
+            txhash: txHash,
+        }
+    }
+
     // REVIEW Implement the execution of GCREdit objects
-    // ! Add this both after the tx is executed (handleExecuteTransaction) and after the tx is synced in Sync.ts and in the consensus
+    // TODO Add this after the tx is synced in Sync.ts and in the consensus
+    // ? Should we add the rollbacks here?
     // NOTE Once this is implemented, we can remove the old methods from gcr.ts and the other methods that overlap with this one
+    /**
+     * Applies a single GCR edit operation to the blockchain state
+     * @param editOperation The GCR edit to apply
+     * @param tx The original transaction containing this edit
+     * @returns Result indicating success/failure and any error messages
+     * @throws May throw database errors during repository operations
+     */
     static async apply(
         editOperation: GCREdit,
         tx: Transaction,
-    ): Promise<[boolean, string]> {
-        // 1. Check if the GCREdit is valid (check if the txhash is valid) // REVIEW see if this is enough
+    ): Promise<GCRResult> {
         if (tx.hash !== editOperation.txhash) {
-            return [false, "Invalid txhash"]
+            return { success: false, message: "Invalid txhash" }
         }
 
-        const db = await Datasource.getInstance()
-        const GCRMainRepository = db.getDataSource().getRepository(GCR_Main)
-        const GCRHashesRepository = db.getDataSource().getRepository(GCRHashes)
-        const GCRSubnetsTxsRepository = db
-            .getDataSource()
-            .getRepository(GCRSubnetsTxs)
-        const GCRTrackerRepository = db
-            .getDataSource()
-            .getRepository(GCR_Tracker)
-        /**
-         * 2. Check if the GCREdit is already applied (check if the txhash is already applied) // ? see how to do this
-         * 3. Apply the GCREdit to the GCR using the appropriate method to edit the database
-         */
-        var result: [boolean, string] = [false, "Invalid GCREdit type"]
-        // REVIEW Test the single case for each type
+        const repositories = await this.getRepositories()
+
         switch (editOperation.type) {
             case "balance":
-                result = await GCRBalanceRoutines.apply(
+                return GCRBalanceRoutines.apply(
                     editOperation,
-                    GCRMainRepository,
+                    repositories.main,
                 )
-                break
             case "nonce":
-                result = await GCRNonceRoutines.apply(
-                    editOperation,
-                    GCRMainRepository,
-                )
-                break
+                return GCRNonceRoutines.apply(editOperation, repositories.main)
             case "assign":
-                // TODO Implement this
-                console.log(
-                    "Assigning GCREdit context: ",
-                    editOperation.context,
-                    editOperation.account,
-                )
-                result = [false, "Not implemented"]
-                break
             case "identity":
-                // TODO Implement this
-                console.log(
-                    "Assigning GCREdit identity: ",
-                    editOperation.identity,
-                    editOperation.account,
-                )
-                result = [false, "Not implemented"]
-                break
             case "subnetsTx":
-                // TODO Implement this
-                console.log(
-                    "Assigning GCREdit subnetsTx: ",
-                    editOperation.txhash,
-                    editOperation.account,
-                )
-                result = [false, "Not implemented"]
-                break
+                // TODO implementations
+                console.log(`Assigning GCREdit ${editOperation.type}`)
+                return { success: false, message: "Not implemented" }
+            default:
+                return { success: false, message: "Invalid GCREdit type" }
         }
-        return result
     }
 
-    // Assign methods
+    /**
+     * Applies all GCR edits from a transaction
+     * @param tx Transaction containing GCR edits to apply
+     * @returns Combined result of all edit applications
+     * @throws May throw if any edit application fails
+     */
+    static async applyToTx(tx: Transaction): Promise<GCRResult> {
+        const editsResults: GCRResult[] = []
+
+        for (let edit of tx.content.gcr_edits) {
+            editsResults.push(await HandleGCR.apply(edit, tx))
+        }
+
+        if (!editsResults.every(result => result.success)) {
+            log.error("[handleExecuteTransaction] Failed to apply GCREdit")
+            const failedMessages = editsResults
+                .filter(result => !result.success)
+                .map(result => result.message)
+                .join(", ")
+            return {
+                success: false,
+                message: `Failed to apply GCREdit: ${failedMessages}`,
+            }
+        }
+
+        return { success: true, message: "" }
+    }
+
+    // ! SECTION GCREdit methods
+
+    // Assign methods // ? Probably to remove
 
     // TODO We have to port these methods from gcr.ts, now they are just proxies
     assign = {
@@ -373,5 +404,17 @@ export default class HandleGCR {
     jsonb = {
         get: GCRJsonbHandler.getJSONBValue,
         update: GCRJsonbHandler.updateJSONBValue,
+    }
+
+    private static async getRepositories() {
+        const db = await Datasource.getInstance()
+        const dataSource = db.getDataSource()
+
+        return {
+            main: dataSource.getRepository(GCR_Main),
+            hashes: dataSource.getRepository(GCRHashes),
+            subnetsTxs: dataSource.getRepository(GCRSubnetsTxs),
+            tracker: dataSource.getRepository(GCR_Tracker),
+        }
     }
 }

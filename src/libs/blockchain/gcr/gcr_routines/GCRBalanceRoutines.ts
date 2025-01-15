@@ -1,11 +1,12 @@
 import {GCREdit} from "@kynesyslabs/demosdk/types"
 import { Repository } from "typeorm"
 import { GCR_Main } from "src/model/entities/GCRv2/GCR_Main"
+import { GCRResult } from "src/libs/blockchain/gcr/handleGCR"
 
 export default class GCRBalanceRoutines {
-    static async apply(editOperation: GCREdit, GCRMainRepository: Repository<GCR_Main>): Promise<[boolean, string]> {
+    static async apply(editOperation: GCREdit, GCRMainRepository: Repository<GCR_Main>): Promise<GCRResult> {
         if (editOperation.type !== "balance") {
-            return [false, "Invalid GCREdit type"]
+            return { success: false, message: "Invalid GCREdit type" }
         }
         console.log(
             "Applying GCREdit balance: ",
@@ -18,7 +19,7 @@ export default class GCRBalanceRoutines {
             pubkey: editOperation.account,
         })
         if (!accountGCR) {
-            return [false, "Account not found"] // REVIEW Or create it?
+            return { success: false, message: "Account not found" } // REVIEW Or create it?
         }
         // Getting the actual balance to apply the operation
         var actualBalance = accountGCR.balance
@@ -27,12 +28,12 @@ export default class GCRBalanceRoutines {
         } else if (editOperation.operation === "remove") {
             // Safeguarding the operation
             if (actualBalance < editOperation.amount) {
-                return [false, "Insufficient balance"]
+                return { success: false, message: "Insufficient balance" }
             }
             accountGCR.balance -= editOperation.amount
         }
         // Saving the account GCR
         await GCRMainRepository.save(accountGCR)
-        return [true, "Balance applied"]
+        return { success: true, message: "Balance applied" }
     }
 }
