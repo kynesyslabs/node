@@ -91,3 +91,4 @@ src/GPATH
 src/GRTAGS
 src/GTAGS
 .vscode/settings.json
+.aider*
