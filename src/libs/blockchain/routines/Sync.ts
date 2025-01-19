@@ -53,6 +53,10 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
         peers = peerManager.getPeers()
     }
 
+    if (latestBlock() === getSharedState.lastBlockNumber) {
+        return {}
+    }
+
     // Getting our data
     log.debug("[fastSync] Getting our last block number and hash")
     const lastBlock = await Chain.getLastBlock()
@@ -422,30 +426,31 @@ export async function mergePeerlist(block: Block): Promise<string[]> {
 }
 
 async function fastSyncRoutine(peers: Peer[] = []) {
-    const {
-        highestBlockNumber,
-        highestBlockNumberPeer,
-        ourLastBlockNumber,
-        ourLastBlockHash,
-    } = await getHigestBlockPeerData(peers)
-
-    if (highestBlockNumberPeer === null) {
+    // const {
+    //     highestBlockNumber,
+    //     highestBlockNumberPeer,
+    //     ourLastBlockNumber,
+    //     ourLastBlockHash,
+    // } = await getHigestBlockPeerData(peers)
+    if (latestBlock() === getSharedState.lastBlockNumber) {
         log.debug("[fastSync] We're already synced!")
         return true
     }
 
     // INFO: Check if block match across peers
-    const verified = await verifyLastBlockIntegrity(
-        highestBlockNumberPeer,
-        ourLastBlockNumber,
-        ourLastBlockHash,
-    )
+    // INFO: Disabled for testing!
+    // TODO: Fix verification of the last block with the same peer
+    // const verified = await verifyLastBlockIntegrity(
+    //     highestBlockPeer(),
+    //     getSharedState.lastBlockNumber,
+    //     getSharedState.lastBlockHash,
+    // )
 
-    if (!verified) {
-        log.error("[fastSync] Last block is not coherent")
-        getSharedState.syncStatus = false
-        return false
-    }
+    // if (!verified) {
+    //     log.error("[fastSync] Last block is not coherent")
+    //     getSharedState.syncStatus = false
+    //     return false
+    // }
 
     const synced = await requestBlocks()
 

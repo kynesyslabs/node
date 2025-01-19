@@ -32,7 +32,7 @@ async function mainLoopCycle() {
         true,
     )
     // ANCHOR Get the current UTC time (set the currentUTCTime variable in sharedState)
-    await getSharedState.getUTCTime()
+    // await getSharedState.getUTCTime()
     log.info(`[MAIN LOOP] Current UTC time: ${getSharedState.currentUTCTime}`)
 
     // Check if the main loop is paused
@@ -50,7 +50,8 @@ async function mainLoopCycle() {
     /* NOTE The peerRoutine also checks getOnlinePeers, so it works by waiting for
     getSharedState.peerRoutineRunning to be 0 so we don't get into conflicts while
     running the consensus routine. */
-    let currentlyOnlinePeers: Peer[] = await peerRoutine()
+    // let currentlyOnlinePeers: Peer[] = await peerRoutine()
+    await peerGossip()
     await fastSync([], "mainloop") // REVIEW Test here
     // we now have a list of online peers that can be used for consensus
 
