@@ -244,7 +244,7 @@ export default class HandleGCR {
      * @param tx The transaction to generate edits from
      * @returns Array of GCR edits to be applied
      */
-    static async generate(tx: Transaction): Promise<GCREdit[]> {
+    static async generate(tx: Transaction, isRollback: boolean = false): Promise<GCREdit[]> {
         const gcrEdits: GCREdit[] = []
         const { content } = tx
 
@@ -254,7 +254,7 @@ export default class HandleGCR {
                 // TODO Implement this
                 break
             case "native":
-                var nativeEdits = await HandleNativeOperations.handle(tx)
+                var nativeEdits = await HandleNativeOperations.handle(tx, isRollback)
                 gcrEdits.push(...nativeEdits)
                 break
             case "web2Request":
@@ -277,12 +277,13 @@ export default class HandleGCR {
      * @param txHash Transaction hash for verification
      * @returns GCREdit object for assignment operations
      */
-    private static createAssignEdit(content: any, txHash: string): GCREdit {
+    private static createAssignEdit(content: any, txHash: string, isRollback: boolean = false): GCREdit {
         return {
             type: "assign",
             account: content.from as string,
             context: content.type === "web2Request" ? "web2" : "xm",
             txhash: txHash,
+            isRollback,
         }
     }
 
@@ -292,13 +293,14 @@ export default class HandleGCR {
      * @param txHash Transaction hash for verification
      * @returns GCREdit object for nonce increment
      */
-    private static createNonceEdit(account: string, txHash: string): GCREdit {
+    private static createNonceEdit(account: string, txHash: string, isRollback: boolean = false): GCREdit {
         return {
             type: "nonce",
             operation: "add",
             account,
             amount: 1,
             txhash: txHash,
+            isRollback,
         }
     }
 
@@ -316,6 +318,7 @@ export default class HandleGCR {
     static async apply(
         editOperation: GCREdit,
         tx: Transaction,
+        rollback: boolean = false, // operations will be reverse in the rollback
     ): Promise<GCRResult> {
         if (tx.hash !== editOperation.txhash) {
             return { success: false, message: "Invalid txhash" }
@@ -323,6 +326,12 @@ export default class HandleGCR {
 
         const repositories = await this.getRepositories()
 
+        // NOTE The rollbacks are applied within the single routines based on the isRollback flag
+        if (rollback) {
+            editOperation.isRollback = true
+        }
+
+        // Applying the edit operations
         switch (editOperation.type) {
             case "balance":
                 return GCRBalanceRoutines.apply(
@@ -348,11 +357,11 @@ export default class HandleGCR {
      * @returns Combined result of all edit applications
      * @throws May throw if any edit application fails
      */
-    static async applyToTx(tx: Transaction): Promise<GCRResult> {
+    static async applyToTx(tx: Transaction, isRollback: boolean = false): Promise<GCRResult> {
         const editsResults: GCRResult[] = []
 
         for (let edit of tx.content.gcr_edits) {
-            editsResults.push(await HandleGCR.apply(edit, tx))
+            editsResults.push(await HandleGCR.apply(edit, tx, isRollback))
         }
 
         if (!editsResults.every(result => result.success)) {
