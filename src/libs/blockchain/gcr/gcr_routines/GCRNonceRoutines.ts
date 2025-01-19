@@ -7,6 +7,7 @@ export default class GCRNonceRoutines {
     static async apply(
         editOperation: GCREdit,
         GCRMainRepository: Repository<GCR_Main>,
+        simulate: boolean,
     ): Promise<GCRResult> {
         if (editOperation.type !== "nonce") {
             return { success: false, message: "Invalid GCREdit type" }
@@ -42,7 +43,9 @@ export default class GCRNonceRoutines {
             accountGCR.nonce -= editOperation.amount
         }
         // Saving the account GCR
-        await GCRMainRepository.save(accountGCR)
+        if (!simulate) {
+            await GCRMainRepository.save(accountGCR)
+        }
         return { success: true, message: "Nonce applied" }
     }
 }

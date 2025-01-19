@@ -315,20 +315,20 @@ export default class ServerHandlers {
 
         // Only if the transaction is valid we add it to the mempool
         if (result.success) {
-            // REVIEW Skipping gcr edits application as we will apply them in the consensus
-            let skipGCREdits = true // TODO Remove this once is not needed anymore
-            if (!skipGCREdits) {
-                // NOTE We apply the GCREdit to the GCR and check if it is successful. If not, we return an error
-                let editsResults = await HandleGCR.applyToTx(queriedTx)
-                if (!editsResults[0]) {
-                    log.error(
-                        "[handleExecuteTransaction] Failed to apply GCREdit",
-                    )
-                    result.success = false
-                    result.response = false
-                    result.extra = "Failed to apply GCREdit: " + editsResults[1]
-                    return result
-                }
+            // REVIEW Simulating gcr edits application as we will apply them in the consensus
+            let simulate = true
+            // NOTE We apply the GCREdit to the GCR and check if it is successful. If not, we return an error
+            let editsResults = await HandleGCR.applyToTx(
+                queriedTx,
+                false, // isRollback
+                simulate,
+            )
+            if (!editsResults[0]) {
+                log.error("[handleExecuteTransaction] Failed to apply GCREdit")
+                result.success = false
+                result.response = false
+                result.extra = "Failed to apply GCREdit: " + editsResults[1]
+                return result
             }
 
             // We add the transaction to the mempool

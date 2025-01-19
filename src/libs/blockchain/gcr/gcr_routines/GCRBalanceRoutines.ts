@@ -4,7 +4,7 @@ import { GCR_Main } from "src/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "src/libs/blockchain/gcr/handleGCR"
 
 export default class GCRBalanceRoutines {
-    static async apply(editOperation: GCREdit, GCRMainRepository: Repository<GCR_Main>): Promise<GCRResult> {
+    static async apply(editOperation: GCREdit, GCRMainRepository: Repository<GCR_Main>, simulate: boolean): Promise<GCRResult> {
         if (editOperation.type !== "balance") {
             return { success: false, message: "Invalid GCREdit type" }
         }
@@ -37,8 +37,10 @@ export default class GCRBalanceRoutines {
             }
             accountGCR.balance -= editOperation.amount
         }
-        // Saving the account GCR
-        await GCRMainRepository.save(accountGCR)
+        // Saving the account GCR if not simulating
+        if (!simulate) {
+            await GCRMainRepository.save(accountGCR)
+        }
         return { success: true, message: "Balance applied" }
     }
 }

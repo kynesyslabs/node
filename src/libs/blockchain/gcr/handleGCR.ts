@@ -244,7 +244,10 @@ export default class HandleGCR {
      * @param tx The transaction to generate edits from
      * @returns Array of GCR edits to be applied
      */
-    static async generate(tx: Transaction, isRollback: boolean = false): Promise<GCREdit[]> {
+    static async generate(
+        tx: Transaction,
+        isRollback: boolean = false,
+    ): Promise<GCREdit[]> {
         const gcrEdits: GCREdit[] = []
         const { content } = tx
 
@@ -254,7 +257,10 @@ export default class HandleGCR {
                 // TODO Implement this
                 break
             case "native":
-                var nativeEdits = await HandleNativeOperations.handle(tx, isRollback)
+                var nativeEdits = await HandleNativeOperations.handle(
+                    tx,
+                    isRollback,
+                )
                 gcrEdits.push(...nativeEdits)
                 break
             case "web2Request":
@@ -277,7 +283,11 @@ export default class HandleGCR {
      * @param txHash Transaction hash for verification
      * @returns GCREdit object for assignment operations
      */
-    private static createAssignEdit(content: any, txHash: string, isRollback: boolean = false): GCREdit {
+    private static createAssignEdit(
+        content: any,
+        txHash: string,
+        isRollback: boolean = false,
+    ): GCREdit {
         return {
             type: "assign",
             account: content.from as string,
@@ -293,7 +303,11 @@ export default class HandleGCR {
      * @param txHash Transaction hash for verification
      * @returns GCREdit object for nonce increment
      */
-    private static createNonceEdit(account: string, txHash: string, isRollback: boolean = false): GCREdit {
+    private static createNonceEdit(
+        account: string,
+        txHash: string,
+        isRollback: boolean = false,
+    ): GCREdit {
         return {
             type: "nonce",
             operation: "add",
@@ -319,6 +333,7 @@ export default class HandleGCR {
         editOperation: GCREdit,
         tx: Transaction,
         rollback: boolean = false, // operations will be reverse in the rollback
+        simulate: boolean = false, // used to simulate the GCREdit application
     ): Promise<GCRResult> {
         if (tx.hash !== editOperation.txhash) {
             return { success: false, message: "Invalid txhash" }
@@ -337,9 +352,14 @@ export default class HandleGCR {
                 return GCRBalanceRoutines.apply(
                     editOperation,
                     repositories.main,
+                    simulate,
                 )
             case "nonce":
-                return GCRNonceRoutines.apply(editOperation, repositories.main)
+                return GCRNonceRoutines.apply(
+                    editOperation,
+                    repositories.main,
+                    simulate,
+                )
             case "assign":
             case "identity":
             case "subnetsTx":
@@ -357,15 +377,29 @@ export default class HandleGCR {
      * @returns Combined result of all edit applications
      * @throws May throw if any edit application fails
      */
-    static async applyToTx(tx: Transaction, isRollback: boolean = false): Promise<GCRResult> {
+    static async applyToTx(
+        tx: Transaction,
+        isRollback: boolean = false,
+        simulate: boolean = false,
+    ): Promise<GCRResult> {
         const editsResults: GCRResult[] = []
 
         for (let edit of tx.content.gcr_edits) {
-            editsResults.push(await HandleGCR.apply(edit, tx, isRollback))
+            try {
+                editsResults.push(
+                    await HandleGCR.apply(edit, tx, isRollback, simulate),
+                )
+            } catch (e) {
+                log.error("[applyToTx] Error applying GCREdit: " + e)
+                editsResults.push({
+                    success: false,
+                    message: "Error applying GCREdit: " + e,
+                })
+            }
         }
 
         if (!editsResults.every(result => result.success)) {
-            log.error("[handleExecuteTransaction] Failed to apply GCREdit")
+            log.error("[applyToTx] Failed to apply GCREdit")
             const failedMessages = editsResults
                 .filter(result => !result.success)
                 .map(result => result.message)
