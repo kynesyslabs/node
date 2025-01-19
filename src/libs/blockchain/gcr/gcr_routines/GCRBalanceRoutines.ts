@@ -13,7 +13,12 @@ export default class GCRBalanceRoutines {
             editOperation.operation,
             editOperation.amount,
             editOperation.account,
+            editOperation.isRollback ? "ROLLBACK" : "NORMAL",
         )
+        // Reversing the operation if it is a rollback
+        if (editOperation.isRollback) {
+            editOperation.operation = editOperation.operation === "add" ? "remove" : "add"
+        }
         // Getting the account GCR
         var accountGCR = await GCRMainRepository.findOneBy({
             pubkey: editOperation.account,

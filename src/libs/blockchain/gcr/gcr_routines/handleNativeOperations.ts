@@ -5,7 +5,7 @@ import { INativePayload } from "node_modules/@kynesyslabs/demosdk/build/types/na
 
 // NOTE This class is responsible for handling native operations such as sending native tokens, etc.
 export class HandleNativeOperations {
-    static async handle(tx: Transaction): Promise<GCREdit[]> {
+    static async handle(tx: Transaction, isRollback: boolean = false): Promise<GCREdit[]> {
         // TODO Implement this
         let edits: GCREdit[] = []
         console.log("handleNativeOperations: ", tx.content.type)
@@ -24,6 +24,7 @@ export class HandleNativeOperations {
                 var subtractEdit: GCREdit = {
                     type: "balance",
                     operation: "remove",
+                    isRollback: isRollback,
                     account: tx.content.from as string, // ? Check and enforce string type as tx.content.from
                     txhash: tx.hash,
                     amount: amount,
@@ -33,6 +34,7 @@ export class HandleNativeOperations {
                 var addEdit: GCREdit = {
                     type: "balance",
                     operation: "add",
+                    isRollback: isRollback,
                     account: to,
                     txhash: tx.hash,
                     amount: amount,

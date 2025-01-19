@@ -1,14 +1,28 @@
-import {GCREdit} from "@kynesyslabs/demosdk/types"
+import { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Repository } from "typeorm"
 import { GCR_Main } from "src/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "src/libs/blockchain/gcr/handleGCR"
 
 export default class GCRNonceRoutines {
-    static async apply(editOperation: GCREdit, GCRMainRepository: Repository<GCR_Main>): Promise<GCRResult> {
+    static async apply(
+        editOperation: GCREdit,
+        GCRMainRepository: Repository<GCR_Main>,
+    ): Promise<GCRResult> {
         if (editOperation.type !== "nonce") {
             return { success: false, message: "Invalid GCREdit type" }
         }
-        console.log("Applying GCREdit nonce: ", editOperation.account, editOperation.operation, editOperation.amount)
+        console.log(
+            "Applying GCREdit nonce: ",
+            editOperation.account,
+            editOperation.operation,
+            editOperation.amount,
+            editOperation.isRollback ? "ROLLBACK" : "NORMAL",
+        )
+        // Reversing the operation if it is a rollback
+        if (editOperation.isRollback) {
+            editOperation.operation =
+                editOperation.operation === "add" ? "remove" : "add"
+        }
         // Getting the account GCR
         var accountGCR = await GCRMainRepository.findOneBy({
             pubkey: editOperation.account,
