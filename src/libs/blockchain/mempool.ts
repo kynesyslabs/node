@@ -267,6 +267,17 @@ export default class Mempool {
         await mempoolRepository.update({ current: 1 }, serializedMempool)
     }
 
+
+    public static async removeTransactionWithHash(
+        hash: string,
+    ): Promise<void> {
+        let mempool = await this.getMempool("Mempool.removeTransaction")
+        let index = mempool.transactions.findIndex(tx => tx.hash === hash)
+        if (index > -1) {
+            mempool.transactions.splice(index, 1)
+        }
+    }
+
     public static async removeTransaction(
         transaction: Transaction,
     ): Promise<void> {
