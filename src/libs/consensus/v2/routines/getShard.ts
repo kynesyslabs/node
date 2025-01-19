@@ -10,38 +10,38 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     const allPeers = await PeerManager.getInstance().getOnlinePeers()
     const peers = allPeers.filter(peer => peer.sync.status)
 
-    const peerIdentites = peers.map(peer => peer.identity)
+    // const peerIdentites = peers.map(peer => peer.identity)
 
-    const lastBlock = await Chain.getLastBlock()
+    // const lastBlock = await Chain.getLastBlock()
 
-    log.debug(
-        "typeof lastBlock.validation_data: " + typeof lastBlock.validation_data,
-    )
-    log.debug(`Last block: ${lastBlock.validation_data}`)
+    // log.debug(
+    //     "typeof lastBlock.validation_data: " + typeof lastBlock.validation_data,
+    // )
+    // log.debug(`Last block: ${lastBlock.validation_data}`)
 
-    let signatures: { [key: string]: string } = {}
+    // let signatures: { [key: string]: string } = {}
 
-    if (lastBlock.validation_data !== "genesis") {
-        signatures = JSON.parse(lastBlock.validation_data)["signatures"]
-    }
+    // if (lastBlock.validation_data !== "genesis") {
+    //     signatures = JSON.parse(lastBlock.validation_data)["signatures"]
+    // }
 
-    // INFO: Include the validators from the last block
-    // REVIEW: Do we include all peers from the last N blocks or only the validators?
-    for (const identity of Object.keys(signatures)) {
-        if (peerIdentites.includes(identity)) {
-            continue
-        }
+    // // INFO: Include the validators from the last block
+    // // REVIEW: Do we include all peers from the last N blocks or only the validators?
+    // for (const identity of Object.keys(signatures)) {
+    //     if (peerIdentites.includes(identity)) {
+    //         continue
+    //     }
 
-        const peer = PeerManager.getInstance().getPeer(identity)
-        log.debug(
-            `Peer result for ${identity}: ${JSON.stringify(peer, null, 2)}`,
-        )
+    //     const peer = PeerManager.getInstance().getPeer(identity)
+    //     log.debug(
+    //         `Peer result for ${identity}: ${JSON.stringify(peer, null, 2)}`,
+    //     )
 
-        if (peer) {
-            log.debug(`Peer ${identity} not in the shard, adding it`)
-            peers.push(peer)
-        }
-    }
+    //     if (peer) {
+    //         log.debug(`Peer ${identity} not in the shard, adding it`)
+    //         peers.push(peer)
+    //     }
+    // }
 
     // Select up to 10 peers from the list using the seed as a source of randomness
     let maxShardSize = 10
