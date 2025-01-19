@@ -1,4 +1,3 @@
-// INFO Entry file for handling web2 requests
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import required from "src/utilities/required"

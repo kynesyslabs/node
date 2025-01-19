@@ -1,26 +1,13 @@
 import {
-    IWeb2Attestation,
+    IAttestationWithResponse,
+    IDAHRStartProxyParams,
     IWeb2Request,
-    IWeb2Result,
 } from "@kynesyslabs/demosdk/types"
 import { Web2RequestManager } from "src/features/web2/Web2RequestManager"
 import { Proxy } from "src/features/web2/proxy/Proxy"
 import { ProxyFactory } from "src/features/web2/proxy/ProxyFactory"
 import required from "src/utilities/required"
 import { generateUniqueId } from "src/utilities/generateUniqueId"
-
-//  TODO Fetch from sdks
-export interface IAttestationWithResponse extends IWeb2Attestation {
-    web2Response: IWeb2Result
-}
-
-//  TODO Fetch from sdks
-interface IDAHRStartProxyParams {
-    method: IWeb2Request["raw"]["method"]
-    headers: IWeb2Request["raw"]["headers"]
-    payload?: unknown
-    authorization?: string
-}
 
 /**
  * DAHR - Data Agnostic HTTPS Relay, class that handles the Web2 request and attestation process.
@@ -89,8 +76,6 @@ export class DAHR {
             headers,
             url: this._web2Request.raw.url,
         }
-
-        console.log("[DAHR] this._web2Request:", this._web2Request)
 
         const web2RequestManager = new Web2RequestManager(this)
         const web2Response = await this._proxy.sendHTTPRequest({
