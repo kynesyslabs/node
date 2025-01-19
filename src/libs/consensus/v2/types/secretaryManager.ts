@@ -24,7 +24,7 @@ export default class SecretaryManager {
     public ourValidatorPhase: ValidationPhase
     public ourKey: string
     public runSecretaryRoutine: boolean = false
-    public blockTimestamp: number
+    public blockTimestamp: number = null
 
     // INFO: Our signature is send with the greenlight request
     get ourSignature() {
@@ -565,7 +565,7 @@ export default class SecretaryManager {
             log.debug(
                 `[SECRETARY ROUTINE] Sending greenlight to ${member.identity} with timestamp ${this.blockTimestamp} and phase ${phase}`,
             )
-            promises.push(member.longCall(request, true, 250, 4))
+            promises.push(member.longCall(request, true, 250, 4, [400]))
         }
 
         const results = await Promise.all(promises)
@@ -627,9 +627,18 @@ export default class SecretaryManager {
         log.debug("Secretary: " + this.secretary.identity)
         log.debug("---- END DIAGNOSTICS ----")
 
+        if (secretaryBlockTimestamp < this.blockTimestamp) {
+            log.debug(
+                "Greenlight received for an older block,returning false ...",
+            )
+            return false
+        }
+
+        // INFO: Only assign the block timestamp if it's greater than the current block timestamp
+        // NOTE: Stray greenlights from previous rounds need to be ignored
         if (
             secretaryBlockTimestamp &&
-            this.ourValidatorPhase.currentPhase < 5
+            secretaryBlockTimestamp > this.blockTimestamp
         ) {
             this.blockTimestamp = secretaryBlockTimestamp
         }
@@ -711,7 +720,7 @@ export default class SecretaryManager {
 
             log.debug("Sending setValidatorPhase request to the secretary")
             log.debug("Secretary is: " + this.secretary.identity)
-            return await this.secretary.longCall(request, true, 1000, retries)
+            return await this.secretary.longCall(request, true, 250, retries)
         }
 
         const handleSendStatusRes = async (res: RPCResponse) => {
@@ -870,7 +879,8 @@ export default class SecretaryManager {
         const res = await this.secretary.call(request)
 
         if (res.result == 200) {
-            return res.response[0] as number
+            this.blockTimestamp = res.response[0] as number
+            return this.blockTimestamp
         }
 
         log.error(

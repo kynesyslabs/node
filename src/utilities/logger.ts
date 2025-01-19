@@ -14,10 +14,18 @@ export default class log {
     static LOG_CRITICAL_FILE = this.LOGS_DIR + "/critical.log"
     static LOG_CUSTOM_PREFIX = this.LOGS_DIR + "/custom_"
 
+    static writeAsync(file: string, message: string) {
+        fs.appendFile(file, message, err => {
+            if (err) {
+                console.error("Error writing to file:", err)
+            }
+        })
+    }
+
     // Overide switch for logging to terminal
     static logToTerminal = {
         peerGossip: true,
-        last_shard: true
+        last_shard: true,
     }
 
     static setLogsDir(port?: number) {
@@ -70,7 +78,10 @@ export default class log {
     }
 
     static getDiagnostics(): string {
-        return fs.readFileSync(this.LOGS_DIR + "/custom_diagnostics.log", "utf8")
+        return fs.readFileSync(
+            this.LOGS_DIR + "/custom_diagnostics.log",
+            "utf8",
+        )
     }
 
     static custom(
@@ -90,7 +101,7 @@ export default class log {
             })
             fs.writeFileSync(this.LOG_CUSTOM_PREFIX + logfile + ".log", "")
         }
-        fs.appendFileSync(this.LOG_CUSTOM_PREFIX + logfile + ".log", logEntry)
+        this.writeAsync(this.LOG_CUSTOM_PREFIX + logfile + ".log", logEntry)
     }
 
     static info(message: string, logToTerminal: boolean = true) {
@@ -98,7 +109,7 @@ export default class log {
         if (logToTerminal) {
             term.bold(logEntry.trim() + "\n")
         }
-        fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
+        this.writeAsync(this.LOG_INFO_FILE, logEntry)
     }
 
     static error(message: string, logToTerminal: boolean = true) {
@@ -106,8 +117,8 @@ export default class log {
         if (logToTerminal) {
             term.red(logEntry.trim() + "\n")
         }
-        fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
-        fs.appendFileSync(this.LOG_ERROR_FILE, logEntry)
+        this.writeAsync(this.LOG_INFO_FILE, logEntry)
+        this.writeAsync(this.LOG_ERROR_FILE, logEntry)
     }
 
     static debug(message: string, logToTerminal: boolean = true) {
@@ -115,8 +126,8 @@ export default class log {
         if (logToTerminal) {
             term.magenta(logEntry.trim() + "\n")
         }
-        fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
-        fs.appendFileSync(this.LOG_DEBUG_FILE, logEntry)
+        this.writeAsync(this.LOG_INFO_FILE, logEntry)
+        this.writeAsync(this.LOG_DEBUG_FILE, logEntry)
     }
 
     static warning(message: string, logToTerminal: boolean = true) {
@@ -124,8 +135,8 @@ export default class log {
         if (logToTerminal) {
             term.yellow(logEntry.trim() + "\n")
         }
-        fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
-        fs.appendFileSync(this.LOG_WARNING_FILE, logEntry)
+        this.writeAsync(this.LOG_INFO_FILE, logEntry)
+        this.writeAsync(this.LOG_WARNING_FILE, logEntry)
     }
 
     static critical(message: string, logToTerminal: boolean = true) {
@@ -133,8 +144,8 @@ export default class log {
         if (logToTerminal) {
             term.bold.red(logEntry.trim() + "\n")
         }
-        fs.appendFileSync(this.LOG_INFO_FILE, logEntry)
-        fs.appendFileSync(this.LOG_CRITICAL_FILE, logEntry)
+        this.writeAsync(this.LOG_INFO_FILE, logEntry)
+        this.writeAsync(this.LOG_CRITICAL_FILE, logEntry)
     }
 
     // Utils
