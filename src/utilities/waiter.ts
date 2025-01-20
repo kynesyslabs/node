@@ -1,11 +1,19 @@
 import { AbortError, TimeoutError } from "../exceptions"
 import log from "./logger"
 
+// Bun does not support NodeJS.Timeout, so we need to create a type for it
+type TimeoutType = ReturnType<typeof setTimeout>
+/** Another possible solution
+type TimeoutType = typeof globalThis extends { setTimeout: any }
+    ? ReturnType<typeof setTimeout>
+    : any
+*/
+
 type WaitEntry = {
     resolve: (value: any) => void
     reject: (reason?: any) => void
     promise: Promise<any>
-    timeoutId: NodeJS.Timeout
+    timeoutId: TimeoutType
     id: string
 
     /**
@@ -58,7 +66,9 @@ export class Waiter {
             Waiter.waitList.set(id, {
                 resolve,
                 reject,
-                timeoutId,
+                // WARNING Bun does not support NodeJS.Timeout, so we need to use the TimeoutType
+                // ! On errors, we can just cast NodeJS.Timeout here
+                timeoutId: timeoutId as TimeoutType,
                 id,
                 promise: null,
             })
