@@ -6,7 +6,6 @@ import { GCRSubnetsTxs } from "../../../../model/entities/GCR/GCRSubnetsTxs"
 import { GlobalChangeRegistry } from "../../../../model/entities/GCR/GlobalChangeRegistry"
 import { GCRHashes } from "../../../../model/entities/GCR/GCRHashes"
 import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
-import { NativeTablesHashes } from "@kynesyslabs/demosdk/types"
 
 // TODO Call the GCR methods to apply the operation to the GCR tables
 // TODO See if we can have a diff of the DB tables and apply only the changes

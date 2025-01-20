@@ -1,4 +1,4 @@
-import { NativeTablesHashes } from "@kynesyslabs/demosdk/types"
+import { type NativeTablesHashes } from "@kynesyslabs/demosdk/types"
 import { Column, Entity, PrimaryColumn, PrimaryGeneratedColumn } from "typeorm"
 
 @Entity("gcr_hashes")

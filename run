@@ -89,7 +89,7 @@ echo "PEER_LIST_FILE=$PEER_LIST_FILE"
 if command -v bun &> /dev/null; then
     START_COMMAND="yarn start:bun"
 else
-    START_COMMAND="yarn start"
+    START_COMMAND="yarn start:bun"
 fi
 
 # Temporary overriding
