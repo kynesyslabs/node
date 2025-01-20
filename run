@@ -111,10 +111,10 @@ else
     else
         START_COMMAND="yarn start"
     fi
+    # Temporary overriding
+    START_COMMAND="yarn start"
 fi
 
-# Temporary overriding
-#START_COMMAND="yarn start"
 
 echo "Starting the node with $START_COMMAND"
 sleep 2
