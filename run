@@ -93,7 +93,7 @@ else
 fi
 
 # Temporary overriding
-START_COMMAND="yarn start"
+# START_COMMAND="yarn start"
 
 echo "Starting the node with $START_COMMAND"
 
