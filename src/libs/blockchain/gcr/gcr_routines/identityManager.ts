@@ -13,8 +13,6 @@ import Datasource from "src/model/datasource"
 import ensureGCRForUser from "./ensureGCRForUser"
 import { updateJSONBValue } from "./gcrJSONBHandler"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
-
-import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
 
 /**
@@ -182,7 +180,7 @@ export default class IdentityManager {
 
     static async removeIdentity(
         sender: string,
-        payload: abstraction.RemoveIdentityPayload,
+        payload: abstraction.CoreTargetIdentityPayload,
     ): Promise<RPCResponse> {
         let existingIdentities = await this.getIdentities(sender)
 
@@ -198,13 +196,11 @@ export default class IdentityManager {
         }
 
         let chainIdentities: string[] =
-            existingIdentities[payload.target_identity.chain][
-                payload.target_identity.subchain
-            ]
+            existingIdentities[payload.chain][payload.subchain]
 
         if (
             !chainIdentities ||
-            !chainIdentities.includes(payload.target_identity.targetAddress)
+            !chainIdentities.includes(payload.targetAddress)
         ) {
             return {
                 result: 404,
@@ -213,7 +209,7 @@ export default class IdentityManager {
                 extra: {
                     message:
                         "Identity: " +
-                        payload.target_identity.targetAddress +
+                        payload.targetAddress +
                         " not found for: " +
                         sender,
                 },
@@ -221,12 +217,10 @@ export default class IdentityManager {
         }
 
         chainIdentities = chainIdentities.filter(
-            id => id !== payload.target_identity.targetAddress,
+            id => id !== payload.targetAddress,
         )
 
-        existingIdentities[payload.target_identity.chain][
-            payload.target_identity.subchain
-        ] = chainIdentities
+        existingIdentities[payload.chain][payload.subchain] = chainIdentities
 
         await updateJSONBValue(
             sender,
@@ -243,7 +237,7 @@ export default class IdentityManager {
             extra: {
                 message:
                     "Identity: " +
-                    payload.target_identity.targetAddress +
+                    payload.targetAddress +
                     " removed from: " +
                     sender,
             },
