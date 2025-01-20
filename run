@@ -58,7 +58,7 @@ CLEAN="false"
 PORT=53550
 
 # Getting arguments
-while getopts "p:d:c:i:n:u:l:" opt; do
+while getopts "p:d:c:i:n:u:l:r:" opt; do
     case $opt in
         p) PORT=$OPTARG;;
         d) PG_PORT=$OPTARG;;
@@ -67,6 +67,7 @@ while getopts "p:d:c:i:n:u:l:" opt; do
         l) PEER_LIST_FILE=$OPTARG;;
         n) GIT_PULL=false;;
         u) EXPOSED_URL=$OPTARG;;
+        r) RUNTIME=$OPTARG;;
         #...
     esac
 done
@@ -85,17 +86,38 @@ echo "IDENTITY_FILE=$IDENTITY_FILE"
 echo "EXPOSED_URL=$EXPOSED_URL"
 echo "PEER_LIST_FILE=$PEER_LIST_FILE"
 
-# Check if Bun is available and set the start command
-if command -v bun &> /dev/null; then
-    START_COMMAND="yarn start:bun"
+# Check if runtime is forced via CLI argument
+if [ ! -z "$RUNTIME" ]; then
+    case $RUNTIME in
+        "node")
+            START_COMMAND="yarn start"
+            ;;
+        "bun")
+            if ! command -v bun &> /dev/null; then
+                echo "Error: Bun runtime requested but Bun is not installed"
+                exit 1
+            fi
+            START_COMMAND="yarn start:bun"
+            ;;
+        *)
+            echo "Error: Invalid runtime specified. Use 'node' or 'bun'"
+            exit 1
+            ;;
+    esac
 else
-    START_COMMAND="yarn start"
+    # Default behavior: Check if Bun is available and set the start command
+    if command -v bun &> /dev/null; then
+        START_COMMAND="yarn start:bun"
+    else
+        START_COMMAND="yarn start"
+    fi
 fi
 
 # Temporary overriding
-START_COMMAND="yarn start"
+#START_COMMAND="yarn start"
 
 echo "Starting the node with $START_COMMAND"
+sleep 2
 
 
 # PG_PORT and IDENTITY_FILE are exported for both docker and yarn
