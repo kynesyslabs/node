@@ -9,6 +9,7 @@ import { Transaction } from "@kynesyslabs/demosdk/types"
 import Peer from "src/libs/peer/Peer"
 import hashGCRTables from "src/libs/blockchain/gcr/gcr_routines/hashGCR"
 
+
 export async function createBlock(
     orderedTransactions: Transaction[],
     commonValidatorSeed: string,

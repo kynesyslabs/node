@@ -26,12 +26,22 @@ import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import { ForgeToHex, HexToForge } from "../crypto/forgeUtils"
 
+// Bun does not support NodeJS.Timeout, so we need to create a type for it
+type TimeoutType = ReturnType<typeof setTimeout>
+/** Another possible solution
+type TimeoutType = typeof globalThis extends { setTimeout: any }
+    ? ReturnType<typeof setTimeout>
+    : any
+*/
+
 class MempoolLock {
     locked: boolean
     waitQueue: {
         resolve: (from: string) => void
         reject: (reason?: any) => void
-        timeoutId: NodeJS.Timeout
+        // WARNING Bun does not support NodeJS.Timeout, so we need to use the TimeoutType
+        // ! On errors, we can just cast NodeJS.Timeout here
+        timeoutId: TimeoutType
         from: string
     }[]
     timeout: number
@@ -71,7 +81,9 @@ class MempoolLock {
             this.waitQueue.push({
                 resolve,
                 reject,
-                timeoutId,
+                // WARNING Bun does not support NodeJS.Timeout, so we need to cast it
+                // ! If we use Bun, we need to change this
+                timeoutId: timeoutId as TimeoutType,
                 from,
             })
         })
@@ -241,7 +253,7 @@ export default class Mempool {
                 " to the mempool",
         )
 
-        // FIXME Debug to remove
+        // ! Debug to remove
         let is_coherent = Transaction.isCoherent(transaction)
         if (!is_coherent) {
             console.error("Transaction in mempool is not coherent")
@@ -267,10 +279,7 @@ export default class Mempool {
         await mempoolRepository.update({ current: 1 }, serializedMempool)
     }
 
-
-    public static async removeTransactionWithHash(
-        hash: string,
-    ): Promise<void> {
+    public static async removeTransactionWithHash(hash: string): Promise<void> {
         let mempool = await this.getMempool("Mempool.removeTransaction")
         let index = mempool.transactions.findIndex(tx => tx.hash === hash)
         if (index > -1) {

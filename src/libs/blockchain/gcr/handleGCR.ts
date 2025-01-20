@@ -281,6 +281,7 @@ export default class HandleGCR {
      * Creates an assignment edit for web2 requests and crosschain operations
      * @param content Transaction content containing type and sender information
      * @param txHash Transaction hash for verification
+     * @param isRollback Whether the operation is a rollback
      * @returns GCREdit object for assignment operations
      */
     private static createAssignEdit(
@@ -301,6 +302,7 @@ export default class HandleGCR {
      * Creates a nonce increment edit for the given account
      * @param account The account address to increment nonce for
      * @param txHash Transaction hash for verification
+     * @param isRollback Whether the operation is a rollback
      * @returns GCREdit object for nonce increment
      */
     private static createNonceEdit(
@@ -326,6 +328,8 @@ export default class HandleGCR {
      * Applies a single GCR edit operation to the blockchain state
      * @param editOperation The GCR edit to apply
      * @param tx The original transaction containing this edit
+     * @param rollback Whether the operation is a rollback
+     * @param simulate Whether the operation is being simulated (used for pre-consensus simulation)
      * @returns Result indicating success/failure and any error messages
      * @throws May throw database errors during repository operations
      */
@@ -374,6 +378,8 @@ export default class HandleGCR {
     /**
      * Applies all GCR edits from a transaction
      * @param tx Transaction containing GCR edits to apply
+     * @param isRollback Whether the operation is a rollback
+     * @param simulate Whether the operation is being simulated (used for pre-consensus simulation)
      * @returns Combined result of all edit applications
      * @throws May throw if any edit application fails
      */
