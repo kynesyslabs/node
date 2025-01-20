@@ -9,6 +9,7 @@ interface GCRRoutinePayload {
 }
 
 export default async function manageGCRRoutines(
+    sender: string,
     payload: GCRRoutinePayload,
 ): Promise<RPCResponse> {
     let response = _.cloneDeep(emptyResponse)
@@ -21,18 +22,28 @@ export default async function manageGCRRoutines(
                 params[0],
             )
             break
+
         case "identity_assign_from_signature":
-            response.response =
-                await IdentityManager.inferIdentityFromSignature(params[0])
+            response = await IdentityManager.inferIdentityFromSignature(
+                sender,
+                params[0],
+            )
             break
+
+        case "remove_identity":
+            response = await IdentityManager.removeIdentity(sender, params[0])
+            break
+
         default:
             response.response = false
             break
     }
+
     // Check if the response is valid
     if (response.response === false) {
         response.result = 400
         response.extra = "Payload failed to execute"
     }
+
     return response
 }

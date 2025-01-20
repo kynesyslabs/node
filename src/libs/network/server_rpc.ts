@@ -158,7 +158,7 @@ async function processPayload(
             return await manageConsensusRoutines(payload.params[0])
 
         case "gcr_routine":
-            return await manageGCRRoutines(payload.params[0])
+            return await manageGCRRoutines(sender, payload.params[0])
 
         case "web2ProxyRequest": {
             const rawPayload = payload.params[0]

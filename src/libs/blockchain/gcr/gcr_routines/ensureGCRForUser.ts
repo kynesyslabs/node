@@ -21,7 +21,7 @@ export default async function ensureGCRForUser(
                     balance: 0,
                     identities: {
                         xm: {
-                            eth: {
+                            evm: {
                                 sepolia: [],
                                 mainnet: [],
                             },

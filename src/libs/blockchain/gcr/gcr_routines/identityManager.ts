@@ -1,25 +1,4 @@
 // TODO Implement the identity manager
-import { abstraction } from "@kynesyslabs/demosdk"
-import { xmcore } from "@kynesyslabs/demosdk"
-import Datasource from "src/model/datasource"
-// TODO Remove unused imports once you finish the identity manager
-import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
-import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
-import { Validators } from "src/model/entities/Validators"
-import terminalkit from "terminal-kit"
-import { LessThanOrEqual } from "typeorm"
-import {
-    Operation,
-    OperationRegistrySlot,
-    OperationResult,
-} from "@kynesyslabs/demosdk/types"
-
-import Chain from "../../chain"
-import executeOperations, { Actor } from "../../routines/executeOperations"
-import gcrStateSave from "../gcr_routines/gcrStateSaverHelper"
-import { Cryptography } from "node_modules/@kynesyslabs/demosdk/build/encryption"
-import log from "src/utilities/logger"
-import forge from "node-forge"
 import {
     EVM,
     MULTIVERSX,
@@ -27,10 +6,17 @@ import {
     TON,
     XRPL,
 } from "@kynesyslabs/demosdk/xm-localsdk"
+import { abstraction } from "@kynesyslabs/demosdk"
+import { RPCResponse } from "@kynesyslabs/demosdk/types"
+
+import Datasource from "src/model/datasource"
+import ensureGCRForUser from "./ensureGCRForUser"
+import { updateJSONBValue } from "./gcrJSONBHandler"
+import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
+
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
-import { updateJSONBValue } from "./gcrJSONBHandler"
-import ensureGCRForUser from "./ensureGCRForUser"
+
 /**
  * Example of a payload for the gcr_routine method
  * payload = {
@@ -53,32 +39,12 @@ import ensureGCRForUser from "./ensureGCRForUser"
  * - Once we have the identity, we should store it in the database updating the identity table
  */
 
-interface ChainData {
-    sdk: typeof DefaultChain
-    rpc: { [key: string]: string }
-}
-
-const chainData: { [key: string]: ChainData } = {
-    solana: {
-        sdk: SOLANA,
-        rpc: chainProviders.solana,
-    },
-    evm: {
-        sdk: EVM,
-        rpc: chainProviders.evm,
-    },
-    egld: {
-        sdk: MULTIVERSX,
-        rpc: chainProviders.egld,
-    },
-    ton: {
-        sdk: TON,
-        rpc: chainProviders.ton,
-    },
-    xrpl: {
-        sdk: XRPL,
-        rpc: chainProviders.xrpl,
-    },
+const chainData: { [key: string]: typeof DefaultChain } = {
+    solana: SOLANA,
+    evm: EVM,
+    egld: MULTIVERSX,
+    ton: TON,
+    xrpl: XRPL,
 }
 
 export default class IdentityManager {
@@ -95,19 +61,13 @@ export default class IdentityManager {
 
     // Infer identity from a valid signature
     static async inferIdentityFromSignature(
+        sender: string,
         payload: abstraction.InferFromSignaturePayload,
-    ): Promise<[boolean, string]> {
-        // Get and verify the demos identity from the payload
-        let [isValid, demosIdentity] =
-            await this.verifyDemosIdentitiesFromPayload(payload)
-        if (!isValid) {
-            return [false, "Demos Identity could not be verified"]
-        }
-
+    ): Promise<RPCResponse> {
         const chainId = payload.target_identity.chain
 
         // @ts-expect-error
-        const sdk = await chainData[chainId].sdk.create(null)
+        const sdk = await chainData[chainId].create(null)
 
         let messageVerified = false
 
@@ -118,72 +78,175 @@ export default class IdentityManager {
                 payload.target_identity.targetAddress,
             )
         } catch (error) {
-            return [false, error.toString()] // ! Implement the identity storage in the database
+            return {
+                result: 400,
+                response: "Error: message could not be verified",
+                require_reply: false,
+                extra: {
+                    message: error.toString(),
+                },
+            }
         }
 
         if (!messageVerified) {
-            return [false, "Error: message could not be verified"]
+            return {
+                result: 400,
+                response: "Signature could not be verified",
+                require_reply: false,
+                extra: {},
+            }
         }
 
-        await ensureGCRForUser(payload.demos_identity.address)
+        await ensureGCRForUser(sender)
+        const dbData: Record<string, any> = await this.getIdentities(sender)
+
+        if (!dbData[payload.target_identity.chain]) {
+            dbData[payload.target_identity.chain] = {}
+        }
+
+        dbData[payload.target_identity.chain][
+            payload.target_identity.subchain
+        ] = [
+            ...((dbData[payload.target_identity.chain] || {})[
+                payload.target_identity.subchain
+            ] || []),
+            payload.target_identity.targetAddress,
+        ]
+
         const res = await updateJSONBValue(
-            payload.demos_identity.address,
+            sender,
             "details",
             "content",
-            [payload.target_identity.targetAddress],
-            `identities.xm.${payload.target_identity.chain}.${payload.target_identity.subchain}`,
+            dbData,
+            `identities, xm`,
         )
-        log.debug("Identity manager: Identity stored in the database")
-        console.log(res)
 
-        // TODO 5. Based on the result, return the identity or false
+        if (res.affected === 0) {
+            return {
+                result: 400,
+                response: "Identity could not be added",
+                require_reply: false,
+                extra: {},
+            }
+        }
 
-        // Check if the target chain is evm and verify the signature with xmcore
-        // if (payload.target_identity.isEVM) {
-        //     let evmInstance = await xmcore.EVM.create("") // ! Add the right provider or allow to create the instance without it
-
-        //     idVerified = await evmInstance.verifyMessage(
-        //         payload.target_identity.signedData,
-        //         payload.target_identity.signature,
-        //         payload.target_identity.targetAddress,
-        //     )
-        // } else {
-        //     // TODO 3b. If the target chain is not evm, verify the signature through xmcore (see above) based on the public key and the network
-        // }
-        // If valid, store the identity in the database
-
-        // TODO 5. Based on the result, return the identity or false
-        return [true, ""] // ? Better types
+        return {
+            result: 200,
+            response: "Identity added",
+            require_reply: false,
+            extra: {
+                message:
+                    "Identity: " +
+                    payload.target_identity.targetAddress +
+                    " added to: " +
+                    sender,
+            },
+        }
     }
 
     // SECTION Helper functions
+    /**
+     * Get the identities related to a demos address
+     * @param address - The address to get the identities of
+     * @returns The identities of the address
+     */
+    static async getIdentities(
+        address: string,
+        chain?: string,
+        subchain?: string,
+    ) {
+        const db = await Datasource.getInstance()
+        const GCRRepository = db
+            .getDataSource()
+            .getRepository(GlobalChangeRegistry)
 
-    // Verify demos identities from payload
-    static async verifyDemosIdentitiesFromPayload(
-        payload:
-            | abstraction.InferFromSignaturePayload
-            | abstraction.InferFromWritePayload,
-    ): Promise<[boolean, string]> {
-        log.debug("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
-        let demosIdentity = forge.util.binary.hex.decode(
-            payload.demos_identity.address,
-        )
-        let demosIdentitySignature = forge.util.binary.hex.decode(
-            payload.demos_identity.signature,
-        )
+        const identities = await GCRRepository.findOne({
+            where: { publicKey: address },
+            select: ["details"],
+        })
 
-        let demosIdentitySignedData = payload.demos_identity.signedData
+        let data = identities?.details.content.identities.xm
 
-        let isValid = Cryptography.verify(
-            demosIdentitySignedData,
-            demosIdentitySignature,
-            demosIdentity,
-        )
+        let result = null
 
-        if (!isValid) {
-            return [false, "Demos Identity could not be verified"]
+        if (chain) {
+            result = (data[chain] || {})[subchain] || []
+        } else if (chain) {
+            result = data[chain] || {}
+        } else {
+            result = data
         }
 
-        return [true, forge.util.binary.hex.encode(demosIdentity)]
+        return result
+    }
+
+    static async removeIdentity(
+        sender: string,
+        payload: abstraction.RemoveIdentityPayload,
+    ): Promise<RPCResponse> {
+        let existingIdentities = await this.getIdentities(sender)
+
+        if (!existingIdentities) {
+            return {
+                result: 404,
+                response: "No identities found",
+                require_reply: false,
+                extra: {
+                    message: "No identities found for: " + sender,
+                },
+            }
+        }
+
+        let chainIdentities: string[] =
+            existingIdentities[payload.target_identity.chain][
+                payload.target_identity.subchain
+            ]
+
+        if (
+            !chainIdentities ||
+            !chainIdentities.includes(payload.target_identity.targetAddress)
+        ) {
+            return {
+                result: 404,
+                response: "Identity not found",
+                require_reply: false,
+                extra: {
+                    message:
+                        "Identity: " +
+                        payload.target_identity.targetAddress +
+                        " not found for: " +
+                        sender,
+                },
+            }
+        }
+
+        chainIdentities = chainIdentities.filter(
+            id => id !== payload.target_identity.targetAddress,
+        )
+
+        existingIdentities[payload.target_identity.chain][
+            payload.target_identity.subchain
+        ] = chainIdentities
+
+        await updateJSONBValue(
+            sender,
+            "details",
+            "content",
+            existingIdentities,
+            `identities, xm`,
+        )
+
+        return {
+            result: 200,
+            response: "Identity removed",
+            require_reply: false,
+            extra: {
+                message:
+                    "Identity: " +
+                    payload.target_identity.targetAddress +
+                    " removed from: " +
+                    sender,
+            },
+        }
     }
 }
