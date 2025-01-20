@@ -350,3 +350,230 @@ export default async function server_rpc(): Promise<FastifyInstance> {
 
     return serverApp
 }
+
+
+/** NOTE
+ *  REVIEW
+ *  This is a Bun server implementation. It is not used yet.
+ *  Hopefully, we can drop in replace the Fastify server with this one.
+ *  See createServer() for an experimental smart selector of the server implementation.
+ */
+export async function server_rpc_bun() {
+    const port = getSharedState.serverPort
+
+    // Helper to convert request to RPCRequest format
+    async function parseRPCRequest(req: Request): Promise<RPCRequest | null> {
+        try {
+            const body = await req.json()
+            if (isRPCRequest(body)) {
+                return body
+            }
+        } catch (e) {
+            return null
+        }
+        return null
+    }
+
+    // Helper to handle CORS headers
+    const corsHeaders = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+    }
+
+    // ? Bun should be defined
+    // eslint-disable-next-line no-undef
+    const server = Bun.serve({
+        port: port,
+        hostname: "0.0.0.0",
+        async fetch(req) {
+            const url = new URL(req.url)
+
+            // Handle CORS preflight
+            if (req.method === "OPTIONS") {
+                return new Response(null, {
+                    headers: corsHeaders,
+                })
+            }
+
+            // GET endpoints
+            if (req.method === "GET") {
+                switch (url.pathname) {
+                    case "/":
+                        return new Response("Hello, World!", {
+                            headers: corsHeaders,
+                        })
+                    case "/info":
+                        var info = await sharedState.getInstance().getInfo()
+                        return new Response(
+                            JSON.stringify({
+                                version: getSharedState.version,
+                                version_name: getSharedState.version_name,
+                                ...info,
+                            }),
+                            {
+                                headers: {
+                                    ...corsHeaders,
+                                    "Content-Type": "application/json",
+                                },
+                            },
+                        )
+                    case "/version":
+                        return new Response(
+                            JSON.stringify(getSharedState.version),
+                            {
+                                headers: {
+                                    ...corsHeaders,
+                                    "Content-Type": "application/json",
+                                },
+                            },
+                        )
+                    case "/publickey":
+                        return new Response(
+                            JSON.stringify(
+                                getSharedState.identity.ed25519.publicKey.toString(
+                                    "hex",
+                                ),
+                            ),
+                            {
+                                headers: {
+                                    ...corsHeaders,
+                                    "Content-Type": "application/json",
+                                },
+                            },
+                        )
+                    case "/connectionstring":
+                        return new Response(
+                            JSON.stringify(
+                                await getSharedState.getConnectionString(),
+                            ),
+                            {
+                                headers: {
+                                    ...corsHeaders,
+                                    "Content-Type": "application/json",
+                                },
+                            },
+                        )
+                    case "/peerlist":
+                        return new Response(
+                            JSON.stringify(
+                                PeerManager.getInstance().getPeers(),
+                            ),
+                            {
+                                headers: {
+                                    ...corsHeaders,
+                                    "Content-Type": "application/json",
+                                },
+                            },
+                        )
+                    case "/public_logs":
+                        return new Response(
+                            JSON.stringify(log.getPublicLogs()),
+                            {
+                                headers: {
+                                    ...corsHeaders,
+                                    "Content-Type": "application/json",
+                                },
+                            },
+                        )
+                    case "/diagnostics":
+                        return new Response(
+                            JSON.stringify(log.getDiagnostics()),
+                            {
+                                headers: {
+                                    ...corsHeaders,
+                                    "Content-Type": "application/json",
+                                },
+                            },
+                        )
+                }
+            }
+
+            // Main RPC endpoint (POST /)
+            if (req.method === "POST" && url.pathname === "/") {
+                const payload = await parseRPCRequest(req)
+                if (!payload) {
+                    return new Response(
+                        JSON.stringify({ error: "Invalid request format" }),
+                        {
+                            status: 400,
+                            headers: {
+                                ...corsHeaders,
+                                "Content-Type": "application/json",
+                            },
+                        },
+                    )
+                }
+
+                log.info(
+                    "[RPC Call] Received request: " +
+                        JSON.stringify(payload, null, 2),
+                    false,
+                )
+
+                let sender = ""
+                if (!noAuthMethods.includes(payload.method)) {
+                    const headers = req.headers
+                    const headerValidation = validateHeaders(headers)
+                    if (!headerValidation[0]) {
+                        return new Response(
+                            JSON.stringify({
+                                error: "Invalid headers:" + headerValidation[1],
+                            }),
+                            {
+                                status: 401,
+                                headers: {
+                                    ...corsHeaders,
+                                    "Content-Type": "application/json",
+                                },
+                            },
+                        )
+                    }
+                    sender = headers.get("identity") || ""
+                }
+
+                const response = await processPayload(payload, sender)
+                return new Response(JSON.stringify(response), {
+                    headers: {
+                        ...corsHeaders,
+                        "Content-Type": "application/json",
+                    },
+                })
+            }
+
+            // Handle 404
+            return new Response("Not Found", {
+                status: 404,
+                headers: corsHeaders,
+            })
+        },
+    })
+
+    log.info("[RPC Call] Server is running on 0.0.0.0:" + port, true)
+    return server
+}
+
+// Smart server creation based on bun/node
+/** Example
+
+import { createServer } from "./libs/network/server_rpc"
+
+// This will automatically use the appropriate server implementation
+const server = await createServer()
+
+ */
+export async function createServer() {
+    // Check if we're running in Bun
+    const isBun =
+        typeof process !== "undefined" &&
+        typeof process.versions === "object" &&
+        "bun" in process.versions
+
+    if (isBun) {
+        log.info("[RPC Call] Using Bun server implementation")
+        return await server_rpc_bun()
+    } else {
+        log.info("[RPC Call] Using Fastify server implementation")
+        return await server_rpc()
+    }
+}
