@@ -298,7 +298,8 @@ export default async function server_rpc(): Promise<FastifyInstance> {
             var sender = ""
             // Excluding due to noAuthMethods from header validation
             if (!noAuthMethods.includes(payload.method)) {
-                var header_validation = validateHeaders(headers)
+                var header_validation = validateHeaders(headers);
+                
                 log.info(
                     "[RPC Call] Header validation: " + header_validation[0],
                 )

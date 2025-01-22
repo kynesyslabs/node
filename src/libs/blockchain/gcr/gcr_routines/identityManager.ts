@@ -1,7 +1,9 @@
 // TODO Implement the identity manager
 import {
     EVM,
+    IBC,
     MULTIVERSX,
+    NEAR,
     SOLANA,
     TON,
     XRPL,
@@ -14,6 +16,7 @@ import ensureGCRForUser from "./ensureGCRForUser"
 import { updateJSONBValue } from "./gcrJSONBHandler"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
+import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 
 /**
  * Example of a payload for the gcr_routine method
@@ -37,12 +40,42 @@ import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain
  * - Once we have the identity, we should store it in the database updating the identity table
  */
 
-const chainData: { [key: string]: typeof DefaultChain } = {
-    solana: SOLANA,
-    evm: EVM,
-    egld: MULTIVERSX,
-    ton: TON,
-    xrpl: XRPL,
+interface ChainData {
+    sdk: typeof DefaultChain
+    rpc: { [key: string]: string },
+    networkId?: string
+}
+
+const chainData: { [key: string]: ChainData } = {
+    solana: {
+        sdk: SOLANA,
+        rpc: chainProviders.solana,
+    },
+    evm: {
+        sdk: EVM,
+        rpc: chainProviders.evm,
+    },
+    egld: {
+        sdk: MULTIVERSX,
+        rpc: chainProviders.egld,
+    },
+    ton: {
+        sdk: TON,
+        rpc: chainProviders.ton,
+    },
+    xrpl: {
+        sdk: XRPL,
+        rpc: chainProviders.xrpl,
+    },
+    ibc: {
+        sdk: IBC,
+        rpc: chainProviders.ibc
+    },
+    near: {
+        sdk: NEAR,
+        rpc: chainProviders.near,
+        networkId: "mainnet"
+    }
 }
 
 export default class IdentityManager {
@@ -65,16 +98,25 @@ export default class IdentityManager {
         const chainId = payload.target_identity.chain
 
         // @ts-expect-error
-        const sdk = await chainData[chainId].create(null)
+        const sdk = await chainData[chainId].sdk.create(null)
 
         let messageVerified = false
 
         try {
-            messageVerified = await sdk.verifyMessage(
-                payload.target_identity.signedData,
-                payload.target_identity.signature,
-                payload.target_identity.targetAddress,
-            )
+            if (chainId === "xrpl" || chainId === "ton" || chainId === "ibc") {
+                messageVerified = await sdk.verifyMessage(
+                    payload.target_identity.signedData,
+                    payload.target_identity.signature,
+                    payload.target_identity.publicKey,
+                )
+            }
+            else {
+                messageVerified = await sdk.verifyMessage(
+                    payload.target_identity.signedData,
+                    payload.target_identity.signature,
+                    payload.target_identity.targetAddress,
+                )
+            }
         } catch (error) {
             return {
                 result: 400,
