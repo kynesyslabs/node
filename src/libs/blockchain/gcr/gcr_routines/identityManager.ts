@@ -74,7 +74,7 @@ const chainData: { [key: string]: ChainData } = {
     near: {
         sdk: NEAR,
         rpc: chainProviders.near,
-        networkId: "mainnet"
+        networkId: "testnet"
     }
 }
 
@@ -103,7 +103,7 @@ export default class IdentityManager {
         let messageVerified = false
 
         try {
-            if (chainId === "xrpl" || chainId === "ton" || chainId === "ibc") {
+            if (chainId === "xrpl" || chainId === "ton" || chainId === "ibc" || chainId === "near") {
                 messageVerified = await sdk.verifyMessage(
                     payload.target_identity.signedData,
                     payload.target_identity.signature,
