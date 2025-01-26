@@ -383,13 +383,14 @@ export class Proxy {
             }
         }
 
-        // Add Content-Type for methods with a body
+        // Only set Content-Type if not provided by user
         if (
             [
                 EnumWeb2Methods.POST,
                 EnumWeb2Methods.PUT,
                 EnumWeb2Methods.PATCH,
-            ].includes(targetMethod)
+            ].includes(targetMethod) &&
+            !headers["Content-Type"]
         ) {
             headers["Content-Type"] = "application/json"
         }

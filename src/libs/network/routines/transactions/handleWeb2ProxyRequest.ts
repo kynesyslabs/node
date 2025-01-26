@@ -1,22 +1,11 @@
 import { DAHR } from "src/features/web2/dahr/DAHR"
-import { IWeb2Request, RPCResponse } from "@kynesyslabs/demosdk/types"
+import {
+    EnumWeb2Actions,
+    IHandleWeb2ProxyRequestParams,
+    RPCResponse,
+} from "@kynesyslabs/demosdk/types"
 import { handleWeb2 } from "src/features/web2/handleWeb2"
 import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
-
-// TODO: Get from SDK
-export enum EnumWeb2Actions {
-    CREATE = "create",
-    START_PROXY = "startProxy",
-    STOP_PROXY = "stopProxy",
-}
-
-// TODO: Get from SDK
-export interface IHandleWeb2ProxyRequestParams {
-    request: IWeb2Request
-    sessionId: string
-    payload: unknown
-    authorization: string
-}
 
 type IHandleWeb2ProxyRequestStepParams = Pick<
     IHandleWeb2ProxyRequestParams,
@@ -74,6 +63,7 @@ export async function handleWeb2ProxyRequest({
                 }
 
                 const { method, headers } = request.raw
+
                 const response = await dahr.startProxy({
                     method,
                     headers,

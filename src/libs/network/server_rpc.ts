@@ -11,6 +11,7 @@ import fastify, {
 import {
     BrowserRequest,
     BundleContent,
+    IHandleWeb2ProxyRequestParams,
     RPCRequest,
     RPCResponse,
 } from "@kynesyslabs/demosdk/types"
@@ -28,11 +29,8 @@ import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
 import { manageNodeCall, NodeCall } from "./manageNodeCall"
 import { registerMethodListingEndpoint } from "./methodListing"
 import { rpcSchema, setupOpenAPI } from "./openApiSpec"
-import {
-    handleWeb2ProxyRequest,
-    IHandleWeb2ProxyRequestParams,
-} from "./routines/transactions/handleWeb2ProxyRequest"
 import required from "src/utilities/required"
+import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { skeletons } from "@kynesyslabs/demosdk/websdk"
 
 // Reading the port from sharedState
@@ -179,7 +177,6 @@ async function processPayload(
                 ...messageData.web2Request.raw,
             }
 
-            // TODO: Get type from SDK
             const params: IHandleWeb2ProxyRequestParams = {
                 request: web2Request,
                 sessionId,
@@ -350,7 +347,6 @@ export default async function server_rpc(): Promise<FastifyInstance> {
 
     return serverApp
 }
-
 
 /** NOTE
  *  REVIEW
