@@ -63,19 +63,11 @@ export class DAHR {
     async startProxy({
         method,
         headers,
-        payload = {},
-        authorization = "",
+        payload,
+        authorization,
     }: IDAHRStartProxyParams): Promise<IAttestationWithResponse> {
         // Make sure we have a web2Request at this point
         required(this._web2Request, "web2Request")
-
-        //Update the web2Request with the new method, headers, and url
-        this._web2Request.raw = {
-            ...this._web2Request.raw,
-            method,
-            headers,
-            url: this._web2Request.raw.url,
-        }
 
         const web2RequestManager = new Web2RequestManager(this)
         const web2Response = await this._proxy.sendHTTPRequest({
