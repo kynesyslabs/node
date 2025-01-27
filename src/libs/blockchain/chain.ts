@@ -26,7 +26,7 @@ import {
     TransactionContent,
 } from "@kynesyslabs/demosdk/types"
 
-import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
+import Hashing from "../crypto/hashing"
 
 import Block from "./block"
 import manageNative from "./gcr/gcr_routines/manageNative"
