@@ -16,9 +16,8 @@ import ensureGCRForUser from "./ensureGCRForUser"
 import { updateJSONBValue } from "./gcrJSONBHandler"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
-import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 
-/**
+/*
  * Example of a payload for the gcr_routine method
  * payload = {
  *     method: "gcr_routine",
@@ -31,51 +30,14 @@ import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
  * }
  */
 
-/** TODO
- * - We should use XM (xmcore) to verify the signature based on the public key and the network
- * e.g.:
- * 
-        let solana = xmcore.SOLANA.createInstance("url")
-        let isValid = solana.verifyMessage("message", Uint8Array.from("signature"), Uint8Array.from("publicKey"))
- * - Once we have the identity, we should store it in the database updating the identity table
- */
-
-interface ChainData {
-    sdk: typeof DefaultChain
-    rpc: { [key: string]: string },
-    networkId?: string
-}
-
-const chainData: { [key: string]: ChainData } = {
-    solana: {
-        sdk: SOLANA,
-        rpc: chainProviders.solana,
-    },
-    evm: {
-        sdk: EVM,
-        rpc: chainProviders.evm,
-    },
-    egld: {
-        sdk: MULTIVERSX,
-        rpc: chainProviders.egld,
-    },
-    ton: {
-        sdk: TON,
-        rpc: chainProviders.ton,
-    },
-    xrpl: {
-        sdk: XRPL,
-        rpc: chainProviders.xrpl,
-    },
-    ibc: {
-        sdk: IBC,
-        rpc: chainProviders.ibc
-    },
-    near: {
-        sdk: NEAR,
-        rpc: chainProviders.near,
-        networkId: "testnet"
-    }
+const chains: { [key: string]: typeof DefaultChain } = {
+    solana: SOLANA,
+    evm: EVM,
+    egld: MULTIVERSX,
+    ton: TON,
+    xrpl: XRPL,
+    ibc: IBC,
+    near: NEAR,
 }
 
 export default class IdentityManager {
@@ -98,19 +60,23 @@ export default class IdentityManager {
         const chainId = payload.target_identity.chain
 
         // @ts-expect-error
-        const sdk = await chainData[chainId].sdk.create(null)
+        const sdk = await chains[chainId].create(null)
 
         let messageVerified = false
 
         try {
-            if (chainId === "xrpl" || chainId === "ton" || chainId === "ibc" || chainId === "near") {
+            if (
+                chainId === "xrpl" ||
+                chainId === "ton" ||
+                chainId === "ibc" ||
+                chainId === "near"
+            ) {
                 messageVerified = await sdk.verifyMessage(
                     payload.target_identity.signedData,
                     payload.target_identity.signature,
                     payload.target_identity.publicKey,
                 )
-            }
-            else {
+            } else {
                 messageVerified = await sdk.verifyMessage(
                     payload.target_identity.signedData,
                     payload.target_identity.signature,
@@ -138,27 +104,31 @@ export default class IdentityManager {
         }
 
         await ensureGCRForUser(sender)
+
+        const newChain = payload.target_identity.chain
+        const newSubchain = payload.target_identity.subchain
+
+        // 1: Get existing identites for the user
         const dbData: Record<string, any> = await this.getIdentities(sender)
 
-        if (!dbData[payload.target_identity.chain]) {
-            dbData[payload.target_identity.chain] = {}
+        // 2: If the chain object does not exist, create it
+        if (!dbData[newChain]) {
+            dbData[newChain] = {}
         }
 
-        dbData[payload.target_identity.chain][
-            payload.target_identity.subchain
-        ] = [
-            ...((dbData[payload.target_identity.chain] || {})[
-                payload.target_identity.subchain
-            ] || []),
+        // 3: Append the new identity to the existing identities
+        dbData[newChain][newSubchain] = [
+            ...(dbData[newChain][newSubchain] || []),
             payload.target_identity.targetAddress,
         ]
 
+        // 4: Update the database
         const res = await updateJSONBValue(
             sender,
             "details",
             "content",
             dbData,
-            `identities, xm`,
+            "identities, xm",
         )
 
         if (res.affected === 0) {
