@@ -749,6 +749,8 @@ export default class SecretaryManager {
                 log.debug("Response: " + JSON.stringify(res, null, 2))
 
                 // REVIEW: How should we handle this?
+                // NOTE: A 400 is returned if the block reference is
+                // lower than the secretary's block reference
                 // await this.handleSecretaryGoneOffline()
                 // await sendStatus()
             }

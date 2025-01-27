@@ -161,6 +161,7 @@ export default async function manageConsensusRoutines(
 
                 const manager = SecretaryManager.getInstance()
 
+                // INFO: Seed check
                 if (
                     manager.shard.blockRef == blockRef &&
                     seed !== manager.shard.CVSA
@@ -184,7 +185,7 @@ export default async function manageConsensusRoutines(
                     }
                 }
 
-                // INFO: Authenticate the request
+                // INFO: Authentication
                 const isSignatureValid = Cryptography.verify(
                     peerKey,
                     peerSignature,
@@ -200,7 +201,7 @@ export default async function manageConsensusRoutines(
 
                 // INFO: If we receive a setValidatorPhase request, and the
                 // secretary routine has not started, wait for it to start
-                if (!manager.runSecretaryRoutine) {
+                if (!manager.runSecretaryRoutine || blockRef > manager.shard.blockRef) {
                     try {
                         await Waiter.wait(
                             peerKey + Waiter.keys.WAIT_FOR_SECRETARY_ROUTINE,
@@ -217,6 +218,12 @@ export default async function manageConsensusRoutines(
                             "Error waiting for the secretary routine to start"
                         return response
                     }
+                }
+
+                if (blockRef < manager.shard.blockRef){
+                    response.result = 400
+                    response.response = "Block reference is lower than the current block reference"
+                    return response
                 }
 
                 const isUs =
