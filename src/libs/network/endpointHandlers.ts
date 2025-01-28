@@ -280,7 +280,8 @@ export default class ServerHandlers {
         // Using a payload variable to be able to check types immediately
         let payload: DemoScript | any // ! Remove this once demosWork is in place
         switch (tx.content.type) {
-            // SECTION Legacy code // ! Remove this once demosWork is in place
+            // SECTION Legacy code
+            // NOTE This is to be removed once demosWork is in place, but is crucial for now
             case "crosschainOperation":
                 payload = tx.content.data
                 console.log("[Included XM Chainscript]")
