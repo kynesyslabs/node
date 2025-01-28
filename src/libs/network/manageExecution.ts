@@ -19,7 +19,7 @@ export async function manageExecution(
     console.log("[serverListeners] content.extra: " + content.extra)
 
     if (content.type === "l2ps") {
-        let response = await ServerHandlers.handleL2PS(content)
+        let response = await ServerHandlers.handleL2PS(content.data)
         if (response.result !== 200) {
             term.red.bold(
                 "[SERVER] Error while handling L2PS request, aborting",

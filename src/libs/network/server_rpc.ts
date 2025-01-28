@@ -159,7 +159,7 @@ async function processPayload(
         case "gcr_routine":
             return await manageGCRRoutines(payload.params[0])
 
-        case "web2ProxyRequest": {
+        /*case "web2ProxyRequest": {
             const rawPayload = payload.params[0]
             required(
                 rawPayload.message,
@@ -185,7 +185,7 @@ async function processPayload(
             }
 
             return await handleWeb2ProxyRequest(params)
-        }
+        } */
 
         default:
             log.warning(

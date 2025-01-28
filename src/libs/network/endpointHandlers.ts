@@ -30,6 +30,8 @@ import {
     XMScript,
     ConsensusRequest,
     RPCResponse,
+    IHandleWeb2ProxyRequestParams,
+    IWeb2Payload,
 } from "@kynesyslabs/demosdk/types"
 import GCR from "../blockchain/gcr/gcr"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
@@ -51,6 +53,11 @@ import { ForgeToHex } from "../crypto/forgeUtils"
 import { Peer } from "../peer"
 import { response } from "express"
 import HandleGCR from "../blockchain/gcr/handleGCR"
+import { SubnetPayload } from "@kynesyslabs/demosdk/l2ps"
+import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
+import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
+import required from "@/utilities/required"
+import { skeletons } from "@kynesyslabs/demosdk/websdk"
 
 /* // ! Note: this will be removed once demosWork is in place
 import {
@@ -285,13 +292,25 @@ export default class ServerHandlers {
                 // TODO Add result.success handling
                 result.response = xm_result
                 break
-            /*  case "web2Request":
+
+            case "subnet":
+                payload = tx.content.data
+                console.log(
+                    "[handleExecuteTransaction] Subnet payload: " + payload[1],
+                )
+                var subnet_result = await ServerHandlers.handleSubnetTx(
+                    payload[1] as SubnetPayload,
+                )
+                result.response = subnet_result
+                break
+
+            case "web2Request":
                 payload = tx.content.data
                 var web2_result = await ServerHandlers.handleWeb2Request(
-                    payload[1] as IWeb2Request,
+                    payload[1] as IWeb2Payload,
                 )
                 result.response = web2_result
-                break */
+                break
             // ! SECTION End of legacy code
 
             case "demoswork":
@@ -347,6 +366,36 @@ export default class ServerHandlers {
         return result
     }
 
+    // INFO Handling Web2 Request
+    static async handleWeb2Request(
+        rawPayload: IWeb2Payload,
+    ): Promise<RPCResponse> {
+        let response: RPCResponse = _.cloneDeep(emptyResponse)
+
+        required(rawPayload.message, "Web2 proxy request message is required")
+        const {
+            sessionId,
+            payload: payloadData,
+            authorization,
+            ...messageData
+        } = rawPayload.message
+        const web2Request = { ...skeletons.web2_request }
+        web2Request.raw = {
+            ...web2Request.raw,
+            ...messageData.web2Request.raw,
+        }
+
+        const params: IHandleWeb2ProxyRequestParams = {
+            request: web2Request,
+            sessionId,
+            payload: payloadData,
+            authorization,
+        }
+
+        response = await handleWeb2ProxyRequest(params)
+        return response
+    }
+
     // INFO Handling XM Transaction
     static async handleXMChainOperation(
         xmscript: XMScript,
@@ -389,11 +438,37 @@ export default class ServerHandlers {
         return response
     }
 
-    // Proxy method for handleL2PS
-    static async handleL2PS(content: any): Promise<RPCResponse> {
+    // NOTE If we receive a SubnetPayload, we use handleL2PS to register the transaction
+    static async handleSubnetTx(content: SubnetPayload) {
         let response: RPCResponse = _.cloneDeep(emptyResponse)
-        response = await handleL2PS(content)
+        let payload: L2PSRegisterTxMessage = {
+            type: "registerTx",
+            data: {
+                uid: content.uid,
+                encryptedTransaction: content.data,
+            },
+            extra: "register",
+        }
+        response = await handleL2PS(payload)
         return response
+    }
+
+    // Proxy method for handleL2PS, used for non encrypted L2PS Calls
+    // TODO Implement this in server_rpc, this is not a tx
+    static async handleL2PS(content: L2PSMessage): Promise<RPCResponse> {
+        let response: RPCResponse = _.cloneDeep(emptyResponse)
+        // REVIEW Refuse registerTx calls as they are managed in endpointHandlers.ts
+        if (content.type === "registerTx") {
+            response.result = 400
+            response.response = false
+            response.extra = "registerTx calls should be sent in a Transaction"
+            return response
+        }
+        // REVIEW Refuse registerAsPartecipant calls as they are managed in endpointHandlers.ts
+        if (content.type === "registerAsPartecipant") {
+            response = await handleL2PS(content)
+            return response
+        }
     }
 
     static async handleConsensusRequest(
