@@ -38,3 +38,10 @@ export class NotInShardError extends Error {
         this.name = "NotInShardError"
     }
 }
+
+export class ForgingEndedError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "ForgingEndedError"
+    }
+}
