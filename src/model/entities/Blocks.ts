@@ -22,6 +22,9 @@ export class Blocks {
     @Column("varchar", { name: "proposer" })
     proposer: pki.PublicKey | pki.ed25519.BinaryBuffer
 
+    @Column("varchar", { name: "next_proposer" })
+    next_proposer: string
+
     @Column("text", { name: "validation_data" })
     validation_data: string
 

@@ -35,6 +35,7 @@ import { Peer } from "../peer"
 import Mempool from "./mempool"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
+import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorSeed"
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -357,6 +358,7 @@ export default class Chain {
         newBlock.hash = block.hash
         newBlock.number = block.number
         newBlock.proposer = block.proposer
+        newBlock.next_proposer = block.next_proposer
         newBlock.status = block.status
         newBlock.validation_data = block.validation_data
         newBlock.content = block.content
@@ -479,6 +481,9 @@ export default class Chain {
         genesis_block.hash = Hashing.sha256(
             JSON.stringify(genesis_block.content),
         )
+
+        let { commonValidatorSeed } = await getCommonValidatorSeed(genesis_block as any)
+        genesis_block.next_proposer = commonValidatorSeed
 
         // REVIEW Create a GCR Operation and execute it
         let genesis_op: Operation = {
