@@ -32,6 +32,7 @@ export async function createBlock(
     block.proposer = commonValidatorSeed // This is the shard identifier
     block.number = blockNumber
     block.content.native_tables_hashes = await hashNativeTables()
+    block.content.timestamp = getSharedState.lastConsensusTime
     block.hash = Hashing.sha256(JSON.stringify(block.content))
     // Signing the block and adding the signature to the block validation data
     let blockSignature = Cryptography.sign(
@@ -50,7 +51,6 @@ export async function createBlock(
 
     /* NOTE - The block timestamp is the average timestamp of the shard 
     see averageTimestamp.ts for more details */
-    block.content.timestamp = getSharedState.lastConsensusTime
     // Add the candidate to the shared state
     getSharedState.candidateBlock = block
     return block
