@@ -1,17 +1,17 @@
 import { DAHR } from "src/features/web2/dahr/DAHR"
 import {
     EnumWeb2Actions,
-    IHandleWeb2ProxyRequestParams,
     RPCResponse,
+    IWeb2Payload,
 } from "@kynesyslabs/demosdk/types"
 import { handleWeb2 } from "src/features/web2/handleWeb2"
 import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
 
 type IHandleWeb2ProxyRequestStepParams = Pick<
-    IHandleWeb2ProxyRequestParams,
-    "request"
+    IWeb2Payload["message"],
+    "web2Request"
 > &
-    Partial<Omit<IHandleWeb2ProxyRequestParams, "request">>
+    Partial<Omit<IWeb2Payload["message"], "web2Request">>
 
 /**
  * Handles the web2 proxy request.
@@ -19,17 +19,17 @@ type IHandleWeb2ProxyRequestStepParams = Pick<
  */
 // eslint-disable-next-line no-redeclare
 export async function handleWeb2ProxyRequest({
-    request,
+    web2Request,
     sessionId,
     payload,
     authorization,
 }:
-    | IHandleWeb2ProxyRequestParams
+    | IWeb2Payload["message"]
     | IHandleWeb2ProxyRequestStepParams): Promise<RPCResponse> {
     try {
-        switch (request.raw.action) {
+        switch (web2Request.raw.action) {
             case EnumWeb2Actions.CREATE: {
-                const isDahrOrError = await handleWeb2(request)
+                const isDahrOrError = await handleWeb2(web2Request)
                 if (isDahrOrError instanceof DAHR) {
                     const dahr = isDahrOrError.toSerializable()
 
@@ -59,10 +59,10 @@ export async function handleWeb2ProxyRequest({
 
                 dahr.web2Request.raw = {
                     ...dahr.web2Request.raw,
-                    url: request.raw.url,
+                    url: web2Request.raw.url,
                 }
 
-                const { method, headers } = request.raw
+                const { method, headers } = web2Request.raw
 
                 const response = await dahr.startProxy({
                     method,
@@ -92,7 +92,7 @@ export async function handleWeb2ProxyRequest({
                 return _createRPCResponse(
                     400,
                     null,
-                    `Unsupported action: ${request.raw.action}`,
+                    `Unsupported action: ${web2Request.raw.action}`,
                 )
             }
         }

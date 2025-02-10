@@ -40,7 +40,7 @@ export default async function handleStep(step: WorkStep): Promise<StepResult> {
         result = await handleXMRequest.digest(xmScript)
     } else if (context === "web2") {
         const web2Request = task as IWeb2Request
-        result = await handleWeb2ProxyRequest({ request: web2Request })
+        result = await handleWeb2ProxyRequest({ web2Request })
     } else if (context === "l2ps") {
         let l2psScript = task as unknown as L2PSMessage // ! Add typing in the SDK
         result = await handleL2PS(l2psScript) // TODO: Follow and implement the logic
