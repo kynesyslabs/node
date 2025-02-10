@@ -11,7 +11,7 @@ import fastify, {
 import {
     BrowserRequest,
     BundleContent,
-    IHandleWeb2ProxyRequestParams,
+    IWeb2Payload,
     RPCRequest,
     RPCResponse,
 } from "@kynesyslabs/demosdk/types"
@@ -28,10 +28,11 @@ import { HelloPeerRequest, manageHelloPeer } from "./manageHelloPeer"
 import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
 import { manageNodeCall, NodeCall } from "./manageNodeCall"
 import { registerMethodListingEndpoint } from "./methodListing"
-import { rpcSchema, setupOpenAPI } from "./openApiSpec"
-import required from "src/utilities/required"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
+import { rpcSchema, setupOpenAPI } from "./openApiSpec"
 import { skeletons } from "@kynesyslabs/demosdk/websdk"
+import required from "src/utilities/required"
+import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 
 // Reading the port from sharedState
 
@@ -159,33 +160,11 @@ async function processPayload(
         case "gcr_routine":
             return await manageGCRRoutines(payload.params[0])
 
-        /*case "web2ProxyRequest": {
-            const rawPayload = payload.params[0]
-            required(
-                rawPayload.message,
-                "Web2 proxy request message is required",
-            )
-            const {
-                sessionId,
-                payload: payloadData,
-                authorization,
-                ...messageData
-            } = rawPayload.message
-            const web2Request = { ...skeletons.web2_request }
-            web2Request.raw = {
-                ...web2Request.raw,
-                ...messageData.web2Request.raw,
-            }
-
-            const params: IHandleWeb2ProxyRequestParams = {
-                request: web2Request,
-                sessionId,
-                payload: payloadData,
-                authorization,
-            }
+        case "web2ProxyRequest": {
+            const params = parseWeb2ProxyRequest(payload.params[0])
 
             return await handleWeb2ProxyRequest(params)
-        } */
+        }
 
         default:
             log.warning(

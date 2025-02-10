@@ -25,20 +25,12 @@ import _ from "lodash"
 import terminalkit from "terminal-kit"
 import {
     ExecutionResult,
-    IWeb2Request,
     ValidityData,
     XMScript,
     ConsensusRequest,
     RPCResponse,
-    IHandleWeb2ProxyRequestParams,
     IWeb2Payload,
 } from "@kynesyslabs/demosdk/types"
-import GCR from "../blockchain/gcr/gcr"
-import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
-import Block from "../blockchain/block"
-import { BlockContent } from "../../../../sdks/src/types/blockchain/blocks"
-import getPeerInfo from "./routines/nodecalls/getPeerInfo"
-import forge from "node-forge"
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
 import { emptyResponse } from "./server_rpc"
@@ -51,14 +43,11 @@ import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Ren
 import { DemoScript } from "@kynesyslabs/demosdk/types"
 import { ForgeToHex } from "../crypto/forgeUtils"
 import { Peer } from "../peer"
-import { response } from "express"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { SubnetPayload } from "@kynesyslabs/demosdk/l2ps"
 import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
-import required from "@/utilities/required"
-import { skeletons } from "@kynesyslabs/demosdk/websdk"
-
+import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 /* // ! Note: this will be removed once demosWork is in place
 import {
     NativePayload,
@@ -305,13 +294,14 @@ export default class ServerHandlers {
                 result.response = subnet_result
                 break
 
-            case "web2Request":
-                payload = tx.content.data
-                var web2_result = await ServerHandlers.handleWeb2Request(
-                    payload[1] as IWeb2Payload,
+            case "web2Request": {
+                payload = tx.content.data[1] as IWeb2Payload
+                const web2Result = await ServerHandlers.handleWeb2Request(
+                    payload,
                 )
-                result.response = web2_result
+                result.response = web2Result
                 break
+            }
             // ! SECTION End of legacy code
 
             case "demoswork":
@@ -371,30 +361,9 @@ export default class ServerHandlers {
     static async handleWeb2Request(
         rawPayload: IWeb2Payload,
     ): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
+        const params = parseWeb2ProxyRequest(rawPayload)
 
-        required(rawPayload.message, "Web2 proxy request message is required")
-        const {
-            sessionId,
-            payload: payloadData,
-            authorization,
-            ...messageData
-        } = rawPayload.message
-        const web2Request = { ...skeletons.web2_request }
-        web2Request.raw = {
-            ...web2Request.raw,
-            ...messageData.web2Request.raw,
-        }
-
-        const params: IHandleWeb2ProxyRequestParams = {
-            request: web2Request,
-            sessionId,
-            payload: payloadData,
-            authorization,
-        }
-
-        response = await handleWeb2ProxyRequest(params)
-        return response
+        return await handleWeb2ProxyRequest(params)
     }
 
     // INFO Handling XM Transaction
