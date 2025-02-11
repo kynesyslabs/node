@@ -32,6 +32,7 @@ import {
     RPCResponse,
     IHandleWeb2ProxyRequestParams,
     IWeb2Payload,
+    GCREdit,
 } from "@kynesyslabs/demosdk/types"
 import GCR from "../blockchain/gcr/gcr"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
@@ -53,6 +54,7 @@ import { ForgeToHex } from "../crypto/forgeUtils"
 import { Peer } from "../peer"
 import { response } from "express"
 import HandleGCR from "../blockchain/gcr/handleGCR"
+import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
 import { SubnetPayload } from "@kynesyslabs/demosdk/l2ps"
 import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
@@ -81,6 +83,7 @@ export default class ServerHandlers {
         // Verify and execute the transaction
         let validationData: ValidityData
         try {
+
             /* NOTE This workflow goeas as:
              * The transaction is validated
              * A gas operation is created and is sent back alongside the validation data
@@ -90,11 +93,35 @@ export default class ServerHandlers {
             //console.log(fname + "Validating transaction...")
             validationData = await confirmTransaction(tx)
 
-            // REVIEW Add the GCREdit into the Transaction object at this point
-            let gcrEdits = await HandleGCR.generate(tx)
-            tx.content.gcr_edits = gcrEdits
+
+            // NOTE Gas operation is created at this point (and balance is checked)
+            // NOTE Nonce assignment is done in the GCR too
+            // REVIEW Generating GCREdit on our side and comparing it with the one in the Transaction object
+            // See DemosTransactions.ts -> prepare(data) for the details
+            let gcrEdits = await GCRGeneration.generate(tx)
+            // TODO This is a workaround, if it works we should make it more elegant
+            // Client side the gcredits are created without the tx hash, which is added in the node
+            // ! Maybe we should remove the tx hash from the GCREdit object directly which improves consistency
+            gcrEdits.forEach((gcredit: GCREdit) => {
+                gcredit.txhash = ""
+            })
+            // Hashing both the gcredits
+            let gcrEditsHash = Hashing.sha256(JSON.stringify(gcrEdits))
+            console.log("gcrEditsHash: " + gcrEditsHash)
+            let txGcrEditsHash = Hashing.sha256(JSON.stringify(tx.content.gcr_edits))
+            console.log("txGcrEditsHash: " + txGcrEditsHash)
+            let comparison = txGcrEditsHash == gcrEditsHash
+            if (!comparison) {
+                log.error("[handleValidateTransaction] GCREdit mismatch")
+                console.log(txGcrEditsHash + " <> " + gcrEditsHash)
+            }
+            if (comparison) {
+                log.info("[handleValidateTransaction] GCREdit hash match")
+            } else {
+                throw new Error("GCREdit mismatch")
+            }
             // REVIEW Recalculate the Transaction hash too
-            tx.hash = Hashing.sha256(JSON.stringify(tx.content))
+            //tx.hash = Hashing.sha256(JSON.stringify(tx.content))
 
             //console.log(fname + "Fetching result...")
         } catch (e) {
@@ -220,6 +247,7 @@ export default class ServerHandlers {
             return result
         }
         // Also the signature must be valid
+
         let hashedData = Hashing.sha256(JSON.stringify(validatedData.data))
         console.log(JSON.stringify(validatedData))
         console.log("Backend - Hash:", hashedData)

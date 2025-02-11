@@ -50,6 +50,8 @@ import { GCR_Tracker } from "src/model/entities/GCRv2/GCR_Tracker"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import { HandleNativeOperations } from "./gcr_routines/handleNativeOperations"
+import GCR from "./gcr"
+import sharedState, { getSharedState } from "@/utilities/sharedState"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -224,102 +226,6 @@ export default class HandleGCR {
 
     // Routines
 
-    // ! IMPORTANT
-    /** NOTE How the GCR is managed when a transaction is executed
-     * Each tx generates an Operation, see handleExecuteTransaction in // LINK src/libs/network/endpointHandlers.ts
-     * TODO The Operation es executed in this file
-     * At consensus, the pack of operations should be sent/merged and included in the block in // LINK src/libs/consensus/v2/PoRBFT.ts
-     * Each time a sync is made, the pack of Operations (the sql queries) are executed in // LINK src/libs/blockchain/routines/Sync.ts
-     *
-     * ? Try to cleanup the code and remove the old methods from gcr.ts
-     */
-
-    // SECTION GCREdit methods
-
-    // TODO Implement the creation of GCREdit objects from a Transaction (as called by
-    // LINK src/libs/network/endpointHandlers.ts
-    //  handleValidateTransaction)
-    /**
-     * Generates GCR (Global Change Registry) edits from a transaction
-     * @param tx The transaction to generate edits from
-     * @returns Array of GCR edits to be applied
-     */
-    static async generate(
-        tx: Transaction,
-        isRollback: boolean = false,
-    ): Promise<GCREdit[]> {
-        const gcrEdits: GCREdit[] = []
-        const { content } = tx
-
-        // Handle main transaction edits
-        switch (content.type) {
-            case "demoswork":
-                // TODO Implement this
-                break
-            case "native":
-                var nativeEdits = await HandleNativeOperations.handle(
-                    tx,
-                    isRollback,
-                )
-                gcrEdits.push(...nativeEdits)
-                break
-            case "web2Request":
-            case "crosschainOperation":
-                gcrEdits.push(this.createAssignEdit(content, tx.hash))
-                break
-            case "genesis":
-                // TODO Implement this
-                break
-        }
-
-        // Add nonce increment edit
-        gcrEdits.push(this.createNonceEdit(content.from as string, tx.hash))
-        return gcrEdits
-    }
-
-    /**
-     * Creates an assignment edit for web2 requests and crosschain operations
-     * @param content Transaction content containing type and sender information
-     * @param txHash Transaction hash for verification
-     * @param isRollback Whether the operation is a rollback
-     * @returns GCREdit object for assignment operations
-     */
-    private static createAssignEdit(
-        content: any,
-        txHash: string,
-        isRollback: boolean = false,
-    ): GCREdit {
-        return {
-            type: "assign",
-            account: content.from as string,
-            context: content.type === "web2Request" ? "web2" : "xm",
-            txhash: txHash,
-            isRollback,
-        }
-    }
-
-    /**
-     * Creates a nonce increment edit for the given account
-     * @param account The account address to increment nonce for
-     * @param txHash Transaction hash for verification
-     * @param isRollback Whether the operation is a rollback
-     * @returns GCREdit object for nonce increment
-     */
-    private static createNonceEdit(
-        account: string,
-        txHash: string,
-        isRollback: boolean = false,
-    ): GCREdit {
-        return {
-            type: "nonce",
-            operation: "add",
-            account,
-            amount: 1,
-            txhash: txHash,
-            isRollback,
-        }
-    }
-
     // REVIEW Implement the execution of GCREdit objects
     // TODO Add this after the tx is synced in Sync.ts and in the consensus
     // ? Should we add the rollbacks here?
@@ -339,9 +245,9 @@ export default class HandleGCR {
         rollback: boolean = false, // operations will be reverse in the rollback
         simulate: boolean = false, // used to simulate the GCREdit application
     ): Promise<GCRResult> {
-        if (tx.hash !== editOperation.txhash) {
+        /*if (tx.hash !== editOperation.txhash) {
             return { success: false, message: "Invalid txhash" }
-        }
+        }*/
 
         const repositories = await this.getRepositories()
 
@@ -390,17 +296,52 @@ export default class HandleGCR {
     ): Promise<GCRResult> {
         const editsResults: GCRResult[] = []
 
+        console.log(
+            "[applyToTx] Starting execution of " +
+                tx.content.gcr_edits.length +
+                " GCREdits",
+        )
         for (let edit of tx.content.gcr_edits) {
+            console.log("[applyToTx] Executing GCREdit: " + edit.type)
             try {
-                editsResults.push(
-                    await HandleGCR.apply(edit, tx, isRollback, simulate),
+                let result = await HandleGCR.apply(
+                    edit,
+                    tx,
+                    isRollback,
+                    simulate,
                 )
+                console.log(
+                    "[applyToTx] GCREdit executed: " +
+                        edit.type +
+                        " with result: " +
+                        result.success +
+                        " and message: " +
+                        result.message,
+                )
+                // If not successful, we stop the execution
+                if (!result.success) {
+                    throw new Error(
+                        "GCREdit failed for " +
+                            edit.type +
+                            " with message: " +
+                            result.message,
+                    )
+                }
+                editsResults.push(result)
+                // Stopping the execution
+                if (!simulate) {
+                    break
+                }
             } catch (e) {
                 log.error("[applyToTx] Error applying GCREdit: " + e)
                 editsResults.push({
                     success: false,
                     message: "Error applying GCREdit: " + e,
                 })
+                // Stopping the execution
+                if (!simulate) {
+                    break
+                }
             }
         }
 
@@ -465,5 +406,22 @@ export default class HandleGCR {
             subnetsTxs: dataSource.getRepository(GCRSubnetsTxs),
             tracker: dataSource.getRepository(GCR_Tracker),
         }
+    }
+
+    // Create methods
+    public static createAccount = async (pubkey: string) => {
+        const db = await Datasource.getInstance()
+        const dataSource = db.getDataSource()
+        const repository = dataSource.getRepository(GCR_Main)
+        const account = new GCR_Main()
+        account.pubkey = pubkey
+        account.balance = 0
+        account.identities = {
+            xm: new Map(),
+            web2: new Map(),
+        }
+        account.assignedTxs = []
+        account.nonce = 0
+        await repository.save(account)
     }
 }
