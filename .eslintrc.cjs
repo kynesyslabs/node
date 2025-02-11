@@ -7,6 +7,7 @@ module.exports = {
     },
     globals: {
         NodeJS: "readonly",
+        globalThis: "readonly",
     },
     extends: "eslint:recommended",
     parserOptions: {

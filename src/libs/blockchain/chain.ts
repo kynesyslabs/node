@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import Datasource from "src/model/datasource"
 import { Blocks } from "src/model/entities/Blocks"
-import { GCRHashes } from "src/model/entities/GCR/GCRHashes"
+import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { Transactions } from "src/model/entities/Transactions"

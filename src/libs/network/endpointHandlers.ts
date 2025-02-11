@@ -25,18 +25,12 @@ import _ from "lodash"
 import terminalkit from "terminal-kit"
 import {
     ExecutionResult,
-    IWeb2Request,
     ValidityData,
     XMScript,
     ConsensusRequest,
     RPCResponse,
+    IWeb2Payload,
 } from "@kynesyslabs/demosdk/types"
-import GCR from "../blockchain/gcr/gcr"
-import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
-import Block from "../blockchain/block"
-import { BlockContent } from "../../../../sdks/src/types/blockchain/blocks"
-import getPeerInfo from "./routines/nodecalls/getPeerInfo"
-import forge from "node-forge"
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
 import { emptyResponse } from "./server_rpc"
@@ -49,8 +43,11 @@ import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Ren
 import { DemoScript } from "@kynesyslabs/demosdk/types"
 import { ForgeToHex } from "../crypto/forgeUtils"
 import { Peer } from "../peer"
-import { response } from "express"
-
+import HandleGCR from "../blockchain/gcr/handleGCR"
+import { SubnetPayload } from "@kynesyslabs/demosdk/l2ps"
+import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
+import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
+import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 /* // ! Note: this will be removed once demosWork is in place
 import {
     NativePayload,
@@ -81,6 +78,13 @@ export default class ServerHandlers {
              */
             //console.log(fname + "Validating transaction...")
             validationData = await confirmTransaction(tx)
+
+            // REVIEW Add the GCREdit into the Transaction object at this point
+            let gcrEdits = await HandleGCR.generate(tx)
+            tx.content.gcr_edits = gcrEdits
+            // REVIEW Recalculate the Transaction hash too
+            tx.hash = Hashing.sha256(JSON.stringify(tx.content))
+
             //console.log(fname + "Fetching result...")
         } catch (e) {
             term.red.bold("[TX VALIDATION ERROR] 💀 : ")
@@ -92,6 +96,7 @@ export default class ServerHandlers {
                     message:
                         "An error occurred while validating the transaction",
                     gas_operation: null,
+
                     transaction: null,
                 },
                 signature: null,
@@ -264,7 +269,8 @@ export default class ServerHandlers {
         // Using a payload variable to be able to check types immediately
         let payload: DemoScript | any // ! Remove this once demosWork is in place
         switch (tx.content.type) {
-            // SECTION Legacy code // ! Remove this once demosWork is in place
+            // SECTION Legacy code
+            // NOTE This is to be removed once demosWork is in place, but is crucial for now
             case "crosschainOperation":
                 payload = tx.content.data
                 console.log("[Included XM Chainscript]")
@@ -276,14 +282,27 @@ export default class ServerHandlers {
                 // TODO Add result.success handling
                 result.response = xm_result
                 break
-            /*  case "web2Request":
+
+            case "subnet":
                 payload = tx.content.data
-                var web2_result = await ServerHandlers.handleWeb2Request(
-                    payload[1] as IWeb2Request,
+                console.log(
+                    "[handleExecuteTransaction] Subnet payload: " + payload[1],
                 )
-                result.response = web2_result
-                break */
-            // SECTION End of legacy code
+                var subnet_result = await ServerHandlers.handleSubnetTx(
+                    payload[1] as SubnetPayload,
+                )
+                result.response = subnet_result
+                break
+
+            case "web2Request": {
+                payload = tx.content.data[1] as IWeb2Payload
+                const web2Result = await ServerHandlers.handleWeb2Request(
+                    payload,
+                )
+                result.response = web2Result
+                break
+            }
+            // ! SECTION End of legacy code
 
             case "demoswork":
                 var demosWorkPayload = tx.content.data
@@ -303,9 +322,26 @@ export default class ServerHandlers {
                 }
                 break
         }
+
         // Only if the transaction is valid we add it to the mempool
         if (result.success) {
-            // REVIEW We add the transaction to the mempool
+            // REVIEW Simulating gcr edits application as we will apply them in the consensus
+            let simulate = true
+            // NOTE We apply the GCREdit to the GCR and check if it is successful. If not, we return an error
+            let editsResults = await HandleGCR.applyToTx(
+                queriedTx,
+                false, // isRollback
+                simulate,
+            )
+            if (!editsResults[0]) {
+                log.error("[handleExecuteTransaction] Failed to apply GCREdit")
+                result.success = false
+                result.response = false
+                result.extra = "Failed to apply GCREdit: " + editsResults[1]
+                return result
+            }
+
+            // We add the transaction to the mempool
             console.log(
                 "[handleExecuteTransaction] Adding tx with hash: " +
                     queriedTx.hash +
@@ -315,13 +351,19 @@ export default class ServerHandlers {
             console.log(
                 "[handleExecuteTransaction] Transaction added to mempool",
             )
-            // TODO Check if Operation(s) are added to the GCR too
-            // FIXME Add an operation for the nonce or anyway a way to manage the nonce
         }
-        // TODO Broadcast the tx to the other peers (or maybe not, consensus should take care of it)
         // Response is then sent back automatically as a reply (with our validation)
         // Returning the state of the transaction including operations
         return result
+    }
+
+    // INFO Handling Web2 Request
+    static async handleWeb2Request(
+        rawPayload: IWeb2Payload,
+    ): Promise<RPCResponse> {
+        const params = parseWeb2ProxyRequest(rawPayload)
+
+        return await handleWeb2ProxyRequest(params)
     }
 
     // INFO Handling XM Transaction
@@ -366,11 +408,37 @@ export default class ServerHandlers {
         return response
     }
 
-    // Proxy method for handleL2PS
-    static async handleL2PS(content: any): Promise<RPCResponse> {
+    // NOTE If we receive a SubnetPayload, we use handleL2PS to register the transaction
+    static async handleSubnetTx(content: SubnetPayload) {
         let response: RPCResponse = _.cloneDeep(emptyResponse)
-        response = await handleL2PS(content)
+        let payload: L2PSRegisterTxMessage = {
+            type: "registerTx",
+            data: {
+                uid: content.uid,
+                encryptedTransaction: content.data,
+            },
+            extra: "register",
+        }
+        response = await handleL2PS(payload)
         return response
+    }
+
+    // Proxy method for handleL2PS, used for non encrypted L2PS Calls
+    // TODO Implement this in server_rpc, this is not a tx
+    static async handleL2PS(content: L2PSMessage): Promise<RPCResponse> {
+        let response: RPCResponse = _.cloneDeep(emptyResponse)
+        // REVIEW Refuse registerTx calls as they are managed in endpointHandlers.ts
+        if (content.type === "registerTx") {
+            response.result = 400
+            response.response = false
+            response.extra = "registerTx calls should be sent in a Transaction"
+            return response
+        }
+        // REVIEW Refuse registerAsPartecipant calls as they are managed in endpointHandlers.ts
+        if (content.type === "registerAsPartecipant") {
+            response = await handleL2PS(content)
+            return response
+        }
     }
 
     static async handleConsensusRequest(

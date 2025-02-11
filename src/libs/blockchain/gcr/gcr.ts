@@ -66,6 +66,7 @@ import gcrStateSave from "./gcr_routines/gcrStateSaverHelper"
 
 const term = terminalkit.terminal
 
+// ? This class should be deprecated: ensure that and remove it
 export class OperationsRegistry {
     path: string = "data/operations.json"
     operations: OperationRegistrySlot[] = []
