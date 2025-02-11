@@ -129,7 +129,7 @@ export default class Transaction implements ITransaction {
         console.log("Private key: ")
         console.log(privateKey)
         console.log("Signature: ")
-        console.log(tx.signature)
+        console.log(tx.signature)   
         let confirmed =
             this.sanityCheck(tx) && this.isCoherent(tx) && this.structured(tx)
         if (confirmed) {

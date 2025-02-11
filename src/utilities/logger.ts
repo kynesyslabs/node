@@ -17,7 +17,7 @@ export default class log {
     // Overide switch for logging to terminal
     static logToTerminal = {
         peerGossip: true,
-        last_shard: true
+        last_shard: true,
     }
 
     static setLogsDir(port?: number) {
@@ -70,7 +70,10 @@ export default class log {
     }
 
     static getDiagnostics(): string {
-        return fs.readFileSync(this.LOGS_DIR + "/custom_diagnostics.log", "utf8")
+        return fs.readFileSync(
+            this.LOGS_DIR + "/custom_diagnostics.log",
+            "utf8",
+        )
     }
 
     static custom(

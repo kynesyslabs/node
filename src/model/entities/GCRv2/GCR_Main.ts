@@ -5,7 +5,7 @@ import { StoredIdentities } from "../types/IdentityTypes"
 
 @Entity("gcr_main")
 export class GCR_Main {
-    @PrimaryColumn({ type: "string", name: "pubkey" })
+    @PrimaryColumn({ type: "text", name: "pubkey" })
     pubkey: string
     @Column({ type: "jsonb", name: "assignedTxs" })
     assignedTxs: string[]

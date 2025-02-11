@@ -15,13 +15,16 @@ import { Blocks } from "./entities/Blocks"
 import { Consensus } from "./entities/Consensus"
 import { Mempool } from "./entities/Mempool"
 import { PgpKeyServer } from "./entities/PgpKeyServer"
-import { GCRHashes } from "./entities/GCRv2/GCRHashes"
 import { Transactions } from "./entities/Transactions"
 import { Validators } from "./entities/Validators"
 //import { Identities } from "./entities/Identities"
 import { GlobalChangeRegistry } from "./entities/GCR/GlobalChangeRegistry"
-import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs"
 import { GCRTracker } from "./entities/GCR/GCRTracker"
+
+import { GCRHashes } from "./entities/GCRv2/GCRHashes"
+import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs"
+import { GCR_Main } from "./entities/GCRv2/GCR_Main"
+import { GCR_Tracker } from "./entities/GCRv2/GCR_Tracker"
 
 class Datasource {
     private static instance: Datasource
@@ -48,6 +51,8 @@ class Datasource {
                 //Identities,
                 GlobalChangeRegistry,
                 GCRTracker,
+                GCR_Main,
+                GCR_Tracker,
             ],
             synchronize: true, // set this to false in production
             logging: false,

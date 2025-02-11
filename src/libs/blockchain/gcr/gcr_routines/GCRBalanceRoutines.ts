@@ -1,7 +1,7 @@
 import {GCREdit} from "@kynesyslabs/demosdk/types"
 import { Repository } from "typeorm"
 import { GCR_Main } from "src/model/entities/GCRv2/GCR_Main"
-import { GCRResult } from "src/libs/blockchain/gcr/handleGCR"
+import HandleGCR, { GCRResult } from "src/libs/blockchain/gcr/handleGCR"
 
 export default class GCRBalanceRoutines {
     static async apply(editOperation: GCREdit, GCRMainRepository: Repository<GCR_Main>, simulate: boolean): Promise<GCRResult> {
@@ -24,7 +24,10 @@ export default class GCRBalanceRoutines {
             pubkey: editOperation.account,
         })
         if (!accountGCR) {
-            return { success: false, message: "Account not found" } // REVIEW Or create it?
+            await HandleGCR.createAccount(editOperation.account)
+            accountGCR = await GCRMainRepository.findOneBy({
+                pubkey: editOperation.account,
+            })
         }
         // Getting the actual balance to apply the operation
         var actualBalance = accountGCR.balance

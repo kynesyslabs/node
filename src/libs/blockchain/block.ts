@@ -22,11 +22,13 @@ export default class Block {
     status: string
     proposer: pki.PublicKey | pki.ed25519.BinaryBuffer
     validation_data: any
+    next_proposer: string
 
     constructor() {
         this.number = null
         this.hash = null // Calculated on the content
         this.status = null
+        this.next_proposer = ""
         this.content = {
             ordered_transactions: [],
             encrypted_transactions_hashes: new Map(), // REVIEW This should work already as it is not enforced in the database as a field

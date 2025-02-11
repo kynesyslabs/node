@@ -21,6 +21,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import required from "src/utilities/required"
+import _ from "lodash"
 const term = terminalkit.terminal
 
 // INFO Cryptographically validate a transaction and calculate gas
@@ -55,6 +56,7 @@ export async function confirmTransaction(
         rpc_public_key: getSharedState.identity.ed25519
             .publicKey as pki.ed25519.BinaryBuffer,
     }
+    /* REVIEW We are not using this method anymore, GCREdits take care of the gas operation
     let gas_operation: Operation
     let gas_calculus = await defineGas(tx, validityData, privateKey)
     // If we receive an Operation, we can continue
@@ -68,6 +70,9 @@ export async function confirmTransaction(
         validityData = await signValidityData(validityData)
         return validityData
     }
+    */
+
+    /* NOTE Nonce assignment is done in the GCR too
     let hasNonce = await assignNonce(tx)
     if (!hasNonce) {
         validityData.data.message =
@@ -76,12 +81,14 @@ export async function confirmTransaction(
         validityData = await signValidityData(validityData)
         return validityData
     }
+    */
     // Verify tx validity
+
     let verified = Transaction.confirmTx(
         tx,
         privateKey as pki.ed25519.BinaryBuffer,
         publicKey as pki.ed25519.BinaryBuffer,
-    ) // REVIEW Are the buffers ok?
+    )// REVIEW Are the buffers ok?
     if (!verified) {
         validityData.data.message =
             "[Native Tx Validation] [SIGNATURE ERROR] Transaction signature not verified\n"

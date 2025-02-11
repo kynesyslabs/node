@@ -1,7 +1,7 @@
 import { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Repository } from "typeorm"
 import { GCR_Main } from "src/model/entities/GCRv2/GCR_Main"
-import { GCRResult } from "src/libs/blockchain/gcr/handleGCR"
+import HandleGCR, { GCRResult } from "src/libs/blockchain/gcr/handleGCR"
 
 export default class GCRNonceRoutines {
     static async apply(
@@ -29,7 +29,10 @@ export default class GCRNonceRoutines {
             pubkey: editOperation.account,
         })
         if (!accountGCR) {
-            return { success: false, message: "Account not found" } // REVIEW Or create it?
+            await HandleGCR.createAccount(editOperation.account)
+            accountGCR = await GCRMainRepository.findOneBy({
+                pubkey: editOperation.account,
+            })
         }
         // Getting the actual nonce to apply the operation
         var actualNonce = accountGCR.nonce
