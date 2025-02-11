@@ -158,7 +158,7 @@ async function processPayload(
             return await manageConsensusRoutines(payload.params[0])
 
         case "gcr_routine":
-            return await manageGCRRoutines(payload.params[0])
+            return await manageGCRRoutines(sender, payload.params[0])
 
         case "web2ProxyRequest": {
             const params = parseWeb2ProxyRequest(payload.params[0])
@@ -282,7 +282,8 @@ export default async function server_rpc(): Promise<FastifyInstance> {
             var sender = ""
             // Excluding due to noAuthMethods from header validation
             if (!noAuthMethods.includes(payload.method)) {
-                var header_validation = validateHeaders(headers)
+                var header_validation = validateHeaders(headers);
+                
                 log.info(
                     "[RPC Call] Header validation: " + header_validation[0],
                 )

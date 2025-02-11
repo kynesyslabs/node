@@ -348,7 +348,7 @@ export default class PeerManager {
             },
             true,
             250,
-            4,
+            3,
         ).then(response => {
             PeerManager.helloPeerCallback(response, peer)
         })
@@ -392,20 +392,15 @@ export default class PeerManager {
             PeerManager.getInstance().addPeer(peer)
             PeerManager.getInstance().removeOfflinePeer(peer.identity)
         } else {
-            log.error(
+            log.info(
                 "[Hello Peer] Failed to connect to peer: " +
                     peer.identity +
                     ". Adding to offline list",
                 false,
             )
-            log.error(
-                "[Hello Peer] Peer response: " +
-                    JSON.stringify(response, null, 2),
-                false,
-            )
             // Add the peer to the offline list
             PeerManager.getInstance().addOfflinePeer(peer)
-            // PeerManager.getInstance().removeOnlinePeer(peer.identity)
+            PeerManager.getInstance().removeOnlinePeer(peer.identity)
         }
         getSharedState.peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
         //process.exit(0)
@@ -417,32 +412,5 @@ export default class PeerManager {
         await Promise.all(
             allPeers.map(peer => PeerManager.sayHelloToPeer(peer)),
         )
-    }
-
-    /**
-     * Set the block number and hash for a peer. Used to bump the block number of the peers that voted for the block
-     *
-     * @param identity - The identity of the peer
-     * @param blockNumber - The block number to set
-     * @param blockHash - The block hash to set
-     */
-    setPeerBlockNumber(
-        identity: string,
-        blockNumber: number,
-        blockHash: string,
-    ) {
-        log.debug(
-            "[PEERMANAGER] Setting peer block number: " +
-                identity +
-                " to " +
-                blockNumber,
-        )
-        const peer = this.peerList[identity]
-        log.debug("[PEERMANAGER] Old block number: " + peer.sync.block)
-        log.debug("[PEERMANAGER] Old block hash: " + peer.sync.block_hash)
-        peer.sync.block = blockNumber
-        peer.sync.block_hash = blockHash
-        log.debug("[PEERMANAGER] New block number: " + peer.sync.block)
-        log.debug("[PEERMANAGER] New block hash: " + peer.sync.block_hash)
     }
 }
