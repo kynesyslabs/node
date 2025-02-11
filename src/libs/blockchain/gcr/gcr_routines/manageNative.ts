@@ -1,4 +1,4 @@
-import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
+import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import Datasource from "src/model/datasource"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 

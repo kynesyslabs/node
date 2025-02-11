@@ -8,7 +8,7 @@ import { Waiter } from "src/utilities/waiter"
 import { _required as required } from "@kynesyslabs/demosdk/websdk"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
-import { TimeoutError, AbortError, NotInShardError } from "src/exceptions"
+import { TimeoutError, AbortError } from "src/exceptions"
 import Cryptography from "src/libs/crypto/cryptography"
 
 // ANCHOR SecretaryManager
@@ -54,15 +54,9 @@ export default class SecretaryManager {
 
         // Reusing the method to create the members
         this.shard.members = await getShard(CVSA)
-        this.ourKey = getSharedState.identity.ed25519.publicKey.toString("hex")
-
-        if (!this.shard.members.map(m => m.identity).includes(this.ourKey)) {
-            log.error("We are not in the shard, exiting ...")
-            throw new NotInShardError("We are not in the shard")
-        }
-
         // Assigning the secretary and its key
         this.shard.secretaryKey = this.secretary.identity
+        this.ourKey = getSharedState.identity.ed25519.publicKey.toString("hex")
 
         log.debug("INITIALIZED SHARD:")
         log.debug(
@@ -71,12 +65,12 @@ export default class SecretaryManager {
         log.debug("SECRETARY: " + this.secretary.identity)
 
         // INFO: If some nodes crash, kill the node for debugging!
-        if (this.shard.members.length < 4 && this.shard.blockRef > 10) {
-            log.debug(
-                `Only ${this.shard.members.length} members in the shard. Exiting ...`,
-            )
-            process.exit(0)
-        }
+        // if (this.shard.members.length < 4 && this.shard.blockRef > 10) {
+        //     log.debug(
+        //         `Only ${this.shard.members.length} members in the shard. Exiting ...`,
+        //     )
+        //     process.exit(0)
+        // }
 
         // INFO: Start the secretary routine
         if (this.checkIfWeAreSecretary()) {
@@ -703,7 +697,7 @@ export default class SecretaryManager {
                             this.ourKey,
                             this.ourValidatorPhase.currentPhase,
                             this.shard.CVSA,
-                            this.shard.blockRef,
+                            this.shard.blockRef
                         ],
                     },
                 ],
