@@ -71,7 +71,7 @@ export default class SecretaryManager {
         log.debug("SECRETARY: " + this.secretary.identity)
 
         // INFO: If some nodes crash, kill the node for debugging!
-        if (this.shard.members.length < 3 && this.shard.blockRef > 10) {
+        if (this.shard.members.length < 3 && this.shard.blockRef > 22600) {
             log.debug(
                 `Only ${this.shard.members.length} members in the shard. Exiting ...`,
             )
