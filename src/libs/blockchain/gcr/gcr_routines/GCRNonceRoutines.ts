@@ -2,6 +2,7 @@ import { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Repository } from "typeorm"
 import { GCR_Main } from "src/model/entities/GCRv2/GCR_Main"
 import HandleGCR, { GCRResult } from "src/libs/blockchain/gcr/handleGCR"
+import { ForgeToHex } from "@/libs/crypto/forgeUtils"
 
 export default class GCRNonceRoutines {
     static async apply(
@@ -12,9 +13,15 @@ export default class GCRNonceRoutines {
         if (editOperation.type !== "nonce") {
             return { success: false, message: "Invalid GCREdit type" }
         }
+
+        let editOperationAccount =
+            typeof editOperation.account !== "string"
+                ? ForgeToHex(editOperation.account)
+                : editOperation.account
+
         console.log(
             "Applying GCREdit nonce: ",
-            editOperation.account,
+            editOperationAccount,
             editOperation.operation,
             editOperation.amount,
             editOperation.isRollback ? "ROLLBACK" : "NORMAL",
@@ -26,16 +33,16 @@ export default class GCRNonceRoutines {
         }
         // Getting the account GCR
         var accountGCR = await GCRMainRepository.findOneBy({
-            pubkey: editOperation.account,
+            pubkey: editOperationAccount,
         })
+
         if (!accountGCR) {
-            await HandleGCR.createAccount(editOperation.account)
-            accountGCR = await GCRMainRepository.findOneBy({
-                pubkey: editOperation.account,
-            })
+            accountGCR = await HandleGCR.createAccount(editOperationAccount)
         }
+
         // Getting the actual nonce to apply the operation
         var actualNonce = accountGCR.nonce
+
         if (editOperation.operation === "add") {
             accountGCR.nonce += editOperation.amount
         } else if (editOperation.operation === "remove") {
@@ -45,6 +52,7 @@ export default class GCRNonceRoutines {
             }
             accountGCR.nonce -= editOperation.amount
         }
+
         // Saving the account GCR
         if (!simulate) {
             await GCRMainRepository.save(accountGCR)

@@ -333,6 +333,7 @@ export default class HandleGCR {
                     break
                 }
             } catch (e) {
+                console.error("Error applying GCREdit: ", e)
                 log.error("[applyToTx] Error applying GCREdit: " + e)
                 editsResults.push({
                     success: false,
@@ -422,6 +423,6 @@ export default class HandleGCR {
         }
         account.assignedTxs = []
         account.nonce = 0
-        await repository.save(account)
+        return await repository.save(account)
     }
 }

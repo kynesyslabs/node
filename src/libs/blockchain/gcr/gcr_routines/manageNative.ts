@@ -1,3 +1,4 @@
+import { GCR_Main } from "@/model/entities/GCRv2/GCR_Main"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import Datasource from "src/model/datasource"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
@@ -15,9 +16,9 @@ import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistr
 // INFO Get the balance of a user
 async function balance(PublicKey: string): Promise<number> {
     const db = await Datasource.getInstance()
-    const GCRRepository = db.getDataSource().getRepository(GlobalChangeRegistry)
-    const status = await GCRRepository.findOneBy({ publicKey: PublicKey })
-    return status.details.content.balance
+    const GCRRepository = db.getDataSource().getRepository(GCR_Main)
+    const status = await GCRRepository.findOneBy({ pubkey: PublicKey })
+    return status.balance
 }
 
 // INFO Arbitrary function to set the balance of a user
@@ -25,45 +26,32 @@ async function setBalance(
     publicKey: string,
     balance: number,
 ): Promise<[boolean, string]> {
-    const rawData: GlobalChangeRegistry = {
-        id: null,
-        publicKey: publicKey,
-        details: {
-            hash: "",
-            content: {
-                balance: balance,
-                nonce: null,
-                identities: null,
-                txs: null,
-            },
+    const rawData: GCR_Main = {
+        assignedTxs: [],
+        identities: {
+            xm: new Map(),
+            web2: new Map(),
         },
-        extended: {
-            tokens: [],
-            nfts: [],
-            xm: [],
-            web2: [],
-            other: [],
-        },
+        balance: balance,
+        nonce: 0,
+        pubkey: publicKey,
     }
 
     const db = await Datasource.getInstance()
-    const GCRRepository = db.getDataSource().getRepository(GlobalChangeRegistry)
-    let GCRSearch = await GCRRepository.findOneBy({ publicKey: publicKey })
+    const GCRRepository = db.getDataSource().getRepository(GCR_Main)
+    let GCRSearch = await GCRRepository.findOneBy({ pubkey: publicKey })
+
     if (!GCRSearch) {
-        GCRSearch = {
-            id: null,
-            publicKey: publicKey,
-            details: rawData.details,
-            extended: rawData.extended,
-        }
+        GCRSearch = rawData
     }
+
     // Keeping the things we need and just updating the balance
     let GCRUpdate = GCRSearch
-    GCRUpdate.details.content.balance = balance
+    GCRUpdate.balance = balance
     // Hashing the GCR
-    GCRUpdate.details.hash = Hashing.sha256(
-        JSON.stringify(GCRUpdate.details.content),
-    )
+    // GCRUpdate.details.hash = Hashing.sha256(
+    //     JSON.stringify(GCRUpdate.details.content),
+    // )
     // Saving the GCR
     await GCRRepository.save(GCRUpdate)
     return [true, ""]

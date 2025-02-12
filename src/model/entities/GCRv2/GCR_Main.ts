@@ -11,7 +11,7 @@ export class GCR_Main {
     assignedTxs: string[]
     @Column({ type: "integer", name: "nonce" })
     nonce: number
-    @Column({ type: "integer", name: "balance" })
+    @Column({ type: "bigint", name: "balance" })
     balance: number
     @Column({ type: "jsonb", name: "identities" })
     identities: StoredIdentities

@@ -361,7 +361,8 @@ export default class ServerHandlers {
                 false, // isRollback
                 simulate,
             )
-            if (!editsResults[0]) {
+
+            if (!editsResults.success) {
                 log.error("[handleExecuteTransaction] Failed to apply GCREdit")
                 result.success = false
                 result.response = false
