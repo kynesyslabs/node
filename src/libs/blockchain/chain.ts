@@ -521,7 +521,7 @@ export default class Chain {
         for (let i = 0; i < allBalances.length; i++) {
             let individualBalance = allBalances[i]
             let address = individualBalance[0]
-            let balance = individualBalance[1]
+            let balance = BigInt(individualBalance[1])
             let _balanceSuccess = await manageNative.balance.setBalance(
                 address,
                 balance,

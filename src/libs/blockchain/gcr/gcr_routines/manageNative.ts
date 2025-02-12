@@ -14,7 +14,7 @@ import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistr
 // SECTION Balance management
 
 // INFO Get the balance of a user
-async function balance(PublicKey: string): Promise<number> {
+async function balance(PublicKey: string): Promise<bigint> {
     const db = await Datasource.getInstance()
     const GCRRepository = db.getDataSource().getRepository(GCR_Main)
     const status = await GCRRepository.findOneBy({ pubkey: PublicKey })
@@ -24,7 +24,7 @@ async function balance(PublicKey: string): Promise<number> {
 // INFO Arbitrary function to set the balance of a user
 async function setBalance(
     publicKey: string,
-    balance: number,
+    balance: bigint,
 ): Promise<[boolean, string]> {
     const rawData: GCR_Main = {
         assignedTxs: [],
@@ -32,7 +32,7 @@ async function setBalance(
             xm: new Map(),
             web2: new Map(),
         },
-        balance: balance,
+        balance: BigInt(balance),
         nonce: 0,
         pubkey: publicKey,
     }
@@ -47,11 +47,8 @@ async function setBalance(
 
     // Keeping the things we need and just updating the balance
     let GCRUpdate = GCRSearch
-    GCRUpdate.balance = balance
-    // Hashing the GCR
-    // GCRUpdate.details.hash = Hashing.sha256(
-    //     JSON.stringify(GCRUpdate.details.content),
-    // )
+    GCRUpdate.balance = BigInt(balance)
+
     // Saving the GCR
     await GCRRepository.save(GCRUpdate)
     return [true, ""]
@@ -60,7 +57,7 @@ async function setBalance(
 // INFO Add a balance to a user
 async function addBalance(
     address: string,
-    amount: number,
+    amount: bigint,
 ): Promise<[boolean, string]> {
     // Get the current balance
     const currentBalance = await balance(address)
@@ -74,7 +71,7 @@ async function addBalance(
 // INFO Remove a balance from a user
 async function removeBalance(
     address: string,
-    amount: number,
+    amount: bigint,
 ): Promise<[boolean, string]> {
     // Get the current balance
     const currentBalance = await balance(address)
@@ -93,7 +90,7 @@ async function removeBalance(
 async function transferBalance(
     address_from: string,
     address_to: string,
-    amount: number,
+    amount: bigint,
 ): Promise<[boolean, string]> {
     // Remove the amount from the sender
     let success = await removeBalance(address_from, amount)
