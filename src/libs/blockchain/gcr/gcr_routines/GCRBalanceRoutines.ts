@@ -41,23 +41,19 @@ export default class GCRBalanceRoutines {
             accountGCR = await HandleGCR.createAccount(editOperationAccount)
         }
 
-        console.error("accountGCR: " + JSON.stringify(accountGCR, null, 2))
-
         // Getting the actual balance to apply the operation
         var actualBalance = accountGCR.balance
 
         if (editOperation.operation === "add") {
             accountGCR.balance =
-                parseInt(accountGCR.balance as unknown as string) +
-                editOperation.amount
+                BigInt(accountGCR.balance) + BigInt(editOperation.amount)
         } else if (editOperation.operation === "remove") {
             // Safeguarding the operation
             if (actualBalance < editOperation.amount) {
                 return { success: false, message: "Insufficient balance" }
             }
             accountGCR.balance =
-                parseInt(accountGCR.balance as unknown as string) -
-                editOperation.amount
+                BigInt(accountGCR.balance) - BigInt(editOperation.amount)
         }
 
         // Saving the account GCR if not simulating

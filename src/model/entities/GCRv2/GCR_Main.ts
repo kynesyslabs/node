@@ -2,7 +2,6 @@ import { Column, Entity, PrimaryColumn } from "typeorm"
 import { StoredIdentities } from "../types/IdentityTypes"
 // Define the shape of your JSON data
 
-
 @Entity("gcr_main")
 export class GCR_Main {
     @PrimaryColumn({ type: "text", name: "pubkey" })
@@ -12,7 +11,7 @@ export class GCR_Main {
     @Column({ type: "integer", name: "nonce" })
     nonce: number
     @Column({ type: "bigint", name: "balance" })
-    balance: number
+    balance: bigint
     @Column({ type: "jsonb", name: "identities" })
     identities: StoredIdentities
 }
