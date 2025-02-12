@@ -463,9 +463,11 @@ export default class HandleGCR {
         const repository = dataSource.getRepository(GCR_Main)
         const account = new GCR_Main()
         account.pubkey = pubkey
-        account.balance = 0
+        account.balance = 0n
         account.identities = {
+
             xm: new Map(),
+            
             web2: new Map(),
         }
         account.assignedTxs = []
