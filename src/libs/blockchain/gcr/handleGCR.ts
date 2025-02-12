@@ -301,6 +301,8 @@ export default class HandleGCR {
                 tx.content.gcr_edits.length +
                 " GCREdits",
         )
+        // Keep track of applied edits to be able to rollback them
+        let appliedEdits: GCREdit[] = []
         for (let edit of tx.content.gcr_edits) {
             console.log("[applyToTx] Executing GCREdit: " + edit.type)
             try {
@@ -320,6 +322,7 @@ export default class HandleGCR {
                 )
                 // If not successful, we stop the execution
                 if (!result.success) {
+                    await this.rollback(tx, appliedEdits) // Rollback the applied edits
                     throw new Error(
                         "GCREdit failed for " +
                             edit.type +
@@ -328,10 +331,7 @@ export default class HandleGCR {
                     )
                 }
                 editsResults.push(result)
-                // Stopping the execution
-                if (!simulate) {
-                    break
-                }
+                appliedEdits.push(edit) // Keep track of applied edits
             } catch (e) {
                 console.error("Error applying GCREdit: ", e)
                 log.error("[applyToTx] Error applying GCREdit: " + e)
@@ -339,6 +339,7 @@ export default class HandleGCR {
                     success: false,
                     message: "Error applying GCREdit: " + e,
                 })
+                await this.rollback(tx, appliedEdits) // Rollback the applied edits
                 // Stopping the execution
                 if (!simulate) {
                     break
@@ -359,6 +360,52 @@ export default class HandleGCR {
         }
 
         return { success: true, message: "" }
+    }
+
+    /**
+     * Rolls back a transaction by reversing the order of applied GCR edits
+     * @param tx The transaction to rollback
+     * @param appliedEditsOriginal The original list of applied GCR edits
+     * @returns Result indicating success/failure and any error messages
+     * @throws May throw if any edit rollback fails
+     */
+    static async rollback(
+        tx: Transaction,
+        appliedEditsOriginal: GCREdit[],
+    ): Promise<GCRResult> {
+        // We need to reverse the order of the applied edits
+        let appliedEdits = appliedEditsOriginal.reverse()
+        log.info(
+            "[rollback] Rolling back " +
+                appliedEdits.length +
+                " GCREdits for tx: " +
+                tx.hash,
+        )
+        // To rollback the edits, we need to pass the rollback flag to the apply method
+        let counter = 0
+        let results: GCRResult[] = []
+        for (let edit of appliedEdits) {
+            console.log(
+                "[rollback] (" +
+                    counter +
+                    "/" +
+                    appliedEdits.length +
+                    ") Rolling back GCREdit: " +
+                    edit.type,
+            )
+            let result = await this.apply(edit, tx, true)
+            results.push(result)
+        }
+        log.info(
+            "[rollback] Rolled back " +
+                counter +
+                " GCREdits for tx: " +
+                tx.hash,
+        )
+        return {
+            success: results.every(result => result.success),
+            message: results.map(result => result.message).join(", "),
+        }
     }
 
     // ! SECTION GCREdit methods
