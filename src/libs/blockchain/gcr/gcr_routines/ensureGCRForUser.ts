@@ -2,7 +2,7 @@
 
 import Datasource from "src/model/datasource"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
-
+import HandleGCR from "../handleGCR"
 export default async function ensureGCRForUser(
     publicKey: string,
 ): Promise<any> {
@@ -11,36 +11,12 @@ export default async function ensureGCRForUser(
     const db = await Datasource.getInstance()
     const GCRRepository = db.getDataSource().getRepository(GlobalChangeRegistry)
 
-    const gcr = await GCRRepository.findOne({ where: { publicKey } })
+    let gcr = await GCRRepository.findOne({ where: { publicKey } })
 
     if (!gcr) {
-        const data = {
-            publicKey: publicKey,
-            details: {
-                content: {
-                    balance: 0,
-                    identities: {
-                        xm: {
-                            evm: {
-                                sepolia: [],
-                                mainnet: [],
-                            },
-                        },
-                        web2: {},
-                    },
-                    txs: [],
-                    nonce: 0,
-                },
-            },
-            extended: {
-                tokens: [],
-                nfts: [],
-                xm: [],
-                web2: [],
-                other: [],
-            },
-        }
-        return await GCRRepository.save(data)
+        // Create the GCR for the user
+        await HandleGCR.createAccount(publicKey)
+        gcr = await GCRRepository.findOne({ where: { publicKey } })
     }
 
     return gcr
