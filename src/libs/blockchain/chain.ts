@@ -12,7 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import Datasource from "src/model/datasource"
 import { Blocks } from "src/model/entities/Blocks"
-import { GCRHashes } from "src/model/entities/GCR/GCRHashes"
+import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { Transactions } from "src/model/entities/Transactions"
@@ -26,7 +26,7 @@ import {
     TransactionContent,
 } from "@kynesyslabs/demosdk/types"
 
-import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
+import Hashing from "../crypto/hashing"
 
 import Block from "./block"
 import manageNative from "./gcr/gcr_routines/manageNative"
@@ -35,6 +35,7 @@ import { Peer } from "../peer"
 import Mempool from "./mempool"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
+import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorSeed"
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -357,6 +358,7 @@ export default class Chain {
         newBlock.hash = block.hash
         newBlock.number = block.number
         newBlock.proposer = block.proposer
+        newBlock.next_proposer = block.next_proposer
         newBlock.status = block.status
         newBlock.validation_data = block.validation_data
         newBlock.content = block.content
@@ -480,6 +482,9 @@ export default class Chain {
             JSON.stringify(genesis_block.content),
         )
 
+        let { commonValidatorSeed } = await getCommonValidatorSeed(genesis_block as any)
+        genesis_block.next_proposer = commonValidatorSeed
+
         // REVIEW Create a GCR Operation and execute it
         let genesis_op: Operation = {
             operator: "genesis",
@@ -516,7 +521,7 @@ export default class Chain {
         for (let i = 0; i < allBalances.length; i++) {
             let individualBalance = allBalances[i]
             let address = individualBalance[0]
-            let balance = individualBalance[1]
+            let balance = BigInt(individualBalance[1])
             let _balanceSuccess = await manageNative.balance.setBalance(
                 address,
                 balance,

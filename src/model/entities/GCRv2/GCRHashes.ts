@@ -1,6 +1,8 @@
 import { type NativeTablesHashes } from "@kynesyslabs/demosdk/types"
 import { Column, Entity, PrimaryColumn, PrimaryGeneratedColumn } from "typeorm"
 
+
+
 @Entity("gcr_hashes")
 export class GCRHashes {
     @PrimaryGeneratedColumn({ type: "integer", name: "id" })

@@ -1,4 +1,5 @@
-import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
+import { GCR_Main } from "@/model/entities/GCRv2/GCR_Main"
+import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import Datasource from "src/model/datasource"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 
@@ -13,57 +14,41 @@ import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistr
 // SECTION Balance management
 
 // INFO Get the balance of a user
-async function balance(PublicKey: string): Promise<number> {
+async function balance(PublicKey: string): Promise<bigint> {
     const db = await Datasource.getInstance()
-    const GCRRepository = db.getDataSource().getRepository(GlobalChangeRegistry)
-    const status = await GCRRepository.findOneBy({ publicKey: PublicKey })
-    return status.details.content.balance
+    const GCRRepository = db.getDataSource().getRepository(GCR_Main)
+    const status = await GCRRepository.findOneBy({ pubkey: PublicKey })
+    return status.balance
 }
 
 // INFO Arbitrary function to set the balance of a user
 async function setBalance(
     publicKey: string,
-    balance: number,
+    balance: bigint,
 ): Promise<[boolean, string]> {
-    const rawData: GlobalChangeRegistry = {
-        id: null,
-        publicKey: publicKey,
-        details: {
-            hash: "",
-            content: {
-                balance: balance,
-                nonce: null,
-                identities: null,
-                txs: null,
-            },
+    const rawData: GCR_Main = {
+        assignedTxs: [],
+        identities: {
+            xm: new Map(),
+            web2: new Map(),
         },
-        extended: {
-            tokens: [],
-            nfts: [],
-            xm: [],
-            web2: [],
-            other: [],
-        },
+        balance: BigInt(balance),
+        nonce: 0,
+        pubkey: publicKey,
     }
 
     const db = await Datasource.getInstance()
-    const GCRRepository = db.getDataSource().getRepository(GlobalChangeRegistry)
-    let GCRSearch = await GCRRepository.findOneBy({ publicKey: publicKey })
+    const GCRRepository = db.getDataSource().getRepository(GCR_Main)
+    let GCRSearch = await GCRRepository.findOneBy({ pubkey: publicKey })
+
     if (!GCRSearch) {
-        GCRSearch = {
-            id: null,
-            publicKey: publicKey,
-            details: rawData.details,
-            extended: rawData.extended,
-        }
+        GCRSearch = rawData
     }
+
     // Keeping the things we need and just updating the balance
     let GCRUpdate = GCRSearch
-    GCRUpdate.details.content.balance = balance
-    // Hashing the GCR
-    GCRUpdate.details.hash = Hashing.sha256(
-        JSON.stringify(GCRUpdate.details.content),
-    )
+    GCRUpdate.balance = BigInt(balance)
+
     // Saving the GCR
     await GCRRepository.save(GCRUpdate)
     return [true, ""]
@@ -72,7 +57,7 @@ async function setBalance(
 // INFO Add a balance to a user
 async function addBalance(
     address: string,
-    amount: number,
+    amount: bigint,
 ): Promise<[boolean, string]> {
     // Get the current balance
     const currentBalance = await balance(address)
@@ -86,7 +71,7 @@ async function addBalance(
 // INFO Remove a balance from a user
 async function removeBalance(
     address: string,
-    amount: number,
+    amount: bigint,
 ): Promise<[boolean, string]> {
     // Get the current balance
     const currentBalance = await balance(address)
@@ -105,7 +90,7 @@ async function removeBalance(
 async function transferBalance(
     address_from: string,
     address_to: string,
-    amount: number,
+    amount: bigint,
 ): Promise<[boolean, string]> {
     // Remove the amount from the sender
     let success = await removeBalance(address_from, amount)

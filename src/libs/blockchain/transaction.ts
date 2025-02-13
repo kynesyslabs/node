@@ -53,6 +53,7 @@ export default class Transaction implements ITransaction {
             to: null,
             amount: null,
             data: [null, null],
+            gcr_edits: [],
             nonce: null,
             timestamp: null,
             transaction_fee: {
@@ -128,7 +129,7 @@ export default class Transaction implements ITransaction {
         console.log("Private key: ")
         console.log(privateKey)
         console.log("Signature: ")
-        console.log(tx.signature)
+        console.log(tx.signature)   
         let confirmed =
             this.sanityCheck(tx) && this.isCoherent(tx) && this.structured(tx)
         if (confirmed) {
@@ -189,9 +190,7 @@ export default class Transaction implements ITransaction {
         status: string = "confirmed",
     ): RawTransaction {
         console.log("[toRawTransaction] attempting to create a raw tx")
-        console.log(
-            "[toRawTransaction] Signature: ",
-        )
+        console.log("[toRawTransaction] Signature: ")
         console.log(tx.signature.data)
         console.log("[toRawTransaction] Block number: " + tx.blockNumber)
         console.log("[toRawTransaction] Status: " + status)
@@ -229,7 +228,10 @@ export default class Transaction implements ITransaction {
     }
 
     public static fromRawTransaction(rawTx: RawTransaction): Transaction {
-        console.log("[fromRawTransaction] Attempting to create a transaction from a raw transaction with hash: " + rawTx.hash)
+        console.log(
+            "[fromRawTransaction] Attempting to create a transaction from a raw transaction with hash: " +
+                rawTx.hash,
+        )
         const tx = new Transaction()
 
         console.log(rawTx)
@@ -242,7 +244,10 @@ export default class Transaction implements ITransaction {
         tx.status = rawTx.status
         tx.hash = rawTx.hash
         tx.content = {
-            type: rawTx.type as "web2Request" | "crosschainOperation" | "demoswork", // ! Remove this horrible thing when possible
+            type: rawTx.type as
+                | "web2Request"
+                | "crosschainOperation"
+                | "demoswork", // ! Remove this horrible thing when possible
             from: Buffer.from(rawTx.from, "hex"),
             to: Buffer.from(rawTx.to, "hex"),
             amount: rawTx.amount,
@@ -255,8 +260,8 @@ export default class Transaction implements ITransaction {
             },
 
             data: JSON.parse(rawTx.content).data,
+            gcr_edits: JSON.parse(rawTx.content).gcr_edits,
         }
         return tx
     }
-
 }

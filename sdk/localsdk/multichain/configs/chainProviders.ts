@@ -19,7 +19,22 @@ export const chainProviders = {
     },
     ton: {
         // provided by @orbs-network/ton-access
-        testnet: "https://ton.access.orbs.network/4412c0ff5Bd3F8B62C092Ab4D238bEE463E64412/1/testnet/toncenter-api-v2/jsonRPC",
-        mainnet: "https://ton.access.orbs.network/4413c0ff5Bd3F8B62C092Ab4D238bEE463E64413/1/mainnet/toncenter-api-v2/jsonRPC"
-    }
+        testnet:
+            "https://ton.access.orbs.network/4412c0ff5Bd3F8B62C092Ab4D238bEE463E64412/1/testnet/toncenter-api-v2/jsonRPC",
+        mainnet:
+            "https://ton.access.orbs.network/4413c0ff5Bd3F8B62C092Ab4D238bEE463E64413/1/mainnet/toncenter-api-v2/jsonRPC",
+    },
+    evm: {
+        mainnet: "https://rpc.ankr.com/eth",
+        sepolia: "https://rpc.ankr.com/eth_sepolia",
+        goerli: "https://ethereum-goerli.publicnode.com",
+    },
+    ibc: {
+        mainnet: "https://stargaze-rpc.publicnode.com:443",
+        testnet: "https://rpc.elgafar-1.stargaze-apis.com",
+    },
+    near: {
+        mainnet: "https://rpc.near.org",
+        testnet: "https://rpc.testnet.near.org",
+    },
 }

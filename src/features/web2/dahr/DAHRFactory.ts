@@ -16,9 +16,6 @@ export class DAHRFactory {
      */
     private constructor() {}
 
-    /**
-     * Clean up expired DAHR instances.
-     */
     private _cleanupExpired(): void {
         const now = Date.now()
         let cleanedCount = 0

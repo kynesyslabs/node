@@ -18,6 +18,7 @@ import applyGCROperation from "src/libs/blockchain/gcr/gcr_routines/applyGCROper
 import { txToGCROperation } from "src/libs/blockchain/gcr/gcr_routines/txToGCROperation"
 import SecretaryManager from "./types/secretaryManager"
 import { ForgingEndedError, NotInShardError } from "src/exceptions"
+import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
 
 /* INFO
 # Semaphore system
@@ -84,31 +85,47 @@ export async function consensusRoutine(): Promise<void> {
         // NOTE: Instead of averaging the time, we'll use the secretary timestamp
         // await synchronizeAndAverageTime(shard)
 
-        // INFO: CONSENSUS ACTION 2: Merge and order the mempools
-        const mempool = await mergeAndOrderMempools(manager.shard.members)
-        log.info(
-            "[consensusRoutine] mempool merged (aka ordered transactions)",
-            true,
-        )
-        log.info(
-            "[consensusRoutine] mempool: " + JSON.stringify(mempool, null, 2),
-            true,
-        )
+    // INFO: CONSENSUS ACTION 2: Merge and order the mempools
+    let tempMempool = await mergeAndOrderMempools(manager.shard.members)
+    log.info(
+        "[consensusRoutine] mempool merged (aka ordered transactions)",
+        true,
+    )
 
         // INFO: CONSENSUS ACTION 3: Merge the peerlist (skipped)
         // REVIEW Merge the peerlist
         const peerlist = []
         // await mergePeerlistAndWait(shard)
 
-        // INFO: CONSENSUS ACTION 4: Apply the GCR operations to the state before forging the block
-        /** REVIEW
-         * Here we apply the GCR operations to the state before forging the block
-         * so that the GCR hash is included in the block.
-         * A list of successful and failed GCR operations is returned.
-         * NOTE A mandatory validator status is updated to reflect that the GCR operations have been applied
-         * */
-        // ! Not here but check Sync.ts (syncNativeTables) and make it work with the GCR (syncing the states)
-        await applyGCRForNewBlock(mempool)
+    // INFO: CONSENSUS ACTION 4: Apply the GCR operations to the state before forging the block
+    /**
+     * Here we apply the GCR operations to the state before forging the block
+     * so that the GCR hash is included in the block.
+     * A list of successful and failed GCR operations is returned.
+     * NOTE A mandatory validator status is updated to reflect that the GCR operations have been applied
+     * */
+    // ? The following line could be outdated once we use the GCREdit stuff
+    // await applyGCRForNewBlock(mempool)
+
+    // Applying the GCREdits and see if everything is consistent
+    let [successfulTxs, failedTxs] = await applyGCREditsFromMergedMempool(tempMempool)
+    log.info(`[consensusRoutine] Successful Txs number: ${successfulTxs.length}`)
+    log.info(`[consensusRoutine] Failed Txs number: ${failedTxs.length}`)
+    if (failedTxs.length > 0) {
+        log.error("[consensusRoutine] Failed Txs found, pruning the mempool")
+        // REVIEW Prune the mempool of the failed txs
+        // NOTE The mempool should now be updated with only the successful txs
+        for (const tx of failedTxs) {
+            await Mempool.removeTransactionWithHash(tx)
+        }
+    }
+    // REVIEW Re-merge the mempools anyway to get the correct mempool from the whole shard
+    const mempool = await mergeAndOrderMempools(manager.shard.members)
+
+    log.info(
+        "[consensusRoutine] mempool: " + JSON.stringify(tempMempool, null, 2),
+        true,
+    )
 
         // INFO: At this point, we should have the secretary block timestamp
         // if we're connected to the secretary and recieved atleast one successful request from them
@@ -278,6 +295,37 @@ async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
     // Using the secretary to update the local statuses
     await updateValidatorPhase(3)
     return await orderTransactions(mergedMempool)
+}
+
+/**
+ * Apply the GCREdits from the merged mempool
+ *
+ * @param mempool - The mempool
+ * @returns The successful and failed GCREdits
+ */
+async function applyGCREditsFromMergedMempool(
+    mempool: Transaction[],
+): Promise<[string[], string[]]> {
+    // TODO Implement this
+    let successfulTxs: string[] = []
+    let failedTxs: string[] = []
+    // 1. Parse the mempool txs to get the GCREdits
+    for (const tx of mempool) {
+        let txGCREdits = tx.content.gcr_edits
+        // 2. Apply the GCREdits to the state for each tx
+        for (const gcrEdit of txGCREdits) {
+            let applyResult = await HandleGCR.apply(gcrEdit, tx)
+            if (applyResult.success) {
+                // If the apply succeeds, add the tx to the successfulTxs array
+                successfulTxs.push(tx.hash)
+            } else {
+                // If the apply fails, add the tx to the failedTxs array
+                failedTxs.push(tx.hash)
+            }
+        }
+    }
+    // 4. Return the successful and failed GCREdits // NOTE They will be used to prune the mempool
+    return [successfulTxs, failedTxs]
 }
 
 /**

@@ -25,6 +25,8 @@ import {
     Transaction,
 } from "@kynesyslabs/demosdk/types"
 import { BlockNotFoundError, PeerOfflineError } from "src/exceptions"
+import GCR from "../gcr/gcr"
+import HandleGCR from "../gcr/handleGCR"
 
 const term = terminalkit.terminal
 
@@ -275,7 +277,7 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
         log.info("[fastSync] Transactions received: " + txs.length, true)
 
         // ! Sync the native tables
-        await syncNativeTables()
+        await syncGCRTables(txs)
 
         // REVIEW Insert the txs into the transactions database table
         if (txs.length > 0) {
@@ -368,10 +370,17 @@ async function requestBlocks() {
     return true
 }
 
-// TODO Implement this
-export async function syncNativeTables() {
-    // TODO Call the endpoint to sync the native tables (manageNodeCall.ts has them)
-    // TODO Add the results to the database in the native tables
+// REVIEW Applying GCREdits to the tables
+export async function syncGCRTables(txs: Transaction[]): Promise<[string, boolean]> { // ? Better typing on this return
+    // Using the GCREdits in the tx to sync the native tables
+    for (let tx of txs) {
+        let result = await HandleGCR.applyToTx(tx)
+        if (!result.success) {
+            log.error("[fastSync] GCR edit application failed at tx: " + tx.hash)
+            return [tx.hash, false]
+        }
+    }
+    return [null, true]
 }
 
 // Helper function to ask for the transactions in a block

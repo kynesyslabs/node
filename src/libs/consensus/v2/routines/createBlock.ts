@@ -7,6 +7,7 @@ import log from "src/utilities/logger"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import Peer from "src/libs/peer/Peer"
 import hashGCRTables from "src/libs/blockchain/gcr/gcr_routines/hashGCR"
+import getCommonValidatorSeed from "./getCommonValidatorSeed"
 
 export async function createBlock(
     orderedTransactions: Transaction[],
@@ -33,6 +34,7 @@ export async function createBlock(
     block.number = blockNumber
     block.content.native_tables_hashes = await hashNativeTables()
     block.content.timestamp = getSharedState.lastConsensusTime
+    block.content.timestamp = getSharedState.lastConsensusTime
     block.hash = Hashing.sha256(JSON.stringify(block.content))
     // Signing the block and adding the signature to the block validation data
     let blockSignature = Cryptography.sign(
@@ -51,6 +53,12 @@ export async function createBlock(
 
     /* NOTE - The block timestamp is the average timestamp of the shard 
     see averageTimestamp.ts for more details */
+
+    let { commonValidatorSeed: nextProposer } = await getCommonValidatorSeed(
+        block as any,
+    )
+    log.debug("nextProposer: " + nextProposer)
+    block.next_proposer = nextProposer
     // Add the candidate to the shared state
     getSharedState.candidateBlock = block
     return block

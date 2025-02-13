@@ -60,6 +60,7 @@ export default async function peerBootstrap(
             peerManager.removeOnlinePeer(blankPeer.identity)
             continue
         }
+
         console.log(
             "[BOOSTRAP: overriding connectionstring] " + currentPeerUrl,
         )

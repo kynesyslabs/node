@@ -2,7 +2,7 @@
 import { Hash } from "crypto"
 import Hashing from "src/libs/crypto/hashing"
 import Datasource from "src/model/datasource"
-import { GCRHashes } from "src/model/entities/GCR/GCRHashes"
+import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
 
 // which is set by the validators during the consensus and is an hash of all the applicable operations for that block.
 import Chain from "../../chain"

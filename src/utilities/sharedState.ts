@@ -14,8 +14,8 @@ dotenv.config()
 export default class sharedState {
     private static instance: sharedState
 
-    version: string = "0.7.4"
-    version_name: string = "Slow Takeover"
+    version: string = "0.8.0"
+    version_name: string = "Ungentle Movement"
 
     block_time: number = 10 // TODO Get it from the genesis (or see Consensus module)
 
