@@ -17,6 +17,7 @@ import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import applyGCROperation from "src/libs/blockchain/gcr/gcr_routines/applyGCROperation"
 import { txToGCROperation } from "src/libs/blockchain/gcr/gcr_routines/txToGCROperation"
 import SecretaryManager from "./types/secretaryManager"
+import { ForgingEndedError, NotInShardError } from "src/exceptions"
 import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
 
 /* INFO
@@ -56,37 +57,33 @@ export async function consensusRoutine(): Promise<void> {
         )
         return
     }
-
-    await initializeConsensusState()
-    // await fastSync([], "consensusRoutine")
-    // Initialize the consensus state and check if the local node is in the shard
-
     const manager = SecretaryManager.getInstance()
 
-    // INFO: We won't use the shard returned by initializeShard
-    // as it can change through the consensus routine
-    // INFO: CONSENSUS ACTION 1: Initialize the shard
-    await initializeShard()
+    try {
+        await initializeConsensusState()
+        // await fastSync([], "consensusRoutine")
+        // Initialize the consensus state and check if the local node is in the shard
 
-    if (!isInShard(manager.shard.members)) {
+        // INFO: We won't use the shard returned by initializeShard
+        // as it can change through the consensus routine
+        // INFO: CONSENSUS ACTION 1: Initialize the shard
+        await initializeShard()
+        log.info("[consensusRoutine] We are in the shard, creating the block")
         log.info(
-            "[consensusRoutine] We are not in the shard, waiting for the block",
+            `[consensusRoutine] shard: ${JSON.stringify(
+                manager.shard,
+                null,
+                2,
+            )}`,
+            false,
         )
-        return
-    }
 
-    log.info("[consensusRoutine] We are in the shard, creating the block")
-    log.info(
-        `[consensusRoutine] shard: ${JSON.stringify(manager.shard, null, 2)}`,
-        false,
-    )
+        // INFO: Broadcast our validation phase to the secretary
+        await updateValidatorPhase(1)
 
-    // INFO: Broadcast our validation phase to the secretary
-    await updateValidatorPhase(1)
-
-    // synchronize and average the time
-    // NOTE: Instead of averaging the time, we'll use the secretary timestamp
-    // await synchronizeAndAverageTime(shard)
+        // synchronize and average the time
+        // NOTE: Instead of averaging the time, we'll use the secretary timestamp
+        // await synchronizeAndAverageTime(shard)
 
     // INFO: CONSENSUS ACTION 2: Merge and order the mempools
     let tempMempool = await mergeAndOrderMempools(manager.shard.members)
@@ -95,10 +92,10 @@ export async function consensusRoutine(): Promise<void> {
         true,
     )
 
-    // INFO: CONSENSUS ACTION 3: Merge the peerlist (skipped)
-    // REVIEW Merge the peerlist
-    const peerlist = []
-    // await mergePeerlistAndWait(shard)
+        // INFO: CONSENSUS ACTION 3: Merge the peerlist (skipped)
+        // REVIEW Merge the peerlist
+        const peerlist = []
+        // await mergePeerlistAndWait(shard)
 
     // INFO: CONSENSUS ACTION 4: Apply the GCR operations to the state before forging the block
     /**
@@ -130,53 +127,72 @@ export async function consensusRoutine(): Promise<void> {
         true,
     )
 
-    // INFO: At this point, we should have the secretary block timestamp
-    // if we're connected to the secretary and recieved atleast one successful request from them
-    if (manager.blockTimestamp) {
-        getSharedState.lastConsensusTime = manager.blockTimestamp
-    } else {
-        // INFO: This should never happen
-        // If it does, request the block timestamp from the secretary
-        log.debug(
-            "[CONSENSUS ROUTINE] Secretary block timestamp not received yet, requesting it ...",
-        )
-        const blockTimestamp = await manager.getSecretaryBlockTimestamp()
-
-        if (blockTimestamp) {
-            getSharedState.lastConsensusTime = blockTimestamp
+        // INFO: At this point, we should have the secretary block timestamp
+        // if we're connected to the secretary and recieved atleast one successful request from them
+        if (manager.blockTimestamp) {
+            getSharedState.lastConsensusTime = manager.blockTimestamp
         } else {
-            log.error(
-                "[CONSENSUS ROUTINE] Block timestamp is not set, stopping the node ...",
+            // INFO: This should never happen
+            // If it does, request the block timestamp from the secretary
+            log.debug(
+                "[CONSENSUS ROUTINE] Secretary block timestamp not received yet, requesting it ...",
             )
-            process.exit(1)
+            const blockTimestamp = await manager.getSecretaryBlockTimestamp()
+
+            if (blockTimestamp) {
+                getSharedState.lastConsensusTime = blockTimestamp
+            } else {
+                log.error(
+                    "[CONSENSUS ROUTINE] Block timestamp could not be resolved, exiting the consensus routine",
+                )
+                return
+            }
         }
+
+        // INFO: CONSENSUS ACTION 5: Forge the block
+        const block = await forgeBlock(mempool, peerlist) // NOTE The GCR hash is calculated here and added to the block
+        // REVIEW Set last consensus time to the current block timestamp
+        getSharedState.lastConsensusTime = block.content.timestamp
+
+        // INFO: CONSENSUS ACTION 6: Vote on the block
+        const [pro, con] = await voteOnBlock(block, manager.shard.members)
+
+        // Check if the block is valid
+        if (isBlockValid(pro, manager.shard.members.length)) {
+            log.info(
+                "[consensusRoutine] [result] Block is valid with " +
+                    pro +
+                    " votes",
+            )
+            await finalizeBlock(block, pro)
+        } else {
+            log.info(
+                `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
+            )
+        }
+
+        // INFO: CONSENSUS ACTION 7: End the consensus routine
+        await updateValidatorPhase(7)
+    } catch (error) {
+        if (error instanceof NotInShardError) {
+            log.info(
+                "[consensusRoutine] We are not in the shard, waiting for the block",
+            )
+            return
+        }
+
+        if (error instanceof ForgingEndedError) {
+            log.info(
+                "[consensusRoutine] We are forging an ended block. Exiting the consensus routine",
+            )
+            return
+        }
+    } finally {
+        manager.endConsensusRoutine()
+        // Cleanup the consensus state
+        cleanupConsensusState()
     }
 
-    // INFO: CONSENSUS ACTION 5: Forge the block
-    const block = await forgeBlock(mempool, peerlist) // NOTE The GCR hash is calculated here and added to the block
-    // REVIEW Set last consensus time to the current block timestamp
-    getSharedState.lastConsensusTime = block.content.timestamp
-
-    // INFO: CONSENSUS ACTION 6: Vote on the block
-    const [pro, con] = await voteOnBlock(block, manager.shard.members)
-
-    // Check if the block is valid
-    if (isBlockValid(pro, manager.shard.members.length)) {
-        log.info(
-            "[consensusRoutine] [result] Block is valid with " + pro + " votes",
-        )
-        await finalizeBlock(block, pro)
-    } else {
-        log.info(
-            `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
-        )
-    }
-
-    // INFO: CONSENSUS ACTION 7: End the consensus routine
-    await updateValidatorPhase(7)
-    manager.endConsensusRoutine()
-    // Cleanup the consensus state
-    cleanupConsensusState()
     log.debug("[consensusRoutine] CONSENSUS ROUTINE ENDED 🔥🔥🔥")
 }
 
@@ -444,6 +460,19 @@ async function finalizeBlock(block: Block, pro: number): Promise<void> {
     console.log(lastBlock)
 }
 
+function preventForgingEnded() {
+    const manager = SecretaryManager.getInstance()
+
+    if (
+        getSharedState.lastBlockNumber === manager.shard.blockRef &&
+        manager.ourValidatorPhase.currentPhase < 5 // forged block
+    ) {
+        throw new ForgingEndedError(
+            "We are forging an ended block. Please exit the consensus routine",
+        )
+    }
+}
+
 /**
  * Sends our validator phase to the secretary, and waits for the greenlight.
  *
@@ -453,12 +482,14 @@ async function finalizeBlock(block: Block, pro: number): Promise<void> {
 async function updateValidatorPhase(phase: number): Promise<any> {
     const manager = SecretaryManager.getInstance()
     await manager.setOurValidatorPhase(phase, true)
+    preventForgingEnded()
 
     // INFO: If it's the first phase, the secretary might not have started the consensus routine yet,
     // Increase retry steps to 10 to wait for the secretary to start
     const retries = phase === 1 ? 10 : 3
     const res = await manager.sendOurValidatorPhaseToSecretary(retries)
 
+    preventForgingEnded()
     log.debug(
         `[updateValidatorStatus 🎉] Validator phase ${phase} resolved with value: ${JSON.stringify(
             res,

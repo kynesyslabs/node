@@ -21,8 +21,7 @@ export default class Block {
     content: BlockContent
     status: string
     proposer: pki.PublicKey | pki.ed25519.BinaryBuffer
-    validation_data: any
-    next_proposer: string
+    validation_data: { signatures: { [key: string]: string } }
 
     constructor() {
         this.number = null

@@ -341,7 +341,7 @@ export default class PeerManager {
                 JSON.stringify(hello_request, null, 2),
         )
         // Not awaiting the response to not block the main thread
-        peer.longCall(
+        const response = await peer.longCall(
             {
                 method: "hello_peer",
                 params: [hello_request],
@@ -349,9 +349,12 @@ export default class PeerManager {
             true,
             250,
             3,
-        ).then(response => {
-            PeerManager.helloPeerCallback(response, peer)
-        })
+        )
+        return PeerManager.helloPeerCallback(response, peer)
+
+        // then(response => {
+        //     PeerManager.helloPeerCallback(response, peer)
+        // })
         log.debug("[Hello Peer] Hello request sent: waiting for response")
     }
 

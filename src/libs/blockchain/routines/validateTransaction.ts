@@ -21,6 +21,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import required from "src/utilities/required"
+import { ForgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 const term = terminalkit.terminal
 
@@ -131,7 +132,7 @@ async function defineGas(
         if (typeof tx.content.from === "string") {
             from = tx.content.from
         } else {
-            from = tx.content.from.toString("hex")
+            from = ForgeToHex(tx.content.from)
         }
         console.log(
             "[Native Tx Validation] Calculating gas for: " + from + "\n",

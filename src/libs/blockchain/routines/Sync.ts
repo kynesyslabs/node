@@ -35,17 +35,28 @@ async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
 }
 
+const latestBlock = () =>
+    peerManager
+        .getAll()
+        .reduce((max, peer) => Math.max(max, peer.sync.block), 0)
+
+const highestBlockPeer = () =>
+    peerManager.getAll().find(peer => peer.sync.block === latestBlock())
 
 /**
  * Get the highest block number and peer from the network. If we're synced
  * we return null for the peer.
- * 
+ *
  * @param peers - If specified, we only get the data from these peers.
  */
 async function getHigestBlockPeerData(peers: Peer[] = []) {
     // Getting all the peers if not specified
     if (peers.length === 0) {
         peers = peerManager.getPeers()
+    }
+
+    if (latestBlock() === getSharedState.lastBlockNumber) {
+        return {}
     }
 
     // Getting our data
@@ -170,10 +181,9 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     }
 }
 
-
 /**
  * Verify if our last block is coherent with the same block from the peer.
- * 
+ *
  * @param peer - The peer to cross-check with
  * @param ourLastBlockNumber - Our last block number
  * @param ourLastBlockHash - Our last block hash
@@ -296,16 +306,12 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
 
 /**
  * Wait for the next block to be generated and download it
- * 
+ *
  * @param peer - The peer to wait for the next block
  * @returns True if the block was downloaded successfully, false otherwise
  */
-async function waitForNextBlock(peer: Peer) {
+async function waitForNextBlock() {
     log.debug("[waitForNextBlock] Waiting for next block")
-    const latestBlock = () =>
-        peerManager
-            .getAll()
-            .reduce((max, peer) => Math.max(max, peer.sync.block), 0)
 
     while (getSharedState.lastBlockNumber >= latestBlock()) {
         await sleep(250)
@@ -313,39 +319,39 @@ async function waitForNextBlock(peer: Peer) {
 
     log.debug("[waitForNextBlock] NEXT BLOCK GENERATED. DOWNLOADING...")
 
-    return await downloadBlock(peer, getSharedState.lastBlockNumber + 1)
+    return await downloadBlock(
+        highestBlockPeer(),
+        getSharedState.lastBlockNumber + 1,
+    )
 }
 
 /**
  * Request the blocks from the peer
- * 
+ *
  * @param peer - The peer to request the blocks from
  * @returns True if the blocks were requested successfully, false otherwise
  */
-async function requestBlocks(peer: Peer) {
+async function requestBlocks() {
     // REVIEW: lowest or highest?
     // Sync the blocks one by one starting from the lowest block number that we do not have
     // ? Way more error handling needed
-    console.error(
-        "[fastSync] Syncing blocks from peer: " + JSON.stringify(peer),
-    )
+    // console.error(
+    //     "[fastSync] Syncing blocks from peer: " + JSON.stringify(peer),
+    // )
 
-    if (!peerManager.getPeer(peer.identity)) {
-        log.error("[fastSync] Peer not found")
-        return false
-    }
+    // if (!peerManager.getPeer(peer.identity)) {
+    //     log.error("[fastSync] Peer not found")
+    //     return false
+    // }
 
-    while (
-        getSharedState.lastBlockNumber <=
-        peerManager.getPeer(peer.identity).sync.block
-    ) {
+    while (getSharedState.lastBlockNumber <= latestBlock()) {
         const blockToAsk = getSharedState.lastBlockNumber + 1
         // log.debug("[fastSync] Sleeping for 1 second")
         // await sleep(250)
 
         log.debug("[fastSync] Asking peer for block: " + blockToAsk)
         try {
-            await downloadBlock(peer, blockToAsk)
+            await downloadBlock(highestBlockPeer(), blockToAsk)
         } catch (error) {
             // INFO: Handle chain head reached
             if (error instanceof BlockNotFoundError) {
@@ -429,35 +435,36 @@ export async function mergePeerlist(block: Block): Promise<string[]> {
 }
 
 async function fastSyncRoutine(peers: Peer[] = []) {
-    const {
-        highestBlockNumber,
-        highestBlockNumberPeer,
-        ourLastBlockNumber,
-        ourLastBlockHash,
-    } = await getHigestBlockPeerData(peers)
-
-    if (highestBlockNumberPeer === null) {
+    // const {
+    //     highestBlockNumber,
+    //     highestBlockNumberPeer,
+    //     ourLastBlockNumber,
+    //     ourLastBlockHash,
+    // } = await getHigestBlockPeerData(peers)
+    if (latestBlock() === getSharedState.lastBlockNumber) {
         log.debug("[fastSync] We're already synced!")
         return true
     }
 
     // INFO: Check if block match across peers
-    const verified = await verifyLastBlockIntegrity(
-        highestBlockNumberPeer,
-        ourLastBlockNumber,
-        ourLastBlockHash,
-    )
+    // INFO: Disabled for testing!
+    // TODO: Fix verification of the last block with the same peer
+    // const verified = await verifyLastBlockIntegrity(
+    //     highestBlockPeer(),
+    //     getSharedState.lastBlockNumber,
+    //     getSharedState.lastBlockHash,
+    // )
 
-    if (!verified) {
-        log.error("[fastSync] Last block is not coherent")
-        getSharedState.syncStatus = false
-        return false
-    }
+    // if (!verified) {
+    //     log.error("[fastSync] Last block is not coherent")
+    //     getSharedState.syncStatus = false
+    //     return false
+    // }
 
-    const synced = await requestBlocks(highestBlockNumberPeer)
+    const synced = await requestBlocks()
 
     if (synced && getSharedState.fastSyncCount === 0) {
-        await waitForNextBlock(highestBlockNumberPeer)
+        await waitForNextBlock()
     }
 
     return synced

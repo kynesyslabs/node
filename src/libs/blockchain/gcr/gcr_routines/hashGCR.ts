@@ -6,12 +6,7 @@ import { GlobalChangeRegistry } from "../../../../model/entities/GCR/GlobalChang
 import { GCRHashes } from "../../../../model/entities/GCRv2/GCRHashes"
 import Chain from "src/libs/blockchain/chain"
 import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
-
-
-export interface NativeTablesHashes {
-    native_gcr: string
-    native_subnets_txs: string
-}
+import { type NativeTablesHashes } from "@kynesyslabs/demosdk/types"
 
 /**
  * Generates a SHA-256 hash for tables that use 'publicKey' as their identifier.
