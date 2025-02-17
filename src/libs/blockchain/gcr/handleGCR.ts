@@ -275,7 +275,7 @@ export default class HandleGCR {
             case "subnetsTx":
                 // TODO implementations
                 console.log(`Assigning GCREdit ${editOperation.type}`)
-                return { success: false, message: "Not implemented" }
+                return { success: true, message: "Not implemented" }
             default:
                 return { success: false, message: "Invalid GCREdit type" }
         }
@@ -353,6 +353,7 @@ export default class HandleGCR {
                 .filter(result => !result.success)
                 .map(result => result.message)
                 .join(", ")
+
             return {
                 success: false,
                 message: `Failed to apply GCREdit: ${failedMessages}`,

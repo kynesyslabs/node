@@ -366,7 +366,7 @@ export default class ServerHandlers {
                 log.error("[handleExecuteTransaction] Failed to apply GCREdit")
                 result.success = false
                 result.response = false
-                result.extra = "Failed to apply GCREdit: " + editsResults[1]
+                result.extra = "Failed to apply GCREdit: " + editsResults.message
                 return result
             }
 

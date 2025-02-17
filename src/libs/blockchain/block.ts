@@ -11,16 +11,17 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { pki } from "node-forge"
 
-import { BlockContent } from "@kynesyslabs/demosdk/types"
+import { BlockContent, Block as BlockType } from "@kynesyslabs/demosdk/types"
 import { Peer } from "../peer"
 
 // NOTE Block class
-export default class Block {
+export default class Block implements BlockType {
     number: number
     hash: string
     content: BlockContent
-    status: string
+    status:  "derived" | "confirmed"
     proposer: pki.PublicKey | pki.ed25519.BinaryBuffer
+    next_proposer: string
     validation_data: { signatures: { [key: string]: string } }
 
     constructor() {
