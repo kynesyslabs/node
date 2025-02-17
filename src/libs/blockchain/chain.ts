@@ -477,7 +477,11 @@ export default class Chain {
         genesis_block.content.previousHash = "0x0"
         genesis_block.status = "confirmed"
         genesis_block.proposer = "0x000000000000000000000000"
-        genesis_block.validation_data = "genesis"
+        genesis_block.validation_data = {
+            signatures: {
+                "0x000000000000000000000000": "0x0",
+            },
+        }
         genesis_block.hash = Hashing.sha256(
             JSON.stringify(genesis_block.content),
         )
