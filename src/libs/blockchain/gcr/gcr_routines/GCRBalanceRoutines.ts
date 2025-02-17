@@ -20,6 +20,11 @@ export default class GCRBalanceRoutines {
                 ? ForgeToHex(editOperation.account)
                 : editOperation.account
 
+        // Safeguarding the operation by checking if the amount is positive
+        if (editOperation.amount <= 0) {
+            return { success: false, message: "Invalid amount" }
+        }
+
         console.log(
             "Applying GCREdit balance: ",
             editOperation.operation,
@@ -60,6 +65,12 @@ export default class GCRBalanceRoutines {
             }
             accountGCR.balance =
                 BigInt(accountGCR.balance) - BigInt(editOperation.amount)
+
+            // Safeguarding the operation by checking if the balance is negative
+            // NOTE This applies just to the non-production environment
+            if (accountGCR.balance < 0n && !getSharedState.PROD) {
+                accountGCR.balance = 0n
+            }
         }
 
         // Saving the account GCR if not simulating
