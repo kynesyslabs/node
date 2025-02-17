@@ -3,6 +3,7 @@ import { Repository } from "typeorm"
 import { GCR_Main } from "src/model/entities/GCRv2/GCR_Main"
 import HandleGCR, { GCRResult } from "src/libs/blockchain/gcr/handleGCR"
 import { ForgeToHex } from "@/libs/crypto/forgeUtils"
+import { getSharedState } from "@/utilities/sharedState"
 
 export default class GCRBalanceRoutines {
     static async apply(
@@ -49,7 +50,12 @@ export default class GCRBalanceRoutines {
                 BigInt(accountGCR.balance) + BigInt(editOperation.amount)
         } else if (editOperation.operation === "remove") {
             // Safeguarding the operation
-            if (actualBalance < editOperation.amount) {
+            // NOTE PROD flag is used to enable testing when not in production
+            if (
+                (actualBalance < editOperation.amount ||
+                    actualBalance === 0n) &&
+                getSharedState.PROD
+            ) {
                 return { success: false, message: "Insufficient balance" }
             }
             accountGCR.balance =
