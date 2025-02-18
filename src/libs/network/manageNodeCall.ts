@@ -19,6 +19,8 @@ import getBlockHeaderByNumber from "./routines/nodecalls/getBlockHeaderByNumber"
 import getBlockHeaderByHash from "./routines/nodecalls/getBlockHeaderByHash"
 import getBlockByNumber from "./routines/nodecalls/getBlockByNumber"
 import getBlockByHash from "./routines/nodecalls/getBlockByHash"
+import getBlocks from "./routines/nodecalls/getBlocks"
+import getTransactions from "./routines/nodecalls/getTransactions"
 import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
@@ -99,6 +101,10 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "getBlockByNumber":
             console.log(`get block by number ${data.blockNumber}`)
             return await getBlockByNumber(data)
+        case "getBlocks":
+            return await getBlocks(data)
+        case "getTransactions":
+            return await getTransactions(data)
         case "getBlockByHash":
             // Check if we have .hash or .blockHash
             if (data.hash) {
@@ -161,7 +167,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 nStat = (await GCR.getGCRNativeStatus(
                     data.address,
                 )) as GlobalChangeRegistry
-                response = nStat //.toString() // REVIEW It works ?
+                response.response = nStat
             } catch (error) {
                 response.result = 400
                 response.response = "error"
