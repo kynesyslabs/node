@@ -24,10 +24,7 @@ import getTransactions from "./routines/nodecalls/getTransactions"
 import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
-import {
-    GlobalChangeRegistry,
-    GCRExtended,
-} from "src/model/entities/GCR/GlobalChangeRegistry"
+import { GCR_Main } from "@/model/entities/GCRv2/GCR_Main"
 
 export interface NodeCall {
     message: string
@@ -166,7 +163,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             try {
                 nStat = (await GCR.getGCRNativeStatus(
                     data.address,
-                )) as GlobalChangeRegistry
+                )) as GCR_Main
                 response.response = nStat
             } catch (error) {
                 response.result = 400
@@ -182,8 +179,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             }
             nStat = (await GCR.getGCRNativeStatus(
                 data.address,
-            )) as GlobalChangeRegistry
-            response.response = nStat.details.content.nonce
+            )) as GCR_Main
+            response.response = nStat.nonce
             break
         case "getPeerTime":
             response.response = new Date().getTime()
