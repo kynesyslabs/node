@@ -63,6 +63,7 @@ import {
 import Chain from "../chain"
 import executeOperations, { Actor } from "../routines/executeOperations"
 import gcrStateSave from "./gcr_routines/gcrStateSaverHelper"
+import { GCR_Main } from "@/model/entities/GCRv2/GCR_Main"
 
 const term = terminalkit.terminal
 
@@ -339,38 +340,38 @@ export default class GCR {
 
     // !SECTION Getters
 
-    static async getGCRNativeStatus(address: string): Promise<GlobalChangeRegistry> {
+    static async getGCRNativeStatus(address: string): Promise<GCR_Main> {
         const db = await Datasource.getInstance()
-        const GCRRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-        let nativeStatus: GlobalChangeRegistry
+        const GCRMain = db.getDataSource().getRepository(GCR_Main)
+
+        let nativeStatus: GCR_Main
+
         try {
-            nativeStatus = await GCRRepository.findOne({
-                where: { publicKey: address },
+            nativeStatus = await GCRMain.findOne({
+                where: { pubkey: address },
             })
+
+            if (!nativeStatus) {
+                nativeStatus = {
+                    pubkey: address,
+                    assignedTxs: [],
+                    nonce: 0,
+                    balance: BigInt(0),
+                    identities: {
+                        xm: new Map(),
+                        web2: new Map(),
+                    },
+                }
+            }
         } catch (e) {
             nativeStatus = {
-                id: 0,
-                publicKey: address,
-                details: {
-                    hash: "",
-                    content: {
-                        balance: 0,
-                        identities: {
-                            xm: new Map(),
-                            web2: new Map(),
-                        },
-                        txs: [],
-                        nonce: 0,
-                    },
-                },
-                extended: {
-                    tokens: [],
-                    nfts: [],
-                    xm: [],
-                    web2: [],
-                    other: [],
+                pubkey: address,
+                assignedTxs: [],
+                nonce: 0,
+                balance: BigInt(0),
+                identities: {
+                    xm: new Map(),
+                    web2: new Map(),
                 },
             }
         }
@@ -528,8 +529,8 @@ export default class GCR {
                                 xm: new Map(),
                                 web2: new Map(),
                             },
-                    txs: [],
-                    nonce: 0,
+                            txs: [],
+                            nonce: 0,
                         },
                     },
                 })

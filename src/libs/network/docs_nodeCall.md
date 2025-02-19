@@ -64,6 +64,15 @@ Returns the current timestamp of the peer.
 ### getAllTxs
 Returns all transactions in the chain.
 
+### getBlocks  
+- `.data`: `{ start: number | 'latest', limit: number }`  
+- Returns all blocks by the given range, from end of the table. 
+
+### getTransactions  
+- `.data`: `{ start: number | 'latest', limit: number }`  
+- Returns all transactions by the given range, from end of the table. 
+
+
 ### hots
 Returns a predefined response (likely an Easter egg).
 
