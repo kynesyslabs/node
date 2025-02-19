@@ -127,24 +127,14 @@ export default class Chain {
     }
 
     // INFO returns all blocks by the given range, default from end of the table.
-    static async getBlocks(
-        start: number,
-        limit: number,
-        fromEnd: boolean = true,
-    ): Promise<Blocks[]> {
+    static async getBlocks(start: number, limit: number): Promise<Blocks[]> {
         const MAX_LIMIT = 100
         const calculatedLimit = Math.min(limit, MAX_LIMIT)
         const db = await Datasource.getInstance()
         const blockRepository = db.getDataSource().getRepository(Blocks)
 
         const queryBuilder = blockRepository.createQueryBuilder("block")
-
-        if (fromEnd) {
-            queryBuilder.orderBy("block.number", "DESC")
-        } else {
-            queryBuilder.orderBy("block.number", "ASC")
-        }
-
+        queryBuilder.orderBy("block.number", "DESC")
         queryBuilder.skip(start).take(calculatedLimit)
 
         return await queryBuilder.getMany()
@@ -237,7 +227,6 @@ export default class Chain {
     static async getTransactions(
         start: number,
         limit: number,
-        fromEnd: boolean = true,
     ): Promise<Transactions[]> {
         const MAX_LIMIT = 100
         const calculatedLimit = Math.min(limit, MAX_LIMIT)
@@ -249,12 +238,7 @@ export default class Chain {
         const queryBuilder =
             transactionRepository.createQueryBuilder("transaction")
 
-        if (fromEnd) {
-            queryBuilder.orderBy("transaction.timestamp", "DESC")
-        } else {
-            queryBuilder.orderBy("transaction.timestamp", "ASC")
-        }
-
+        queryBuilder.orderBy("transaction.timestamp", "DESC")
         queryBuilder.skip(start).take(calculatedLimit)
 
         return await queryBuilder.getMany()

@@ -65,12 +65,12 @@ Returns the current timestamp of the peer.
 Returns all transactions in the chain.
 
 ### getBlocks  
-- `.data`: `{ start: number, limit: number, fromEnd?: boolean }`  
-- Returns all blocks by the given range, default from end of the table. 
+- `.data`: `{ start: number | 'latest', limit: number }`  
+- Returns all blocks by the given range, from end of the table. 
 
 ### getTransactions  
-- `.data`: `{ start: number, limit: number, fromEnd?: boolean }`  
-- Returns all transactions by the given range, default from end of the table. 
+- `.data`: `{ start: number | 'latest', limit: number }`  
+- Returns all transactions by the given range, from end of the table. 
 
 
 ### hots

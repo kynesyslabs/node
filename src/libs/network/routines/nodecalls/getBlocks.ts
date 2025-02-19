@@ -1,10 +1,19 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
 
-export default async function getBlocks(data: any): Promise<RPCResponse> {
-    const start: number = data.start || 0
-    const limit: number = data.limit || 10
-    const fromEnd: boolean = data.fromEnd || true
+interface IGetBlocksData {
+    start: number | "latest"
+    limit: number
+}
+
+export default async function getBlocks(
+    data: IGetBlocksData,
+): Promise<RPCResponse> {
+    const start: number | string =
+        data.start === "latest" || data.start === 0
+            ? 0
+            : Number(data.start) || 0
+    const limit: number = data.limit || 50
 
     if (isNaN(start) || isNaN(limit)) {
         console.log("[SERVER ERROR] Invalid start or limit parameter value 💀")
@@ -16,10 +25,10 @@ export default async function getBlocks(data: any): Promise<RPCResponse> {
         }
     } else {
         console.log(
-            `[SERVER] Received getBlocks: start=${start}, limit=${limit}, fromEnd=${fromEnd}`,
+            `[SERVER] Received getBlocks: start=${start}, limit=${limit}`,
         )
 
-        const blocks = await Chain.getBlocks(start, limit, fromEnd)
+        const blocks = await Chain.getBlocks(start, limit)
 
         if (blocks && blocks.length > 0) {
             return {
