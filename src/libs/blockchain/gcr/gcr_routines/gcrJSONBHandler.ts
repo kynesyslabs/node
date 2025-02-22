@@ -1,10 +1,5 @@
-import { EntityTarget, Repository, FindOptionsOrder } from "typeorm"
 import Datasource from "../../../../model/datasource"
-import Hashing from "src/libs/crypto/hashing"
-import { GCRSubnetsTxs } from "../../../../model/entities/GCRv2/GCRSubnetsTxs"
-import { GlobalChangeRegistry } from "../../../../model/entities/GCR/GlobalChangeRegistry"
-import { GCRHashes } from "../../../../model/entities/GCRv2/GCRHashes"
-import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
+import { GCR_Main } from "@/model/entities/GCRv2/GCR_Main"
 
 /** Example
         // Get top-level values
@@ -29,13 +24,13 @@ import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
         )
     */
 export async function getJSONBValue(
-    publicKey: string,
-    field: "extended" | "details",
+    pubkey: string,
+    field: "identities" | "assignedTxs",
     key: string,
     subkey?: string,
 ) {
     const db = await Datasource.getInstance()
-    const GCRRepository = db.getDataSource().getRepository(GlobalChangeRegistry)
+    const GCRRepository = db.getDataSource().getRepository(GCR_Main)
 
     const jsonPath = subkey
         ? `gcr.${field}->'${key}'->>'${subkey}'`
@@ -43,7 +38,7 @@ export async function getJSONBValue(
 
     return await GCRRepository.createQueryBuilder("gcr")
         .select(jsonPath)
-        .where("gcr.publicKey = :publicKey", { publicKey })
+        .where("gcr.pubkey = :pubkey", { pubkey })
         .getRawOne()
 }
 
@@ -74,14 +69,14 @@ await GCRJsonbHandler.updateJSONBValue(
     )
     */
 export async function updateJSONBValue(
-    publicKey: string,
-    field: "extended" | "details",
+    pubkey: string,
+    field: "assignedTxs" | "identities",
     key: string,
     value: any,
     subkey?: string,
 ) {
     const db = await Datasource.getInstance()
-    const GCRRepository = db.getDataSource().getRepository(GlobalChangeRegistry)
+    const GCRRepository = db.getDataSource().getRepository(GCR_Main)
 
     const jsonPath = subkey ? `{${key}, ${subkey}}` : `{${key}}`
 
@@ -89,11 +84,11 @@ export async function updateJSONBValue(
     const jsonValue = JSON.stringify(value).replace(/'/g, "''")
 
     return await GCRRepository.createQueryBuilder()
-        .update(GlobalChangeRegistry)
+        .update(GCR_Main)
         .set({
             [field]: () =>
                 `jsonb_set(${field}, '${jsonPath}', '${jsonValue}'::jsonb, true)`,
         })
-        .where("publicKey = :publicKey", { publicKey })
+        .where("pubkey = :pubkey", { pubkey })
         .execute()
 }

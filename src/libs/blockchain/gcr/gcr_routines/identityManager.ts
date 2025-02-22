@@ -1,4 +1,6 @@
 // TODO Implement the identity manager
+import { abstraction } from "@kynesyslabs/demosdk"
+import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import {
     EVM,
     IBC,
@@ -8,14 +10,12 @@ import {
     TON,
     XRPL,
 } from "@kynesyslabs/demosdk/xm-localsdk"
-import { abstraction } from "@kynesyslabs/demosdk"
-import { RPCResponse } from "@kynesyslabs/demosdk/types"
 
+import { GCR_Main } from "@/model/entities/GCRv2/GCR_Main"
+import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
 import Datasource from "src/model/datasource"
 import ensureGCRForUser from "./ensureGCRForUser"
 import { updateJSONBValue } from "./gcrJSONBHandler"
-import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
-import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
 
 /*
  * Example of a payload for the gcr_routine method
@@ -103,17 +103,33 @@ export default class IdentityManager {
             }
         }
 
-        await ensureGCRForUser(sender)
+        const gcrEntry = await ensureGCRForUser(sender)
 
         const newChain = payload.target_identity.chain
         const newSubchain = payload.target_identity.subchain
 
         // 1: Get existing identites for the user
-        const dbData: Record<string, any> = await this.getIdentities(sender)
+        const dbData: Record<string, any> = gcrEntry.identities.xm
 
         // 2: If the chain object does not exist, create it
         if (!dbData[newChain]) {
             dbData[newChain] = {}
+        }
+
+        // Check if incoming identity is already in the db
+        if (
+            (dbData[newChain][newSubchain] || []).includes(
+                payload.target_identity.targetAddress,
+            )
+        ) {
+            return {
+                result: 304,
+                response: "Identity not added: already exists",
+                require_reply: false,
+                extra: {
+                    message: "Identity already exists",
+                },
+            }
         }
 
         // 3: Append the new identity to the existing identities
@@ -123,13 +139,7 @@ export default class IdentityManager {
         ]
 
         // 4: Update the database
-        const res = await updateJSONBValue(
-            sender,
-            "details",
-            "content",
-            dbData,
-            "identities, xm",
-        )
+        const res = await updateJSONBValue(sender, "identities", "xm", dbData)
 
         if (res.affected === 0) {
             return {
@@ -160,22 +170,20 @@ export default class IdentityManager {
      * @param address - The address to get the identities of
      * @returns The identities of the address
      */
-    static async getIdentities(
+    static async getXmIdentities(
         address: string,
         chain?: string,
         subchain?: string,
     ) {
         const db = await Datasource.getInstance()
-        const GCRRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
+        const GCRRepository = db.getDataSource().getRepository(GCR_Main)
 
         const identities = await GCRRepository.findOne({
-            where: { publicKey: address },
-            select: ["details"],
+            where: { pubkey: address },
+            select: ["identities"],
         })
 
-        let data = identities?.details.content.identities.xm
+        let data = identities?.identities.xm
 
         let result = null
 
@@ -190,11 +198,11 @@ export default class IdentityManager {
         return result
     }
 
-    static async removeIdentity(
+    static async removeXmIdentity(
         sender: string,
         payload: abstraction.CoreTargetIdentityPayload,
     ): Promise<RPCResponse> {
-        let existingIdentities = await this.getIdentities(sender)
+        let existingIdentities = await this.getXmIdentities(sender)
 
         if (!existingIdentities) {
             return {
@@ -234,13 +242,7 @@ export default class IdentityManager {
 
         existingIdentities[payload.chain][payload.subchain] = chainIdentities
 
-        await updateJSONBValue(
-            sender,
-            "details",
-            "content",
-            existingIdentities,
-            `identities, xm`,
-        )
+        await updateJSONBValue(sender, "identities", "xm", existingIdentities)
 
         return {
             result: 200,

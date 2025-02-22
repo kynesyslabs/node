@@ -16,7 +16,7 @@ import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { Transactions } from "src/model/entities/Transactions"
-import { MoreThan, ILike } from "typeorm"
+import { MoreThan, ILike, In, LessThan, FindManyOptions } from "typeorm"
 
 import {
     AddressInfo,
@@ -125,6 +125,36 @@ export default class Chain {
         )
         return lastBlock?.hash
     }
+
+    // INFO returns all blocks by the given range, default from end of the table.
+    /**
+     * Returns <limit> blocks starting from the given block number.
+     *
+     * @param start The block number to start from
+     * @param limit The maximum number of blocks to return
+     * @returns An array of blocks
+     */
+    static async getBlocks(
+        start: "latest" | number,
+        limit: number,
+    ): Promise<Blocks[]> {
+        const MAX_LIMIT = 50
+        const calculatedLimit = Math.min(limit, MAX_LIMIT)
+        const db = await Datasource.getInstance()
+        const blockRepository = db.getDataSource().getRepository(Blocks)
+
+        let options: FindManyOptions<Blocks> = {
+            order: { number: "DESC" },
+            take: calculatedLimit,
+        }
+
+        if (start !== "latest") {
+            options = { ...options, where: { number: LessThan(start + 1) } }
+        }
+
+        return await blockRepository.find(options)
+    }
+
     // INFO Get any block by its number
     static async getBlockByNumber(number: number): Promise<Blocks> {
         const db = await Datasource.getInstance()
@@ -190,6 +220,55 @@ export default class Chain {
         )
     }
 
+    // INFO returns transactions by hashes
+    static async getTransactionsFromHashes(
+        hashes: string[],
+    ): Promise<Transaction[]> {
+        const db = await Datasource.getInstance()
+        const transactionRepository = db
+            .getDataSource()
+            .getRepository(Transactions)
+
+        const rawTransactions = await transactionRepository.find({
+            where: { hash: In(hashes) },
+        })
+
+        return rawTransactions.map(rawTransaction =>
+            Transaction.fromRawTransaction(rawTransaction),
+        )
+    }
+
+    // INFO returns all transactions by the given range, default from end of the table.
+    /**
+     * Returns <limit> transactions starting from the given transaction id.
+     *
+     * @param start The transaction id to start from
+     * @param limit The maximum number of transactions to return
+     * @returns An array of transactions
+     */
+    static async getTransactions(
+        start: "latest" | number,
+        limit: number,
+    ): Promise<Transactions[]> {
+        const MAX_LIMIT = 100
+        const calculatedLimit = Math.min(limit, MAX_LIMIT)
+        const db = await Datasource.getInstance()
+        const transactionRepository = db
+            .getDataSource()
+            .getRepository(Transactions)
+
+        let options: FindManyOptions<Transactions> = {
+            order: { id: "DESC" },
+            take: calculatedLimit,
+        }
+
+        if (start !== "latest") {
+            options = { ...options, where: { id: LessThan(start + 1) } }
+        }
+
+        return await transactionRepository.find(options)
+    }
+
     // REVIEW Giving back all the properties of an address
 
     static async getAddressInfo(
@@ -235,19 +314,13 @@ export default class Chain {
             return []
         }
 
-        const blocks = await Promise.all([
-            this.getBlockByNumber(lastBlockNumber),
-            this.getBlockByNumber(lastBlockNumber - 1),
-            this.getBlockByNumber(lastBlockNumber - 2),
-        ])
+        const blocks = await this.getBlocks("latest", 3)
 
         try {
             const processedBlocks = await Promise.all(
                 blocks.map(async block => {
-                    const transactions = await Promise.all(
-                        block.content.ordered_transactions.map(txHash =>
-                            this.getTransactionFromHash(txHash),
-                        ),
+                    const transactions = await this.getTransactionsFromHashes(
+                        block.content.ordered_transactions,
                     )
 
                     // Filter NODE_ONLINE transactions and extract their data
@@ -261,19 +334,14 @@ export default class Chain {
                                 (transaction?.content as TransactionContent)
                                     .data,
                         )
+
                     // Extract the peer list from the transactions
-                    let onlinePeersInBlock: Peer[] = []
-                    for (
-                        let i = 0;
-                        i < onlinePeersInBlockTransactions.length;
-                        i++
-                    ) {
-                        const onlineTxRaw = onlinePeersInBlockTransactions[i]
-                        const onlineTx = JSON.parse(onlineTxRaw[0])
-                        // ? This typization is totally random for now
-                        const onlinePeer = onlineTx.data as Peer
-                        onlinePeersInBlock.push(onlinePeer)
-                    }
+                    const onlinePeersInBlock =
+                        onlinePeersInBlockTransactions.map(onlineTxRaw => {
+                            const onlineTx = JSON.parse(onlineTxRaw[0])
+                            return onlineTx.data as Peer
+                        })
+
                     return onlinePeersInBlock
                 }),
             )
@@ -486,7 +554,9 @@ export default class Chain {
             JSON.stringify(genesis_block.content),
         )
 
-        let { commonValidatorSeed } = await getCommonValidatorSeed(genesis_block as any)
+        let { commonValidatorSeed } = await getCommonValidatorSeed(
+            genesis_block as any,
+        )
         genesis_block.next_proposer = commonValidatorSeed
 
         // REVIEW Create a GCR Operation and execute it

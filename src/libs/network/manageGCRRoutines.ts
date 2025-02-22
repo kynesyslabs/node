@@ -1,7 +1,7 @@
-import { emptyResponse } from "./server_rpc"
-import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
+import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
 import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
+import { emptyResponse } from "./server_rpc"
 
 interface GCRRoutinePayload {
     method: string
@@ -24,14 +24,29 @@ export default async function manageGCRRoutines(
             break
 
         case "identity_assign_from_signature":
-            response = await IdentityManager.inferIdentityFromSignature(
-                sender,
-                params[0],
-            )
+            try {
+                response = await IdentityManager.inferIdentityFromSignature(
+                    sender,
+                    params[0],
+                )
+            } catch (error) {
+                console.error(error)
+                response.result = 400
+                response.response = "Error: something went wrong"
+                response.extra = error
+            }
             break
 
         case "remove_identity":
-            response = await IdentityManager.removeIdentity(sender, params[0])
+            response = await IdentityManager.removeXmIdentity(sender, params[0])
+            break
+
+        case "getIdentities":
+            const data = await IdentityManager.getXmIdentities(sender)
+            response.response = {
+                xm: data,
+                web2: {},
+            }
             break
 
         default:

@@ -34,7 +34,7 @@ async function main() {
 
 async function createTransaction(
     value: number,
-    txType: "web2Request" | "crosschainOperation" | "demoswork",
+    txType: "web2Request" | "crosschainOperation" | "demoswork" | "NODE_ONLINE",
     sender: forge.pki.ed25519.BinaryBuffer,
     receiver: forge.pki.ed25519.BinaryBuffer,
     txData: any,

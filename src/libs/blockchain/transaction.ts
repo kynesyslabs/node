@@ -129,7 +129,7 @@ export default class Transaction implements ITransaction {
         console.log("Private key: ")
         console.log(privateKey)
         console.log("Signature: ")
-        console.log(tx.signature)   
+        console.log(tx.signature)
         let confirmed =
             this.sanityCheck(tx) && this.isCoherent(tx) && this.structured(tx)
         if (confirmed) {
@@ -247,7 +247,8 @@ export default class Transaction implements ITransaction {
             type: rawTx.type as
                 | "web2Request"
                 | "crosschainOperation"
-                | "demoswork", // ! Remove this horrible thing when possible
+                | "demoswork" // ! Remove this horrible thing when possible
+                | "NODE_ONLINE",
             from: Buffer.from(rawTx.from, "hex"),
             to: Buffer.from(rawTx.to, "hex"),
             amount: rawTx.amount,
