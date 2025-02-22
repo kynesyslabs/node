@@ -1,4 +1,4 @@
-// ! Unify this and handleGCR.ts methods
+// ! This should be deprecated in favor of the GCREdit system, if not used please remove it
 
 /* LICENSE
 
@@ -158,7 +158,9 @@ export default class GCR {
         const Repository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
-        const RepositorySearch = await Repository.findOneBy({ publicKey: address })
+        const RepositorySearch = await Repository.findOneBy({
+            publicKey: address,
+        })
         const GCRExtendedData = RepositorySearch?.extended
         return GCRExtendedData[field]
     }
@@ -190,7 +192,9 @@ export default class GCR {
             .getRepository(GlobalChangeRegistry)
 
         try {
-            const RepositorySearch = await Repository.findOneBy({ publicKey: address })
+            const RepositorySearch = await Repository.findOneBy({
+                publicKey: address,
+            })
             const GCRExtendedData = RepositorySearch?.extended
             return GCRExtendedData && GCRExtendedData.tokens
                 ? GCRExtendedData.tokens[token_address]
@@ -207,7 +211,9 @@ export default class GCR {
             .getRepository(GlobalChangeRegistry)
 
         try {
-            const RepositorySearch = await Repository.findOneBy({ publicKey: address })
+            const RepositorySearch = await Repository.findOneBy({
+                publicKey: address,
+            })
             const GCRExtendedData = RepositorySearch?.extended
             return GCRExtendedData && GCRExtendedData.nfts
                 ? GCRExtendedData.nfts[nft_address]
@@ -234,7 +240,9 @@ export default class GCR {
             .getRepository(GlobalChangeRegistry)
 
         try {
-            const RepositorySearch = await Repository.findOneBy({ publicKey: "DEMOS Network" })
+            const RepositorySearch = await Repository.findOneBy({
+                publicKey: "DEMOS Network",
+            })
             const GCRExtendedData = RepositorySearch?.extended
             return GCRExtendedData && GCRExtendedData.other
         } catch (e) {
@@ -339,7 +347,9 @@ export default class GCR {
 
     // !SECTION Getters
 
-    static async getGCRNativeStatus(address: string): Promise<GlobalChangeRegistry> {
+    static async getGCRNativeStatus(
+        address: string,
+    ): Promise<GlobalChangeRegistry> {
         const db = await Datasource.getInstance()
         const GCRRepository = db
             .getDataSource()
@@ -377,16 +387,16 @@ export default class GCR {
         return nativeStatus
     }
 
-    static async getGCRStatusProperties(
-        address: string,
-    ): Promise<GCRExtended> {
+    static async getGCRStatusProperties(address: string): Promise<GCRExtended> {
         const db = await Datasource.getInstance()
         const Repository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
         let statusProperties: GCRExtended
         try {
-            const RepositorySearch = await Repository.findOneBy({ publicKey: address })
+            const RepositorySearch = await Repository.findOneBy({
+                publicKey: address,
+            })
             statusProperties = RepositorySearch?.extended
         } catch (e) {
             statusProperties = null
@@ -413,7 +423,9 @@ export default class GCR {
             const Repository = db
                 .getDataSource()
                 .getRepository(GlobalChangeRegistry)
-            const RepositorySearch = await Repository.findOneBy({ publicKey: address })
+            const RepositorySearch = await Repository.findOneBy({
+                publicKey: address,
+            })
             statusProperties = RepositorySearch?.extended
             // Or creating it if it doesn't exist
             if (!statusProperties) {
@@ -430,7 +442,10 @@ export default class GCR {
             jStatusProperties.push(xm_hash)
             // And updating it
             statusProperties.xm = jStatusProperties
-            await Repository.update({ publicKey: address }, { extended: statusProperties })
+            await Repository.update(
+                { publicKey: address },
+                { extended: statusProperties },
+            )
             // REVIEW Save the hash of the GCR for this public key
             await gcrStateSave.updateGCRTracker(address)
             result.success = true
@@ -456,7 +471,9 @@ export default class GCR {
             const Repository = db
                 .getDataSource()
                 .getRepository(GlobalChangeRegistry)
-            const RepositorySearch = await Repository.findOneBy({ publicKey: address })
+            const RepositorySearch = await Repository.findOneBy({
+                publicKey: address,
+            })
             statusProperties = RepositorySearch?.extended
             // Or creating it if it doesn't exist
             if (!statusProperties) {
@@ -473,7 +490,10 @@ export default class GCR {
             jStatusProperties.push(web2_hash)
             // And updating it
             statusProperties.web2 = jStatusProperties
-            await Repository.update({ publicKey: address }, { extended: statusProperties })
+            await Repository.update(
+                { publicKey: address },
+                { extended: statusProperties },
+            )
             // REVIEW Save the hash of the GCR for this public key
             await gcrStateSave.updateGCRTracker(address)
             result.success = true
@@ -528,8 +548,8 @@ export default class GCR {
                                 xm: new Map(),
                                 web2: new Map(),
                             },
-                    txs: [],
-                    nonce: 0,
+                            txs: [],
+                            nonce: 0,
                         },
                     },
                 })

@@ -54,7 +54,8 @@ export async function deriveMempoolOperation(
         // ANCHOR Inserting the operation in the next mempool session with the proper data
         Mempool.addTransaction(derivedTx)
         // ANCHOR And we do the same for the derived operation, inserting it in the GCR
-        GCR.getInstance().operations.push(derivedOperation)
+        // NOTE Deprecated in favor of the GCREdit system
+        //GCR.getInstance().operations.push(derivedOperation)
     }
     // TODO Size limit?
     return [derivedTx.hash, derivedOperation] // REVIEW Is this ok?

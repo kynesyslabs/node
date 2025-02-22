@@ -241,17 +241,18 @@ export async function broadcastVerifiedNativeTransaction(
 
     // ANCHOR TX Pre-execution, operation derivation and GCR Operation registry update are defined here
 
-    // NOTE Now we can save the gas operation as the tx is set to be executed
+    // NOTE Deprecated in favor of the GCREdit system
     // and the gas will be deducted anyway
-    console.log("[TX RECEIVED] Gas Operation added to the GCR\n")
-    GCR.getInstance().operations.push(validityData.data.gas_operation)
+    //console.log("[TX RECEIVED] Gas Operation added to the GCR\n")
+    //GCR.getInstance().operations.push(validityData.data.gas_operation)
 
     // Finally, we add all the derived operations to the GCR
-    for (let i = 0; i < execution[2].length; i++) {
+    // NOTE Deprecated in favor of GCREdit
+    /*for (let i = 0; i < execution[2].length; i++) {
         console.log("[TX RECEIVED] Operation derived")
         //console.log(execution[2][i])
         GCR.getInstance().operations.push(execution[2][i])
         console.log("[TX RECEIVED] Operation added to the GCR\n")
-    }
+    }*/
     return execution
 }
