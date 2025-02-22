@@ -16,6 +16,7 @@ import { Peer } from "../peer"
 
 // NOTE Block class
 export default class Block implements BlockType {
+    id: number
     number: number
     hash: string
     content: BlockContent

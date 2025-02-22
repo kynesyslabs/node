@@ -222,6 +222,7 @@ export default class Transaction implements ITransaction {
             networkFee: tx.content.transaction_fee.network_fee,
             rpcFee: tx.content.transaction_fee.rpc_fee,
             additionalFee: tx.content.transaction_fee.additional_fee,
+            id: 0, // ? What is this?
         }
 
         return rawTx
