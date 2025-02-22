@@ -1,6 +1,6 @@
 // TODO Implement the identity manager
 import { abstraction } from "@kynesyslabs/demosdk"
-import { RPCResponse } from "@kynesyslabs/demosdk/types"
+import { ProviderIdentities, RPCResponse } from "@kynesyslabs/demosdk/types"
 import {
     EVM,
     IBC,
@@ -16,6 +16,7 @@ import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain
 import Datasource from "src/model/datasource"
 import ensureGCRForUser from "./ensureGCRForUser"
 import { updateJSONBValue } from "./gcrJSONBHandler"
+import { Cryptography } from "@kynesyslabs/demosdk/encryption"
 
 /*
  * Example of a payload for the gcr_routine method
@@ -43,6 +44,8 @@ const chains: { [key: string]: typeof DefaultChain } = {
 export default class IdentityManager {
     // INFO: SUPPORTED CHAINS
     constructor() {}
+    
+    // SECTION XM Identities
 
     // Infer identity from a valid write transaction
     static async inferIdentityFromWrite(
@@ -164,7 +167,54 @@ export default class IdentityManager {
         }
     }
 
-    // SECTION Helper functions
+    // SECTION Web2 Identities
+    static async inferGithubIdentity(payload: abstraction.InferFromGithubPayload): Promise<RPCResponse> {
+        let result: RPCResponse = {
+            result: 400,
+            response: "Not executed",
+            require_reply: false,
+            extra: {},
+        }
+        // REVIEW  Checking the gist for signatures
+        const gistUrl = payload.proof
+        // Inferring the github username from the gist url
+        //const githubUsername = gistUrl.split("github.com/")[1].split("/")[0]
+        // Fetching the gist content
+        const gist = await fetch(gistUrl)
+        const gistContent = await gist.json()
+        // Extracting the public key and signature from the gist content
+        const demosPublicKey = gistContent.publicKey
+        const demosSignature = gistContent.signature
+        // Setting the message to be verified
+        const message = "I am demos user: " + demosPublicKey
+
+        // Verify the signature
+        const verified = await Cryptography.verify(message, demosSignature, demosPublicKey)
+        if (!verified) {
+            await this.addWeb2Identifier(demosPublicKey, "github", gistUrl) // REVIEW It contains the github username as well in the url
+            result = {
+                result: 200,
+                response: "Identity added",
+                require_reply: false,
+                extra: {
+                    message: "Identity added",
+                },
+            }
+        } else {
+            result = {
+                result: 401,
+                response: "Github identity could not be verified",
+                require_reply: false,
+                extra: {
+                    message: "Signature could not be verified",
+                },
+            }
+        }
+
+        return result
+    }
+
+    // SECTION Helper functions and Getters
     /**
      * Get the identities related to a demos address
      * @param address - The address to get the identities of
@@ -189,8 +239,6 @@ export default class IdentityManager {
 
         if (chain) {
             result = (data[chain] || {})[subchain] || []
-        } else if (chain) {
-            result = data[chain] || {}
         } else {
             result = data
         }
@@ -200,7 +248,7 @@ export default class IdentityManager {
 
     static async removeXmIdentity(
         sender: string,
-        payload: abstraction.CoreTargetIdentityPayload,
+        payload: abstraction.XMCoreTargetIdentityPayload,
     ): Promise<RPCResponse> {
         let existingIdentities = await this.getXmIdentities(sender)
 
@@ -254,6 +302,65 @@ export default class IdentityManager {
                     payload.targetAddress +
                     " removed from: " +
                     sender,
+            },
+        }
+    }
+
+    // Web2 Identities
+    static async getWeb2Identifiers(address: string): Promise<ProviderIdentities> {
+        const db = await Datasource.getInstance()
+        const GCRRepository = db.getDataSource().getRepository(GCR_Main)
+
+        const identities = await GCRRepository.findOne({
+            where: { pubkey: address },
+            select: ["identities"],
+        })
+
+        return identities?.identities.web2
+    }
+
+    static async addWeb2Identifier(address: string, context: string, proof: string): Promise<RPCResponse> {
+        const db = await Datasource.getInstance()
+        const GCRRepository = db.getDataSource().getRepository(GCR_Main)
+
+        const identities = await GCRRepository.findOne({
+            where: { pubkey: address },
+            select: ["identities"],
+        })
+
+        identities.identities.web2[context] = [proof]
+
+        await updateJSONBValue(address, "identities", "web2", identities.identities)
+
+        return {
+            result: 200,
+            response: "Identity added",
+            require_reply: false,
+            extra: {
+                message: "Identity added",
+            },
+        }
+    }
+
+    static async removeWeb2Identifier(address: string, context: string): Promise<RPCResponse> {
+        const db = await Datasource.getInstance()
+        const GCRRepository = db.getDataSource().getRepository(GCR_Main)
+
+        const identities = await GCRRepository.findOne({
+            where: { pubkey: address },
+            select: ["identities"],
+        })
+
+        identities.identities.web2[context] = []
+
+        await updateJSONBValue(address, "identities", "web2", identities.identities)
+
+        return {
+            result: 200,
+            response: "Identity removed",
+            require_reply: false,
+            extra: {
+                message: "Identity removed",
             },
         }
     }

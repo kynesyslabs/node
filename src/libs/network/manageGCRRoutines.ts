@@ -37,12 +37,21 @@ export default async function manageGCRRoutines(
             }
             break
 
+        // Github identity add
+        case "add_github_identity":
+            response = await IdentityManager.addWeb2Identifier(
+                sender,
+                "github",
+                params[0], // REVIEW Is this correct?
+            )
+            break
+
         case "remove_identity":
             response = await IdentityManager.removeXmIdentity(sender, params[0])
             break
 
         case "getIdentities":
-            const data = await IdentityManager.getXmIdentities(sender)
+            var data = await IdentityManager.getXmIdentities(sender)
             response.response = {
                 xm: data,
                 web2: {},
