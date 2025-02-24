@@ -17,8 +17,8 @@ export class Mempool {
     timestamp: number
 
     @Column("jsonb", { name: "transactions", nullable: true })
-    transactions: Transaction[] | null
+    transactions: string | null
 
     @Column("text", { name: "proposedBlock", nullable: true })
-    proposedBlock: Block | null
+    proposedBlock: string | null
 }

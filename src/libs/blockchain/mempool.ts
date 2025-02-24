@@ -119,8 +119,8 @@ export interface MempoolData {
 export interface SerializedMempoolData {
     number: number
     current: number
-    transactions: Transaction[]
-    proposedBlock: Block
+    transactions: string
+    proposedBlock: string
     timestamp: number
 }
 
@@ -164,8 +164,8 @@ export default class Mempool {
                 let newMempool: SerializedMempoolData = {
                     number: 0,
                     current: 1,
-                    transactions: [],
-                    proposedBlock: null,
+                    transactions: JSON.stringify([]),
+                    proposedBlock: JSON.stringify({}),
                     timestamp: new Date().getTime(),
                 }
                 const db = await Datasource.getInstance()
@@ -194,8 +194,8 @@ export default class Mempool {
             const mempool: MempoolData = {
                 number: firstResult.number,
                 current: firstResult.current,
-                transactions: firstResult.transactions,
-                proposedBlock: firstResult.proposedBlock,
+                transactions: JSON.parse(firstResult.transactions),
+                proposedBlock: JSON.parse(firstResult.proposedBlock),
                 timestamp: new Date().getTime(),
             }
             log.info("[MEMPOOL MANAGER] Mempool retrieved:")
@@ -271,8 +271,8 @@ export default class Mempool {
         const serializedMempool: SerializedMempoolData = {
             number: mempool.number,
             current: mempool.current,
-            transactions: mempool.transactions,
-            proposedBlock: mempool.proposedBlock,
+            transactions: JSON.stringify(mempool.transactions),
+            proposedBlock: JSON.stringify(mempool.proposedBlock),
             timestamp: mempool.timestamp,
         }
 
@@ -299,7 +299,7 @@ export default class Mempool {
         try {
             await mempoolRepository.update(
                 { current: 1 },
-                { transactions: mempool.transactions },
+                { transactions: JSON.stringify(mempool.transactions) },
             )
         } catch (error) {
             log.error(
@@ -326,7 +326,7 @@ export default class Mempool {
             try {
                 await mempoolRepository.update(
                     { current: 1 },
-                    { transactions: mempool.transactions },
+                    { transactions: JSON.stringify(mempool.transactions) },
                 )
             } catch (error) {
                 console.error("Error removing transaction from mempool:", error)
@@ -357,8 +357,8 @@ export default class Mempool {
             let newMempool = mempoolRepository.create({
                 number: next_number,
                 current: 1,
-                transactions: [],
-                proposedBlock: {},
+                transactions: JSON.stringify([]),
+                proposedBlock: JSON.stringify({}),
                 timestamp: new Date().getTime(),
             })
 
@@ -397,6 +397,8 @@ export default class Mempool {
             log.info("[MEMPOOL VERIFICATION] The block numbers do not match")
             return false
         }
+
+        log.only("incoming mempool: " + JSON.stringify(mempool))
         // Checking all the txs one by one for the signatures
         for (let i = 0; i < mempool.transactions.length; i++) {
             let tx = mempool.transactions[i]
@@ -411,12 +413,20 @@ export default class Mempool {
             log.info(
                 "[MEMPOOL VERIFICATION] Calculated hash: " + calculated_hash,
             )
+
+            log.only("expected hash: " + tx_hash)
+            log.only("calculated hash: " + calculated_hash)
+            log.only("is coherent: " + (calculated_hash == tx_hash))
+
             if (calculated_hash != tx_hash) {
                 log.info(
                     "[X] [MEMPOOL VERIFICATION] The hash of the transaction is invalid",
                 )
+                log.only("tx content: " + JSON.stringify(tx.content))
+                process.exit(1)
                 return false
             }
+
             log.info(
                 "[+] [MEMPOOL VERIFICATION] The hash of the transaction is valid",
             )
@@ -515,7 +525,7 @@ export default class Mempool {
         try {
             await mempoolRepository.update(
                 { current: 1 }, // Assuming 'current' is a unique identifier for the mempool record
-                { transactions: mempool.transactions },
+                { transactions: JSON.stringify(mempool.transactions) },
             )
         } catch (error) {
             console.error("Error removing transaction from mempool:", error)
@@ -549,7 +559,7 @@ export default class Mempool {
         try {
             await mempoolRepository.update(
                 { current: 1 }, // Assuming 'current' is a unique identifier for the mempool record
-                { transactions: mempool.transactions },
+                { transactions: JSON.stringify(mempool.transactions) },
             )
         } catch (error) {
             console.error("Error removing transaction from mempool:", error)
@@ -582,7 +592,9 @@ export default class Mempool {
                     await mempoolRepository.update(
                         { current: 1 }, // Assuming 'current' is a unique identifier for the mempool record
                         {
-                            transactions: local_mempool.transactions,
+                            transactions: JSON.stringify(
+                                local_mempool.transactions,
+                            ),
                         },
                     )
                 } catch (error) {
