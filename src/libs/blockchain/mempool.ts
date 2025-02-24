@@ -20,11 +20,11 @@ import Hashing from "../crypto/hashing"
 import PeerManager from "../peer/PeerManager"
 import Block from "./block"
 // INFO Singleton Mempool class
-import Transaction from "./transaction"
 import { ISignature } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
-import { ForgeToHex, HexToForge } from "../crypto/forgeUtils"
+import { ForgeToHex } from "../crypto/forgeUtils"
+import Transaction from "./transaction"
 
 // Bun does not support NodeJS.Timeout, so we need to create a type for it
 type TimeoutType = ReturnType<typeof setTimeout>
@@ -119,8 +119,8 @@ export interface MempoolData {
 export interface SerializedMempoolData {
     number: number
     current: number
-    transactions: string
-    proposedBlock: string
+    transactions: Transaction[]
+    proposedBlock: Block
     timestamp: number
 }
 
@@ -164,7 +164,7 @@ export default class Mempool {
                 let newMempool: SerializedMempoolData = {
                     number: 0,
                     current: 1,
-                    transactions: JSON.stringify([]),
+                    transactions: [],
                     proposedBlock: null,
                     timestamp: new Date().getTime(),
                 }
@@ -194,8 +194,8 @@ export default class Mempool {
             const mempool: MempoolData = {
                 number: firstResult.number,
                 current: firstResult.current,
-                transactions: JSON.parse(firstResult.transactions),
-                proposedBlock: JSON.parse(firstResult.proposedBlock),
+                transactions: firstResult.transactions,
+                proposedBlock: firstResult.proposedBlock,
                 timestamp: new Date().getTime(),
             }
             log.info("[MEMPOOL MANAGER] Mempool retrieved:")
@@ -227,8 +227,8 @@ export default class Mempool {
                 .getRepository(MempoolEntity)
 
             const mempool = await mempoolRepository.findBy({ current: 1 })
-            log.info("[MEMPOOL MANAGER] Mempool to be deleted:")
-            log.info(JSON.stringify(mempool))
+            log.only("[MEMPOOL MANAGER] Mempool to be deleted:")
+            log.only(JSON.stringify(mempool))
 
             if (mempool.length > 0) {
                 await mempoolRepository.delete({ current: 1 })
@@ -271,19 +271,41 @@ export default class Mempool {
         const serializedMempool: SerializedMempoolData = {
             number: mempool.number,
             current: mempool.current,
-            transactions: JSON.stringify(mempool.transactions),
-            proposedBlock: JSON.stringify(mempool.proposedBlock),
+            transactions: mempool.transactions,
+            proposedBlock: mempool.proposedBlock,
             timestamp: mempool.timestamp,
         }
 
         await mempoolRepository.update({ current: 1 }, serializedMempool)
     }
 
-    public static async removeTransactionWithHash(hash: string): Promise<void> {
-        let mempool = await this.getMempool("Mempool.removeTransaction")
-        let index = mempool.transactions.findIndex(tx => tx.hash === hash)
-        if (index > -1) {
-            mempool.transactions.splice(index, 1)
+    public static async removeTransactionsWithHashes(
+        hashes: string[],
+    ): Promise<void> {
+        let mempool = await this.getMempool(
+            "Mempool.removeTransactionsWithHashes",
+        )
+
+        const hashSet = new Set(hashes)
+        mempool.transactions = mempool.transactions.filter(
+            tx => !hashSet.has(tx.hash),
+        )
+
+        const db = await Datasource.getInstance()
+        const mempoolRepository = db
+            .getDataSource()
+            .getRepository(MempoolEntity)
+
+        try {
+            await mempoolRepository.update(
+                { current: 1 },
+                { transactions: mempool.transactions },
+            )
+        } catch (error) {
+            log.error(
+                "[MEMPOOL MANAGER] Error removing transactions from mempool:" +
+                    error.toString(),
+            )
         }
     }
 
@@ -304,7 +326,7 @@ export default class Mempool {
             try {
                 await mempoolRepository.update(
                     { current: 1 },
-                    { transactions: JSON.stringify(mempool.transactions) },
+                    { transactions: mempool.transactions },
                 )
             } catch (error) {
                 console.error("Error removing transaction from mempool:", error)
@@ -335,8 +357,8 @@ export default class Mempool {
             let newMempool = mempoolRepository.create({
                 number: next_number,
                 current: 1,
-                transactions: JSON.stringify([]),
-                proposedBlock: JSON.stringify({}),
+                transactions: [],
+                proposedBlock: {},
                 timestamp: new Date().getTime(),
             })
 
@@ -493,7 +515,7 @@ export default class Mempool {
         try {
             await mempoolRepository.update(
                 { current: 1 }, // Assuming 'current' is a unique identifier for the mempool record
-                { transactions: JSON.stringify(mempool.transactions) },
+                { transactions: mempool.transactions },
             )
         } catch (error) {
             console.error("Error removing transaction from mempool:", error)
@@ -527,7 +549,7 @@ export default class Mempool {
         try {
             await mempoolRepository.update(
                 { current: 1 }, // Assuming 'current' is a unique identifier for the mempool record
-                { transactions: JSON.stringify(mempool.transactions) },
+                { transactions: mempool.transactions },
             )
         } catch (error) {
             console.error("Error removing transaction from mempool:", error)
@@ -560,9 +582,7 @@ export default class Mempool {
                     await mempoolRepository.update(
                         { current: 1 }, // Assuming 'current' is a unique identifier for the mempool record
                         {
-                            transactions: JSON.stringify(
-                                local_mempool.transactions,
-                            ),
+                            transactions: local_mempool.transactions,
                         },
                     )
                 } catch (error) {

@@ -85,47 +85,50 @@ export async function consensusRoutine(): Promise<void> {
         // NOTE: Instead of averaging the time, we'll use the secretary timestamp
         // await synchronizeAndAverageTime(shard)
 
-    // INFO: CONSENSUS ACTION 2: Merge and order the mempools
-    let tempMempool = await mergeAndOrderMempools(manager.shard.members)
-    log.info(
-        "[consensusRoutine] mempool merged (aka ordered transactions)",
-        true,
-    )
+        // INFO: CONSENSUS ACTION 2: Merge and order the mempools
+        let tempMempool = await mergeAndOrderMempools(manager.shard.members)
+        log.info(
+            "[consensusRoutine] mempool merged (aka ordered transactions)",
+            true,
+        )
 
         // INFO: CONSENSUS ACTION 3: Merge the peerlist (skipped)
         // REVIEW Merge the peerlist
         const peerlist = []
         // await mergePeerlistAndWait(shard)
 
-    // INFO: CONSENSUS ACTION 4: Apply the GCR operations to the state before forging the block
-    /**
-     * Here we apply the GCR operations to the state before forging the block
-     * so that the GCR hash is included in the block.
-     * A list of successful and failed GCR operations is returned.
-     * NOTE A mandatory validator status is updated to reflect that the GCR operations have been applied
-     * */
-    // ? The following line could be outdated once we use the GCREdit stuff
-    // await applyGCRForNewBlock(mempool)
+        // INFO: CONSENSUS ACTION 4: Apply the GCR operations to the state before forging the block
+        /**
+         * Here we apply the GCR operations to the state before forging the block
+         * so that the GCR hash is included in the block.
+         * A list of successful and failed GCR operations is returned.
+         * NOTE A mandatory validator status is updated to reflect that the GCR operations have been applied
+         * */
+        // ? The following line could be outdated once we use the GCREdit stuff
+        // await applyGCRForNewBlock(mempool)
 
-    // Applying the GCREdits and see if everything is consistent
-    let [successfulTxs, failedTxs] = await applyGCREditsFromMergedMempool(tempMempool)
-    log.info(`[consensusRoutine] Successful Txs number: ${successfulTxs.length}`)
-    log.info(`[consensusRoutine] Failed Txs number: ${failedTxs.length}`)
-    if (failedTxs.length > 0) {
-        log.error("[consensusRoutine] Failed Txs found, pruning the mempool")
-        // REVIEW Prune the mempool of the failed txs
-        // NOTE The mempool should now be updated with only the successful txs
-        for (const tx of failedTxs) {
-            await Mempool.removeTransactionWithHash(tx)
+        // Applying the GCREdits and see if everything is consistent
+        let [successfulTxs, failedTxs] = await applyGCREditsFromMergedMempool(
+            tempMempool,
+        )
+        if (failedTxs.length > 0) {
+            log.error(
+                "[consensusRoutine] Failed Txs found, pruning the mempool",
+            )
+            // REVIEW Prune the mempool of the failed txs
+            // NOTE The mempool should now be updated with only the successful txs
+            for (const tx of failedTxs) {
+                await Mempool.removeTransactionsWithHashes([tx])
+            }
         }
-    }
-    // REVIEW Re-merge the mempools anyway to get the correct mempool from the whole shard
-    const mempool = await mergeAndOrderMempools(manager.shard.members)
+        // REVIEW Re-merge the mempools anyway to get the correct mempool from the whole shard
+        const mempool = await mergeAndOrderMempools(manager.shard.members)
 
-    log.info(
-        "[consensusRoutine] mempool: " + JSON.stringify(tempMempool, null, 2),
-        true,
-    )
+        log.info(
+            "[consensusRoutine] mempool: " +
+                JSON.stringify(tempMempool, null, 2),
+            true,
+        )
 
         // INFO: At this point, we should have the secretary block timestamp
         // if we're connected to the secretary and recieved atleast one successful request from them

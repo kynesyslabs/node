@@ -494,7 +494,9 @@ export default class Chain {
             }
             // REVIEW And we clean the mempool
             if (cleanMempool) {
-                await Mempool.clean()
+                await Mempool.removeTransactionsWithHashes(
+                    transactionEntities.map(tx => tx.hash),
+                )
             }
             return result
         }
