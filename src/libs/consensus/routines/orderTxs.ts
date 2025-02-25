@@ -4,24 +4,24 @@ import Transaction from "src/libs/blockchain/transaction"
 export default async function orderTxs(
     txs: Transaction[],
 ): Promise<Transaction[]> {
-    let orderedTxs: Transaction[] = []
-    let ranking = {}
-    let mapping = {}
+    const orderedTxs: Transaction[] = []
+    const ranking = {}
+    const mapping = {}
     // Parsing all the transactions and building a ranking
     for (let i = 0; i < txs.length; i++) {
-        let tx = txs[i]
+        const tx = txs[i]
         // Trivial but at least is clear
-        let baseFee = tx.content.transaction_fee.network_fee
-        let rpcFee = tx.content.transaction_fee.rpc_fee
-        let additionalFee = tx.content.transaction_fee.additional_fee
-        let totalFee = baseFee + rpcFee + additionalFee
+        const baseFee = tx.content.transaction_fee.network_fee
+        const rpcFee = tx.content.transaction_fee.rpc_fee
+        const additionalFee = tx.content.transaction_fee.additional_fee
+        const totalFee = baseFee + rpcFee + additionalFee
         // Building the ranking
         ranking[tx.hash] = totalFee
         mapping[tx.hash] = tx
     }
     // Sorting the ranking
-    let orderedTxsSortable: any[][] = []
-    for (var txHash in ranking) {
+    const orderedTxsSortable: any[][] = []
+    for (const txHash in ranking) {
         orderedTxsSortable.push([txHash, ranking[txHash]])
     }
     if (orderedTxsSortable && orderedTxsSortable.length > 0) {
@@ -31,7 +31,7 @@ export default async function orderTxs(
     }
     // Assigning the transactions to the ordered transactions mapping
     for (let i = 0; i < orderedTxsSortable.length; i++) {
-        let tx = mapping[orderedTxsSortable[i][0]]
+        const tx = mapping[orderedTxsSortable[i][0]]
         orderedTxs.push(tx)
         delete mapping[orderedTxsSortable[i][0]]
     }

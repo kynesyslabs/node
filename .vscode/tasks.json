@@ -1,18 +1,29 @@
 {
-  "version": "2.0.0",
-  "tasks": [
-    {
-      "label": "tsc: build - tsconfig.json",
-      "type": "typescript",
-      "tsconfig": "tsconfig.json",
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      },
-      "problemMatcher": ["$tsc"]
-    }
-  ]
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "tsc: build - tsconfig.json",
+            "type": "typescript",
+            "tsconfig": "tsconfig.json",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$tsc"]
+        },
+        {
+            "type": "eslint",
+            "problemMatcher": ["$eslint-stylish"],
+            "label": "eslint: lint whole folder"
+        },
+        {
+            "label": "Lint Subfolder",
+            "type": "shell",
+            "command": "npx eslint src/ --ext .ts --fix",
+            "problemMatcher": ["$eslint-stylish"]
+        }
+    ]
 }

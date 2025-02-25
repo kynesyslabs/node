@@ -33,14 +33,14 @@ export async function handleWeb2ProxyRequest({
                 if (isDahrOrError instanceof DAHR) {
                     const dahr = isDahrOrError.toSerializable()
 
-                    return _createRPCResponse(200, {
+                    return createRPCResponse(200, {
                         dahr,
                     })
                 }
 
                 const error = isDahrOrError
 
-                return _createRPCResponse(
+                return createRPCResponse(
                     400,
                     error,
                     "An error occurred while handling the web2 request",
@@ -48,9 +48,9 @@ export async function handleWeb2ProxyRequest({
             }
 
             case EnumWeb2Actions.START_PROXY: {
-                const dahr = _getDAHRInstance(sessionId)
+                const dahr = getDAHRInstance(sessionId)
                 if (!dahr) {
-                    return _createRPCResponse(
+                    return createRPCResponse(
                         400,
                         null,
                         "DAHR instance not found",
@@ -70,13 +70,13 @@ export async function handleWeb2ProxyRequest({
                     payload,
                     authorization,
                 })
-                return _createRPCResponse(200, response)
+                return createRPCResponse(200, response)
             }
 
             case EnumWeb2Actions.STOP_PROXY: {
-                const dahr = _getDAHRInstance(sessionId)
+                const dahr = getDAHRInstance(sessionId)
                 if (!dahr) {
-                    return _createRPCResponse(
+                    return createRPCResponse(
                         400,
                         null,
                         "DAHR instance not found",
@@ -84,12 +84,12 @@ export async function handleWeb2ProxyRequest({
                 }
 
                 dahr.stopProxy()
-                return _createRPCResponse(200, {
+                return createRPCResponse(200, {
                     message: "Proxy stopped successfully",
                 })
             }
             default: {
-                return _createRPCResponse(
+                return createRPCResponse(
                     400,
                     null,
                     `Unsupported action: ${web2Request.raw.action}`,
@@ -99,11 +99,11 @@ export async function handleWeb2ProxyRequest({
     } catch (error: any) {
         console.error("Error in handleWeb2ProxyRequest:", error)
 
-        return _createRPCResponse(500, error, error.message)
+        return createRPCResponse(500, error, error.message)
     }
 }
 
-function _getDAHRInstance(sessionId: string): DAHR | null {
+function getDAHRInstance(sessionId: string): DAHR | null {
     const dahr = DAHRFactory.instance.getDAHR(sessionId)
     if (!dahr) {
         console.error(`DAHR instance not found for sessionId: ${sessionId}`)
@@ -112,7 +112,7 @@ function _getDAHRInstance(sessionId: string): DAHR | null {
     return dahr
 }
 
-function _createRPCResponse(
+function createRPCResponse(
     result: number,
     response: unknown,
     extra: string | null = null,

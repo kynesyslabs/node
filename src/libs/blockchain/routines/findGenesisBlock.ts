@@ -14,19 +14,19 @@ import Chain from "src/libs/blockchain/chain"
 
 export default async function findGenesisBlock() {
     console.log("[GENESIS] Looking for the genesis block...")
-    let genesis_block_q = await Chain.getGenesisBlock()
+    const genesisBlockQuery = await Chain.getGenesisBlock()
     console.log("[GENESIS] Received genesis search query")
     //console.log(genesis_block_q)
-    let genesis_block
-    if (!genesis_block_q) {
+    let genesisBlock
+    if (!genesisBlockQuery) {
         console.log("[GENESIS] No genesis block found.")
-        genesis_block = null
+        genesisBlock = null
     } else {
-        genesis_block = genesis_block_q
+        genesisBlock = genesisBlockQuery
     }
     // console.log(genesis_block)
     // throw new Error("genesis block found")
-    if (!genesis_block) {
+    if (!genesisBlock) {
         console.log("[BOOTSTRAP] Initializing the genesis block\n")
         if (!fs.existsSync("data/genesis.json")) {
             // Exit if there are no genesis block
@@ -36,7 +36,7 @@ export default async function findGenesisBlock() {
         }
         console.log("[BOOTSTRAP] Loading the genesis block\n")
         // Loading the genesis block
-        let genesis_data = JSON.parse(
+        const genesisData = JSON.parse(
             fs.readFileSync("data/genesis.json", "utf8"),
         )
         console.log("[BOOTSTRAP] Loaded the genesis block\n")
@@ -45,12 +45,12 @@ export default async function findGenesisBlock() {
         // throw new Error()
         // Adding the genesis block to the chain
         console.log("[BOOTSTRAP] Adding the genesis block to the chain\n")
-        let genesis_hash = await Chain.generateGenesisBlock(genesis_data)
-        console.log("[BOOTSTRAP] Genesis block created: " + genesis_hash + "\n")
-        genesis_block = await Chain.getGenesisBlock()
+        const genesisHash = await Chain.generateGenesisBlock(genesisData)
+        console.log("[BOOTSTRAP] Genesis block created: " + genesisHash + "\n")
+        genesisBlock = await Chain.getGenesisBlock()
     } else {
         console.log("Genesis block found: ")
     }
-    console.log(genesis_block)
-    console.log(genesis_block.hash)
+    console.log(genesisBlock)
+    console.log(genesisBlock.hash)
 }

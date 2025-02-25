@@ -19,12 +19,11 @@ import { Transactions } from "./entities/Transactions"
 import { Validators } from "./entities/Validators"
 //import { Identities } from "./entities/Identities"
 import { GlobalChangeRegistry } from "./entities/GCR/GlobalChangeRegistry"
-import { GCRTracker } from "./entities/GCR/GCRTracker"
 
 import { GCRHashes } from "./entities/GCRv2/GCRHashes"
 import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs"
-import { GCR_Main } from "./entities/GCRv2/GCR_Main"
-import { GCR_Tracker } from "./entities/GCRv2/GCR_Tracker"
+import { GCRMain } from "./entities/GCRv2/GCR_Main"
+import { GCRTracker } from "./entities/GCRv2/GCR_Tracker"
 
 class Datasource {
     private static instance: Datasource
@@ -51,8 +50,8 @@ class Datasource {
                 //Identities,
                 GlobalChangeRegistry,
                 GCRTracker,
-                GCR_Main,
-                GCR_Tracker,
+                GCRMain,
+                GCRTracker,
             ],
             synchronize: true, // set this to false in production
             logging: false,

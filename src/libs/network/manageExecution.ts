@@ -13,13 +13,13 @@ const term = terminalkit.terminal
 export async function manageExecution(
     content: BundleContent,
 ): Promise<RPCResponse> {
-    let return_value = _.cloneDeep(emptyResponse)
+    const returnValue = _.cloneDeep(emptyResponse)
 
     console.log("[serverListeners] content.type: " + content.type)
     console.log("[serverListeners] content.extra: " + content.extra)
 
     if (content.type === "l2ps") {
-        let response = await ServerHandlers.handleL2PS(content.data)
+        const response = await ServerHandlers.handleL2PS(content.data)
         if (response.result !== 200) {
             term.red.bold(
                 "[SERVER] Error while handling L2PS request, aborting",
@@ -39,12 +39,13 @@ export async function manageExecution(
         // Then we send the validation data to the client that can use it to execute the tx
         case "confirmTx":
             term.yellow.bold("[SERVER] Received confirmTx\n")
+            // eslint-disable-next-line no-var
             var validityData = await ServerHandlers.handleValidateTransaction(
                 content.data as Transaction,
             )
-            return_value.result = 200
-            return_value.response = validityData
-            return_value.require_reply = false
+            returnValue.result = 200
+            returnValue.response = validityData
+            returnValue.require_reply = false
             break
         // Executing a tx means that we execute the transaction and send back the result
         // to the client. We first need to check if the tx is actually valid.
@@ -65,35 +66,35 @@ export async function manageExecution(
             }
 
             try {
-                var result = await ServerHandlers.handleExecuteTransaction(
+                const result = await ServerHandlers.handleExecuteTransaction(
                     validityDataPayload,
                 )
                 console.log(
                     "[SERVER] Transaction executed. Sending back the result",
                 )
                 // Destructuring the result to get the extra, require_reply and response
-                return_value.result = 200
-                return_value.response = result.response
-                return_value.require_reply = result.require_reply
-                return_value.extra = result.extra
+                returnValue.result = 200
+                returnValue.response = result.response
+                returnValue.require_reply = result.require_reply
+                returnValue.extra = result.extra
                 break
             } catch (error) {
-                let errorMessage =
+                const errorMessage =
                     "[SERVER] Error while handling broadcastTx: " + error
                 console.log(errorMessage)
-                return_value.result = 400
-                return_value.response = "Bad Request"
-                return_value.extra = errorMessage
-                return_value.require_reply = false
-                return return_value
+                returnValue.result = 400
+                returnValue.response = "Bad Request"
+                returnValue.extra = errorMessage
+                returnValue.require_reply = false
+                return returnValue
             }
         // ANCHOR Messages
         // They are treated as messages and are handled by their types themselves
         // For readability, we call an external function to manage the messages
         default:
-            return_value.result = 400
-            return_value.response = "Bad Request"
-            return_value.require_reply = false
+            returnValue.result = 400
+            returnValue.response = "Bad Request"
+            returnValue.require_reply = false
             break
     }
     //console.log("content.message: " + content.message)
@@ -102,14 +103,14 @@ export async function manageExecution(
     // ANCHOR Reply logic
 
     // TODO & REVIEW Call security module for send limiting messages
-    let secDisabled = true
+    const secDisabled = true
     if (!secDisabled) {
-        let ts = new Date().getTime()
-        let securityInterceptor: ISecurityReport = null // ! implement this
+        const ts = new Date().getTime()
+        const securityInterceptor: ISecurityReport = null // ! implement this
     }
 
     // Sending back the response
     console.log("[SERVER] Sending back a response")
     //console.log(return_value)
-    return return_value
+    return returnValue
 }

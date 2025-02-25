@@ -7,8 +7,8 @@ import terminalkit from "terminal-kit"
 const term = terminalkit.terminal
 
 export async function checkConsensusTime(
-    flexible: boolean = false,
-    flextime: number = 2,
+    flexible = false,
+    flextime = 2,
 ): Promise<boolean> {
     // Safeguard to prevent the consensus time from being checked before the last block is forged
     if (getSharedState.inConsensusLoop) {
@@ -18,16 +18,16 @@ export async function checkConsensusTime(
     let isConsensusTime = false
     // Using the average timestamp set in the last block
     //let lastTimestamp = await getSharedState.getLastConsensusTime() // ? Should we check it from the blockchain each time?
-    let lastBlock = await Chain.getLastBlock()
+    const lastBlock = await Chain.getLastBlock()
     log.debug("LAST BLOCK NUMBER: " + lastBlock.number)
     log.debug("--------------------------------")
     log.debug("LAST BLOCK: " + lastBlock.hash)
     log.debug("--------------------------------")
-    let lastTimestamp = lastBlock.content.timestamp
+    const lastTimestamp = lastBlock.content.timestamp
     // REVIEW Using the UTC timestamp as per mainLoop.ts settings
-    let currentTimestamp = getNetworkTimestamp() // Date.now()
-    let delta = currentTimestamp - lastTimestamp
-    let consensusIntervalTime =
+    const currentTimestamp = getNetworkTimestamp() // Date.now()
+    const delta = currentTimestamp - lastTimestamp
+    const consensusIntervalTime =
         getSharedState.getConsensusTime() || 10 // 10 seconds, use 10000 for 10 seconds in ms
     log.info("[CONSENSUS TIME] lastTimestamp: " + lastTimestamp, true)
     log.info("[CONSENSUS TIME] currentTimestamp: " + currentTimestamp, true)
@@ -44,8 +44,8 @@ export async function checkConsensusTime(
         // REVIEW Allow a small leeway for the consensus time
         if (flexible) {
             // Calculate if the delta is within the flexible time
-            let maxDelta = consensusIntervalTime + flextime
-            let minDelta = consensusIntervalTime - flextime
+            const maxDelta = consensusIntervalTime + flextime
+            const minDelta = consensusIntervalTime - flextime
             if (delta > minDelta && delta < maxDelta) {
                 isConsensusTime = true
                 log.info("[CONSENSUS TIME] Consensus time reached (with flexible time and delta: " + delta + ")", true)

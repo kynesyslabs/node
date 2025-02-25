@@ -7,9 +7,9 @@ import { PeerManager } from "src/libs/peer"
 // REVIEW Add an handler in endpointHandlers.ts
 // TODO Test this locally
 export default async function mergePeerlist(shard: Peer[]): Promise<Peer[]> {
-    let ourPeerList = PeerManager.getInstance().getPeers()
+    const ourPeerList = PeerManager.getInstance().getPeers()
     let mergedPeerList: Peer[] = []
-    var promises = []
+    const promises = []
     for (const peer of shard) {
         promises.push(
             peer.call({

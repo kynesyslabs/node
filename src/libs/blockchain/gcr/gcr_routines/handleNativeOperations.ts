@@ -5,18 +5,19 @@ import { INativePayload } from "node_modules/@kynesyslabs/demosdk/build/types/na
 
 // NOTE This class is responsible for handling native operations such as sending native tokens, etc.
 export class HandleNativeOperations {
-    static async handle(tx: Transaction, isRollback: boolean = false): Promise<GCREdit[]> {
+    static async handle(tx: Transaction, isRollback = false): Promise<GCREdit[]> {
         // TODO Implement this
-        let edits: GCREdit[] = []
+        const edits: GCREdit[] = []
         console.log("handleNativeOperations: ", tx.content.type)
-        let nativePayloadData: ["native", INativePayload] = tx.content.data as ["native", INativePayload] // ? Is this typization correct and safe?
-        let nativePayload: INativePayload = nativePayloadData[1]
+        const nativePayloadData: ["native", INativePayload] = tx.content.data as ["native", INativePayload] // ? Is this typization correct and safe?
+        const nativePayload: INativePayload = nativePayloadData[1]
         console.log("nativePayload: ", nativePayload)
         console.log("nativeOperation: ", nativePayload.nativeOperation)
         // Switching on the native operation type
         switch (nativePayload.nativeOperation) {
             // Balance operations for the send native method
             case "send":
+                // eslint-disable-next-line no-var
                 var [to, amount] = nativePayload.args
                 // First, remove the amount from the sender's balance
                 console.log("to: ", to)

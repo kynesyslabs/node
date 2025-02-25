@@ -14,7 +14,7 @@ export default async function applyGCROperation(
     operation: GCROperation,
 ): Promise<boolean> {
     // Get the GCR tables
-    let success = true
+    const success = true
     const db = await Datasource.getInstance()
     const gcrTrackerRepository: Repository<GCRTracker> = db
         .getDataSource()

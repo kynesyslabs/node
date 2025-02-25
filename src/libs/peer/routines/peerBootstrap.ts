@@ -19,24 +19,24 @@ import log from "src/utilities/logger"
 const peerManager = PeerManager.getInstance()
 
 // Proxy function to call peerBootstrap in a nicer way
-export async function peerlistCheck(local_list: Peer[]): Promise<Peer[]> {
-    return await peerBootstrap(local_list)
+export async function peerlistCheck(localList: Peer[]): Promise<Peer[]> {
+    return await peerBootstrap(localList)
 }
 
 // ANCHOR Main function
 
 export default async function peerBootstrap(
-    local_list: Peer[],
+    localList: Peer[],
 ): Promise<Peer[]> {
     console.log("[PEER BOOTSTRAP] Loading peers...")
     // Validity check
-    for (let i = 0; i < local_list.length; i++) {
-        console.log("[PEER BOOTSTRAP] Checking peer " + local_list[i])
+    for (let i = 0; i < localList.length; i++) {
+        console.log("[PEER BOOTSTRAP] Checking peer " + localList[i])
         // ANCHOR Extract peer info from the string
-        let _currentPeer: Peer = local_list[i] // The url of the peer
+        const currentPeer: Peer = localList[i] // The url of the peer
         // If there is a : in the url, we assume it's a address + port
-        let currentPeerUrl: string = _currentPeer.connection.string
-        let currentPublicKey: string = _currentPeer.identity
+        const currentPeerUrl: string = currentPeer.connection.string
+        const currentPublicKey: string = currentPeer.identity
         console.log(
             "[BOOTSTRAP] Testing " +
                 currentPeerUrl +
@@ -50,7 +50,7 @@ export default async function peerBootstrap(
             "[BOOTSTRAP] Testing " + currentPeerUrl + " identity",
         )
         // After this, the peer object will have an identity and thus will be verified
-        let verifiedPeer = await getPeerIdentity(
+        const verifiedPeer = await getPeerIdentity(
             blankPeer,
             currentPublicKey,
         )

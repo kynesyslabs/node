@@ -27,7 +27,7 @@ class XMParser {
             console.log("The file does not exist.")
             return null
         }
-        let script = fs.readFileSync(path, "utf8")
+        const script = fs.readFileSync(path, "utf8")
         return await XMParser.load(script)
     }
 
@@ -37,21 +37,21 @@ class XMParser {
         if (!(script.startsWith("[") && script.endsWith("]"))) {
             script = "[" + script + "]"
         }
-        let xmscript: XMScript = JSON.parse(script)
+        const xmscript: XMScript = JSON.parse(script)
         return xmscript
     }
 
     // INFO Preparsing a script to be able to execute it later (e.g. checking the syntax)
 
     static async prepare(script: XMScript): Promise<XMScript> {
-        let result: XMScript = script
+        const result: XMScript = script
         // TODO
         return result
     }
 
     // INFO This returns the results of the execution of the XMScript
     static async execute(fullscript: XMScript): Promise<any> {
-        let results = {}
+        const results = {}
         let name: string, operation: IOperation
         // Iterating over the operations
         // TODO Enforce order
@@ -110,6 +110,7 @@ class XMParser {
         /* SECTION Write tasks */
         switch (operation.task?.type) {
             case "pay":
+                // eslint-disable-next-line no-var
                 var result = await handlePayOperation(operation, chainID)
 
                 // INFO: Adding chain info for debugging

@@ -12,7 +12,7 @@ import Genesis from "../types/genesisTypes"
 import gcrRoutines from "../gcr/gcr_routines"
 
 // REVIEW Is this working?
-export default class subOperations {
+export default class SubOperations {
     public static gcrRoutines = gcrRoutines
 
     private static result: OperationResult = {
@@ -24,19 +24,19 @@ export default class subOperations {
     // INFO Compiling the genesis status if not already done
     static async genesis(
         operation: Operation,
-        genesis_block: Block,
+        genesisBlock: Block,
     ): Promise<OperationResult> {
-        let result: OperationResult = {
+        const result: OperationResult = {
             success: true,
             message: "No error occurred",
         }
         // NOTE Insert blindly stuff into the GCR if no genesis is present
         // Using the genesis schema it is easy to follow the structure of the genesis file
         console.log(operation.params)
-        let genesis_content: Genesis = operation.params
+        const genesisContent: Genesis = operation.params
         // Let's extract the genesis transaction from the genesis block
-        let genesis_tx = await Chain.getTransactionFromHash(
-            genesis_block.content.ordered_transactions[0],
+        const genesisTx = await Chain.getTransactionFromHash(
+            genesisBlock.content.ordered_transactions[0],
         )
         // NOTE Writing the tx to the chain tx table as it is the genesis one
         const db = await Datasource.getInstance()
@@ -46,8 +46,8 @@ export default class subOperations {
 
         // Assuming genesis_tx.content is an object that needs to be serialized as JSON
         const transaction = new Transactions()
-        transaction.hash = genesis_tx.hash
-        transaction.content = genesis_tx.content
+        transaction.hash = genesisTx.hash
+        transaction.content = genesisTx.content
         transaction.signature = "genesis"
         transaction.status = "someStatus"
         transaction.type = "genesis"
@@ -60,11 +60,11 @@ export default class subOperations {
         await transactionRepository.save(transaction)
 
         // NOTE Balances
-        let balances = genesis_content.balances
+        const balances = genesisContent.balances
         for (let i = 0; i < balances.length; i++) {
-            let balance_operation = balances[i]
-            let receiver = balance_operation[0]
-            let amount = balance_operation[1]
+            const balanceOperation = balances[i]
+            const receiver = balanceOperation[0]
+            const amount = balanceOperation[1]
             await GCR.setGCRNativeBalance(
                 receiver,
                 parseInt(amount),
@@ -78,9 +78,9 @@ export default class subOperations {
     static async transferNative(
         operation: Operation,
     ): Promise<OperationResult> {
-        let from: string = operation.params.from
-        let to: string = operation.params.to
-        let amount = parseInt(operation.params.amount, 10)
+        const from: string = operation.params.from
+        const to: string = operation.params.to
+        const amount = parseInt(operation.params.amount, 10)
 
         // Check if amount is a valid number
         if (isNaN(amount)) {
@@ -89,8 +89,8 @@ export default class subOperations {
                 message: "Invalid amount",
             }
         }
-        let balance_from = await GCR.getGCRNativeBalance(from)
-        let balance_to = await GCR.getGCRNativeBalance(to)
+        const balanceFrom = await GCR.getGCRNativeBalance(from)
+        const balanceTo = await GCR.getGCRNativeBalance(to)
         // Sanity checks
 
         if (amount == 0) {
@@ -98,7 +98,7 @@ export default class subOperations {
                 success: false,
                 message: "Amount cannot be 0",
             }
-        } else if (amount > balance_from) {
+        } else if (amount > balanceFrom) {
             return {
                 success: false,
                 message: "Insufficient funds",
@@ -106,10 +106,10 @@ export default class subOperations {
         }
         // TODO
         // If we are here, we have a valid operation
-        let new_balance_from = balance_from - amount
-        let new_balance_to = balance_to + amount
-        await GCR.setGCRNativeBalance(from, new_balance_from, operation.hash)
-        await GCR.setGCRNativeBalance(to, new_balance_to, operation.hash)
+        const newBalanceFrom = balanceFrom - amount
+        const newBalanceTo = balanceTo + amount
+        await GCR.setGCRNativeBalance(from, newBalanceFrom, operation.hash)
+        await GCR.setGCRNativeBalance(to, newBalanceTo, operation.hash)
         // Returning success
         return {
             success: true,
@@ -119,9 +119,9 @@ export default class subOperations {
 
     // INFO Adding native tokens to the stated address
     static async addNative(operation: Operation): Promise<OperationResult> {
-        let to: string = operation.params.to
-        let amount: string = operation.params.amount
-        let balance_to = await GCR.getGCRNativeBalance(to)
+        const to: string = operation.params.to
+        const amount: string = operation.params.amount
+        const balanceTo = await GCR.getGCRNativeBalance(to)
         // Sanity checks
         if (amount == "0") {
             return {
@@ -131,23 +131,23 @@ export default class subOperations {
         }
         // TODO
         // If we are here, we have a valid operation
-        let new_balance_to = balance_to + parseInt(amount)
-        await GCR.setGCRNativeBalance(to, new_balance_to, operation.hash)
-        return subOperations.result
+        const newBalanceTo = balanceTo + parseInt(amount)
+        await GCR.setGCRNativeBalance(to, newBalanceTo, operation.hash)
+        return SubOperations.result
     }
 
     // INFO Removing native tokens from the stated address
     static async removeNative(operation: Operation): Promise<OperationResult> {
-        let to: string = operation.params.to
-        let amount: string = operation.params.amount
-        let balance_to = await GCR.getGCRNativeBalance(to)
+        const to: string = operation.params.to
+        const amount: string = operation.params.amount
+        const balanceTo = await GCR.getGCRNativeBalance(to)
         // Sanity checks
         if (amount == "0") {
             return {
                 success: false,
                 message: "Amount cannot be 0",
             }
-        } else if (balance_to < parseInt(amount)) {
+        } else if (balanceTo < parseInt(amount)) {
             return {
                 success: false,
                 message: "Insufficient funds",
@@ -155,18 +155,18 @@ export default class subOperations {
         }
         // TODO
         // If we are here, we have a valid operation
-        let new_balance_to = balance_to - parseInt(amount)
-        await GCR.setGCRNativeBalance(to, new_balance_to, operation.hash)
-        return subOperations.result
+        const newBalanceTo = balanceTo - parseInt(amount)
+        await GCR.setGCRNativeBalance(to, newBalanceTo, operation.hash)
+        return SubOperations.result
     }
 
     static async addAsset(operation: Operation): Promise<OperationResult> {
         // TODO
-        return subOperations.result
+        return SubOperations.result
     }
 
     static async removeAsset(operation: Operation): Promise<OperationResult> {
         // TODO
-        return subOperations.result
+        return SubOperations.result
     }
 }

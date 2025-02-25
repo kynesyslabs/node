@@ -10,9 +10,9 @@ export async function broadcastBlockHash(
     block: Block,
     shard: Peer[],
 ): Promise<[number, number]> {
-    var pro = 0
-    var con = 0
-    var promises = []
+    let pro = 0
+    let con = 0
+    const promises = []
     const ourId = getSharedState.identity.ed25519.publicKey.toString("hex")
     const proposeParams = [block.hash, block.validation_data, ourId]
     for (const peer of shard) {
@@ -41,7 +41,7 @@ export async function broadcastBlockHash(
                 log.debug("[broadcastBlockHash] response: " + JSON.stringify(response, null, 2))
                 // Add the validation data to the block
                 // ? Should we check if the peer is in the shard? Theoretically we checked before
-                let peerValidationData =
+                const peerValidationData =
                     response.extra.signatures[response.response]
                 log.info(
                     "[broadcastBlockHash] Peer validation data: ",
@@ -50,7 +50,7 @@ export async function broadcastBlockHash(
                 block.validation_data.signatures[response.response] =
                     peerValidationData
 
-                let incomingSignatures: { [key: string]: string } =
+                const incomingSignatures: { [key: string]: string } =
                     response.extra["signatures"]
 
                 for (const [identity, signature] of Object.entries(

@@ -9,11 +9,11 @@ import handleStep from "./handleStep"
 export async function processOperations(
     script: DemoScript,
 ): Promise<[DemoScript, OperationResult[]]> {
-    let operationsResults: OperationResult[] = []
+    const operationsResults: OperationResult[] = []
     for (const operationName of script.operationOrder) {
         const operation: DemosWorkOperationScripts = script.operations[operationName]
         // Prepare the operation result
-        let operationResult: OperationResult = {
+        const operationResult: OperationResult = {
             operation: operation,
             success: true,
             error: "",

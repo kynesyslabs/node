@@ -15,9 +15,9 @@ export const modules = {
 
 // SECTION Internal methods
 async function checkRateLimits(
-    reported_timestamp: number,
+    reportedTimestamp: number,
 ): Promise<ISecurityReport> {
-    let report: ISecurityReport = {
+    const report: ISecurityReport = {
         code: "0",
         message: "undefined",
         state: undefined,

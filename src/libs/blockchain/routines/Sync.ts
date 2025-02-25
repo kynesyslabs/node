@@ -92,10 +92,10 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
 
     // SECTION: Asking the peers for the last block number
     // Asking the peers for the last block number
-    let peerLastBlockNumbers = []
-    let promises = new Map<string, Promise<RPCResponse>>()
-    for (let peer of peers) {
-        let call: RPCRequest = {
+    const peerLastBlockNumbers = []
+    const promises = new Map<string, Promise<RPCResponse>>()
+    for (const peer of peers) {
+        const call: RPCRequest = {
             method: "nodeCall",
             params: [
                 {
@@ -109,15 +109,15 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     }
 
     // Wait for all the promises to resolve (synchronously?)
-    let responses = new Map<string, RPCResponse>()
-    for (let [peerId, promise] of promises) {
-        let response = await promise
+    const responses = new Map<string, RPCResponse>()
+    for (const [peerId, promise] of promises) {
+        const response = await promise
         responses.set(peerId, response)
     }
 
     const requestBlockNumbers = []
 
-    for (let response of responses) {
+    for (const response of responses) {
         if (response[1].result === 200) {
             peerLastBlockNumbers.push(response[1].response as number)
             log.info(
@@ -143,7 +143,7 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     )
 
     // REVIEW Choose the peer with the highest last block number
-    let highestBlockNumber: number = peerLastBlockNumbers.reduce(
+    const highestBlockNumber: number = peerLastBlockNumbers.reduce(
         (max, peer) => Math.max(max, peer),
         0,
     )
@@ -162,10 +162,10 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     }
 
     // Otherwise, we need to sync
-    let highestBlockNumberPeerIndex = peerLastBlockNumbers.findIndex(
+    const highestBlockNumberPeerIndex = peerLastBlockNumbers.findIndex(
         peer => peer === highestBlockNumber,
     )
-    let highestBlockNumberPeer = peers[highestBlockNumberPeerIndex]
+    const highestBlockNumberPeer = peers[highestBlockNumberPeerIndex]
     log.info(
         "[fastSync] Peer with highest last block number: " +
             highestBlockNumberPeer.identity +
@@ -195,7 +195,7 @@ async function verifyLastBlockIntegrity(
     ourLastBlockHash: string,
 ) {
     // Verify if the last block hash is coherent
-    let lastSyncedBlockRequest: RPCRequest = {
+    const lastSyncedBlockRequest: RPCRequest = {
         method: "nodeCall",
         params: [
             {
@@ -205,11 +205,11 @@ async function verifyLastBlockIntegrity(
             },
         ],
     }
-    let lastSyncedBlockResponse = await peer.call(lastSyncedBlockRequest, false)
+    const lastSyncedBlockResponse = await peer.call(lastSyncedBlockRequest, false)
 
     if (lastSyncedBlockResponse.result === 200) {
         console.log("[fastSync] Last synced block response received")
-        let lastSyncedBlock = lastSyncedBlockResponse.response as Block
+        const lastSyncedBlock = lastSyncedBlockResponse.response as Block
         if (lastSyncedBlock.hash !== ourLastBlockHash) {
             log.info("[fastSync] Hash is not coherent")
             log.info("[fastSync] Our hash: " + ourLastBlockHash)
@@ -227,7 +227,7 @@ async function verifyLastBlockIntegrity(
 }
 
 async function downloadBlock(peer: Peer, blockToAsk: number) {
-    let blockRequest: RPCRequest = {
+    const blockRequest: RPCRequest = {
         method: "nodeCall",
         params: [
             {
@@ -237,7 +237,7 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
             },
         ],
     }
-    let blockResponse = await peer.longCall(blockRequest, false, 250, 3, [404])
+    const blockResponse = await peer.longCall(blockRequest, false, 250, 3, [404])
 
     // INFO: Handle max retries reached
     if (blockResponse.result === 400) {
@@ -255,7 +255,7 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
         console.log(
             "[fastSync] Block response received for block: " + blockToAsk,
         )
-        let block = blockResponse.response as Block
+        const block = blockResponse.response as Block
 
         if (!block) {
             log.error("[downloadBlock] Block not received")
@@ -269,11 +269,11 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
 
         // REVIEW Merge the peerlist
         log.info("[fastSync] Merging peers from block: " + block.hash)
-        let mergedPeerlist = await mergePeerlist(block)
+        const mergedPeerlist = await mergePeerlist(block)
         log.info("[fastSync] Merged peers from block: " + mergedPeerlist)
         // REVIEW Parse the txs hashes in the block
         log.info("[fastSync] Asking for transactions in the block", true)
-        let txs = await askTxsForBlock(block, peer)
+        const txs = await askTxsForBlock(block, peer)
         log.info("[fastSync] Transactions received: " + txs.length, true)
 
         // ! Sync the native tables
@@ -285,7 +285,7 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
                 "[fastSync] Inserting transactions into the database",
                 true,
             )
-            let success = await Chain.insertTransactions(txs)
+            const success = await Chain.insertTransactions(txs)
             if (success) {
                 log.info("[fastSync] Transactions inserted successfully")
                 return true
@@ -373,8 +373,8 @@ async function requestBlocks() {
 // REVIEW Applying GCREdits to the tables
 export async function syncGCRTables(txs: Transaction[]): Promise<[string, boolean]> { // ? Better typing on this return
     // Using the GCREdits in the tx to sync the native tables
-    for (let tx of txs) {
-        let result = await HandleGCR.applyToTx(tx)
+    for (const tx of txs) {
+        const result = await HandleGCR.applyToTx(tx)
         if (!result.success) {
             log.error("[fastSync] GCR edit application failed at tx: " + tx.hash)
             return [tx.hash, false]
@@ -388,10 +388,10 @@ export async function askTxsForBlock(
     block: Block,
     peer: Peer,
 ): Promise<Transaction[]> {
-    let txsHashes = block.content.ordered_transactions
-    let txs = []
-    for (let txHash of txsHashes) {
-        let txRequest: RPCRequest = {
+    const txsHashes = block.content.ordered_transactions
+    const txs = []
+    for (const txHash of txsHashes) {
+        const txRequest: RPCRequest = {
             method: "nodeCall",
             params: [
                 {
@@ -401,9 +401,9 @@ export async function askTxsForBlock(
                 },
             ],
         }
-        let txResponse = await peer.call(txRequest, false)
+        const txResponse = await peer.call(txRequest, false)
         if (txResponse.result === 200) {
-            let tx = txResponse.response as Transaction
+            const tx = txResponse.response as Transaction
             txs.push(tx)
         }
     }

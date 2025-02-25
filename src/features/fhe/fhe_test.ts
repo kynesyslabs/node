@@ -14,21 +14,21 @@ async function main() {
     console.log("[+] FHE instance created")
     console.log("\n\n[ Math Operations ]")
     // Create data to be encrypted
-    let plainData = 7
-    let addStep = 5
-    let multiplyStep = 3
+    const plainData = 7
+    const addStep = 5
+    const multiplyStep = 3
     // Encrypt the PlainText
-    var cipheredData = await fhe.encryption.encryptNumber(plainData)
+    const cipheredData = await fhe.encryption.encryptNumber(plainData)
 
     console.log("\n[Addition]")
-    var cipheredAddStep = await fhe.encryption.encryptNumber(addStep)
+    const cipheredAddStep = await fhe.encryption.encryptNumber(addStep)
     // Add the CipherText to itself and store it in the destination parameter (itself)
-    var cipheredAdditionResult = await fhe.math.addNumbers(cipheredData, cipheredAddStep)
+    const cipheredAdditionResult = await fhe.math.addNumbers(cipheredData, cipheredAddStep)
     // Decrypt the CipherText
-    var decryptedAdditionResult = await fhe.encryption.decryptNumber(cipheredAdditionResult)
+    const decryptedAdditionResult = await fhe.encryption.decryptNumber(cipheredAdditionResult)
     console.log("plainData: ", plainData, "\naddStep: ", addStep, "\ndecryptedAdditionResult: ", decryptedAdditionResult)
 
-    var decryptedData = await fhe.encryption.decryptNumber(cipheredData)
+    let decryptedData = await fhe.encryption.decryptNumber(cipheredData)
 
     if (decryptedData !== decryptedAdditionResult) {
         console.log("\n[ERROR] The decryptedData is not equal to decryptedAdditionResult")
@@ -36,11 +36,11 @@ async function main() {
     }
     console.log("\n[OK] Now the cipheredData is equal to decryptedAdditionResult: ", decryptedData)
     console.log("\n[Multiplication]")
-    var cipheredMultiplyStep = await fhe.encryption.encryptNumber(multiplyStep)
+    const cipheredMultiplyStep = await fhe.encryption.encryptNumber(multiplyStep)
     // Multiply the CipherText to itself and store it in the destination parameter (itself)
-    var cipheredMultiplicationResult = await fhe.math.multiplyNumbers(cipheredData, cipheredMultiplyStep)
+    const cipheredMultiplicationResult = await fhe.math.multiplyNumbers(cipheredData, cipheredMultiplyStep)
     // Decrypt the CipherText
-    var decryptedMultiplicationResult = await fhe.encryption.decryptNumber(cipheredMultiplicationResult)
+    const decryptedMultiplicationResult = await fhe.encryption.decryptNumber(cipheredMultiplicationResult)
     console.log("plainData: ", plainData, "\nmultiplyStep: ", multiplyStep, "\ndecryptedMultiplyResult: ", decryptedMultiplicationResult)
 
     decryptedData = await fhe.encryption.decryptNumber(cipheredData)
@@ -53,9 +53,9 @@ async function main() {
     console.log("\n[Negate - Flipping the sign of the number]")
     // Boolean operations
     // Negate the CipherText and store it in the destination parameter (itself)
-    var cipheredNegateResult = await fhe.math.negate(cipheredData)
+    const cipheredNegateResult = await fhe.math.negate(cipheredData)
     // Decrypt the CipherText
-    var decryptedNegateResult = await fhe.encryption.decryptNumber(cipheredNegateResult)
+    const decryptedNegateResult = await fhe.encryption.decryptNumber(cipheredNegateResult)
     if (decryptedNegateResult !== -decryptedData) {
         console.log("\n[ERROR] The decryptedNegateResult is not equal to -plainData")
         process.exit(-1)

@@ -14,9 +14,7 @@ export class DAHRFactory {
     /**
      * Private constructor to prevent direct object creation.
      */
-    private constructor() {}
-
-    private _cleanupExpired(): void {
+    private cleanupExpired(): void {
         const now = Date.now()
         let cleanedCount = 0
         for (const [sessionId, { lastAccess }] of this._dahrs) {
@@ -50,7 +48,7 @@ export class DAHRFactory {
      * @returns {DAHR} The DAHR instance.
      */
     createDAHR(web2Request: IWeb2Request): DAHR {
-        this._cleanupExpired()
+        this.cleanupExpired()
         const newDAHR = new DAHR(web2Request)
         const sessionId = newDAHR.sessionId // Get the sessionId from the DAHR instance
         term.yellow(
@@ -110,6 +108,7 @@ export class DAHRFactory {
      */
     getUserDAHRs(sessionId: string): Array<[string, DAHR]> {
         return Array.from(this._dahrs.entries())
+            // eslint-disable-next-line @typescript-eslint/naming-convention, @typescript-eslint/no-unused-vars
             .filter(([_, { dahr }]) => dahr.sessionId === sessionId)
             .map(([sessionId, { dahr }]) => [sessionId, dahr])
     }

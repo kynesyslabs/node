@@ -1,7 +1,7 @@
 import { DemosWork } from "@kynesyslabs/demosdk/demoswork"
 import { DemoScript, Transaction } from "@kynesyslabs/demosdk/types"
 import GCROperation from "src/libs/blockchain/gcr/types/GCROperations" // ! Put it in the sdk
-import { ForgeToHex } from "src/libs/crypto/forgeUtils"
+import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import calculateCurrentGas from "../../routines/calculateCurrentGas"
 
 /** NOTE
@@ -15,7 +15,7 @@ import calculateCurrentGas from "../../routines/calculateCurrentGas"
 
 // REVIEW This should convert a transaction to an operation
 export async function txToGCROperation(tx: Transaction): Promise<GCROperation> {
-    let operation: GCROperation = {
+    const operation: GCROperation = {
         address: "",
         data: null,
         gas: 0,
@@ -23,11 +23,11 @@ export async function txToGCROperation(tx: Transaction): Promise<GCROperation> {
     // Extract the address from the transaction
     let address: string
     if (typeof tx.content.from !== "string") {
-        address = ForgeToHex(tx.content.from)
+        address = forgeToHex(tx.content.from)
     } else {
         address = tx.content.from
     }
-    operation.address = address 
+    operation.address = address
     // Extract the data from the transaction as a DemosWork
     operation.data = tx.content.data[1] as DemoScript
     // Calculate the gas used

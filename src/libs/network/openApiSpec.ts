@@ -5,12 +5,12 @@ import fs from "fs"
 import path from "path"
 import { fileURLToPath } from "url"
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+const filename = fileURLToPath(import.meta.url)
+const dirname = path.dirname(filename)
 
 export function setupOpenAPI(server: FastifyInstance) {
   // Read the OpenAPI specification from the JSON file
-  const openApiSpecPath = path.join(__dirname, "openapi-spec.json")
+  const openApiSpecPath = path.join(dirname, "openapi-spec.json")
   const openApiSpec = JSON.parse(fs.readFileSync(openApiSpecPath, "utf-8"))
 
   server.register(fastifySwagger, {

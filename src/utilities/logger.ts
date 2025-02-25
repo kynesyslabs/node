@@ -5,7 +5,7 @@ import fs from "fs"
 import terminalkit from "terminal-kit"
 const term = terminalkit.terminal
 
-export default class log {
+export default class Logger {
     static LOGS_DIR = "logs"
     static LOG_INFO_FILE = this.LOGS_DIR + "/info.log"
     static LOG_ERROR_FILE = this.LOGS_DIR + "/error.log"
@@ -87,8 +87,8 @@ export default class log {
     static custom(
         logfile: string,
         message: string,
-        logToTerminal: boolean = true,
-        cleanFile: boolean = false,
+        logToTerminal = true,
+        cleanFile = false,
     ) {
         const logEntry = `[INFO] [${this.getTimestamp()}] ${message}\n`
         if (this.logToTerminal[logfile] && logToTerminal) {
@@ -104,7 +104,7 @@ export default class log {
         this.writeAsync(this.LOG_CUSTOM_PREFIX + logfile + ".log", logEntry)
     }
 
-    static info(message: string, logToTerminal: boolean = true) {
+    static info(message: string, logToTerminal = true) {
         const logEntry = `[INFO] [${this.getTimestamp()}] ${message}\n`
         if (logToTerminal) {
             term.bold(logEntry.trim() + "\n")
@@ -112,7 +112,7 @@ export default class log {
         this.writeAsync(this.LOG_INFO_FILE, logEntry)
     }
 
-    static error(message: string, logToTerminal: boolean = true) {
+    static error(message: string, logToTerminal = true) {
         const logEntry = `[ERROR] [${this.getTimestamp()}] ${message}\n`
         if (logToTerminal) {
             term.red(logEntry.trim() + "\n")
@@ -121,7 +121,7 @@ export default class log {
         this.writeAsync(this.LOG_ERROR_FILE, logEntry)
     }
 
-    static debug(message: string, logToTerminal: boolean = true) {
+    static debug(message: string, logToTerminal = true) {
         const logEntry = `[DEBUG] [${this.getTimestamp()}] ${message}\n`
         if (logToTerminal) {
             term.magenta(logEntry.trim() + "\n")
@@ -130,7 +130,7 @@ export default class log {
         this.writeAsync(this.LOG_DEBUG_FILE, logEntry)
     }
 
-    static warning(message: string, logToTerminal: boolean = true) {
+    static warning(message: string, logToTerminal = true) {
         const logEntry = `[WARNING] [${this.getTimestamp()}] ${message}\n`
         if (logToTerminal) {
             term.yellow(logEntry.trim() + "\n")
@@ -139,7 +139,7 @@ export default class log {
         this.writeAsync(this.LOG_WARNING_FILE, logEntry)
     }
 
-    static critical(message: string, logToTerminal: boolean = true) {
+    static critical(message: string, logToTerminal = true) {
         const logEntry = `[CRITICAL] [${this.getTimestamp()}] ${message}\n`
         if (logToTerminal) {
             term.bold.red(logEntry.trim() + "\n")
@@ -150,7 +150,7 @@ export default class log {
 
     // Utils
 
-    static cleanLogs(withCustom: boolean = false) {
+    static cleanLogs(withCustom = false) {
         const files = fs.readdirSync(this.LOGS_DIR)
         for (const file of files) {
             if (file.startsWith("custom_")) {

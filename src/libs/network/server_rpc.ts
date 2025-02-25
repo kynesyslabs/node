@@ -180,7 +180,7 @@ async function processPayload(
 }
 /* End of processor method */
 
-export default async function server_rpc(): Promise<FastifyInstance> {
+export default async function serverRpc(): Promise<FastifyInstance> {
     const port = getSharedState.serverPort
     const serverApp: FastifyInstance = fastify()
     await serverApp.register(fastifyCors, {
@@ -279,17 +279,17 @@ export default async function server_rpc(): Promise<FastifyInstance> {
 
             // Header check
             const headers = req.headers
-            var sender = ""
+            let sender = ""
             // Excluding due to noAuthMethods from header validation
             if (!noAuthMethods.includes(payload.method)) {
-                var header_validation = validateHeaders(headers);
+                const headerValidation = validateHeaders(headers)
                 
                 log.info(
-                    "[RPC Call] Header validation: " + header_validation[0],
+                    "[RPC Call] Header validation: " + headerValidation[0],
                 )
-                if (!header_validation[0]) {
+                if (!headerValidation[0]) {
                     reply.status(401).send({
-                        error: "Invalid headers:" + header_validation[1],
+                        error: "Invalid headers:" + headerValidation[1],
                     })
                     return
                 }
@@ -334,7 +334,7 @@ export default async function server_rpc(): Promise<FastifyInstance> {
  *  Hopefully, we can drop in replace the Fastify server with this one.
  *  See createServer() for an experimental smart selector of the server implementation.
  */
-export async function server_rpc_bun() {
+export async function serverRpcBun() {
     const port = getSharedState.serverPort
 
     // Helper to convert request to RPCRequest format
@@ -547,9 +547,9 @@ export async function createServer() {
 
     if (isBun) {
         log.info("[RPC Call] Using Bun server implementation")
-        return await server_rpc_bun()
+        return await serverRpcBun()
     } else {
         log.info("[RPC Call] Using Fastify server implementation")
-        return await server_rpc()
+        return await serverRpc()
     }
 }

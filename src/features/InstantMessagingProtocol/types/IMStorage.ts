@@ -5,27 +5,24 @@
 // By posting to the inbox, the user sends a message to the other user.
 // By posting to the outbox, the user publishes the reply so that the other user can read it.
 import Cryptography from "src/libs/crypto/cryptography"
-import { HexToForge } from "src/libs/crypto/forgeUtils"
-import { demostdlib } from "src/libs/utils"
+import { hexToForge } from "src/libs/crypto/forgeUtils"
 
-import { outbox } from "../../activitypub/feditypes"
 // Using RSA and ED25519, privacy and authenticity are guaranteed even in a public decentralized context.
-import { IMMessage } from "./IMSession"
+import { ImMessage } from "./IMSession"
 
-export interface IMStorage {
-    inbox: IMMessage[]
-    outbox: IMMessage[]
+export interface ImStorage {
+    inbox: ImMessage[]
+    outbox: ImMessage[]
 }
 
 export default class IMStorageInstance {
     // REVIEW Check the stability of the Storage type
     // REVIEW Also we should make this persistent (or not? Aethereal messages are not persistent)
-    private static storages: Map<string, IMStorage> = new Map<
+    private static storages: Map<string, ImStorage> = new Map<
         string,
-        IMStorage
+        ImStorage
     >()
 
-    constructor() {}
 
     // INFO Method to check if the actor can act on  a property
     // TODO Change signature to an arbitrary message
@@ -43,10 +40,10 @@ export default class IMStorageInstance {
         }
 
         // We need to use the key as a forge primitive
-        let bufferKey = HexToForge(publicKey)
+        const bufferKey = hexToForge(publicKey)
 
         // Verify the signature of the key to ensure the identity of the actor
-        let verified = Cryptography.verify(publicKey, signedKey, bufferKey)
+        const verified = Cryptography.verify(publicKey, signedKey, bufferKey)
 
         // If the signature is not verified, the request is not authorized
         if (!verified) {
@@ -63,23 +60,23 @@ export default class IMStorageInstance {
     // INFO Outboxes are public to read, but private to write
     public static getOutboxes(
         publicKey: string,
-    ): [boolean, IMMessage[] | string] {
+    ): [boolean, ImMessage[] | string] {
         if (!this.storages.has(publicKey)) {
             this.storages.set(publicKey, { inbox: [], outbox: [] })
         }
-        let outbox = this.storages.get(publicKey).outbox
+        const outbox = this.storages.get(publicKey).outbox
         return [true, outbox]
     }
     public static writeToOutbox(
         publicKey: string,
         signedKey: string,
-        message: IMMessage,
+        message: ImMessage,
     ) {
         // Checking Authorization
         if (!this.isAuthorized(publicKey, signedKey, [publicKey])[0]) {
             return [false, "You are not allowed to act on this property"]
         }
-        let account = this.storages.get(publicKey)
+        const account = this.storages.get(publicKey)
         account.outbox.push(message)
         this.storages.set(publicKey, account)
         return [true, "Message written to the outbox"]
@@ -89,22 +86,22 @@ export default class IMStorageInstance {
     public static getInboxes(
         publicKey: string,
         signedKey: string,
-    ): [boolean, IMMessage[] | string] {
+    ): [boolean, ImMessage[] | string] {
         // Checking Authorization
         if (!this.isAuthorized(publicKey, signedKey, [publicKey])[0]) {
             return [false, "You are not allowed to act on this property"]
         }
-        let inbox = this.storages.get(publicKey).inbox
+        const inbox = this.storages.get(publicKey).inbox
         return [true, inbox]
     }
     public static writeToInbox(
         publicKey: string,
-        message: IMMessage,
+        message: ImMessage,
     ): [boolean, string] {
         if (!this.storages.has(publicKey)) {
             this.storages.set(publicKey, { inbox: [], outbox: [] })
         }
-        let account = this.storages.get(publicKey)
+        const account = this.storages.get(publicKey)
         account.inbox.push(message)
         this.storages.set(publicKey, account)
         return [true, "Message written to the inbox"]

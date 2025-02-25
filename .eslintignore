@@ -4,3 +4,5 @@ data
 dist
 .github
 .vscode
+.env
+postgres_*

@@ -1,13 +1,13 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
 
-interface IGetBlocksData {
+interface InterfaceGetBlocksData {
     start: number | "latest"
     limit: number
 }
 
 export default async function getBlocks(
-    data: IGetBlocksData,
+    data: InterfaceGetBlocksData,
 ): Promise<RPCResponse> {
     const params = [data.start, data.limit].map((value, index) => {
         if (index === 0 && value === "latest") {

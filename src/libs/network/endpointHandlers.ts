@@ -42,7 +42,7 @@ import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Ren
 
 // ? Note: this is to be implemented once demosWork is in place
 import { DemoScript } from "@kynesyslabs/demosdk/types"
-import { ForgeToHex } from "../crypto/forgeUtils"
+import { forgeToHex } from "../crypto/forgeUtils"
 import { Peer } from "../peer"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
@@ -59,7 +59,7 @@ import {
 } from "@kynesyslabs/demosdk/types"
 */
 
-let term = terminalkit.terminal
+const term = terminalkit.terminal
 
 export default class ServerHandlers {
     // ANCHOR Validate transaction
@@ -67,7 +67,7 @@ export default class ServerHandlers {
         tx: Transaction,
     ): Promise<ValidityData> {
         term.yellow("[handleTransactions] Handling a DEMOS tx...\n")
-        let fname = "[handleTransactions] "
+        const fname = "[handleTransactions] "
         term.yellow(fname + "Handling transaction...")
         // Verify and execute the transaction
         let validationData: ValidityData
@@ -87,7 +87,7 @@ export default class ServerHandlers {
             // NOTE Nonce assignment is done in the GCR too
             // REVIEW Generating GCREdit on our side and comparing it with the one in the Transaction object
             // See DemosTransactions.ts -> prepare(data) for the details
-            let gcrEdits = await GCRGeneration.generate(tx)
+            const gcrEdits = await GCRGeneration.generate(tx)
             // TODO This is a workaround, if it works we should make it more elegant
             // Client side the gcredits are created without the tx hash, which is added in the node
             // ! Maybe we should remove the tx hash from the GCREdit object directly which improves consistency
@@ -95,11 +95,11 @@ export default class ServerHandlers {
                 gcredit.txhash = ""
             })
             // Hashing both the gcredits
-            let gcrEditsHash = Hashing.sha256(JSON.stringify(gcrEdits))
+            const gcrEditsHash = Hashing.sha256(JSON.stringify(gcrEdits))
             console.log("gcrEditsHash: " + gcrEditsHash)
-            let txGcrEditsHash = Hashing.sha256(JSON.stringify(tx.content.gcr_edits))
+            const txGcrEditsHash = Hashing.sha256(JSON.stringify(tx.content.gcr_edits))
             console.log("txGcrEditsHash: " + txGcrEditsHash)
-            let comparison = txGcrEditsHash == gcrEditsHash
+            const comparison = txGcrEditsHash == gcrEditsHash
             if (!comparison) {
                 log.error("[handleValidateTransaction] GCREdit mismatch")
                 console.log(txGcrEditsHash + " <> " + gcrEditsHash)
@@ -130,7 +130,7 @@ export default class ServerHandlers {
                 rpc_public_key: null,
             }
             // Signing and hashing the validation data
-            let hashedValidationData = Hashing.sha256(
+            const hashedValidationData = Hashing.sha256(
                 JSON.stringify(validationData.data),
             )
             validationData.signature = Cryptography.sign(
@@ -152,8 +152,8 @@ export default class ServerHandlers {
         // Log the entire validatedData object to inspect its structure
         console.log("[handleExecuteTransaction] Validated Data:", validatedData)
 
-        let fname = "[handleExecuteTransaction] "
-        let result: ExecutionResult = {
+        const fname = "[handleExecuteTransaction] "
+        const result: ExecutionResult = {
             success: true,
             response: null,
             extra: null,
@@ -161,9 +161,9 @@ export default class ServerHandlers {
         }
         // NOTE Content should contain validity data and our signature to proceed
         // Integrity checks
-        let ourKey = getSharedState.identity.ed25519.publicKey
-        let hexOurKey = ourKey.toString("hex")
-        let dataKey = _.cloneDeep(validatedData.rpc_public_key)
+        const ourKey = getSharedState.identity.ed25519.publicKey
+        const hexOurKey = ourKey.toString("hex")
+        const dataKey = _.cloneDeep(validatedData.rpc_public_key)
         console.log("validatedData.rpc_public_key:  ")
         console.log(validatedData.rpc_public_key)
         /*  console.log("[handleExecuteTransaction] dataKey: ")
@@ -181,10 +181,10 @@ export default class ServerHandlers {
                 "[handleExecuteTransaction] dataKey is a buffer: using ForgeToHex",
             )
             console.log(dataKey)
-            hexDataKey = ForgeToHex(dataKey)
+            hexDataKey = forgeToHex(dataKey)
         }
         console.log("dataKey: " + hexDataKey)
-        let dataSignature = validatedData.signature
+        const dataSignature = validatedData.signature
         let hexDataSignature: string
         if (typeof dataSignature === "string") {
             console.log(
@@ -196,17 +196,17 @@ export default class ServerHandlers {
                 "[handleExecuteTransaction] dataSignature is a buffer: using ForgeToHex",
             )
             console.log(dataSignature)
-            hexDataSignature = ForgeToHex(dataSignature)
+            hexDataSignature = forgeToHex(dataSignature)
         }
         console.log("dataSignature: " + hexDataSignature)
-        let queriedTx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
+        const queriedTx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
         // REVIEW Correct? If the transaction has no block number, we set it to the last block number + 1
         if (!queriedTx.blockNumber) {
             log.warning(
                 "[handleExecuteTransaction] Queried tx has no block number: " +
                     queriedTx.hash,
             )
-            let lastBlockNumber = await Chain.getLastBlockNumber()
+            const lastBlockNumber = await Chain.getLastBlockNumber()
             queriedTx.blockNumber = lastBlockNumber + 1
             log.warning(
                 "[handleExecuteTransaction] Queried tx block number set to: " +
@@ -237,12 +237,12 @@ export default class ServerHandlers {
         }
         // Also the signature must be valid
 
-        let hashedData = Hashing.sha256(JSON.stringify(validatedData.data))
+        const hashedData = Hashing.sha256(JSON.stringify(validatedData.data))
         console.log(JSON.stringify(validatedData))
         console.log("Backend - Hash:", hashedData)
         console.log("Backend - Data Signature:", hexDataSignature)
         console.log("Backend - Data Key:", hexDataKey)
-        let signatureValid = Cryptography.verify(
+        const signatureValid = Cryptography.verify(
             hashedData,
             hexDataSignature, // REVIEW use dataSignature if needed
             hexDataKey, // REVIEW use dataKey if needed
@@ -260,8 +260,8 @@ export default class ServerHandlers {
             return result
         }
         // Finally, the block number reference must be valid
-        let blockNumber = validatedData.data.reference_block
-        let lastBlockNumber = await Chain.getLastBlockNumber()
+        const blockNumber = validatedData.data.reference_block
+        const lastBlockNumber = await Chain.getLastBlockNumber()
         if (blockNumber != lastBlockNumber) {
             log.error(
                 "[handleExecuteTransaction] Invalid validityData block reference: " +
@@ -293,7 +293,7 @@ export default class ServerHandlers {
                 */
         term.green.bold(fname + "Valid validityData! \n")
         // REVIEW Switch case for different types of transactions
-        let tx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
+        const tx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
         // Using a payload variable to be able to check types immediately
         let payload: DemoScript | any // ! Remove this once demosWork is in place
         switch (tx.content.type) {
@@ -304,11 +304,11 @@ export default class ServerHandlers {
                 console.log("[Included XM Chainscript]")
                 console.log(payload[1])
                 // TODO Better types on answers
-                var xm_result = await ServerHandlers.handleXMChainOperation(
+                var xmResult = await ServerHandlers.handleXMChainOperation(
                     payload[1] as XMScript,
                 )
                 // TODO Add result.success handling
-                result.response = xm_result
+                result.response = xmResult
                 break
 
             case "subnet":
@@ -316,10 +316,10 @@ export default class ServerHandlers {
                 console.log(
                     "[handleExecuteTransaction] Subnet payload: " + payload[1],
                 )
-                var subnet_result = await ServerHandlers.handleSubnetTx(
+                var subnetResult = await ServerHandlers.handleSubnetTx(
                     payload[1] as SubnetPayload,
                 )
-                result.response = subnet_result
+                result.response = subnetResult
                 break
 
             case "web2Request": {
@@ -336,10 +336,10 @@ export default class ServerHandlers {
                 var demosWorkPayload = tx.content.data
                 var demosWorkScript = demosWorkPayload[1] as DemoScript
                 try {
-                    var demoswork_result = await handleDemosWorkRequest(
+                    const demosWorkResult = await handleDemosWorkRequest(
                         demosWorkScript,
                     )
-                    result.response = demoswork_result
+                    result.response = demosWorkResult
                 } catch (e) {
                     log.error(
                         "[handleExecuteTransaction] Error in demosWork: " + e,
@@ -354,9 +354,9 @@ export default class ServerHandlers {
         // Only if the transaction is valid we add it to the mempool
         if (result.success) {
             // REVIEW Simulating gcr edits application as we will apply them in the consensus
-            let simulate = true
+            const simulate = true
             // NOTE We apply the GCREdit to the GCR and check if it is successful. If not, we return an error
-            let editsResults = await HandleGCR.applyToTx(
+            const editsResults = await HandleGCR.applyToTx(
                 queriedTx,
                 false, // isRollback
                 simulate,
@@ -423,7 +423,7 @@ export default class ServerHandlers {
     }
 
     static async handleXMChainStatus(): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
+        const response: RPCResponse = _.cloneDeep(emptyResponse)
         // NOTE Remember that crosschain operations are in chainscript syntax (see chainscript_example.ts)
         response.response = await multichainCapabilities()
         // TODO
@@ -440,7 +440,7 @@ export default class ServerHandlers {
     // NOTE If we receive a SubnetPayload, we use handleL2PS to register the transaction
     static async handleSubnetTx(content: SubnetPayload) {
         let response: RPCResponse = _.cloneDeep(emptyResponse)
-        let payload: L2PSRegisterTxMessage = {
+        const payload: L2PSRegisterTxMessage = {
             type: "registerTx",
             data: {
                 uid: content.uid,
@@ -473,8 +473,8 @@ export default class ServerHandlers {
     static async handleConsensusRequest(
         request: ConsensusRequest,
     ): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
-        let senderIdentity = request.sender
+        const response: RPCResponse = _.cloneDeep(emptyResponse)
+        const senderIdentity = request.sender
         //console.log("[SERVER] Received consensus request")
         /*console.log(
             "[SERVER] Peer identity information received: " +
@@ -492,7 +492,7 @@ export default class ServerHandlers {
         //console.log("we are in consensus mode")
 
         let authorized = false
-        let senderPublicKey = senderIdentity
+        const senderPublicKey = senderIdentity
 
         const { shard } = getSharedState
 
@@ -509,7 +509,7 @@ export default class ServerHandlers {
         const peerList = shard
 
         // Authorizing the sender
-        for (let peer of peerList) {
+        for (const peer of peerList) {
             if (peer.identity === senderPublicKey) {
                 authorized = true
                 break
@@ -550,18 +550,18 @@ export default class ServerHandlers {
         // Basic message handling logic
         // ...
         let extra: any
-        let require_reply = false
+        const requireReply = false
         const response = "Not Yet Implemented"
-        return { extra, require_reply, response }
+        return { extra, requireReply, response }
     }
 
     static async handleStorage(): Promise<any> {
         // Basic storage handling logic
         // ...
-        let extra = { storageState: "mocked" }
-        let require_reply = true
-        let response = {}
-        return { extra, require_reply, response }
+        const extra = { storageState: "mocked" }
+        const requireReply = true
+        const response = {}
+        return { extra, requireReply, response }
     }
 
     static async handleMempool(content: any): Promise<any> {
@@ -587,30 +587,30 @@ export default class ServerHandlers {
             extra:
                 (response ? "Mempool received by" : "Mempool not merged") +
                 ` by: ${ourId} at ${ourDate}`,
-            require_reply: false,
+            requireReply: false,
         }
     }
 
     // REVIEW Add a method to handle the reception of a peerlist
     static async handlePeerlist(content: Peer[]): Promise<any> {
         // Basic peerlist handling logic
-        let ourPeerList = PeerManager.getInstance().getPeers()
+        const ourPeerList = PeerManager.getInstance().getPeers()
         // Create a new peerlist with only unique peers (readable)
-        let mergedPeerList: Peer[] = []
+        const mergedPeerList: Peer[] = []
         for (const peer of content) {
             if (!mergedPeerList.includes(peer)) {
                 mergedPeerList.push(peer)
             }
         }
         // Order the peerlist by alphanumeric
-        let orderedPeerList = mergedPeerList.sort((a, b) =>
+        const orderedPeerList = mergedPeerList.sort((a, b) =>
             a.identity.localeCompare(b.identity),
         )
         // Set the peerlist to the peer manager and discard the current one
         PeerManager.getInstance().setPeers(orderedPeerList, true)
-        let extra = { peerlistState: "merged" }
-        let require_reply = false
-        let response = true
-        return { extra, require_reply, response }
+        const extra = { peerlistState: "merged" }
+        const requireReply = false
+        const response = true
+        return { extra, requireReply, response }
     }
 }

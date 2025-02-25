@@ -49,10 +49,10 @@ export default class Chain {
         return this.instance
     }
 
-    static async read(sql_query: string): Promise<any> {
+    static async read(sqlQuery: string): Promise<any> {
         try {
             const db = await Datasource.getInstance()
-            return await db.getDataSource().query(sql_query)
+            return await db.getDataSource().query(sqlQuery)
         } catch (err) {
             console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
             console.error(err)
@@ -60,10 +60,10 @@ export default class Chain {
         }
     }
 
-    static async write(sql_query: string) {
+    static async write(sqlQuery: string) {
         try {
             const db = await Datasource.getInstance()
-            return await db.getDataSource().query(sql_query)
+            return await db.getDataSource().query(sqlQuery)
         } catch (err) {
             console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
             console.error(err)
@@ -138,8 +138,8 @@ export default class Chain {
         start: "latest" | number,
         limit: number,
     ): Promise<Blocks[]> {
-        const MAX_LIMIT = 50
-        const calculatedLimit = Math.min(limit, MAX_LIMIT)
+        const maxLimit = 50
+        const calculatedLimit = Math.min(limit, maxLimit)
         const db = await Datasource.getInstance()
         const blockRepository = db.getDataSource().getRepository(Blocks)
 
@@ -191,7 +191,7 @@ export default class Chain {
         const db = await Datasource.getInstance()
         const blockRepository = db.getDataSource().getRepository(Blocks)
 
-        let genBlock = await blockRepository.findOneBy({ number: 0 })
+        const genBlock = await blockRepository.findOneBy({ number: 0 })
         console.log("[getGenesisBlock] genesis Block retrieved")
         //console.log(genBlock)
         return genBlock
@@ -250,8 +250,8 @@ export default class Chain {
         start: "latest" | number,
         limit: number,
     ): Promise<Transactions[]> {
-        const MAX_LIMIT = 100
-        const calculatedLimit = Math.min(limit, MAX_LIMIT)
+        const maxLimit = 100
+        const calculatedLimit = Math.min(limit, maxLimit)
         const db = await Datasource.getInstance()
         const transactionRepository = db
             .getDataSource()
@@ -275,16 +275,16 @@ export default class Chain {
         address: string,
     ): Promise<{ native: GlobalChangeRegistry }> {
         const db = await Datasource.getInstance()
-        const GCRRepository = db
+        const gcrRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
 
-        const GCRSearch = (await GCRRepository.findOneBy({
+        const gcrSearch = (await gcrRepository.findOneBy({
             publicKey: ILike(address),
         })) as GlobalChangeRegistry
 
         return {
-            native: GCRSearch,
+            native: gcrSearch,
         }
     }
 
@@ -298,7 +298,7 @@ export default class Chain {
     static async getLastBlock(): Promise<Blocks> {
         const db = await Datasource.getInstance()
         const blockRepository = db.getDataSource().getRepository(Blocks)
-        let lastBlock = await blockRepository
+        const lastBlock = await blockRepository
             .createQueryBuilder("block")
             .orderBy("block.number", "DESC")
             .getOne()
@@ -378,7 +378,7 @@ export default class Chain {
         block: Block,
         operations: Operation[] = [],
         position?: number,
-        cleanMempool: boolean = true,
+        cleanMempool = true,
     ): Promise<any> {
         const db = await Datasource.getInstance()
         const blockRepository = db.getDataSource().getRepository(Blocks)
@@ -395,7 +395,7 @@ export default class Chain {
         // Convert the transactions strings back to Transaction objects
         log.info("[insertBlock] Extracting transactions from block")
         // ! FIXME The below fails when a tx like a web2Request is inserted
-        let orderedTransactionsHashes = block.content.ordered_transactions
+        const orderedTransactionsHashes = block.content.ordered_transactions
         log.info(JSON.stringify(orderedTransactionsHashes))
         // Fetch transaction entities from the repository based on ordered transaction hashes
         let transactionEntities = await Promise.all(
@@ -411,14 +411,16 @@ export default class Chain {
                 log.info("[insertBlock] Transaction fetched: ")
                 log.info(rawTransaction)
                 return Transaction.fromRawTransaction(rawTransaction) */
-                let mempoolData = await Mempool.getMempool("insertBlock")
-                let tx = mempoolData.transactions.find(tx => tx.hash === txHash)
+                const mempoolData = await Mempool.getMempool("insertBlock")
+                const tx = mempoolData.transactions.find(
+                    tx => tx.hash === txHash,
+                )
                 return tx
             }),
         )
         transactionEntities = transactionEntities.filter(tx => tx !== undefined)
 
-        let newBlock = new Blocks()
+        const newBlock = new Blocks()
         log.info("[CHAIN] reading hash")
         log.info(JSON.stringify(transactionEntities))
         log.info("[CHAIN] bork")
@@ -474,7 +476,7 @@ export default class Chain {
                     position +
                     " does not exist: inserting a new block",
             )
-            let result = await blockRepository.save(newBlock)
+            const result = await blockRepository.save(newBlock)
             getSharedState.lastBlockNumber = block.number
             getSharedState.lastBlockHash = block.hash
 
@@ -489,7 +491,7 @@ export default class Chain {
 
             // REVIEW We then add the transactions to the Transactions repository
             for (let i = 0; i < transactionEntities.length; i++) {
-                let tx = transactionEntities[i]
+                const tx = transactionEntities[i]
                 await this.insertTransaction(tx)
             }
             // REVIEW And we clean the mempool
@@ -501,72 +503,70 @@ export default class Chain {
     }
 
     // INFO Generate the genesis block
-    static async generateGenesisBlock(genesis_data: any): Promise<Block> {
+    static async generateGenesisBlock(genesisData: any): Promise<Block> {
         // TODO Add a type for the block json
-        let genesis_block = new Block()
-        genesis_block.number = 0
+        const genesisBlock = new Block()
+        genesisBlock.number = 0
 
         // Define the genesis transaction
-        let genesis_tx = new Transaction()
-        genesis_tx.content.type = "genesis"
-        genesis_tx.blockNumber = 0
-        genesis_tx.content.to = {
+        const genesisTx = new Transaction()
+        genesisTx.content.type = "genesis"
+        genesisTx.blockNumber = 0
+        genesisTx.content.to = {
             type: "ed25519",
             data: new Uint8Array(Buffer.from("0x0", "hex")),
         }.data.toString()
-        genesis_tx.content.from = {
+        genesisTx.content.from = {
             type: "ed25519",
             data: new Uint8Array(Buffer.from("0x0", "hex")),
         }.data.toString()
 
-        genesis_tx.signature = {
+        genesisTx.signature = {
             type: "ed25519",
             data: new Uint8Array(Buffer.from("0x0", "hex")),
         }
-        genesis_tx.status = "confirmed"
+        genesisTx.status = "confirmed"
 
-        if (!genesis_data.timestamp) {
-            genesis_tx.content.timestamp = Date.now()
+        if (!genesisData.timestamp) {
+            genesisTx.content.timestamp = Date.now()
         } else {
-            genesis_tx.content.timestamp = parseInt(genesis_data.timestamp)
+            genesisTx.content.timestamp = parseInt(genesisData.timestamp)
         }
-        genesis_tx.content.amount = 0
-        genesis_tx.content.nonce = 0
-        genesis_tx.content.transaction_fee.network_fee = 0
-        genesis_tx.content.transaction_fee.rpc_fee = 0
-        genesis_tx.content.transaction_fee.additional_fee = 0
+        genesisTx.content.amount = 0
+        genesisTx.content.nonce = 0
+        genesisTx.content.transaction_fee.network_fee = 0
+        genesisTx.content.transaction_fee.rpc_fee = 0
+        genesisTx.content.transaction_fee.additional_fee = 0
 
-        genesis_tx.hash = Hashing.sha256(JSON.stringify(genesis_tx.content))
-        console.log(genesis_tx)
+        genesisTx.hash = Hashing.sha256(JSON.stringify(genesisTx.content))
+        console.log(genesisTx)
 
         // Build a block containing the genesis tx
-        genesis_block.content.timestamp = genesis_tx.content.timestamp
-        genesis_block.content.ordered_transactions.push(genesis_tx.hash)
-        genesis_block.content.previousHash = "0x0"
-        genesis_block.status = "confirmed"
-        genesis_block.proposer = "0x000000000000000000000000"
-        genesis_block.validation_data = {
+        genesisBlock.content.timestamp = genesisTx.content.timestamp
+        genesisBlock.content.ordered_transactions.push(genesisTx.hash)
+        genesisBlock.content.previousHash = "0x0"
+        genesisBlock.status = "confirmed"
+        genesisBlock.proposer = "0x000000000000000000000000"
+        genesisBlock.validation_data = {
             signatures: {
                 "0x000000000000000000000000": "0x0",
             },
         }
-        genesis_block.hash = Hashing.sha256(
-            JSON.stringify(genesis_block.content),
-        )
+        genesisBlock.hash = Hashing.sha256(JSON.stringify(genesisBlock.content))
 
-        let { commonValidatorSeed } = await getCommonValidatorSeed(
-            genesis_block as any,
+        const { commonValidatorSeed } = await getCommonValidatorSeed(
+            genesisBlock as any,
         )
-        genesis_block.next_proposer = commonValidatorSeed
+        genesisBlock.next_proposer = commonValidatorSeed
 
         // REVIEW Create a GCR Operation and execute it
-        let genesis_op: Operation = {
+        const genesisOp: Operation = {
             operator: "genesis",
             actor: "DEMOS Network",
-            params: genesis_data,
-            hash: genesis_block.hash,
+            params: genesisData,
+            hash: genesisBlock.hash,
             nonce: 0,
-            timestamp: genesis_block.content.timestamp,
+            timestamp: genesisBlock.content.timestamp,
             status: true,
             fees: {
                 network_fee: 0,
@@ -577,39 +577,35 @@ export default class Chain {
         // Insert the genesis block into the database
         //console.log(genesis_block)
         console.log("[GENESIS] Block generated, ready to insert it")
-        console.log(genesis_block)
+        console.log(genesisBlock)
         console.log("[GENESIS] inserting transaction into the mempool")
-        console.log(genesis_tx)
+        console.log(genesisTx)
         //await this.insertTransaction(genesis_tx)
-        await Mempool.addTransaction(genesis_tx) // ! FIXME This fails
+        await Mempool.addTransaction(genesisTx) // ! FIXME This fails
         console.log("[GENESIS] inserted transaction")
-        const genesisBlock = await this.insertBlock(
-            genesis_block,
-            [genesis_op],
-            0,
-        )
+        const result = await this.insertBlock(genesisBlock, [genesisOp], 0)
 
         // REVIEW Maybe this should be done prior to inserting the block
         // NOTE Assigning balances from the genesis block
-        var allBalances = genesis_data.balances
+        const allBalances = genesisData.balances
         for (let i = 0; i < allBalances.length; i++) {
-            let individualBalance = allBalances[i]
-            let address = individualBalance[0]
-            let balance = BigInt(individualBalance[1])
-            let _balanceSuccess = await manageNative.balance.setBalance(
+            const individualBalance = allBalances[i]
+            const address = individualBalance[0]
+            const balance = BigInt(individualBalance[1])
+            const balanceSuccess = await manageNative.balance.setBalance(
                 address,
                 balance,
             )
         }
 
         // Adding an empty encrypted transactions list
-        genesisBlock.content.encrypted_transactions = []
+        genesisBlock.content.encrypted_transactions_hashes = new Map()
         return await genesisBlock
     }
 
     // INFO Generates multiple genesis blocks from an array of genesis configurations and inserts them into the chain
-    static async generateGenesisBlocks(genesis_jsons: any[]): Promise<string> {
-        let compiledBlock = ""
+    static async generateGenesisBlocks(genesisJsons: any[]): Promise<string> {
+        const compiledBlock = ""
         // TODO
         return compiledBlock
     }
@@ -622,7 +618,7 @@ export default class Chain {
     // INFO Insert a transaction into the database
     static async insertTransaction(
         transaction: Transaction,
-        status: string = "confirmed",
+        status = "confirmed",
     ): Promise<boolean> {
         console.log(
             "[insertTransaction] Inserting transaction: " + transaction.hash,
@@ -653,7 +649,7 @@ export default class Chain {
         transactions: Transaction[],
     ): Promise<boolean> {
         let success = true
-        for (let tx of transactions) {
+        for (const tx of transactions) {
             success = await this.insertTransaction(tx)
             if (!success) {
                 return false
@@ -671,34 +667,34 @@ export default class Chain {
     ): Promise<GlobalChangeRegistry | GCRExtended | null> {
         if (type === 0) {
             const db = await Datasource.getInstance()
-            const GCRRepository = db
+            const gcrRepository = db
                 .getDataSource()
                 .getRepository(GlobalChangeRegistry)
 
-            return (await GCRRepository.findOneBy({
+            return (await gcrRepository.findOneBy({
                 publicKey: ILike(address),
             })) as GlobalChangeRegistry
         } else if (type === 1) {
             const db = await Datasource.getInstance()
-            const GCRRepository = db
+            const gcrRepository = db
                 .getDataSource()
                 .getRepository(GlobalChangeRegistry)
 
-            return (await GCRRepository.findOneBy({
+            return (await gcrRepository.findOneBy({
                 publicKey: ILike(address),
             })) as GlobalChangeRegistry
         }
         return null
     } // TODO Implement specific time-saving operations to get specific data (see the tables in the db)
     // INFO Getting the hash of the status at a given block
-    static async statusHashAt(block_number: number) {
+    static async statusHashAt(blockNumber: number) {
         const db = await Datasource.getInstance()
-        const GCRHashesRepository = db.getDataSource().getRepository(GCRHashes)
+        const gcrHashesRepository = db.getDataSource().getRepository(GCRHashes)
 
-        const GCRHashesSearch = await GCRHashesRepository.findOneBy({
-            block: block_number,
+        const gcrHashesSearch = await gcrHashesRepository.findOneBy({
+            block: blockNumber,
         })
-        return GCRHashesSearch ? GCRHashesSearch.hash : null
+        return gcrHashesSearch ? gcrHashesSearch.hash : null
     }
     // !SECTION Maintennance operations
 

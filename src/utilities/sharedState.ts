@@ -11,45 +11,47 @@ import { MempoolData } from "src/libs/blockchain/mempool"
 
 dotenv.config()
 
-export default class sharedState {
-    private static instance: sharedState
+export default class SharedState {
+    private static instance: SharedState
 
-    version: string = "0.8.0"
-    version_name: string = "Ungentle Movement"
+    // !SECTION Constants
+    prod = process.env.PROD == "true" || false
+    version = "0.8.0"
+    version_name = "Ungentle Movement"
 
-    block_time: number = 10 // TODO Get it from the genesis (or see Consensus module)
+    block_time = 10 // TODO Get it from the genesis (or see Consensus module)
 
-    currentTimestamp: number = 0
-    currentUTCTime: number = 0
-    lastTimestamp: number = 0
-    lastShardSeed: string = ""
+    currentTimestamp = 0
+    currentUTCTime = 0
+    lastTimestamp = 0
+    lastShardSeed = ""
 
     // NOTE See calibrateTime.ts for this value
-    timestampCorrection: number = 0
+    timestampCorrection = 0
 
     // SECTION shared state variables
     // Modes
-    inMainLoop: boolean = false
-    inConsensusLoop: boolean = false
-    inSyncLoop: boolean = false
-    inPeerRecheckLoop: boolean = false
-    inPeerGossip: boolean = false
-    startingConsensus: boolean = false
+    inMainLoop = false
+    inConsensusLoop = false
+    inSyncLoop = false
+    inPeerRecheckLoop = false
+    inPeerGossip = false
+    startingConsensus = false
 
     // Mempool
-    inGetMempool: boolean = false
-    inCleanMempool: boolean = false
+    inGetMempool = false
+    inCleanMempool = false
     // REVIEW Mempool caching
     mempoolCache: MempoolData | null = null
 
     // States
-    runMainLoop: boolean = true
-    mainLoopPaused: boolean = false
-    consensusMode: boolean = false
+    runMainLoop = true
+    mainLoopPaused = false
+    consensusMode = false
 
     // Sync
-    fastSyncCount: number = 0
-    _syncStatus: boolean = false
+    fastSyncCount = 0
+    _syncStatus = false
     set syncStatus(synced: boolean) {
         this._syncStatus = synced
         // INFO: Update our peer object when we get a new sync status
@@ -64,18 +66,18 @@ export default class sharedState {
         return this._syncStatus
     }
 
-    peerRoutineRunning: number = 0
+    peerRoutineRunning = 0
     // SECTION shared state variables
     shard: Peer[]
     lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard
     currentValidatorSeed: string
     identity: Identity
-    lastConsensusTime: number = 0
+    lastConsensusTime = 0
 
     // SECTION Consensus states
     candidateBlock: Block
-    lastBlockNumber: number = 0
-    _lastBlockHash: string = ""
+    lastBlockNumber = 0
+    _lastBlockHash = ""
 
     set lastBlockHash(value: string) {
         this._lastBlockHash = value
@@ -89,7 +91,7 @@ export default class sharedState {
 
     // SECTION Configuration
     rpcFee: number = parseInt(process.env.RPC_FEE_PERCENT) // TODO Implement // Percentage of the fee to be charged for the rpc
-    serverPort: number = 53550
+    serverPort = 53550
     identityFile: string = process.env.IDENTITY_FILE || ".demos_identity"
     peerListFile: string = process.env.PEER_LIST_FILE || "demos_peerlist.json"
     connectionString: string = "http://localhost:" + this.serverPort
@@ -104,19 +106,16 @@ export default class sharedState {
         this.identity = Identity.getInstance()
     }
 
-    public static getInstance(): sharedState {
-        if (!sharedState.instance) {
-            sharedState.instance = new sharedState()
+    public static getInstance(): SharedState {
+        if (!SharedState.instance) {
+            SharedState.instance = new SharedState()
         }
-        return sharedState.instance
+        return SharedState.instance
     }
 
     // Getter for the current UTC time (optional in ms, default in s integer)
     // It can use NTP or system time based on the ntp parameter, default is system time
-    public async getUTCTime(
-        ntp: boolean = false,
-        inSeconds: boolean = true,
-    ): Promise<boolean> {
+    public async getUTCTime(ntp = false, inSeconds = true): Promise<boolean> {
         try {
             if (ntp) {
                 this.currentUTCTime = await this.getNTPTime()
@@ -133,20 +132,20 @@ export default class sharedState {
 
     // Getter for the current NTP time
     public async getNTPTime(): Promise<number> {
-        let date = await new Promise<Date>((resolve, reject) => {
+        const date = await new Promise<Date>((resolve, reject) => {
             ntpClient.getNetworkTime("pool.ntp.org", 123, (err, date) => {
                 if (err) reject(err)
                 else resolve(date)
             })
         })
-        let timestamp = date.getTime()
+        const timestamp = date.getTime()
         return timestamp
     }
 
     // Getter for the current timestamp (optional in ms, default in s integer)
-    public getTimestamp(inSeconds: boolean = true): number {
+    public getTimestamp(inSeconds = true): number {
         this.currentTimestamp = Date.now() // REVIEW Maybe
-        let timestamp = inSeconds
+        const timestamp = inSeconds
             ? Math.floor(this.currentTimestamp / 1000)
             : this.currentTimestamp
         return timestamp
@@ -177,7 +176,7 @@ export default class sharedState {
 
     // NOTE This is a wrapper for many stats that are used by the node and the rpc server
     public async getInfo(): Promise<any> {
-        let info = {
+        const info = {
             version: this.version,
             identity: this.identity.ed25519.publicKey.toString("hex"),
             connectionString: await this.getConnectionString(),
@@ -191,7 +190,7 @@ export default class sharedState {
 // Export the getter object
 const sharedStateGetter = {
     get getSharedState() {
-        return sharedState.getInstance()
+        return SharedState.getInstance()
     },
 }
 export const { getSharedState } = sharedStateGetter

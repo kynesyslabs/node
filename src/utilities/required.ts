@@ -8,16 +8,16 @@
  * You can also set fatal to false to avoid throwing an error if the required value is not true.
  */
 
-export interface requiredOutcome {
+export interface RequiredOutcome {
     success: boolean
     message?: string
 }
 
 export default function required(
     value: any,
-    msg: string = "Missing required element",
-    fatal: boolean = true,
-): requiredOutcome {
+    msg = "Missing required element",
+    fatal = true,
+): RequiredOutcome {
     if (!value) {
         if (fatal) throw new Error("[REQUIRED] " + msg)
         return { success: false, message: msg }

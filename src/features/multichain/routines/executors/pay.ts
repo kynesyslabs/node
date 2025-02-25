@@ -44,9 +44,9 @@ export default async function handlePayOperation(
     console.log("[XMScript Parser] Non-EVM PAY")
 
     // ANCHOR Ripple
-    const rpc_url =
+    const rpcUrl =
         operation.rpc || chainProviders[operation.chain][operation.subchain]
-    if (!rpc_url) {
+    if (!rpcUrl) {
         return {
             result: "error",
             error: `RPC URL not found for ${operation.chain}.${operation.subchain}`,
@@ -55,31 +55,35 @@ export default async function handlePayOperation(
 
     switch (operation.chain) {
         case "xrpl":
-            result = await handleXRPLPay(rpc_url, operation)
+            result = await handleXRPLPay(rpcUrl, operation)
             break
 
         case "egld":
             result = await genericJsonRpcPay(
                 multichain.MULTIVERSX,
-                rpc_url,
+                rpcUrl,
                 operation,
             )
             break
 
         case "ibc":
-            result = await genericJsonRpcPay(multichain.IBC, rpc_url, operation)
+            result = await genericJsonRpcPay(
+                multichain.IBC,
+                rpcUrl,
+                operation,
+            )
             break
 
         case "solana":
             result = await genericJsonRpcPay(
                 multichain.SOLANA,
-                rpc_url,
+                rpcUrl,
                 operation,
             )
             break
 
         case "ton":
-            result = await genericJsonRpcPay(multichain.TON, rpc_url, operation)
+            result = await genericJsonRpcPay(multichain.TON, rpcUrl, operation)
             break
 
         default:
@@ -103,7 +107,7 @@ export default async function handlePayOperation(
  */
 async function genericJsonRpcPay(
     sdk: any,
-    rpc_url: string,
+    rpcUrl: string,
     operation: IOperation,
 ) {
     console.log([
@@ -112,7 +116,7 @@ async function genericJsonRpcPay(
     let instance: multichain.IBC
 
     try {
-        instance = await sdk.create(rpc_url)
+        instance = await sdk.create(rpcUrl)
     } catch (error) {
         return {
             result: "error",
@@ -154,8 +158,8 @@ async function handleEVMPay(chainID: number, operation: IOperation) {
     let evmInstance = multichain.EVM.getInstance(chainID)
 
     if (!evmInstance) {
-        const rpc_url = evmProviders[operation.chain][operation.subchain]
-        evmInstance = multichain.EVM.createInstance(chainID, rpc_url)
+        const rpcUrl = evmProviders[operation.chain][operation.subchain]
+        evmInstance = multichain.EVM.createInstance(chainID, rpcUrl)
         await evmInstance.connect()
     }
 
@@ -168,26 +172,26 @@ async function handleEVMPay(chainID: number, operation: IOperation) {
  * Executes a Ripple Pay operation and returns the result
  */
 async function handleXRPLPay(
-    rpc_url: string,
+    rpcUrl: string,
     operation: IOperation,
 ): Promise<TransactionResponse> {
     console.log(
         `[XMScript Parser] Ripple Pay: ${operation.chain} on ${operation.subchain}`,
     )
     console.log(
-        `[XMScript Parser] Ripple Pay: we will use ${rpc_url} to connect to ${operation.chain} on ${operation.subchain}`,
+        `[XMScript Parser] Ripple Pay: we will use ${rpcUrl} to connect to ${operation.chain} on ${operation.subchain}`,
     )
     console.log(
         "[XMScript Parser] Ripple Pay: trying to send the payload as a signed transaction...",
     ) // REVIEW Simulations?
-    let xrplInstance = new multichain.XRPL(rpc_url)
+    const xrplInstance = new multichain.XRPL(rpcUrl)
     const connected = await xrplInstance.connect()
     console.log("CONNECT RETURNED: ", connected)
 
     if (!connected) {
         return {
             result: "error",
-            error: `Failed to connect to the XRP network. RPC URL: "${rpc_url}" on ${operation.chain}.${operation.subchain} is not reachable`,
+            error: `Failed to connect to the XRP network. RPC URL: "${rpcUrl}" on ${operation.chain}.${operation.subchain} is not reachable`,
         }
     }
 

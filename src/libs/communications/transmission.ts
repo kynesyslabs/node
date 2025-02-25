@@ -42,10 +42,10 @@ export default class Transmission {
     }
 
     // INFO Initialize a message object with the given parameters
-    initialize(type, message, sender_public, receiver, data, extra) {
+    initialize(type, message, senderPublic, receiver, data, extra) {
         this.bundle.content.type = type
         this.bundle.content.message = message
-        this.bundle.content.sender = sender_public
+        this.bundle.content.sender = senderPublic
         this.bundle.content.receiver = receiver.identity
         this.bundle.content.data = data
         this.bundle.content.extra = extra

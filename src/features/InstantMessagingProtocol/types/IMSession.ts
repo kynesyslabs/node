@@ -1,5 +1,5 @@
 import Cryptography from "src/libs/crypto/cryptography"
-import { ForgeToHex, HexToForge } from "src/libs/crypto/forgeUtils"
+import { hexToForge } from "src/libs/crypto/forgeUtils"
 
 /* INFO - Structure
  *
@@ -15,7 +15,7 @@ import { ForgeToHex, HexToForge } from "src/libs/crypto/forgeUtils"
  */
 
 // INFO By declaring an identity and signing it, we can verify the identity of the partecipants in the IM Session
-export interface IMHandshake {
+export interface ImHandshake {
     firstPublicIdentity: string
     firstPublicIdentitySignature: string
     firstPublicIdentityLock: boolean
@@ -27,7 +27,7 @@ export interface IMHandshake {
 
 // INFO Each message in the IM Session is an IMMessage
 // NOTE Adding features to this interface allows for richer messages
-export interface IMMessage {
+export interface ImMessage {
     message: {
         data: any // REVIEW should this be a string?
         timestamp: number // Unix timestamp
@@ -39,7 +39,7 @@ export interface IMMessage {
 
 export default class IMSession {
     // An empty handshake is created when the session is created. Once the handshake is complete, the session is ready to be used
-    public handshake: IMHandshake = {
+    public handshake: ImHandshake = {
         firstPublicIdentity: "",
         firstPublicIdentitySignature: "",
         firstPublicIdentityLock: false,
@@ -48,10 +48,9 @@ export default class IMSession {
         secondPublicIdentityLock: false,
     }
 
-    private messages: IMMessage[] = [] // REVIEW should this be public?
+    private messages: ImMessage[] = [] // REVIEW should this be public?
 
     // Any IM Session must be created with two public identities
-    constructor() {}
 
     // INFO Handshake method
     public doHandshake(
@@ -111,10 +110,10 @@ export default class IMSession {
         }
 
         // We need to use the key as a forge primitive
-        let bufferKey = HexToForge(publicKey)
+        const bufferKey = hexToForge(publicKey)
 
         // Verify the signature of the key to ensure the identity of the sender
-        let verified = Cryptography.verify(publicKey, signedKey, bufferKey)
+        const verified = Cryptography.verify(publicKey, signedKey, bufferKey)
 
         // If the signature is not verified, the message is not added
         if (!verified) {
@@ -124,13 +123,13 @@ export default class IMSession {
 
     // INFO Method to add a message to the session by one of the partecipants
     public addMessage(
-        protoMessage: IMMessage,
+        protoMessage: ImMessage,
         publicKey: string,
         signedKey: string,
-    ): [boolean, IMMessage | string] {
+    ): [boolean, ImMessage | string] {
         // Checking if session is usable
         // (aka if the partecipant is partecipating in the session and if the signature is valid)
-        let doable = this.isSessionValid(publicKey, signedKey)
+        const doable = this.isSessionValid(publicKey, signedKey)
         if (!doable[0]) {
             return doable
         }
@@ -149,15 +148,15 @@ export default class IMSession {
         signedKey: string,
         since?: number,
         to?: number,
-    ): [boolean, IMMessage[] | string] {
+    ): [boolean, ImMessage[] | string] {
         // Checking if session is usable
         // (aka if the partecipant is partecipating in the session and if the signature is valid)
-        let doable = this.isSessionValid(publicKey, signedKey)
+        const doable = this.isSessionValid(publicKey, signedKey)
         if (!doable[0]) {
             return doable
         }
 
-        let totalMessages = this.messages.length
+        const totalMessages = this.messages.length
         // TODO
         if (!since) {
             since = 0
@@ -165,7 +164,7 @@ export default class IMSession {
         if (!to) {
             to = totalMessages
         }
-        let retrievedMessages = this.messages.slice(since, to)
+        const retrievedMessages = this.messages.slice(since, to)
         return [true, retrievedMessages]
     }
 }

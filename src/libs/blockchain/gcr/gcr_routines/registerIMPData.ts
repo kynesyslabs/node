@@ -1,26 +1,26 @@
 // INFO To safely transition from L2 (IMP) to L1 (DEMOS) it is necessary to have a wrapper that interprets the results
 import { Hash } from "crypto"
 // The outcome of this method can be feed to GCR.addToGCRIMPData
-import { IMMessage } from "src/features/InstantMessagingProtocol/types/IMSession"
+import { ImMessage } from "src/features/InstantMessagingProtocol/types/IMSession"
 import Cryptography from "src/libs/crypto/cryptography"
-import { ForgeToHex, HexToForge } from "src/libs/crypto/forgeUtils"
+import { forgeToHex, hexToForge } from "src/libs/crypto/forgeUtils"
 import Hashing from "src/libs/crypto/hashing"
 
 export default async function registerIMPData(
-    bundle: IMMessage[],
+    bundle: ImMessage[],
 ): Promise<[boolean, any]> {
-    let status = false
-    let message = "Error while registering IMP data"
+    const status = false
+    const message = "Error while registering IMP data"
     // REVIEW Verify each message
     for (let i = 0; i < bundle.length; i++) {
-        let message = bundle[i]
-        let {
+        const message = bundle[i]
+        const {
             message: { data, timestamp, isEncrypted, from },
             signature,
         } = message
         // Verify the signature
-        let hash = Hashing.sha256(JSON.stringify(message.message))
-        let verified = Cryptography.verify(
+        const hash = Hashing.sha256(JSON.stringify(message.message))
+        const verified = Cryptography.verify(
             hash,
             signature,
             message.message.from,

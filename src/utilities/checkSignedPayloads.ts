@@ -6,7 +6,7 @@ export default function checkSignedPayloads(
     signedPayloads: any[],
 ): boolean {
     // NOTE Sanity check on the signedPayloads length
-    let sanityCheck = required(
+    const sanityCheck = required(
         signedPayloads.length == num,
         "Invalid signedPayloads length",
     )

@@ -86,7 +86,7 @@ export async function consensusRoutine(): Promise<void> {
         // await synchronizeAndAverageTime(shard)
 
     // INFO: CONSENSUS ACTION 2: Merge and order the mempools
-    let tempMempool = await mergeAndOrderMempools(manager.shard.members)
+    const tempMempool = await mergeAndOrderMempools(manager.shard.members)
     log.info(
         "[consensusRoutine] mempool merged (aka ordered transactions)",
         true,
@@ -108,7 +108,7 @@ export async function consensusRoutine(): Promise<void> {
     // await applyGCRForNewBlock(mempool)
 
     // Applying the GCREdits and see if everything is consistent
-    let [successfulTxs, failedTxs] = await applyGCREditsFromMergedMempool(tempMempool)
+    const [successfulTxs, failedTxs] = await applyGCREditsFromMergedMempool(tempMempool)
     log.info(`[consensusRoutine] Successful Txs number: ${successfulTxs.length}`)
     log.info(`[consensusRoutine] Failed Txs number: ${failedTxs.length}`)
     if (failedTxs.length > 0) {
@@ -265,7 +265,7 @@ function isInShard(shard: Peer[]): boolean {
  */
 async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
     await fastSync(shard, "synchronizeAndAverageTime")
-    var averageTimestamp = await averageTimestamps(shard)
+    let averageTimestamp = await averageTimestamps(shard)
     // Strip the decimal part
     if (!Number.isInteger(averageTimestamp)) {
         log.warning(
@@ -307,14 +307,14 @@ async function applyGCREditsFromMergedMempool(
     mempool: Transaction[],
 ): Promise<[string[], string[]]> {
     // TODO Implement this
-    let successfulTxs: string[] = []
-    let failedTxs: string[] = []
+    const successfulTxs: string[] = []
+    const failedTxs: string[] = []
     // 1. Parse the mempool txs to get the GCREdits
     for (const tx of mempool) {
-        let txGCREdits = tx.content.gcr_edits
+        const txGCREdits = tx.content.gcr_edits
         // 2. Apply the GCREdits to the state for each tx
         for (const gcrEdit of txGCREdits) {
-            let applyResult = await HandleGCR.apply(gcrEdit, tx)
+            const applyResult = await HandleGCR.apply(gcrEdit, tx)
             if (applyResult.success) {
                 // If the apply succeeds, add the tx to the successfulTxs array
                 successfulTxs.push(tx.hash)
@@ -337,11 +337,11 @@ async function applyGCREditsFromMergedMempool(
 async function applyGCRForNewBlock(
     mempool: Transaction[],
 ): Promise<[string[], string[]]> {
-    let successfulTxs: string[] = []
-    let failedTxs: string[] = []
+    const successfulTxs: string[] = []
+    const failedTxs: string[] = []
     for (const tx of mempool) {
         const operation = await txToGCROperation(tx)
-        let success = await applyGCROperation(operation)
+        const success = await applyGCROperation(operation)
         if (success) {
             successfulTxs.push(tx.hash)
         } else {

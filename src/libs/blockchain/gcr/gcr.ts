@@ -52,7 +52,7 @@ import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistr
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { Validators } from "src/model/entities/Validators"
 import terminalkit from "terminal-kit"
-import { LessThanOrEqual } from "typeorm"
+import { LessThanOrEqual, Repository } from "typeorm"
 
 import {
     Operation,
@@ -63,13 +63,13 @@ import {
 import Chain from "../chain"
 import executeOperations, { Actor } from "../routines/executeOperations"
 import gcrStateSave from "./gcr_routines/gcrStateSaverHelper"
-import { GCR_Main } from "@/model/entities/GCRv2/GCR_Main"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 
 const term = terminalkit.terminal
 
 // ? This class should be deprecated: ensure that and remove it
 export class OperationsRegistry {
-    path: string = "data/operations.json"
+    path = "data/operations.json"
     operations: OperationRegistrySlot[] = []
 
     constructor() {
@@ -125,28 +125,28 @@ export default class GCR {
 
     static async getGCRStatusNativeTable() {
         const db = await Datasource.getInstance()
-        const GCRRepository = db
+        const gcrRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
-        return await GCRRepository.find()
+        return await gcrRepository.find()
     }
 
     static async getGCRStatusPropertiesTable(publicKey: string) {
         const db = await Datasource.getInstance()
-        const Repository = db
+        const gcrRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
-        const RepositorySearch = await Repository.findOneBy({ publicKey })
-        const GCRExtendedData = RepositorySearch?.extended
-        return GCRExtendedData
+        const gcrSearch = await gcrRepository.findOneBy({ publicKey })
+        const gcrExtendedData = gcrSearch?.extended
+        return gcrExtendedData
     }
 
     static async getGCRNativeFor(address: string) {
         const db = await Datasource.getInstance()
-        const GCRRepository = db
+        const gcrRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
-        return await GCRRepository.findOne({
+        return await gcrRepository.findOne({
             where: { publicKey: address },
         })
     }
@@ -156,26 +156,26 @@ export default class GCR {
         field: keyof GCRExtended,
     ) {
         const db = await Datasource.getInstance()
-        const Repository = db
+        const gcrRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
-        const RepositorySearch = await Repository.findOneBy({
+        const gcrSearch = await gcrRepository.findOneBy({
             publicKey: address,
         })
-        const GCRExtendedData = RepositorySearch?.extended
-        return GCRExtendedData[field]
+        const gcrExtendedData = gcrSearch?.extended
+        return gcrExtendedData[field]
     }
 
     // ANCHOR Balances retrieval
 
     static async getGCRNativeBalance(address: string) {
         const db = await Datasource.getInstance()
-        const GCRRepository = db
+        const gcrRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
 
         try {
-            const response = await GCRRepository.findOne({
+            const response = await gcrRepository.findOne({
                 select: ["details"],
                 where: { publicKey: address },
             })
@@ -186,38 +186,38 @@ export default class GCR {
         }
     }
 
-    static async getGCRTokenBalance(address: string, token_address: string) {
+    static async getGCRTokenBalance(address: string, tokenAddress: string) {
         const db = await Datasource.getInstance()
-        const Repository = db
+        const gcrRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
 
         try {
-            const RepositorySearch = await Repository.findOneBy({
+            const gcrSearch = await gcrRepository.findOneBy({
                 publicKey: address,
             })
-            const GCRExtendedData = RepositorySearch?.extended
-            return GCRExtendedData && GCRExtendedData.tokens
-                ? GCRExtendedData.tokens[token_address]
+            const gcrExtendedData = gcrSearch?.extended
+            return gcrExtendedData && gcrExtendedData.tokens
+                ? gcrExtendedData.tokens[tokenAddress]
                 : 0
         } catch (e) {
             console.error(e)
         }
     }
 
-    static async getGCRNFTBalance(address: string, nft_address: string) {
+    static async getGCRNFTBalance(address: string, nftAddress: string) {
         const db = await Datasource.getInstance()
-        const Repository = db
+        const gcrRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
 
         try {
-            const RepositorySearch = await Repository.findOneBy({
+            const gcrSearch = await gcrRepository.findOneBy({
                 publicKey: address,
             })
-            const GCRExtendedData = RepositorySearch?.extended
-            return GCRExtendedData && GCRExtendedData.nfts
-                ? GCRExtendedData.nfts[nft_address]
+            const gcrExtendedData = gcrSearch?.extended
+            return gcrExtendedData && gcrExtendedData.nfts
+                ? gcrExtendedData.nfts[nftAddress]
                 : 0
         } catch (e) {
             console.error(e)
@@ -236,16 +236,16 @@ export default class GCR {
     // TODO Maybe implement it at genesis or retrieve the genesis from chain?
     static async getGCRChainProperties(): Promise<any> {
         const db = await Datasource.getInstance()
-        const Repository = db
+        const gcrRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
 
         try {
-            const RepositorySearch = await Repository.findOneBy({
+            const gcrSearch = await gcrRepository.findOneBy({
                 publicKey: "DEMOS Network",
             })
-            const GCRExtendedData = RepositorySearch?.extended
-            return GCRExtendedData && GCRExtendedData.other
+            const gcrExtendedData = gcrSearch?.extended
+            return gcrExtendedData && gcrExtendedData.other
         } catch (e) {
             // Handle the error appropriately
             console.error("Error fetching GCR chain properties:", e)
@@ -348,14 +348,14 @@ export default class GCR {
 
     // !SECTION Getters
 
-    static async getGCRNativeStatus(address: string): Promise<GCR_Main> {
+    static async getGCRNativeStatus(address: string): Promise<GCRMain> {
         const db = await Datasource.getInstance()
-        const GCRMain = db.getDataSource().getRepository(GCR_Main)
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
 
-        let nativeStatus: GCR_Main
+        let nativeStatus: GCRMain
 
         try {
-            nativeStatus = await GCRMain.findOne({
+            nativeStatus = await gcrMainRepository.findOne({
                 where: { pubkey: address },
             })
 
@@ -388,15 +388,15 @@ export default class GCR {
 
     static async getGCRStatusProperties(address: string): Promise<GCRExtended> {
         const db = await Datasource.getInstance()
-        const Repository = db
+        const gcrRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
         let statusProperties: GCRExtended
         try {
-            const RepositorySearch = await Repository.findOneBy({
+            const gcrSearch = await gcrRepository.findOneBy({
                 publicKey: address,
             })
-            statusProperties = RepositorySearch?.extended
+            statusProperties = gcrSearch?.extended
         } catch (e) {
             statusProperties = null
         }
@@ -409,9 +409,9 @@ export default class GCR {
     // INFO Assigning a XM Transaction to an address
     static async addToGCRXM(
         address: string,
-        xm_hash: string,
+        xmHash: string,
     ): Promise<OperationResult> {
-        let result: OperationResult = {
+        const result: OperationResult = {
             success: false,
             message: "",
         }
@@ -419,13 +419,13 @@ export default class GCR {
             let statusProperties: GCRExtended
             // Getting the table
             const db = await Datasource.getInstance()
-            const Repository = db
+            const gcrRepository = db
                 .getDataSource()
                 .getRepository(GlobalChangeRegistry)
-            const RepositorySearch = await Repository.findOneBy({
+            const gcrSearch = await gcrRepository.findOneBy({
                 publicKey: address,
             })
-            statusProperties = RepositorySearch?.extended
+            statusProperties = gcrSearch?.extended
             // Or creating it if it doesn't exist
             if (!statusProperties) {
                 statusProperties = {
@@ -437,11 +437,11 @@ export default class GCR {
                 }
             }
             // Loading the object
-            let jStatusProperties = statusProperties.xm
-            jStatusProperties.push(xm_hash)
+            const jStatusProperties = statusProperties.xm
+            jStatusProperties.push(xmHash)
             // And updating it
             statusProperties.xm = jStatusProperties
-            await Repository.update(
+            await gcrRepository.update(
                 { publicKey: address },
                 { extended: statusProperties },
             )
@@ -457,9 +457,9 @@ export default class GCR {
     // INFO Assigning a Web2 Transaction to an address
     static async addToGCRWeb2(
         address: string,
-        web2_hash: string,
+        web2Hash: string,
     ): Promise<OperationResult> {
-        let result: OperationResult = {
+        const result: OperationResult = {
             success: false,
             message: "",
         }
@@ -467,13 +467,13 @@ export default class GCR {
             let statusProperties: any
             // Getting the table
             const db = await Datasource.getInstance()
-            const Repository = db
+            const gcrRepository = db
                 .getDataSource()
                 .getRepository(GlobalChangeRegistry)
-            const RepositorySearch = await Repository.findOneBy({
+            const gcrSearch = await gcrRepository.findOneBy({
                 publicKey: address,
             })
-            statusProperties = RepositorySearch?.extended
+            statusProperties = gcrSearch?.extended
             // Or creating it if it doesn't exist
             if (!statusProperties) {
                 statusProperties = {
@@ -485,11 +485,11 @@ export default class GCR {
                 }
             }
             // Loading the object
-            let jStatusProperties = JSON.parse(statusProperties.web2)
-            jStatusProperties.push(web2_hash)
+            const jStatusProperties = JSON.parse(statusProperties.web2)
+            jStatusProperties.push(web2Hash)
             // And updating it
             statusProperties.web2 = jStatusProperties
-            await Repository.update(
+            await gcrRepository.update(
                 { publicKey: address },
                 { extended: statusProperties },
             )
@@ -506,9 +506,9 @@ export default class GCR {
     // INFO Assigning a IMPData hash to an address or to the L1 itself
     static async addToGCRIMPData(
         address: string,
-        IMPDataHash: string,
+        impDataHash: string,
     ): Promise<OperationResult> {
-        let result: OperationResult = {
+        const result: OperationResult = {
             success: false,
             message: "",
         }
@@ -522,22 +522,22 @@ export default class GCR {
     static async setGCRNativeBalance(
         address: string,
         native: number,
-        tx_hash: string,
+        txHash: string,
     ): Promise<boolean> {
         const db = await Datasource.getInstance()
-        const GCRRepository = db
+        const gcrRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
 
         try {
-            let nativeStatus = await GCRRepository.findOne({
+            let nativeStatus = await gcrRepository.findOne({
                 select: ["details"],
                 where: { publicKey: address },
             })
 
             if (!nativeStatus) {
                 console.log("Creating new native status")
-                nativeStatus = GCRRepository.create({
+                nativeStatus = gcrRepository.create({
                     publicKey: address,
                     details: {
                         hash: "",
@@ -552,21 +552,21 @@ export default class GCR {
                         },
                     },
                 })
-                await GCRRepository.save(nativeStatus)
+                await gcrRepository.save(nativeStatus)
             }
 
             //console.log(nativeStatus.details.txs)
-            let tx_list = nativeStatus.details.content.txs || []
-            tx_list.push(tx_hash)
+            const txList = nativeStatus.details.content.txs || []
+            txList.push(txHash)
 
-            await GCRRepository.update(
+            await gcrRepository.update(
                 { publicKey: address },
                 {
                     details: {
                         hash: "",
                         content: {
                             balance: native,
-                            txs: tx_list,
+                            txs: txList,
                             nonce: nativeStatus.details.content.nonce,
                         },
                     },

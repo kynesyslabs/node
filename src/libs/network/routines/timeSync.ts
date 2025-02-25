@@ -31,15 +31,15 @@ export default async function getPeerTime(
     console.log(peer)
     console.log(id)
 
-    let node_call: NodeCall = {
+    const nodeCall: NodeCall = {
         message: "getPeerTime",
         data: null,
         muid: null,
     }
 
-    let response = await peer.call({
+    const response = await peer.call({
         method: "nodeCall",
-        params: [node_call],
+        params: [nodeCall],
     })
 
     // Response management

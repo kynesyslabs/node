@@ -10,7 +10,7 @@ import log from "src/utilities/logger"
 export default async function handleNativeRequest(
     content: INativePayload,
 ): Promise<RPCResponse> {
-    let operation = content.nativeOperation
+    const operation = content.nativeOperation
     log.info("[native] [handleNativeRequest] Received a native operation: " + operation)
     // TODO: Implement the logic for native operations
     return {

@@ -14,7 +14,7 @@ import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistr
 // TODO Expand the operation registry (if any) to support inlining of hashes into GCR states.
 
 // INFO Take the ordered list of operations from the consensus mechanism and hash it
-export default class gcrStateSave {
+export default class GCRStateSaverHelper {
     constructor() {}
 
     static getLastConsenusStateHash() {
@@ -25,13 +25,13 @@ export default class gcrStateSave {
     static async updateGCRTracker(publicKey: string) {
         // TODO Update the GCR tracker for a given public key
         const db = await Datasource.getInstance()
-        const GCRTrackerRepository = db
+        const gcrTrackerRepository = db
             .getDataSource()
             .getRepository(GCRTracker)
-        const GCRRepository = db
+        const gcrRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
-        const userData = await GCRRepository.findOne({
+        const userData = await gcrRepository.findOne({
             where: { publicKey: publicKey },
         })
         if (!userData) {
@@ -39,7 +39,7 @@ export default class gcrStateSave {
         }
         const hash = Hashing.sha256(JSON.stringify(userData))
         // Creating or updating the GCR tracker using upsert
-        await GCRTrackerRepository.upsert(
+        await gcrTrackerRepository.upsert(
             {
                 publicKey: publicKey,
                 hash: hash,

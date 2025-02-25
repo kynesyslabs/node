@@ -8,11 +8,11 @@ import _ from "lodash"
 export async function handleLoginResponse(
     content: BrowserRequest,
 ): Promise<RPCResponse> {
-    let response: RPCResponse = _.cloneDeep(emptyResponse)
-    let result = [true, ""]
-    let s_signature = content.data.signature // Must be a JSON or a string of a signature (as Uint8Array or {type: "Buffer", data: []})
-    let signature_conversion = normalizeWebBuffers(s_signature)
-    let signature = signature_conversion[0]
+    const response: RPCResponse = _.cloneDeep(emptyResponse)
+    const result = [true, ""]
+    const sSignature = content.data.signature // Must be a JSON or a string of a signature (as Uint8Array or {type: "Buffer", data: []})
+    const signatureConversion = normalizeWebBuffers(sSignature)
+    const signature = signatureConversion[0]
     if (!signature) {
         response.result = 400
         response.response = "error"
@@ -36,11 +36,11 @@ export async function handleLoginResponse(
 export async function handleLoginRequest(
     content: BrowserRequest,
 ): Promise<RPCResponse> {
-    let response: RPCResponse = _.cloneDeep(emptyResponse)
+    const response: RPCResponse = _.cloneDeep(emptyResponse)
     // A browser login request is the first step for a user to confirm their identity
     // The user will be prompted for a message to sign and their session is either created or updated
-    let address_requested = content.data.publicKey // Must be a JSON string of a publicKey
-    let session = Sessions.getInstance().newSession(address_requested)
+    const addressRequested = content.data.publicKey // Must be a JSON string of a publicKey
+    const session = Sessions.getInstance().newSession(addressRequested)
     if (!session) {
         response.result = 400
         response.response = "error"

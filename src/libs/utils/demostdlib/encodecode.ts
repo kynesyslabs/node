@@ -3,14 +3,14 @@
 export default class EncoDecode {
     constructor() {}
 
-    static serialize(data: any, format: string = "hex") {
+    static serialize(data: any, format = "hex") {
         if (typeof data === "string") {
             data = Buffer.from(data)
         }
         return data.toString(format)
     }
 
-    static deserialize(data: any, format: string = "hex") {
+    static deserialize(data: any, format = "hex") {
         if (typeof data === "string") {
             data = Buffer.from(data)
         }

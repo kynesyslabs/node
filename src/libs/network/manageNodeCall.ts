@@ -24,7 +24,7 @@ import getTransactions from "./routines/nodecalls/getTransactions"
 import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
-import { GCR_Main } from "@/model/entities/GCRv2/GCR_Main"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 
 export interface NodeCall {
     message: string
@@ -38,7 +38,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
     // ...
     let result: any // Storage for the result
     let nStat: any // Storage for the native status
-    let { data } = content
+    const { data } = content
     let response = _.cloneDeep(emptyResponse)
     response.result = 200 // Until proven otherwise
     response.require_reply = false // Until proven otherwise
@@ -163,7 +163,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             try {
                 nStat = (await GCR.getGCRNativeStatus(
                     data.address,
-                )) as GCR_Main
+                )) as GCRMain
                 response.response = nStat
             } catch (error) {
                 response.result = 400
@@ -179,7 +179,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             }
             nStat = (await GCR.getGCRNativeStatus(
                 data.address,
-            )) as GCR_Main
+            )) as GCRMain
             response.response = nStat.nonce
             break
         case "getPeerTime":
@@ -187,8 +187,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             break
 
         case "getAllTxs":
-            var response_object = await Chain.getAllTxs()
-            response.response = response_object
+            var responseObject = await Chain.getAllTxs()
+            response.response = responseObject
             break
 
         // REVIEW Implement native tables requests

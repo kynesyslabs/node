@@ -6,12 +6,12 @@ import log from "src/utilities/logger"
 
 export default async function getPeerlist(): Promise<Peer[]> {
     console.log("[SERVER] Executing getPeerlist")
-    // Getting our current peerlist
-    let socketized_response = PeerManager.getInstance().getPeers()
-    let response = [] as Peer[]
+    // Getting our current peerlist     
+    const socketizedResponse = PeerManager.getInstance().getPeers()
+    const response = [] as Peer[]
 
     // Filling response with peers without socket objects
-    for (let peer of socketized_response) {
+    for (const peer of socketizedResponse) {
         // peer.connection.socket = null // ? What is this
         response.push(peer)
 

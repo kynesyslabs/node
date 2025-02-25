@@ -32,13 +32,13 @@ export default class Wallet {
         this.identity = forge.pki.ed25519.generateKeyPair()
     }
 
-    dispatch(divided_input: string[]) {
+    dispatch(dividedInput: any) {
         // We need the modes (2 to 3 arguments)
-        if (divided_input.length < 2 || divided_input.length > 3) {
+        if (dividedInput.length < 2 || dividedInput.length > 3) {
             console.log("Please specify a command")
             return
         }
-        var mode = divided_input[1]
+        const mode = dividedInput[1]
         switch (mode.toLowerCase()) {
             default:
                 console.log(
@@ -47,7 +47,7 @@ export default class Wallet {
                 break
             // NOTE New wallet from scratch
             case "create":
-                if (divided_input.length > 2) {
+                if (dividedInput.length > 2) {
                     console.log("WARNING: Excess of arguments will be ignored")
                 }
                 try {
@@ -59,12 +59,12 @@ export default class Wallet {
                 break
             // NOTE Loading from an hex private key
             case "load":
-                if (divided_input.length < 3) {
+                if (dividedInput.length < 3) {
                     console.log("Please specify a private key in hex format")
                     break
                 }
                 try {
-                    this.load(divided_input[2])
+                    this.load(dividedInput[2])
                     console.log("Wallet loaded successfully")
                 } catch (e) {
                     console.log(e["message"])
@@ -73,11 +73,11 @@ export default class Wallet {
             // NOTE Saving the wallet to a file
             case "save": // Requires an input from the user or default to a file
                 var filename: string
-                if (divided_input.length < 3) {
+                if (dividedInput.length < 3) {
                     console.log("Using default file name: wallet.demos")
                     filename = "wallet.demos"
                 } else {
-                    filename = divided_input[2]
+                    filename = dividedInput[2]
                 }
                 // Writing to file
                 try {
@@ -89,18 +89,18 @@ export default class Wallet {
                 break
             // NOTE Reading from a file
             case "read": // Requires an input from the user or default to a file
-                var load_filename: string
-                if (divided_input.length < 3) {
+                var loadFilename: string
+                if (dividedInput.length < 3) {
                     console.log(
                         "Trying to read from default file name: wallet.demos",
                     )
-                    load_filename = "wallet.demos"
+                    loadFilename = "wallet.demos"
                 } else {
-                    load_filename = divided_input[2]
+                    loadFilename = dividedInput[2]
                 }
                 // Reading from file
                 try {
-                    this.read(load_filename)
+                    this.read(loadFilename)
                     console.log("Wallet read successfully")
                 } catch (e) {
                     console.log(e["message"])
@@ -125,8 +125,8 @@ export default class Wallet {
     }
 
     read(filename: string) {
-        let stringed_pk = fs.readFileSync(filename, "utf8")
-        this.identity.privateKey = Buffer.from(stringed_pk, "hex")
+        const stringedPk = fs.readFileSync(filename, "utf8")
+        this.identity.privateKey = Buffer.from(stringedPk, "hex")
         this.identity.publicKey = forge.pki.ed25519.publicKeyFromPrivateKey({
             privateKey: this.identity.privateKey,
         })

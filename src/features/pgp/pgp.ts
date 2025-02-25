@@ -8,8 +8,6 @@ class PGPClass {
 
     keyPair: any
 
-    constructor() {}
-
     public static getInstance(): PGPClass {
         if (!this.instance) {
             this.instance = new PGPClass()
@@ -34,11 +32,10 @@ class PGPClass {
     async generateNewPGPKeyPair(
         address: string,
         privKey: forge.pki.ed25519.BinaryBuffer,
-        signedAddress: forge.pki.ed25519.BinaryBuffer,
     ) {
         // TODO Improve security of verification
         // Convert the private key to a hex string
-        let privKeyHex = privKey.toString("hex")
+        const privKeyHex = privKey.toString("hex")
         this.keyPair = await openpgp.generateKey({
             type: "rsa", // Type of the key
             rsaBits: 4096, // RSA key size (defaults to 4096 bits)
@@ -51,5 +48,5 @@ class PGPClass {
     // TODO Add encryption/decryption of messages
 }
 
-const PGP = PGPClass.getInstance
-export default PGP
+const pgp = PGPClass.getInstance
+export default pgp
