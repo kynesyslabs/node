@@ -175,7 +175,7 @@ export default class Logger {
      */
     static only(message: string, padWithNewLines: boolean = false) {
         if (!this.LOG_ONLY_ENABLED) {
-            log.debug("⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹ [LOG ONLY ENABLED] ⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹")
+            Logger.debug("⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹ [LOG ONLY ENABLED] ⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹")
             this.LOG_ONLY_ENABLED = true
         }
 
