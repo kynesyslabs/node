@@ -5,7 +5,9 @@ import fs from "fs"
 import terminalkit from "terminal-kit"
 const term = terminalkit.terminal
 
+
 export default class Logger {
+    static LOG_ONLY_ENABLED = false
     static LOGS_DIR = "logs"
     static LOG_INFO_FILE = this.LOGS_DIR + "/info.log"
     static LOG_ERROR_FILE = this.LOGS_DIR + "/error.log"
@@ -24,8 +26,8 @@ export default class Logger {
 
     // Overide switch for logging to terminal
     static logToTerminal = {
-        peerGossip: true,
-        last_shard: true,
+        peerGossip: false,
+        last_shard: false,
     }
 
     static setLogsDir(port?: number) {
@@ -90,6 +92,10 @@ export default class Logger {
         logToTerminal = true,
         cleanFile = false,
     ) {
+        if (this.LOG_ONLY_ENABLED) {
+            return
+        }
+
         const logEntry = `[INFO] [${this.getTimestamp()}] ${message}\n`
         if (this.logToTerminal[logfile] && logToTerminal) {
             term.bold(logEntry.trim())
@@ -105,6 +111,10 @@ export default class Logger {
     }
 
     static info(message: string, logToTerminal = true) {
+        if (this.LOG_ONLY_ENABLED) {
+            return
+        }
+
         const logEntry = `[INFO] [${this.getTimestamp()}] ${message}\n`
         if (logToTerminal) {
             term.bold(logEntry.trim() + "\n")
@@ -122,6 +132,10 @@ export default class Logger {
     }
 
     static debug(message: string, logToTerminal = true) {
+        if (this.LOG_ONLY_ENABLED) {
+            return
+        }
+
         const logEntry = `[DEBUG] [${this.getTimestamp()}] ${message}\n`
         if (logToTerminal) {
             term.magenta(logEntry.trim() + "\n")
@@ -131,6 +145,10 @@ export default class Logger {
     }
 
     static warning(message: string, logToTerminal = true) {
+        if (this.LOG_ONLY_ENABLED) {
+            return
+        }
+
         const logEntry = `[WARNING] [${this.getTimestamp()}] ${message}\n`
         if (logToTerminal) {
             term.yellow(logEntry.trim() + "\n")
@@ -148,8 +166,26 @@ export default class Logger {
         this.writeAsync(this.LOG_CRITICAL_FILE, logEntry)
     }
 
-    // Utils
+    /**
+     * Prints given text and disables logging any other type
+     * of log (except ERROR and CRITICAL) after this call.
+     *
+     * @param message The text to print.
+     * @param padWithNewLines Whether to print a bunch of new lines after the text.
+     */
+    static only(message: string, padWithNewLines: boolean = false) {
+        if (!this.LOG_ONLY_ENABLED) {
+            Logger.debug("⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹ [LOG ONLY ENABLED] ⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹")
+            this.LOG_ONLY_ENABLED = true
+        }
 
+        const logEntry = `[ONLY] [${this.getTimestamp()}] ${message}\n`
+        term.bold.cyan(
+            logEntry.trim() + (padWithNewLines ? "\n\n\n\n\n" : "\n"),
+        )
+    }
+
+    // Utils
     static cleanLogs(withCustom = false) {
         const files = fs.readdirSync(this.LOGS_DIR)
         for (const file of files) {
