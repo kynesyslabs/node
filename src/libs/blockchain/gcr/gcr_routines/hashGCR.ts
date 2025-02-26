@@ -18,7 +18,7 @@ import { type NativeTablesHashes } from "@kynesyslabs/demosdk/types"
  * @param entity - The TypeORM entity to hash (must have a publicKey property)
  * @returns Promise<string> - SHA-256 hash of the table contents
  */
-export async function hashPublicKeyTable<T extends { publicKey: string }>(
+export async function hashPublicKeyTable<T extends { public_key: string }>(
     entity: EntityTarget<T>,
 ): Promise<string> {
     const db = await Datasource.getInstance()
@@ -26,7 +26,7 @@ export async function hashPublicKeyTable<T extends { publicKey: string }>(
 
     const records = await repository.find({
         order: {
-            publicKey: "ASC",
+            public_key: "ASC",
         } as unknown as FindOptionsOrder<T>,
     })
 
