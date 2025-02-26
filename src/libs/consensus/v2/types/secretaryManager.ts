@@ -13,6 +13,8 @@ import Cryptography from "src/libs/crypto/cryptography"
 
 // ANCHOR SecretaryManager
 export default class SecretaryManager {
+    private _greenlight_timeout: number = 15000
+    private _set_validator_phase_timeout: number = 10000
     private static instance: SecretaryManager
 
     // Internal variables
@@ -176,7 +178,7 @@ export default class SecretaryManager {
                     log.debug(
                         "[SECRETARY ROUTINE] Waiting for the set wait status",
                     )
-                    await Waiter.wait(Waiter.keys.SET_WAIT_STATUS)
+                    await Waiter.wait(Waiter.keys.SET_WAIT_STATUS, this._set_validator_phase_timeout)
                     log.debug(
                         "[SECRETARY ROUTINE] SET_WAIT_STATUS Lock resolved",
                     )
@@ -699,7 +701,7 @@ export default class SecretaryManager {
 
         const waiterKey =
             Waiter.keys.GREEN_LIGHT + this.ourValidatorPhase.currentPhase
-        const greenlight: Promise<null> = Waiter.wait(waiterKey, 15000)
+        const greenlight: Promise<null> = Waiter.wait(waiterKey, this._greenlight_timeout)
 
         const sendStatus = async () => {
             const request: RPCRequest = {

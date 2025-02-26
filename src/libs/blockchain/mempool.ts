@@ -20,10 +20,10 @@ import Hashing from "../crypto/hashing"
 import PeerManager from "../peer/PeerManager"
 import Block from "./block"
 // INFO Singleton Mempool class
-import Transaction from "./transaction"
 import { ISignature } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
+import Transaction from "./transaction"
 import { forgeToHex } from "../crypto/forgeUtils"
 
 // Bun does not support NodeJS.Timeout, so we need to create a type for it
@@ -165,7 +165,7 @@ export default class Mempool {
                     number: 0,
                     current: 1,
                     transactions: JSON.stringify([]),
-                    proposedBlock: null,
+                    proposedBlock: JSON.stringify({}),
                     timestamp: new Date().getTime(),
                 }
                 const db = await Datasource.getInstance()
@@ -227,8 +227,6 @@ export default class Mempool {
                 .getRepository(MempoolEntity)
 
             const mempool = await mempoolRepository.findBy({ current: 1 })
-            log.info("[MEMPOOL MANAGER] Mempool to be deleted:")
-            log.info(JSON.stringify(mempool))
 
             if (mempool.length > 0) {
                 await mempoolRepository.delete({ current: 1 })
@@ -279,11 +277,33 @@ export default class Mempool {
         await mempoolRepository.update({ current: 1 }, serializedMempool)
     }
 
-    public static async removeTransactionWithHash(hash: string): Promise<void> {
-        const mempool = await this.getMempool("Mempool.removeTransaction")
-        const index = mempool.transactions.findIndex(tx => tx.hash === hash)
-        if (index > -1) {
-            mempool.transactions.splice(index, 1)
+    public static async removeTransactionsWithHashes(
+        hashes: string[],
+    ): Promise<void> {
+        let mempool = await this.getMempool(
+            "Mempool.removeTransactionsWithHashes",
+        )
+
+        const hashSet = new Set(hashes)
+        mempool.transactions = mempool.transactions.filter(
+            tx => !hashSet.has(tx.hash),
+        )
+
+        const db = await Datasource.getInstance()
+        const mempoolRepository = db
+            .getDataSource()
+            .getRepository(MempoolEntity)
+
+        try {
+            await mempoolRepository.update(
+                { current: 1 },
+                { transactions: JSON.stringify(mempool.transactions) },
+            )
+        } catch (error) {
+            log.error(
+                "[MEMPOOL MANAGER] Error removing transactions from mempool:" +
+                    error.toString(),
+            )
         }
     }
 
@@ -375,6 +395,7 @@ export default class Mempool {
             log.info("[MEMPOOL VERIFICATION] The block numbers do not match")
             return false
         }
+
         // Checking all the txs one by one for the signatures
         for (let i = 0; i < mempool.transactions.length; i++) {
             const tx = mempool.transactions[i]
@@ -389,12 +410,14 @@ export default class Mempool {
             log.info(
                 "[MEMPOOL VERIFICATION] Calculated hash: " + calculatedHash,
             )
+
             if (calculatedHash != txHash) {
                 log.info(
                     "[X] [MEMPOOL VERIFICATION] The hash of the transaction is invalid",
                 )
                 return false
             }
+
             log.info(
                 "[+] [MEMPOOL VERIFICATION] The hash of the transaction is valid",
             )
