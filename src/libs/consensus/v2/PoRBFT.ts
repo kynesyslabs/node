@@ -85,13 +85,12 @@ export async function consensusRoutine(): Promise<void> {
         // NOTE: Instead of averaging the time, we'll use the secretary timestamp
         // await synchronizeAndAverageTime(shard)
 
-
-    // INFO: CONSENSUS ACTION 2: Merge and order the mempools
-    const tempMempool = await mergeAndOrderMempools(manager.shard.members)
-    log.info(
-        "[consensusRoutine] mempool merged (aka ordered transactions)",
-        true,
-    )
+        // INFO: CONSENSUS ACTION 2: Merge and order the mempools
+        const tempMempool = await mergeAndOrderMempools(manager.shard.members)
+        log.info(
+            "[consensusRoutine] mempool merged (aka ordered transactions)",
+            true,
+        )
         // INFO: CONSENSUS ACTION 3: Merge the peerlist (skipped)
         // REVIEW Merge the peerlist
         const peerlist = []
@@ -108,7 +107,7 @@ export async function consensusRoutine(): Promise<void> {
         // await applyGCRForNewBlock(mempool)
 
         // Applying the GCREdits and see if everything is consistent
-        let [successfulTxs, failedTxs] = await applyGCREditsFromMergedMempool(
+        const [successfulTxs, failedTxs] = await applyGCREditsFromMergedMempool(
             tempMempool,
         )
         if (failedTxs.length > 0) {
@@ -118,7 +117,7 @@ export async function consensusRoutine(): Promise<void> {
             // REVIEW Prune the mempool of the failed txs
             // NOTE The mempool should now be updated with only the successful txs
             for (const tx of failedTxs) {
-                await Mempool.removeTransactionsWithHashes([tx])
+                await Mempool.removeTransactionWithHash(tx)
             }
         }
         // REVIEW Re-merge the mempools anyway to get the correct mempool from the whole shard
