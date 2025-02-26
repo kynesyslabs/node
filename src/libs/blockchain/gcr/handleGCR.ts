@@ -25,7 +25,6 @@ import _ from "lodash"
 import { GCRSubnetsTxs } from "src/model/entities/GCRv2/GCRSubnetsTxs" // TODO Put this in the sdk when done
 import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
 import {
-    EncryptedTransaction,
     RPCResponse,
     Transaction,
 } from "@kynesyslabs/demosdk/types"
@@ -38,7 +37,6 @@ import ensureGCRForUser from "./gcr_routines/ensureGCRForUser"
 import gcrStateSave from "./gcr_routines/gcrStateSaverHelper"
 import { assignXM } from "./gcr_routines/assignXM"
 import { assignWeb2 } from "./gcr_routines/assignWeb2"
-import { txToGCROperation } from "./gcr_routines/txToGCROperation"
 import IdentityManager from "./gcr_routines/identityManager"
 import manageNative from "./gcr_routines/manageNative"
 import { GCREdit } from "@kynesyslabs/demosdk/types"
@@ -46,12 +44,10 @@ import log from "src/utilities/logger"
 
 // REVIEW Trying to use the new GCRv2
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
-import { GCRTracker } from "src/model/entities/GCRv2/GCR_Tracker"
+import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
-import { HandleNativeOperations } from "./gcr_routines/handleNativeOperations"
-import GCR from "./gcr"
-import sharedState, { getSharedState } from "@/utilities/sharedState"
+
 import { Repository } from "typeorm"
 
 export type GetNativeStatusOptions = {
