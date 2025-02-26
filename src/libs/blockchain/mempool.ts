@@ -227,8 +227,6 @@ export default class Mempool {
                 .getRepository(MempoolEntity)
 
             const mempool = await mempoolRepository.findBy({ current: 1 })
-            log.only("[MEMPOOL MANAGER] Mempool to be deleted:")
-            log.only(JSON.stringify(mempool))
 
             if (mempool.length > 0) {
                 await mempoolRepository.delete({ current: 1 })
@@ -398,7 +396,6 @@ export default class Mempool {
             return false
         }
 
-        log.only("incoming mempool: " + JSON.stringify(mempool))
         // Checking all the txs one by one for the signatures
         for (let i = 0; i < mempool.transactions.length; i++) {
             let tx = mempool.transactions[i]
@@ -414,16 +411,10 @@ export default class Mempool {
                 "[MEMPOOL VERIFICATION] Calculated hash: " + calculated_hash,
             )
 
-            log.only("expected hash: " + tx_hash)
-            log.only("calculated hash: " + calculated_hash)
-            log.only("is coherent: " + (calculated_hash == tx_hash))
-
             if (calculated_hash != tx_hash) {
                 log.info(
                     "[X] [MEMPOOL VERIFICATION] The hash of the transaction is invalid",
                 )
-                log.only("tx content: " + JSON.stringify(tx.content))
-                process.exit(1)
                 return false
             }
 
