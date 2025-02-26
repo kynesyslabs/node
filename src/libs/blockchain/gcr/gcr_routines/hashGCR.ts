@@ -69,7 +69,8 @@ export async function hashSubnetsTxsTable(): Promise<string> {
  */
 export default async function hashGCRTables(): Promise<NativeTablesHashes> {
     // Get all individual hashes
-    const gcrHash = await hashPublicKeyTable(GCRTracker) // Tracking the GCR hashes as they are hashes of the GCR itself
+    // REVIEW: The below was GCRTracker without "", which was causing an error as is not an entity
+    const gcrHash = await hashPublicKeyTable("gcr_tracker") // Tracking the GCR hashes as they are hashes of the GCR itself
     const subnetsTxsHash = await hashSubnetsTxsTable()
     return {
         native_gcr: gcrHash,
