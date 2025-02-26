@@ -5,7 +5,7 @@ import forge from "node-forge"
 import { hashing } from "../crypto"
 import Cryptography from "../crypto/cryptography"
 
-export default class fungibleToken {
+export default class FungibleToken {
     public metadata: {
         tokenType: string
         tokenName: string
@@ -26,8 +26,8 @@ export default class fungibleToken {
     public deploymentSignature: string
 
     // TODO We can either create a new token or load an existing one
-    static async getToken(tokenAddress: string): Promise<fungibleToken> {
-        let token = new fungibleToken()
+    static async getToken(tokenAddress: string): Promise<FungibleToken> {
+        const token = new FungibleToken()
         // TODO Load the token from the gcr table if any and give back an instance of this class
         return token
     }
@@ -38,8 +38,8 @@ export default class fungibleToken {
         symbol: string,
         decimals: number,
         creator: string, // Hex address
-    ): Promise<fungibleToken> {
-        let token = new fungibleToken()
+    ): Promise<FungibleToken> {
+        const token = new FungibleToken()
         token.metadata.tokenName = tokenName
         token.metadata.symbol = symbol
         token.metadata.decimals = decimals
@@ -51,16 +51,17 @@ export default class fungibleToken {
     }
 
     // Injection support here
+    // eslint-disable-next-line @typescript-eslint/ban-types
     private _transfer: Function = null
 
-    constructor() {}
 
     // SECTION Smart contract logic hooks
 
     // INFO Calling this method is the right way to decide your transfer logic.
     // Implement anything as _transfer and it will be executed prior to the actual transfer.
-    hookTransfer(_transfer: Function) {
-        this._transfer = _transfer
+    // eslint-disable-next-line @typescript-eslint/naming-convention, @typescript-eslint/ban-types
+    hookTransfer(transfer: Function) {
+        this._transfer = transfer
     }
 
     // SECTION Smart contract logic endpoints
@@ -80,10 +81,10 @@ export default class fungibleToken {
     async deploy(deploymentKey: forge.pki.ed25519.NativeBuffer): Promise<void> {
         // Closing the token metadata
         this.metadata.deployment_timestamp = Date.now()
-        let hashedTokenMetadata = hashing.sha256(JSON.stringify(this.metadata)) // NOTE This is also the token address
+        const hashedTokenMetadata = hashing.sha256(JSON.stringify(this.metadata)) // NOTE This is also the token address
         this.address = hashedTokenMetadata
         // Signing the token metadata
-        let signature = Cryptography.sign(
+        const signature = Cryptography.sign(
             hashedTokenMetadata,
             deploymentKey,
         ).toString("hex")

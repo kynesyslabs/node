@@ -24,7 +24,7 @@ export async function createBlock(
         return getSharedState.candidateBlock
     }
     // Creating the block
-    var block = new Block()
+    const block = new Block()
     block.content.ordered_transactions = orderedTransactions.map(
         transaction => transaction.hash,
     )
@@ -37,7 +37,7 @@ export async function createBlock(
     block.content.timestamp = getSharedState.lastConsensusTime
     block.hash = Hashing.sha256(JSON.stringify(block.content))
     // Signing the block and adding the signature to the block validation data
-    let blockSignature = Cryptography.sign(
+    const blockSignature = Cryptography.sign(
         block.hash,
         getSharedState.identity.ed25519.privateKey,
     )
@@ -54,7 +54,7 @@ export async function createBlock(
     /* NOTE - The block timestamp is the average timestamp of the shard 
     see averageTimestamp.ts for more details */
 
-    let { commonValidatorSeed: nextProposer } = await getCommonValidatorSeed(
+    const { commonValidatorSeed: nextProposer } = await getCommonValidatorSeed(
         block as any,
     )
     log.debug("nextProposer: " + nextProposer)
@@ -67,7 +67,7 @@ export async function createBlock(
 // NOTE Proxy for hashGCRTables
 export async function hashNativeTables(): Promise<NativeTablesHashes> {
     // TODO
-    let hashes: NativeTablesHashes = await hashGCRTables()
+    const hashes: NativeTablesHashes = await hashGCRTables()
     // TODO
     return hashes
 }

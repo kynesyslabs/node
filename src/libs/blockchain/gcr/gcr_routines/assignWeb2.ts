@@ -4,6 +4,6 @@ import GCR from "../gcr"
 export async function assignWeb2(
     operation: Operation,
 ): Promise<OperationResult> {
-    let { address, web2_hash } = operation.params
-    return await GCR.addToGCRWeb2(address, web2_hash)
+    const { address, web2Hash } = operation.params
+    return await GCR.addToGCRWeb2(address, web2Hash)
 }

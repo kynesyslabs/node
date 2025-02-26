@@ -13,6 +13,7 @@ export class ProxyFactory {
      */
     static createProxy(dahrSessionId: string): Proxy {
         if (this._proxyInstances.has(dahrSessionId)) {
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             return this._proxyInstances.get(dahrSessionId)!
         }
 

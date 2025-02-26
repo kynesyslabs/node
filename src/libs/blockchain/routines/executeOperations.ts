@@ -50,22 +50,22 @@ export default async function executeOperations(
 ): Promise<Map<string, Actor>> {
     console.log("Executing operations")
     //console.log("executeOperations", operations)
-    let results = new Map<string, Actor>()
+    const results = new Map<string, Actor>()
     // First of all we divide the operations into groups of addresses
     let groups: Map<string, Operation[]> = new Map()
-    let sorted_groups = groups
+    const sortedGroups = groups
     groups = divideByAddress(operations)
     // Then for each group we sort it by fees
     for (let group of groups.values()) {
-        let address = group[0].actor // Each group should have the same actor
+        const address = group[0].actor // Each group should have the same actor
         group = sortByNumeric(group, "fees")
-        sorted_groups.set(address, group)
+        sortedGroups.set(address, group)
     }
     // For every group we execute the operations and set the results
-    for (let group of sorted_groups.values()) {
-        let address = group[0].actor
-        let group_results = await executeSequence(group, block)
-        results.set(address, group_results)
+    for (const group of sortedGroups.values()) {
+        const address = group[0].actor
+        const groupResults = await executeSequence(group, block)
+        results.set(address, groupResults)
     }
     // Returns the complex result
     return results
@@ -78,12 +78,12 @@ async function executeSequence(
     operations: Operation[],
     block: Block = null,
 ): Promise<Actor> {
-    let results: Actor = {
+    const results: Actor = {
         operations: new Map<Operation, OperationResult>(),
     }
     // Execute the operations sequentially
     for (let i = 0; i < operations.length; i++) {
-        let hash = operations[i].hash
+        const hash = operations[i].hash
         let error = "no error occurred"
         let valid = true // Until proven otherwise
         let result: OperationResult = {
@@ -156,7 +156,7 @@ function sortByNumeric(
 ): Operation[] {
     let sorted: Operation[] = []
     for (let i = 0; i < list.length; i++) {
-        let operation = list[i]
+        const operation = list[i]
         // Creating the first element if is not present yet
         if (sorted.length === 0) {
             sorted = [operation]
@@ -178,9 +178,9 @@ function sortByNumeric(
 
 // INFO Given a list of operations, divide them in a map of addresses to their corresponding operations
 function divideByAddress(operations: Operation[]): Map<string, Operation[]> {
-    let divided: Map<string, Operation[]> = new Map()
+    const divided: Map<string, Operation[]> = new Map()
     for (let i = 0; i < operations.length; i++) {
-        let address = operations[i].actor
+        const address = operations[i].actor
         if (!divided.has(address)) {
             divided.set(address, [operations[i]])
         } else {

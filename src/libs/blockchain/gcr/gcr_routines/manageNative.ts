@@ -1,4 +1,4 @@
-import { GCR_Main } from "@/model/entities/GCRv2/GCR_Main"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import Datasource from "src/model/datasource"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
@@ -14,10 +14,10 @@ import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistr
 // SECTION Balance management
 
 // INFO Get the balance of a user
-async function balance(PublicKey: string): Promise<bigint> {
+async function balance(publicKey: string): Promise<bigint> {
     const db = await Datasource.getInstance()
-    const GCRRepository = db.getDataSource().getRepository(GCR_Main)
-    const status = await GCRRepository.findOneBy({ pubkey: PublicKey })
+    const gcrRepository = db.getDataSource().getRepository(GCRMain)
+    const status = await gcrRepository.findOneBy({ pubkey: publicKey })
     return status.balance
 }
 
@@ -26,7 +26,7 @@ async function setBalance(
     publicKey: string,
     balance: bigint,
 ): Promise<[boolean, string]> {
-    const rawData: GCR_Main = {
+    const rawData: GCRMain = {
         assignedTxs: [],
         identities: {
             xm: new Map(),
@@ -38,19 +38,19 @@ async function setBalance(
     }
 
     const db = await Datasource.getInstance()
-    const GCRRepository = db.getDataSource().getRepository(GCR_Main)
-    let GCRSearch = await GCRRepository.findOneBy({ pubkey: publicKey })
+    const gcrRepository = db.getDataSource().getRepository(GCRMain)
+    let gcrSearch = await gcrRepository.findOneBy({ pubkey: publicKey })
 
-    if (!GCRSearch) {
-        GCRSearch = rawData
+    if (!gcrSearch) {
+        gcrSearch = rawData
     }
 
     // Keeping the things we need and just updating the balance
-    let GCRUpdate = GCRSearch
-    GCRUpdate.balance = BigInt(balance)
+    const gcrUpdate = gcrSearch
+    gcrUpdate.balance = BigInt(balance)
 
     // Saving the GCR
-    await GCRRepository.save(GCRUpdate)
+    await gcrRepository.save(gcrUpdate)
     return [true, ""]
 }
 
@@ -88,23 +88,23 @@ async function removeBalance(
 
 // INFO Transfer a balance from one user to another
 async function transferBalance(
-    address_from: string,
-    address_to: string,
+    addressFrom: string,
+    addressTo: string,
     amount: bigint,
 ): Promise<[boolean, string]> {
     // Remove the amount from the sender
-    let success = await removeBalance(address_from, amount)
+    const success = await removeBalance(addressFrom, amount)
     if (!success[0]) {
         return [false, success[1]]
     }
     // Add the amount to the receiver
-    await addBalance(address_to, amount)
+    await addBalance(addressTo, amount)
     return [true, ""]
 }
 
 // !SECTION balance management
 
-let manageNative = {
+const manageNative = {
     balance: {
         transferBalance: transferBalance,
         addBalance: addBalance,

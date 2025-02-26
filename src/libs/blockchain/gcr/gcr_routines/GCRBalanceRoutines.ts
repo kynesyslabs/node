@@ -1,23 +1,23 @@
 import { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Repository } from "typeorm"
-import { GCR_Main } from "src/model/entities/GCRv2/GCR_Main"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import HandleGCR, { GCRResult } from "src/libs/blockchain/gcr/handleGCR"
-import { ForgeToHex } from "@/libs/crypto/forgeUtils"
+import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import { getSharedState } from "@/utilities/sharedState"
 
 export default class GCRBalanceRoutines {
     static async apply(
         editOperation: GCREdit,
-        GCRMainRepository: Repository<GCR_Main>,
+        gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
         if (editOperation.type !== "balance") {
             return { success: false, message: "Invalid GCREdit type" }
         }
 
-        let editOperationAccount =
+        const editOperationAccount =
             typeof editOperation.account !== "string"
-                ? ForgeToHex(editOperation.account)
+                ? forgeToHex(editOperation.account)
                 : editOperation.account
 
         // Safeguarding the operation by checking if the amount is positive
@@ -39,7 +39,7 @@ export default class GCRBalanceRoutines {
         }
 
         // Getting the account GCR
-        var accountGCR = await GCRMainRepository.findOneBy({
+        let accountGCR = await gcrMainRepository.findOneBy({
             pubkey: editOperationAccount,
         })
 
@@ -48,7 +48,7 @@ export default class GCRBalanceRoutines {
         }
 
         // Getting the actual balance to apply the operation
-        var actualBalance = accountGCR.balance
+        const actualBalance = accountGCR.balance
 
         if (editOperation.operation === "add") {
             accountGCR.balance =
@@ -75,7 +75,7 @@ export default class GCRBalanceRoutines {
 
         // Saving the account GCR if not simulating
         if (!simulate) {
-            await GCRMainRepository.save(accountGCR)
+            await gcrMainRepository.save(accountGCR)
         }
 
         return { success: true, message: "Balance applied" }

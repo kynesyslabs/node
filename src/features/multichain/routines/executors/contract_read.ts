@@ -12,8 +12,8 @@ export default async function handleContractRead(
     // and sending back the chain response as it is
     if (operation.is_evm) {
         // console.log(evmProviders)
-        let providerUrl = evmProviders[operation.chain][operation.subchain] // REVIEW Error handling
-        let evmInstance = multichain.EVM.createInstance(chainID, providerUrl) // REVIEW We should be connected
+        const providerUrl = evmProviders[operation.chain][operation.subchain] // REVIEW Error handling
+        const evmInstance = multichain.EVM.createInstance(chainID, providerUrl) // REVIEW We should be connected
         console.log(
             `[XM Method] operation.chain: ${operation.chain}, operation.subchain: ${operation.subchain}`,
         )
@@ -22,7 +22,7 @@ export default async function handleContractRead(
         console.log("params: \n")
         console.log(operation.task.params)
         console.log("\n end params: \n")
-        let params = operation.task.params // REVIEW Error handling
+        const params = operation.task.params // REVIEW Error handling
         console.log("parsed params: " + params)
         if (!params.address) {
             console.log("Missing address")
@@ -47,7 +47,7 @@ export default async function handleContractRead(
         }
         // Getting a contract instance using the evm library
         console.log("getting contract instance")
-        let contractInstance = await evmInstance.getContractInstance(
+        const contractInstance = await evmInstance.getContractInstance(
             params.address,
             params.abi,
         )

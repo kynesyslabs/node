@@ -19,7 +19,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 
-const MAX_GOSSIP_PEERS = 10
+const maxGossipPeers = 10
 
 /**
  * Initiates the peer gossip process.
@@ -138,8 +138,8 @@ async function mergePeerlists(peerlists: Peer[][]): Promise<boolean> {
     // let mergedPeerlist: Peer[] = []
     const peerMap = new Map<string, Peer>()
 
-    for (let peerlist of peerlists) {
-        for (let peer of peerlist) {
+    for (const peerlist of peerlists) {
+        for (const peer of peerlist) {
             if (!peer) {
                 log.warning("[peerGossip] Peer is undefined, skipping")
                 continue
@@ -184,10 +184,10 @@ async function mergePeerlists(peerlists: Peer[][]): Promise<boolean> {
  * @returns {Peer[]} - Selected peers for gossip.
  */
 function selectPeersForGossip(peers: Peer[]): Peer[] {
-    if (peers.length <= MAX_GOSSIP_PEERS) {
+    if (peers.length <= maxGossipPeers) {
         log.custom(
             "peerGossip",
-            `Less than ${MAX_GOSSIP_PEERS} peers, gossiping with all of them`,
+            `Less than ${maxGossipPeers} peers, gossiping with all of them`,
             true,
         )
         return peers
@@ -195,10 +195,10 @@ function selectPeersForGossip(peers: Peer[]): Peer[] {
 
     log.custom(
         "peerGossip",
-        `Selecting ${MAX_GOSSIP_PEERS} random peers`,
+        `Selecting ${maxGossipPeers} random peers`,
         false,
     )
-    return shuffleArray(peers).slice(0, MAX_GOSSIP_PEERS)
+    return shuffleArray(peers).slice(0, maxGossipPeers)
 }
 
 /**
@@ -226,8 +226,8 @@ async function requestPeerlistHashes(peers: Peer[]): Promise<RPCResponse[]> {
         "Sending peerlist hash request to selected peers",
         false,
     )
-    let promises = []
-    for (let peer of peers) {
+    const promises = []
+    for (const peer of peers) {
         if (!peer.identity) {
             log.custom("peerGossip", "Peer has no identity, skipping", false)
             log.warning(`[peerGossip] Peer has no identity: ${peer}`)

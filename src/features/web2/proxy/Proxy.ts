@@ -66,7 +66,7 @@ export class Proxy {
         // Only initialize the proxy server if it's not already running
         if (!this._isInitialized) {
             try {
-                await this._startProxyServer(targetUrl)
+                await this.startProxyServer(targetUrl)
                 this._isInitialized = true
             } catch (error) {
                 console.error("[Web2API] Error starting proxy server:", error)
@@ -76,8 +76,8 @@ export class Proxy {
 
         return new Promise((resolve, reject) => {
             const { targetProtocol, targetHostname, targetPort } =
-                this._parseUrl(targetUrl)
-            const headers = this._createHeaders(
+                this.parseUrl(targetUrl)
+            const headers = this.createHeaders(
                 targetHostname,
                 targetPort,
                 targetMethod,
@@ -192,21 +192,21 @@ export class Proxy {
         throw new Error("Unable to determine proxy server address")
     }
 
-    private _startProxyServer(targetUrl: string): Promise<void> {
+    private startProxyServer(targetUrl: string): Promise<void> {
         // Don't create a new server if one is already running
         if (this._server) {
             return Promise.resolve()
         }
 
         return new Promise((resolve, reject) => {
-            this._createNewServer(targetUrl).then(resolve).catch(reject)
+            this.createNewServer(targetUrl).then(resolve).catch(reject)
         })
     }
 
-    private _createNewServer(targetUrl: string): Promise<void> {
+    private createNewServer(targetUrl: string): Promise<void> {
         return new Promise((resolve, reject) => {
             const { targetProtocol, targetHostname, targetPort } =
-                this._parseUrl(targetUrl)
+                this.parseUrl(targetUrl)
 
             // Create the proxy server
             const proxyServer = httpProxy.createProxyServer({
@@ -242,7 +242,7 @@ export class Proxy {
 
             // Create the main HTTP server
             this._server = http.createServer((req, res) => {
-                if (!this._isAuthorizedRequest(req)) {
+                if (!this.isAuthorizedRequest(req)) {
                     res.writeHead(403)
                     res.end("Unauthorized")
                     return
@@ -252,7 +252,7 @@ export class Proxy {
 
             // Handle HTTPS CONNECT
             this._server.on("connect", (req, clientSocket, head) => {
-                if (!this._isAuthorizedRequest(req)) {
+                if (!this.isAuthorizedRequest(req)) {
                     clientSocket.write(
                         "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nUnauthorized request",
                     )
@@ -318,7 +318,7 @@ export class Proxy {
         })
     }
 
-    private _isAuthorizedRequest(req: http.IncomingMessage): boolean {
+    private isAuthorizedRequest(req: http.IncomingMessage): boolean {
         const sessionIdHeader = req.headers["x-dahr-session-id"]
         const url = req.url || ""
         const method = req.method as EnumWeb2Methods
@@ -344,7 +344,7 @@ export class Proxy {
         return true
     }
 
-    private _parseUrl(url: string) {
+    private parseUrl(url: string) {
         const parsedUrl = new URL(url)
         return {
             targetProtocol: parsedUrl.protocol,
@@ -359,7 +359,7 @@ export class Proxy {
         }
     }
 
-    private _createHeaders(
+    private createHeaders(
         targetHostname: string,
         targetPort: number,
         targetMethod: EnumWeb2Methods,
@@ -396,14 +396,14 @@ export class Proxy {
         }
 
         // Add Authorization if required
-        if (this._requiresAuthorization(targetUrl, targetMethod)) {
+        if (this.requiresAuthorization(targetUrl, targetMethod)) {
             headers["Authorization"] = `Bearer ${targetAuthorization}`
         }
 
         return headers
     }
 
-    private _requiresAuthorization(
+    private requiresAuthorization(
         url: string,
         method: EnumWeb2Methods,
     ): boolean {

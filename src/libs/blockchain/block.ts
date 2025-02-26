@@ -53,7 +53,7 @@ export default class Block implements BlockType {
 
     // INFO The header is the smallest placeholder to verify a block health
     getHeader(): any {
-        let header = {
+        const header = {
             number: this.number,
             hash: this.hash,
             status: this.status,

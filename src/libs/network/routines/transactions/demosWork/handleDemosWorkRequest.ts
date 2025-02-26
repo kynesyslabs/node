@@ -14,7 +14,7 @@ import { processOperations } from "./processOperations"
 // SECTION Handlers
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 // ? Remove this proxy if possible
-let handleXMRequest = multichainDispatcher
+const handleXMRequest = multichainDispatcher
 
 /* TODO Log
 - add to the DemoScript logic a flag to specify if a step is mandatory or not
@@ -95,8 +95,8 @@ export type OperationResult = {
 export default async function handleDemosWorkRequest(
     content: DemoScript,
 ): Promise<RPCResponse> {
-    var compiledScript: DemoScript = _.cloneDeep(content)
-    var operationsResults: OperationResult[] = []
+    let compiledScript: DemoScript = _.cloneDeep(content)
+    let operationsResults: OperationResult[] = []
     const response: RPCResponse = _.cloneDeep(emptyResponse)
 
     log.info("[demosWork] [handleDemosWorkRequest] Received a DemoScript: ")

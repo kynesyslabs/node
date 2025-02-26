@@ -14,21 +14,21 @@ export default async function getCommonValidatorSeed(
     commonValidatorSeed: string
     lastBlockNumber: number
 }> {
-    const BLOCK_COUNT = 3
+    const blockCount = 3
 
     if (!lastBlock) {
         lastBlock = await Chain.getLastBlock()
     }
 
     const lastBlockNumber = lastBlock.number
-    var lastFewBlocks: Blocks[] = [lastBlock]
+    const lastFewBlocks: Blocks[] = [lastBlock]
 
     log.debug("LAST BLOCK NUMBER: " + lastBlock.number)
     log.debug("--------------------------------")
     log.debug("LAST BLOCK: " + lastBlock.hash)
     log.debug("--------------------------------")
 
-    while (lastFewBlocks.length < BLOCK_COUNT) {
+    while (lastFewBlocks.length < blockCount) {
         const block = await Chain.getBlockByNumber(
             lastBlockNumber - lastFewBlocks.length,
         )

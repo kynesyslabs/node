@@ -53,7 +53,7 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     log.custom("last_shard", "Shard seed is: " + seed)
     getSharedState.lastShardSeed = seed
     const random = Alea(seed)
-    let availablePeers = [...peers]
+    const availablePeers = [...peers]
 
     // REVIEW: sort available peers by .identity (which is a hex string)
     // before choosing the peers for a uniform sample across nodes

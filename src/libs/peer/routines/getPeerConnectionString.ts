@@ -21,14 +21,14 @@ export default async function getPeerConnectionString(
     peer: Peer,
     id: any,
 ): Promise<Peer> {
-    let node_call: NodeCall = {
+    const nodeCall: NodeCall = {
         message: "getPeerConnectionString",
         data: null,
         muid: null,
     }
-    let response = await peer.call({
+    const response = await peer.call({
         method: "nodeCall",
-        params: [node_call],
+        params: [nodeCall],
     })
     // Response management
     if (response.result === 200) {

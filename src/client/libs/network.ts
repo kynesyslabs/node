@@ -1,15 +1,12 @@
-import * as socket from "socket.io"
 import * as socket_client from "socket.io-client"
 
 export default class Network {
-    constructor() {}
-
     static async rpcConnect(
-        rpc_url: string,
+        rpcUrl: string,
         socket: socket_client.Socket,
     ): Promise<socket_client.Socket> {
         try {
-            socket = socket_client.connect(rpc_url)
+            socket = socket_client.connect(rpcUrl)
             let timeout = 5000
             socket.on("connect", () => {
                 console.log("Connected to RPC server")
@@ -29,8 +26,4 @@ export default class Network {
             return null
         }
     }
-}
-
-async function sleep(ms: number) {
-    return new Promise(resolve => setTimeout(resolve, ms))
 }

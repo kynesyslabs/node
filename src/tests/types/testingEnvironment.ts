@@ -16,8 +16,8 @@ import { getSharedState } from "src/utilities/sharedState"
 require("dotenv").config()
 const term = require("terminal-kit").terminal
 
-export default class testingEnvironment {
-    private static instance: testingEnvironment = null
+export default class TestingEnvironment {
+    private static instance: TestingEnvironment = null
 
     estabilished = false
     connection = null
@@ -44,31 +44,31 @@ export default class testingEnvironment {
 
     constructor() {}
 
-    static async retrieve(): Promise<testingEnvironment> {
+    static async retrieve(): Promise<TestingEnvironment> {
         // Printing configuration
         term.yellow(
             "[DEMOS Infrastructure Testing Environment] Environment loaded\n ",
         )
         term.green(process.env.RPC_URL + "\n")
 
-        if (!testingEnvironment.instance) {
+        if (!TestingEnvironment.instance) {
             term.yellow(
                 "[DEMOS Infrastructure Testing Environment] Starting...\n",
             )
-            testingEnvironment.instance = new testingEnvironment()
+            TestingEnvironment.instance = new TestingEnvironment()
         }
         term.green(
             "[DEMOS Infrastructure Testing Environment] Retrieving instance...\n",
         )
         term.yellow("[START OF AVAILABLE MODULES]\n")
-        console.log(testingEnvironment.instance.modules)
+        console.log(TestingEnvironment.instance.modules)
         console.log("[END OF AVAILABLE MODULES]")
         term.yellow("[CONNECTING TO RPC SERVER]\n")
         console.log(process.env.RPC_URL)
-        testingEnvironment.instance.connect()
+        TestingEnvironment.instance.connect()
         // Waiting for the blockchain to be connected
-        await testingEnvironment.instance.isConnected()
-        return testingEnvironment.instance
+        await TestingEnvironment.instance.isConnected()
+        return TestingEnvironment.instance
     }
 
     // INFO Connection to the testing environment rpc
@@ -97,7 +97,7 @@ export default class testingEnvironment {
     }
 
     // INFO 10 seconds timeout to check if the connection is established
-    async isConnected(timeout: number = 10): Promise<boolean> {
+    async isConnected(timeout = 10): Promise<boolean> {
         while (!this.estabilished && timeout > 0) {
             await sleep(1000)
             timeout -= 1

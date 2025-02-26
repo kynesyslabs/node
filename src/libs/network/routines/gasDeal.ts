@@ -10,36 +10,36 @@ export interface GasDeal {
 }
 
 export default async function gasDeal(
-    proposed_chain: string,
+    proposedChain: string,
     payload: any,
 ): Promise<GasDeal> {
     // Generating a skeleton gas deal
-    let gas_deal: GasDeal = {
-        proposed_chain: proposed_chain,
+    const gasDeal: GasDeal = {
+        proposed_chain: proposedChain,
         amount_in_ref_currency: null,
         amount_in_native_currency: null,
         ref_currency: null,
         ref_currency_feed: null,
     }
-    let gas_required = await determineGasForOperation(payload) // In DEMOS
+    const gasRequired = await determineGasForOperation(payload) // In DEMOS
     // TODO Somehow convert gas in the reference currency
     // TODO Use the below functions to get the native and reference currency of the chain and calculate the conversion
-    let reference_currency = await getChainReferenceCurrency(proposed_chain)
-    let native_to_ref_conversion_rate =
-        await getChainNativeToReferenceConversionRate(proposed_chain)
-    let native_to_demos_conversion_rate =
-        await getChainNativeToDEMOSConversionRate(proposed_chain)
-    let amount_in_native_currency =
-        gas_required * native_to_demos_conversion_rate
-    let amount_in_ref_currency =
-        amount_in_native_currency * native_to_ref_conversion_rate
+    const referenceCurrency = await getChainReferenceCurrency(proposedChain)
+    const nativeToRefConversionRate =
+        await getChainNativeToReferenceConversionRate(proposedChain)
+    const nativeToDemosConversionRate =
+        await getChainNativeToDEMOSConversionRate(proposedChain)
+    const amountInNativeCurrency =
+        gasRequired * nativeToDemosConversionRate
+    const amountInRefCurrency =
+        amountInNativeCurrency * nativeToRefConversionRate
     // TODO Calculate the amount in the reference currency
-    gas_deal.amount_in_ref_currency = amount_in_ref_currency
-    gas_deal.amount_in_native_currency = amount_in_native_currency
-    gas_deal.ref_currency = reference_currency
-    gas_deal.ref_currency_feed = "example"
+    gasDeal.amount_in_ref_currency = amountInRefCurrency
+    gasDeal.amount_in_native_currency = amountInNativeCurrency
+    gasDeal.ref_currency = referenceCurrency
+    gasDeal.ref_currency_feed = "example"
     // TODO Generate a gas deal based on the proposed chain and the payload using determineGasForOperation
-    return gas_deal
+    return gasDeal
 }
 
 export async function getChainReferenceCurrency(

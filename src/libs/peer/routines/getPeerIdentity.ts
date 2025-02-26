@@ -27,23 +27,23 @@ export default async function getPeerIdentity(
 ): Promise<Peer> {
 
     // Getting our identity
-    let id = getSharedState.identity.ed25519
+    const id = getSharedState.identity.ed25519
     
     console.warn("[PEER AUTHENTICATION] Getting peer identity")
     console.log(peer)
     console.log(id)
     console.log(expectedKey)
 
-    let node_call: NodeCall = {
+    const nodeCall: NodeCall = {
         message: "getPeerIdentity",
         data: null,
         muid: null,
     }
 
 
-    let response = await peer.call({
+    const response = await peer.call({
         method: "nodeCall",
-        params: [node_call],
+        params: [nodeCall],
     })
     console.log("[PEER AUTHENTICATION] Response Received: " + JSON.stringify(response, null, 2))
     // Response management

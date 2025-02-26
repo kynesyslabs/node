@@ -21,11 +21,11 @@ export function std(arr: number[]): number {
 export function variance(arr: number[]): number {
     if (arr.length < 2) return 0
 
-    const _mean = mean(arr)
-    return arr.map(x => Math.pow(x - _mean, 2)).reduce(add) / (arr.length - 1)
+    const meanValue = mean(arr)
+    return arr.map(x => Math.pow(x - meanValue, 2)).reduce(add) / (arr.length - 1)
 }
 
-export function calculateIQR(data) {
+export function calculateIQR(data: number[]): { iqr: number, q1: number, q3: number } {
     const sortedData = [...data].sort((a, b) => a - b)
     const q1 = sortedData[Math.floor(sortedData.length / 4)]
     const q3 = sortedData[Math.ceil(sortedData.length * (3 / 4))]

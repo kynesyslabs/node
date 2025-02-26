@@ -16,13 +16,13 @@ export default class Cryptography {
 
     constructor() {}
 
-    dispatch(divided_input) {
+    dispatch(dividedInput: any) {
         // TODO as in wallet
     }
 
     public sign(message: any) {
         this.identity = Wallet.getInstance().identity
-        let signature = forge.pki.ed25519.sign({
+        const signature = forge.pki.ed25519.sign({
             message: message,
             privateKey: this.identity.privateKey,
         })
@@ -34,7 +34,7 @@ export default class Cryptography {
         signature: forge.pki.ed25519.BinaryBuffer,
         publicKey: forge.pki.ed25519.BinaryBuffer,
     ) {
-        let verified = forge.pki.ed25519.verify({
+        const verified = forge.pki.ed25519.verify({
             message: message,
             signature: signature,
             publicKey: publicKey,

@@ -3,7 +3,7 @@ import { StoredIdentities } from "../types/IdentityTypes"
 // Define the shape of your JSON data
 
 @Entity("gcr_main")
-export class GCR_Main {
+export class GCRMain {
     @PrimaryColumn({ type: "text", name: "pubkey" })
     pubkey: string
     @Column({ type: "jsonb", name: "assignedTxs" })

@@ -9,7 +9,7 @@ import Cryptography from "src/libs/crypto/cryptography"
 
 import { normalizeWebBuffers } from "./normalizeWebBuffers"
 
-const SESSION_TIMEOUT = 1000 * 60 * 5 // 5 minutes
+const sessionTimeout = 1000 * 60 * 5 // 5 minutes
 
 function randomMessage() {
     let result = ""
@@ -26,7 +26,7 @@ function randomMessage() {
     return result
 }
 
-export interface ISession {
+export interface InterfaceSession {
     start_timestamp: number
     last_timestamp: number
     end_timestamp: number
@@ -40,7 +40,7 @@ export interface ISession {
 export default class Sessions {
     private static _instance: Sessions
 
-    registry: Map<string, ISession> // Where string is an address
+    registry: Map<string, InterfaceSession> // Where string is an address
 
     public static getInstance(): Sessions {
         if (!Sessions._instance) {
@@ -50,35 +50,35 @@ export default class Sessions {
     }
 
     constructor() {
-        this.registry = new Map<string, ISession>()
+        this.registry = new Map<string, InterfaceSession>()
     }
 
     // INFO Getting a session from the registry
-    public getSession(address: string): ISession {
+    public getSession(address: string): InterfaceSession {
         return this.registry.get(address)
     }
 
     // INFO Checking if a session is still valid
     public isSessionValid(address: string): boolean {
-        let session = this.registry.get(address)
+        const session = this.registry.get(address)
         // If no session has been opened yet, return false
         if (!session || !session.current_status) {
             return false
         }
         // Checking the timestamps
-        if (session.last_timestamp + SESSION_TIMEOUT < Date.now()) {
+        if (session.last_timestamp + sessionTimeout < Date.now()) {
             // Or should we use start_timestamp?
             return false
         }
     }
 
     // INFO Generating a new session
-    public newSession(address: string): ISession {
+    public newSession(address: string): InterfaceSession {
         // Generate a new session
-        let session: ISession = {
+        const session: InterfaceSession = {
             start_timestamp: Date.now(),
             last_timestamp: Date.now(),
-            end_timestamp: Date.now() + SESSION_TIMEOUT,
+            end_timestamp: Date.now() + sessionTimeout,
             current_status: false,
             current_stage: "waiting for signature",
             session_message: randomMessage(),
@@ -91,26 +91,29 @@ export default class Sessions {
 
     // INFO Validating a signature and openning a session
     // NOTE We need either a JSON string, a JSON object ({type: "Buffer", data: []}) or a Uint8Array
-    public validateSignature(s_address: string, s_signature: string): boolean {
-        let session = this.registry.get(s_address)
+    public validateSignature(
+        sessionAddress: string,
+        sessionSignature: string,
+    ): boolean {
+        const session = this.registry.get(sessionAddress)
         // If no session has been opened yet, return false
         if (!session || !session.current_status) {
             return false
         }
         // Normalizing the signature and the address
-        let message = this.registry.get(s_address).session_message
-        let res_signature = normalizeWebBuffers(s_signature)
-        if (!res_signature[0]) {
+        const message = this.registry.get(sessionAddress).session_message
+        const resSignature = normalizeWebBuffers(sessionSignature)
+        if (!resSignature[0]) {
             return false
         }
-        let signature = res_signature[0]
-        let res_address = normalizeWebBuffers(s_address)
-        if (!res_address[0]) {
+        const signature = resSignature[0]
+        const resAddress = normalizeWebBuffers(sessionAddress)
+        if (!resAddress[0]) {
             return false
         }
-        let address = res_address[0]
+        const address = resAddress[0]
         // Validating the signature
-        let valid = Cryptography.verify(message, signature, address)
+        const valid = Cryptography.verify(message, signature, address)
         return valid
     }
 

@@ -72,7 +72,7 @@ class Bridge {
      * @returns The result of the operation
      */
     async executeOperation(operationId: string): Promise<BridgeOperationResult> {
-        let result: BridgeOperationResult = {
+        const result: BridgeOperationResult = {
             success: false,
             message: "",
             operation: null,
@@ -91,8 +91,8 @@ class Bridge {
      * @param operation - The operation to register
      * @returns True if the operation was registered, false otherwise
      */
-    async registerOperation(operation: BridgeOperation): Promise<Boolean> {
-        let result: Boolean = false
+    async registerOperation(operation: BridgeOperation): Promise<boolean> {
+        const result = false
         // TODO Implement the logic to register the operation
         return result
     }
@@ -101,7 +101,7 @@ class Bridge {
 /**
  * This class contains static methods to control the bridges easily
  */
-class bridgesControls {
+class BridgesControls {
     // TODO Implement the controls like getting the shard from the CVSA in the block and so on
     static getShardFromCVSA(cvsa: string): string[] {
         // Returns the shard as an array of public keys
@@ -110,4 +110,4 @@ class bridgesControls {
     }
 }
 
-export { Bridge, bridgesControls }
+export { Bridge, BridgesControls }

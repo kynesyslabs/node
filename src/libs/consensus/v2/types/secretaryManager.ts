@@ -3,7 +3,7 @@ import { Shard } from "./shardTypes"
 import { getSharedState } from "src/utilities/sharedState"
 import getShard from "../routines/getShard"
 import _ from "lodash"
-import { ForgeToHex } from "src/libs/crypto/forgeUtils"
+import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import { Waiter } from "src/utilities/waiter"
 import { _required as required } from "@kynesyslabs/demosdk/websdk"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
@@ -25,7 +25,7 @@ export default class SecretaryManager {
 
     public ourValidatorPhase: ValidationPhase
     public ourKey: string
-    public runSecretaryRoutine: boolean = false
+    public runSecretaryRoutine = false
     public blockTimestamp: number = null
 
     // INFO: Our signature is send with the greenlight request
@@ -45,9 +45,9 @@ export default class SecretaryManager {
      * @param lastBlockNumber The last block number
      * @returns The list of shard members
      */
-    async initializeShard(CVSA: string, lastBlockNumber: number) {
+    async initializeShard(cVSA: string, lastBlockNumber: number) {
         this.shard = {
-            CVSA: CVSA,
+            CVSA: cVSA,
             members: [],
             validationPhases: {},
             secretaryKey: "",
@@ -55,7 +55,7 @@ export default class SecretaryManager {
         }
 
         // Reusing the method to create the members
-        this.shard.members = await getShard(CVSA)
+        this.shard.members = await getShard(cVSA)
         this.ourKey = getSharedState.identity.ed25519.publicKey.toString("hex")
 
         if (
@@ -113,7 +113,7 @@ export default class SecretaryManager {
     public checkIfWeAreSecretary() {
         return (
             this.shard.secretaryKey ===
-            ForgeToHex(getSharedState.identity.ed25519.publicKey)
+            forgeToHex(getSharedState.identity.ed25519.publicKey)
         )
     }
 
@@ -465,7 +465,7 @@ export default class SecretaryManager {
     /**
      * A routine that releases waiting members if it's time to do so
      */
-    public async releaseWaitingRoutine(resolveWaiter: boolean = false) {
+    public async releaseWaitingRoutine(resolveWaiter = false) {
         const shouldRelease = this.shouldReleaseWaitingMembers()
         log.debug(
             `[SECRETARY ROUTINE] Should release the waiting members? ${shouldRelease}`,
@@ -689,7 +689,7 @@ export default class SecretaryManager {
      * Sends our local validator phase to the secretary and waits for the green light
      * If resolved, returns the secretary block timestamp
      */
-    public async sendOurValidatorPhaseToSecretary(retries: number = 3) {
+    public async sendOurValidatorPhaseToSecretary(retries = 3) {
         // INFO: Enable code to simulate node failures
         // if (this.ourValidatorPhase.currentPhase == 4) {
         //     log.debug(

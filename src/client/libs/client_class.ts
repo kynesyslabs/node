@@ -25,7 +25,7 @@ export default class Client {
     // SECTION CLI Operations
     async connect(url: string): Promise<void> {
         this.rpc_url = url
-        let success = await Network.rpcConnect(this.rpc_url, this.socket)
+        const success = await Network.rpcConnect(this.rpc_url, this.socket)
         if (success) {
             console.log("Connected to server")
             this.STATUS_PROMPT = "Connected"

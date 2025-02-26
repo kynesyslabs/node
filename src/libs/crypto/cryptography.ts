@@ -15,7 +15,7 @@ import forge from "node-forge"
 import { getSharedState } from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 
-import { ForgeToHex, HexToForge } from "./forgeUtils"
+import { forgeToHex } from "./forgeUtils"
 
 const term = terminalkit.terminal
 
@@ -38,7 +38,7 @@ export default class Cryptography {
     static async save(keypair: forge.pki.KeyPair, path: string, mode = "hex") {
         console.log(keypair.privateKey)
         if (mode === "hex") {
-            let hexPrivKey = Cryptography.saveToHex(keypair.privateKey)
+            const hexPrivKey = Cryptography.saveToHex(keypair.privateKey)
             await fs.writeFile(path, hexPrivKey)
         } else {
             await fs.writeFile(path, JSON.stringify(keypair.privateKey))
@@ -48,7 +48,7 @@ export default class Cryptography {
     static saveToHex(forgeBuffer: forge.pki.PrivateKey): string {
         console.log("[forge to string encoded]")
         //console.log(forgeBuffer) // REVIEW if it is like this
-        let stringBuffer = forgeBuffer.toString("hex")
+        const stringBuffer = forgeBuffer.toString("hex")
         console.log("DECODED INTO:")
         console.log("0x" + stringBuffer)
         return "0x" + stringBuffer
@@ -62,9 +62,9 @@ export default class Cryptography {
     ) {
         const key = crypto.createCipher(algorithm, password)
         // Getting the private key in hex form
-        const hex_key = keypair.privateKey.toString("hex")
+        const hexKey = keypair.privateKey.toString("hex")
         // Encrypting and saving
-        const encryptedMessage = key.update(hex_key, "utf8", "hex")
+        const encryptedMessage = key.update(hexKey, "utf8", "hex")
         await fs.writeFile(path, encryptedMessage)
     }
 
@@ -104,9 +104,9 @@ export default class Cryptography {
     }
 
     static loadFromHex(content: string): forge.pki.KeyPair {
-        let keypair = { publicKey: null, privateKey: null }
+        const keypair = { publicKey: null, privateKey: null }
         content = content.slice(2)
-        let finalArray = new Uint8Array(64)
+        const finalArray = new Uint8Array(64)
         console.log("[string to forge encoded]")
         console.log(content)
         for (let i = 0; i < content.length; i += 2) {
@@ -129,7 +129,7 @@ export default class Cryptography {
     }
 
     static loadFromBufferString(content: string): forge.pki.KeyPair {
-        let keypair = { publicKey: null, privateKey: null }
+        const keypair = { publicKey: null, privateKey: null }
         keypair.privateKey = Buffer.from(JSON.parse(content))
         keypair.publicKey = forge.pki.ed25519.publicKeyFromPrivateKey({
             privateKey: keypair.privateKey,
@@ -205,13 +205,13 @@ export default class Cryptography {
             "[Cryptography] Using the signature: (" +
                 typeof signature +
                 ") " +
-                ForgeToHex(signature),
+                forgeToHex(signature),
         )
         console.log(
             "[Cryptography] And the public key: (" +
                 typeof publicKey +
                 ") " +
-                ForgeToHex(publicKey),
+                forgeToHex(publicKey),
         )
         //console.log(publicKey)
         return forge.pki.ed25519.verify({
@@ -226,14 +226,14 @@ export default class Cryptography {
     static rsa = {
         // INFO Generating a new RSA keypair from our ecdsa private key
         derive: (): forge.pki.rsa.KeyPair => {
-            let md = forge.md.sha256.create()
+            const md = forge.md.sha256.create()
             md.update(
                 JSON.stringify(getSharedState.identity.ed25519.privateKey),
             )
-            let seed = md.digest().toHex()
-            let pnrg = forge.random.createInstance()
+            const seed = md.digest().toHex()
+            const pnrg = forge.random.createInstance()
             pnrg.seedFileSync = () => seed
-            let keys = forge.pki.rsa.generateKeyPair({ bits: 4096, prng: pnrg })
+            const keys = forge.pki.rsa.generateKeyPair({ bits: 4096, prng: pnrg })
             return keys
         },
 
@@ -248,7 +248,7 @@ export default class Cryptography {
                 publicKey = Buffer.from(publicKey)
             }
             // Converting the message and decrypting it
-            let based = forge.util.encode64(message)
+            const based = forge.util.encode64(message)
             const encrypted = publicKey.encrypt(based)
             return [true, encrypted]
         },
@@ -282,7 +282,7 @@ export default class Cryptography {
                     return [false, "No private key found"]
                 }
             }
-            let debased = forge.util.decode64(message)
+            const debased = forge.util.decode64(message)
             const decrypted = privateKey.decrypt(debased)
             return [true, decrypted.toString()]
         },

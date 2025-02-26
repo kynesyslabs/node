@@ -4,9 +4,10 @@ import { ActivityPubStorage } from "./fedistore"
 
 const app = express()
 
-var connected = false
-var database: ActivityPubStorage
+let connected = false
+let database: ActivityPubStorage
 
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 require("dotenv").config()
 
 // Middleware to parse JSON bodies

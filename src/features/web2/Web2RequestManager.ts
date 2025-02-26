@@ -2,7 +2,7 @@ import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import { PeerManager } from "src/libs/peer"
 import required from "src/utilities/required"
-import sharedState from "src/utilities/sharedState"
+import SharedState from "src/utilities/sharedState"
 
 import {
     IWeb2Attestation,
@@ -29,7 +29,7 @@ export class Web2RequestManager {
      * @returns {boolean} Whether the web2 result is valid.
      */
     get web2ResultIsValid(): boolean {
-        return this._verifyWeb2RequestAndResult()
+        return this.verifyWeb2RequestAndResult()
     }
 
     /**
@@ -50,7 +50,7 @@ export class Web2RequestManager {
      * @returns {IWeb2Attestation} The combined attestation for the Web2 request and result.
      */
     getAttestedResult(web2Result: IWeb2Result): IWeb2Attestation {
-        const combinedAttestation = this._validateWeb2RequestAndResult(
+        const combinedAttestation = this.validateWeb2RequestAndResult(
             this.dahr.web2Request,
             web2Result,
         )
@@ -63,7 +63,7 @@ export class Web2RequestManager {
         return combinedAttestation
     }
 
-    private _validateWeb2RequestAndResult(
+    private validateWeb2RequestAndResult(
         web2Request: IWeb2Request,
         web2Result: IWeb2Result,
     ): IWeb2Attestation {
@@ -83,20 +83,20 @@ export class Web2RequestManager {
 
         const signature = Cryptography.sign(
             hashedCombined,
-            sharedState.getInstance().identity.ed25519.privateKey,
+            SharedState.getInstance().identity.ed25519.privateKey,
         )
 
         const attestation: IWeb2Attestation = {
             hash: hashedCombined,
             timestamp: Date.now(),
-            identity: sharedState.getInstance().identity.ed25519.publicKey,
+            identity: SharedState.getInstance().identity.ed25519.publicKey,
             signature: signature,
             valid: null,
         }
         term.bold("[Web2Parser] Combined Attestation:\n")
         console.log(attestation)
 
-        const hexKey = sharedState
+        const hexKey = SharedState
             .getInstance()
             .identity.ed25519.publicKey.toString("hex")
 
@@ -117,7 +117,7 @@ export class Web2RequestManager {
         return attestation
     }
 
-    private _verifyWeb2RequestAndResult(): boolean {
+    private verifyWeb2RequestAndResult(): boolean {
         required(this.dahr.web2Request, "Missing request")
         let valid = true
 
@@ -170,8 +170,8 @@ export class Web2RequestManager {
      * @returns {Promise<boolean>} Whether the quorum is reached.
      */
     async quorumIsReached(
-        quorum: number = 10,
-        timeout: number = 9000,
+        quorum = 10,
+        timeout = 9000,
     ): Promise<boolean> {
         let reachedQuorum = false
         let timer = 0

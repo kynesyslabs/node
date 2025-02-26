@@ -36,7 +36,7 @@ export default async function manageProposeBlockHash(
     // ? Should we check for the block number as well? Or we cancel the candidateBlock at the end of the consensus?
     // Vote for the block hash
     // We must ensure we generated a block indeed
-    let candidateBlockFormed = await ensureCandidateBlockFormed()
+    const candidateBlockFormed = await ensureCandidateBlockFormed()
     log.debug(
         "[manageProposeBlockHash] Candidate block formed: " +
             JSON.stringify(candidateBlockFormed, null, 2),

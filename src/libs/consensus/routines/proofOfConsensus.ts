@@ -5,7 +5,7 @@ import { demostdlib } from "src/libs/utils"
 import { getSharedState } from "src/utilities/sharedState"
 
 export async function proofConsensus(hash: string): Promise<[string, string]> {
-    let poc: [string, string] = [hash, null]
+    const poc: [string, string] = [hash, null]
     // Obtain Paperinik (PK, Public Key) and Public hash
     const pk = getSharedState.identity.ed25519.privateKey
     const publicHex = getSharedState
@@ -32,7 +32,7 @@ export async function proofConsensus(hash: string): Promise<[string, string]> {
 }
 
 export async function proofConsensusHandler(hash: any): Promise<RPCResponse> {
-    let response: RPCResponse = {
+    const response: RPCResponse = {
         result: 200,
         response: "",
         require_reply: true,
@@ -43,20 +43,20 @@ export async function proofConsensusHandler(hash: any): Promise<RPCResponse> {
     // REVIEW Check if the content is valid - Or maybe not
     console.log("proofConsensusHandler")
     //console.log(content)
-    let pocFullResponse = await proofConsensus(hash)
+    const pocFullResponse = await proofConsensus(hash)
     response.response = pocFullResponse[0]
     response.extra = pocFullResponse[1]
     return response
 }
 
 export async function askPoC(hash: string, peer: Peer): Promise<any> {
-    let poc_call = {
+    const pocCall = {
         method: "proofOfConsensus",
         params: [hash],
     }
     console.log("[POC] Asking for PoC")
-    let response = await peer.call(poc_call)
-    if (response.result===200) {
+    const response = await peer.call(pocCall)
+    if (response.result === 200) {
         return response.response
     } else {
         return null

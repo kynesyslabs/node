@@ -34,10 +34,9 @@ import getTimestampCorrection from "./libs/utils/calibrateTime"
 const term = terminalkit.terminal
 
 dotenv.config()
-console.log = () => {}
 
 // NOTE This is a global variable that will be used to store the warmup routine and the index needed variables
-let indexState: {
+const indexState: {
     OVERRIDE_PORT: number | null
     OVERRIDE_IS_TESTER: boolean | null
     COMMANDLINE_MODE: boolean | null
@@ -71,7 +70,7 @@ async function calibrateTime() {
 }
 // ANCHOR Routine to handle parameters in advanced mode
 async function digestArguments() {
-    let args = process.argv
+    const args = process.argv
     if (args.length > 3) {
         console.log("digest arguments")
         for (let i = 3; i < args.length; i++) {
@@ -81,7 +80,7 @@ async function digestArguments() {
                 process.exit(0)
             }
             // Handle configurations
-            let param = args[i].split("=")
+            const param = args[i].split("=")
             // NOTE These are all the parameters supported
             switch (param[0]) {
                 case "port":
@@ -179,7 +178,7 @@ async function preMainLoop() {
         "\n[MAIN] 🔗 WE ARE " + id.ed25519.publicKey.toString("hex") + " 🔗 \n",
     )
     // Creating ourselves as a peer // ? Should this be removed in production?
-    let ourselves = "http://127.0.0.1:" + indexState.SERVER_PORT
+    const ourselves = "http://127.0.0.1:" + indexState.SERVER_PORT
     getSharedState.connectionString = ourselves
     log.info("Our connection string is: " + ourselves)
     // And saves the public key file

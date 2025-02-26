@@ -11,17 +11,17 @@ export interface EVMInfo {
 }
 
 export default function evmInfo(chainID: number): [boolean, string | EVMInfo] {
-    let composedName = "eip155-" + String(chainID) + ".json"
-    let filePath = "data/evmChains/" + composedName
+    const composedName = "eip155-" + String(chainID) + ".json"
+    const filePath = "data/evmChains/" + composedName
     console.log(composedName)
     // Check if the file exists
     if (fs.existsSync(filePath)) {
         console.log("File exists")
         // Read the file
-        let rawdata = fs.readFileSync(filePath)
+        const rawdata = fs.readFileSync(filePath)
         // Parse the file
-        let data = JSON.parse(rawdata.toString())
-        let info: EVMInfo = {
+        const data = JSON.parse(rawdata.toString())
+        const info: EVMInfo = {
             name: data.name,
             chain: data.chain,
             id: data.chainId,

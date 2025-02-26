@@ -5,7 +5,7 @@ import Transmission from "src/libs/communications/transmission"
 
 export function payloadSize(
     payload: any,
-    is_object = true,
+    isObject = true,
     type:
         /*| "object"
         | "transaction"

@@ -62,7 +62,7 @@ async function mainLoopCycle() {
     // SECTION Todo list for a typical consensus operation
 
     // ANCHOR Check if we have to forge the block now
-    let isConsensusTimeReached = await consensusTime.checkConsensusTime()
+    const isConsensusTimeReached = await consensusTime.checkConsensusTime()
     log.info("[MAINLOOP]: about to check if its time for consensus")
 
     if (!isConsensusTimeReached) {
@@ -160,7 +160,7 @@ async function peerRoutine(): Promise<Peer[]> {
     peerGossip() // ? Await or not? I'd say not because it's good to have it in the background having anyway a reentry prevention
 
     log.info("[MAINLOOP]: family:", true)
-    let famLen = currentlyOnlinePeers.length
+    const famLen = currentlyOnlinePeers.length
     let famString = ""
     for (let i = 0; i < famLen; i++) {
         famString += "🐸 "

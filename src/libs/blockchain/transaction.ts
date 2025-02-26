@@ -30,7 +30,7 @@ import {
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import Confirmation from "./types/confirmation"
-import { ForgeToHex } from "../crypto/forgeUtils"
+import { forgeToHex } from "../crypto/forgeUtils"
 
 interface TransactionResponse {
     status: string
@@ -77,14 +77,14 @@ export default class Transaction implements ITransaction {
             return [false, "Missing tx.content"]
         }
         // Sign using identity.cryptography.sign(tx.content, privateKey)
-        let _signature = Cryptography.sign(
+        const signature = Cryptography.sign(
             JSON.stringify(tx.content),
             privateKey,
         )
-        if (!_signature) {
+        if (!signature) {
             return [false, "Failed to sign transaction"]
         }
-        return [true, _signature]
+        return [true, signature]
     }
 
     // INFO Given a signed transaction, verify it against the address of the sender
@@ -98,21 +98,21 @@ export default class Transaction implements ITransaction {
             return [false, "Missing tx.signature"]
         }
         // verify using identity.cryptography.verify(tx.content, tx.signature, publicKey)
-        let _verified = Cryptography.verify(
+        const verified = Cryptography.verify(
             JSON.stringify(tx.content),
             tx.signature.data.toString("hex"),
             tx.content.from.toString("hex"),
         )
-        return [_verified, "Result of verify()"]
+        return [verified, "Result of verify()"]
     }
 
     // INFO Hashing the content of a transaction
     static hash(tx: Transaction): any {
-        let _hash = Hashing.sha256(JSON.stringify(tx.content))
-        if (!_hash) {
+        const hash = Hashing.sha256(JSON.stringify(tx.content))
+        if (!hash) {
             return false
         } else {
-            tx.hash = _hash
+            tx.hash = hash
             return tx
         }
     }
@@ -130,10 +130,10 @@ export default class Transaction implements ITransaction {
         console.log(privateKey)
         console.log("Signature: ")
         console.log(tx.signature)
-        let confirmed =
+        const confirmed =
             this.sanityCheck(tx) && this.isCoherent(tx) && this.structured(tx)
         if (confirmed) {
-            let confirmation = new Confirmation()
+            const confirmation = new Confirmation()
             confirmation.data.validator = publicKey
             confirmation.data.tx_hash_validated = tx.hash
             confirmation.signature = Cryptography.sign(
@@ -151,43 +151,42 @@ export default class Transaction implements ITransaction {
         console.log("[sanityCheck] Checking the sanity of the tx")
         console.log("Hash: " + tx.hash)
         console.log("Signature: ")
-        console.log(ForgeToHex(tx.signature.data))
+        console.log(forgeToHex(tx.signature.data))
         console.log("From: ")
-        console.log(ForgeToHex(tx.content.from))
+        console.log(forgeToHex(tx.content.from))
         //let tx_content_hash = Hashing.sha256(JSON.stringify(tx.content))
-        let _result = Cryptography.verify(
+        const result = Cryptography.verify(
             tx.hash,
-            ForgeToHex(tx.signature.data),
-            ForgeToHex(tx.content.from),
+            forgeToHex(tx.signature.data),
+            forgeToHex(tx.content.from),
         )
-        console.log("[sanityCheck] Sanity: " + _result)
-        return _result
+        console.log("[sanityCheck] Sanity: " + result)
+        return result
     }
 
     // INFO Checking if the tx is coherent to the current state of the blockchain (and the txs pending before it)
     public static isCoherent(tx: Transaction) {
-        let _result = true
         console.log(
             "[isCoherent] Checking the coherence of the tx with hash: " +
                 tx.hash,
         )
-        let _derived_hash = Hashing.sha256(JSON.stringify(tx.content))
-        console.log("[isCoherent] Derived hash: " + _derived_hash)
-        _result = _derived_hash == tx.hash
-        console.log("[isCoherent] Coherence: " + _result)
-        return _result
+        const derivedHash = Hashing.sha256(JSON.stringify(tx.content))
+        console.log("[isCoherent] Derived hash: " + derivedHash)
+        const coherence = derivedHash == tx.hash
+        console.log("[isCoherent] Coherence: " + coherence)
+        return coherence
     }
 
     // INFO Checking if a tx has all the necessary informations
     public static structured(tx: Transaction) {
-        let _structured = true
+        const structured = true
         // TODO Do this
-        return _structured
+        return structured
     }
 
     public static toRawTransaction(
         tx: Transaction,
-        status: string = "confirmed",
+        status = "confirmed",
     ): RawTransaction {
         console.log("[toRawTransaction] attempting to create a raw tx")
         console.log("[toRawTransaction] Signature: ")

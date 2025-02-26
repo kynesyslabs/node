@@ -51,6 +51,7 @@ export default async function manageGCRRoutines(
             break
 
         case "getIdentities":
+            // eslint-disable-next-line no-var
             var data = await IdentityManager.getXmIdentities(sender)
             response.response = {
                 xm: data,

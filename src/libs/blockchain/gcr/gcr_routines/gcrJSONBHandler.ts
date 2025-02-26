@@ -1,5 +1,5 @@
 import Datasource from "../../../../model/datasource"
-import { GCR_Main } from "@/model/entities/GCRv2/GCR_Main"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 
 /** Example
         // Get top-level values
@@ -30,13 +30,14 @@ export async function getJSONBValue(
     subkey?: string,
 ) {
     const db = await Datasource.getInstance()
-    const GCRRepository = db.getDataSource().getRepository(GCR_Main)
+    const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
     const jsonPath = subkey
         ? `gcr.${field}->'${key}'->>'${subkey}'`
         : `gcr.${field}->>'${key}'`
 
-    return await GCRRepository.createQueryBuilder("gcr")
+    return await gcrRepository
+        .createQueryBuilder("gcr")
         .select(jsonPath)
         .where("gcr.pubkey = :pubkey", { pubkey })
         .getRawOne()
@@ -76,15 +77,16 @@ export async function updateJSONBValue(
     subkey?: string,
 ) {
     const db = await Datasource.getInstance()
-    const GCRRepository = db.getDataSource().getRepository(GCR_Main)
+    const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
     const jsonPath = subkey ? `{${key}, ${subkey}}` : `{${key}}`
 
     // Convert value to JSON string and escape single quotes
     const jsonValue = JSON.stringify(value).replace(/'/g, "''")
 
-    return await GCRRepository.createQueryBuilder()
-        .update(GCR_Main)
+    return await gcrRepository
+        .createQueryBuilder()
+        .update(GCRMain)
         .set({
             [field]: () =>
                 `jsonb_set(${field}, '${jsonPath}', '${jsonValue}'::jsonb, true)`,

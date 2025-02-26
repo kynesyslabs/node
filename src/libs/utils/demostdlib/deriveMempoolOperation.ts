@@ -25,11 +25,12 @@ export interface DerivableNative {
 // INFO Deriving a mempool operation from a given data by deriving a tx and the corresponding mempool operation
 export async function deriveMempoolOperation(
     data: DerivableNative,
-    insert: boolean = true,
+    insert = true,
 ): Promise<any> {
     // Sanity check
     if (typeof data.data !== "string") {
         try {
+            // eslint-disable-next-line @typescript-eslint/naming-convention
             data.data = JSON.stringify(data.data, (_, v) =>
                 typeof v === "bigint" ? v.toString() : v,
             )
@@ -39,15 +40,13 @@ export async function deriveMempoolOperation(
         }
     }
     // We should have a valid, attested request: lets handle it
-    let derivedTx: Transaction
-    let derivedOperation: Operation
     // Deriving a transaction
     // TODO Replace with deriveTransaction(data) using data.type
-    derivedTx = await createTransaction(data) // A simple tx with data inside
+    const derivedTx: Transaction = await createTransaction(data) // A simple tx with data inside
     console.log("Derived tx:")
     //console.log(derivedTx)
     // Deriving an operation from the tx
-    derivedOperation = await createOperation(derivedTx) // An operation witnessing the validity of the data requested
+    const derivedOperation: Operation = await createOperation(derivedTx) // An operation witnessing the validity of the data requested
     console.log("Derived operation:")
     //console.log(derivedOperation)
     if (insert) {
@@ -92,7 +91,7 @@ export async function deriveTransaction(data: any): Promise<Transaction> {
 export async function deriveOperations(
     transaction: Transaction,
 ): Promise<Operation[]> {
-    let operations = []
+    const operations = []
     // Analyzing the transaction type
     switch (transaction.content.type) {
         // TODO Do this
@@ -115,7 +114,7 @@ export async function deriveOperations(
 export async function createOperation(
     transaction: Transaction,
 ): Promise<Operation> {
-    let operation: Operation = {
+    const operation: Operation = {
         operator: null,
         actor: null,
         params: null,
@@ -151,7 +150,7 @@ async function createTransactionProxy(data: any): Promise<Transaction> {
 export async function createTransaction(
     derivable: DerivableNative,
 ): Promise<Transaction> {
-    let transaction: Transaction = {
+    const transaction: Transaction = {
         content: {
             type: null,
             from: null,
@@ -190,7 +189,7 @@ export async function createTransaction(
     transaction.content.timestamp = derivable.timestamp
     // Hashing the content and signing the transaction
     transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
-    let signature = Cryptography.sign(
+    const signature = Cryptography.sign(
         transaction.hash,
         getSharedState.identity.ed25519.privateKey,
     )

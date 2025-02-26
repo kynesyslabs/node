@@ -1,8 +1,8 @@
 import * as ntpClient from "ntp-client"
 import sharedState, { getSharedState } from "src/utilities/sharedState"
 
-const PRIMARY_NTP_SERVER = "pool.ntp.org"
-const FALLBACK_NTP_SERVERS = [
+const primaryNtpServer = "pool.ntp.org"
+const fallbackNtpServers = [
     "time.google.com",
     "time.windows.com",
     "time.apple.com",
@@ -45,7 +45,7 @@ async function getMeasuredTimeDelta(): Promise<number> {
 async function getNtpTime(): Promise<number> {
     try {
         const time = await new Promise<Date>((resolve, reject) => {
-            ntpClient.getNetworkTime(PRIMARY_NTP_SERVER, 123, (err, date) => {
+            ntpClient.getNetworkTime(primaryNtpServer, 123, (err, date) => {
                 if (err) {
                     reject(err)
                 } else {
@@ -55,13 +55,13 @@ async function getNtpTime(): Promise<number> {
         })
         return Math.floor(time.getTime() / 1000)
     } catch (error) {
-        console.warn(`Failed to fetch time from ${PRIMARY_NTP_SERVER}:`, error)
+        console.warn(`Failed to fetch time from ${primaryNtpServer}:`, error)
         return getFallbackNtpTime()
     }
 }
 
 async function getFallbackNtpTime(): Promise<number> {
-    for (const server of FALLBACK_NTP_SERVERS) {
+    for (const server of fallbackNtpServers) {
         try {
             const time = await new Promise<Date>((resolve, reject) => {
                 ntpClient.getNetworkTime(server, 123, (err, date) => {

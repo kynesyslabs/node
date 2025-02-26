@@ -8,7 +8,7 @@ export async function mergeMempools(
     mempool: MempoolData,
     shard: Peer[],
 ): Promise<MempoolData> {
-    let promises: Promise<RPCResponse>[] = []
+    const promises: Promise<RPCResponse>[] = []
 
     for (const peer of shard) {
         log.info(`[mergeMempools] Merging mempool with ${peer.identity}`)
@@ -31,7 +31,7 @@ export async function mergeMempools(
 
     log.info("[mergeMempools] Merging mempools is complete")
     // We call getMempool again to make sure we have the latest version that should have the merged mempools
-    let mergedMempool = await Mempool.getMempool("mergeMempools")
+    const mergedMempool = await Mempool.getMempool("mergeMempools")
     console.log("[mergeMempools] Merged mempool:")
     console.log(mergedMempool)
     return mergedMempool

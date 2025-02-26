@@ -3,8 +3,8 @@ import Wallet from "./cli_libraries/wallet"
 
 const readline = require("readline")
 
-const NAME = "demos_client"
-const VERSION = "alpha"
+const name = "demos_client"
+const version = "alpha"
 
 async function prompt(query = ""): Promise<string> {
     const rl = readline.createInterface({
@@ -23,26 +23,26 @@ async function prompt(query = ""): Promise<string> {
 export default async function commandLine(): Promise<any> {
     console.log("This CLI client is in testing mode")
     // Get input from user
-    let breaker = false
+    const breaker = false
     input_loop: while (!breaker) {
-        let raw_input = await prompt(NAME + " - " + VERSION + ":> ")
+        const rawInput = await prompt(name + " - " + version + ":> ")
         // NOTE Dividing arguments if any
-        let divided_input: string[]
-        if (raw_input.includes(" ")) {
-            divided_input = raw_input.split(" ")
+        let dividedInput: string[]
+        if (rawInput.includes(" ")) {
+            dividedInput = rawInput.split(" ")
         } else {
-            divided_input = [raw_input]
+            dividedInput = [rawInput]
         }
-        let input = divided_input[0]
+        const input = dividedInput[0]
         // ANCHOR Command ingestion
         switch (input.toLowerCase()) {
             // INFO Wallet case is to work with wallets
             case "wallet":
-                Wallet.getInstance().dispatch(divided_input)
+                Wallet.getInstance().dispatch(dividedInput)
                 break
             // TODO Write commands
             case "crypto":
-                Cryptography.getInstance().dispatch(divided_input)
+                Cryptography.getInstance().dispatch(dividedInput)
                 break
             // TODO Write commands
             case "help":

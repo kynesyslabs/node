@@ -9,7 +9,7 @@ export function normalizeWebBuffers(webBuffer: any): [Buffer, string] {
             return [Buffer.from(webBuffer), null]
         } else {
             // Parsing the Uint8Array and Buffering it
-            let bufferized = {
+            const bufferized = {
                 type: "Buffer",
                 data: [],
             }

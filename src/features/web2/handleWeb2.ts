@@ -1,7 +1,7 @@
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import required from "src/utilities/required"
-import sharedState from "src/utilities/sharedState"
+import SharedState from "src/utilities/sharedState"
 import { IWeb2Request } from "@kynesyslabs/demosdk/types"
 import { Web2RequestManager } from "./Web2RequestManager"
 import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
@@ -62,7 +62,7 @@ export async function handleWeb2(
                 )
 
                 /* FIXME DEVEL Activate in production */
-                if (sharedState.getInstance().PROD) {
+                if (SharedState.getInstance().prod) {
                     required(
                         await web2RequestManager.quorumIsReached(),
                         "Not enough attestations to reach quorum",
@@ -78,7 +78,7 @@ export async function handleWeb2(
                     JSON.stringify(dahr.web2Request.attestations),
                 )
                 const ourPrivateKey =
-                    sharedState.getInstance().identity.ed25519.privateKey
+                    SharedState.getInstance().identity.ed25519.privateKey
                 const signedAttestations = Cryptography.sign(
                     hashedAttestations,
                     ourPrivateKey,

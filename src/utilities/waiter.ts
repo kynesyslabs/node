@@ -41,7 +41,7 @@ export class Waiter {
      */
     static async wait<T = any>(
         id: string,
-        timeout: number = 10000,
+        timeout = 10000,
     ): Promise<T> {
         if (Waiter.waitList.has(id)) {
             throw new Error(`[WAITER] Already waiting for id: ${id}`)

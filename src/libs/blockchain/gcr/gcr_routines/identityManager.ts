@@ -11,7 +11,7 @@ import {
     XRPL,
 } from "@kynesyslabs/demosdk/xm-localsdk"
 
-import { GCR_Main } from "@/model/entities/GCRv2/GCR_Main"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
 import Datasource from "src/model/datasource"
 import ensureGCRForUser from "./ensureGCRForUser"
@@ -62,7 +62,7 @@ export default class IdentityManager {
     ): Promise<RPCResponse> {
         const chainId = payload.target_identity.chain
 
-        // @ts-expect-error
+        // @ts-expect-error - This is a workaround to avoid type errors
         const sdk = await chains[chainId].create(null)
 
         let messageVerified = false
@@ -226,14 +226,14 @@ export default class IdentityManager {
         subchain?: string,
     ) {
         const db = await Datasource.getInstance()
-        const GCRRepository = db.getDataSource().getRepository(GCR_Main)
+        const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
-        const identities = await GCRRepository.findOne({
+        const identities = await gcrRepository.findOne({
             where: { pubkey: address },
             select: ["identities"],
         })
 
-        let data = identities?.identities.xm
+        const data = identities?.identities.xm
 
         let result = null
 
@@ -250,7 +250,7 @@ export default class IdentityManager {
         sender: string,
         payload: abstraction.XMCoreTargetIdentityPayload,
     ): Promise<RPCResponse> {
-        let existingIdentities = await this.getXmIdentities(sender)
+        const existingIdentities = await this.getXmIdentities(sender)
 
         if (!existingIdentities) {
             return {
@@ -309,9 +309,9 @@ export default class IdentityManager {
     // Web2 Identities
     static async getWeb2Identifiers(address: string): Promise<ProviderIdentities> {
         const db = await Datasource.getInstance()
-        const GCRRepository = db.getDataSource().getRepository(GCR_Main)
+        const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
-        const identities = await GCRRepository.findOne({
+        const identities = await gcrRepository.findOne({
             where: { pubkey: address },
             select: ["identities"],
         })
@@ -321,9 +321,9 @@ export default class IdentityManager {
 
     static async addWeb2Identifier(address: string, context: string, proof: string): Promise<RPCResponse> {
         const db = await Datasource.getInstance()
-        const GCRRepository = db.getDataSource().getRepository(GCR_Main)
+        const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
-        const identities = await GCRRepository.findOne({
+        const identities = await gcrRepository.findOne({
             where: { pubkey: address },
             select: ["identities"],
         })
@@ -344,9 +344,9 @@ export default class IdentityManager {
 
     static async removeWeb2Identifier(address: string, context: string): Promise<RPCResponse> {
         const db = await Datasource.getInstance()
-        const GCRRepository = db.getDataSource().getRepository(GCR_Main)
+        const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
-        const identities = await GCRRepository.findOne({
+        const identities = await gcrRepository.findOne({
             where: { pubkey: address },
             select: ["identities"],
         })

@@ -21,7 +21,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import required from "src/utilities/required"
-import { ForgeToHex } from "src/libs/crypto/forgeUtils"
+import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 const term = terminalkit.terminal
 
@@ -32,11 +32,11 @@ export async function confirmTransaction(
 ): Promise<ValidityData> {
     term.yellow("\n[Native Tx Validation] Validating transaction...\n")
     // Getting the current block number
-    let reference_block = await Chain.getLastBlockNumber()
+    const referenceBlock = await Chain.getLastBlockNumber()
     // Loading identity
-    const id_ed25519 = getSharedState.identity.ed25519
-    let publicKey = id_ed25519.publicKey
-    let privateKey = id_ed25519.privateKey
+    const idEd25519 = getSharedState.identity.ed25519
+    const publicKey = idEd25519.publicKey
+    const privateKey = idEd25519.privateKey
     // REVIEW This should work just fine
     console.log("Signature: ")
     console.log(tx.signature)
@@ -47,7 +47,7 @@ export async function confirmTransaction(
     let validityData: ValidityData = {
         data: {
             valid: false,
-            reference_block: reference_block,
+            reference_block: referenceBlock,
             message:
                 "[Native Tx Validation] [NOT PROCESSED] Transaction yet to be processed\n",
             gas_operation: null,
@@ -85,7 +85,7 @@ export async function confirmTransaction(
     */
     // Verify tx validity
 
-    let verified = Transaction.confirmTx(
+    const verified = Transaction.confirmTx(
         tx,
         privateKey as pki.ed25519.BinaryBuffer,
         publicKey as pki.ed25519.BinaryBuffer,
@@ -108,8 +108,8 @@ export async function confirmTransaction(
 }
 
 async function signValidityData(data: ValidityData): Promise<ValidityData> {
-    let privateKey = getSharedState.identity.ed25519.privateKey
-    let hash = Hashing.sha256(JSON.stringify(data.data))
+    const privateKey = getSharedState.identity.ed25519.privateKey
+    const hash = Hashing.sha256(JSON.stringify(data.data))
     data.signature = Cryptography.sign(hash, privateKey)
     return data
 }
@@ -132,7 +132,7 @@ async function defineGas(
         if (typeof tx.content.from === "string") {
             from = tx.content.from
         } else {
-            from = ForgeToHex(tx.content.from)
+            from = forgeToHex(tx.content.from)
         }
         console.log(
             "[Native Tx Validation] Calculating gas for: " + from + "\n",
@@ -144,7 +144,7 @@ async function defineGas(
         validityData.data.message =
             "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction\n"
         // Hash the validation data
-        let hash = Hashing.sha256(JSON.stringify(validityData.data))
+        const hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
         validityData.signature = Cryptography.sign(hash, privateKey)
         return [false, validityData]
@@ -163,13 +163,13 @@ async function defineGas(
             from +
             "\n"
         // Hash the validation data
-        let hash = Hashing.sha256(JSON.stringify(validityData.data))
+        const hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
         validityData.signature = Cryptography.sign(hash, privateKey)
         return [false, validityData]
     }
     // TODO Work on this method
-    let compositeFeeAmount = await calculateCurrentGas(tx)
+    const compositeFeeAmount = await calculateCurrentGas(tx)
     // FIXME Overriding for testing
     if (fromBalance < compositeFeeAmount && getSharedState.PROD) {
         term.red.bold(
@@ -188,7 +188,7 @@ async function defineGas(
             "\n" +
             "\n"
         // Hash the validation data
-        let hash = Hashing.sha256(JSON.stringify(validityData.data))
+        const hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
         validityData.signature = Cryptography.sign(hash, privateKey)
         return [false, validityData]
@@ -197,7 +197,7 @@ async function defineGas(
     // TODO Move gas operation creator to a separate module
     // NOTE Deducting the gas from the account and assigning the operation to be executed
     // as child of this transaction
-    let gas_operation: Operation = {
+    const gasOperation: Operation = {
         operator: "pay_gas",
         actor: from,
         params: { amount: compositeFeeAmount.toString() },
@@ -213,11 +213,11 @@ async function defineGas(
     }
     console.log("[Native Tx Validation] Gas Operation derived\n")
     //console.log(gas_operation)
-    return [true, gas_operation]
+    return [true, gasOperation]
 }
 
-export async function assignNonce(tx: Transaction): Promise<Boolean> {
-    let validNonce = true // TODO Override for testing
+export async function assignNonce(tx: Transaction): Promise<boolean> {
+    const validNonce = true // TODO Override for testing
     // TODO Get, check and increment the nonce of the transaction
     // while returning either true or false
     return validNonce
@@ -232,7 +232,7 @@ export async function broadcastVerifiedNativeTransaction(
     // The operations are the Operation objects that are executed in the GCR after the consensus
     // has confirmed the transaction in the block.
 
-    let execution = await executeNativeTransaction(
+    const execution = await executeNativeTransaction(
         validityData.data.transaction,
     )
     if (!execution[0]) {

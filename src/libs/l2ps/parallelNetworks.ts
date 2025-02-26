@@ -66,12 +66,12 @@ export class Subnet {
 
     // Setting a private key will also set the uid of the subnet (hash of the public key in PEM format)
     public setPrivateKey(privateKeyPEM: string): RPCResponse {
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
+        const response: RPCResponse = _.cloneDeep(emptyResponse)
         let msg = ""
         try {
             this.keypair.privateKey = forge.pki.privateKeyFromPem(privateKeyPEM)
             this.keypair.publicKey = forge.pki.publicKeyFromPem(privateKeyPEM)
-            let uid = Hashing.sha256(
+            const uid = Hashing.sha256(
                 forge.pki.publicKeyToPem(this.keypair.publicKey),
             )
             if (this.uid !== uid) {
@@ -92,7 +92,7 @@ export class Subnet {
     }
 
     public setPublicKey(publicKeyPEM: string): RPCResponse {
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
+        const response: RPCResponse = _.cloneDeep(emptyResponse)
         let msg = ""
         try {
             this.keypair.publicKey = forge.pki.publicKeyFromPem(publicKeyPEM)
@@ -111,18 +111,18 @@ export class Subnet {
 
     // Getting all the transactions in a N block for this subnet
     public async getTransactions(blockNumber: number): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
+        const response: RPCResponse = _.cloneDeep(emptyResponse)
         response.result = 200
 
-        var block = await Chain.getBlockByNumber(blockNumber)
-        var blockContent: BlockContent = JSON.parse(block.content)
-        var encryptedTransactions = blockContent.encrypted_transactions_hashes
+        const block = await Chain.getBlockByNumber(blockNumber)
+        const blockContent: BlockContent = JSON.parse(block.content)
+        const encryptedTransactions = blockContent.encrypted_transactions_hashes
         response.response = encryptedTransactions
         return response
     }
 
     public async getAllTransactions(): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
+        const response: RPCResponse = _.cloneDeep(emptyResponse)
         response.result = 200
         response.response = "not implemented"
         response.require_reply = false
@@ -138,13 +138,13 @@ export class Subnet {
         /* Workflow:
          * We first need to check if the payload is valid by checking the hash of the encrypted transaction.
          */
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
+        const response: RPCResponse = _.cloneDeep(emptyResponse)
         response.result = 200
         response.response = "not implemented"
         response.require_reply = false
         response.extra = "registerTx not implemented"
         // Checking if the encrypted transaction coherent
-        var expectedHash = Hashing.sha256(
+        const expectedHash = Hashing.sha256(
             encryptedTransaction.encryptedTransaction,
         ) // Hashing the encrypted transaction
         if (expectedHash != encryptedTransaction.encryptedHash) {
@@ -161,7 +161,7 @@ export class Subnet {
 
     // Registering a node as partecipant in the L2PS
     public async registerAsPartecipant(peer: Peer): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
+        const response: RPCResponse = _.cloneDeep(emptyResponse)
         response.result = 200
         response.response = "not implemented"
         response.require_reply = false
@@ -186,12 +186,12 @@ export class Subnet {
             return null
         }
         // ! TODO Clean the typing of Cryptography.rsa.decrypt
-        let decryptedTransactionResponse = Cryptography.rsa.decrypt(encryptedTransaction.encryptedTransaction, this.keypair.privateKey)
+        const decryptedTransactionResponse = Cryptography.rsa.decrypt(encryptedTransaction.encryptedTransaction, this.keypair.privateKey)
         if (!decryptedTransactionResponse[0]) {
             log.error("[L2PS] Error decrypting transaction " + encryptedTransaction.hash + " on subnet " + this.uid)
             return decryptedTransactionResponse[1]
         }
-        let decryptedTransaction: Transaction = decryptedTransactionResponse[1]
+        const decryptedTransaction: Transaction = decryptedTransactionResponse[1]
         return decryptedTransaction
     }
 
@@ -206,12 +206,12 @@ export class Subnet {
             return null
         }
         // ! TODO Clean the typing of Cryptography.rsa.encrypt
-        let encryptedTransactionResponse = Cryptography.rsa.encrypt(JSON.stringify(transaction), this.keypair.publicKey)
+        const encryptedTransactionResponse = Cryptography.rsa.encrypt(JSON.stringify(transaction), this.keypair.publicKey)
         if (!encryptedTransactionResponse[0]) {
             log.error("[L2PS] Error encrypting transaction " + transaction.hash + " on subnet " + this.uid)
             return encryptedTransactionResponse[1]
         }
-        let encryptedTransaction: EncryptedTransaction = encryptedTransactionResponse[1]
+        const encryptedTransaction: EncryptedTransaction = encryptedTransactionResponse[1]
         return encryptedTransaction
     }
 
@@ -232,17 +232,17 @@ export class Subnet {
             )
             return null
         }
-        let publicKeyPEM = peer.L2PSpublicKeys.get(this.uid)
-        let publicKey: forge.pki.rsa.PublicKey = forge.pki.publicKeyFromPem(publicKeyPEM)
-        let JSONTransaction = JSON.stringify(transaction)
+        const publicKeyPEM = peer.L2PSpublicKeys.get(this.uid)
+        const publicKey: forge.pki.rsa.PublicKey = forge.pki.publicKeyFromPem(publicKeyPEM)
+        const jsonTransaction = JSON.stringify(transaction)
         // ! TODO Clean the typing of Cryptography.rsa.encrypt
-        let encryptedBaseTxResponse = Cryptography.rsa.encrypt(JSONTransaction, publicKey)
+        const encryptedBaseTxResponse = Cryptography.rsa.encrypt(jsonTransaction, publicKey)
         if (!encryptedBaseTxResponse[0]) {
             log.error("[L2PS] Error encrypting transaction for peer " + peer.connection.string + "(" + peer.identity + ")" + " on subnet " + this.uid)
             return encryptedBaseTxResponse[1]
         }
-        let encryptedBaseTx = encryptedBaseTxResponse[1]
-        let encryptedTxHash = Hashing.sha256(JSON.stringify(encryptedBaseTx))
+        const encryptedBaseTx = encryptedBaseTxResponse[1]
+        const encryptedTxHash = Hashing.sha256(JSON.stringify(encryptedBaseTx))
         let encryptedTransaction: EncryptedTransaction = {
             hash: transaction.hash,
             encryptedTransaction: encryptedBaseTx,
@@ -251,7 +251,7 @@ export class Subnet {
             L2PS: this.keypair.publicKey,
         }
         // REVIEW Double pass encryption with the subnet public key
-        let encryptedTransactionDoublePassResponse = Cryptography.rsa.encrypt(JSON.stringify(encryptedTransaction), this.keypair.publicKey)
+        const encryptedTransactionDoublePassResponse = Cryptography.rsa.encrypt(JSON.stringify(encryptedTransaction), this.keypair.publicKey)
         if (!encryptedTransactionDoublePassResponse[0]) {
             log.error("[L2PS] Error encrypting transaction for peer " + peer.connection.string + "(" + peer.identity + ")" + " on subnet " + this.uid)
             return encryptedTransactionDoublePassResponse[1]

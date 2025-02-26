@@ -4,7 +4,7 @@ import { StoredIdentities } from "../types/IdentityTypes"
 
 // TODO Implement this
 @Entity("gcr_tracker")
-export class GCR_Tracker {
+export class GCRTracker {
     @PrimaryColumn({ type: "text", name: "txhash" })
     txhash: string
     @Column({ type: "boolean", name: "applied" })
