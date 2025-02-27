@@ -26,7 +26,7 @@ export async function hashPublicKeyTable<T extends { public_key: string }>(
 
     const records = await repository.find({
         order: {
-            public_key: "ASC",
+            publicKey: "ASC",
         } as unknown as FindOptionsOrder<T>,
     })
 

@@ -116,7 +116,9 @@ export async function consensusRoutine(): Promise<void> {
             )
             //  Prune the mempool of the failed txs
             // NOTE The mempool should now be updated with only the successful txs
-            await Mempool.removeTransactionsWithHashes(failedTxs)
+            for (const tx of failedTxs) {
+                await Mempool.removeTransactionsWithHashes([tx])
+            }
         }
         // REVIEW Re-merge the mempools anyway to get the correct mempool from the whole shard
         // ! To avoid race conditions, we should use the sharedState.inConsensusLoop flag to not insert new txs in the current mempool
@@ -175,8 +177,6 @@ export async function consensusRoutine(): Promise<void> {
         // INFO: CONSENSUS ACTION 7: End the consensus routine
         await updateValidatorPhase(7)
     } catch (error) {
-        console.error(error)
-        process.exit(1)
         if (error instanceof NotInShardError) {
             log.info(
                 "[consensusRoutine] We are not in the shard, waiting for the block",

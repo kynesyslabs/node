@@ -23,7 +23,7 @@ import { GlobalChangeRegistry } from "./entities/GCR/GlobalChangeRegistry"
 import { GCRHashes } from "./entities/GCRv2/GCRHashes"
 import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs"
 import { GCRMain } from "./entities/GCRv2/GCR_Main"
-import { GCRTracker } from "./entities/GCRv2/GCR_Tracker"
+import { GCRTracker } from "./entities/GCR/GCRTracker"
 
 class Datasource {
     private static instance: Datasource
