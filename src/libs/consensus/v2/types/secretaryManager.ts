@@ -13,8 +13,8 @@ import Cryptography from "src/libs/crypto/cryptography"
 
 // ANCHOR SecretaryManager
 export default class SecretaryManager {
-    private _greenlight_timeout: number = 15000
-    private _set_validator_phase_timeout: number = 10000
+    private _greenlight_timeout = 15000 // 15 seconds
+    private _set_validator_phase_timeout = 10000 // 10 seconds
     private static instance: SecretaryManager
 
     // Internal variables

@@ -127,6 +127,15 @@ export interface SerializedMempoolData {
 export default class Mempool {
     private static lock: MempoolLock = new MempoolLock()
 
+    // INFO Temporary mempool for storing transactions while the consensus routine is running
+    public static temporaryMempool: MempoolData = {
+        number: -1,
+        current: -1,
+        transactions: [],
+        proposedBlock: new Block(),
+        timestamp: 0,
+    }
+
     // INFO Reading the whole current mempool
     public static async getMempool(from = ""): Promise<MempoolData> {
         from += `_${Math.floor(Math.random() * 1000)}`
@@ -244,7 +253,16 @@ export default class Mempool {
     public static async addTransaction(
         transaction: Transaction,
     ): Promise<void> {
-        const mempool = await this.getMempool("Mempool.addTransaction")
+        var mempool: MempoolData
+        if (getSharedState.inConsensusLoop) {
+            log.info(
+                "locking the mempool for new txs while the consensus routine is running",
+            )
+            // REVIEW When we are in the consensus routine, we can't use the main mempool, so we use the temporary one
+            mempool = this.temporaryMempool
+        } else {
+            mempool = await this.getMempool("Mempool.addTransaction")
+        }
         log.info(
             "adding transaction with hash " +
                 transaction.hash +
@@ -277,10 +295,21 @@ export default class Mempool {
         await mempoolRepository.update({ current: 1 }, serializedMempool)
     }
 
+    public static async joinTemporaryMempool() {
+        const mempool = await this.getMempool("Mempool.joinTemporaryMempool")
+        // Joining the transactions from the temporary mempool to the main one
+        this.temporaryMempool.transactions.forEach(tx => {
+            mempool.transactions.push(tx)
+        })
+        // Clearing the temporary mempool
+        this.temporaryMempool.transactions = []
+        
+    }
+
     public static async removeTransactionsWithHashes(
         hashes: string[],
     ): Promise<void> {
-        let mempool = await this.getMempool(
+        const mempool = await this.getMempool(
             "Mempool.removeTransactionsWithHashes",
         )
 

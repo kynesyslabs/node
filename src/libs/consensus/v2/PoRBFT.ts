@@ -92,7 +92,7 @@ export async function consensusRoutine(): Promise<void> {
             true,
         )
         // INFO: CONSENSUS ACTION 3: Merge the peerlist (skipped)
-        // REVIEW Merge the peerlist
+        // Merge the peerlist
         const peerlist = []
         // await mergePeerlistAndWait(shard)
 
@@ -114,13 +114,12 @@ export async function consensusRoutine(): Promise<void> {
             log.error(
                 "[consensusRoutine] Failed Txs found, pruning the mempool",
             )
-            // REVIEW Prune the mempool of the failed txs
+            //  Prune the mempool of the failed txs
             // NOTE The mempool should now be updated with only the successful txs
-            for (const tx of failedTxs) {
-                await Mempool.removeTransactionWithHash(tx)
-            }
+            await Mempool.removeTransactionsWithHashes(failedTxs)
         }
         // REVIEW Re-merge the mempools anyway to get the correct mempool from the whole shard
+        // ! To avoid race conditions, we should use the sharedState.inConsensusLoop flag to not insert new txs in the current mempool
         const mempool = await mergeAndOrderMempools(manager.shard.members)
 
         log.info(
@@ -195,6 +194,8 @@ export async function consensusRoutine(): Promise<void> {
         manager.endConsensusRoutine()
         // Cleanup the consensus state
         cleanupConsensusState()
+        // Joining the temporary mempool to the main one
+        await Mempool.joinTemporaryMempool() // ? Is await ok here?
     }
 
     log.debug("[consensusRoutine] CONSENSUS ROUTINE ENDED 🔥🔥🔥")
