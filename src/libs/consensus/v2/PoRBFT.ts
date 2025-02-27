@@ -121,7 +121,6 @@ export async function consensusRoutine(): Promise<void> {
             }
         }
         // REVIEW Re-merge the mempools anyway to get the correct mempool from the whole shard
-        // ! To avoid race conditions, we should use the sharedState.inConsensusLoop flag to not insert new txs in the current mempool
         const mempool = await mergeAndOrderMempools(manager.shard.members)
 
         log.info(
