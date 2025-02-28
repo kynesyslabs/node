@@ -173,7 +173,7 @@ export default class Logger {
      * @param message The text to print.
      * @param padWithNewLines Whether to print a bunch of new lines after the text.
      */
-    static only(message: string, padWithNewLines: boolean = false) {
+    static only(message: string, padWithNewLines = false) {
         if (!this.LOG_ONLY_ENABLED) {
             Logger.debug("⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹ [LOG ONLY ENABLED] ⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹")
             this.LOG_ONLY_ENABLED = true
