@@ -16,8 +16,8 @@ export default class SharedState {
 
     // !SECTION Constants
     prod = process.env.PROD == "true" || false
-    version = "0.8.0"
-    version_name = "Ungentle Movement"
+    version = "0.9.0"
+    version_name = "Prismatic Evolution"
 
     block_time = 10 // TODO Get it from the genesis (or see Consensus module)
 
