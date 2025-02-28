@@ -177,6 +177,9 @@ export default class Logger {
         if (!this.LOG_ONLY_ENABLED) {
             Logger.debug("⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹ [LOG ONLY ENABLED] ⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹")
             this.LOG_ONLY_ENABLED = true
+
+            // Disable console.log
+            console.log = () => {}
         }
 
         const logEntry = `[ONLY] [${this.getTimestamp()}] ${message}\n`

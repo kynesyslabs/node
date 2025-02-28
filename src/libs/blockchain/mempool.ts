@@ -303,7 +303,17 @@ export default class Mempool {
         })
         // Clearing the temporary mempool
         this.temporaryMempool.transactions = []
-        
+
+        // Save mempool
+        const db = await Datasource.getInstance()
+        const mempoolRepository = db
+            .getDataSource()
+            .getRepository(MempoolEntity)
+
+        await mempoolRepository.update(
+            { current: 1 },
+            { transactions: JSON.stringify(mempool.transactions) },
+        )
     }
 
     public static async removeTransactionsWithHashes(
