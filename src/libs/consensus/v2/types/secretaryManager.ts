@@ -10,6 +10,7 @@ import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { TimeoutError, AbortError, NotInShardError } from "src/exceptions"
 import Cryptography from "src/libs/crypto/cryptography"
+import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 
 // ANCHOR SecretaryManager
 export default class SecretaryManager {
@@ -41,7 +42,7 @@ export default class SecretaryManager {
     /**
      * Initializes the shard, including the members and the validation phases.
      *
-     * @param CVSA The CVSA string
+     * @param cVSA The CVSA string
      * @param lastBlockNumber The last block number
      * @returns The list of shard members
      */
@@ -764,13 +765,18 @@ export default class SecretaryManager {
 
             if (res.extra == 450) {
                 log.debug("[SEND OUR VALIDATOR PHASE] Invalid seed detected")
-                process.exit(0)
+                // process.exit(0)
+                // INFO: Logs parts used to create the current CVSA
+                await getCommonValidatorSeed(null, (message: string) => {
+                    log.only(message)
+                })
+                return null
             }
 
             // INFO: Extract the greenlight status and resolve the waiter
             const greenlight = res.extra.greenlight
             const timestamp = res.extra.timestamp
-            const blockRef = res.extra.blockRef
+            // const blockRef = res.extra.blockRef
 
             if (greenlight) {
                 log.debug(

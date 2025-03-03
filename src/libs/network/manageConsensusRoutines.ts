@@ -165,15 +165,19 @@ export default async function manageConsensusRoutines(
                     seed !== manager.shard.CVSA
                 ) {
                     // TODO: Remove this block after testing!
-                    setTimeout(() => {
-                        log.debug("our seed: " + manager.shard.CVSA)
-                        log.debug(
-                            "payload params: " +
-                                JSON.stringify(payload.params, null, 2),
-                        )
-                        log.error("Invalid seed detected")
-                        process.exit(0)
-                    }, 500)
+                    // setTimeout(() => {
+                    //     log.debug("our seed: " + manager.shard.CVSA)
+                    //     log.debug(
+                    //         "payload params: " +
+                    //             JSON.stringify(payload.params, null, 2),
+                    //     )
+                    //     log.error("Invalid seed detected")
+                    //     process.exit(0)
+                    // }, 500)
+                    // INFO: Logs parts used to create the current CVSA
+                    await getCommonValidatorSeed(null, (message: string) => {
+                        log.only(message)
+                    })
 
                     return {
                         result: 200,
@@ -199,7 +203,10 @@ export default async function manageConsensusRoutines(
 
                 // INFO: If we receive a setValidatorPhase request, and the
                 // secretary routine has not started, wait for it to start
-                if (!manager.runSecretaryRoutine || blockRef > manager.shard.blockRef) {
+                if (
+                    !manager.runSecretaryRoutine ||
+                    blockRef > manager.shard.blockRef
+                ) {
                     try {
                         await Waiter.wait(
                             peerKey + Waiter.keys.WAIT_FOR_SECRETARY_ROUTINE,
@@ -218,9 +225,10 @@ export default async function manageConsensusRoutines(
                     }
                 }
 
-                if (blockRef < manager.shard.blockRef){
+                if (blockRef < manager.shard.blockRef) {
                     response.result = 400
-                    response.response = "Block reference is lower than the current block reference"
+                    response.response =
+                        "Block reference is lower than the current block reference"
                     return response
                 }
 
