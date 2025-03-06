@@ -32,7 +32,7 @@ import Block from "./block"
 import manageNative from "./gcr/gcr_routines/manageNative"
 import Transaction from "./transaction"
 import { Peer } from "../peer"
-import Mempool from "./mempool"
+import Mempool from "./mempool_v2"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorSeed"
@@ -396,29 +396,35 @@ export default class Chain {
         log.info("[insertBlock] Extracting transactions from block")
         // ! FIXME The below fails when a tx like a web2Request is inserted
         const orderedTransactionsHashes = block.content.ordered_transactions
+        log.only("Ordered tx hashes: " + orderedTransactionsHashes.length)
         log.info(JSON.stringify(orderedTransactionsHashes))
         // Fetch transaction entities from the repository based on ordered transaction hashes
-        let transactionEntities = await Promise.all(
-            orderedTransactionsHashes.map(async txHash => {
-                log.info(
-                    "[insertBlock] Fetching transaction with hash: " + txHash,
-                )
-                /*
-                // Why do we look into the transactions repository? Shouldn't be in the mempool yet?
-                const rawTransaction = await transactionRepository.findOneBy({
-                    hash: txHash,
-                }) // This returns null
-                log.info("[insertBlock] Transaction fetched: ")
-                log.info(rawTransaction)
-                return Transaction.fromRawTransaction(rawTransaction) */
-                const mempoolData = await Mempool.getMempool("insertBlock")
-                const tx = mempoolData.transactions.find(
-                    tx => tx.hash === txHash,
-                )
-                return tx
-            }),
+        // const mempoolData = await Mempool.getMempool()
+        // log.only("Mempool Data tx count: " + mempoolData.transactions.length)
+        const transactionEntities = await Mempool.getTransactionsByHashes(
+            orderedTransactionsHashes,
         )
-        transactionEntities = transactionEntities.filter(tx => tx !== undefined)
+
+        // let transactionEntities = await Promise.all(
+        //     orderedTransactionsHashes.map(async txHash => {
+        //         log.info(
+        //             "[insertBlock] Fetching transaction with hash: " + txHash,
+        //         )
+        //         /*
+        //         // Why do we look into the transactions repository? Shouldn't be in the mempool yet?
+        //         const rawTransaction = await transactionRepository.findOneBy({
+        //             hash: txHash,
+        //         }) // This returns null
+        //         log.info("[insertBlock] Transaction fetched: ")
+        //         log.info(rawTransaction)
+        //         return Transaction.fromRawTransaction(rawTransaction) */
+        //         const tx = mempoolData.transactions.find(
+        //             tx => tx.hash === txHash,
+        //         )
+        //         return tx
+        //     }),
+        // )
+        // transactionEntities = transactionEntities.filter(tx => tx !== undefined)
 
         const newBlock = new Blocks()
         log.info("[CHAIN] reading hash")
@@ -488,6 +494,7 @@ export default class Chain {
                 "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
             )
             //log.info(result)
+            log.only("Finalize tx count: " + transactionEntities.length)
 
             // REVIEW We then add the transactions to the Transactions repository
             for (let i = 0; i < transactionEntities.length; i++) {
@@ -496,7 +503,7 @@ export default class Chain {
             }
             // REVIEW And we clean the mempool
             if (cleanMempool) {
-                await Mempool.removeTransactionsWithHashes(
+                await Mempool.removeTransactionsByHashes(
                     transactionEntities.map(tx => tx.hash),
                 )
             }

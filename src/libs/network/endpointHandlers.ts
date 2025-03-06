@@ -13,9 +13,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 // REVIEW Pay attention to the return types (RPCResponse)
 
 import Chain from "src/libs/blockchain/chain"
-import Mempool, { MempoolData } from "src/libs/blockchain/mempool"
+import Mempool from "src/libs/blockchain/mempool_v2"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
 import Transaction from "src/libs/blockchain/transaction"
+// import { Transaction as TransactionType } from "@kynesyslabs/demosdk/types"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import handleL2PS from "./routines/transactions/handleL2PS"
@@ -72,7 +73,6 @@ export default class ServerHandlers {
         // Verify and execute the transaction
         let validationData: ValidityData
         try {
-
             /* NOTE This workflow goeas as:
              * The transaction is validated
              * A gas operation is created and is sent back alongside the validation data
@@ -81,7 +81,6 @@ export default class ServerHandlers {
              */
             //console.log(fname + "Validating transaction...")
             validationData = await confirmTransaction(tx)
-
 
             // NOTE Gas operation is created at this point (and balance is checked)
             // NOTE Nonce assignment is done in the GCR too
@@ -97,7 +96,9 @@ export default class ServerHandlers {
             // Hashing both the gcredits
             const gcrEditsHash = Hashing.sha256(JSON.stringify(gcrEdits))
             console.log("gcrEditsHash: " + gcrEditsHash)
-            const txGcrEditsHash = Hashing.sha256(JSON.stringify(tx.content.gcr_edits))
+            const txGcrEditsHash = Hashing.sha256(
+                JSON.stringify(tx.content.gcr_edits),
+            )
             console.log("txGcrEditsHash: " + txGcrEditsHash)
             const comparison = txGcrEditsHash == gcrEditsHash
             if (!comparison) {
@@ -366,7 +367,8 @@ export default class ServerHandlers {
                 log.error("[handleExecuteTransaction] Failed to apply GCREdit")
                 result.success = false
                 result.response = false
-                result.extra = "Failed to apply GCREdit: " + editsResults.message
+                result.extra =
+                    "Failed to apply GCREdit: " + editsResults.message
                 return result
             }
 
@@ -527,9 +529,7 @@ export default class ServerHandlers {
 
         switch (request.message) {
             case "getMempool":
-                response.response = await Mempool.getMempool(
-                    "ServerHandlers.getMempool",
-                )
+                response.response = await Mempool.getMempool()
                 //console.log(response)
                 response.result = 200
                 response.require_reply = false
@@ -569,13 +569,15 @@ export default class ServerHandlers {
         // ...
         log.info("[handleMempool] Received a message")
         log.info(content)
-        let response = false
+        let response = []
+        log.only("Mempool received: ")
+        log.only(JSON.stringify(content.data))
 
         try {
-            response = await Mempool.receive(content.data as MempoolData)
+            response = await Mempool.receive(content.data as Transaction[])
         } catch (error) {
             console.error(error)
-            response = false
+            response = []
         }
 
         const ourId = getSharedState.identity.ed25519.publicKey.toString("hex")
