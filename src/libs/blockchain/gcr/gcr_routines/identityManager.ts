@@ -42,9 +42,16 @@ const chains: { [key: string]: typeof DefaultChain } = {
 }
 
 export default class IdentityManager {
-    // INFO: SUPPORTED CHAINS
+    // Supported Web2 contexts
+    static readonly supportedWeb2Contexts = {
+        github: this.inferGithubIdentity,
+        twitter: this.inferTwitterIdentity,
+    }
+
+    // ? SUPPORTED CHAINS
+
     constructor() {}
-    
+
     // SECTION XM Identities
 
     // Infer identity from a valid write transaction
@@ -168,13 +175,10 @@ export default class IdentityManager {
     }
 
     // SECTION Web2 Identities
-    static async inferGithubIdentity(payload: abstraction.InferFromGithubPayload): Promise<RPCResponse> {
-        let result: RPCResponse = {
-            result: 400,
-            response: "Not executed",
-            require_reply: false,
-            extra: {},
-        }
+    static async inferGithubIdentity(
+        payload: abstraction.InferFromGithubPayload,
+    ): Promise<Boolean> {
+        let result: Boolean = false
         // REVIEW  Checking the gist for signatures
         const gistUrl = payload.proof
         // Inferring the github username from the gist url
@@ -189,31 +193,25 @@ export default class IdentityManager {
         const message = "I am demos user: " + demosPublicKey
 
         // Verify the signature
-        const verified = await Cryptography.verify(message, demosSignature, demosPublicKey)
+        const verified = await Cryptography.verify(
+            message,
+            demosSignature,
+            demosPublicKey,
+        )
         if (!verified) {
-            await this.addWeb2Identifier(demosPublicKey, "github", gistUrl) // REVIEW It contains the github username as well in the url
-            result = {
-                result: 200,
-                response: "Identity added",
-                require_reply: false,
-                extra: {
-                    message: "Identity added",
-                },
-            }
+            result = false
         } else {
-            result = {
-                result: 401,
-                response: "Github identity could not be verified",
-                require_reply: false,
-                extra: {
-                    message: "Signature could not be verified",
-                },
-            }
+            result = true
         }
-
         return result
     }
 
+    static async inferTwitterIdentity(
+        payload: abstraction.InferFromTwitterPayload,
+    ): Promise<Boolean> {
+        // TODO Fetch a twitter post and verify the signature (as we did for github gists)
+        return false
+    }
     // SECTION Helper functions and Getters
     /**
      * Get the identities related to a demos address
@@ -307,7 +305,9 @@ export default class IdentityManager {
     }
 
     // Web2 Identities
-    static async getWeb2Identifiers(address: string): Promise<ProviderIdentities> {
+    static async getWeb2Identifiers(
+        address: string,
+    ): Promise<ProviderIdentities> {
         const db = await Datasource.getInstance()
         const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
@@ -319,10 +319,41 @@ export default class IdentityManager {
         return identities?.identities.web2
     }
 
-    static async addWeb2Identifier(address: string, context: string, proof: string): Promise<RPCResponse> {
+    static async addWeb2Identifier(
+        address: string,
+        context: string,
+        proof: string,
+    ): Promise<RPCResponse> {
         const db = await Datasource.getInstance()
         const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
+        //  Check if the context is supported
+        if (!IdentityManager.supportedWeb2Contexts[context]) {
+            return {
+                result: 400,
+                response: "Context not supported",
+                require_reply: false,
+                extra: {
+                    message: "Context not supported: " + context,
+                },
+            }
+        }
+        // Calling the mapped method for the context to verify the proof
+        const verified = await IdentityManager.supportedWeb2Contexts[context](
+            proof,
+        )
+        // NOTE All the above methods return a boolean, so we can proceed with the rest of the function here without duplicating code
+        if (!verified) {
+            return {
+                result: 401,
+                response: "Proof could not be verified",
+                require_reply: false,
+                extra: {
+                    message: "Proof could not be verified",
+                },
+            }
+        }
+        // Adding the proof to the identities
         const identities = await gcrRepository.findOne({
             where: { pubkey: address },
             select: ["identities"],
@@ -330,7 +361,12 @@ export default class IdentityManager {
 
         identities.identities.web2[context] = [proof]
 
-        await updateJSONBValue(address, "identities", "web2", identities.identities)
+        await updateJSONBValue(
+            address,
+            "identities",
+            "web2",
+            identities.identities,
+        )
 
         return {
             result: 200,
@@ -342,7 +378,10 @@ export default class IdentityManager {
         }
     }
 
-    static async removeWeb2Identifier(address: string, context: string): Promise<RPCResponse> {
+    static async removeWeb2Identifier(
+        address: string,
+        context: string,
+    ): Promise<RPCResponse> {
         const db = await Datasource.getInstance()
         const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
@@ -353,7 +392,12 @@ export default class IdentityManager {
 
         identities.identities.web2[context] = []
 
-        await updateJSONBValue(address, "identities", "web2", identities.identities)
+        await updateJSONBValue(
+            address,
+            "identities",
+            "web2",
+            identities.identities,
+        )
 
         return {
             result: 200,

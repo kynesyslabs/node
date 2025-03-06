@@ -17,6 +17,8 @@ export default async function manageGCRRoutines(
     // Handle the payload
     const { method, params } = payload
     switch (method) {
+        // SECTION XM Identity Management
+
         case "identity_assign_from_write":
             response.response = await IdentityManager.inferIdentityFromWrite(
                 params[0],
@@ -37,15 +39,6 @@ export default async function manageGCRRoutines(
             }
             break
 
-        // Github identity add
-        case "add_github_identity":
-            response = await IdentityManager.addWeb2Identifier(
-                sender,
-                "github",
-                params[0], // REVIEW Is this correct?
-            )
-            break
-
         case "remove_identity":
             response = await IdentityManager.removeXmIdentity(sender, params[0])
             break
@@ -57,6 +50,25 @@ export default async function manageGCRRoutines(
                 xm: data,
                 web2: {},
             }
+            break
+        // SECTION Web2 Identity Management
+
+        // Github identity add
+        case "add_github_identity":
+            response = await IdentityManager.addWeb2Identifier(
+                sender,
+                "github",
+                params[0], // REVIEW Is this correct?
+            )
+            break
+
+        // Twitter identity add
+        case "add_twitter_identity":
+            response = await IdentityManager.addWeb2Identifier(
+                sender,
+                "twitter",
+                params[0],
+            )
             break
 
         default:
