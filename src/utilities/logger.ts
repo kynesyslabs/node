@@ -175,7 +175,7 @@ export default class Logger {
      */
     static only(message: string, padWithNewLines = false) {
         if (!this.LOG_ONLY_ENABLED) {
-            Logger.debug("⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹ [LOG ONLY ENABLED] ⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹⏹")
+            Logger.debug("▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸ [LOG ONLY ENABLED] ◂◂◂◂◂◂◂◂◂◂◂◂◂◂◂◂◂◂◂◂◂◂")
             this.LOG_ONLY_ENABLED = true
 
             // Disable console.log
