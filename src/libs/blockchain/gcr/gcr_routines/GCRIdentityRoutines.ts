@@ -2,25 +2,178 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../handleGCR"
 import { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Repository } from "typeorm"
-import log from "@/utilities/logger"
+import { forgeToHex } from "@/libs/crypto/forgeUtils"
+import { AccountGCRIdentities } from "../types/GCROperations"
 
 export default class GCRIdentityRoutines {
-    // TODO: Implement these
-    static async applyXmIdentityAdd() {}
-    static async applyXmIdentityRemove() {}
-    // static async applyWeb2IdentityAdd() {}
-    // static async applyWeb2IdentityRemove() {}
+    static async applyXmIdentityAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const sender =
+            typeof editOperation.account === "string"
+                ? editOperation.account
+                : forgeToHex(editOperation.account)
+        const { chain, subchain, isEVM, targetAddress } = editOperation.data
+
+        if (
+            !chain ||
+            !subchain ||
+            typeof isEVM !== "boolean" ||
+            !targetAddress
+        ) {
+            return { success: false, message: "Invalid edit operation data" }
+        }
+
+        const normalizedAddress = isEVM
+            ? targetAddress.toLowerCase()
+            : targetAddress
+
+        let accountGCR = await gcrMainRepository.findOneBy({ pubkey: sender })
+        if (!accountGCR) {
+            accountGCR = new GCRMain()
+            accountGCR.pubkey = sender
+            accountGCR.identities = { xm: {}, web2: {} } as AccountGCRIdentities
+        }
+
+        accountGCR.identities.xm[chain] = accountGCR.identities.xm[chain] || {}
+        accountGCR.identities.xm[chain][subchain] =
+            accountGCR.identities.xm[chain][subchain] || []
+
+        const addressExists = accountGCR.identities.xm[chain][subchain].some(
+            (addr: string) =>
+                isEVM
+                    ? addr.toLowerCase() === normalizedAddress
+                    : addr === normalizedAddress,
+        )
+
+        if (addressExists) {
+            return { success: false, message: "Identity already exists" }
+        }
+
+        accountGCR.identities.xm[chain][subchain].push(normalizedAddress)
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+        }
+
+        return { success: true, message: "Identity applied" }
+    }
+
+    static async applyXmIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const sender =
+            typeof editOperation.account === "string"
+                ? editOperation.account
+                : forgeToHex(editOperation.account)
+        const { chain, subchain, isEVM, targetAddress } = editOperation.data
+
+        if (!chain || !subchain || !targetAddress) {
+            return { success: false, message: "Invalid edit operation data" }
+        }
+
+        const normalizedAddress = isEVM
+            ? targetAddress.toLowerCase()
+            : targetAddress
+
+        const accountGCR = await gcrMainRepository.findOneBy({ pubkey: sender })
+
+        if (!accountGCR) {
+            return { success: false, message: "Account not found" }
+        }
+
+        if (
+            !accountGCR.identities ||
+            !accountGCR.identities.xm ||
+            !accountGCR.identities.xm[chain] ||
+            !Array.isArray(accountGCR.identities.xm[chain][subchain])
+        ) {
+            return {
+                success: false,
+                message: "No identities found for the specified chain/subchain",
+            }
+        }
+
+        const addressExists = accountGCR.identities.xm[chain][subchain].some(
+            (addr: string) =>
+                isEVM
+                    ? addr.toLowerCase() === normalizedAddress
+                    : addr === normalizedAddress,
+        )
+
+        if (!addressExists) {
+            return { success: false, message: "Identity not found" }
+        }
+
+        accountGCR.identities.xm[chain][subchain] = accountGCR.identities.xm[
+            chain
+        ][subchain].filter((id: string) =>
+            isEVM
+                ? id.toLowerCase() !== normalizedAddress
+                : id !== normalizedAddress,
+        )
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+        }
+
+        return { success: true, message: "Identity removed" }
+    }
 
     static async apply(
         editOperation: GCREdit,
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        // INFO: Debug breakpoint
-        log.only("[GCRIdentityRoutines] Applying identity")
-        log.only(JSON.stringify(editOperation))
-        process.exit(1)
+        if (
+            editOperation.type !== "identity" ||
+            !("context" in editOperation)
+        ) {
+            return {
+                success: false,
+                message: "Invalid edit operation for identity routine",
+            }
+        }
 
-        return { success: true, message: "Identity applied" }
+        const identityEdit = editOperation
+
+        let operation = identityEdit.operation
+        if (identityEdit.isRollback) {
+            operation = operation === "add" ? "remove" : "add"
+        }
+
+        let result: GCRResult
+        if (identityEdit.context === "xm") {
+            if (operation === "add") {
+                result = await this.applyXmIdentityAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+            } else if (operation === "remove") {
+                result = await this.applyXmIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+            } else {
+                result = {
+                    success: false,
+                    message: "Unsupported identity operation",
+                }
+            }
+        } else if (identityEdit.context === "web2") {
+            // TODO implement web2 identity operations
+            result = {
+                success: false,
+                message: "Web2 identity operations not implemented",
+            }
+        } else {
+            result = { success: false, message: "Invalid identity context" }
+        }
+        return result
     }
 }
