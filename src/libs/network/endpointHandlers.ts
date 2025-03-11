@@ -13,6 +13,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 // REVIEW Pay attention to the return types (RPCResponse)
 
 import Chain from "src/libs/blockchain/chain"
+import { abstraction } from "@kynesyslabs/demosdk"
 import Mempool, { MempoolData } from "src/libs/blockchain/mempool"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
 import Transaction from "src/libs/blockchain/transaction"
@@ -50,6 +51,7 @@ import { SubnetPayload } from "@kynesyslabs/demosdk/l2ps"
 import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
+import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
 /* // ! Note: this will be removed once demosWork is in place
 import {
     NativePayload,
@@ -347,6 +349,23 @@ export default class ServerHandlers {
                     result.success = false
                     result.response = e
                     result.extra = "Error in demosWork"
+                }
+                break
+            case "identity":
+                const identitiesPayload = tx.content.data
+                const targetIdentity =
+                    identitiesPayload[1] as abstraction.IdentityPayload
+                try {
+                    const identityResult = await IdentityManager.verifyPayload(
+                        targetIdentity.payload as abstraction.InferFromSignaturePayload,
+                    )
+
+                    result.response = identityResult
+                } catch (e) {
+                    log.error("[handleverifyPayload] Error in identity: " + e)
+                    result.success = false
+                    result.response = e
+                    result.extra = "Error in identity verify confirmation"
                 }
                 break
         }

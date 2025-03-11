@@ -1,5 +1,11 @@
 // TODO Implement the identity manager
-import { abstraction } from "@kynesyslabs/demosdk"
+import {
+    InferFromGithubPayload,
+    InferFromWritePayload,
+    InferFromSignatureTargetIdentityPayload,
+    XMCoreTargetIdentityPayload,
+    InferFromSignaturePayload,
+} from "@kynesyslabs/demosdk/abstraction"
 import { ProviderIdentities, RPCResponse } from "@kynesyslabs/demosdk/types"
 import {
     EVM,
@@ -15,6 +21,7 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
 import Datasource from "src/model/datasource"
 import ensureGCRForUser from "./ensureGCRForUser"
+import log from "src/utilities/logger"
 import { updateJSONBValue } from "./gcrJSONBHandler"
 import { Cryptography } from "@kynesyslabs/demosdk/encryption"
 
@@ -44,21 +51,64 @@ const chains: { [key: string]: typeof DefaultChain } = {
 export default class IdentityManager {
     // INFO: SUPPORTED CHAINS
     constructor() {}
-    
+
     // SECTION XM Identities
 
     // Infer identity from a valid write transaction
     static async inferIdentityFromWrite(
-        payload: abstraction.InferFromWritePayload,
+        payload: InferFromWritePayload,
     ): Promise<string | false> {
         // TODO Implement: check if the transaction is valid and assign the identity to the target address
         return false
     }
 
+    // Verify the payload signature
+    static async verifyPayload(
+        payload: InferFromSignaturePayload,
+    ): Promise<boolean> {
+        const chainId = payload.target_identity.chain
+        // @ts-expect-error - This is a workaround to avoid type errors
+        const sdk = await chains[chainId].create(null)
+
+        const { signedData, signature, publicKey, targetAddress } =
+            payload.target_identity as unknown as InferFromSignatureTargetIdentityPayload
+
+        let messageVerified = false
+        try {
+            if (
+                chainId === "xrpl" ||
+                chainId === "ton" ||
+                chainId === "ibc" ||
+                chainId === "near"
+            ) {
+                messageVerified = await sdk.verifyMessage(
+                    signedData,
+                    signature,
+                    publicKey,
+                )
+            } else {
+                messageVerified = await sdk.verifyMessage(
+                    signedData,
+                    signature,
+                    targetAddress,
+                )
+            }
+
+            if (!messageVerified) {
+                return false
+            }
+
+            return messageVerified
+        } catch (error) {
+            log.error("Error: " + error)
+            return false
+        }
+    }
+
     // Infer identity from a valid signature
     static async inferIdentityFromSignature(
         sender: string,
-        payload: abstraction.InferFromSignaturePayload,
+        payload: InferFromSignaturePayload,
     ): Promise<RPCResponse> {
         const chainId = payload.target_identity.chain
 
@@ -168,7 +218,9 @@ export default class IdentityManager {
     }
 
     // SECTION Web2 Identities
-    static async inferGithubIdentity(payload: abstraction.InferFromGithubPayload): Promise<RPCResponse> {
+    static async inferGithubIdentity(
+        payload: InferFromGithubPayload,
+    ): Promise<RPCResponse> {
         let result: RPCResponse = {
             result: 400,
             response: "Not executed",
@@ -189,7 +241,11 @@ export default class IdentityManager {
         const message = "I am demos user: " + demosPublicKey
 
         // Verify the signature
-        const verified = await Cryptography.verify(message, demosSignature, demosPublicKey)
+        const verified = await Cryptography.verify(
+            message,
+            demosSignature,
+            demosPublicKey,
+        )
         if (!verified) {
             await this.addWeb2Identifier(demosPublicKey, "github", gistUrl) // REVIEW It contains the github username as well in the url
             result = {
@@ -248,7 +304,7 @@ export default class IdentityManager {
 
     static async removeXmIdentity(
         sender: string,
-        payload: abstraction.XMCoreTargetIdentityPayload,
+        payload: XMCoreTargetIdentityPayload,
     ): Promise<RPCResponse> {
         const existingIdentities = await this.getXmIdentities(sender)
 
@@ -307,7 +363,9 @@ export default class IdentityManager {
     }
 
     // Web2 Identities
-    static async getWeb2Identifiers(address: string): Promise<ProviderIdentities> {
+    static async getWeb2Identifiers(
+        address: string,
+    ): Promise<ProviderIdentities> {
         const db = await Datasource.getInstance()
         const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
@@ -319,7 +377,11 @@ export default class IdentityManager {
         return identities?.identities.web2
     }
 
-    static async addWeb2Identifier(address: string, context: string, proof: string): Promise<RPCResponse> {
+    static async addWeb2Identifier(
+        address: string,
+        context: string,
+        proof: string,
+    ): Promise<RPCResponse> {
         const db = await Datasource.getInstance()
         const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
@@ -330,7 +392,12 @@ export default class IdentityManager {
 
         identities.identities.web2[context] = [proof]
 
-        await updateJSONBValue(address, "identities", "web2", identities.identities)
+        await updateJSONBValue(
+            address,
+            "identities",
+            "web2",
+            identities.identities,
+        )
 
         return {
             result: 200,
@@ -342,7 +409,10 @@ export default class IdentityManager {
         }
     }
 
-    static async removeWeb2Identifier(address: string, context: string): Promise<RPCResponse> {
+    static async removeWeb2Identifier(
+        address: string,
+        context: string,
+    ): Promise<RPCResponse> {
         const db = await Datasource.getInstance()
         const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
@@ -353,7 +423,12 @@ export default class IdentityManager {
 
         identities.identities.web2[context] = []
 
-        await updateJSONBValue(address, "identities", "web2", identities.identities)
+        await updateJSONBValue(
+            address,
+            "identities",
+            "web2",
+            identities.identities,
+        )
 
         return {
             result: 200,
