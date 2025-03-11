@@ -24,10 +24,7 @@ import _ from "lodash"
 // NOTE This will replace gcr.ts methods for calling the native tables
 import { GCRSubnetsTxs } from "src/model/entities/GCRv2/GCRSubnetsTxs" // TODO Put this in the sdk when done
 import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
-import {
-    RPCResponse,
-    Transaction,
-} from "@kynesyslabs/demosdk/types"
+import { RPCResponse, Transaction } from "@kynesyslabs/demosdk/types"
 import Datasource from "src/model/datasource"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
@@ -49,6 +46,7 @@ import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 
 import { Repository } from "typeorm"
+import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -267,8 +265,13 @@ export default class HandleGCR {
                     repositories.main as Repository<GCRMain>,
                     simulate,
                 )
-            case "assign":
             case "identity":
+                return GCRIdentityRoutines.apply(
+                    editOperation,
+                    repositories.main as Repository<GCRMain>,
+                    simulate,
+                )
+            case "assign":
             case "subnetsTx":
                 // TODO implementations
                 console.log(`Assigning GCREdit ${editOperation.type}`)
@@ -463,9 +466,8 @@ export default class HandleGCR {
         account.pubkey = pubkey
         account.balance = 0n
         account.identities = {
-
             xm: new Map(),
-            
+
             web2: new Map(),
         }
         account.assignedTxs = []

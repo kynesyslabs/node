@@ -11,6 +11,8 @@ import {
     ISendHTTPRequestParams,
 } from "@kynesyslabs/demosdk/types"
 import required from "src/utilities/required"
+import stream from "stream"
+import SharedState from "@/utilities/sharedState"
 
 /**
  * A proxy server class that handles HTTP/HTTPS requests by creating a local proxy server.
@@ -21,26 +23,15 @@ export class Proxy {
     private _server: http.Server | https.Server | null = null
     private _proxyPort = 0
     private _isInitialized = false
-    private readonly _authConfig: IAuthorizationConfig = {
-        requireAuthForAll: true,
-        exceptions: [],
-    }
 
     constructor(
         private readonly _dahrSessionId: string,
         private readonly _proxyHost: string = "localhost",
-        authorizationConfig?: {
-            requireAuthForAll: boolean
-            exceptions: Array<{
-                urlPattern: RegExp
-                methods: EnumWeb2Methods[]
-            }>
+        private readonly _authConfig: IAuthorizationConfig = {
+            requireAuthForAll: SharedState.getInstance().PROD,
+            exceptions: [],
         },
     ) {
-        this._authConfig = authorizationConfig || {
-            requireAuthForAll: false, // TODO: Set to true before production
-            exceptions: [],
-        }
         required(this._dahrSessionId, "Missing dahr session Id")
     }
 
@@ -265,34 +256,60 @@ export class Proxy {
                     parseInt(targetPort) || 443,
                     targetHost,
                     () => {
-                        clientSocket.write(
-                            "HTTP/1.1 200 Connection Established\r\n" +
-                                "Proxy-agent: DAHR-Proxy\r\n" +
-                                "\r\n",
-                        )
+                        try {
+                            if (
+                                !clientSocket.destroyed &&
+                                clientSocket.writable
+                            ) {
+                                clientSocket.write(
+                                    "HTTP/1.1 200 Connection Established\r\n" +
+                                        "Proxy-agent: DAHR-Proxy\r\n" +
+                                        "\r\n",
+                                )
 
-                        targetSocket.write(head)
-                        targetSocket.pipe(clientSocket)
-                        clientSocket.pipe(targetSocket)
+                                if (
+                                    !targetSocket.destroyed &&
+                                    targetSocket.writable
+                                ) {
+                                    targetSocket.write(head)
+
+                                    // Only set up pipes if both sockets are still valid
+                                    if (
+                                        !clientSocket.destroyed &&
+                                        !targetSocket.destroyed
+                                    ) {
+                                        targetSocket.pipe(clientSocket)
+                                        clientSocket.pipe(targetSocket)
+                                    }
+                                }
+                            }
+                        } catch (error) {
+                            console.error(
+                                "[Web2API] Error during connection setup:",
+                                error,
+                            )
+                            this.safelyCloseSocket(clientSocket)
+                            this.safelyCloseSocket(targetSocket)
+                        }
                     },
                 )
 
                 targetSocket.on("error", err => {
                     console.error("[Web2API] Target connection error:", err)
-                    clientSocket.end()
+                    this.safelyCloseSocket(clientSocket)
                 })
 
                 clientSocket.on("error", err => {
                     console.error("[Web2API] Client connection error:", err)
-                    targetSocket.end()
+                    this.safelyCloseSocket(targetSocket)
                 })
 
                 targetSocket.on("end", () => {
-                    clientSocket.end()
+                    this.safelyCloseSocket(clientSocket)
                 })
 
                 clientSocket.on("end", () => {
-                    targetSocket.end()
+                    this.safelyCloseSocket(targetSocket)
                 })
             })
 
@@ -419,5 +436,19 @@ export class Proxy {
             return true
         }
         return false
+    }
+
+    // Helper function to safely close a socket
+    private safelyCloseSocket(socket: net.Socket | stream.Duplex): void {
+        try {
+            if (!socket.destroyed) {
+                if (socket.writable) {
+                    socket.end()
+                }
+                socket.destroy()
+            }
+        } catch (error) {
+            console.error("[Web2API] Error while safely closing socket:", error)
+        }
     }
 }
