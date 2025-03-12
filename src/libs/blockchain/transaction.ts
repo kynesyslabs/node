@@ -197,9 +197,6 @@ export default class Transaction implements ITransaction {
         console.log("[toRawTransaction] Hash: " + tx.hash)
         console.log("[toRawTransaction] Type: " + tx.content.type)
 
-        log.only("tx.content: ")
-        log.only("Typeof tx.content: " + typeof tx.content)
-        log.only(JSON.stringify(tx.content))
         // NOTE From and To can be either a string or a Buffer
         if (tx.content.to["data"]?.toString("hex")) {
             tx.content.to = tx.content.to["data"]?.toString("hex")

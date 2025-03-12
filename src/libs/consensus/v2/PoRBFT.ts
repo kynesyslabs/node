@@ -87,7 +87,11 @@ export async function consensusRoutine(): Promise<void> {
         // await synchronizeAndAverageTime(shard)
 
         // INFO: CONSENSUS ACTION 2: Merge and order the mempools
-        const tempMempool = await mergeAndOrderMempools(manager.shard.members)
+        const tempMempool = await mergeAndOrderMempools(
+            manager.shard.members,
+            manager.shard.blockRef,
+        )
+        log.only("Consensus step 3 cleared!")
         log.only("MEmpool tx count: " + tempMempool.length)
 
         log.info(
@@ -175,6 +179,9 @@ export async function consensusRoutine(): Promise<void> {
             )
             await finalizeBlock(block, pro)
         } else {
+            log.only("Forged mempool: ")
+            log.only(JSON.stringify(tempMempool.map(tx => tx.hash), null, 2))
+            process.exit(0)
             log.info(
                 `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
             )
@@ -205,7 +212,7 @@ export async function consensusRoutine(): Promise<void> {
     }
 
     log.only("👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋")
-    log.debug("[consensusRoutine] CONSENSUS ROUTINE ENDED 🔥🔥🔥")
+    log.only("[consensusRoutine] CONSENSUS ROUTINE ENDED 🔥🔥🔥")
 }
 
 // SECTION: Consensus functions!
@@ -296,18 +303,20 @@ async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
  * @param shard - The shard members
  * @returns The ordered transactions
  */
-async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
-    const ourMempool = await Mempool.getMempool()
+async function mergeAndOrderMempools(
+    shard: Peer[],
+    blockNumber: number,
+): Promise<Transaction[]> {
+    const ourMempool = await Mempool.getMempool(blockNumber)
     console.log("[consensusRoutine] Our mempool:")
     console.log(ourMempool)
     log.info("[consensusRoutine] Our mempool has been retrieved")
+
     // NOTE: Transactions here should be ordered by timestamp
+    await mergeMempools(ourMempool, shard)
     await updateValidatorPhase(3)
-    return await mergeMempools(ourMempool, shard)
-    log.info("[consensusRoutine] Mempools have been merged")
-    // await updateValidatorStatus("mergedMempool", true, false, true)
-    // Using the secretary to update the local statuses
-    // return await orderTransactions(mergedMempool)
+
+    return await Mempool.getMempool(blockNumber)
 }
 
 /**

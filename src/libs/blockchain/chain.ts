@@ -104,10 +104,11 @@ export default class Chain {
             .getOne()
         log.debug(
             "[getLastBlockNumber] Returning the last block number: " +
-                lastBlock.number,
+                lastBlock?.number,
         )
         return lastBlock ? lastBlock.number : 0
     }
+
     // INFO Get the last block hash
     static async getLastBlockHash() {
         log.debug("[getLastBlockHash] Enter getLastBlockHash")
@@ -396,11 +397,9 @@ export default class Chain {
         log.info("[insertBlock] Extracting transactions from block")
         // ! FIXME The below fails when a tx like a web2Request is inserted
         const orderedTransactionsHashes = block.content.ordered_transactions
-        log.only("Ordered tx hashes: " + orderedTransactionsHashes.length)
         log.info(JSON.stringify(orderedTransactionsHashes))
         // Fetch transaction entities from the repository based on ordered transaction hashes
         // const mempoolData = await Mempool.getMempool()
-        // log.only("Mempool Data tx count: " + mempoolData.transactions.length)
         const transactionEntities = await Mempool.getTransactionsByHashes(
             orderedTransactionsHashes,
         )
@@ -590,7 +589,7 @@ export default class Chain {
         console.log("[GENESIS] inserting transaction into the mempool")
         console.log(genesisTx)
         //await this.insertTransaction(genesis_tx)
-        await Mempool.addTransaction(genesisTx) // ! FIXME This fails
+        await Mempool.addTransaction({ ...genesisTx, reference_block: 0 }) // ! FIXME This fails
         console.log("[GENESIS] inserted transaction")
         const result = await this.insertBlock(genesisBlock, [genesisOp], 0)
 

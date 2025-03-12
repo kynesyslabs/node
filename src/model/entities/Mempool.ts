@@ -9,6 +9,7 @@ import {
     Column,
     Entity,
     Index,
+    PrimaryColumn,
     PrimaryGeneratedColumn,
 } from "typeorm"
 
@@ -35,11 +36,8 @@ export class Mempool {
 
 @Entity("mempooltx")
 export class MempoolTx implements Transaction {
-    @PrimaryGeneratedColumn({ type: "integer", name: "id" })
-    id: number
-
     @Index()
-    @Column("text", { name: "hash", unique: true })
+    @PrimaryColumn("text", { name: "hash", unique: true })
     hash: string
 
     @Column("bigint", { name: "timestamp" })
@@ -62,4 +60,7 @@ export class MempoolTx implements Transaction {
 
     @Column("integer", { name: "nonce" })
     nonce: number
+
+    @Column("integer", { name: "reference_block" })
+    reference_block: number
 }

@@ -44,7 +44,6 @@ const chains: { [key: string]: typeof DefaultChain } = {
 export default class IdentityManager {
     // INFO: SUPPORTED CHAINS
     constructor() {}
-    
     // SECTION XM Identities
 
     // Infer identity from a valid write transaction
@@ -175,6 +174,7 @@ export default class IdentityManager {
             require_reply: false,
             extra: {},
         }
+
         // REVIEW  Checking the gist for signatures
         const gistUrl = payload.proof
         // Inferring the github username from the gist url
