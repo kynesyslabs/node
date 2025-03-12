@@ -180,7 +180,17 @@ export async function consensusRoutine(): Promise<void> {
             await finalizeBlock(block, pro)
         } else {
             log.only("Forged mempool: ")
-            log.only(JSON.stringify(tempMempool.map(tx => tx.hash), null, 2))
+            log.only(
+                JSON.stringify(
+                    tempMempool.map(tx => ({
+                        hash: tx.hash,
+                        timestamp: tx.content.timestamp,
+                        reference_block: tx.reference_block,
+                    })),
+                    null,
+                    2,
+                ),
+            )
             process.exit(0)
             log.info(
                 `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
@@ -306,7 +316,7 @@ async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
 async function mergeAndOrderMempools(
     shard: Peer[],
     blockNumber: number,
-): Promise<Transaction[]> {
+): Promise<(Transaction & { reference_block: number })[]> {
     const ourMempool = await Mempool.getMempool(blockNumber)
     console.log("[consensusRoutine] Our mempool:")
     console.log(ourMempool)

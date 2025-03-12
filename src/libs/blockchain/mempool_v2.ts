@@ -25,6 +25,7 @@ export default class Mempool {
             order: {
                 timestamp: "ASC",
                 reference_block: "ASC",
+                hash: "ASC",
             },
         }
 
@@ -34,7 +35,9 @@ export default class Mempool {
             }
         }
 
-        return await this.repo.find(options)
+        return (await this.repo.find(options)) as (Transaction & {
+            reference_block: number
+        })[]
     }
 
     /**
