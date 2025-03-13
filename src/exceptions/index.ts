@@ -45,3 +45,10 @@ export class ForgingEndedError extends Error {
         this.name = "ForgingEndedError"
     }
 }
+
+export class BlockInvalidError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "BlockInvalidError"
+    }
+}

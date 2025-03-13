@@ -17,8 +17,9 @@ import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import applyGCROperation from "src/libs/blockchain/gcr/gcr_routines/applyGCROperation"
 import { txToGCROperation } from "src/libs/blockchain/gcr/gcr_routines/txToGCROperation"
 import SecretaryManager from "./types/secretaryManager"
-import { ForgingEndedError, NotInShardError } from "src/exceptions"
+import { BlockInvalidError, ForgingEndedError, NotInShardError } from "src/exceptions"
 import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
+import { GCREdit } from "@kynesyslabs/demosdk/types"
 
 /* INFO
 # Semaphore system
@@ -59,6 +60,11 @@ export async function consensusRoutine(): Promise<void> {
     }
     const manager = SecretaryManager.getInstance()
 
+    // Defining the variables needed for rolling back the GCREdits
+    let successfulTxs: string[] = []
+    let failedTxs: string[] = []
+    let tempMempool: Transaction[] = []
+
     try {
         await initializeConsensusState()
         // await fastSync([], "consensusRoutine")
@@ -86,7 +92,7 @@ export async function consensusRoutine(): Promise<void> {
         // await synchronizeAndAverageTime(shard)
 
         // INFO: CONSENSUS ACTION 2: Merge and order the mempools
-        const tempMempool = await mergeAndOrderMempools(manager.shard.members)
+        tempMempool = await mergeAndOrderMempools(manager.shard.members)
         log.info(
             "[consensusRoutine] mempool merged (aka ordered transactions)",
             true,
@@ -107,9 +113,11 @@ export async function consensusRoutine(): Promise<void> {
         // await applyGCRForNewBlock(mempool)
 
         // Applying the GCREdits and see if everything is consistent
-        const [successfulTxs, failedTxs] = await applyGCREditsFromMergedMempool(
+        const [localSuccessfulTxs, localFailedTxs] = await applyGCREditsFromMergedMempool(
             tempMempool,
         )
+        successfulTxs = successfulTxs.concat(localSuccessfulTxs)
+        failedTxs = failedTxs.concat(localFailedTxs)
         if (failedTxs.length > 0) {
             log.error(
                 "[consensusRoutine] Failed Txs found, pruning the mempool",
@@ -171,6 +179,10 @@ export async function consensusRoutine(): Promise<void> {
             log.info(
                 `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
             )
+            // Raising an error to rollback the GCREdits
+            throw new BlockInvalidError(
+                `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
+            )
         }
 
         // INFO: CONSENSUS ACTION 7: End the consensus routine
@@ -187,6 +199,22 @@ export async function consensusRoutine(): Promise<void> {
             log.info(
                 "[consensusRoutine] We are forging an ended block. Exiting the consensus routine",
             )
+            return
+        }
+        if (error instanceof BlockInvalidError) {
+            log.info(
+                "[consensusRoutine] Block is invalid. Rolling back the GCREdits",
+            )
+            // REVIEW Using the successfulTxs to rollback the GCREdits derived from those txs
+            // Getting the txs from the hashes
+            const txsToRollback: Transaction[] = []
+            for (const txHash of successfulTxs) {
+                const tx = tempMempool.find(tx => tx.hash === txHash)
+                if (tx) {
+                    txsToRollback.push(tx)
+                }
+            }
+            await rollbackGCREditsFromTxs(txsToRollback)
             return
         }
     } finally {
@@ -299,6 +327,28 @@ async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
     // Using the secretary to update the local statuses
     await updateValidatorPhase(3)
     return await orderTransactions(mergedMempool)
+}
+
+/**
+ * Rollback the GCREdits from a set of txs
+ *
+ * @param txs - The txs
+ * @returns The successful and failed GCREdits
+ */
+async function rollbackGCREditsFromTxs(txs: Transaction[]): Promise<[string[], string[]]> {
+    const successfulTxs: string[] = []
+    const failedTxs: string[] = []
+    // 1. Parse the txs to get the GCREdits
+    for (const tx of txs) {
+        // 2. Apply the GCREdits to the state for each tx with the isRollback flag set to true
+        const result = await HandleGCR.applyToTx(tx, true)
+        if (result.success) {
+            successfulTxs.push(tx.hash)
+        } else {
+            failedTxs.push(tx.hash)
+        }
+    }
+    return [successfulTxs, failedTxs]
 }
 
 /**
