@@ -57,7 +57,7 @@ export async function consensusRoutine(): Promise<void> {
         )
         return
     }
-    log.only("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
+    log.debug("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     const manager = SecretaryManager.getInstance()
 
     try {
@@ -68,7 +68,7 @@ export async function consensusRoutine(): Promise<void> {
         // as it can change through the consensus routine
         // INFO: CONSENSUS ACTION 1: Initialize the shard
         await initializeShard()
-        log.only("Forgin block: " + manager.shard.blockRef)
+        log.debug("Forgin block: " + manager.shard.blockRef)
         log.info("[consensusRoutine] We are in the shard, creating the block")
         log.info(
             `[consensusRoutine] shard: ${JSON.stringify(
@@ -91,8 +91,6 @@ export async function consensusRoutine(): Promise<void> {
             manager.shard.members,
             manager.shard.blockRef,
         )
-        log.only("Consensus step 3 cleared!")
-        log.only("MEmpool tx count: " + tempMempool.length)
 
         log.info(
             "[consensusRoutine] mempool merged (aka ordered transactions)",
@@ -132,7 +130,6 @@ export async function consensusRoutine(): Promise<void> {
 
         // REVIEW Re-merge the mempools anyway to get the correct mempool from the whole shard
         // const mempool = await mergeAndOrderMempools(manager.shard.members)
-        // log.only("Later Mempool tx count: " + mempool.length)
 
         log.info(
             "[consensusRoutine] mempool: " +
@@ -179,19 +176,6 @@ export async function consensusRoutine(): Promise<void> {
             )
             await finalizeBlock(block, pro)
         } else {
-            log.only("Forged mempool: ")
-            log.only(
-                JSON.stringify(
-                    tempMempool.map(tx => ({
-                        hash: tx.hash,
-                        timestamp: tx.content.timestamp,
-                        reference_block: tx.reference_block,
-                    })),
-                    null,
-                    2,
-                ),
-            )
-            process.exit(0)
             log.info(
                 `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
             )
@@ -221,8 +205,8 @@ export async function consensusRoutine(): Promise<void> {
         // await Mempool.joinTemporaryMempool() // ? Is await ok here?
     }
 
-    log.only("👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋")
-    log.only("[consensusRoutine] CONSENSUS ROUTINE ENDED 🔥🔥🔥")
+    log.debug("👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋")
+    log.debug("[consensusRoutine] CONSENSUS ROUTINE ENDED 🔥🔥🔥")
 }
 
 // SECTION: Consensus functions!
@@ -343,6 +327,12 @@ async function applyGCREditsFromMergedMempool(
     const failedTxs: string[] = []
     // 1. Parse the mempool txs to get the GCREdits
     for (const tx of mempool) {
+        const txExists = await Chain.checkTxExists(tx.hash)
+        if (txExists) {
+            failedTxs.push(tx.hash)
+            continue
+        }
+
         const txGCREdits = tx.content.gcr_edits
         // 2. Apply the GCREdits to the state for each tx
         for (const gcrEdit of txGCREdits) {

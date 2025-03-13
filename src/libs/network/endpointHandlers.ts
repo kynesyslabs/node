@@ -63,7 +63,10 @@ import {
 const term = terminalkit.terminal
 
 function isReferenceBlockAllowed(referenceBlock: number, lastBlock: number) {
-    return referenceBlock >= lastBlock - 3 && referenceBlock <= lastBlock
+    return (
+        referenceBlock >= lastBlock - getSharedState.referenceBlockRoom &&
+        referenceBlock <= lastBlock
+    )
 }
 
 export default class ServerHandlers {
@@ -402,6 +405,13 @@ export default class ServerHandlers {
                     "[handleExecuteTransaction] Transaction added to mempool",
                 )
 
+                if (error) {
+                    result.success = false
+                    result.response = {
+                        message: "Failed to add transaction to mempool",
+                    }
+                }
+
                 // INFO: Add block confirmation number
                 result.extra = {
                     ...(result.extra ? result.extra : {}),
@@ -612,14 +622,6 @@ export default class ServerHandlers {
             success: false,
             mempool: [],
         }
-        log.only("Mempool received: ")
-        log.only(
-            JSON.stringify(
-                content.data.map(tx => tx.hash),
-                null,
-                2,
-            ),
-        )
 
         try {
             response = await Mempool.receive(content.data as Transaction[])

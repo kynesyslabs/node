@@ -59,9 +59,29 @@ export default class Mempool {
         return await this.repo.find({ where: { hash: In(hashes) } })
     }
 
+    public static async checkTransactionByHash(hash: string) {
+        return await this.repo.exists({ where: { hash: hash } })
+    }
+
     public static async addTransaction(
         transaction: Transaction & { reference_block: number },
     ) {
+        const txExists = await Chain.checkTxExists(transaction.hash)
+        if (txExists) {
+            return {
+                confirmationBlock: null,
+                error: "Transaction already executed",
+            }
+        }
+
+        const mempoolTx = await this.checkTransactionByHash(transaction.hash)
+        if (mempoolTx) {
+            return {
+                confirmationBlock: null,
+                error: "Transaction already in mempool",
+            }
+        }
+
         let blockNumber: number
         const manager = SecretaryManager.getInstance()
 
@@ -110,7 +130,9 @@ export default class Mempool {
         for (const tx of incoming) {
             const isCoherent = TxUtils.isCoherent(tx)
             if (!isCoherent) {
-                log.error("Transaction is not coherent: " + tx.hash)
+                log.error(
+                    "[Mempool.receive] Transaction is not coherent: " + tx.hash,
+                )
                 return {
                     success: false,
                     mempool: [],
@@ -119,7 +141,10 @@ export default class Mempool {
 
             const signatureValid = TxUtils.validateSignature(tx)
             if (!signatureValid) {
-                log.error("Transaction signature is not valid: " + tx.hash)
+                log.error(
+                    "[Mempool.receive] Transaction signature is not valid: " +
+                        tx.hash,
+                )
                 return {
                     success: false,
                     mempool: [],
@@ -138,28 +163,19 @@ export default class Mempool {
         }
 
         const existingHashes = await this.getMempoolHashMap(blockNumber)
-        log.only("existingHashes: " + JSON.stringify(existingHashes))
         const incomingSet = {}
 
         // INFO: Filter unique transactions
         for (const tx of incoming) {
             if (!existingHashes[tx.hash]) {
                 incomingSet[tx.hash] = true
-                log.only("indexed new tx: " + tx.hash)
             } else {
                 log.error("tx already exists: " + tx.hash)
             }
         }
 
-        log.error("incoming: " + JSON.stringify(incoming.map(tx => tx.hash)))
-        log.error("incomingSet: " + JSON.stringify(incomingSet))
-
         // REVIEW: Should we save each tx individually?
         // await this.repo.save(incoming)
-        log.only("mempool before save: ")
-        const mempoolBeforeSave = await this.getMempool(blockNumber)
-        log.only(JSON.stringify(mempoolBeforeSave.map(tx => tx.hash)))
-
         for (const tx of incoming) {
             try {
                 await this.repo.save(tx)
@@ -170,22 +186,13 @@ export default class Mempool {
                 }
             }
         }
-
-        log.only("mempool after save: ")
-        const mempoolAfterSave = await this.getMempool(blockNumber)
-        log.only(JSON.stringify(mempoolAfterSave.map(tx => tx.hash)))
-
         const finalPool = await this.getMempool(blockNumber)
-
-        log.error("finalPool: " + JSON.stringify(finalPool.map(tx => tx.hash)))
 
         // INFO: Redundancy
         // INFO: Return the difference to the caller node
         const final = finalPool.filter(
             tx => tx.blockNumber === blockNumber && !incomingSet[tx.hash],
         )
-        log.error("final: " + JSON.stringify(final.map(tx => tx.hash)))
-
         return {
             success: true,
             mempool: final,

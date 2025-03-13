@@ -270,6 +270,14 @@ export default class Chain {
         return await transactionRepository.find(options)
     }
 
+    static async checkTxExists(hash: string): Promise<boolean> {
+        const db = await Datasource.getInstance()
+        const transactionRepository = db
+            .getDataSource()
+            .getRepository(Transactions)
+        return await transactionRepository.exists({ where: { hash: hash } })
+    }
+
     // REVIEW Giving back all the properties of an address
 
     static async getAddressInfo(
@@ -492,9 +500,6 @@ export default class Chain {
             log.debug(
                 "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
             )
-            //log.info(result)
-            log.only("Finalize tx count: " + transactionEntities.length)
-
             // REVIEW We then add the transactions to the Transactions repository
             for (let i = 0; i < transactionEntities.length; i++) {
                 const tx = transactionEntities[i]
