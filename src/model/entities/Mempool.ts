@@ -1,6 +1,17 @@
 import Block from "@/libs/blockchain/block"
-import { Transaction } from "@kynesyslabs/demosdk/types"
-import { Column, Entity, PrimaryGeneratedColumn } from "typeorm"
+import {
+    ISignature,
+    Transaction,
+    TransactionContent,
+} from "@kynesyslabs/demosdk/types"
+import {
+    BeforeInsert,
+    Column,
+    Entity,
+    Index,
+    PrimaryColumn,
+    PrimaryGeneratedColumn,
+} from "typeorm"
 
 @Entity("mempool")
 export class Mempool {
@@ -21,4 +32,35 @@ export class Mempool {
 
     @Column("text", { name: "proposedBlock", nullable: true })
     proposedBlock: string | null
+}
+
+@Entity("mempooltx")
+export class MempoolTx implements Transaction {
+    @Index()
+    @PrimaryColumn("text", { name: "hash", unique: true })
+    hash: string
+
+    @Column("bigint", { name: "timestamp" })
+    timestamp: bigint
+
+    @Column("json", { name: "content" })
+    content: TransactionContent
+
+    @Column("json", { name: "signature" })
+    signature: ISignature
+
+    @Column("text", { name: "status" })
+    status: string
+
+    @Column("integer", { name: "blockNumber" })
+    blockNumber: number
+
+    @Column("jsonb", { name: "extra", nullable: true })
+    extra: Record<string, any> | null
+
+    @Column("integer", { name: "nonce" })
+    nonce: number
+
+    @Column("integer", { name: "reference_block" })
+    reference_block: number
 }

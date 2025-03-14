@@ -45,6 +45,7 @@ import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 
+import Chain from "../chain"
 import { Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 
@@ -295,6 +296,13 @@ export default class HandleGCR {
         simulate = false,
     ): Promise<GCRResult> {
         const editsResults: GCRResult[] = []
+        const txExists = await Chain.checkTxExists(tx.hash)
+        if (txExists) {
+            return {
+                success: false,
+                message: "Transaction already executed",
+            }
+        }
 
         console.log(
             "[applyToTx] Starting execution of " +

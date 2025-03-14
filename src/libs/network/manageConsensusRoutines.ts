@@ -161,8 +161,8 @@ export default async function manageConsensusRoutines(
 
                 // INFO: Seed check
                 if (
-                    manager.shard.blockRef == blockRef &&
-                    seed !== manager.shard.CVSA
+                    manager.shard?.blockRef == blockRef &&
+                    seed !== manager.shard?.CVSA
                 ) {
                     // TODO: Remove this block after testing!
                     // setTimeout(() => {

@@ -31,6 +31,7 @@ import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import Confirmation from "./types/confirmation"
 import { forgeToHex } from "../crypto/forgeUtils"
+import log from "src/utilities/logger"
 
 interface TransactionResponse {
     status: string
@@ -131,7 +132,7 @@ export default class Transaction implements ITransaction {
         console.log("Signature: ")
         console.log(tx.signature)
         const confirmed =
-            this.sanityCheck(tx) && this.isCoherent(tx) && this.structured(tx)
+            this.validateSignature(tx) && this.isCoherent(tx) && this.structured(tx)
         if (confirmed) {
             const confirmation = new Confirmation()
             confirmation.data.validator = publicKey
@@ -147,8 +148,8 @@ export default class Transaction implements ITransaction {
     }
 
     // INFO Checks the integrity of a transaction
-    public static sanityCheck(tx: Transaction) {
-        console.log("[sanityCheck] Checking the sanity of the tx")
+    public static validateSignature(tx: Transaction) {
+        console.log("[validateSignature] Checking the signature of the tx")
         console.log("Hash: " + tx.hash)
         console.log("Signature: ")
         console.log(forgeToHex(tx.signature.data))
@@ -160,7 +161,7 @@ export default class Transaction implements ITransaction {
             forgeToHex(tx.signature.data),
             forgeToHex(tx.content.from),
         )
-        console.log("[sanityCheck] Sanity: " + result)
+        console.log("[validateSignature] Sanity: " + result)
         return result
     }
 

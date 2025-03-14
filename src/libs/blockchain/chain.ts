@@ -32,7 +32,7 @@ import Block from "./block"
 import manageNative from "./gcr/gcr_routines/manageNative"
 import Transaction from "./transaction"
 import { Peer } from "../peer"
-import Mempool from "./mempool"
+import Mempool from "./mempool_v2"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorSeed"
@@ -104,10 +104,11 @@ export default class Chain {
             .getOne()
         log.debug(
             "[getLastBlockNumber] Returning the last block number: " +
-                lastBlock.number,
+                lastBlock?.number,
         )
         return lastBlock ? lastBlock.number : 0
     }
+
     // INFO Get the last block hash
     static async getLastBlockHash() {
         log.debug("[getLastBlockHash] Enter getLastBlockHash")
@@ -269,6 +270,14 @@ export default class Chain {
         return await transactionRepository.find(options)
     }
 
+    static async checkTxExists(hash: string): Promise<boolean> {
+        const db = await Datasource.getInstance()
+        const transactionRepository = db
+            .getDataSource()
+            .getRepository(Transactions)
+        return await transactionRepository.exists({ where: { hash: hash } })
+    }
+
     // REVIEW Giving back all the properties of an address
 
     static async getAddressInfo(
@@ -398,27 +407,31 @@ export default class Chain {
         const orderedTransactionsHashes = block.content.ordered_transactions
         log.info(JSON.stringify(orderedTransactionsHashes))
         // Fetch transaction entities from the repository based on ordered transaction hashes
-        let transactionEntities = await Promise.all(
-            orderedTransactionsHashes.map(async txHash => {
-                log.info(
-                    "[insertBlock] Fetching transaction with hash: " + txHash,
-                )
-                /*
-                // Why do we look into the transactions repository? Shouldn't be in the mempool yet?
-                const rawTransaction = await transactionRepository.findOneBy({
-                    hash: txHash,
-                }) // This returns null
-                log.info("[insertBlock] Transaction fetched: ")
-                log.info(rawTransaction)
-                return Transaction.fromRawTransaction(rawTransaction) */
-                const mempoolData = await Mempool.getMempool("insertBlock")
-                const tx = mempoolData.transactions.find(
-                    tx => tx.hash === txHash,
-                )
-                return tx
-            }),
+        // const mempoolData = await Mempool.getMempool()
+        const transactionEntities = await Mempool.getTransactionsByHashes(
+            orderedTransactionsHashes,
         )
-        transactionEntities = transactionEntities.filter(tx => tx !== undefined)
+
+        // let transactionEntities = await Promise.all(
+        //     orderedTransactionsHashes.map(async txHash => {
+        //         log.info(
+        //             "[insertBlock] Fetching transaction with hash: " + txHash,
+        //         )
+        //         /*
+        //         // Why do we look into the transactions repository? Shouldn't be in the mempool yet?
+        //         const rawTransaction = await transactionRepository.findOneBy({
+        //             hash: txHash,
+        //         }) // This returns null
+        //         log.info("[insertBlock] Transaction fetched: ")
+        //         log.info(rawTransaction)
+        //         return Transaction.fromRawTransaction(rawTransaction) */
+        //         const tx = mempoolData.transactions.find(
+        //             tx => tx.hash === txHash,
+        //         )
+        //         return tx
+        //     }),
+        // )
+        // transactionEntities = transactionEntities.filter(tx => tx !== undefined)
 
         const newBlock = new Blocks()
         log.info("[CHAIN] reading hash")
@@ -487,8 +500,6 @@ export default class Chain {
             log.debug(
                 "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
             )
-            //log.info(result)
-
             // REVIEW We then add the transactions to the Transactions repository
             for (let i = 0; i < transactionEntities.length; i++) {
                 const tx = transactionEntities[i]
@@ -496,7 +507,7 @@ export default class Chain {
             }
             // REVIEW And we clean the mempool
             if (cleanMempool) {
-                await Mempool.removeTransactionsWithHashes(
+                await Mempool.removeTransactionsByHashes(
                     transactionEntities.map(tx => tx.hash),
                 )
             }
@@ -583,7 +594,7 @@ export default class Chain {
         console.log("[GENESIS] inserting transaction into the mempool")
         console.log(genesisTx)
         //await this.insertTransaction(genesis_tx)
-        await Mempool.addTransaction(genesisTx) // ! FIXME This fails
+        await Mempool.addTransaction({ ...genesisTx, reference_block: 0 }) // ! FIXME This fails
         console.log("[GENESIS] inserted transaction")
         const result = await this.insertBlock(genesisBlock, [genesisOp], 0)
 

@@ -14,7 +14,7 @@ export class Transactions {
     @Column("varchar", { name: "status" })
     status: string
 
-    @Column("varchar", { name: "hash" })
+    @Column("varchar", { name: "hash", unique: true })
     hash: string
 
     @Column("json", { name: "content" })

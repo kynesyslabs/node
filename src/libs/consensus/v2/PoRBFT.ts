@@ -1,6 +1,6 @@
 import Transaction from "src/libs/blockchain/transaction"
 import getCommonValidatorSeed from "./routines/getCommonValidatorSeed"
-import Mempool from "src/libs/blockchain/mempool"
+import Mempool from "src/libs/blockchain/mempool_v2"
 import Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
 import { getSharedState } from "src/utilities/sharedState"
@@ -58,6 +58,7 @@ export async function consensusRoutine(): Promise<void> {
         )
         return
     }
+    log.debug("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     const manager = SecretaryManager.getInstance()
 
     // Defining the variables needed for rolling back the GCREdits
@@ -69,11 +70,11 @@ export async function consensusRoutine(): Promise<void> {
         await initializeConsensusState()
         // await fastSync([], "consensusRoutine")
         // Initialize the consensus state and check if the local node is in the shard
-
         // INFO: We won't use the shard returned by initializeShard
         // as it can change through the consensus routine
         // INFO: CONSENSUS ACTION 1: Initialize the shard
         await initializeShard()
+        log.debug("Forgin block: " + manager.shard.blockRef)
         log.info("[consensusRoutine] We are in the shard, creating the block")
         log.info(
             `[consensusRoutine] shard: ${JSON.stringify(
@@ -92,7 +93,11 @@ export async function consensusRoutine(): Promise<void> {
         // await synchronizeAndAverageTime(shard)
 
         // INFO: CONSENSUS ACTION 2: Merge and order the mempools
-        tempMempool = await mergeAndOrderMempools(manager.shard.members)
+        tempMempool = await mergeAndOrderMempools(
+            manager.shard.members,
+            manager.shard.blockRef,
+        )
+
         log.info(
             "[consensusRoutine] mempool merged (aka ordered transactions)",
             true,
@@ -125,11 +130,13 @@ export async function consensusRoutine(): Promise<void> {
             //  Prune the mempool of the failed txs
             // NOTE The mempool should now be updated with only the successful txs
             for (const tx of failedTxs) {
-                await Mempool.removeTransactionsWithHashes([tx])
+                log.error("Failed tx: " + tx)
+                await Mempool.removeTransactionsByHashes([tx])
             }
         }
+
         // REVIEW Re-merge the mempools anyway to get the correct mempool from the whole shard
-        const mempool = await mergeAndOrderMempools(manager.shard.members)
+        // const mempool = await mergeAndOrderMempools(manager.shard.members)
 
         log.info(
             "[consensusRoutine] mempool: " +
@@ -160,7 +167,7 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         // INFO: CONSENSUS ACTION 5: Forge the block
-        const block = await forgeBlock(mempool, peerlist) // NOTE The GCR hash is calculated here and added to the block
+        const block = await forgeBlock(tempMempool, peerlist) // NOTE The GCR hash is calculated here and added to the block
         // REVIEW Set last consensus time to the current block timestamp
         getSharedState.lastConsensusTime = block.content.timestamp
 
@@ -222,9 +229,10 @@ export async function consensusRoutine(): Promise<void> {
         // Cleanup the consensus state
         cleanupConsensusState()
         // Joining the temporary mempool to the main one
-        await Mempool.joinTemporaryMempool() // ? Is await ok here?
+        // await Mempool.joinTemporaryMempool() // ? Is await ok here?
     }
 
+    log.debug("👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋")
     log.debug("[consensusRoutine] CONSENSUS ROUTINE ENDED 🔥🔥🔥")
 }
 
@@ -316,17 +324,20 @@ async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
  * @param shard - The shard members
  * @returns The ordered transactions
  */
-async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
-    const ourMempool = await Mempool.getMempool("mergeAndOrderMempools")
+async function mergeAndOrderMempools(
+    shard: Peer[],
+    blockNumber: number,
+): Promise<(Transaction & { reference_block: number })[]> {
+    const ourMempool = await Mempool.getMempool(blockNumber)
     console.log("[consensusRoutine] Our mempool:")
     console.log(ourMempool)
     log.info("[consensusRoutine] Our mempool has been retrieved")
-    const mergedMempool = await mergeMempools(ourMempool, shard)
-    log.info("[consensusRoutine] Mempools have been merged")
-    // await updateValidatorStatus("mergedMempool", true, false, true)
-    // Using the secretary to update the local statuses
+
+    // NOTE: Transactions here should be ordered by timestamp
+    await mergeMempools(ourMempool, shard)
     await updateValidatorPhase(3)
-    return await orderTransactions(mergedMempool)
+
+    return await Mempool.getMempool(blockNumber)
 }
 
 /**
@@ -365,6 +376,12 @@ async function applyGCREditsFromMergedMempool(
     const failedTxs: string[] = []
     // 1. Parse the mempool txs to get the GCREdits
     for (const tx of mempool) {
+        const txExists = await Chain.checkTxExists(tx.hash)
+        if (txExists) {
+            failedTxs.push(tx.hash)
+            continue
+        }
+
         const txGCREdits = tx.content.gcr_edits
         // 2. Apply the GCREdits to the state for each tx
         for (const gcrEdit of txGCREdits) {

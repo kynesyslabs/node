@@ -73,7 +73,7 @@ export async function manageExecution(
                     "[SERVER] Transaction executed. Sending back the result",
                 )
                 // Destructuring the result to get the extra, require_reply and response
-                returnValue.result = 200
+                returnValue.result = result.success ? 200 : 400
                 returnValue.response = result.response
                 returnValue.require_reply = result.require_reply
                 returnValue.extra = result.extra

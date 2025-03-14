@@ -13,9 +13,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 // REVIEW Pay attention to the return types (RPCResponse)
 
 import Chain from "src/libs/blockchain/chain"
-import Mempool, { MempoolData } from "src/libs/blockchain/mempool"
+import Mempool from "src/libs/blockchain/mempool_v2"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
 import Transaction from "src/libs/blockchain/transaction"
+// import { Transaction as TransactionType } from "@kynesyslabs/demosdk/types"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import handleL2PS from "./routines/transactions/handleL2PS"
@@ -60,6 +61,13 @@ import {
 */
 
 const term = terminalkit.terminal
+
+function isReferenceBlockAllowed(referenceBlock: number, lastBlock: number) {
+    return (
+        referenceBlock >= lastBlock - getSharedState.referenceBlockRoom &&
+        referenceBlock <= lastBlock
+    )
+}
 
 export default class ServerHandlers {
     // ANCHOR Validate transaction
@@ -262,7 +270,8 @@ export default class ServerHandlers {
         // Finally, the block number reference must be valid
         const blockNumber = validatedData.data.reference_block
         const lastBlockNumber = await Chain.getLastBlockNumber()
-        if (blockNumber != lastBlockNumber) {
+
+        if (!isReferenceBlockAllowed(blockNumber, lastBlockNumber)) {
             log.error(
                 "[handleExecuteTransaction] Invalid validityData block reference: " +
                     blockNumber +
@@ -349,6 +358,12 @@ export default class ServerHandlers {
                     result.extra = "Error in demosWork"
                 }
                 break
+            case "native":
+                // INFO: Just update the response text
+                result.response = {
+                    message: "Transaction applied",
+                }
+                break
         }
 
         // Only if the transaction is valid we add it to the mempool
@@ -366,8 +381,10 @@ export default class ServerHandlers {
                 log.error("[handleExecuteTransaction] Failed to apply GCREdit")
                 result.success = false
                 result.response = false
-                result.extra =
-                    "Failed to apply GCREdit: " + editsResults.message
+                result.extra = {
+                    error: "Failed to apply GCREdit: " + editsResults.message,
+                }
+
                 return result
             }
 
@@ -377,11 +394,44 @@ export default class ServerHandlers {
                     queriedTx.hash +
                     " to the mempool",
             )
-            await Mempool.addTransaction(queriedTx)
-            console.log(
-                "[handleExecuteTransaction] Transaction added to mempool",
-            )
+            try {
+                const { confirmationBlock, error } =
+                    await Mempool.addTransaction({
+                        ...queriedTx,
+                        reference_block: validatedData.data.reference_block,
+                    })
+
+                console.log(
+                    "[handleExecuteTransaction] Transaction added to mempool",
+                )
+
+                if (error) {
+                    result.success = false
+                    result.response = {
+                        message: "Failed to add transaction to mempool",
+                    }
+                }
+
+                // INFO: Add block confirmation number
+                result.extra = {
+                    ...(result.extra ? result.extra : {}),
+                    confirmationBlock,
+                    ...(error ? { error } : {}),
+                }
+            } catch (e) {
+                result.success = false
+                result.response = false
+                result.extra = {
+                    message: "Failed to add transaction to mempool",
+                }
+
+                log.error(
+                    "[handleExecuteTransaction] Failed to add transaction to mempool: " +
+                        e,
+                )
+            }
         }
+
         // Response is then sent back automatically as a reply (with our validation)
         // Returning the state of the transaction including operations
         return result
@@ -528,9 +578,7 @@ export default class ServerHandlers {
 
         switch (request.message) {
             case "getMempool":
-                response.response = await Mempool.getMempool(
-                    "ServerHandlers.getMempool",
-                )
+                response.response = await Mempool.getMempool()
                 //console.log(response)
                 response.result = 200
                 response.require_reply = false
@@ -570,23 +618,25 @@ export default class ServerHandlers {
         // ...
         log.info("[handleMempool] Received a message")
         log.info(content)
-        let response = false
+        let response = {
+            success: false,
+            mempool: [],
+        }
 
         try {
-            response = await Mempool.receive(content.data as MempoolData)
+            response = await Mempool.receive(content.data as Transaction[])
         } catch (error) {
             console.error(error)
-            response = false
         }
 
         const ourId = getSharedState.identity.ed25519.publicKey.toString("hex")
         const ourDate = new Date().toISOString()
 
         return {
-            result: response ? 200 : 400,
-            response: response,
+            result: response.success ? 200 : 400,
+            response: response.mempool,
             extra:
-                (response ? "Mempool received by" : "Mempool not merged") +
+                (response.success ? "Mempool received" : "Mempool not merged") +
                 ` by: ${ourId} at ${ourDate}`,
             requireReply: false,
         }

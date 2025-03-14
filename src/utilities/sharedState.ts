@@ -25,6 +25,7 @@ export default class SharedState {
     currentUTCTime = 0
     lastTimestamp = 0
     lastShardSeed = ""
+    referenceBlockRoom = 1
 
     // NOTE See calibrateTime.ts for this value
     timestampCorrection = 0

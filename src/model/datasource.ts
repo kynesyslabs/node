@@ -13,7 +13,7 @@ import { DataSource } from "typeorm"
 
 import { Blocks } from "./entities/Blocks"
 import { Consensus } from "./entities/Consensus"
-import { Mempool } from "./entities/Mempool"
+import { Mempool, MempoolTx } from "./entities/Mempool"
 import { PgpKeyServer } from "./entities/PgpKeyServer"
 import { Transactions } from "./entities/Transactions"
 import { Validators } from "./entities/Validators"
@@ -41,6 +41,7 @@ class Datasource {
                 Blocks,
                 Transactions,
                 Mempool,
+                MempoolTx,
                 Consensus,
                 PgpKeyServer,
                 GCRHashes,
@@ -55,6 +56,9 @@ class Datasource {
             ],
             synchronize: true, // set this to false in production
             logging: false,
+            extra: {
+                events: true
+            }
         })
     }
 

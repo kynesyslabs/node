@@ -179,7 +179,10 @@ export default class SecretaryManager {
                     log.debug(
                         "[SECRETARY ROUTINE] Waiting for the set wait status",
                     )
-                    await Waiter.wait(Waiter.keys.SET_WAIT_STATUS, this._set_validator_phase_timeout)
+                    await Waiter.wait(
+                        Waiter.keys.SET_WAIT_STATUS,
+                        this._set_validator_phase_timeout,
+                    )
                     log.debug(
                         "[SECRETARY ROUTINE] SET_WAIT_STATUS Lock resolved",
                     )
@@ -702,7 +705,10 @@ export default class SecretaryManager {
 
         const waiterKey =
             Waiter.keys.GREEN_LIGHT + this.ourValidatorPhase.currentPhase
-        const greenlight: Promise<null> = Waiter.wait(waiterKey, this._greenlight_timeout)
+        const greenlight: Promise<null> = Waiter.wait(
+            waiterKey,
+            this._greenlight_timeout,
+        )
 
         const sendStatus = async () => {
             const request: RPCRequest = {
@@ -719,6 +725,17 @@ export default class SecretaryManager {
                         ],
                     },
                 ],
+            }
+
+            if (!this.secretary) {
+                // INFO: Node is running alone, and has kicked itself out of the shard
+                return {
+                    result: 500,
+                    extra: {
+                        greenlight: true,
+                        timestamp: this.blockTimestamp,
+                    },
+                } as RPCResponse
             }
 
             log.debug("Sending setValidatorPhase request to the secretary")
