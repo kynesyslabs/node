@@ -15,7 +15,8 @@ export default class GCRIdentityRoutines {
             typeof editOperation.account === "string"
                 ? editOperation.account
                 : forgeToHex(editOperation.account)
-        const { chain, subchain, isEVM, targetAddress } = editOperation.data
+        const { chain, subchain, targetAddress } = editOperation.data
+        const isEVM = chain === "evm"
 
         if (
             !chain ||
@@ -69,7 +70,8 @@ export default class GCRIdentityRoutines {
             typeof editOperation.account === "string"
                 ? editOperation.account
                 : forgeToHex(editOperation.account)
-        const { chain, subchain, isEVM, targetAddress } = editOperation.data
+        const { chain, subchain, targetAddress } = editOperation.data
+        const isEVM = chain === "evm"
 
         if (!chain || !subchain || !targetAddress) {
             return { success: false, message: "Invalid edit operation data" }

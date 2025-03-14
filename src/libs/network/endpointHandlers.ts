@@ -13,6 +13,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 // REVIEW Pay attention to the return types (RPCResponse)
 
 import Chain from "src/libs/blockchain/chain"
+import { abstraction } from "@kynesyslabs/demosdk"
 import Mempool from "src/libs/blockchain/mempool_v2"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
 import Transaction from "src/libs/blockchain/transaction"
@@ -51,6 +52,7 @@ import { SubnetPayload } from "@kynesyslabs/demosdk/l2ps"
 import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
+import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
 /* // ! Note: this will be removed once demosWork is in place
 import {
     NativePayload,
@@ -361,7 +363,39 @@ export default class ServerHandlers {
             case "native":
                 // INFO: Just update the response text
                 result.response = {
-                    message: "Transaction applied",
+                    message: "Transaction applied, waiting for confirmation",
+                }
+                result.success = true
+                break
+            case "identity":
+                const identitiesPayload = tx.content.data
+                const targetIdentity =
+                    identitiesPayload[1] as abstraction.IdentityPayload
+
+                if (targetIdentity.method == "identity_remove") {
+                    result.response = {
+                        message: "Transaction applied, waiting for confirmation",
+                    }
+                    result.success = true
+                    break
+                }
+
+                try {
+                    const identityResult = await IdentityManager.verifyPayload(
+                        targetIdentity.payload as abstraction.InferFromSignaturePayload,
+                    )
+
+                    result.response = identityResult
+                    result.success = true
+                } catch (e) {
+                    log.error("[handleverifyPayload] Error in identity: " + e)
+                    result.success = false
+                    result.response = {
+                        message: "Failed to verify signature",
+                    }
+                    result.extra = {
+                        error: e,
+                    }
                 }
                 break
         }

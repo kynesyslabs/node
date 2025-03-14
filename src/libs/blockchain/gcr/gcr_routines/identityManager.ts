@@ -1,5 +1,12 @@
 // TODO Implement the identity manager
-import { abstraction } from "@kynesyslabs/demosdk"
+import {
+    InferFromGithubPayload,
+    InferFromWritePayload,
+    InferFromSignatureTargetIdentityPayload,
+    XMCoreTargetIdentityPayload,
+    InferFromSignaturePayload,
+    InferFromTwitterPayload,
+} from "@kynesyslabs/demosdk/abstraction"
 import { ProviderIdentities, RPCResponse } from "@kynesyslabs/demosdk/types"
 import {
     EVM,
@@ -15,6 +22,7 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
 import Datasource from "src/model/datasource"
 import ensureGCRForUser from "./ensureGCRForUser"
+import log from "src/utilities/logger"
 import { updateJSONBValue } from "./gcrJSONBHandler"
 import { Cryptography } from "@kynesyslabs/demosdk/encryption"
 
@@ -56,16 +64,59 @@ export default class IdentityManager {
 
     // Infer identity from a valid write transaction
     static async inferIdentityFromWrite(
-        payload: abstraction.InferFromWritePayload,
+        payload: InferFromWritePayload,
     ): Promise<string | false> {
         // TODO Implement: check if the transaction is valid and assign the identity to the target address
         return false
     }
 
+    // Verify the payload signature
+    static async verifyPayload(
+        payload: InferFromSignaturePayload,
+    ): Promise<boolean> {
+        const chainId = payload.target_identity.chain
+        // @ts-expect-error - This is a workaround to avoid type errors
+        const sdk = await chains[chainId].create(null)
+
+        const { signedData, signature, publicKey, targetAddress } =
+            payload.target_identity as unknown as InferFromSignatureTargetIdentityPayload
+
+        let messageVerified = false
+        try {
+            if (
+                chainId === "xrpl" ||
+                chainId === "ton" ||
+                chainId === "ibc" ||
+                chainId === "near"
+            ) {
+                messageVerified = await sdk.verifyMessage(
+                    signedData,
+                    signature,
+                    publicKey,
+                )
+            } else {
+                messageVerified = await sdk.verifyMessage(
+                    signedData,
+                    signature,
+                    targetAddress,
+                )
+            }
+
+            if (!messageVerified) {
+                return false
+            }
+
+            return messageVerified
+        } catch (error) {
+            log.error("Error: " + error)
+            return false
+        }
+    }
+
     // Infer identity from a valid signature
     static async inferIdentityFromSignature(
         sender: string,
-        payload: abstraction.InferFromSignaturePayload,
+        payload: InferFromSignaturePayload,
     ): Promise<RPCResponse> {
         const chainId = payload.target_identity.chain
 
@@ -176,7 +227,7 @@ export default class IdentityManager {
 
     // SECTION Web2 Identities
     static async inferGithubIdentity(
-        payload: abstraction.InferFromGithubPayload,
+        payload: InferFromGithubPayload,
     ): Promise<Boolean> {
         let result: Boolean = false
         // REVIEW  Checking the gist for signatures
@@ -207,7 +258,7 @@ export default class IdentityManager {
     }
 
     static async inferTwitterIdentity(
-        payload: abstraction.InferFromTwitterPayload,
+        payload: InferFromTwitterPayload,
     ): Promise<Boolean> {
         // TODO Fetch a twitter post and verify the signature (as we did for github gists)
         return false
@@ -246,7 +297,7 @@ export default class IdentityManager {
 
     static async removeXmIdentity(
         sender: string,
-        payload: abstraction.XMCoreTargetIdentityPayload,
+        payload: XMCoreTargetIdentityPayload,
     ): Promise<RPCResponse> {
         const existingIdentities = await this.getXmIdentities(sender)
 
