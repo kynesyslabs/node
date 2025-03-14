@@ -728,7 +728,14 @@ export default class SecretaryManager {
             }
 
             if (!this.secretary) {
-                return null
+                // INFO: Node is running alone, and has kicked itself out of the shard
+                return {
+                    result: 500,
+                    extra: {
+                        greenlight: true,
+                        timestamp: this.blockTimestamp,
+                    },
+                } as RPCResponse
             }
 
             log.debug("Sending setValidatorPhase request to the secretary")
