@@ -374,19 +374,24 @@ export default class ServerHandlers {
 
                 if (targetIdentity.method == "identity_remove") {
                     result.response = {
-                        message: "Transaction applied, waiting for confirmation",
+                        message:
+                            "Transaction applied, waiting for confirmation",
                     }
                     result.success = true
                     break
                 }
 
                 try {
-                    const identityResult = await IdentityManager.verifyPayload(
+                    const verified = await IdentityManager.verifyPayload(
                         targetIdentity.payload as abstraction.InferFromSignaturePayload,
                     )
 
-                    result.response = identityResult
-                    result.success = true
+                    result.response = {
+                        message: verified
+                            ? "Signature verified. Transaction applied."
+                            : "Signature verification failed. Transaction not applied.",
+                    }
+                    result.success = verified
                 } catch (e) {
                     log.error("[handleverifyPayload] Error in identity: " + e)
                     result.success = false

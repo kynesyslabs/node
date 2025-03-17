@@ -113,7 +113,10 @@ export default class IdentityManager {
         }
     }
 
-    // Infer identity from a valid signature
+    /**
+     * @deprecated Identities are now updated as transactions.
+     * This method should be safe to remove.
+     */
     static async inferIdentityFromSignature(
         sender: string,
         payload: InferFromSignaturePayload,
