@@ -475,7 +475,6 @@ export default class HandleGCR {
         account.balance = 0n
         account.identities = {
             xm: new Map(),
-
             web2: new Map(),
         }
         account.assignedTxs = []

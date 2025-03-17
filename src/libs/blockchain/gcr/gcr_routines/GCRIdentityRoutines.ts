@@ -3,7 +3,7 @@ import { GCRResult } from "../handleGCR"
 import { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Repository } from "typeorm"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
-import { AccountGCRIdentities } from "../types/GCROperations"
+import ensureGCRForUser from "./ensureGCRForUser"
 
 export default class GCRIdentityRoutines {
     static async applyXmIdentityAdd(
@@ -31,12 +31,7 @@ export default class GCRIdentityRoutines {
             ? targetAddress.toLowerCase()
             : targetAddress
 
-        let accountGCR = await gcrMainRepository.findOneBy({ pubkey: sender })
-        if (!accountGCR) {
-            accountGCR = new GCRMain()
-            accountGCR.pubkey = sender
-            accountGCR.identities = { xm: {}, web2: {} } as AccountGCRIdentities
-        }
+        const accountGCR = await ensureGCRForUser(sender)
 
         accountGCR.identities.xm[chain] = accountGCR.identities.xm[chain] || {}
         accountGCR.identities.xm[chain][subchain] =

@@ -17,7 +17,11 @@ import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import applyGCROperation from "src/libs/blockchain/gcr/gcr_routines/applyGCROperation"
 import { txToGCROperation } from "src/libs/blockchain/gcr/gcr_routines/txToGCROperation"
 import SecretaryManager from "./types/secretaryManager"
-import { BlockInvalidError, ForgingEndedError, NotInShardError } from "src/exceptions"
+import {
+    BlockInvalidError,
+    ForgingEndedError,
+    NotInShardError,
+} from "src/exceptions"
 import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
 import { GCREdit } from "@kynesyslabs/demosdk/types"
 
@@ -118,9 +122,8 @@ export async function consensusRoutine(): Promise<void> {
         // await applyGCRForNewBlock(mempool)
 
         // Applying the GCREdits and see if everything is consistent
-        const [localSuccessfulTxs, localFailedTxs] = await applyGCREditsFromMergedMempool(
-            tempMempool,
-        )
+        const [localSuccessfulTxs, localFailedTxs] =
+            await applyGCREditsFromMergedMempool(tempMempool)
         successfulTxs = successfulTxs.concat(localSuccessfulTxs)
         failedTxs = failedTxs.concat(localFailedTxs)
         if (failedTxs.length > 0) {
@@ -175,7 +178,9 @@ export async function consensusRoutine(): Promise<void> {
         const [pro, con] = await voteOnBlock(block, manager.shard.members)
 
         // Check if the block is valid
-        if (isBlockValid(pro, manager.shard.members.length)) {
+        // if (isBlockValid(pro, manager.shard.members.length)) {
+        log.only("Successful txs: " + successfulTxs.length)
+        if (successfulTxs.length <= 0) {
             log.info(
                 "[consensusRoutine] [result] Block is valid with " +
                     pro +
@@ -222,6 +227,8 @@ export async function consensusRoutine(): Promise<void> {
                 }
             }
             await rollbackGCREditsFromTxs(txsToRollback)
+            await Mempool.removeTransactionsByHashes(successfulTxs)
+
             return
         }
     } finally {
@@ -346,7 +353,9 @@ async function mergeAndOrderMempools(
  * @param txs - The txs
  * @returns The successful and failed GCREdits
  */
-async function rollbackGCREditsFromTxs(txs: Transaction[]): Promise<[string[], string[]]> {
+async function rollbackGCREditsFromTxs(
+    txs: Transaction[],
+): Promise<[string[], string[]]> {
     const successfulTxs: string[] = []
     const failedTxs: string[] = []
     // 1. Parse the txs to get the GCREdits
