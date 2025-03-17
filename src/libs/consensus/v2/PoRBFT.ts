@@ -178,8 +178,7 @@ export async function consensusRoutine(): Promise<void> {
         const [pro, con] = await voteOnBlock(block, manager.shard.members)
 
         // Check if the block is valid
-        // if (isBlockValid(pro, manager.shard.members.length)) {
-        if (successfulTxs.length <= 0) {
+        if (isBlockValid(pro, manager.shard.members.length)) {
             log.info(
                 "[consensusRoutine] [result] Block is valid with " +
                     pro +
