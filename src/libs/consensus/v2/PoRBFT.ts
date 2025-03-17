@@ -179,7 +179,6 @@ export async function consensusRoutine(): Promise<void> {
 
         // Check if the block is valid
         // if (isBlockValid(pro, manager.shard.members.length)) {
-        log.only("Successful txs: " + successfulTxs.length)
         if (successfulTxs.length <= 0) {
             log.info(
                 "[consensusRoutine] [result] Block is valid with " +
