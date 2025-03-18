@@ -432,6 +432,14 @@ export default class IdentityManager {
         }
     }
 
+    static async addWeb2Identity(
+        address: string,
+        context: string,
+        targetIdentity: string,
+    ) {
+        
+    }
+
     static async removeWeb2Identifier(
         address: string,
         context: string,

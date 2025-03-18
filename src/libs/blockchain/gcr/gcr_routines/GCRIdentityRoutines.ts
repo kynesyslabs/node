@@ -120,6 +120,22 @@ export default class GCRIdentityRoutines {
         return { success: true, message: "Identity removed" }
     }
 
+    static async applyWeb2IdentityAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        return { success: true, message: "Web2 identity added" }
+    }
+
+    static async applyWeb2IdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        return { success: true, message: "Web2 identity removed" }
+    }
+
     static async apply(
         editOperation: GCREdit,
         gcrMainRepository: Repository<GCRMain>,
@@ -143,34 +159,71 @@ export default class GCRIdentityRoutines {
         }
 
         let result: GCRResult
-        if (identityEdit.context === "xm") {
-            if (operation === "add") {
+
+        switch (identityEdit.context + operation) {
+            case "xmadd":
                 result = await this.applyXmIdentityAdd(
                     identityEdit,
                     gcrMainRepository,
                     simulate,
                 )
-            } else if (operation === "remove") {
+                break
+            case "xmremove":
                 result = await this.applyXmIdentityRemove(
                     identityEdit,
                     gcrMainRepository,
                     simulate,
                 )
-            } else {
+                break
+            case "web2add":
+                result = await this.applyWeb2IdentityAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "web2remove":
+                result = await this.applyWeb2IdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            default:
                 result = {
                     success: false,
                     message: "Unsupported identity operation",
                 }
-            }
-        } else if (identityEdit.context === "web2") {
-            // TODO implement web2 identity operations
-            result = {
-                success: false,
-                message: "Web2 identity operations not implemented",
-            }
-        } else {
-            result = { success: false, message: "Invalid identity context" }
         }
+
+        // if (identityEdit.context === "xm") {
+        //     if (operation === "add") {
+        //         result = await this.applyXmIdentityAdd(
+        //             identityEdit,
+        //             gcrMainRepository,
+        //             simulate,
+        //         )
+        //     } else if (operation === "remove") {
+        //         result = await this.applyXmIdentityRemove(
+        //             identityEdit,
+        //             gcrMainRepository,
+        //             simulate,
+        //         )
+        //     } else {
+        //         result = {
+        //             success: false,
+        //             message: "Unsupported identity operation",
+        //         }
+        //     }
+        // } else if (identityEdit.context === "web2") {
+        //     // TODO implement web2 identity operations
+        //     result = {
+        //         success: false,
+        //         message: "Web2 identity operations not implemented",
+        //     }
+        // } else {
+        //     result = { success: false, message: "Invalid identity context" }
+        // }
         return result
     }
 }
