@@ -11,12 +11,7 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const sender =
-            typeof editOperation.account === "string"
-                ? editOperation.account
-                : forgeToHex(editOperation.account)
-        const { chain, subchain, targetAddress } = editOperation.data
-        const isEVM = chain === "evm"
+        const { chain, isEVM, subchain, targetAddress } = editOperation.data
 
         if (
             !chain ||
@@ -31,7 +26,7 @@ export default class GCRIdentityRoutines {
             ? targetAddress.toLowerCase()
             : targetAddress
 
-        const accountGCR = await ensureGCRForUser(sender)
+        const accountGCR = await ensureGCRForUser(editOperation.account)
 
         accountGCR.identities.xm[chain] = accountGCR.identities.xm[chain] || {}
         accountGCR.identities.xm[chain][subchain] =
@@ -61,12 +56,7 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const sender =
-            typeof editOperation.account === "string"
-                ? editOperation.account
-                : forgeToHex(editOperation.account)
-        const { chain, subchain, targetAddress } = editOperation.data
-        const isEVM = chain === "evm"
+        const { chain, isEVM, subchain, targetAddress } = editOperation.data
 
         if (!chain || !subchain || !targetAddress) {
             return { success: false, message: "Invalid edit operation data" }
@@ -76,7 +66,7 @@ export default class GCRIdentityRoutines {
             ? targetAddress.toLowerCase()
             : targetAddress
 
-        const accountGCR = await gcrMainRepository.findOneBy({ pubkey: sender })
+        const accountGCR = await gcrMainRepository.findOneBy({ pubkey: editOperation.account })
 
         if (!accountGCR) {
             return { success: false, message: "Account not found" }
@@ -125,6 +115,22 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
+        const { context, username } = editOperation.data
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+        accountGCR.identities.web2 = accountGCR.identities.web2 || new Map()
+        accountGCR.identities.web2[context] =
+            accountGCR.identities.web2[context] || []
+
+        if (accountGCR.identities.web2[context].includes(username)) {
+            return { success: false, message: "Identity already exists" }
+        }
+
+        accountGCR.identities.web2[context].push(username)
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+        }
+
         return { success: true, message: "Web2 identity added" }
     }
 
@@ -133,6 +139,25 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
+        const { context, username } = editOperation.data
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+
+        accountGCR.identities.web2 = accountGCR.identities.web2 || new Map()
+        accountGCR.identities.web2[context] =
+            accountGCR.identities.web2[context] || []
+
+        if (!accountGCR.identities.web2[context].includes(username)) {
+            return { success: false, message: "Identity not found" }
+        }
+
+        accountGCR.identities.web2[context] = accountGCR.identities.web2[
+            context
+        ].filter((id: string) => id !== username)
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+        }
+
         return { success: true, message: "Web2 identity removed" }
     }
 
@@ -151,7 +176,7 @@ export default class GCRIdentityRoutines {
             }
         }
 
-        const identityEdit = editOperation
+        const identityEdit = structuredClone(editOperation)
 
         let operation = identityEdit.operation
         if (identityEdit.isRollback) {
@@ -159,6 +184,12 @@ export default class GCRIdentityRoutines {
         }
 
         let result: GCRResult
+
+        // CONVERT operation.account to hex
+        identityEdit.account =
+            typeof identityEdit.account === "string"
+                ? identityEdit.account
+                : forgeToHex(identityEdit.account)
 
         switch (identityEdit.context + operation) {
             case "xmadd":
@@ -196,34 +227,6 @@ export default class GCRIdentityRoutines {
                 }
         }
 
-        // if (identityEdit.context === "xm") {
-        //     if (operation === "add") {
-        //         result = await this.applyXmIdentityAdd(
-        //             identityEdit,
-        //             gcrMainRepository,
-        //             simulate,
-        //         )
-        //     } else if (operation === "remove") {
-        //         result = await this.applyXmIdentityRemove(
-        //             identityEdit,
-        //             gcrMainRepository,
-        //             simulate,
-        //         )
-        //     } else {
-        //         result = {
-        //             success: false,
-        //             message: "Unsupported identity operation",
-        //         }
-        //     }
-        // } else if (identityEdit.context === "web2") {
-        //     // TODO implement web2 identity operations
-        //     result = {
-        //         success: false,
-        //         message: "Web2 identity operations not implemented",
-        //     }
-        // } else {
-        //     result = { success: false, message: "Invalid identity context" }
-        // }
         return result
     }
 }

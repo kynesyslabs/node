@@ -370,23 +370,9 @@ export default class ServerHandlers {
                 result.success = true
                 break
             case "identity":
-                const res = await handleIdentityRequest(tx.content.data[1] as IdentityPayload)
-                const identitiesPayload = tx.content.data
-                const targetIdentity =
-                    identitiesPayload[1] as abstraction.IdentityPayload
-
-                if (targetIdentity.method == "xm_identity_remove") {
-                    result.response = {
-                        message:
-                            "Transaction applied, waiting for confirmation",
-                    }
-                    result.success = true
-                    break
-                }
-
                 try {
-                    const verified = await IdentityManager.verifyPayload(
-                        targetIdentity.payload as abstraction.InferFromSignaturePayload,
+                    const verified = await handleIdentityRequest(
+                        tx.content.data[1] as IdentityPayload,
                     )
 
                     result.response = {
@@ -405,6 +391,7 @@ export default class ServerHandlers {
                         error: e,
                     }
                 }
+
                 break
         }
 
