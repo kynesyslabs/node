@@ -9,18 +9,38 @@ import { TwitterProofParser, Web2ProofParser } from "./web2/parsers"
  * @returns true if the proof is valid, false otherwise
  */
 export async function verifyWeb2Proof(payload: Web2CoreTargetIdentityPayload) {
-    let parser: Web2ProofParser
+    let parser: typeof Web2ProofParser
 
     switch (payload.context) {
         case "twitter":
-            parser = new TwitterProofParser(payload.proof)
+            parser = TwitterProofParser
             break
         default:
-            return false
+            return {
+                success: false,
+                message: `Unsupported proof context: ${payload.context}`,
+            }
     }
 
-    const { message, publicKey, signature } = await parser.readData()
-    return Cryptography.verify(message, signature, publicKey)
+    const instance = await parser.getInstance()
+
+    try {
+        const { message, publicKey, signature } = await instance.readData(
+            payload.proof,
+        )
+        const verified = Cryptography.verify(message, signature, publicKey)
+
+        return {
+            success: verified,
+            message: `Verified ${payload.context} proof`,
+        }
+    } catch (error: any) {
+        console.error(error)
+        return {
+            success: false,
+            message: error.toString(),
+        }
+    }
 }
 
 export { TwitterProofParser, Web2ProofParser }

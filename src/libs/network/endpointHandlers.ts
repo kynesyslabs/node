@@ -371,17 +371,17 @@ export default class ServerHandlers {
                 break
             case "identity":
                 try {
-                    const verified = await handleIdentityRequest(
+                    const { success, message } = await handleIdentityRequest(
                         tx.content.data[1] as IdentityPayload,
                     )
+                    const status = success ? "applied" : "not applied"
 
+                    result.success = success
                     result.response = {
-                        message: verified
-                            ? "Signature verified. Transaction applied."
-                            : "Signature verification failed. Transaction not applied.",
+                        message: message + `. Transaction ${status}.`,
                     }
-                    result.success = verified
                 } catch (e) {
+                    console.error(e)
                     log.error("[handleverifyPayload] Error in identity: " + e)
                     result.success = false
                     result.response = {

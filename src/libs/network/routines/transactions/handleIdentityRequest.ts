@@ -24,8 +24,15 @@ export default async function handleIdentityRequest(payload: IdentityPayload) {
             )
         case "xm_identity_remove":
         case "web2_identity_remove":
-            return true
+            return {
+                success: true,
+                message: "Identity removed",
+            }
         default:
-            return false
+            return {
+                success: false,
+                // @ts-expect-error - we should never get here
+                message: `Unsupported identity method: ${payload.method}`,
+            }
     }
 }

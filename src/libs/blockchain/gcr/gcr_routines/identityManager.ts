@@ -73,7 +73,7 @@ export default class IdentityManager {
     // Verify the payload signature
     static async verifyPayload(
         payload: InferFromSignaturePayload,
-    ): Promise<boolean> {
+    ): Promise<{ success: boolean; message: string }> {
         const chainId = payload.target_identity.chain
         // @ts-expect-error - This is a workaround to avoid type errors
         const sdk = await chains[chainId].create(null)
@@ -103,13 +103,22 @@ export default class IdentityManager {
             }
 
             if (!messageVerified) {
-                return false
+                return {
+                    success: false,
+                    message: "Message could not be verified",
+                }
             }
 
-            return messageVerified
+            return {
+                success: true,
+                message: "Message verified",
+            }
         } catch (error) {
             log.error("Error: " + error)
-            return false
+            return {
+                success: false,
+                message: error.toString(),
+            }
         }
     }
 
@@ -436,9 +445,7 @@ export default class IdentityManager {
         address: string,
         context: string,
         targetIdentity: string,
-    ) {
-        
-    }
+    ) {}
 
     static async removeWeb2Identifier(
         address: string,

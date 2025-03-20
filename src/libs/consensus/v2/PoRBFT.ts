@@ -62,7 +62,7 @@ export async function consensusRoutine(): Promise<void> {
         )
         return
     }
-    log.debug("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
+    log.only("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     const manager = SecretaryManager.getInstance()
 
     // Defining the variables needed for rolling back the GCREdits
@@ -72,13 +72,14 @@ export async function consensusRoutine(): Promise<void> {
 
     try {
         await initializeConsensusState()
+
         // await fastSync([], "consensusRoutine")
         // Initialize the consensus state and check if the local node is in the shard
         // INFO: We won't use the shard returned by initializeShard
         // as it can change through the consensus routine
         // INFO: CONSENSUS ACTION 1: Initialize the shard
         await initializeShard()
-        log.debug("Forgin block: " + manager.shard.blockRef)
+        log.only("Forgin block: " + manager.shard.blockRef)
         log.info("[consensusRoutine] We are in the shard, creating the block")
         log.info(
             `[consensusRoutine] shard: ${JSON.stringify(
@@ -101,6 +102,7 @@ export async function consensusRoutine(): Promise<void> {
             manager.shard.members,
             manager.shard.blockRef,
         )
+        log.only("MErged mempool: " + JSON.stringify(tempMempool.map((tx) => tx.hash), null, 2))
 
         log.info(
             "[consensusRoutine] mempool merged (aka ordered transactions)",

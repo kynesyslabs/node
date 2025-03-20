@@ -14,6 +14,7 @@ docker/node_base
 last_crash_memory_usage.txt
 node[0-9]*
 .env
+twitter_cookies.json
 
 .vscode
 

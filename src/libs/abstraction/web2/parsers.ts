@@ -1,35 +1,185 @@
+import fs from "fs"
+import { Scraper } from "@the-convocation/twitter-scraper"
+import { getSharedState } from "@/utilities/sharedState"
+import { Cookie } from "tough-cookie"
+import log from "@/utilities/logger"
+
 export abstract class Web2ProofParser {
-    url: string
-    constructor(url: string) {
-        this.url = url
+    constructor() {}
+
+    checkFormat(data: Record<string, string>) {
+        try {
+            const keys = ["message", "signature", "publicKey"]
+            return keys.every(key => data[key] && typeof data[key] === "string")
+        } catch (error) {
+            console.error(error)
+            return false
+        }
     }
 
     /**
      * Returns the payload from the proof url
      */
-    abstract readData(): Promise<{
+    abstract readData(proofUrl: string): Promise<{
         message: string
         signature: string
         publicKey: string
     }>
+
+    static getInstance(): Promise<Web2ProofParser> {
+        throw new Error("Not implemented")
+    }
 }
 
 export class TwitterProofParser extends Web2ProofParser {
-    constructor(tweetUrl: string) {
-        super(tweetUrl)
+    private static instance: TwitterProofParser
+    scraper: Scraper
+
+    constructor() {
+        super()
+        this.scraper = new Scraper()
     }
 
-    async readData(): Promise<{
+    getTweetDetails(tweetUrl: string): { username: string; tweetId: string } {
+        try {
+            // Parse URL and remove any query parameters
+            const url = new URL(tweetUrl)
+            const pathParts = url.pathname.split("/")
+
+            // Tweet URLs follow pattern twitter.com/username/status/tweetId
+            const statusIndex = pathParts.indexOf("status")
+            if (statusIndex === -1 || !pathParts[statusIndex + 1]) {
+                throw new Error("Invalid tweet URL format")
+            }
+
+            // Username is the part before 'status'
+            const username = pathParts[statusIndex - 1]
+            if (!username) {
+                throw new Error("Invalid tweet URL format - username not found")
+            }
+
+            return {
+                username: username,
+                tweetId: pathParts[statusIndex + 1],
+            }
+        } catch (error) {
+            console.error(error)
+            throw new Error("Failed to extract tweet details")
+        }
+    }
+
+    async loadCookies() {
+        // INFO: Load cookies from file
+        log.debug("🐦 Trying to load cookies from file")
+        if (fs.existsSync(getSharedState.twitterCookieFile)) {
+            log.debug("🐦 Twitter cookie file found, parsing ...")
+            const cookieDump = fs.readFileSync(
+                getSharedState.twitterCookieFile,
+                "utf8",
+            )
+
+            if (cookieDump) {
+                const parsed: any[] = JSON.parse(cookieDump)
+                const cookies = parsed.map(data => Cookie.fromJSON(data))
+                await this.scraper.setCookies(cookies)
+            }
+        }
+
+        const loggedIn = await this.scraper.isLoggedIn()
+        if (loggedIn) {
+            log.debug("🐦 Successfully loaded cookies from file")
+        }
+
+        return loggedIn
+    }
+
+    async login() {
+        // INFO: Try to load cookies from file
+        const loggedInFromCookies = await this.loadCookies()
+        if (loggedInFromCookies) {
+            return true
+        }
+
+        log.warning(
+            "🐦 Failed to load cookies from file, trying login using credentials",
+        )
+        // INFO: Try to login with credentials
+        log.debug("🐦 Trying to login with credentials")
+        const username = process.env.TWITTER_USERNAME
+        const password = process.env.TWITTER_PASSWORD
+        const email = process.env.TWITTER_EMAIL
+
+        const missing = [
+            !username && "username",
+            !password && "password",
+            !email && "email",
+        ].filter(Boolean)
+
+        if (missing.length) {
+            throw new Error(
+                `Missing Twitter credentials: ${missing.join(", ")}`,
+            )
+        }
+
+        await this.scraper.login(username, password, email)
+
+        const loggedIn = await this.scraper.isLoggedIn()
+        if (!loggedIn) {
+            throw new Error("Unable to authenticate with Twitter")
+        }
+
+        log.debug("🐦 Successfully logged in with credentials")
+        const cookies = await this.scraper.getCookies()
+
+        // INFO: Save cookies to file
+        fs.writeFileSync(
+            getSharedState.twitterCookieFile,
+            JSON.stringify(cookies, null, 2),
+        )
+
+        return loggedIn
+    }
+
+    async readData(tweetUrl: string): Promise<{
         message: string
         signature: string
         publicKey: string
     }> {
-        return {
-            message: "hi",
-            signature:
-                "6313be95e90b2be4c69db9124d3fa62d196080318b1f4eb95a7cbac4c6dd77f22de9391b9b7894327fa7e73049eba57bbdfa6a3aac8e868ce23aa9ff1e5b3605",
-            publicKey:
-                "be065600833f72f3ff4d2f0ed16cc663bbd31ba607ebca0a6748ae3f98665492",
+        // INFO: Get the tweet ID from the URL
+        const { username, tweetId } = this.getTweetDetails(tweetUrl)
+        const tweet = await this.scraper.getTweet(tweetId)
+
+        if (tweet.username !== username) {
+            throw new Error("Tweet does not belong to the provided user")
         }
+
+        // INFO: Parse and return the payload
+        let payload: Record<string, string>
+
+        try {
+            payload = JSON.parse(tweet.text)
+        } catch (error) {
+            console.error(error)
+            throw new Error("Invalid proof format")
+        }
+
+        if (!this.checkFormat(payload)) {
+            throw new Error("Invalid proof format")
+        }
+
+        return {
+            message: payload["message"],
+            signature: payload["signature"],
+            publicKey: payload["publicKey"],
+        }
+    }
+
+    static async getInstance() {
+        if (!this.instance) {
+            this.instance = new TwitterProofParser()
+        }
+
+        await this.instance.login()
+        return this.instance
     }
 }
