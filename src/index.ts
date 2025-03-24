@@ -148,7 +148,6 @@ async function warmup() {
     console.log("= End of Configuration = \n")
     // Configure the logs directory
     log.setLogsDir(indexState.SERVER_PORT)
-    // ? REVIEW Starting the server_rpc: should we keep this async?
     // This should start the server_rpc without any other needed operation
     log.info("[MAIN] Starting the RPC server")
     server_rpc()

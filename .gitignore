@@ -15,7 +15,7 @@ last_crash_memory_usage.txt
 node[0-9]*
 .env
 twitter_cookies.json
-
+.RUN
 .vscode
 
 #OSX files
@@ -93,3 +93,5 @@ src/GRTAGS
 src/GTAGS
 .vscode/settings.json
 .aider*
+
+

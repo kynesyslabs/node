@@ -7,6 +7,14 @@ export const chainIds = {
         sepolia: 11155111,
         holesky: 17000,
     },
+    arbitrum: {
+        mainnet: 42161,
+        sepolia: 421614,
+    },
+    optimism: {
+        mainnet: 10,
+        sepolia: 11155420,
+    },
     bsc: {
         mainnet: 56,
         testnet: 97,
