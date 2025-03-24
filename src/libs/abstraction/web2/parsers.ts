@@ -7,13 +7,26 @@ import log from "@/utilities/logger"
 export abstract class Web2ProofParser {
     constructor() {}
 
-    checkFormat(data: Record<string, string>) {
+    /**
+     * Parses the payload from the payload text to an object
+     *
+     * @param data - The payload text
+     */
+    parsePayload(data: string) {
         try {
-            const keys = ["message", "signature", "publicKey"]
-            return keys.every(key => data[key] && typeof data[key] === "string")
+            const splits = data.split(":")
+            if (splits.length !== 4) {
+                throw new Error("Invalid proof format")
+            }
+
+            return {
+                message: splits[1],
+                signature: splits[2],
+                publicKey: splits[3],
+            }
         } catch (error) {
             console.error(error)
-            return false
+            return null
         }
     }
 
@@ -154,24 +167,13 @@ export class TwitterProofParser extends Web2ProofParser {
         }
 
         // INFO: Parse and return the payload
-        let payload: Record<string, string>
+        const payload = this.parsePayload(tweet.text)
 
-        try {
-            payload = JSON.parse(tweet.text)
-        } catch (error) {
-            console.error(error)
+        if (!payload) {
             throw new Error("Invalid proof format")
         }
 
-        if (!this.checkFormat(payload)) {
-            throw new Error("Invalid proof format")
-        }
-
-        return {
-            message: payload["message"],
-            signature: payload["signature"],
-            publicKey: payload["publicKey"],
-        }
+        return payload
     }
 
     static async getInstance() {
