@@ -3,7 +3,6 @@ import {
     SDK,
     Configuration,
     BLOCKCHAIN_NAME,
-    CrossChainManagerCalculationOptions,
     CHAIN_TYPE,
     WrappedCrossChainTrade,
     CrossChainTrade,
@@ -12,6 +11,7 @@ import {
     BasicTransactionOptions,
 } from "rubic-sdk"
 import { BridgeTradePayload, SupportedTokens, ChainProviders } from "@kynesyslabs/demosdk/types"
+import { BlockchainName, BRIDGE_PROTOCOLS, ExtendedCrossChainManagerCalculationOptions } from "./bridgeUtils"
 
 class CustomEVMProvider {
     private httpProvider: HttpProvider
@@ -123,25 +123,6 @@ class CustomEVMProvider {
         })
     }
 }
-
-export const BRIDGE_PROTOCOLS = {
-    ALL: "all",
-    MULTICHAIN: "multichain",
-    CELER: "celer",
-    SYMBIOSIS: "symbiosis",
-    AXELAR: "axelar",
-    WORMHOLE: "wormhole",
-} as const
-
-interface ExtendedCrossChainManagerCalculationOptions
-    extends CrossChainManagerCalculationOptions {
-    bridgeTypes?: string[]
-}
-
-export type BlockchainName =
-    (typeof BLOCKCHAIN_NAME)[keyof typeof BLOCKCHAIN_NAME]
-
-export type BridgeProtocol = keyof typeof BRIDGE_PROTOCOLS
 
 export default class RubicService {
     private sdk: SDK | null = null
@@ -299,8 +280,6 @@ export default class RubicService {
 
     async executeTrade(wrappedTrade: WrappedCrossChainTrade) {
         if (!this.sdk) throw new Error("SDK not initialized")
-
-        // const wrappedTrade = payload.wrappedTrade;
 
         if (!wrappedTrade) throw new Error("Trade object is null or undefined")
 
