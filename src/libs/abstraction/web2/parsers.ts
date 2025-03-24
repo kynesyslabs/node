@@ -181,7 +181,13 @@ export class TwitterProofParser extends Web2ProofParser {
             this.instance = new TwitterProofParser()
         }
 
-        await this.instance.login()
+        try {
+            await this.instance.login()
+        } catch (error) {
+            console.error(error)
+            // do what?
+        }
+
         return this.instance
     }
 }
