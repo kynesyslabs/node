@@ -345,7 +345,7 @@ export default class HandleGCR {
                 log.error("[applyToTx] Error applying GCREdit: " + e)
                 editsResults.push({
                     success: false,
-                    message: "Error applying GCREdit: " + e,
+                    message: `${e}`,
                 })
                 await this.rollback(tx, appliedEdits) // Rollback the applied edits
                 // Stopping the execution
@@ -364,7 +364,7 @@ export default class HandleGCR {
 
             return {
                 success: false,
-                message: `Failed to apply GCREdit: ${failedMessages}`,
+                message: failedMessages,
             }
         }
 
