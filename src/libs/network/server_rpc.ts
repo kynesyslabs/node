@@ -33,6 +33,7 @@ import { rpcSchema, setupOpenAPI } from "./openApiSpec"
 import { skeletons } from "@kynesyslabs/demosdk/websdk"
 import required from "src/utilities/required"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
+import manageBridges from "./manageBridge"
 
 // Reading the port from sharedState
 
@@ -160,6 +161,9 @@ async function processPayload(
         case "gcr_routine":
             return await manageGCRRoutines(sender, payload.params[0])
 
+        case "bridge":
+            return await manageBridges(sender, payload.params[0])
+
         case "web2ProxyRequest": {
             const params = parseWeb2ProxyRequest(payload.params[0])
 
@@ -283,8 +287,10 @@ export default async function serverRpc(): Promise<FastifyInstance> {
             // Excluding due to noAuthMethods from header validation
             if (!noAuthMethods.includes(payload.method)) {
                 const headerValidation = validateHeaders(headers)
-
-                log.info("[RPC Call] Header validation: " + headerValidation[0])
+                
+                log.info(
+                    "[RPC Call] Header validation: " + headerValidation[0],
+                )
                 if (!headerValidation[0]) {
                     reply.status(401).send({
                         error: "Invalid headers:" + headerValidation[1],
@@ -298,27 +304,18 @@ export default async function serverRpc(): Promise<FastifyInstance> {
                 "[RPC Call] Payload: " + JSON.stringify(payload, null, 2),
                 false,
             )
-            // REVIEW To avoid crashes, we catch all unhandled exceptions and return a 500 error
-            try {
-                const response = await processPayload(payload, sender)
-                log.info(
-                    "[RPC Call] Response ready: sending it to the client...",
-                    false,
-                )
-                log.info(
-                    "[RPC Call] Response: " + JSON.stringify(response, null, 2),
-                    false,
-                )
+            const response = await processPayload(payload, sender)
+            log.info(
+                "[RPC Call] Response ready: sending it to the client...",
+                false,
+            )
+            log.info(
+                "[RPC Call] Response: " + JSON.stringify(response, null, 2),
+                false,
+            )
 
-                reply.header("Access-Control-Allow-Origin", "*")
-                reply.send(response)
-            } catch (error) {
-                log.error("[RPC Call] Error: " + error, true)
-                reply.status(500).send({
-                    error: "Internal server error",
-                    details: error,
-                })
-            }
+            reply.header("Access-Control-Allow-Origin", "*")
+            reply.send(response)
         },
     )
 
