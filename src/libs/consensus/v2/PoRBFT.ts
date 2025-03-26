@@ -72,6 +72,7 @@ export async function consensusRoutine(): Promise<void> {
 
     try {
         await initializeConsensusState()
+
         // await fastSync([], "consensusRoutine")
         // Initialize the consensus state and check if the local node is in the shard
         // INFO: We won't use the shard returned by initializeShard
@@ -101,6 +102,7 @@ export async function consensusRoutine(): Promise<void> {
             manager.shard.members,
             manager.shard.blockRef,
         )
+        log.debug("MErged mempool: " + JSON.stringify(tempMempool.map((tx) => tx.hash), null, 2))
 
         log.info(
             "[consensusRoutine] mempool merged (aka ordered transactions)",
