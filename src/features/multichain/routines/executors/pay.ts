@@ -158,7 +158,9 @@ async function handleEVMPay(chainID: number, operation: IOperation) {
     let evmInstance = multichain.EVM.getInstance(chainID)
 
     if (!evmInstance) {
-        const rpcUrl = evmProviders[operation.chain][operation.subchain]
+        const rpcUrl =
+            operation.rpc || evmProviders[operation.chain][operation.subchain]
+
         evmInstance = multichain.EVM.createInstance(chainID, rpcUrl)
         await evmInstance.connect()
     }
