@@ -1,9 +1,10 @@
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../handleGCR"
-import { GCREdit } from "@kynesyslabs/demosdk/types"
+import { GCREdit, Web2GCRData } from "@kynesyslabs/demosdk/types"
 import { Repository } from "typeorm"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import ensureGCRForUser from "./ensureGCRForUser"
+import Hashing from "@/libs/crypto/hashing"
 
 export default class GCRIdentityRoutines {
     static async applyXmIdentityAdd(
@@ -115,24 +116,35 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const { context, username } = editOperation.data
+        const { context, data } = editOperation.data as Web2GCRData
         const accountGCR = await ensureGCRForUser(editOperation.account)
-        accountGCR.identities.web2 = accountGCR.identities.web2 || new Map()
+        accountGCR.identities.web2 = accountGCR.identities.web2 || {}
         accountGCR.identities.web2[context] =
             accountGCR.identities.web2[context] || []
 
-        if (accountGCR.identities.web2[context].includes(username)) {
+
+        const exists = accountGCR.identities.web2[context].some(
+            (id: Web2GCRData["data"]) => id.username === data.username,
+        )
+
+        if (exists) {
             return { success: false, message: "Identity already exists" }
         }
 
-        accountGCR.identities.web2[context].push(username)
+        const proofOk = Hashing.sha256(data.proof) === data.proofHash
+
+        if (!proofOk) {
+            return { success: false, message: "Sha256 proof mismatch: Expected " + data.proofHash + " but got " + Hashing.sha256(data.proof) }
+        }
+
+        accountGCR.identities.web2[context].push(data)
 
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
         }
 
         return { success: true, message: "Web2 identity added" }
-    }
+    } 
 
     static async applyWeb2IdentityRemove(
         editOperation: any,
@@ -142,17 +154,21 @@ export default class GCRIdentityRoutines {
         const { context, username } = editOperation.data
         const accountGCR = await ensureGCRForUser(editOperation.account)
 
-        accountGCR.identities.web2 = accountGCR.identities.web2 || new Map()
+        accountGCR.identities.web2 = accountGCR.identities.web2 || {}
         accountGCR.identities.web2[context] =
             accountGCR.identities.web2[context] || []
 
-        if (!accountGCR.identities.web2[context].includes(username)) {
+        const exists = accountGCR.identities.web2[context].some(
+            (id: Web2GCRData["data"]) => id.username === username,
+        )
+
+        if (!exists) {
             return { success: false, message: "Identity not found" }
         }
 
         accountGCR.identities.web2[context] = accountGCR.identities.web2[
             context
-        ].filter((id: string) => id !== username)
+        ].filter((id: Web2GCRData["data"]) => id.username !== username)
 
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
