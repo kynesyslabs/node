@@ -36,7 +36,8 @@ import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 
 // Reading the port from sharedState
 
-const noAuthMethods = ["nodeCall"]
+// TODO: Add Proper authentication
+const noAuthMethods = ["nodeCall", "gcr_routine"]
 
 export const emptyResponse: RPCResponse = {
     result: 0,
