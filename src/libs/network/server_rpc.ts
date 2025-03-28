@@ -33,6 +33,7 @@ import { rpcSchema, setupOpenAPI } from "./openApiSpec"
 import { skeletons } from "@kynesyslabs/demosdk/websdk"
 import required from "src/utilities/required"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
+import manageBridges from "./manageBridge"
 
 // Reading the port from sharedState
 
@@ -161,6 +162,9 @@ async function processPayload(
         case "gcr_routine":
             return await manageGCRRoutines(sender, payload.params[0])
 
+        case "bridge":
+            return await manageBridges(sender, payload.params[0])
+
         case "web2ProxyRequest": {
             const params = parseWeb2ProxyRequest(payload.params[0])
 
@@ -284,8 +288,10 @@ export default async function serverRpc(): Promise<FastifyInstance> {
             // Excluding due to noAuthMethods from header validation
             if (!noAuthMethods.includes(payload.method)) {
                 const headerValidation = validateHeaders(headers)
-
-                log.info("[RPC Call] Header validation: " + headerValidation[0])
+                
+                log.info(
+                    "[RPC Call] Header validation: " + headerValidation[0],
+                )
                 if (!headerValidation[0]) {
                     reply.status(401).send({
                         error: "Invalid headers:" + headerValidation[1],

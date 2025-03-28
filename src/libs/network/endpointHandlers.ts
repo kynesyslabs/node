@@ -53,6 +53,8 @@ import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
+import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
+import { IdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 /* // ! Note: this will be removed once demosWork is in place
 import {
     NativePayload,
@@ -368,31 +370,18 @@ export default class ServerHandlers {
                 result.success = true
                 break
             case "identity":
-                const identitiesPayload = tx.content.data
-                const targetIdentity =
-                    identitiesPayload[1] as abstraction.IdentityPayload
-
-                if (targetIdentity.method == "identity_remove") {
-                    result.response = {
-                        message:
-                            "Transaction applied, waiting for confirmation",
-                    }
-                    result.success = true
-                    break
-                }
-
                 try {
-                    const verified = await IdentityManager.verifyPayload(
-                        targetIdentity.payload as abstraction.InferFromSignaturePayload,
+                    const { success, message } = await handleIdentityRequest(
+                        tx.content.data[1] as IdentityPayload,
                     )
+                    const status = success ? "applied" : "not applied"
 
+                    result.success = success
                     result.response = {
-                        message: verified
-                            ? "Signature verified. Transaction applied."
-                            : "Signature verification failed. Transaction not applied.",
+                        message: message + `. Transaction ${status}.`,
                     }
-                    result.success = verified
                 } catch (e) {
+                    console.error(e)
                     log.error("[handleverifyPayload] Error in identity: " + e)
                     result.success = false
                     result.response = {
@@ -402,6 +391,7 @@ export default class ServerHandlers {
                         error: e,
                     }
                 }
+
                 break
         }
 
