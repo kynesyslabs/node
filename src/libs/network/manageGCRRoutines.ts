@@ -22,11 +22,31 @@ export default async function manageGCRRoutines(
     if (method.startsWith("incentive_")) {
         // Remove the "incentive_" prefix and pass to incentive controller
         const incentiveMethod = method.substring(10)
-        return await IncentiveController.getInstance().handleIncentiveRequest(
-            sender,
-            incentiveMethod,
+        console.log(
+            `[GCR_ROUTINE] Processing incentive request: ${incentiveMethod} with params:`,
             params,
         )
+        try {
+            return await IncentiveController.getInstance().handleIncentiveRequest(
+                sender,
+                incentiveMethod,
+                params,
+            )
+        } catch (error) {
+            console.error(
+                `[GCR_ROUTINE] Error processing incentive request ${incentiveMethod}:`,
+                error,
+            )
+            return {
+                result: 500,
+                response: "Error processing incentive request",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
     }
 
     switch (method) {

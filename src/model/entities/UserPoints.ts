@@ -1,3 +1,4 @@
+import "reflect-metadata"
 import {
     Entity,
     Column,
@@ -8,7 +9,7 @@ import {
 
 @Entity()
 export class UserPointsEntity {
-    @PrimaryColumn()
+    @PrimaryColumn({ type: "varchar" })
     userId: string
 
     @Column({ type: "integer", default: 0 })
@@ -16,7 +17,6 @@ export class UserPointsEntity {
 
     @Column({ type: "jsonb", default: {} })
     breakdown: {
-        identityCreation: number
         web3Wallets: number
         socialAccounts: number
     }
@@ -30,9 +30,6 @@ export class UserPointsEntity {
         github?: string
         discord?: string
     }
-
-    @Column()
-    reputationLevel: string
 
     @CreateDateColumn()
     createdAt: Date

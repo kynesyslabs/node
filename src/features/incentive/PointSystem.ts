@@ -1,39 +1,24 @@
 import Datasource from "../../model/datasource"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
+import { UserPointsEntity } from "../../model/entities/UserPoints"
 
 // Define point values for different actions
 const pointValues = {
-    CREATE_IDENTITY: 100,
-    LINK_WEB3_WALLET: 50, // per wallet
-    LINK_TWITTER: 75,
-    LINK_GITHUB: 75,
-    LINK_DISCORD: 75, // TODO: Implement Discord integration
+    LINK_WEB3_WALLET: 2, // per wallet
+    LINK_TWITTER: 5,
 }
-
-// Define reputation levels
-const reputationLevels = [
-    { name: "Newcomer", minPoints: 0 },
-    { name: "Explorer", minPoints: 100 },
-    { name: "Contributor", minPoints: 250 },
-    { name: "Builder", minPoints: 500 },
-    { name: "Pioneer", minPoints: 1000 },
-]
 
 export interface UserPoints {
     userId: string
     totalPoints: number
     breakdown: {
-        identityCreation: number
         web3Wallets: number
         socialAccounts: number
     }
     linkedWallets: string[]
     linkedSocials: {
         twitter?: string
-        github?: string
-        discord?: string
     }
-    reputationLevel: string
     lastUpdated: Date
 }
 
@@ -47,58 +32,6 @@ export class PointSystem {
             PointSystem.instance = new PointSystem()
         }
         return PointSystem.instance
-    }
-
-    /**
-     * Award points for creating a Demos identity
-     */
-    async awardIdentityCreationPoints(userId: string): Promise<RPCResponse> {
-        try {
-            // Get or create user points record
-            const userPoints = await this.getUserPoints(userId)
-
-            // Only award points if not already awarded
-            if (userPoints.breakdown.identityCreation === 0) {
-                userPoints.breakdown.identityCreation =
-                    pointValues.CREATE_IDENTITY
-                userPoints.totalPoints += pointValues.CREATE_IDENTITY
-
-                await this.saveUserPoints(userPoints)
-
-                return {
-                    result: 200,
-                    response: {
-                        pointsAwarded: pointValues.CREATE_IDENTITY,
-                        totalPoints: userPoints.totalPoints,
-                        message: "Points awarded for identity creation",
-                    },
-                    require_reply: false,
-                    extra: {},
-                }
-            }
-
-            return {
-                result: 200,
-                response: {
-                    pointsAwarded: 0,
-                    totalPoints: userPoints.totalPoints,
-                    message: "Points already awarded for identity creation",
-                },
-                require_reply: false,
-                extra: {},
-            }
-        } catch (error) {
-            console.error("Error awarding identity points:", error)
-            return {
-                result: 500,
-                response: "Error awarding points",
-                require_reply: false,
-                extra: {
-                    error:
-                        error instanceof Error ? error.message : String(error),
-                },
-            }
-        }
     }
 
     /**
@@ -218,83 +151,126 @@ export class PointSystem {
     }
 
     /**
-     * Get user's current points and reputation
+     * Get user's current points
      */
     async getUserPoints(userId: string): Promise<UserPoints> {
-        // TODO: Implement database storage for points
-        // For now, we'll create a new record if none exists
+        try {
+            // Get database connection
+            const datasource = await Datasource.getInstance()
+            const connection = datasource.getDataSource()
+            const userPointsRepo = connection.getRepository(UserPointsEntity)
 
-        // In a real implementation, this would fetch from the database
-        const defaultPoints: UserPoints = {
-            userId,
-            totalPoints: 0,
-            breakdown: {
-                identityCreation: 0,
-                web3Wallets: 0,
-                socialAccounts: 0,
-            },
-            linkedWallets: [],
-            linkedSocials: {},
-            reputationLevel: reputationLevels[0].name,
-            lastUpdated: new Date(),
-        }
+            // Try to find existing user points
+            const userPointsEntity = await userPointsRepo.findOne({
+                where: { userId },
+            })
 
-        // Calculate reputation level
-        const reputationLevel = this.calculateReputationLevel(
-            defaultPoints.totalPoints,
-        )
-        defaultPoints.reputationLevel = reputationLevel
+            if (userPointsEntity) {
+                // Convert entity to UserPoints interface
+                const userPoints: UserPoints = {
+                    userId: userPointsEntity.userId,
+                    totalPoints: userPointsEntity.totalPoints,
+                    breakdown: {
+                        web3Wallets:
+                            userPointsEntity.breakdown.web3Wallets || 0,
+                        socialAccounts:
+                            userPointsEntity.breakdown.socialAccounts || 0,
+                    },
+                    linkedWallets: userPointsEntity.linkedWallets,
+                    linkedSocials: {
+                        twitter: userPointsEntity.linkedSocials.twitter,
+                    },
+                    lastUpdated: userPointsEntity.updatedAt,
+                }
+                return userPoints
+            }
 
-        return defaultPoints
-    }
+            // If no record exists, create a default one
+            const defaultPoints: UserPoints = {
+                userId,
+                totalPoints: 0,
+                breakdown: {
+                    web3Wallets: 0,
+                    socialAccounts: 0,
+                },
+                linkedWallets: [],
+                linkedSocials: {},
+                lastUpdated: new Date(),
+            }
 
-    /**
-     * Calculate reputation level based on points
-     */
-    private calculateReputationLevel(points: number): string {
-        let level = reputationLevels[0].name
+            return defaultPoints
+        } catch (error: unknown) {
+            const errorMessage =
+                error instanceof Error ? error.message : String(error)
+            console.error(
+                `[PointSystem] Error getting user points: ${errorMessage}`,
+                error,
+            )
 
-        for (const repLevel of reputationLevels) {
-            if (points >= repLevel.minPoints) {
-                level = repLevel.name
-            } else {
-                break
+            // Return default points in case of error
+            return {
+                userId,
+                totalPoints: 0,
+                breakdown: {
+                    web3Wallets: 0,
+                    socialAccounts: 0,
+                },
+                linkedWallets: [],
+                linkedSocials: {},
+                lastUpdated: new Date(),
             }
         }
-
-        return level
     }
 
     /**
      * Save user points to database
      */
     private async saveUserPoints(userPoints: UserPoints): Promise<void> {
-        // TODO: Implement database storage
-        // For now, we'll just update the reputation level and timestamp
-        userPoints.reputationLevel = this.calculateReputationLevel(
-            userPoints.totalPoints,
-        )
-        userPoints.lastUpdated = new Date()
+        try {
+            // Update the last updated timestamp
+            userPoints.lastUpdated = new Date()
 
-        console.log(
-            `[PointSystem] Updated points for user ${userPoints.userId}: ${userPoints.totalPoints} points`,
-        )
-    }
+            // Get database connection
+            const datasource = await Datasource.getInstance()
+            const connection = datasource.getDataSource()
+            const userPointsRepo = connection.getRepository(UserPointsEntity)
 
-    /**
-     * Check if a user has bot-like behavior
-     * This is a placeholder for more sophisticated bot detection
-     */
-    async checkForBotBehavior(userId: string): Promise<boolean> {
-        // TODO: Implement actual bot detection
-        // For now, we'll just return false (not a bot)
+            // Check if user already has a record
+            let userPointsEntity = await userPointsRepo.findOne({
+                where: { userId: userPoints.userId },
+            })
 
-        // In a real implementation, this would check:
-        // 1. Account age
-        // 2. Activity patterns
-        // 3. Social account verification status
-        // 4. Reputation on linked platforms
+            if (!userPointsEntity) {
+                // Create new entity if it doesn't exist
+                userPointsEntity = new UserPointsEntity()
+                userPointsEntity.userId = userPoints.userId
+            }
 
-        return false
+            // Update entity with new values
+            userPointsEntity.totalPoints = userPoints.totalPoints
+            userPointsEntity.breakdown = {
+                web3Wallets: userPoints.breakdown.web3Wallets,
+                socialAccounts: userPoints.breakdown.socialAccounts,
+            }
+            userPointsEntity.linkedWallets = userPoints.linkedWallets
+            userPointsEntity.linkedSocials = {
+                twitter: userPoints.linkedSocials.twitter,
+            }
+
+            // Save to database
+            await userPointsRepo.save(userPointsEntity)
+
+            console.log(
+                `[PointSystem] Saved points for user ${userPoints.userId}: ${userPoints.totalPoints} points`,
+            )
+        } catch (error: unknown) {
+            const errorMessage =
+                error instanceof Error ? error.message : String(error)
+            console.error(
+                `[PointSystem] Error saving user points: ${errorMessage}`,
+                error,
+            )
+            throw error
+        }
     }
 }
