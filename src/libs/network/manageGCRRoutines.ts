@@ -12,7 +12,7 @@ export default async function manageGCRRoutines(
     sender: string,
     payload: GCRRoutinePayload,
 ): Promise<RPCResponse> {
-    let response = _.cloneDeep(emptyResponse)
+    const response = _.cloneDeep(emptyResponse)
     response.result = 200
     // Handle the payload
     const { method, params } = payload
@@ -25,51 +25,19 @@ export default async function manageGCRRoutines(
             )
             break
 
-        case "identity_assign_from_signature":
-            try {
-                response = await IdentityManager.inferIdentityFromSignature(
-                    sender,
-                    params[0],
-                )
-            } catch (error) {
-                console.error(error)
-                response.result = 400
-                response.response = "Error: something went wrong"
-                response.extra = error
-            }
-            break
-
-        case "remove_identity":
-            response = await IdentityManager.removeXmIdentity(sender, params[0])
-            break
-
         case "getIdentities":
-            // eslint-disable-next-line no-var
-            var data = await IdentityManager.getXmIdentities(sender)
-            response.response = {
-                xm: data,
-                web2: {},
-            }
+            response.response = await IdentityManager.getIdentities(sender)
             break
+
+        case "getWeb2Identities":
+            response.response = await IdentityManager.getIdentities(sender, "web2")
+            break
+
+        case "getXmIdentities":
+            response.response = await IdentityManager.getIdentities(sender, "xm")
+            break
+
         // SECTION Web2 Identity Management
-
-        // Github identity add
-        case "add_github_identity":
-            response = await IdentityManager.addWeb2Identifier(
-                sender,
-                "github",
-                params[0], // REVIEW Is this correct?
-            )
-            break
-
-        // Twitter identity add
-        case "add_twitter_identity":
-            response = await IdentityManager.addWeb2Identifier(
-                sender,
-                "twitter",
-                params[0],
-            )
-            break
 
         default:
             response.response = false

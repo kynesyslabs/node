@@ -427,7 +427,6 @@ export default class HandleGCR {
         web2: assignWeb2,
         identity: {
             assignFromWrite: IdentityManager.inferIdentityFromWrite,
-            assignFromSignature: IdentityManager.inferIdentityFromSignature,
         },
     }
 
@@ -474,8 +473,8 @@ export default class HandleGCR {
         account.pubkey = pubkey
         account.balance = 0n
         account.identities = {
-            xm: new Map(),
-            web2: new Map(),
+            xm: {},
+            web2: {},
         }
         account.assignedTxs = []
         account.nonce = 0
