@@ -27,8 +27,6 @@ export class UserPointsEntity {
     @Column({ type: "jsonb", default: {} })
     linkedSocials: {
         twitter?: string
-        github?: string
-        discord?: string
     }
 
     @CreateDateColumn()
