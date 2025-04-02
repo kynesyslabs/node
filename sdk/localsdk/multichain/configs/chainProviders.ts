@@ -38,7 +38,7 @@ export const chainProviders = {
         testnet: "https://rpc.testnet.near.org",
     },
     btc: {
-        mainnet: "https://blockstream.info",
+        mainnet: "https://blockstream.info/api",
         testnet: "https://blockstream.info/testnet/api",
     },
 }
