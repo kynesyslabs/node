@@ -23,4 +23,8 @@ export const chainIds = {
         mainnet: 137,
         mumbai: 80001,
     },
+    btc: {
+        mainnet: 2203,
+        testnet: 1501,
+    },
 }

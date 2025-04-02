@@ -67,11 +67,7 @@ export default async function handlePayOperation(
             break
 
         case "ibc":
-            result = await genericJsonRpcPay(
-                multichain.IBC,
-                rpcUrl,
-                operation,
-            )
+            result = await genericJsonRpcPay(multichain.IBC, rpcUrl, operation)
             break
 
         case "solana":
@@ -84,6 +80,10 @@ export default async function handlePayOperation(
 
         case "ton":
             result = await genericJsonRpcPay(multichain.TON, rpcUrl, operation)
+            break
+
+        case "btc":
+            result = await genericJsonRpcPay(multichain.BTC, rpcUrl, operation)
             break
 
         default:
