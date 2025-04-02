@@ -142,6 +142,7 @@ async function genericJsonRpcPay(
         }
     }
 }
+
 /**
  * Executes an EVM Pay operation and returns the result
  */
