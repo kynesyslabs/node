@@ -1,6 +1,9 @@
-import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import Cryptography from "../crypto/cryptography"
-import { TwitterProofParser, Web2ProofParser } from "./web2/parsers"
+
+import { GithubProofParser } from "./web2/github"
+import { TwitterProofParser } from "./web2/twitter"
+import { type Web2ProofParser } from "./web2/parsers"
+import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 
 /**
  * Fetches the proof data using the appropriate parser and verifies the signature
@@ -14,6 +17,9 @@ export async function verifyWeb2Proof(payload: Web2CoreTargetIdentityPayload) {
     switch (payload.context) {
         case "twitter":
             parser = TwitterProofParser
+            break
+        case "github":
+            parser = GithubProofParser
             break
         default:
             return {
