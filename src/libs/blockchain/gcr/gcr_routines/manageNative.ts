@@ -1,7 +1,5 @@
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import Datasource from "src/model/datasource"
-import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 
 // import Block from "../../block"
 // import Chain from "../../chain"
@@ -29,8 +27,8 @@ async function setBalance(
     const rawData: GCRMain = {
         assignedTxs: [],
         identities: {
-            xm: new Map(),
-            web2: new Map(),
+            xm: {},
+            web2: {},
         },
         balance: BigInt(balance),
         nonce: 0,
