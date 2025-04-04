@@ -21,7 +21,8 @@
         "upgrade_deps": "yarn upgrade-interactive --latest",
         "upgrade_deps:force": "ncu -u && yarn",
         "keygen": "tsx -r tsconfig-paths/register src/libs/utils/keyMaker.ts",
-        "test:chains": "jest --testMatch '**/tests/**/*.ts' --testPathIgnorePatterns src/* tests/utils/* tests/**/_template*  --verbose"
+        "test:chains": "jest --testMatch '**/tests/**/*.ts' --testPathIgnorePatterns src/* tests/utils/* tests/**/_template*  --verbose",
+        "dump_balance": "bun run src/utilities/balanceDumper.ts"
     },
     "devDependencies": {
         "@babel/eslint-parser": "^7.22.11",
