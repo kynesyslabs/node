@@ -55,7 +55,7 @@ class Datasource {
                 GCRTracker,
             ],
             synchronize: true, // set this to false in production
-            logging: false
+            logging: false,
         })
     }
 

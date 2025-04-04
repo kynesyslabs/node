@@ -268,9 +268,9 @@ export default class RubicService {
                 trade => trade !== undefined && trade !== null && !trade.error,
             )
 
-            const bestTrade = filteredTrades[0];
+            const bestTrade = filteredTrades[0]
             
-            return bestTrade;
+            return bestTrade
         } catch (error: any) {
             console.error("Error getting trade:", error)
 
@@ -288,7 +288,7 @@ export default class RubicService {
             throw wrappedTrade.error
         }
 
-        const trade = wrappedTrade.trade as unknown as CrossChainTrade;
+        const trade = wrappedTrade.trade as unknown as CrossChainTrade
 
         if (!trade) throw new Error("Invalid trade object: trade is null")
             
@@ -317,7 +317,7 @@ export default class RubicService {
                 },
             }
 
-            const needsApproval = await trade.needApprove();
+            const needsApproval = await trade.needApprove()
 
             if (needsApproval) {
                 console.log("Approving...")

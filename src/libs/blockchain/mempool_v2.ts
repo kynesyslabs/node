@@ -107,7 +107,7 @@ export default class Mempool {
                 error: "",
             }
         } catch (error) {
-            let message: string = "Error: Failed to add transaction to mempool"
+            let message = "Error: Failed to add transaction to mempool"
 
             if (error instanceof QueryFailedError) {
                 log.error("Error saving tx: " + transaction.hash)
