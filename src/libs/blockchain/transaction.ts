@@ -131,8 +131,13 @@ export default class Transaction implements ITransaction {
         console.log(privateKey)
         console.log("Signature: ")
         console.log(tx.signature)
+        const structured = this.structured(tx)
+        if (!structured.valid) {
+            return null // TODO Improve return type
+        }
         const confirmed =
-            this.validateSignature(tx) && this.isCoherent(tx) && this.structured(tx)
+            this.validateSignature(tx) &&
+            this.isCoherent(tx) 
         if (confirmed) {
             const confirmation = new Confirmation()
             confirmation.data.validator = publicKey
@@ -178,11 +183,104 @@ export default class Transaction implements ITransaction {
         return coherence
     }
 
-    // INFO Checking if a tx has all the necessary informations
-    public static structured(tx: Transaction) {
-        const structured = true
-        // TODO Do this
-        return structured
+    // Add this new method for TO field validation
+    private static validateToField(to: any): {
+        valid: boolean
+        message: string
+    } {
+        if (!to) {
+            console.log("[validateToField] Missing TO field")
+            return {
+                valid: false,
+                message: "Missing TO field",
+            }
+        }
+
+        try {
+            // Convert TO field to buffer if it's a string
+            let toBuffer: Buffer
+            if (typeof to === "string") {
+                toBuffer = Buffer.from(to, "hex")
+            } else if (to instanceof Buffer) {
+                toBuffer = to
+            } else {
+                console.log(
+                    "[validateToField] TO field is not in a valid format",
+                )
+                return {
+                    valid: false,
+                    message: "TO field is not in a valid format",
+                }
+            }
+
+            // Check if it's a valid 32-byte Ed25519 public key
+            if (toBuffer.length !== 32) {
+                console.log(
+                    "[validateToField] TO field is not a valid 32-byte Ed25519 public key",
+                )
+                return {
+                    valid: false,
+                    message:
+                        "TO field is not a valid 32-byte Ed25519 public key",
+                }
+            }
+
+            // Optional: Verify it's a valid Ed25519 public key using forge
+            try {
+                forge.pki.ed25519.publicKeyFromAsn1(
+                    forge.asn1.fromDer(
+                        forge.util.createBuffer(toBuffer.toString("binary")),
+                    ),
+                )
+            } catch (e) {
+                console.log(
+                    "[validateToField] TO field is not a valid Ed25519 public key",
+                )
+                return {
+                    valid: false,
+                    message: "TO field is not a valid Ed25519 public key",
+                }
+            }
+
+            return {
+                valid: true,
+                message: "TO field is valid",
+            }
+        } catch (e) {
+            console.log("[validateToField] Error validating TO field:", e)
+            return {
+                valid: false,
+                message: "Error validating TO field",
+            }
+        }
+    }
+
+    // Modify the structured method to use the new validation
+    public static structured(tx: Transaction): {
+        valid: boolean
+        message: string
+    } {
+        // Validate TO field
+        const toValidation = this.validateToField(tx.content.to)
+        if (!toValidation.valid) {
+            return {
+                valid: false,
+                message: toValidation.message,
+            }
+        }
+
+        // TODO: Add other structural validations here
+        // For example:
+        // - Validate FROM field
+        // - Validate amount
+        // - Validate timestamp
+        // - Validate nonce
+        // etc.
+
+        return {
+            valid: true,
+            message: "Transaction is structurally valid",
+        }
     }
 
     public static toRawTransaction(
