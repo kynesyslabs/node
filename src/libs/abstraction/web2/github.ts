@@ -40,6 +40,7 @@ export class GithubProofParser extends Web2ProofParser {
     async readData(
         proofUrl: string,
     ): Promise<{ message: string; signature: string; publicKey: string }> {
+        this.verifyProofFormat(proofUrl, "github")
         const { username, gistId } = this.parseGistDetails(proofUrl)
         let content: string
 

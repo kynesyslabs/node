@@ -119,6 +119,7 @@ export class TwitterProofParser extends Web2ProofParser {
         signature: string
         publicKey: string
     }> {
+        this.verifyProofFormat(tweetUrl, "twitter")
         // INFO: Get the tweet ID from the URL
         const { username, tweetId } = this.getTweetDetails(tweetUrl)
         const tweet = await this.scraper.getTweet(tweetId)

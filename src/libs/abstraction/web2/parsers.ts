@@ -1,5 +1,28 @@
 export abstract class Web2ProofParser {
+    formats = {
+        github: [
+            "https://gist.github.com",
+            "https://raw.githubusercontent.com",
+            "https://gist.githubusercontent.com",
+        ],
+        twitter: ["https://x.com", "https://twitter.com"],
+    }
+
     constructor() {}
+
+    verifyProofFormat(proofUrl: string, context: string) {
+        if (
+            !this.formats[context].some((format: string) =>
+                proofUrl.startsWith(format),
+            )
+        ) {
+            // construct informative error message
+            const errorMessage = `Invalid ${context} proof format. Supported formats are: ${this.formats[
+                context
+            ].join(", ")}`
+            throw new Error(errorMessage)
+        }
+    }
 
     /**
      * Parses the payload from the payload text to an object
