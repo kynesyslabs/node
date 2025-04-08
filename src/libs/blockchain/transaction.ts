@@ -135,9 +135,7 @@ export default class Transaction implements ITransaction {
         if (!structured.valid) {
             return null // TODO Improve return type
         }
-        const confirmed =
-            this.validateSignature(tx) &&
-            this.isCoherent(tx) 
+        const confirmed = this.validateSignature(tx) && this.isCoherent(tx)
         if (confirmed) {
             const confirmation = new Confirmation()
             confirmation.data.validator = publicKey
@@ -183,11 +181,33 @@ export default class Transaction implements ITransaction {
         return coherence
     }
 
-    // Add this new method for TO field validation
+    /**
+     * Validates the 'to' field of a transaction to ensure it's a valid Ed25519 public key.
+     *
+     * @param {any} to - The 'to' field value to validate. Can be one of:
+     *   - A hex string representing a 32-byte Ed25519 public key
+     *   - A Buffer containing a 32-byte Ed25519 public key
+     *   - A JSON object with format {type: "Buffer", data: number[]}
+     *
+     * @returns {Object} An object containing:
+     *   - valid: boolean - Whether the 'to' field is valid
+     *   - message: string - Description of the validation result or error
+     *
+     * @example
+     * // Valid hex string
+     * validateToField("5e2320ef...") // 32 bytes in hex
+     *
+     * // Valid Buffer
+     * validateToField(Buffer.from([94, 35, ...])) // 32 bytes
+     *
+     * // Valid JSON Buffer format
+     * validateToField({type: "Buffer", data: [94, 35, ...]}) // 32 bytes
+     */
     private static validateToField(to: any): {
         valid: boolean
         message: string
     } {
+        // Step 1: Check if the field exists
         if (!to) {
             console.log("[validateToField] Missing TO field")
             return {
@@ -197,35 +217,65 @@ export default class Transaction implements ITransaction {
         }
 
         try {
-            // Convert TO field to buffer if it's a string
             let toBuffer: Buffer
+
+            // Step 2: Convert input to Buffer based on its format
             if (typeof to === "string") {
-                toBuffer = Buffer.from(to, "hex")
-            } else if (to instanceof Buffer) {
+                // Case 1: Hex string format (e.g., "5e2320ef...")
+                try {
+                    toBuffer = Buffer.from(to, "hex")
+                } catch (e) {
+                    console.log(
+                        "[validateToField] Invalid hex string format in TO field",
+                    )
+                    return {
+                        valid: false,
+                        message: "Invalid hex string format in TO field",
+                    }
+                }
+            } else if (Buffer.isBuffer(to)) {
+                // Case 2: Direct Buffer format
                 toBuffer = to
+            } else if (
+                typeof to === "object" &&
+                to.type === "Buffer" &&
+                Array.isArray(to.data)
+            ) {
+                // Case 3: JSON Buffer format (e.g., {type: "Buffer", data: [94, 35, ...]})
+                try {
+                    toBuffer = Buffer.from(to.data)
+                } catch (e) {
+                    console.log(
+                        "[validateToField] Invalid Buffer data format in TO field",
+                    )
+                    return {
+                        valid: false,
+                        message: "Invalid Buffer data format in TO field",
+                    }
+                }
             } else {
                 console.log(
                     "[validateToField] TO field is not in a valid format",
                 )
                 return {
                     valid: false,
-                    message: "TO field is not in a valid format",
+                    message:
+                        "TO field must be a hex string, Buffer, or JSON Buffer format",
                 }
             }
 
-            // Check if it's a valid 32-byte Ed25519 public key
+            // Step 3: Validate buffer length (must be exactly 32 bytes for Ed25519)
             if (toBuffer.length !== 32) {
                 console.log(
-                    "[validateToField] TO field is not a valid 32-byte Ed25519 public key",
+                    `[validateToField] TO field must be exactly 32 bytes (received ${toBuffer.length} bytes)`,
                 )
                 return {
                     valid: false,
-                    message:
-                        "TO field is not a valid 32-byte Ed25519 public key",
+                    message: `TO field must be exactly 32 bytes (received ${toBuffer.length} bytes)`,
                 }
             }
 
-            // Optional: Verify it's a valid Ed25519 public key using forge
+            // Step 4: Validate as Ed25519 public key using forge
             try {
                 forge.pki.ed25519.publicKeyFromAsn1(
                     forge.asn1.fromDer(
@@ -234,23 +284,28 @@ export default class Transaction implements ITransaction {
                 )
             } catch (e) {
                 console.log(
-                    "[validateToField] TO field is not a valid Ed25519 public key",
+                    "[validateToField] TO field is not a valid Ed25519 public key format",
                 )
                 return {
                     valid: false,
-                    message: "TO field is not a valid Ed25519 public key",
+                    message:
+                        "TO field is not a valid Ed25519 public key format",
                 }
             }
 
+            // All validations passed
             return {
                 valid: true,
                 message: "TO field is valid",
             }
         } catch (e) {
+            // Catch any unexpected errors during validation
             console.log("[validateToField] Error validating TO field:", e)
             return {
                 valid: false,
-                message: "Error validating TO field",
+                message: `Error validating TO field: ${
+                    e instanceof Error ? e.message : String(e)
+                }`,
             }
         }
     }
