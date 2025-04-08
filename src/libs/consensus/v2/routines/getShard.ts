@@ -13,6 +13,7 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     // NOTE: Undo this when merging from testnet
     const peers = PeerManager.getInstance().getAll()
 
+
     // const peerIdentites = peers.map(peer => peer.identity)
 
     // const lastBlock = await Chain.getLastBlock()
