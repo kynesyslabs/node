@@ -1,13 +1,9 @@
 // TODO Implement the identity manager
 import {
-    InferFromGithubPayload,
     InferFromWritePayload,
     InferFromSignatureTargetIdentityPayload,
-    XMCoreTargetIdentityPayload,
     InferFromSignaturePayload,
-    InferFromTwitterPayload,
 } from "@kynesyslabs/demosdk/abstraction"
-import { ProviderIdentities, RPCResponse } from "@kynesyslabs/demosdk/types"
 import {
     EVM,
     IBC,
@@ -16,15 +12,12 @@ import {
     SOLANA,
     TON,
     XRPL,
+    BTC,
 } from "@kynesyslabs/demosdk/xm-localsdk"
 
-import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
-import Datasource from "src/model/datasource"
 import ensureGCRForUser from "./ensureGCRForUser"
 import log from "src/utilities/logger"
-import { updateJSONBValue } from "./gcrJSONBHandler"
-import { Cryptography } from "@kynesyslabs/demosdk/encryption"
 
 /*
  * Example of a payload for the gcr_routine method
@@ -47,6 +40,8 @@ const chains: { [key: string]: typeof DefaultChain } = {
     xrpl: XRPL,
     ibc: IBC,
     near: NEAR,
+    // @ts-expect-error - BTC module contains more fields than the DefaultChain type
+    btc: BTC,
 }
 
 export default class IdentityManager {
