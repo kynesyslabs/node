@@ -22,6 +22,27 @@ export interface UserPoints {
     lastUpdated: Date
 }
 
+// Define a type for successful responses containing UserPoints
+type UserPointsResponse = {
+    result: 200
+    response: UserPoints
+    require_reply: boolean
+    extra: Record<string, unknown>
+}
+
+// Define a type for error responses
+type ErrorResponse = {
+    result: 400 | 500
+    response: string
+    require_reply: boolean
+    extra: {
+        error: string
+    }
+}
+
+// Combine the response types
+type PointSystemResponse = UserPointsResponse | ErrorResponse
+
 export class PointSystem {
     private static instance: PointSystem
 
@@ -35,6 +56,69 @@ export class PointSystem {
     }
 
     /**
+     * Get user's current points
+     */
+    private async getUserPointsInternal(userId: string): Promise<UserPoints> {
+        const db = await Datasource.getInstance()
+        const userPointsRepository = db
+            .getDataSource()
+            .getRepository(UserPointsEntity)
+
+        // Get or create user points record
+        let userPointsEntity = await userPointsRepository.findOneBy({ userId })
+        if (!userPointsEntity) {
+            userPointsEntity = new UserPointsEntity()
+            userPointsEntity.userId = userId
+            userPointsEntity.totalPoints = 0
+            userPointsEntity.breakdown = {
+                web3Wallets: 0,
+                socialAccounts: 0,
+            }
+            userPointsEntity.linkedWallets = []
+            userPointsEntity.linkedSocials = {}
+            await userPointsRepository.save(userPointsEntity)
+        }
+
+        // Convert entity to UserPoints interface
+        return {
+            userId: userPointsEntity.userId,
+            totalPoints: userPointsEntity.totalPoints,
+            breakdown: {
+                web3Wallets: userPointsEntity.breakdown?.web3Wallets || 0,
+                socialAccounts: userPointsEntity.breakdown?.socialAccounts || 0,
+            },
+            linkedWallets: userPointsEntity.linkedWallets || [],
+            linkedSocials: {
+                twitter: userPointsEntity.linkedSocials?.twitter,
+            },
+            lastUpdated: userPointsEntity.updatedAt,
+        }
+    }
+
+    async getUserPoints(userId: string): Promise<RPCResponse> {
+        try {
+            const userPoints = await this.getUserPointsInternal(userId)
+            return {
+                result: 200,
+                response: userPoints,
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            console.error("Error getting user points:", error)
+            return {
+                result: 500,
+                response: "Error getting user points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
      * Award points for linking a Web3 wallet
      */
     async awardWeb3WalletPoints(
@@ -43,10 +127,27 @@ export class PointSystem {
         chain: string,
     ): Promise<RPCResponse> {
         try {
-            // Get user points record
-            const userPoints = await this.getUserPoints(userId)
+            const userPoints = await this.getUserPointsInternal(userId)
 
-            // Check if this wallet is already linked
+            // Check if any wallet of this chain type is already linked
+            const hasExistingChainWallet = userPoints.linkedWallets.some(
+                wallet => wallet.startsWith(`${chain}:`),
+            )
+
+            if (hasExistingChainWallet) {
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: userPoints.totalPoints,
+                        message: `A ${chain} wallet is already linked. Please disconnect it first.`,
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            // Check if this exact wallet is already linked
             if (
                 userPoints.linkedWallets.includes(`${chain}:${walletAddress}`)
             ) {
@@ -55,7 +156,7 @@ export class PointSystem {
                     response: {
                         pointsAwarded: 0,
                         totalPoints: userPoints.totalPoints,
-                        message: "Wallet already linked, no new points awarded",
+                        message: "This wallet is already linked",
                     },
                     require_reply: false,
                     extra: {},
@@ -101,8 +202,7 @@ export class PointSystem {
         twitterHandle: string,
     ): Promise<RPCResponse> {
         try {
-            // Get user points record
-            const userPoints = await this.getUserPoints(userId)
+            const userPoints = await this.getUserPointsInternal(userId)
 
             // Check if Twitter is already linked
             if (userPoints.linkedSocials.twitter) {
@@ -151,118 +251,44 @@ export class PointSystem {
     }
 
     /**
-     * Get user's current points
-     */
-    async getUserPoints(userId: string): Promise<UserPoints> {
-        try {
-            // Get database connection
-            const datasource = await Datasource.getInstance()
-            const connection = datasource.getDataSource()
-            const userPointsRepo = connection.getRepository(UserPointsEntity)
-
-            // Try to find existing user points
-            const userPointsEntity = await userPointsRepo.findOne({
-                where: { userId },
-            })
-
-            if (userPointsEntity) {
-                // Convert entity to UserPoints interface
-                const userPoints: UserPoints = {
-                    userId: userPointsEntity.userId,
-                    totalPoints: userPointsEntity.totalPoints,
-                    breakdown: {
-                        web3Wallets:
-                            userPointsEntity.breakdown.web3Wallets || 0,
-                        socialAccounts:
-                            userPointsEntity.breakdown.socialAccounts || 0,
-                    },
-                    linkedWallets: userPointsEntity.linkedWallets,
-                    linkedSocials: {
-                        twitter: userPointsEntity.linkedSocials.twitter,
-                    },
-                    lastUpdated: userPointsEntity.updatedAt,
-                }
-                return userPoints
-            }
-
-            // If no record exists, create a default one
-            const defaultPoints: UserPoints = {
-                userId,
-                totalPoints: 0,
-                breakdown: {
-                    web3Wallets: 0,
-                    socialAccounts: 0,
-                },
-                linkedWallets: [],
-                linkedSocials: {},
-                lastUpdated: new Date(),
-            }
-
-            return defaultPoints
-        } catch (error: unknown) {
-            const errorMessage =
-                error instanceof Error ? error.message : String(error)
-            console.error(
-                `[PointSystem] Error getting user points: ${errorMessage}`,
-                error,
-            )
-
-            // Return default points in case of error
-            return {
-                userId,
-                totalPoints: 0,
-                breakdown: {
-                    web3Wallets: 0,
-                    socialAccounts: 0,
-                },
-                linkedWallets: [],
-                linkedSocials: {},
-                lastUpdated: new Date(),
-            }
-        }
-    }
-
-    /**
      * Save user points to database
      */
     private async saveUserPoints(userPoints: UserPoints): Promise<void> {
         try {
-            // Update the last updated timestamp
-            userPoints.lastUpdated = new Date()
-
             // Get database connection
             const datasource = await Datasource.getInstance()
             const connection = datasource.getDataSource()
-            const userPointsRepo = connection.getRepository(UserPointsEntity)
 
-            // Check if user already has a record
-            let userPointsEntity = await userPointsRepo.findOne({
-                where: { userId: userPoints.userId },
+            // Use a transaction for database operations
+            await connection.transaction(async transactionalEntityManager => {
+                const userPointsRepo =
+                    transactionalEntityManager.getRepository(UserPointsEntity)
+
+                // Check if user already has a record
+                let userPointsEntity = await userPointsRepo.findOne({
+                    where: { userId: userPoints.userId },
+                })
+
+                if (!userPointsEntity) {
+                    // Create new entity if it doesn't exist
+                    userPointsEntity = new UserPointsEntity()
+                    userPointsEntity.userId = userPoints.userId
+                }
+
+                // Update entity with new values
+                userPointsEntity.totalPoints = userPoints.totalPoints
+                userPointsEntity.breakdown = {
+                    web3Wallets: userPoints.breakdown.web3Wallets,
+                    socialAccounts: userPoints.breakdown.socialAccounts,
+                }
+                userPointsEntity.linkedWallets = userPoints.linkedWallets
+                userPointsEntity.linkedSocials = {
+                    twitter: userPoints.linkedSocials.twitter,
+                }
+
+                // Save to database within transaction
+                await userPointsRepo.save(userPointsEntity)
             })
-
-            if (!userPointsEntity) {
-                // Create new entity if it doesn't exist
-                userPointsEntity = new UserPointsEntity()
-                userPointsEntity.userId = userPoints.userId
-            }
-
-            // Update entity with new values
-            userPointsEntity.totalPoints = userPoints.totalPoints
-            userPointsEntity.breakdown = {
-                web3Wallets: userPoints.breakdown.web3Wallets,
-                socialAccounts: userPoints.breakdown.socialAccounts,
-            }
-            userPointsEntity.linkedWallets = userPoints.linkedWallets
-            userPointsEntity.linkedSocials = {
-                twitter: userPoints.linkedSocials.twitter,
-            }
-
-            // Save to database
-            await userPointsRepo.save(userPointsEntity)
-
-            console.log(
-                `[PointSystem] Saved points for user ${userPoints.userId}: ${userPoints.totalPoints} points`,
-            )
         } catch (error: unknown) {
             const errorMessage =
                 error instanceof Error ? error.message : String(error)
@@ -271,6 +297,220 @@ export class PointSystem {
                 error,
             )
             throw error
+        }
+    }
+
+    async addPoints(
+        userId: string,
+        points: number,
+        type: "web3Wallets" | "socialAccounts",
+    ): Promise<PointSystemResponse> {
+        try {
+            const db = await Datasource.getInstance()
+            const userPointsRepository = db
+                .getDataSource()
+                .getRepository(UserPointsEntity)
+
+            // Get or create user points record
+            let userPointsEntity = await userPointsRepository.findOneBy({
+                userId,
+            })
+            if (!userPointsEntity) {
+                userPointsEntity = new UserPointsEntity()
+                userPointsEntity.userId = userId
+                userPointsEntity.totalPoints = 0
+                userPointsEntity.breakdown = {
+                    web3Wallets: 0,
+                    socialAccounts: 0,
+                }
+                userPointsEntity.linkedWallets = []
+                userPointsEntity.linkedSocials = {}
+            }
+
+            // Update points
+            userPointsEntity.totalPoints += points
+            if (!userPointsEntity.breakdown) {
+                userPointsEntity.breakdown = {
+                    web3Wallets: 0,
+                    socialAccounts: 0,
+                }
+            }
+            userPointsEntity.breakdown[type] += points
+
+            await userPointsRepository.save(userPointsEntity)
+
+            // Convert to UserPoints for response
+            const userPoints: UserPoints = {
+                userId: userPointsEntity.userId,
+                totalPoints: userPointsEntity.totalPoints,
+                breakdown: {
+                    web3Wallets: userPointsEntity.breakdown?.web3Wallets || 0,
+                    socialAccounts:
+                        userPointsEntity.breakdown?.socialAccounts || 0,
+                },
+                linkedWallets: userPointsEntity.linkedWallets || [],
+                linkedSocials: {
+                    twitter: userPointsEntity.linkedSocials?.twitter,
+                },
+                lastUpdated: userPointsEntity.updatedAt,
+            }
+
+            return {
+                result: 200,
+                response: userPoints,
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            console.error("Error adding points:", error)
+            return {
+                result: 500,
+                response: "Error adding points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    async linkWallet(
+        userId: string,
+        walletAddress: string,
+    ): Promise<PointSystemResponse> {
+        try {
+            const db = await Datasource.getInstance()
+            const userPointsRepository = db
+                .getDataSource()
+                .getRepository(UserPointsEntity)
+
+            // Get or create user points record
+            let userPointsEntity = await userPointsRepository.findOneBy({
+                userId,
+            })
+            if (!userPointsEntity) {
+                userPointsEntity = new UserPointsEntity()
+                userPointsEntity.userId = userId
+                userPointsEntity.totalPoints = 0
+                userPointsEntity.breakdown = {
+                    web3Wallets: 0,
+                    socialAccounts: 0,
+                }
+                userPointsEntity.linkedWallets = []
+                userPointsEntity.linkedSocials = {}
+            }
+
+            // Add wallet if not already linked
+            if (!userPointsEntity.linkedWallets.includes(walletAddress)) {
+                userPointsEntity.linkedWallets.push(walletAddress)
+                await userPointsRepository.save(userPointsEntity)
+            }
+
+            // Convert to UserPoints for response
+            const userPoints: UserPoints = {
+                userId: userPointsEntity.userId,
+                totalPoints: userPointsEntity.totalPoints,
+                breakdown: {
+                    web3Wallets: userPointsEntity.breakdown?.web3Wallets || 0,
+                    socialAccounts:
+                        userPointsEntity.breakdown?.socialAccounts || 0,
+                },
+                linkedWallets: userPointsEntity.linkedWallets || [],
+                linkedSocials: {
+                    twitter: userPointsEntity.linkedSocials?.twitter,
+                },
+                lastUpdated: userPointsEntity.updatedAt,
+            }
+
+            return {
+                result: 200,
+                response: userPoints,
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            console.error("Error linking wallet:", error)
+            return {
+                result: 500,
+                response: "Error linking wallet",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    async linkSocialAccount(
+        userId: string,
+        platform: "twitter",
+        accountId: string,
+    ): Promise<PointSystemResponse> {
+        try {
+            const db = await Datasource.getInstance()
+            const userPointsRepository = db
+                .getDataSource()
+                .getRepository(UserPointsEntity)
+
+            // Get or create user points record
+            let userPointsEntity = await userPointsRepository.findOneBy({
+                userId,
+            })
+            if (!userPointsEntity) {
+                userPointsEntity = new UserPointsEntity()
+                userPointsEntity.userId = userId
+                userPointsEntity.totalPoints = 0
+                userPointsEntity.breakdown = {
+                    web3Wallets: 0,
+                    socialAccounts: 0,
+                }
+                userPointsEntity.linkedWallets = []
+                userPointsEntity.linkedSocials = {}
+            }
+
+            // Update social account
+            if (!userPointsEntity.linkedSocials) {
+                userPointsEntity.linkedSocials = {}
+            }
+            userPointsEntity.linkedSocials[platform] = accountId
+
+            await userPointsRepository.save(userPointsEntity)
+
+            // Convert to UserPoints for response
+            const userPoints: UserPoints = {
+                userId: userPointsEntity.userId,
+                totalPoints: userPointsEntity.totalPoints,
+                breakdown: {
+                    web3Wallets: userPointsEntity.breakdown?.web3Wallets || 0,
+                    socialAccounts:
+                        userPointsEntity.breakdown?.socialAccounts || 0,
+                },
+                linkedWallets: userPointsEntity.linkedWallets || [],
+                linkedSocials: {
+                    twitter: userPointsEntity.linkedSocials?.twitter,
+                },
+                lastUpdated: userPointsEntity.updatedAt,
+            }
+
+            return {
+                result: 200,
+                response: userPoints,
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            console.error("Error linking social account:", error)
+            return {
+                result: 500,
+                response: "Error linking social account",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
         }
     }
 }

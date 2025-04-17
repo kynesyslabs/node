@@ -48,6 +48,7 @@ import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import Chain from "../chain"
 import { Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
+import GCRIncentiveRoutines from "./gcr_routines/GCRIncentiveRoutines"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -69,9 +70,10 @@ export type GetNativeSubnetsTxsOptions = {
     txData?: boolean
 }
 
-export type GCRResult = {
+export interface GCRResult {
     success: boolean
     message: string
+    response?: any
 }
 
 // ? Maybe sanitize the options?
@@ -272,6 +274,8 @@ export default class HandleGCR {
                     repositories.main as Repository<GCRMain>,
                     simulate,
                 )
+            case "incentive":
+                return GCRIncentiveRoutines.apply(editOperation, simulate)
             case "assign":
             case "subnetsTx":
                 // TODO implementations

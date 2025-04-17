@@ -33,6 +33,7 @@ import {
     RPCResponse,
     IWeb2Payload,
     GCREdit,
+    GCREditIncentive,
 } from "@kynesyslabs/demosdk/types"
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
@@ -52,9 +53,9 @@ import { SubnetPayload } from "@kynesyslabs/demosdk/l2ps"
 import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
-import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
 import { IdentityPayload } from "@kynesyslabs/demosdk/abstraction"
+import GCRIncentiveRoutines from "../blockchain/gcr/gcr_routines/GCRIncentiveRoutines"
 /* // ! Note: this will be removed once demosWork is in place
 import {
     NativePayload,
@@ -392,6 +393,33 @@ export default class ServerHandlers {
                     }
                 }
 
+                break
+            case "incentive":
+                try {
+                    const incentivePayload = tx.content
+                        .data[1] as GCREditIncentive
+
+                    incentivePayload.txhash = tx.hash
+                    const incentiveResult = await GCRIncentiveRoutines.apply(
+                        incentivePayload,
+                        false,
+                    )
+
+                    result.success = incentiveResult.success
+                    result.response = incentiveResult.response
+                } catch (e) {
+                    console.error(e)
+                    log.error(
+                        "[handleExecuteTransaction] Error in incentive: " + e,
+                    )
+                    result.success = false
+                    result.response = {
+                        message: "Failed to process incentive request",
+                    }
+                    result.extra = {
+                        error: e,
+                    }
+                }
                 break
         }
 
