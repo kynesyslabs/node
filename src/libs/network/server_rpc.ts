@@ -11,7 +11,6 @@ import fastify, {
 import {
     BrowserRequest,
     BundleContent,
-    IWeb2Payload,
     RPCRequest,
     RPCResponse,
 } from "@kynesyslabs/demosdk/types"
@@ -30,10 +29,9 @@ import { manageNodeCall, NodeCall } from "./manageNodeCall"
 import { registerMethodListingEndpoint } from "./methodListing"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { rpcSchema, setupOpenAPI } from "./openApiSpec"
-import { skeletons } from "@kynesyslabs/demosdk/websdk"
-import required from "src/utilities/required"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import manageBridges from "./manageBridge"
+import Chain from "../blockchain/chain"
 
 // Reading the port from sharedState
 
@@ -192,19 +190,22 @@ export default async function serverRpc(): Promise<FastifyInstance> {
         methods: ["GET", "POST"],
     })
 
+    serverApp.addHook("onSend", (request, reply, payload, done) => {
+        reply.header("Access-Control-Allow-Origin", "*")
+        done()
+    })
+
     // Register the method listing endpoint
     registerMethodListingEndpoint(serverApp)
 
     // GET request handlers
 
     serverApp.get("/", async (req: FastifyRequest, reply: FastifyReply) => {
-        reply.header("Access-Control-Allow-Origin", "*")
         reply.send("Hello, World!")
     })
 
     // NOTE Generic info endpoint
     serverApp.get("/info", async (req: FastifyRequest, reply: FastifyReply) => {
-        reply.header("Access-Control-Allow-Origin", "*")
         const info = await sharedState.getInstance().getInfo()
         const version = getSharedState.version
         const versionName = getSharedState.version_name
@@ -215,18 +216,24 @@ export default async function serverRpc(): Promise<FastifyInstance> {
         })
     })
 
+    serverApp.get("/genesis", async (req: FastifyRequest, reply: FastifyReply) => {
+        const genesisBlock = await Chain.getBlockByNumber(0)
+
+        // NOTE: Forcing browsers to render as JSON without unwrapping
+        reply.header("Content-Type", "application/json")
+        reply.send(genesisBlock.content.extra.genesisData)
+    })
+
     // Specific info endpoints
     serverApp.get(
         "/version",
         async (req: FastifyRequest, reply: FastifyReply) => {
-            reply.header("Access-Control-Allow-Origin", "*")
             reply.send(getSharedState.version)
         },
     )
     serverApp.get(
         "/publickey",
         async (req: FastifyRequest, reply: FastifyReply) => {
-            reply.header("Access-Control-Allow-Origin", "*")
             reply.send(
                 getSharedState.identity.ed25519.publicKey.toString("hex"),
             )
@@ -235,14 +242,12 @@ export default async function serverRpc(): Promise<FastifyInstance> {
     serverApp.get(
         "/connectionstring",
         async (req: FastifyRequest, reply: FastifyReply) => {
-            reply.header("Access-Control-Allow-Origin", "*")
             reply.send(await getSharedState.getConnectionString())
         },
     )
     serverApp.get(
         "/peerlist",
         async (req: FastifyRequest, reply: FastifyReply) => {
-            reply.header("Access-Control-Allow-Origin", "*")
             reply.send(PeerManager.getInstance().getPeers())
         },
     )
@@ -251,7 +256,6 @@ export default async function serverRpc(): Promise<FastifyInstance> {
     serverApp.get(
         "/public_logs",
         async (req: FastifyRequest, reply: FastifyReply) => {
-            reply.header("Access-Control-Allow-Origin", "*")
             reply.send(log.getPublicLogs())
         },
     )
@@ -259,7 +263,6 @@ export default async function serverRpc(): Promise<FastifyInstance> {
     serverApp.get(
         "/diagnostics",
         async (req: FastifyRequest, reply: FastifyReply) => {
-            reply.header("Access-Control-Allow-Origin", "*")
             reply.send(log.getDiagnostics())
         },
     )
@@ -316,7 +319,6 @@ export default async function serverRpc(): Promise<FastifyInstance> {
                     false,
                 )
 
-                reply.header("Access-Control-Allow-Origin", "*")
                 reply.send(response)
             } catch (error) {
                 log.error("[RPC Call] Error: " + error, true)

@@ -465,19 +465,30 @@ export default class HandleGCR {
     }
 
     // Create methods
-    public static createAccount = async (pubkey: string) => {
+    /**
+     * Creates a new GCRMain account.
+     * If fillData is provided, the account will be created with the provided data.
+     *
+     * @param pubkey The public key of the account
+     * @param fillData Optional data to fill in the account
+     * @returns The created GCRMain account
+     */
+    public static createAccount = async (
+        pubkey: string,
+        fillData?: Record<string, any>,
+    ) => {
         const db = await Datasource.getInstance()
         const dataSource = db.getDataSource()
         const repository = dataSource.getRepository(GCRMain)
         const account = new GCRMain()
         account.pubkey = pubkey
-        account.balance = 0n
-        account.identities = {
+        account.balance = fillData["balance"] || 0n
+        account.identities = fillData["identities"] || {
             xm: {},
             web2: {},
         }
         account.assignedTxs = []
-        account.nonce = 0
+        account.nonce = fillData["nonce"] || 0
         return await repository.save(account)
     }
 }

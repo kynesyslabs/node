@@ -12,6 +12,25 @@ KyneSys Labs: https://www.kynesys.xyz/
 import * as fs from "fs"
 import Chain from "src/libs/blockchain/chain"
 
+function getLatestGCRRecoveryData() {
+    const path = "output/"
+
+    // return the file with the latest timestamp
+    try {
+        const files = fs.readdirSync(path)
+    const latestFile = files.sort((a, b) => {
+        const timeA = fs.statSync(path + a).mtime.getTime()
+        const timeB = fs.statSync(path + b).mtime.getTime()
+        return timeB - timeA
+    })[0]
+
+        return JSON.parse(fs.readFileSync(path + latestFile, "utf8"))
+    } catch (error) {
+        console.error("Error getting latest GCR recovery data:", error)
+        return null
+    }
+}
+
 export default async function findGenesisBlock() {
     console.log("[GENESIS] Looking for the genesis block...")
     const genesisBlockQuery = await Chain.getGenesisBlock()
@@ -39,10 +58,28 @@ export default async function findGenesisBlock() {
         const genesisData = JSON.parse(
             fs.readFileSync("data/genesis.json", "utf8"),
         )
+
+        const finalBalances = {}
+
+        for (const balance of genesisData["balances"]) {
+            finalBalances[balance[0]] = balance[1]
+        }
+
+        const recovereryGenesis = getLatestGCRRecoveryData()
+
+        if (recovereryGenesis) {
+            genesisData["users"] = recovereryGenesis["users"]
+
+            // add recovereryGenesis["genesis_balances"] to genesisData["balances"]
+            // (replace the ones that are already in genesisData["balances"])
+            for (const balance of recovereryGenesis["genesis_balances"]) {
+                finalBalances[balance[0]] = balance[1]
+            }
+        }
+
+        genesisData["balances"] = Object.entries(finalBalances)
         console.log("[BOOTSTRAP] Loaded the genesis block\n")
-        // console.log("imported genesis json data")
-        // console.log(genesis_data)
-        // throw new Error()
+
         // Adding the genesis block to the chain
         console.log("[BOOTSTRAP] Adding the genesis block to the chain\n")
         const genesisHash = await Chain.generateGenesisBlock(genesisData)

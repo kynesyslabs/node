@@ -37,29 +37,39 @@ async function dumpUserBalances(): Promise<void> {
 
         // Query to get all fields for users with positive balance
         const query = `
-      SELECT *
-      FROM ${dbConfig.table}
-      WHERE balance > 0
-      ORDER BY balance DESC
-    `
+        SELECT *
+        FROM ${dbConfig.table}
+        WHERE balance > 0
+        ORDER BY balance DESC
+        `
 
         // Execute the query
         console.log("Executing query...")
-        const result = await client.query(query)
-        console.log(`Found ${result.rows.length} users with positive balance.`)
+        let result
+        try {
+            result = await client.query(query)
+            console.log(`Found ${result.rows.length} users with positive balance.`)
+        } catch (error) {
+            console.error("Error dumping GCR table:", error.toString())
+        }
+
+        if (!result) {
+            return
+        }
 
         // Process the results to add genesis_balance field
-        const userBalances: UserBalance[] = result.rows.map(row => {
-            // Add genesis_balance field to each record as an actual array
-            return {
-                ...row,
-                genesis_balance: [row.pubkey, row.balance],
-            }
-        })
+        // const userBalances: UserBalance[] = result.rows.map(row => {
+        //     // Add genesis_balance field to each record as an actual array
+        //     return {
+        //         ...row,
+        //         genesis_balance: [row.pubkey, row.balance],
+        //     }
+        // })
+        const userBalances = result.rows
 
         // Extract all genesis_balance entries into a separate array
         const genesisBalances: [string, number][] = userBalances.map(
-            user => user.genesis_balance,
+            user => [user.pubkey, user.balance],
         )
 
         // Create the output data structure
