@@ -78,7 +78,7 @@ export default class GCRIncentiveRoutines {
 
                 // Currently only Twitter is supported
                 if (platform.toLowerCase() === "twitter") {
-                    await incentiveController.onTwitterLinked(
+                    const response = await incentiveController.onTwitterLinked(
                         editOperation.account,
                         username,
                     )
@@ -86,8 +86,8 @@ export default class GCRIncentiveRoutines {
                         `Awarded Twitter linking points to ${editOperation.account} for ${username}`,
                     )
                     return {
-                        success: true,
-                        message: "Twitter linking points awarded",
+                        success: response.result === 200 ? true : false,
+                        message: response.response.message,
                     }
                 } else {
                     // For future expansion to other platforms

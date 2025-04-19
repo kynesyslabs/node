@@ -407,6 +407,9 @@ export default class ServerHandlers {
 
                     result.success = incentiveResult.success
                     result.response = incentiveResult.response
+                    result.extra = {
+                        message: incentiveResult.message,
+                    }
                 } catch (e) {
                     console.error(e)
                     log.error(

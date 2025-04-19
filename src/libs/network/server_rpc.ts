@@ -37,8 +37,7 @@ import manageBridges from "./manageBridge"
 
 // Reading the port from sharedState
 
-// TODO: Add Proper authentication
-const noAuthMethods = ["nodeCall", "gcr_routine"]
+const noAuthMethods = ["nodeCall"]
 
 export const emptyResponse: RPCResponse = {
     result: 0,
@@ -288,10 +287,8 @@ export default async function serverRpc(): Promise<FastifyInstance> {
             // Excluding due to noAuthMethods from header validation
             if (!noAuthMethods.includes(payload.method)) {
                 const headerValidation = validateHeaders(headers)
-                
-                log.info(
-                    "[RPC Call] Header validation: " + headerValidation[0],
-                )
+
+                log.info("[RPC Call] Header validation: " + headerValidation[0])
                 if (!headerValidation[0]) {
                     reply.status(401).send({
                         error: "Invalid headers:" + headerValidation[1],
