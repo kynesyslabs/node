@@ -25,7 +25,7 @@ export default class GCRIncentiveRoutines {
         if (!simulate) {
             try {
                 const incentiveController = IncentiveController.getInstance()
-                await incentiveController.onWalletLinked(
+                const response = await incentiveController.onWalletLinked(
                     editOperation.account,
                     walletAddress,
                     chain,
@@ -34,8 +34,8 @@ export default class GCRIncentiveRoutines {
                     `Awarded wallet linking points to ${editOperation.account} for ${chain}:${walletAddress}`,
                 )
                 return {
-                    success: true,
-                    message: "Wallet linking points awarded",
+                    success: response.result === 200 ? true : false,
+                    message: response.response.message,
                 }
             } catch (error: any) {
                 log.error(`Failed to award wallet linking points: ${error}`)
