@@ -10,8 +10,16 @@ import {
     RubicSdkError,
     BasicTransactionOptions,
 } from "rubic-sdk"
-import { BridgeTradePayload, SupportedTokens, ChainProviders } from "@kynesyslabs/demosdk/types"
-import { BlockchainName, BRIDGE_PROTOCOLS, ExtendedCrossChainManagerCalculationOptions } from "./bridgeUtils"
+import {
+    BridgeTradePayload,
+    SupportedTokens,
+    ChainProviders,
+} from "@kynesyslabs/demosdk/types"
+import {
+    BlockchainName,
+    BRIDGE_PROTOCOLS,
+    ExtendedCrossChainManagerCalculationOptions,
+} from "./bridgeUtils"
 
 class CustomEVMProvider {
     private httpProvider: HttpProvider
@@ -235,7 +243,10 @@ export default class RubicService {
                 payload.fromChainId,
                 payload.fromToken,
             )
-            const toTokenAddress = this.getTokenAddress(payload.toChainId, payload.toToken)
+            const toTokenAddress = this.getTokenAddress(
+                payload.toChainId,
+                payload.toToken,
+            )
 
             const trades = await this.sdk.crossChainManager.calculateTrade(
                 {
@@ -269,7 +280,7 @@ export default class RubicService {
             )
 
             const bestTrade = filteredTrades[0]
-            
+
             return bestTrade
         } catch (error: any) {
             console.error("Error getting trade:", error)
@@ -291,7 +302,7 @@ export default class RubicService {
         const trade = wrappedTrade.trade as unknown as CrossChainTrade
 
         if (!trade) throw new Error("Invalid trade object: trade is null")
-            
+
         try {
             const signerAddress = this.signer.address
             this.sdk.updateWalletAddress(CHAIN_TYPE.EVM, signerAddress)
@@ -335,6 +346,21 @@ export default class RubicService {
 
             return receipt
         } catch (error) {
+            if (
+                error instanceof RubicSdkError &&
+                error.message.includes("eth_estimateGas")
+            ) {
+                const customError = Object.assign(
+                    new RubicSdkError(error.message),
+                    {
+                        details: {
+                            message:
+                                "Insufficient gas funds for the transaction.",
+                        },
+                    },
+                )
+                throw customError
+            }
             console.error("Error executing trade:", error)
             throw error
         }
