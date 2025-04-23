@@ -13,6 +13,7 @@ import {
     TON,
     XRPL,
     BTC,
+    SUI
 } from "@kynesyslabs/demosdk/xm-localsdk"
 
 import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
@@ -42,6 +43,7 @@ const chains: { [key: string]: typeof DefaultChain } = {
     near: NEAR,
     // @ts-expect-error - BTC module contains more fields than the DefaultChain type
     btc: BTC,
+    sui: SUI
 }
 
 export default class IdentityManager {
@@ -72,7 +74,8 @@ export default class IdentityManager {
                 chainId === "xrpl" ||
                 chainId === "ton" ||
                 chainId === "ibc" ||
-                chainId === "near"
+                chainId === "near" ||
+                chainId === "sui"
             ) {
                 messageVerified = await sdk.verifyMessage(
                     signedData,
