@@ -1,0 +1,11 @@
+/**
+ * Error types that can occur in the signaling server
+ */
+export enum ImErrorType {
+    INVALID_MESSAGE = "INVALID_MESSAGE",
+    CLIENT_ID_TAKEN = "CLIENT_ID_TAKEN",
+    PEER_NOT_FOUND = "PEER_NOT_FOUND",
+    INVALID_PUBLIC_KEY = "INVALID_PUBLIC_KEY",
+    REGISTRATION_REQUIRED = "REGISTRATION_REQUIRED",
+    INTERNAL_ERROR = "INTERNAL_ERROR",
+}
