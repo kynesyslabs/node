@@ -154,6 +154,11 @@ export class SignalingServer {
                 return
             }
 
+            // Check if any response handlers can handle this message
+            for (const handler of this.responseHandlers) {
+                handler(ws, message)
+            }
+
             switch (data.type) {
                 case "register":
                     console.log("[IM] Received a register message")
@@ -208,6 +213,24 @@ export class SignalingServer {
                     }
                     this.handlePublicKeyRequest(ws, data.payload.targetId)
                     break
+                case "debug_question": {
+                    // Handle debug message to trigger a question
+                    console.log("[IM] Received debug question request")
+                    const senderId = this.getPeerIdByWebSocket(ws)
+                    if (!senderId) {
+                        this.sendError(
+                            ws,
+                            ImErrorType.REGISTRATION_REQUIRED,
+                            "You must register before sending debug messages",
+                        )
+                        return
+                    }
+                    // Send a question to the peer
+                    this.sendQuestionToPeer(senderId, {
+                        text: "This is a debug question. What is your favorite programming language?",
+                    })
+                    break
+                }
                 default:
                     this.sendError(
                         ws,
@@ -423,6 +446,56 @@ export class SignalingServer {
     }
 
     /**
+     * Sends a question to a specific peer
+     * @param peerId - The ID of the peer to send the question to
+     * @param question - The question to send
+     */
+    private sendQuestionToPeer(peerId: string, question: any): void {
+        try {
+            const peer = this.peers.get(peerId)
+            if (!peer) {
+                console.error(`Target peer ${peerId} not found`)
+                return
+            }
+
+            const questionId = crypto.randomUUID()
+
+            // Send the question to the peer
+            peer.ws.send(
+                JSON.stringify({
+                    type: "server_question",
+                    payload: {
+                        questionId,
+                        question,
+                    },
+                }),
+            )
+
+            console.log(`Question sent to peer ${peerId} with ID ${questionId}`)
+        } catch (error) {
+            console.error("Error sending question to peer:", error)
+        }
+    }
+
+    // Temporary storage for response handlers
+    private responseHandlers: Set<(ws: WebSocket, message: string) => void> =
+        new Set()
+
+    // Add a response handler
+    private addResponseHandler(
+        handler: (ws: WebSocket, message: string) => void,
+    ): void {
+        this.responseHandlers.add(handler)
+    }
+
+    // Remove a response handler
+    private removeResponseHandler(
+        handler: (ws: WebSocket, message: string) => void,
+    ): void {
+        this.responseHandlers.delete(handler)
+    }
+
+    /**
      * Retrieves the peer ID associated with a WebSocket connection
      * @param ws - The WebSocket to look up
      * @returns The peer ID or undefined if not found
@@ -454,6 +527,28 @@ export class SignalingServer {
             console.error("Broadcast error:", error)
             // Don't send error here as the peer is already disconnected
         }
+    }
+
+    /**
+     * Disconnects the server and cleans up resources
+     */
+    public disconnect(): void {
+        // Close all peer connections
+        for (const peer of this.peers.values()) {
+            try {
+                peer.ws.close()
+            } catch (error) {
+                console.error("Error closing peer connection:", error)
+            }
+        }
+
+        // Clear the peers map
+        this.peers.clear()
+
+        // Stop the server
+        this.server.stop()
+
+        console.log("Signaling server disconnected")
     }
 }
 
