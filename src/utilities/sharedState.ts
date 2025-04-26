@@ -38,6 +38,10 @@ export default class SharedState {
     inPeerRecheckLoop = false
     inPeerGossip = false
     startingConsensus = false
+    isSignalingServerStarted = false
+
+    // Running as a node (is false when running specific modules like the signaling server)
+    runningAsNode = true
 
     // Mempool
     inGetMempool = false

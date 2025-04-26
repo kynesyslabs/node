@@ -72,7 +72,7 @@ export default class Transaction implements ITransaction {
     public static sign(
         tx: Transaction,
         privateKey: forge.pki.ed25519.BinaryBuffer,
-    ): any[] {
+    ): [boolean, any] {
         // Check sanity of the structure of the tx object
         if (!tx.content) {
             return [false, "Missing tx.content"]
