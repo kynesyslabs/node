@@ -1,3 +1,5 @@
+import { SerializedSignedObject } from "../../../../../../sdks/src/encryption/unifiedCrypto" // FIXME Import from the sdk once we can
+
 export interface ImBaseMessage {
     type: string
     payload: any
@@ -8,6 +10,7 @@ export interface ImRegisterMessage extends ImBaseMessage {
     payload: {
         clientId: string
         publicKey: Uint8Array
+        verification: SerializedSignedObject
     }
 }
 

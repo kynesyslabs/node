@@ -1,4 +1,5 @@
 // TODO Once tested, implement blockchain registration for the data we want to store (or the hashes of the data)
+// TODO Implement handle@[first_2_chars_of_signing_public_key][mid_2_chars_of_signing_public_key][last_2_chars_of_signing_public_key] as handle and give it back to the peer
 // FIXME Offline messaging is not implemented, we need to implement it by storing messages in a database if the peer is offline
 // REVIEW Probably need to implement a way to verify the public key of the peer for retrieval purposes (e.g. offline messages)
 /**
@@ -52,6 +53,12 @@ import {
     ImPublicKeyRequestMessage,
 } from "./types/IMMessage"
 import Transaction from "@/libs/blockchain/transaction"
+import {
+    signedObject,
+    SerializedSignedObject,
+    unifiedCrypto,
+} from "../../../../../sdks/src/encryption/unifiedCrypto" // FIXME Import from the sdk once we can
+import { deserializeUint8Array } from "../../../../../sdks/src/utils/uint8Serialize" // FIXME Import from the sdk once we can
 /**
  * SignalingServer class that manages peer connections and message routing
  */
@@ -156,7 +163,8 @@ export class SignalingServer {
                     if (
                         registerMessage.type !== "register" ||
                         !registerMessage.payload.clientId ||
-                        !registerMessage.payload.publicKey
+                        !registerMessage.payload.publicKey ||
+                        !registerMessage.payload.verification
                     ) {
                         this.sendError(
                             ws,
@@ -170,7 +178,8 @@ export class SignalingServer {
                         ws,
                         registerMessage.payload.clientId,
                         registerMessage.payload.publicKey,
-                    )
+                        registerMessage.payload.verification,
+                    ) // REVIEW As this is async, is ok not to await it?
                     console.log("[IM] Register message handled")
                     break
                 case "discover":
@@ -221,10 +230,11 @@ export class SignalingServer {
      * @param clientId - The unique identifier for the peer
      * @param publicKey - The peer's public key as Uint8Array
      */
-    private handleRegister(
+    private async handleRegister(
         ws: WebSocket,
         clientId: string,
         publicKey: Uint8Array,
+        proof: SerializedSignedObject,
     ) {
         try {
             if (this.peers.has(clientId)) {
@@ -249,7 +259,29 @@ export class SignalingServer {
                 return
             }
 
-            this.peers.set(clientId, { id: clientId, ws, publicKey })
+            // Deserialize the proof
+            const deserializedProof: signedObject = {
+                algorithm: proof.algorithm,
+                signedData: deserializeUint8Array(proof.serializedSignedData),
+                publicKey: deserializeUint8Array(proof.serializedPublicKey),
+                message: deserializeUint8Array(proof.serializedMessage),
+            }
+
+            const signingPublicKey = deserializedProof.publicKey
+
+            // Validate the proof
+            const verified = await unifiedCrypto.verify(deserializedProof)
+
+            if (!verified) {
+                this.sendError(ws, ImErrorType.INVALID_PROOF, "Invalid proof")
+                return
+            }
+            this.peers.set(clientId, {
+                id: clientId,
+                ws,
+                publicKey,
+                signingPublicKey,
+            })
             console.log(`Peer registered with ID: ${clientId}`)
 
             // Send confirmation to the registering peer
