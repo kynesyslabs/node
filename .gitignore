@@ -96,3 +96,4 @@ src/GTAGS
 
 # Output files
 output/*
+.env
