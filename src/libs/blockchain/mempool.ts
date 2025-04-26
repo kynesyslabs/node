@@ -20,7 +20,7 @@ import Hashing from "../crypto/hashing"
 import PeerManager from "../peer/PeerManager"
 import Block from "./block"
 // INFO Singleton Mempool class
-import { ISignature } from "@kynesyslabs/demosdk/types"
+import type { ISignature } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import Transaction from "./transaction"

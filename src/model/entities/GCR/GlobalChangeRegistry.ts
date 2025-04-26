@@ -1,5 +1,5 @@
 import { Column, Entity, PrimaryGeneratedColumn } from "typeorm"
-import { StoredIdentities } from "../types/IdentityTypes"
+import type { StoredIdentities } from "../types/IdentityTypes"
 // Define the shape of your JSON data
 
 // ! See https://poe.com/s/ud8vmCkiIHiNCaU7SYaP for efficient JSONB manipulation (and apply around the code)

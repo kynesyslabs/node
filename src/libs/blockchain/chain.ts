@@ -23,9 +23,8 @@ import {
     Operation,
     StatusNative as StatusNativeType,
     StatusProperties as StatusPropertiesType,
-    TransactionContent,
 } from "@kynesyslabs/demosdk/types"
-
+import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import Hashing from "../crypto/hashing"
 
 import Block from "./block"
