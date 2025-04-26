@@ -56,9 +56,10 @@ import Transaction from "@/libs/blockchain/transaction"
 import {
     signedObject,
     SerializedSignedObject,
-    unifiedCrypto,
-} from "../../../../../sdks/src/encryption/unifiedCrypto" // FIXME Import from the sdk once we can
-import { deserializeUint8Array } from "../../../../../sdks/src/utils/uint8Serialize" // FIXME Import from the sdk once we can
+    ucrypto,
+} from "@kynesyslabs/demosdk/encryption"
+
+import { deserializeUint8Array } from "@kynesyslabs/demosdk/utils" // FIXME Import from the sdk once we can
 /**
  * SignalingServer class that manages peer connections and message routing
  */
@@ -270,7 +271,7 @@ export class SignalingServer {
             const signingPublicKey = deserializedProof.publicKey
 
             // Validate the proof
-            const verified = await unifiedCrypto.verify(deserializedProof)
+            const verified = await ucrypto.verify(deserializedProof)
 
             if (!verified) {
                 this.sendError(ws, ImErrorType.INVALID_PROOF, "Invalid proof")
