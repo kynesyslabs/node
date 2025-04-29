@@ -132,9 +132,9 @@ export default class Logger {
     }
 
     static debug(message: string, logToTerminal = true) {
-        if (this.LOG_ONLY_ENABLED) {
-            return
-        }
+        // if (this.LOG_ONLY_ENABLED) {
+        //     return
+        // }
 
         const logEntry = `[DEBUG] [${this.getTimestamp()}] ${message}\n`
         if (logToTerminal) {
