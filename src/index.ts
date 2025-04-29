@@ -266,14 +266,14 @@ async function main() {
             // commandLine() // While doing the rest of the stuff needed, a comand line interface is available
         }
         // Starting the signaling server
-        const signalingServer = new SignalingServer(indexState.SIGNALING_SERVER_PORT)
-        if (signalingServer) {
-            getSharedState.isSignalingServerStarted = true
-            console.log("[MAIN] Signaling server started")
-        } else {
-            console.log("[MAIN] Failed to start the signaling server")
-            process.exit(1)
-        }
+        // const signalingServer = new SignalingServer(indexState.SIGNALING_SERVER_PORT)
+        // if (signalingServer) {
+        //     getSharedState.isSignalingServerStarted = true
+        //     console.log("[MAIN] Signaling server started")
+        // } else {
+        //     console.log("[MAIN] Failed to start the signaling server")
+        //     process.exit(1)
+        // }
         term.yellow("[MAIN] ✅ Starting the background loop\n")
         // ANCHOR Starting the main loop
         mainLoop() // Is an async function so running without waiting send that to the background
