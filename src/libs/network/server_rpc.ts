@@ -11,7 +11,6 @@ import fastify, {
 import {
     BrowserRequest,
     BundleContent,
-    IWeb2Payload,
     RPCRequest,
     RPCResponse,
 } from "@kynesyslabs/demosdk/types"
@@ -30,8 +29,6 @@ import { manageNodeCall, NodeCall } from "./manageNodeCall"
 import { registerMethodListingEndpoint } from "./methodListing"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { rpcSchema, setupOpenAPI } from "./openApiSpec"
-import { skeletons } from "@kynesyslabs/demosdk/websdk"
-import required from "src/utilities/required"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import manageBridges from "./manageBridge"
 
@@ -73,20 +70,22 @@ function isRPCRequest(obj: any): obj is RPCRequest {
 }
 
 // Validate the headers
-function validateHeaders(headers: any): [boolean, string] {
+function validateHeaders(headers: Headers): [boolean, string] {
     // Check if we have a valid signature and identity header
-    log.info("[RPC Call] Validating headers...") // + JSON.stringify(headers, null, 2))
-    if (!headers["signature"]) {
+    log.info("[RPC Call] Validating headers...") // + JSON.stringify(headers, null, 2))    
+    if (!headers.get("signature")) {
         log.error("[RPC Call] Missing signature header")
+        log.info("[RPC Call] Headers: " + JSON.stringify(headers, null, 2), true)
+        //process.exit(0)
         return [false, "Missing signature header"]
     }
-    if (!headers["identity"]) {
+    if (!headers.get("identity")) {
         log.error("[RPC Call] Missing identity header")
         return [false, "Missing identity header"]
     }
-    // TODO Check if the signature is valid
-    const signature = headers.signature as string
-    const identity = headers.identity as string
+    // Check if the signature is valid
+    const signature = headers.get("signature") as string
+    const identity = headers.get("identity") as string
     const message = identity
     const isValid = Cryptography.verify(message, signature, identity)
     if (!isValid) {
@@ -184,168 +183,9 @@ async function processPayload(
 }
 /* End of processor method */
 
-export default async function serverRpc(): Promise<FastifyInstance> {
-    const port = getSharedState.serverPort
-    const serverApp: FastifyInstance = fastify()
-    await serverApp.register(fastifyCors, {
-        origin: "*",
-        methods: ["GET", "POST"],
-    })
 
-    // Register the method listing endpoint
-    registerMethodListingEndpoint(serverApp)
-
-    // GET request handlers
-
-    serverApp.get("/", async (req: FastifyRequest, reply: FastifyReply) => {
-        reply.header("Access-Control-Allow-Origin", "*")
-        reply.send("Hello, World!")
-    })
-
-    // NOTE Generic info endpoint
-    serverApp.get("/info", async (req: FastifyRequest, reply: FastifyReply) => {
-        reply.header("Access-Control-Allow-Origin", "*")
-        const info = await sharedState.getInstance().getInfo()
-        const version = getSharedState.version
-        const versionName = getSharedState.version_name
-        reply.send({
-            version: version,
-            version_name: versionName,
-            ...info,
-        })
-    })
-
-    // Specific info endpoints
-    serverApp.get(
-        "/version",
-        async (req: FastifyRequest, reply: FastifyReply) => {
-            reply.header("Access-Control-Allow-Origin", "*")
-            reply.send(getSharedState.version)
-        },
-    )
-    serverApp.get(
-        "/publickey",
-        async (req: FastifyRequest, reply: FastifyReply) => {
-            reply.header("Access-Control-Allow-Origin", "*")
-            reply.send(
-                getSharedState.identity.ed25519.publicKey.toString("hex"),
-            )
-        },
-    )
-    serverApp.get(
-        "/connectionstring",
-        async (req: FastifyRequest, reply: FastifyReply) => {
-            reply.header("Access-Control-Allow-Origin", "*")
-            reply.send(await getSharedState.getConnectionString())
-        },
-    )
-    serverApp.get(
-        "/peerlist",
-        async (req: FastifyRequest, reply: FastifyReply) => {
-            reply.header("Access-Control-Allow-Origin", "*")
-            reply.send(PeerManager.getInstance().getPeers())
-        },
-    )
-
-    // Get public logs (custom logs)
-    serverApp.get(
-        "/public_logs",
-        async (req: FastifyRequest, reply: FastifyReply) => {
-            reply.header("Access-Control-Allow-Origin", "*")
-            reply.send(log.getPublicLogs())
-        },
-    )
-
-    serverApp.get(
-        "/diagnostics",
-        async (req: FastifyRequest, reply: FastifyReply) => {
-            reply.header("Access-Control-Allow-Origin", "*")
-            reply.send(log.getDiagnostics())
-        },
-    )
-
-    // Define the options for the main RPC endpoint
-    const postOptions: RouteShorthandOptions = {
-        schema: rpcSchema,
-    }
-
-    // Update the main RPC endpoint
-    serverApp.post(
-        "/",
-        postOptions,
-        async (req: FastifyRequest, reply: FastifyReply) => {
-            log.info(
-                "[RPC Call] Received request: " +
-                    JSON.stringify(req.body, null, 2),
-                false,
-            )
-            const payload = req.body as RPCRequest
-
-            // Header check
-            const headers = req.headers
-            let sender = ""
-            // Excluding due to noAuthMethods from header validation
-            if (!noAuthMethods.includes(payload.method)) {
-                const headerValidation = validateHeaders(headers)
-                
-                log.info(
-                    "[RPC Call] Header validation: " + headerValidation[0],
-                )
-                if (!headerValidation[0]) {
-                    reply.status(401).send({
-                        error: "Invalid headers:" + headerValidation[1],
-                    })
-                    return
-                }
-                sender = headers["identity"] as string
-            }
-            log.info("[RPC Call] Processing payload...", false)
-            log.info(
-                "[RPC Call] Payload: " + JSON.stringify(payload, null, 2),
-                false,
-            )
-            // REVIEW To avoid crashes, we catch all unhandled exceptions and return a 500 error
-            try {
-                const response = await processPayload(payload, sender)
-                log.info(
-                    "[RPC Call] Response ready: sending it to the client...",
-                    false,
-                )
-                log.info(
-                    "[RPC Call] Response: " + JSON.stringify(response, null, 2),
-                    false,
-                )
-
-                reply.header("Access-Control-Allow-Origin", "*")
-                reply.send(response)
-            } catch (error) {
-                log.error("[RPC Call] Error: " + error, true)
-                reply.status(500).send({
-                    error: "Internal server error",
-                    details: error,
-                })
-            }
-        },
-    )
-
-    // Setup OpenAPI
-    setupOpenAPI(serverApp)
-
-    // Start the server
-    await serverApp.listen({ port, host: "0.0.0.0" })
-    log.info("[RPC Call] Server is running on 0.0.0.0:" + port, true)
-
-    // Add helmet for security headers
-    // await serverApp.register(helmet)
-
-    return serverApp
-}
-
-/** NOTE
- *  REVIEW
- *  This is a Bun server implementation. It is not used yet.
- *  Hopefully, we can drop in replace the Fastify server with this one.
- *  See createServer() for an experimental smart selector of the server implementation.
+/**
+ *  HTTP server using Bun
  */
 export async function serverRpcBun() {
     const port = getSharedState.serverPort
@@ -370,13 +210,13 @@ export async function serverRpcBun() {
         "Access-Control-Allow-Headers": "*",
     }
 
-    // ? Bun should be defined
-    // eslint-disable-next-line no-undef
     const server = Bun.serve({
         port: port,
         hostname: "0.0.0.0",
         async fetch(req) {
             const url = new URL(req.url)
+            //log.info("[RPC Call] Request: " + JSON.stringify(req, null, 2), true)
+            //process.exit(0)
 
             // Handle CORS preflight
             if (req.method === "OPTIONS") {
@@ -503,6 +343,7 @@ export async function serverRpcBun() {
                 let sender = ""
                 if (!noAuthMethods.includes(payload.method)) {
                     const headers = req.headers
+                    log.info("[RPC Call] Headers: " + JSON.stringify(headers, null, 2), true)
                     const headerValidation = validateHeaders(headers)
                     if (!headerValidation[0]) {
                         return new Response(
@@ -540,29 +381,4 @@ export async function serverRpcBun() {
 
     log.info("[RPC Call] Server is running on 0.0.0.0:" + port, true)
     return server
-}
-
-// Smart server creation based on bun/node
-/** Example
-
-import { createServer } from "./libs/network/server_rpc"
-
-// This will automatically use the appropriate server implementation
-const server = await createServer()
-
- */
-export async function createServer() {
-    // Check if we're running in Bun
-    const isBun =
-        typeof process !== "undefined" &&
-        typeof process.versions === "object" &&
-        "bun" in process.versions
-
-    if (isBun) {
-        log.info("[RPC Call] Using Bun server implementation")
-        return await serverRpcBun()
-    } else {
-        log.info("[RPC Call] Using Fastify server implementation")
-        return await serverRpc()
-    }
 }
