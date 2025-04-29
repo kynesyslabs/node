@@ -48,6 +48,7 @@ export default async function manageConsensusRoutines(
     // ! When we return false, we cannot have the client asking for the same method over and over again or
     // ! continue asking for consensus_routine, we must rate limit the requests
     const isConsensusTime = await checkConsensusTime(true, 2)
+    process.exit(0)
     const isConsensusRunning = isConsensusAlreadyRunning()
     const inConsensus = isConsensusTime || isConsensusRunning
 
