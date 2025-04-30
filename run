@@ -139,14 +139,14 @@ cd $PG_FOLDER
 if [ "$CLEAN" == "true" ]; then
     echo "Cleaning the database"
     sleep 1
-    echo $PASSWORD | sudo -S rm -rf data_*
+    sudo rm -rf data_*
     mkdir data_${PG_PORT}
 fi
 
 # Suppressing errors if the database is not running
 docker compose down > /dev/null 2>&1
 if [ "$CLEAN" == "true" ]; then
-    rm -rf data_${PG_PORT} || echo $PASSWORD | sudo -S rm -rf data_${PG_PORT}
+    rm -rf data_${PG_PORT} || sudo rm -rf data_${PG_PORT}
     mkdir data_${PG_PORT}
 fi
 # Finally starting the database

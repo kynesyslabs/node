@@ -50,7 +50,7 @@ export async function checkConsensusTime(
                 isConsensusTime = true
                 log.info("[CONSENSUS TIME] Consensus time reached (with flexible time and delta: " + delta + ")", true)
             }
-        }       
+        }
     }
     if (!isConsensusTime) {
         log.info("[CONSENSUS TIME] Consensus time not reached", true)
