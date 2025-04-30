@@ -30,7 +30,7 @@ import log from "src/utilities/logger"
 import { Peer } from "./libs/peer"
 import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
-
+import net from "net"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 
 const term = terminalkit.terminal
@@ -110,6 +110,40 @@ async function digestArguments() {
         }
     }
 }
+
+const isPortAvailable = async (port: number): Promise<boolean> => {
+    return new Promise((resolve, reject) => {
+        const s = net.createServer()
+        s.once("error", err => {
+            s.close()
+            if (err["code"] == "EADDRINUSE") {
+                resolve(false)
+            } else {
+                resolve(false) // or throw error!!
+                // reject(err);
+            }
+        })
+
+        s.once("listening", () => {
+            resolve(true)
+            s.close()
+        })
+        s.listen(port)
+    })
+}
+
+async function getNextAvailablePort(startFrom = 2222) {
+    let openPort: number = null
+    while (startFrom < 65535 || !!openPort) {
+        if (await isPortAvailable(startFrom)) {
+            openPort = startFrom
+            break
+        }
+        startFrom++
+    }
+    return openPort
+}
+
 // ANCHOR Warmup method
 async function warmup() {
     // INFO Cleaning the logs directory (except custom logs)
@@ -139,10 +173,20 @@ async function warmup() {
         indexState.SERVER_PORT = parseInt(process.env.SERVER_PORT, 10) || 53550
     }
     // Allow overriding signaling server port through RPC_SIGNALING_PORT
-    indexState.SIGNALING_SERVER_PORT = parseInt(process.env.RPC_SIGNALING_PORT, 10) || 0
+    indexState.SIGNALING_SERVER_PORT =
+        parseInt(process.env.RPC_SIGNALING_PORT, 10) || 0
     if (indexState.SIGNALING_SERVER_PORT == 0) {
-        indexState.SIGNALING_SERVER_PORT = parseInt(process.env.SIGNALING_SERVER_PORT, 10) || 3005
+        indexState.SIGNALING_SERVER_PORT =
+            parseInt(process.env.SIGNALING_SERVER_PORT, 10) || 3005
     }
+
+    // Use next available port for the signaling server
+    // (useful when we have multiple nodes running the same code on the same machine)
+    indexState.SIGNALING_SERVER_PORT = await getNextAvailablePort(
+        indexState.SIGNALING_SERVER_PORT,
+    )
+    log.only("SIGNALING_SERVER_PORT: " + indexState.SIGNALING_SERVER_PORT)
+
     // Setting the server port to the shared state
     getSharedState.serverPort = indexState.SERVER_PORT
     // Exposed URL
@@ -266,14 +310,16 @@ async function main() {
             // commandLine() // While doing the rest of the stuff needed, a comand line interface is available
         }
         // Starting the signaling server
-        // const signalingServer = new SignalingServer(indexState.SIGNALING_SERVER_PORT)
-        // if (signalingServer) {
-        //     getSharedState.isSignalingServerStarted = true
-        //     console.log("[MAIN] Signaling server started")
-        // } else {
-        //     console.log("[MAIN] Failed to start the signaling server")
-        //     process.exit(1)
-        // }
+        const signalingServer = new SignalingServer(
+            indexState.SIGNALING_SERVER_PORT,
+        )
+        if (signalingServer) {
+            getSharedState.isSignalingServerStarted = true
+            console.log("[MAIN] Signaling server started")
+        } else {
+            console.log("[MAIN] Failed to start the signaling server")
+            process.exit(1)
+        }
         term.yellow("[MAIN] ✅ Starting the background loop\n")
         // ANCHOR Starting the main loop
         mainLoop() // Is an async function so running without waiting send that to the background
