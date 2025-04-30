@@ -358,57 +358,40 @@ async function requestBlocks() {
     //     log.error("[fastSync] Peer not found")
     //     return false
     // }
+    const seenPeers = new Set<string>()
+    let peer = highestBlockPeer()
 
     while (getSharedState.lastBlockNumber <= latestBlock()) {
         const blockToAsk = getSharedState.lastBlockNumber + 1
         // log.debug("[fastSync] Sleeping for 1 second")
         // await sleep(250)
-        let peer = highestBlockPeer()
-        let retryCount = 0
-        const maxRetries = 3 // Maximum number of retries with different peers
 
-        while (retryCount < maxRetries) {
-            log.debug(
-                "[fastSync] Asking " +
-                    peer.connection.string +
-                    " for block: " +
-                    blockToAsk,
-            )
-            try {
-                await downloadBlock(peer, blockToAsk)
-                break // Success, exit retry loop
-            } catch (error) {
-                // INFO: Handle chain head reached
-                if (error instanceof BlockNotFoundError) {
-                    log.info("[fastSync] Block not found")
-                    return true // Exit both loops
+        log.debug("[fastSync] Asking peer for block: " + blockToAsk)
+        try {
+            await downloadBlock(peer, blockToAsk)
+        } catch (error) {
+            // INFO: Handle chain head reached
+            if (error instanceof BlockNotFoundError) {
+                log.info("[fastSync] Block not found")
+                break
+            }
+
+            if (error instanceof PeerUnreachableError) {
+                log.only("[fastSync] Peer " + peer.identity + " is offline. Switching to the next peer.")
+                seenPeers.add(peer.identity)
+
+                const highestBlockPeers = peerManager
+                    .getAll()
+                    .filter(p => p.sync.block === latestBlock())
+                    .filter(p => !seenPeers.has(p.identity))
+
+                if (highestBlockPeers.length === 0) {
+                    log.error("[fastSync] No more peers to try")
+                    return false
                 }
 
-                if (error instanceof PeerUnreachableError) {
-                    log.error(
-                        "[fastSync] Peer " +
-                            peer.connection.string +
-                            " is unreachable, trying next peer",
-                    )
-
-                    // Get all peers and find the next one
-                    const allPeers = peerManager.getPeers()
-                    const currentIndex = allPeers.findIndex(
-                        p => p.identity === peer.identity,
-                    )
-                    const nextIndex = (currentIndex + 1) % allPeers.length
-                    peer = allPeers[nextIndex]
-                    retryCount++
-
-                    if (retryCount === maxRetries) {
-                        log.error(
-                            "[fastSync] All peers are unreachable after " +
-                                maxRetries +
-                                " retries",
-                        )
-                        return false
-                    }
-                }
+                peer = highestBlockPeers[0]
+                break
             }
         }
     }
