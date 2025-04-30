@@ -111,11 +111,11 @@ async function digestArguments() {
     }
 }
 
-const isPortAvailable = async (port: number): Promise<boolean> => {
+async function isPortAvailable(port: number): Promise<boolean> {
     return new Promise((resolve, reject) => {
-        const s = net.createServer()
-        s.once("error", err => {
-            s.close()
+        const server = net.createServer()
+        server.once("error", err => {
+            server.close()
             if (err["code"] == "EADDRINUSE") {
                 resolve(false)
             } else {
@@ -124,24 +124,24 @@ const isPortAvailable = async (port: number): Promise<boolean> => {
             }
         })
 
-        s.once("listening", () => {
+        server.once("listening", () => {
             resolve(true)
-            s.close()
+            server.close()
         })
-        s.listen(port)
+        server.listen(port)
     })
 }
 
-async function getNextAvailablePort(startFrom = 2222) {
-    let openPort: number = null
-    while (startFrom < 65535 || !!openPort) {
+async function getNextAvailablePort(startFrom: number) {
+    let availablePort: number = null
+    while (startFrom < 65535 || !!availablePort) {
         if (await isPortAvailable(startFrom)) {
-            openPort = startFrom
+            availablePort = startFrom
             break
         }
         startFrom++
     }
-    return openPort
+    return availablePort
 }
 
 // ANCHOR Warmup method
