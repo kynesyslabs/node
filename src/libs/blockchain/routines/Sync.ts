@@ -24,7 +24,7 @@ import {
     RPCResponse,
     Transaction,
 } from "@kynesyslabs/demosdk/types"
-import { BlockNotFoundError, PeerOfflineError } from "src/exceptions"
+import { BlockNotFoundError, PeerUnreachableError } from "src/exceptions"
 import GCR from "../gcr/gcr"
 import HandleGCR from "../gcr/handleGCR"
 
@@ -205,7 +205,10 @@ async function verifyLastBlockIntegrity(
             },
         ],
     }
-    const lastSyncedBlockResponse = await peer.call(lastSyncedBlockRequest, false)
+    const lastSyncedBlockResponse = await peer.call(
+        lastSyncedBlockRequest,
+        false,
+    )
 
     if (lastSyncedBlockResponse.result === 200) {
         console.log("[fastSync] Last synced block response received")
@@ -227,7 +230,12 @@ async function verifyLastBlockIntegrity(
 }
 
 async function downloadBlock(peer: Peer, blockToAsk: number) {
-    log.only("[downloadBlock] Requesting block: " + blockToAsk + " from peer: " + peer.connection.string)
+    log.only(
+        "[downloadBlock] Requesting block: " +
+            blockToAsk +
+            " from peer: " +
+            peer.connection.string,
+    )
     const blockRequest: RPCRequest = {
         method: "nodeCall",
         params: [
@@ -239,14 +247,16 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
         ],
     }
 
-    const blockResponse = await peer.longCall(blockRequest, false, 250, 3, [404])
+    const blockResponse = await peer.longCall(blockRequest, false, 250, 3, [
+        404,
+    ])
     log.only("[downloadBlock] Block response received: " + blockResponse.result)
 
     // INFO: Handle max retries reached
     if (blockResponse.result === 400) {
         log.info("[fastSync] Peer is offline")
         // TODO: Test this!
-        throw new PeerOfflineError("Peer is offline")
+        throw new PeerUnreachableError("Peer is offline")
     }
 
     if (blockResponse.result === 404) {
@@ -353,21 +363,52 @@ async function requestBlocks() {
         const blockToAsk = getSharedState.lastBlockNumber + 1
         // log.debug("[fastSync] Sleeping for 1 second")
         // await sleep(250)
+        let peer = highestBlockPeer()
+        let retryCount = 0
+        const maxRetries = 3 // Maximum number of retries with different peers
 
-        log.debug("[fastSync] Asking peer for block: " + blockToAsk)
-        try {
-            await downloadBlock(highestBlockPeer(), blockToAsk)
-        } catch (error) {
-            // INFO: Handle chain head reached
-            if (error instanceof BlockNotFoundError) {
-                log.info("[fastSync] Block not found")
-                break
-            }
+        while (retryCount < maxRetries) {
+            log.debug(
+                "[fastSync] Asking " +
+                    peer.connection.string +
+                    " for block: " +
+                    blockToAsk,
+            )
+            try {
+                await downloadBlock(peer, blockToAsk)
+                break // Success, exit retry loop
+            } catch (error) {
+                // INFO: Handle chain head reached
+                if (error instanceof BlockNotFoundError) {
+                    log.info("[fastSync] Block not found")
+                    return true // Exit both loops
+                }
 
-            if (error instanceof PeerOfflineError) {
-                log.info("[fastSync] Peer is offline")
-                // TODO: Switch to the next peer
-                return false
+                if (error instanceof PeerUnreachableError) {
+                    log.error(
+                        "[fastSync] Peer " +
+                            peer.connection.string +
+                            " is unreachable, trying next peer",
+                    )
+
+                    // Get all peers and find the next one
+                    const allPeers = peerManager.getPeers()
+                    const currentIndex = allPeers.findIndex(
+                        p => p.identity === peer.identity,
+                    )
+                    const nextIndex = (currentIndex + 1) % allPeers.length
+                    peer = allPeers[nextIndex]
+                    retryCount++
+
+                    if (retryCount === maxRetries) {
+                        log.error(
+                            "[fastSync] All peers are unreachable after " +
+                                maxRetries +
+                                " retries",
+                        )
+                        return false
+                    }
+                }
             }
         }
     }
@@ -376,12 +417,17 @@ async function requestBlocks() {
 }
 
 // REVIEW Applying GCREdits to the tables
-export async function syncGCRTables(txs: Transaction[]): Promise<[string, boolean]> { // ? Better typing on this return
+export async function syncGCRTables(
+    txs: Transaction[],
+): Promise<[string, boolean]> {
+    // ? Better typing on this return
     // Using the GCREdits in the tx to sync the native tables
     for (const tx of txs) {
         const result = await HandleGCR.applyToTx(tx)
         if (!result.success) {
-            log.error("[fastSync] GCR edit application failed at tx: " + tx.hash)
+            log.error(
+                "[fastSync] GCR edit application failed at tx: " + tx.hash,
+            )
             return [tx.hash, false]
         }
     }
