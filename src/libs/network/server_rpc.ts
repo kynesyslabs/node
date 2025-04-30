@@ -1,12 +1,5 @@
 /*  NOTE Importing this file automatically spawns a new server that listens for RPC requests */
 
-import fastifyCors from "@fastify/cors"
-import fastify, {
-    FastifyInstance,
-    FastifyReply,
-    FastifyRequest,
-    RouteShorthandOptions,
-} from "fastify"
 //import helmet from "@fastify/helmet"
 import {
     BrowserRequest,
@@ -26,11 +19,10 @@ import { manageExecution } from "./manageExecution"
 import { HelloPeerRequest, manageHelloPeer } from "./manageHelloPeer"
 import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
 import { manageNodeCall, NodeCall } from "./manageNodeCall"
-import { registerMethodListingEndpoint } from "./methodListing"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
-import { rpcSchema, setupOpenAPI } from "./openApiSpec"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import manageBridges from "./manageBridge"
+import { BunServer, cors, json, jsonResponse } from "./bunServer"
 
 // Reading the port from sharedState
 
@@ -186,199 +178,85 @@ async function processPayload(
 
 /**
  *  HTTP server using Bun
- */
+ */ 
+
 export async function serverRpcBun() {
     const port = getSharedState.serverPort
+    const server = new BunServer(port)
 
-    // Helper to convert request to RPCRequest format
-    async function parseRPCRequest(req: Request): Promise<RPCRequest | null> {
+    // Apply middlewares
+    server.use(cors())
+    server.use(json())
+
+    // GET endpoints
+    server.get("/", () => new Response("Hello, World!"))
+
+    server.get("/info", async () => {
+        const info = await sharedState.getInstance().getInfo()
+        return jsonResponse({
+            version: getSharedState.version,
+            version_name: getSharedState.version_name,
+            ...info,
+        })
+    })
+
+    server.get("/version", () => jsonResponse(getSharedState.version))
+
+    server.get("/publickey", () =>
+        jsonResponse(getSharedState.identity.ed25519.publicKey.toString("hex")),
+    )
+
+    server.get("/connectionstring", async () =>
+        jsonResponse(await getSharedState.getConnectionString()),
+    )
+
+    server.get("/peerlist", () =>
+        jsonResponse(PeerManager.getInstance().getPeers()),
+    )
+
+    server.get("/public_logs", () => jsonResponse(log.getPublicLogs()))
+
+    server.get("/diagnostics", () => jsonResponse(log.getDiagnostics()))
+
+    // Main RPC endpoint
+    server.post("/", async req => {
         try {
-            const body = await req.json()
-            if (isRPCRequest(body)) {
-                return body
-            }
-        } catch (e) {
-            return null
-        }
-        return null
-    }
-
-    // Helper to handle CORS headers
-    const corsHeaders = {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "*",
-    }
-
-    const server = Bun.serve({
-        port: port,
-        hostname: "0.0.0.0",
-        async fetch(req) {
-            const url = new URL(req.url)
-            //log.info("[RPC Call] Request: " + JSON.stringify(req, null, 2), true)
-            //process.exit(0)
-
-            // Handle CORS preflight
-            if (req.method === "OPTIONS") {
-                return new Response(null, {
-                    headers: corsHeaders,
-                })
+            const payload = await req.json()
+            if (!isRPCRequest(payload)) {
+                return jsonResponse({ error: "Invalid request format" }, 400)
             }
 
-            // GET endpoints
-            if (req.method === "GET") {
-                switch (url.pathname) {
-                    case "/":
-                        return new Response("Hello, World!", {
-                            headers: corsHeaders,
-                        })
-                    case "/info":
-                        var info = await sharedState.getInstance().getInfo()
-                        return new Response(
-                            JSON.stringify({
-                                version: getSharedState.version,
-                                version_name: getSharedState.version_name,
-                                ...info,
-                            }),
-                            {
-                                headers: {
-                                    ...corsHeaders,
-                                    "Content-Type": "application/json",
-                                },
-                            },
-                        )
-                    case "/version":
-                        return new Response(
-                            JSON.stringify(getSharedState.version),
-                            {
-                                headers: {
-                                    ...corsHeaders,
-                                    "Content-Type": "application/json",
-                                },
-                            },
-                        )
-                    case "/publickey":
-                        return new Response(
-                            JSON.stringify(
-                                getSharedState.identity.ed25519.publicKey.toString(
-                                    "hex",
-                                ),
-                            ),
-                            {
-                                headers: {
-                                    ...corsHeaders,
-                                    "Content-Type": "application/json",
-                                },
-                            },
-                        )
-                    case "/connectionstring":
-                        return new Response(
-                            JSON.stringify(
-                                await getSharedState.getConnectionString(),
-                            ),
-                            {
-                                headers: {
-                                    ...corsHeaders,
-                                    "Content-Type": "application/json",
-                                },
-                            },
-                        )
-                    case "/peerlist":
-                        return new Response(
-                            JSON.stringify(
-                                PeerManager.getInstance().getPeers(),
-                            ),
-                            {
-                                headers: {
-                                    ...corsHeaders,
-                                    "Content-Type": "application/json",
-                                },
-                            },
-                        )
-                    case "/public_logs":
-                        return new Response(
-                            JSON.stringify(log.getPublicLogs()),
-                            {
-                                headers: {
-                                    ...corsHeaders,
-                                    "Content-Type": "application/json",
-                                },
-                            },
-                        )
-                    case "/diagnostics":
-                        return new Response(
-                            JSON.stringify(log.getDiagnostics()),
-                            {
-                                headers: {
-                                    ...corsHeaders,
-                                    "Content-Type": "application/json",
-                                },
-                            },
-                        )
-                }
-            }
+            log.info(
+                "[RPC Call] Received request: " +
+                    JSON.stringify(payload, null, 2),
+                false,
+            )
 
-            // Main RPC endpoint (POST /)
-            if (req.method === "POST" && url.pathname === "/") {
-                const payload = await parseRPCRequest(req)
-                if (!payload) {
-                    return new Response(
-                        JSON.stringify({ error: "Invalid request format" }),
-                        {
-                            status: 400,
-                            headers: {
-                                ...corsHeaders,
-                                "Content-Type": "application/json",
-                            },
-                        },
+            let sender = ""
+            if (!noAuthMethods.includes(payload.method)) {
+                const headers = req.headers
+                log.info(
+                    "[RPC Call] Headers: " + JSON.stringify(headers, null, 2),
+                    true,
+                )
+                const headerValidation = validateHeaders(headers)
+                if (!headerValidation[0]) {
+                    return jsonResponse(
+                        { error: "Invalid headers:" + headerValidation[1] },
+                        401,
                     )
                 }
-
-                log.info(
-                    "[RPC Call] Received request: " +
-                        JSON.stringify(payload, null, 2),
-                    false,
-                )
-
-                let sender = ""
-                if (!noAuthMethods.includes(payload.method)) {
-                    const headers = req.headers
-                    log.info("[RPC Call] Headers: " + JSON.stringify(headers, null, 2), true)
-                    const headerValidation = validateHeaders(headers)
-                    if (!headerValidation[0]) {
-                        return new Response(
-                            JSON.stringify({
-                                error: "Invalid headers:" + headerValidation[1],
-                            }),
-                            {
-                                status: 401,
-                                headers: {
-                                    ...corsHeaders,
-                                    "Content-Type": "application/json",
-                                },
-                            },
-                        )
-                    }
-                    sender = headers.get("identity") || ""
-                }
-
-                const response = await processPayload(payload, sender)
-                return new Response(JSON.stringify(response), {
-                    headers: {
-                        ...corsHeaders,
-                        "Content-Type": "application/json",
-                    },
-                })
+                sender = headers.get("identity") || ""
             }
 
-            // Handle 404
-            return new Response("Not Found", {
-                status: 404,
-                headers: corsHeaders,
-            })
-        },
+            const response = await processPayload(payload, sender)
+            return jsonResponse(response)
+        } catch (e) {
+            return jsonResponse({ error: "Invalid request format" }, 400)
+        }
     })
 
     log.info("[RPC Call] Server is running on 0.0.0.0:" + port, true)
-    return server
+    return server.start()
 }
+
