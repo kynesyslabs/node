@@ -185,8 +185,6 @@ async function warmup() {
     indexState.SIGNALING_SERVER_PORT = await getNextAvailablePort(
         indexState.SIGNALING_SERVER_PORT,
     )
-    log.only("SIGNALING_SERVER_PORT: " + indexState.SIGNALING_SERVER_PORT)
-
     // Setting the server port to the shared state
     getSharedState.serverPort = indexState.SERVER_PORT
     // Exposed URL
