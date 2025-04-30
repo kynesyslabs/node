@@ -230,12 +230,6 @@ async function verifyLastBlockIntegrity(
 }
 
 async function downloadBlock(peer: Peer, blockToAsk: number) {
-    log.only(
-        "[downloadBlock] Requesting block: " +
-            blockToAsk +
-            " from peer: " +
-            peer.connection.string,
-    )
     const blockRequest: RPCRequest = {
         method: "nodeCall",
         params: [
@@ -250,7 +244,6 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
     const blockResponse = await peer.longCall(blockRequest, false, 250, 3, [
         404,
     ])
-    log.only("[downloadBlock] Block response received: " + blockResponse.result)
 
     // INFO: Handle max retries reached
     if (blockResponse.result === 400) {
@@ -275,9 +268,9 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
             return false
         }
 
-        log.only("[downloadBlock] Block received: " + block.hash)
+        log.info("[downloadBlock] Block received: " + block.hash)
         await Chain.insertBlock(block, [], null, false)
-        log.only(
+        log.info(
             "[fastSync] Block inserted successfully at the head of the chain!",
         )
 
@@ -325,15 +318,13 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
  * @returns True if the block was downloaded successfully, false otherwise
  */
 async function waitForNextBlock() {
-    log.only("[waitForNextBlock] Waiting for next block")
+    log.debug("[waitForNextBlock] Waiting for next block")
 
     while (getSharedState.lastBlockNumber >= latestBlock()) {
-        log.only("[waitForNextBlock] No new block. Sleeping for 250ms")
         await sleep(250)
     }
 
-    log.only("[waitForNextBlock] NEXT BLOCK GENERATED. DOWNLOADING...")
-
+    log.debug("[waitForNextBlock] NEXT BLOCK GENERATED. DOWNLOADING...")
     return await downloadBlock(
         highestBlockPeer(),
         getSharedState.lastBlockNumber + 1,
@@ -365,8 +356,6 @@ async function requestBlocks() {
         const blockToAsk = getSharedState.lastBlockNumber + 1
         // log.debug("[fastSync] Sleeping for 1 second")
         // await sleep(250)
-
-        log.debug("[fastSync] Asking peer for block: " + blockToAsk)
         try {
             await downloadBlock(peer, blockToAsk)
         } catch (error) {
@@ -377,7 +366,11 @@ async function requestBlocks() {
             }
 
             if (error instanceof PeerUnreachableError) {
-                log.only("[fastSync] Peer " + peer.identity + " is offline. Switching to the next peer.")
+                log.debug(
+                    "[fastSync] Peer " +
+                        peer.identity +
+                        " is unreachable. Switching to the next peer.",
+                )
                 seenPeers.add(peer.identity)
 
                 const highestBlockPeers = peerManager
@@ -385,13 +378,25 @@ async function requestBlocks() {
                     .filter(p => p.sync.block === latestBlock())
                     .filter(p => !seenPeers.has(p.identity))
 
+                log.info(
+                    "[fastSync] Highest block peers: " +
+                        JSON.stringify(
+                            highestBlockPeers.map(p => p.connection.string),
+                            null,
+                            2,
+                        ),
+                )
+
                 if (highestBlockPeers.length === 0) {
                     log.error("[fastSync] No more peers to try")
                     return false
                 }
 
+                log.info(
+                    "[fastSync] Switched to peer: " +
+                        highestBlockPeers[0].connection.string,
+                )
                 peer = highestBlockPeers[0]
-                break
             }
         }
     }
@@ -495,17 +500,12 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     //     return false
     // }
 
-    log.only("[fastSync] Requesting blocks")
     const synced = await requestBlocks()
-    log.only("[fastSync] Blocks downloaded")
 
     if (synced && getSharedState.fastSyncCount === 0) {
-        log.only("[fastSync] Waiting for next block")
         await waitForNextBlock()
-        log.only("[fastSync] Next block downloaded")
     }
 
-    log.only("[fastSync] Returning with value: " + synced)
     return synced
 }
 
