@@ -366,8 +366,16 @@ export default class GCR {
                     nonce: 0,
                     balance: BigInt(0),
                     identities: {
-                        xm: new Map(),
-                        web2: new Map(),
+                        xm: {},
+                        web2: {},
+                    },
+                    points: {
+                        totalPoints: 0,
+                        breakdown: {
+                            web3Wallets: 0,
+                            socialAccounts: 0,
+                        },
+                        lastUpdated: new Date(),
                     },
                 }
             }
@@ -378,8 +386,16 @@ export default class GCR {
                 nonce: 0,
                 balance: BigInt(0),
                 identities: {
-                    xm: new Map(),
-                    web2: new Map(),
+                    xm: {},
+                    web2: {},
+                },
+                points: {
+                    totalPoints: 0,
+                    breakdown: {
+                        web3Wallets: 0,
+                        socialAccounts: 0,
+                    },
+                    lastUpdated: new Date(),
                 },
             }
         }
@@ -544,8 +560,8 @@ export default class GCR {
                         content: {
                             balance: 0,
                             identities: {
-                                xm: new Map(),
-                                web2: new Map(),
+                                xm: {},
+                                web2: {},
                             },
                             txs: [],
                             nonce: 0,

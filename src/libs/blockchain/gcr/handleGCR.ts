@@ -48,7 +48,6 @@ import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import Chain from "../chain"
 import { Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
-import GCRIncentiveRoutines from "./gcr_routines/GCRIncentiveRoutines"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -274,8 +273,6 @@ export default class HandleGCR {
                     repositories.main as Repository<GCRMain>,
                     simulate,
                 )
-            case "incentive":
-                return GCRIncentiveRoutines.apply(editOperation, simulate)
             case "assign":
             case "subnetsTx":
                 // TODO implementations
@@ -478,11 +475,19 @@ export default class HandleGCR {
         account.pubkey = pubkey
         account.balance = 0n
         account.identities = {
-            xm: new Map(),
-            web2: new Map(),
+            xm: {},
+            web2: {},
         }
         account.assignedTxs = []
         account.nonce = 0
+        account.points = {
+            totalPoints: 0,
+            breakdown: {
+                web3Wallets: 0,
+                socialAccounts: 0,
+            },
+            lastUpdated: new Date(),
+        }
         return await repository.save(account)
     }
 }

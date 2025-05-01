@@ -1,4 +1,12 @@
-// TODO Implement the identity manager
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
+import Datasource from "src/model/datasource"
+import ensureGCRForUser from "./ensureGCRForUser"
+import log from "src/utilities/logger"
+import { updateJSONBValue } from "./gcrJSONBHandler"
+import { Cryptography } from "@kynesyslabs/demosdk/encryption"
+import { StoredIdentities } from "@/model/entities/types/IdentityTypes"
+import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import {
     InferFromGithubPayload,
     InferFromWritePayload,
@@ -7,7 +15,6 @@ import {
     InferFromSignaturePayload,
     InferFromTwitterPayload,
 } from "@kynesyslabs/demosdk/abstraction"
-import { ProviderIdentities, RPCResponse } from "@kynesyslabs/demosdk/types"
 import {
     EVM,
     IBC,
@@ -17,14 +24,6 @@ import {
     TON,
     XRPL,
 } from "@kynesyslabs/demosdk/xm-localsdk"
-
-import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
-import Datasource from "src/model/datasource"
-import ensureGCRForUser from "./ensureGCRForUser"
-import log from "src/utilities/logger"
-import { updateJSONBValue } from "./gcrJSONBHandler"
-import { Cryptography } from "@kynesyslabs/demosdk/encryption"
 
 /*
  * Example of a payload for the gcr_routine method
@@ -39,6 +38,7 @@ import { Cryptography } from "@kynesyslabs/demosdk/encryption"
  * }
  */
 
+// SUPPORTED CHAINS
 const chains: { [key: string]: typeof DefaultChain } = {
     solana: SOLANA,
     evm: EVM,
@@ -55,8 +55,6 @@ export default class IdentityManager {
         github: this.inferGithubIdentity,
         twitter: this.inferTwitterIdentity,
     }
-
-    // ? SUPPORTED CHAINS
 
     constructor() {}
 
@@ -289,22 +287,22 @@ export default class IdentityManager {
         const db = await Datasource.getInstance()
         const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
-        const identities = await gcrRepository.findOne({
+        const account = await gcrRepository.findOne({
             where: { pubkey: address },
             select: ["identities"],
         })
 
-        const data = identities?.identities.xm
-
-        let result = null
-
-        if (chain) {
-            result = (data[chain] || {})[subchain] || []
-        } else {
-            result = data
+        if (!account) {
+            return null
         }
 
-        return result
+        const data = account.identities.xm
+
+        if (chain) {
+            return (data[chain] || {})[subchain] || []
+        } else {
+            return data
+        }
     }
 
     static async removeXmIdentity(
@@ -370,16 +368,20 @@ export default class IdentityManager {
     // Web2 Identities
     static async getWeb2Identifiers(
         address: string,
-    ): Promise<ProviderIdentities> {
+    ): Promise<StoredIdentities["web2"] | null> {
         const db = await Datasource.getInstance()
         const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
-        const identities = await gcrRepository.findOne({
+        const account = await gcrRepository.findOne({
             where: { pubkey: address },
             select: ["identities"],
         })
 
-        return identities?.identities.web2
+        if (!account) {
+            return null
+        }
+
+        return account.identities.web2
     }
 
     static async addWeb2Identifier(
@@ -422,7 +424,14 @@ export default class IdentityManager {
             select: ["identities"],
         })
 
-        identities.identities.web2[context] = [proof]
+        // Create a proper Web2GCRData entry format
+        identities.identities.web2[context] = [
+            {
+                username: typeof proof === "string" ? proof : "",
+                proof: typeof proof === "string" ? proof : "",
+                proofHash: "",
+            },
+        ]
 
         await updateJSONBValue(
             address,

@@ -13,18 +13,15 @@ KyneSys Labs: https://www.kynesys.xyz/
 // REVIEW Pay attention to the return types (RPCResponse)
 
 import Chain from "src/libs/blockchain/chain"
-import { abstraction } from "@kynesyslabs/demosdk"
 import Mempool from "src/libs/blockchain/mempool_v2"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
 import Transaction from "src/libs/blockchain/transaction"
-// import { Transaction as TransactionType } from "@kynesyslabs/demosdk/types"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import handleL2PS from "./routines/transactions/handleL2PS"
 import { getSharedState } from "src/utilities/sharedState"
 import _ from "lodash"
-// NOTE Terminal kit for useful logging
-import terminalkit from "terminal-kit"
+import terminalKit from "terminal-kit"
 import {
     ExecutionResult,
     ValidityData,
@@ -33,7 +30,6 @@ import {
     RPCResponse,
     IWeb2Payload,
     GCREdit,
-    GCREditIncentive,
 } from "@kynesyslabs/demosdk/types"
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
@@ -55,7 +51,7 @@ import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyR
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
 import { IdentityPayload } from "@kynesyslabs/demosdk/abstraction"
-import GCRIncentiveRoutines from "../blockchain/gcr/gcr_routines/GCRIncentiveRoutines"
+import { IncentiveController } from "@/features/incentive/IncentiveController"
 /* // ! Note: this will be removed once demosWork is in place
 import {
     NativePayload,
@@ -65,7 +61,7 @@ import {
 } from "@kynesyslabs/demosdk/types"
 */
 
-const term = terminalkit.terminal
+const term = terminalKit.terminal
 
 function isReferenceBlockAllowed(referenceBlock: number, lastBlock: number) {
     return (
@@ -363,6 +359,7 @@ export default class ServerHandlers {
                     result.extra = "Error in demosWork"
                 }
                 break
+
             case "native":
                 // INFO: Just update the response text
                 result.response = {
@@ -370,16 +367,34 @@ export default class ServerHandlers {
                 }
                 result.success = true
                 break
+
             case "identity":
                 try {
-                    const { success, message } = await handleIdentityRequest(
+                    const identityResult = await handleIdentityRequest(
                         tx.content.data[1] as IdentityPayload,
+                        tx.content.from as string,
                     )
-                    const status = success ? "applied" : "not applied"
+                    const status = identityResult.success
+                        ? "applied"
+                        : "not applied"
 
-                    result.success = success
-                    result.response = {
-                        message: message + `. Transaction ${status}.`,
+                    result.success = identityResult.success
+
+                    // If we have a nested response (like from points query), include it
+                    if (identityResult.response) {
+                        result.response = identityResult.response
+                        result.extra = {
+                            message:
+                                identityResult.message +
+                                `. Transaction ${status}.`,
+                        }
+                    } else {
+                        // Default case for normal identity operations
+                        result.response = {
+                            message:
+                                identityResult.message +
+                                `. Transaction ${status}.`,
+                        }
                     }
                 } catch (e) {
                     console.error(e)
@@ -392,44 +407,13 @@ export default class ServerHandlers {
                         error: e,
                     }
                 }
-
-                break
-            case "incentive":
-                try {
-                    const incentivePayload = tx.content
-                        .data[1] as GCREditIncentive
-
-                    incentivePayload.txhash = tx.hash
-                    const incentiveResult = await GCRIncentiveRoutines.apply(
-                        incentivePayload,
-                        false,
-                    )
-
-                    result.success = incentiveResult.success
-                    result.response = incentiveResult.response
-                    result.extra = {
-                        message: incentiveResult.message,
-                    }
-                } catch (e) {
-                    console.error(e)
-                    log.error(
-                        "[handleExecuteTransaction] Error in incentive: " + e,
-                    )
-                    result.success = false
-                    result.response = {
-                        message: "Failed to process incentive request",
-                    }
-                    result.extra = {
-                        error: e,
-                    }
-                }
                 break
         }
 
         // Only if the transaction is valid we add it to the mempool
         if (result.success) {
             // REVIEW Simulating gcr edits application as we will apply them in the consensus
-            const simulate = true
+            const simulate = false
             // NOTE We apply the GCREdit to the GCR and check if it is successful. If not, we return an error
             const editsResults = await HandleGCR.applyToTx(
                 queriedTx,

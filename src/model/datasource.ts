@@ -24,7 +24,6 @@ import { GCRHashes } from "./entities/GCRv2/GCRHashes"
 import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs"
 import { GCRMain } from "./entities/GCRv2/GCR_Main"
 import { GCRTracker } from "./entities/GCR/GCRTracker"
-import { UserPointsEntity } from "./entities/UserPoints"
 
 class Datasource {
     private static instance: Datasource
@@ -54,7 +53,6 @@ class Datasource {
                 GCRTracker,
                 GCRMain,
                 GCRTracker,
-                UserPointsEntity,
             ],
             synchronize: true, // set this to false in production
             logging: false,
