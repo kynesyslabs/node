@@ -29,7 +29,7 @@ function is_first_run() {
 # If we are on the first run, we need to install the dependencies
 if is_first_run; then
     echo "Installing node dependencies"
-    if ! yarn install; then
+    if ! bun install; then
         echo "Error: Dependencies failed to install"
         exit 1
     fi
@@ -42,9 +42,9 @@ if is_first_run; then
     echo "Ok, docker compose installed"
     # Check if Bun is installed
     if ! command -v bun &> /dev/null; then
-        echo "Warning: Bun is not installed. For better performance, consider installing Bun: https://bun.sh/"
-        echo "The script will continue using Node.js instead of Bun."
-        echo "Install bun following: https://bun.sh/docs/installation if you want to use Bun for a major performance improvement"
+        echo "Error: Bun is not installed and is required to run the node (since 0.9.5)"
+        echo "Install bun following: https://bun.sh/docs/installation."
+        exit 1
     else
         echo "Ok, Bun is installed"
     fi
@@ -90,14 +90,15 @@ echo "PEER_LIST_FILE=$PEER_LIST_FILE"
 if [ ! -z "$RUNTIME" ]; then
     case $RUNTIME in
         "node")
-            START_COMMAND="yarn start"
+            echo "Error: Node runtime requested but Bun is required to run the node (since 0.9.5)"
+            exit 1
             ;;
         "bun")
             if ! command -v bun &> /dev/null; then
                 echo "Error: Bun runtime requested but Bun is not installed"
                 exit 1
             fi
-            START_COMMAND="yarn start:bun"
+            START_COMMAND="yarn start:bun" # REVIEW Consider using bun directly
             ;;
         *)
             echo "Error: Invalid runtime specified. Use 'node' or 'bun'"
@@ -107,12 +108,13 @@ if [ ! -z "$RUNTIME" ]; then
 else
     # Default behavior: Check if Bun is available and set the start command
     if command -v bun &> /dev/null; then
-        START_COMMAND="yarn start:bun"
+        START_COMMAND="yarn start:bun"  # REVIEW Consider using bun directly
     else
-        START_COMMAND="yarn start"
+        echo "Error: Bun is not installed and is required to run the node (since 0.9.5)"
+        exit 1
     fi
     # Temporary overriding
-    START_COMMAND="yarn start"
+    START_COMMAND="yarn start:bun"  # REVIEW Consider using bun directly
 fi
 
 

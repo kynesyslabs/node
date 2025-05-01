@@ -1,5 +1,6 @@
 import { BLOCKCHAIN_NAME, CrossChainManagerCalculationOptions } from "rubic-sdk"
 
+// eslint-disable-next-line @typescript-eslint/naming-convention
 export const BRIDGE_PROTOCOLS = {
     ALL: "all",
     MULTICHAIN: "multichain",

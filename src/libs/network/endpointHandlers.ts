@@ -36,7 +36,6 @@ import log from "src/utilities/logger"
 import { emptyResponse } from "./server_rpc"
 // SECTION Handlers for different types of transactions
 import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
-import multichainCapabilities from "sdk/localsdk/multichain/types/multichainCapabilities"
 import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Rename to handleXMRequest
 
 // ? Note: this is to be implemented once demosWork is in place
@@ -515,14 +514,6 @@ export default class ServerHandlers {
     // INFO This method is used to allow signed data exchanges between peers and clients
     static async handleXMChainSignedPayload(content: any): Promise<any> {
         // TODO Probably to take out
-    }
-
-    static async handleXMChainStatus(): Promise<RPCResponse> {
-        const response: RPCResponse = _.cloneDeep(emptyResponse)
-        // NOTE Remember that crosschain operations are in chainscript syntax (see chainscript_example.ts)
-        response.response = await multichainCapabilities()
-        // TODO
-        return response
     }
 
     // Proxy method for handleDemosWorkRequest

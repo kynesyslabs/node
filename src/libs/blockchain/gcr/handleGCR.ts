@@ -428,7 +428,6 @@ export default class HandleGCR {
         web2: assignWeb2,
         identity: {
             assignFromWrite: IdentityManager.inferIdentityFromWrite,
-            assignFromSignature: IdentityManager.inferIdentityFromSignature,
         },
     }
 

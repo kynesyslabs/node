@@ -1,9 +1,9 @@
 import Block from "@/libs/blockchain/block"
 import {
-    ISignature,
     Transaction,
-    TransactionContent,
 } from "@kynesyslabs/demosdk/types"
+import type { ISignature } from "@kynesyslabs/demosdk/types"
+import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import {
     BeforeInsert,
     Column,

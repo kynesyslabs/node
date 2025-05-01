@@ -16,8 +16,8 @@ export default class SharedState {
 
     // !SECTION Constants
     prod = process.env.PROD == "true" || false
-    version = "0.9.0"
-    version_name = "Prismatic Evolution"
+    version = "0.9.5"
+    version_name = "Entangled Polymer"
 
     block_time = 10 // TODO Get it from the genesis (or see Consensus module)
 
@@ -38,6 +38,10 @@ export default class SharedState {
     inPeerRecheckLoop = false
     inPeerGossip = false
     startingConsensus = false
+    isSignalingServerStarted = false
+
+    // Running as a node (is false when running specific modules like the signaling server)
+    runningAsNode = true
 
     // Mempool
     inGetMempool = false

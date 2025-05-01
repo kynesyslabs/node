@@ -1,12 +1,12 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
-import RubicService from "../../features/bridges/rubic" 
+import RubicService from "../../features/bridges/rubic"
 import { emptyResponse } from "./server_rpc"
 import { WrappedCrossChainTrade } from "rubic-sdk"
 
 interface BridgePayload {
-    method: string,
-    chain: string,
+    method: string
+    chain: string
     params: any[] // ? Define the params type or nah
 }
 
@@ -14,11 +14,11 @@ export default async function manageBridges(
     sender: string,
     payload: BridgePayload,
 ): Promise<RPCResponse> {
-    let response = _.cloneDeep(emptyResponse)
+    const response = _.cloneDeep(emptyResponse)
     response.result = 200
 
     const { method, chain, params } = payload
-    let rubicService = new RubicService(sender, chain)
+    const rubicService = new RubicService(sender, chain)
     await rubicService.waitForInitialization()
 
     switch (method) {
@@ -26,7 +26,7 @@ export default async function manageBridges(
             response.response = await rubicService.getTrade(params[0])
             break
 
-        case "execute_trade":
+        case "execute_trade": {
             const trade = await rubicService.getTrade(params[0])
 
             if (trade instanceof Error) {
@@ -37,14 +37,15 @@ export default async function manageBridges(
 
             response.response = await rubicService.executeTrade(trade)
             break
+        }
 
-        case "execute_mock_trade":
-            const mockTrade = params[0] as WrappedCrossChainTrade;
-            mockTrade.trade.swap = async () => "0x1234567890abcdef",
-            mockTrade.trade.needApprove = async () => false,
-            
-            response.response = await rubicService.executeTrade(mockTrade)
+        case "execute_mock_trade": {
+            const mockTrade = params[0] as WrappedCrossChainTrade
+            ;(mockTrade.trade.swap = async () => "0x1234567890abcdef"),
+                (mockTrade.trade.needApprove = async () => false),
+                (response.response = await rubicService.executeTrade(mockTrade))
             break
+        }
 
         default:
             response.response = false

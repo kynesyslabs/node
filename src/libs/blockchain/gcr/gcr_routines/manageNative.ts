@@ -1,7 +1,5 @@
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import Datasource from "src/model/datasource"
-import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 
 // import Block from "../../block"
 // import Chain from "../../chain"
