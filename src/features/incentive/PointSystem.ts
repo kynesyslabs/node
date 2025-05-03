@@ -29,8 +29,11 @@ export class PointSystem {
         linkedWallets: string[]
         linkedSocials: { twitter?: string }
     }> {
-        const xmIdentities = await IdentityManager.getXmIdentities(userId)
-        const web2Identities = await IdentityManager.getWeb2Identifiers(userId)
+        const xmIdentities = await IdentityManager.getIdentities(userId)
+        const web2Identities = await IdentityManager.getWeb2Identities(
+            userId,
+            "github",
+        )
 
         const linkedWallets: string[] = []
 
