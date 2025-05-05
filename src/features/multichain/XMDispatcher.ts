@@ -1,14 +1,10 @@
 /* eslint-disable no-unused-vars */
-import {
-    DerivableNative, deriveMempoolOperation,
-} from "src/libs/utils/demostdlib/deriveMempoolOperation"
 // INFO Entry point for multichain requests
-import { json } from "stream/consumers"
 
 import XMParser from "./routines/XMParser"
 import { XMScript } from "@kynesyslabs/demosdk/types"
 
-export default class multichainDispatcher {
+export default class MultichainDispatcher {
     // INFO Digesting the request from the server
     static async digest(data: XMScript): Promise<any> {
         console.log("\n\n")
@@ -39,8 +35,9 @@ export default class multichainDispatcher {
         console.log("\n===== END OF ANALYSIS ===== \n")
         console.log("[XMChain Digestion] Proceeding: execution phase")
         // REVIEW Execute
-        let result = await multichainDispatcher.execute(data)
+        const result = await MultichainDispatcher.execute(data)
         // TODO Implement a response schema
+        // eslint-disable-next-line @typescript-eslint/naming-convention
         return JSON.stringify(result, (_, v) =>
             typeof v === "bigint" ? v.toString() : v,
         ) // await multichainDispatcher.execute(data)

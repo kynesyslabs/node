@@ -1,6 +1,5 @@
-import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import Datasource from "src/model/datasource"
-import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 
 // import Block from "../../block"
 // import Chain from "../../chain"
@@ -13,66 +12,50 @@ import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistr
 // SECTION Balance management
 
 // INFO Get the balance of a user
-async function balance(PublicKey: string): Promise<number> {
+async function balance(publicKey: string): Promise<bigint> {
     const db = await Datasource.getInstance()
-    const GCRRepository = db.getDataSource().getRepository(GlobalChangeRegistry)
-    const status = await GCRRepository.findOneBy({ publicKey: PublicKey })
-    return status.details.content.balance
+    const gcrRepository = db.getDataSource().getRepository(GCRMain)
+    const status = await gcrRepository.findOneBy({ pubkey: publicKey })
+    return status.balance
 }
 
 // INFO Arbitrary function to set the balance of a user
 async function setBalance(
     publicKey: string,
-    balance: number,
+    balance: bigint,
 ): Promise<[boolean, string]> {
-    const rawData: GlobalChangeRegistry = {
-        id: null,
-        publicKey: publicKey,
-        details: {
-            hash: "",
-            content: {
-                balance: balance,
-                nonce: null,
-                identities: null,
-                txs: null,
-            },
+    const rawData: GCRMain = {
+        assignedTxs: [],
+        identities: {
+            xm: {},
+            web2: {},
         },
-        extended: {
-            tokens: [],
-            nfts: [],
-            xm: [],
-            web2: [],
-            other: [],
-        },
+        balance: BigInt(balance),
+        nonce: 0,
+        pubkey: publicKey,
     }
 
     const db = await Datasource.getInstance()
-    const GCRRepository = db.getDataSource().getRepository(GlobalChangeRegistry)
-    let GCRSearch = await GCRRepository.findOneBy({ publicKey: publicKey })
-    if (!GCRSearch) {
-        GCRSearch = {
-            id: null,
-            publicKey: publicKey,
-            details: rawData.details,
-            extended: rawData.extended,
-        }
+    const gcrRepository = db.getDataSource().getRepository(GCRMain)
+    let gcrSearch = await gcrRepository.findOneBy({ pubkey: publicKey })
+
+    if (!gcrSearch) {
+        gcrSearch = rawData
     }
+
     // Keeping the things we need and just updating the balance
-    let GCRUpdate = GCRSearch
-    GCRUpdate.details.content.balance = balance
-    // Hashing the GCR
-    GCRUpdate.details.hash = Hashing.sha256(
-        JSON.stringify(GCRUpdate.details.content),
-    )
+    const gcrUpdate = gcrSearch
+    gcrUpdate.balance = BigInt(balance)
+
     // Saving the GCR
-    await GCRRepository.save(GCRUpdate)
+    await gcrRepository.save(gcrUpdate)
     return [true, ""]
 }
 
 // INFO Add a balance to a user
 async function addBalance(
     address: string,
-    amount: number,
+    amount: bigint,
 ): Promise<[boolean, string]> {
     // Get the current balance
     const currentBalance = await balance(address)
@@ -86,7 +69,7 @@ async function addBalance(
 // INFO Remove a balance from a user
 async function removeBalance(
     address: string,
-    amount: number,
+    amount: bigint,
 ): Promise<[boolean, string]> {
     // Get the current balance
     const currentBalance = await balance(address)
@@ -103,23 +86,23 @@ async function removeBalance(
 
 // INFO Transfer a balance from one user to another
 async function transferBalance(
-    address_from: string,
-    address_to: string,
-    amount: number,
+    addressFrom: string,
+    addressTo: string,
+    amount: bigint,
 ): Promise<[boolean, string]> {
     // Remove the amount from the sender
-    let success = await removeBalance(address_from, amount)
+    const success = await removeBalance(addressFrom, amount)
     if (!success[0]) {
         return [false, success[1]]
     }
     // Add the amount to the receiver
-    await addBalance(address_to, amount)
+    await addBalance(addressTo, amount)
     return [true, ""]
 }
 
 // !SECTION balance management
 
-let manageNative = {
+const manageNative = {
     balance: {
         transferBalance: transferBalance,
         addBalance: addBalance,

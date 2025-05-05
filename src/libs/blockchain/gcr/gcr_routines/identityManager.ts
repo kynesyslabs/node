@@ -1,24 +1,25 @@
 // TODO Implement the identity manager
-import { abstraction } from "@kynesyslabs/demosdk"
-import { xmcore } from "@kynesyslabs/demosdk"
-import Datasource from "src/model/datasource"
-// TODO Remove unused imports once you finish the identity manager
-import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
-import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
-import { Validators } from "src/model/entities/Validators"
-import terminalkit from "terminal-kit"
-import { LessThanOrEqual } from "typeorm"
 import {
-    Operation,
-    OperationRegistrySlot,
-    OperationResult,
-} from "@kynesyslabs/demosdk/types"
+    InferFromWritePayload,
+    InferFromSignatureTargetIdentityPayload,
+    InferFromSignaturePayload,
+} from "@kynesyslabs/demosdk/abstraction"
+import {
+    EVM,
+    IBC,
+    MULTIVERSX,
+    NEAR,
+    SOLANA,
+    TON,
+    XRPL,
+    BTC,
+} from "@kynesyslabs/demosdk/xm-localsdk"
 
-import Chain from "../../chain"
-import executeOperations, { Actor } from "../../routines/executeOperations"
-import gcrStateSave from "../gcr_routines/gcrStateSaverHelper"
-import { Cryptography } from "node_modules/@kynesyslabs/demosdk/build/encryption"
-/**
+import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
+import ensureGCRForUser from "./ensureGCRForUser"
+import log from "src/utilities/logger"
+
+/*
  * Example of a payload for the gcr_routine method
  * payload = {
  *     method: "gcr_routine",
@@ -31,75 +32,125 @@ import { Cryptography } from "node_modules/@kynesyslabs/demosdk/build/encryption
  * }
  */
 
-/** TODO
- * - We should use XM (xmcore) to verify the signature based on the public key and the network
- * e.g.:
- * 
-        let solana = xmcore.SOLANA.createInstance("url")
-        let isValid = solana.verifyMessage("message", Uint8Array.from("signature"), Uint8Array.from("publicKey"))
- * - Once we have the identity, we should store it in the database updating the identity table
- */
+const chains: { [key: string]: typeof DefaultChain } = {
+    solana: SOLANA,
+    evm: EVM,
+    egld: MULTIVERSX,
+    ton: TON,
+    xrpl: XRPL,
+    ibc: IBC,
+    near: NEAR,
+    // @ts-expect-error - BTC module contains more fields than the DefaultChain type
+    btc: BTC,
+}
 
 export default class IdentityManager {
     constructor() {}
 
     // Infer identity from a valid write transaction
     static async inferIdentityFromWrite(
-        payload: abstraction.InferFromWritePayload,
+        payload: InferFromWritePayload,
     ): Promise<string | false> {
         // TODO Implement: check if the transaction is valid and assign the identity to the target address
         return false
     }
 
-    // Infer identity from a valid signature
-    static async inferIdentityFromSignature(
-        payload: abstraction.InferFromSignaturePayload,
-    ): Promise<[boolean, string]> {
-        // Get and verify the demos identity from the payload
-        let [isValid, demosIdentity] =
-            await this.verifyDemosIdentitiesFromPayload(payload)
-        if (!isValid) {
-            return [false, "Demos Identity could not be verified"]
+    // Verify the payload signature
+    static async verifyPayload(
+        payload: InferFromSignaturePayload,
+    ): Promise<{ success: boolean; message: string }> {
+        const chainId = payload.target_identity.chain
+        // @ts-expect-error - This is a workaround to avoid type errors
+        const sdk = await chains[chainId].create(null)
+
+        const { signedData, signature, publicKey, targetAddress } =
+            payload.target_identity as unknown as InferFromSignatureTargetIdentityPayload
+
+        let messageVerified = false
+        try {
+            if (
+                chainId === "xrpl" ||
+                chainId === "ton" ||
+                chainId === "ibc" ||
+                chainId === "near"
+            ) {
+                messageVerified = await sdk.verifyMessage(
+                    signedData,
+                    signature,
+                    publicKey,
+                )
+            } else {
+                messageVerified = await sdk.verifyMessage(
+                    signedData,
+                    signature,
+                    targetAddress,
+                )
+            }
+
+            if (!messageVerified) {
+                return {
+                    success: false,
+                    message: "Message could not be verified",
+                }
+            }
+
+            return {
+                success: true,
+                message: "Message verified",
+            }
+        } catch (error) {
+            log.error("Error: " + error)
+            return {
+                success: false,
+                message: error.toString(),
+            }
         }
-        let idVerified = false
-        // Check if the target chain is evm and verify the signature with xmcore
-        if (payload.target_identity.isEVM) {
-            let evmInstance = await xmcore.EVM.create("") // ! Add the right provider or allow to create the instance without it
-            idVerified = await evmInstance.verifyMessage(
-                payload.target_identity.signedData,
-                payload.target_identity.signature,
-                payload.target_identity.targetAddress,
-            )
-        } else {
-            // TODO 3b. If the target chain is not evm, verify the signature through xmcore (see above) based on the public key and the network
-        }
-        // If valid, store the identity in the database
-        if (idVerified) {
-            return [false, "not implemented"] // ! Implement the identity storage in the database
-        }
-        // TODO 5. Based on the result, return the identity or false
-        return [true, ""] // ? Better types
     }
 
-    // SECTION Helper functions
-
-    // Verify demos identities from payload
-    static async verifyDemosIdentitiesFromPayload(
-        payload:
-            | abstraction.InferFromSignaturePayload
-            | abstraction.InferFromWritePayload,
-    ): Promise<[boolean, string]> {
-        let demosIdentity = payload.demos_identity.address
-        let demosIdentitySignature = payload.demos_identity.signature
-        let demosIdentitySignedData = payload.demos_identity.signedData
-        let isValid = Cryptography.verify(
-            demosIdentitySignedData,
-            demosIdentitySignature,
-            demosIdentity,
-        )
-        if (!isValid) {
-            return [false, "Demos Identity could not be verified"]
+    // SECTION Helper functions and Getters
+    /**
+     * Get the identities related to a demos address
+     * @param address - The address to get the identities of
+     * @param chain - The chain to get the identities of
+     * @param subchain - The subchain to get the identities of
+     * @returns The identities of the address
+     */
+    static async getXmIdentities(
+        address: string,
+        chain: string,
+        subchain: string,
+    ) {
+        if (!chain && !subchain) {
+            return null
         }
-        return [true, demosIdentity]
+
+        const data = await this.getIdentities(address, "xm")
+        return (data[chain] || {})[subchain] || []
+    }
+
+    /**
+     * Get the web2 identities related to a demos address
+     * @param address - The address to get the identities of
+     * @param context - The context of the identities to get
+     * @returns The identities of the address
+     */
+    static async getWeb2Identities(address: string, context: string) {
+        const data = await this.getIdentities(address, "web2")
+        return data[context] || []
+    }
+
+    /**
+     * Get the identities related to a demos address
+     * @param address - The address to get the identities of
+     * @param key - The key to get the identities of
+     * @returns The identities of the address
+     */
+    static async getIdentities(address: string, key?: string): Promise<any> {
+        const gcr = await ensureGCRForUser(address)
+        if (key) {
+            return gcr.identities[key]
+        }
+
+        return gcr.identities
     }
 }

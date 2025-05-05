@@ -52,8 +52,6 @@ export default async function manageConsensusRoutines(
     const inConsensus = isConsensusTime || isConsensusRunning
 
     if (!inConsensus) {
-        log.error("[manageConsensusRoutines] Consensus time not reached")
-        log.error("payload: " + JSON.stringify(payload, null, 2))
         response.result = 400
         response.response =
             "Consensus time not reached (checked by manageConsensusRoutines)"
@@ -161,20 +159,25 @@ export default async function manageConsensusRoutines(
 
                 const manager = SecretaryManager.getInstance()
 
+                // INFO: Seed check
                 if (
-                    manager.shard.blockRef == blockRef &&
-                    seed !== manager.shard.CVSA
+                    manager.shard?.blockRef == blockRef &&
+                    seed !== manager.shard?.CVSA
                 ) {
                     // TODO: Remove this block after testing!
-                    setTimeout(() => {
-                        log.debug("our seed: " + manager.shard.CVSA)
-                        log.debug(
-                            "payload params: " +
-                                JSON.stringify(payload.params, null, 2),
-                        )
-                        log.error("Invalid seed detected")
-                        process.exit(0)
-                    }, 500)
+                    // setTimeout(() => {
+                    //     log.debug("our seed: " + manager.shard.CVSA)
+                    //     log.debug(
+                    //         "payload params: " +
+                    //             JSON.stringify(payload.params, null, 2),
+                    //     )
+                    //     log.error("Invalid seed detected")
+                    //     process.exit(0)
+                    // }, 500)
+                    // INFO: Logs parts used to create the current CVSA
+                    await getCommonValidatorSeed(null, (message: string) => {
+                        log.only(message)
+                    })
 
                     return {
                         result: 200,
@@ -184,7 +187,7 @@ export default async function manageConsensusRoutines(
                     }
                 }
 
-                // INFO: Authenticate the request
+                // INFO: Authentication
                 const isSignatureValid = Cryptography.verify(
                     peerKey,
                     peerSignature,
@@ -200,7 +203,10 @@ export default async function manageConsensusRoutines(
 
                 // INFO: If we receive a setValidatorPhase request, and the
                 // secretary routine has not started, wait for it to start
-                if (!manager.runSecretaryRoutine) {
+                if (
+                    !manager.runSecretaryRoutine ||
+                    blockRef > manager.shard.blockRef
+                ) {
                     try {
                         await Waiter.wait(
                             peerKey + Waiter.keys.WAIT_FOR_SECRETARY_ROUTINE,
@@ -217,6 +223,13 @@ export default async function manageConsensusRoutines(
                             "Error waiting for the secretary routine to start"
                         return response
                     }
+                }
+
+                if (blockRef < manager.shard.blockRef) {
+                    response.result = 400
+                    response.response =
+                        "Block reference is lower than the current block reference"
+                    return response
                 }
 
                 const isUs =

@@ -12,7 +12,6 @@ import {
     BrowserRequest,
     BundleContent,
     IWeb2Payload,
-    IWeb2Request,
     RPCRequest,
     RPCResponse,
 } from "@kynesyslabs/demosdk/types"
@@ -29,10 +28,12 @@ import { HelloPeerRequest, manageHelloPeer } from "./manageHelloPeer"
 import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
 import { manageNodeCall, NodeCall } from "./manageNodeCall"
 import { registerMethodListingEndpoint } from "./methodListing"
-import { rpcSchema, setupOpenAPI } from "./openApiSpec"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
-import { processWeb2Payload } from "src/features/web2/routines/web2PayloadProcessor"
+import { rpcSchema, setupOpenAPI } from "./openApiSpec"
+import { skeletons } from "@kynesyslabs/demosdk/websdk"
 import required from "src/utilities/required"
+import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
+import manageBridges from "./manageBridge"
 
 // Reading the port from sharedState
 
@@ -158,28 +159,15 @@ async function processPayload(
             return await manageConsensusRoutines(payload.params[0])
 
         case "gcr_routine":
-            return await manageGCRRoutines(payload.params[0])
+            return await manageGCRRoutines(sender, payload.params[0])
+
+        case "bridge":
+            return await manageBridges(sender, payload.params[0])
 
         case "web2ProxyRequest": {
-            const rawPayload = payload.params[0]
-            required(
-                rawPayload.message,
-                "Web2 proxy request message is required",
-            )
-            const {
-                sessionId,
-                payload: payloadData,
-                authorization,
-                ...messageData
-            } = rawPayload.message
-            const web2Request = processWeb2Payload(messageData)
+            const params = parseWeb2ProxyRequest(payload.params[0])
 
-            return await handleWeb2ProxyRequest(
-                web2Request,
-                sessionId,
-                payloadData,
-                authorization,
-            )
+            return await handleWeb2ProxyRequest(params)
         }
 
         default:
@@ -196,7 +184,7 @@ async function processPayload(
 }
 /* End of processor method */
 
-export default async function server_rpc(): Promise<FastifyInstance> {
+export default async function serverRpc(): Promise<FastifyInstance> {
     const port = getSharedState.serverPort
     const serverApp: FastifyInstance = fastify()
     await serverApp.register(fastifyCors, {
@@ -295,16 +283,17 @@ export default async function server_rpc(): Promise<FastifyInstance> {
 
             // Header check
             const headers = req.headers
-            var sender = ""
+            let sender = ""
             // Excluding due to noAuthMethods from header validation
             if (!noAuthMethods.includes(payload.method)) {
-                var header_validation = validateHeaders(headers)
+                const headerValidation = validateHeaders(headers)
+                
                 log.info(
-                    "[RPC Call] Header validation: " + header_validation[0],
+                    "[RPC Call] Header validation: " + headerValidation[0],
                 )
-                if (!header_validation[0]) {
+                if (!headerValidation[0]) {
                     reply.status(401).send({
-                        error: "Invalid headers:" + header_validation[1],
+                        error: "Invalid headers:" + headerValidation[1],
                     })
                     return
                 }
@@ -315,18 +304,27 @@ export default async function server_rpc(): Promise<FastifyInstance> {
                 "[RPC Call] Payload: " + JSON.stringify(payload, null, 2),
                 false,
             )
-            const response = await processPayload(payload, sender)
-            log.info(
-                "[RPC Call] Response ready: sending it to the client...",
-                false,
-            )
-            log.info(
-                "[RPC Call] Response: " + JSON.stringify(response, null, 2),
-                false,
-            )
+            // REVIEW To avoid crashes, we catch all unhandled exceptions and return a 500 error
+            try {
+                const response = await processPayload(payload, sender)
+                log.info(
+                    "[RPC Call] Response ready: sending it to the client...",
+                    false,
+                )
+                log.info(
+                    "[RPC Call] Response: " + JSON.stringify(response, null, 2),
+                    false,
+                )
 
-            reply.header("Access-Control-Allow-Origin", "*")
-            reply.send(response)
+                reply.header("Access-Control-Allow-Origin", "*")
+                reply.send(response)
+            } catch (error) {
+                log.error("[RPC Call] Error: " + error, true)
+                reply.status(500).send({
+                    error: "Internal server error",
+                    details: error,
+                })
+            }
         },
     )
 
@@ -341,4 +339,230 @@ export default async function server_rpc(): Promise<FastifyInstance> {
     // await serverApp.register(helmet)
 
     return serverApp
+}
+
+/** NOTE
+ *  REVIEW
+ *  This is a Bun server implementation. It is not used yet.
+ *  Hopefully, we can drop in replace the Fastify server with this one.
+ *  See createServer() for an experimental smart selector of the server implementation.
+ */
+export async function serverRpcBun() {
+    const port = getSharedState.serverPort
+
+    // Helper to convert request to RPCRequest format
+    async function parseRPCRequest(req: Request): Promise<RPCRequest | null> {
+        try {
+            const body = await req.json()
+            if (isRPCRequest(body)) {
+                return body
+            }
+        } catch (e) {
+            return null
+        }
+        return null
+    }
+
+    // Helper to handle CORS headers
+    const corsHeaders = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+    }
+
+    // ? Bun should be defined
+    // eslint-disable-next-line no-undef
+    const server = Bun.serve({
+        port: port,
+        hostname: "0.0.0.0",
+        async fetch(req) {
+            const url = new URL(req.url)
+
+            // Handle CORS preflight
+            if (req.method === "OPTIONS") {
+                return new Response(null, {
+                    headers: corsHeaders,
+                })
+            }
+
+            // GET endpoints
+            if (req.method === "GET") {
+                switch (url.pathname) {
+                    case "/":
+                        return new Response("Hello, World!", {
+                            headers: corsHeaders,
+                        })
+                    case "/info":
+                        var info = await sharedState.getInstance().getInfo()
+                        return new Response(
+                            JSON.stringify({
+                                version: getSharedState.version,
+                                version_name: getSharedState.version_name,
+                                ...info,
+                            }),
+                            {
+                                headers: {
+                                    ...corsHeaders,
+                                    "Content-Type": "application/json",
+                                },
+                            },
+                        )
+                    case "/version":
+                        return new Response(
+                            JSON.stringify(getSharedState.version),
+                            {
+                                headers: {
+                                    ...corsHeaders,
+                                    "Content-Type": "application/json",
+                                },
+                            },
+                        )
+                    case "/publickey":
+                        return new Response(
+                            JSON.stringify(
+                                getSharedState.identity.ed25519.publicKey.toString(
+                                    "hex",
+                                ),
+                            ),
+                            {
+                                headers: {
+                                    ...corsHeaders,
+                                    "Content-Type": "application/json",
+                                },
+                            },
+                        )
+                    case "/connectionstring":
+                        return new Response(
+                            JSON.stringify(
+                                await getSharedState.getConnectionString(),
+                            ),
+                            {
+                                headers: {
+                                    ...corsHeaders,
+                                    "Content-Type": "application/json",
+                                },
+                            },
+                        )
+                    case "/peerlist":
+                        return new Response(
+                            JSON.stringify(
+                                PeerManager.getInstance().getPeers(),
+                            ),
+                            {
+                                headers: {
+                                    ...corsHeaders,
+                                    "Content-Type": "application/json",
+                                },
+                            },
+                        )
+                    case "/public_logs":
+                        return new Response(
+                            JSON.stringify(log.getPublicLogs()),
+                            {
+                                headers: {
+                                    ...corsHeaders,
+                                    "Content-Type": "application/json",
+                                },
+                            },
+                        )
+                    case "/diagnostics":
+                        return new Response(
+                            JSON.stringify(log.getDiagnostics()),
+                            {
+                                headers: {
+                                    ...corsHeaders,
+                                    "Content-Type": "application/json",
+                                },
+                            },
+                        )
+                }
+            }
+
+            // Main RPC endpoint (POST /)
+            if (req.method === "POST" && url.pathname === "/") {
+                const payload = await parseRPCRequest(req)
+                if (!payload) {
+                    return new Response(
+                        JSON.stringify({ error: "Invalid request format" }),
+                        {
+                            status: 400,
+                            headers: {
+                                ...corsHeaders,
+                                "Content-Type": "application/json",
+                            },
+                        },
+                    )
+                }
+
+                log.info(
+                    "[RPC Call] Received request: " +
+                        JSON.stringify(payload, null, 2),
+                    false,
+                )
+
+                let sender = ""
+                if (!noAuthMethods.includes(payload.method)) {
+                    const headers = req.headers
+                    const headerValidation = validateHeaders(headers)
+                    if (!headerValidation[0]) {
+                        return new Response(
+                            JSON.stringify({
+                                error: "Invalid headers:" + headerValidation[1],
+                            }),
+                            {
+                                status: 401,
+                                headers: {
+                                    ...corsHeaders,
+                                    "Content-Type": "application/json",
+                                },
+                            },
+                        )
+                    }
+                    sender = headers.get("identity") || ""
+                }
+
+                const response = await processPayload(payload, sender)
+                return new Response(JSON.stringify(response), {
+                    headers: {
+                        ...corsHeaders,
+                        "Content-Type": "application/json",
+                    },
+                })
+            }
+
+            // Handle 404
+            return new Response("Not Found", {
+                status: 404,
+                headers: corsHeaders,
+            })
+        },
+    })
+
+    log.info("[RPC Call] Server is running on 0.0.0.0:" + port, true)
+    return server
+}
+
+// Smart server creation based on bun/node
+/** Example
+
+import { createServer } from "./libs/network/server_rpc"
+
+// This will automatically use the appropriate server implementation
+const server = await createServer()
+
+ */
+export async function createServer() {
+    // Check if we're running in Bun
+    const isBun =
+        typeof process !== "undefined" &&
+        typeof process.versions === "object" &&
+        "bun" in process.versions
+
+    if (isBun) {
+        log.info("[RPC Call] Using Bun server implementation")
+        return await serverRpcBun()
+    } else {
+        log.info("[RPC Call] Using Fastify server implementation")
+        return await serverRpc()
+    }
 }

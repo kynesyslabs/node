@@ -10,7 +10,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 // NOTE Each NFT has its own property
-interface singleNFTProperty {
+interface SingleNFTProperty {
     name: string
     value: string
 }
@@ -19,9 +19,9 @@ interface singleNFTProperty {
 class SingleNFT {
     id: number
     image: string
-    properties: singleNFTProperty[]
+    properties: SingleNFTProperty[]
 
-    constructor(id: number, image: string, properties: singleNFTProperty[]) {
+    constructor(id: number, image: string, properties: SingleNFTProperty[]) {
         this.id = id
         this.image = image
         this.properties = properties
@@ -47,8 +47,8 @@ export default class NFT {
     }
 
     // INFO Adding a new item to the NFT items list
-    setItem(image: string, properties: singleNFTProperty[]) {
-        let id = this.items.length + 1
+    setItem(image: string, properties: SingleNFTProperty[]) {
+        const id = this.items.length + 1
         this.items.push(new SingleNFT(id, image, properties))
     }
 }

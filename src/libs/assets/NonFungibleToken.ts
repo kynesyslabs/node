@@ -1,25 +1,25 @@
 // INFO Basic extensible non fungible token implementation
 
 // Internal metadata for single tokens
-interface tokenMetadata {
+interface TokenMetadata {
     name: string
     description: string
     // Other metadata specific to this NFT can be added here
 }
 
 // Interface for the whole token metadata representation
-interface tokenMetadataInterface {
+interface TokenMetadataInterface {
     tokenID: string
-    metadata: tokenMetadata
+    metadata: TokenMetadata
 }
 
 // A NFT contract like this implements the above interfaces
-export default class nonFungibleToken {
+export default class NonFungibleToken {
     public tokenType: string
     public tokenName: string
     public symbol: string
     public totalSupply: string
-    public tokenMetadata: tokenMetadataInterface[]
+    public tokenMetadata: TokenMetadataInterface[]
 
     constructor() {}
 }

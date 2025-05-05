@@ -11,22 +11,25 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { pki } from "node-forge"
 
-import { BlockContent } from "@kynesyslabs/demosdk/types"
+import { BlockContent, Block as BlockType } from "@kynesyslabs/demosdk/types"
 import { Peer } from "../peer"
 
 // NOTE Block class
-export default class Block {
+export default class Block implements BlockType {
+    id: number
     number: number
     hash: string
     content: BlockContent
-    status: string
+    status:  "derived" | "confirmed"
     proposer: pki.PublicKey | pki.ed25519.BinaryBuffer
-    validation_data: any
+    next_proposer: string
+    validation_data: { signatures: { [key: string]: string } }
 
     constructor() {
         this.number = null
         this.hash = null // Calculated on the content
         this.status = null
+        this.next_proposer = ""
         this.content = {
             ordered_transactions: [],
             encrypted_transactions_hashes: new Map(), // REVIEW This should work already as it is not enforced in the database as a field
@@ -50,7 +53,7 @@ export default class Block {
 
     // INFO The header is the smallest placeholder to verify a block health
     getHeader(): any {
-        let header = {
+        const header = {
             number: this.number,
             hash: this.hash,
             status: this.status,

@@ -33,19 +33,19 @@ Each block, the nodes execute the Operation objects ordering them by their times
 export default async function executeNativeTransaction(
     transaction: Transaction,
 ): Promise<[boolean, string, Operation[]?]> {
-    let success: boolean = true
-    let message: string = ""
-    let operations: Operation[] = []
+    let success = true
+    let message = ""
+    const operations: Operation[] = []
 
     // ANCHOR Managing simple value transfer
     if (transaction.content.amount > 0) {
         let operation: Operation
-        let sender = transaction.content.from.toString("hex")
-        let sender_balance = await GCR.getGCRNativeBalance(sender)
-        let receiver = transaction.content.to.toString("hex")
-        let receiver_balance = await GCR.getGCRNativeBalance(receiver)
+        const sender = transaction.content.from.toString("hex")
+        const senderBalance = await GCR.getGCRNativeBalance(sender)
+        const receiver = transaction.content.to.toString("hex")
+        const receiverBalance = await GCR.getGCRNativeBalance(receiver)
         // Refuse transaction if GCR is not in shape
-        if (sender_balance < transaction.content.amount) {
+        if (senderBalance < transaction.content.amount) {
             success = false
             message = "Insufficient funds"
             return [success, message]

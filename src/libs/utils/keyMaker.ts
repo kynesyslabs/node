@@ -31,7 +31,7 @@ async function main() {
     }
 
     // Loading or generating the identity
-    let identity = await ensureIdentity()
+    const identity = await ensureIdentity()
     const publicKey = identity.publicKey.toString("hex")
     const privateKey = identity.privateKey.toString("hex")
     console.log("\n\n====\nPublic Key:", publicKey)

@@ -1,13 +1,13 @@
 import Block from "src/libs/blockchain/block"
-import { NativeTablesHashes } from "@kynesyslabs/demosdk/types"
+import { type NativeTablesHashes } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import Cryptography from "src/libs/crypto/cryptography"
-import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import Peer from "src/libs/peer/Peer"
 import hashGCRTables from "src/libs/blockchain/gcr/gcr_routines/hashGCR"
+import getCommonValidatorSeed from "./getCommonValidatorSeed"
 
 export async function createBlock(
     orderedTransactions: Transaction[],
@@ -24,7 +24,7 @@ export async function createBlock(
         return getSharedState.candidateBlock
     }
     // Creating the block
-    var block = new Block()
+    const block = new Block()
     block.content.ordered_transactions = orderedTransactions.map(
         transaction => transaction.hash,
     )
@@ -33,9 +33,11 @@ export async function createBlock(
     block.proposer = commonValidatorSeed // This is the shard identifier
     block.number = blockNumber
     block.content.native_tables_hashes = await hashNativeTables()
+    block.content.timestamp = getSharedState.lastConsensusTime
+    block.content.timestamp = getSharedState.lastConsensusTime
     block.hash = Hashing.sha256(JSON.stringify(block.content))
     // Signing the block and adding the signature to the block validation data
-    let blockSignature = Cryptography.sign(
+    const blockSignature = Cryptography.sign(
         block.hash,
         getSharedState.identity.ed25519.privateKey,
     )
@@ -48,9 +50,15 @@ export async function createBlock(
     block.validation_data.signatures[ // ! Define a decent type for validation_data
         getSharedState.identity.ed25519.publicKey.toString("hex")
     ] = blockSignature.toString("hex")
+
     /* NOTE - The block timestamp is the average timestamp of the shard 
     see averageTimestamp.ts for more details */
-    block.content.timestamp = getSharedState.lastConsensusTime
+
+    const { commonValidatorSeed: nextProposer } = await getCommonValidatorSeed(
+        block as any,
+    )
+    log.debug("nextProposer: " + nextProposer)
+    block.next_proposer = nextProposer
     // Add the candidate to the shared state
     getSharedState.candidateBlock = block
     return block
@@ -59,7 +67,7 @@ export async function createBlock(
 // NOTE Proxy for hashGCRTables
 export async function hashNativeTables(): Promise<NativeTablesHashes> {
     // TODO
-    let hashes: NativeTablesHashes = await hashGCRTables()
+    const hashes: NativeTablesHashes = await hashGCRTables()
     // TODO
     return hashes
 }

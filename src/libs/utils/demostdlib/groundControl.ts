@@ -11,12 +11,12 @@ import * as fs from "fs"
 import http from "node:http"
 import https from "node:https"
 import { PeerManager } from "src/libs/peer"
-import required, { requiredOutcome } from "src/utilities/required"
+import required, { RequiredOutcome } from "src/utilities/required"
 import { getSharedState } from "src/utilities/sharedState"
 
-export default class groundControl {
+export default class GroundControl {
     static host: string
-    static port: number = 10250
+    static port = 10250
     static server: any
 
     static options = {
@@ -27,15 +27,15 @@ export default class groundControl {
 
     // INFO Literally just initialize the server and its listener
     static async init(
-        port: number = 10250,
-        host: string = "0.0.0.0",
+        port = 10250,
+        host = "0.0.0.0",
         protocol: "http" | "https" = "http",
         keys: any,
     ): Promise<any> {
         // HTTPS Check
         if (protocol === "https") {
-            let protocolOutcome: requiredOutcome = null
-            let errorFlag: boolean = false
+            let protocolOutcome: RequiredOutcome = null
+            let errorFlag = false
             // We want to check one by one if the keys are present and valid before starting the server
             protocolOutcome = required(
                 keys,
@@ -69,14 +69,14 @@ export default class groundControl {
             } else {
                 // Else we can start da server
                 try {
-                    groundControl.options = {
+                    GroundControl.options = {
                         key: fs.readFileSync(keys.key),
                         cert: fs.readFileSync(keys.cert),
                         ca: fs.readFileSync(keys.ca),
                     }
-                    groundControl.server = https.createServer(
-                        groundControl.options,
-                        groundControl.HandlerMethod,
+                    GroundControl.server = https.createServer(
+                        GroundControl.options,
+                        GroundControl.handlerMethod,
                     )
                 } catch (e) {
                     // Also here, we fallback happily
@@ -90,11 +90,11 @@ export default class groundControl {
         }
         // Supporting fallback
         if (protocol === "http") {
-            groundControl.server = http.createServer(
-                groundControl.HandlerMethod,
+            GroundControl.server = http.createServer(
+                GroundControl.handlerMethod,
             )
         }
-        groundControl.server.listen(port, host, () => {
+        GroundControl.server.listen(port, host, () => {
             console.log(
                 "Ground Control Server is running at " +
                     protocol +
@@ -107,21 +107,21 @@ export default class groundControl {
     }
 
     // INFO This is the handler for the server
-    static async HandlerMethod(
+    static async handlerMethod(
         req: http.IncomingMessage,
         res: http.ServerResponse,
     ) {
         res.statusCode = 200
-        let { url } = req
+        const { url } = req
         // Discarding useless stuff: we are not listening for this kind of requests
         if (url === "/favicon.ico") {
             res.end()
             return
         }
         console.log(url)
-        let args = groundControl.parse(url)
+        const args = GroundControl.parse(url)
         //console.log(args)
-        let response = await groundControl.dispatch(args)
+        const response = await GroundControl.dispatch(args)
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify(response))
     }
@@ -135,14 +135,14 @@ export default class groundControl {
             return null
         }
         // Separate arguments
-        let cleanArgs = args.split("?")[1]
-        let argsArray = cleanArgs.split("&")
-        let argsObject = new Map<string, any>()
+        const cleanArgs = args.split("?")[1]
+        const argsArray = cleanArgs.split("&")
+        const argsObject = new Map<string, any>()
         // Parsing arguments and keys and creating a proper object
         for (let i = 0; i < argsArray.length; i++) {
-            let arg = argsArray[i]
-            let key = arg.split("=")[0]
-            let value = arg.split("=")[1]
+            const arg = argsArray[i]
+            const key = arg.split("=")[0]
+            const value = arg.split("=")[1]
             argsObject.set(key, value)
         }
         return argsObject
@@ -150,7 +150,7 @@ export default class groundControl {
 
     // INFO This is groundControl to variable Tom
     static async dispatch(args: Map<string, any> = null): Promise<Object> {
-        let response = {
+        const response = {
             status: 0,
             message: null,
         }
@@ -166,11 +166,11 @@ export default class groundControl {
             switch (args.get("show")) {
                 // Are we sync or not?
                 case "sync":
-                    metric = groundControl.get.sync_status().toString()
+                    metric = GroundControl.get.syncStatus().toString()
                     status = 200
                     break
                 case "connected_peers":
-                    metric = groundControl.get.connected_peers().toString()
+                    metric = GroundControl.get.connectedPeers().toString()
                     status = 200
                     break
                 case "mempool_size":
@@ -191,11 +191,11 @@ export default class groundControl {
     /* SECTION Data retrieverz */
 
     static get = {
-        sync_status: function () {
+        syncStatus: function () {
             return getSharedState.syncStatus
         },
-        connected_peers: function () {
-            let plist = PeerManager.getInstance().getAll()
+        connectedPeers: function () {
+            const plist = PeerManager.getInstance().getAll()
             return plist.length
         },
     }

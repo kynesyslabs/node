@@ -1,12 +1,7 @@
-import { EntityTarget, Repository, FindOptionsOrder } from "typeorm"
 import Datasource from "../../../../model/datasource"
-import Hashing from "src/libs/crypto/hashing"
-import { GCRSubnetsTxs } from "../../../../model/entities/GCR/GCRSubnetsTxs"
-import { GlobalChangeRegistry } from "../../../../model/entities/GCR/GlobalChangeRegistry"
-import { GCRHashes } from "../../../../model/entities/GCR/GCRHashes"
-import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 
-    /** Example
+/** Example
         // Get top-level values
         const tokens = await GCRJsonbHandler.getJSONBValue(
             "publicKey",
@@ -29,23 +24,22 @@ import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
         )
     */
 export async function getJSONBValue(
-    publicKey: string,
-    field: "extended" | "details",
+    pubkey: string,
+    field: "identities" | "assignedTxs",
     key: string,
     subkey?: string,
 ) {
-        const db = await Datasource.getInstance()
-        const GCRRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
+    const db = await Datasource.getInstance()
+    const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
-        const jsonPath = subkey
-            ? `gcr.${field}->'${key}'->>'${subkey}'`
-            : `gcr.${field}->>'${key}'`
+    const jsonPath = subkey
+        ? `gcr.${field}->'${key}'->>'${subkey}'`
+        : `gcr.${field}->>'${key}'`
 
-        return await GCRRepository.createQueryBuilder("gcr")
-            .select(jsonPath)
-            .where("gcr.publicKey = :publicKey", { publicKey })
+    return await gcrRepository
+        .createQueryBuilder("gcr")
+        .select(jsonPath)
+        .where("gcr.pubkey = :pubkey", { pubkey })
         .getRawOne()
 }
 
@@ -76,29 +70,27 @@ await GCRJsonbHandler.updateJSONBValue(
     )
     */
 export async function updateJSONBValue(
-    publicKey: string,
-    field: "extended" | "details",
+    pubkey: string,
+    field: "assignedTxs" | "identities",
     key: string,
     value: any,
     subkey?: string,
 ) {
-        const db = await Datasource.getInstance()
-        const GCRRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
+    const db = await Datasource.getInstance()
+    const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
-        const jsonPath = subkey ? `{${key}, ${subkey}}` : `{${key}}`
+    const jsonPath = subkey ? `{${key}, ${subkey}}` : `{${key}}`
 
-        // Convert value to JSON string and escape single quotes
-        const jsonValue = JSON.stringify(value).replace(/'/g, "''")
+    // Convert value to JSON string and escape single quotes
+    const jsonValue = JSON.stringify(value).replace(/'/g, "''")
 
-        return await GCRRepository.createQueryBuilder()
-            .update(GlobalChangeRegistry)
-            .set({
-                [field]: () =>
-                    `jsonb_set(${field}, '${jsonPath}', '${jsonValue}'::jsonb, true)`,
-            })
-            .where("publicKey = :publicKey", { publicKey })
+    return await gcrRepository
+        .createQueryBuilder()
+        .update(GCRMain)
+        .set({
+            [field]: () =>
+                `jsonb_set(${field}, '${jsonPath}', '${jsonValue}'::jsonb, true)`,
+        })
+        .where("pubkey = :pubkey", { pubkey })
         .execute()
 }
-

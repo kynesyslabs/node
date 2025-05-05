@@ -1,7 +1,7 @@
-import { emptyResponse } from "./server_rpc"
-import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
+import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
 import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
+import { emptyResponse } from "./server_rpc"
 
 interface GCRRoutinePayload {
     method: string
@@ -9,29 +9,46 @@ interface GCRRoutinePayload {
 }
 
 export default async function manageGCRRoutines(
+    sender: string,
     payload: GCRRoutinePayload,
 ): Promise<RPCResponse> {
-    let response = _.cloneDeep(emptyResponse)
+    const response = _.cloneDeep(emptyResponse)
+    response.result = 200
     // Handle the payload
     const { method, params } = payload
     switch (method) {
+        // SECTION XM Identity Management
+
         case "identity_assign_from_write":
             response.response = await IdentityManager.inferIdentityFromWrite(
                 params[0],
             )
             break
-        case "identity_assign_from_signature":
-            response.response =
-                await IdentityManager.inferIdentityFromSignature(params[0])
+
+        case "getIdentities":
+            response.response = await IdentityManager.getIdentities(sender)
             break
+
+        case "getWeb2Identities":
+            response.response = await IdentityManager.getIdentities(sender, "web2")
+            break
+
+        case "getXmIdentities":
+            response.response = await IdentityManager.getIdentities(sender, "xm")
+            break
+
+        // SECTION Web2 Identity Management
+
         default:
             response.response = false
             break
     }
+
     // Check if the response is valid
     if (response.response === false) {
         response.result = 400
         response.extra = "Payload failed to execute"
     }
+
     return response
 }

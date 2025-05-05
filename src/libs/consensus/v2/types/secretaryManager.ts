@@ -3,16 +3,19 @@ import { Shard } from "./shardTypes"
 import { getSharedState } from "src/utilities/sharedState"
 import getShard from "../routines/getShard"
 import _ from "lodash"
-import { ForgeToHex } from "src/libs/crypto/forgeUtils"
+import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import { Waiter } from "src/utilities/waiter"
 import { _required as required } from "@kynesyslabs/demosdk/websdk"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
-import { TimeoutError, AbortError } from "src/exceptions"
+import { TimeoutError, AbortError, NotInShardError } from "src/exceptions"
 import Cryptography from "src/libs/crypto/cryptography"
+import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 
 // ANCHOR SecretaryManager
 export default class SecretaryManager {
+    private _greenlight_timeout = 15000 // 15 seconds
+    private _set_validator_phase_timeout = 10000 // 10 seconds
     private static instance: SecretaryManager
 
     // Internal variables
@@ -23,8 +26,8 @@ export default class SecretaryManager {
 
     public ourValidatorPhase: ValidationPhase
     public ourKey: string
-    public runSecretaryRoutine: boolean = false
-    public blockTimestamp: number
+    public runSecretaryRoutine = false
+    public blockTimestamp: number = null
 
     // INFO: Our signature is send with the greenlight request
     get ourSignature() {
@@ -39,13 +42,13 @@ export default class SecretaryManager {
     /**
      * Initializes the shard, including the members and the validation phases.
      *
-     * @param CVSA The CVSA string
+     * @param cVSA The CVSA string
      * @param lastBlockNumber The last block number
      * @returns The list of shard members
      */
-    async initializeShard(CVSA: string, lastBlockNumber: number) {
+    async initializeShard(cVSA: string, lastBlockNumber: number) {
         this.shard = {
-            CVSA: CVSA,
+            CVSA: cVSA,
             members: [],
             validationPhases: {},
             secretaryKey: "",
@@ -53,10 +56,16 @@ export default class SecretaryManager {
         }
 
         // Reusing the method to create the members
-        this.shard.members = await getShard(CVSA)
+        this.shard.members = await getShard(cVSA)
+        this.ourKey = getSharedState.identity.ed25519.publicKey.toString("hex")
+
+        if (
+            !this.shard.members.map(peer => peer.identity).includes(this.ourKey)
+        ) {
+            throw new NotInShardError("We are not in the shard")
+        }
         // Assigning the secretary and its key
         this.shard.secretaryKey = this.secretary.identity
-        this.ourKey = getSharedState.identity.ed25519.publicKey.toString("hex")
 
         log.debug("INITIALIZED SHARD:")
         log.debug(
@@ -65,7 +74,7 @@ export default class SecretaryManager {
         log.debug("SECRETARY: " + this.secretary.identity)
 
         // INFO: If some nodes crash, kill the node for debugging!
-        // if (this.shard.members.length < 4 && this.shard.blockRef > 10) {
+        // if (this.shard.members.length < 3 && this.shard.blockRef > 24000) {
         //     log.debug(
         //         `Only ${this.shard.members.length} members in the shard. Exiting ...`,
         //     )
@@ -105,7 +114,7 @@ export default class SecretaryManager {
     public checkIfWeAreSecretary() {
         return (
             this.shard.secretaryKey ===
-            ForgeToHex(getSharedState.identity.ed25519.publicKey)
+            forgeToHex(getSharedState.identity.ed25519.publicKey)
         )
     }
 
@@ -170,7 +179,10 @@ export default class SecretaryManager {
                     log.debug(
                         "[SECRETARY ROUTINE] Waiting for the set wait status",
                     )
-                    await Waiter.wait(Waiter.keys.SET_WAIT_STATUS)
+                    await Waiter.wait(
+                        Waiter.keys.SET_WAIT_STATUS,
+                        this._set_validator_phase_timeout,
+                    )
                     log.debug(
                         "[SECRETARY ROUTINE] SET_WAIT_STATUS Lock resolved",
                     )
@@ -457,7 +469,7 @@ export default class SecretaryManager {
     /**
      * A routine that releases waiting members if it's time to do so
      */
-    public async releaseWaitingRoutine(resolveWaiter: boolean = false) {
+    public async releaseWaitingRoutine(resolveWaiter = false) {
         const shouldRelease = this.shouldReleaseWaitingMembers()
         log.debug(
             `[SECRETARY ROUTINE] Should release the waiting members? ${shouldRelease}`,
@@ -559,7 +571,7 @@ export default class SecretaryManager {
             log.debug(
                 `[SECRETARY ROUTINE] Sending greenlight to ${member.identity} with timestamp ${this.blockTimestamp} and phase ${phase}`,
             )
-            promises.push(member.longCall(request, true, 250, 4))
+            promises.push(member.longCall(request, true, 250, 4, [400]))
         }
 
         const results = await Promise.all(promises)
@@ -621,9 +633,18 @@ export default class SecretaryManager {
         log.debug("Secretary: " + this.secretary.identity)
         log.debug("---- END DIAGNOSTICS ----")
 
+        if (secretaryBlockTimestamp < this.blockTimestamp) {
+            log.debug(
+                "Greenlight received for an older block,returning false ...",
+            )
+            return false
+        }
+
+        // INFO: Only assign the block timestamp if it's greater than the current block timestamp
+        // NOTE: Stray greenlights from previous rounds need to be ignored
         if (
             secretaryBlockTimestamp &&
-            this.ourValidatorPhase.currentPhase < 5
+            secretaryBlockTimestamp > this.blockTimestamp
         ) {
             this.blockTimestamp = secretaryBlockTimestamp
         }
@@ -672,7 +693,7 @@ export default class SecretaryManager {
      * Sends our local validator phase to the secretary and waits for the green light
      * If resolved, returns the secretary block timestamp
      */
-    public async sendOurValidatorPhaseToSecretary(retries: number = 3) {
+    public async sendOurValidatorPhaseToSecretary(retries = 3) {
         // INFO: Enable code to simulate node failures
         // if (this.ourValidatorPhase.currentPhase == 4) {
         //     log.debug(
@@ -684,7 +705,10 @@ export default class SecretaryManager {
 
         const waiterKey =
             Waiter.keys.GREEN_LIGHT + this.ourValidatorPhase.currentPhase
-        const greenlight: Promise<null> = Waiter.wait(waiterKey, 15000)
+        const greenlight: Promise<null> = Waiter.wait(
+            waiterKey,
+            this._greenlight_timeout,
+        )
 
         const sendStatus = async () => {
             const request: RPCRequest = {
@@ -697,15 +721,26 @@ export default class SecretaryManager {
                             this.ourKey,
                             this.ourValidatorPhase.currentPhase,
                             this.shard.CVSA,
-                            this.shard.blockRef
+                            this.shard.blockRef,
                         ],
                     },
                 ],
             }
 
+            if (!this.secretary) {
+                // INFO: Node is running alone, and has kicked itself out of the shard
+                return {
+                    result: 500,
+                    extra: {
+                        greenlight: true,
+                        timestamp: this.blockTimestamp,
+                    },
+                } as RPCResponse
+            }
+
             log.debug("Sending setValidatorPhase request to the secretary")
             log.debug("Secretary is: " + this.secretary.identity)
-            return await this.secretary.longCall(request, true, 1000, retries)
+            return await this.secretary.longCall(request, true, 250, retries)
         }
 
         const handleSendStatusRes = async (res: RPCResponse) => {
@@ -734,6 +769,8 @@ export default class SecretaryManager {
                 log.debug("Response: " + JSON.stringify(res, null, 2))
 
                 // REVIEW: How should we handle this?
+                // NOTE: A 400 is returned if the block reference is
+                // lower than the secretary's block reference
                 // await this.handleSecretaryGoneOffline()
                 // await sendStatus()
             }
@@ -745,13 +782,18 @@ export default class SecretaryManager {
 
             if (res.extra == 450) {
                 log.debug("[SEND OUR VALIDATOR PHASE] Invalid seed detected")
-                process.exit(0)
+                // process.exit(0)
+                // INFO: Logs parts used to create the current CVSA
+                await getCommonValidatorSeed(null, (message: string) => {
+                    log.only(message)
+                })
+                return null
             }
 
             // INFO: Extract the greenlight status and resolve the waiter
             const greenlight = res.extra.greenlight
             const timestamp = res.extra.timestamp
-            const blockRef = res.extra.blockRef
+            // const blockRef = res.extra.blockRef
 
             if (greenlight) {
                 log.debug(
@@ -864,7 +906,8 @@ export default class SecretaryManager {
         const res = await this.secretary.call(request)
 
         if (res.result == 200) {
-            return res.response[0] as number
+            this.blockTimestamp = res.response[0] as number
+            return this.blockTimestamp
         }
 
         log.error(

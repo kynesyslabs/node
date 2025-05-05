@@ -1,13 +1,11 @@
 // INFO This is the main client for any user that want to interact with DEMOS with the command line
 
 import * as readline from "readline"
-import * as socket from "socket.io"
-import * as socket_client from "socket.io-client"
 
 import Client from "./libs/client_class"
 
 // NOTE Initializing client
-let client = new Client()
+const client = new Client()
 
 // NOTE Creating a readline interface
 const rl = readline.createInterface({
@@ -17,6 +15,7 @@ const rl = readline.createInterface({
 
 // INFO Easy async based readline method
 async function ask(message: string): Promise<string> {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     return new Promise((resolve, reject) => {
         rl.question(message, answer => {
             rl.close()
@@ -28,9 +27,9 @@ async function ask(message: string): Promise<string> {
 // INFO Entry point
 async function main() {
     // NOTE Constant prompting
-    let exit_flag = false
-    while (!exit_flag) {
-        let answer = await ask(
+    let exitFlag = false
+    while (!exitFlag) {
+        const answer = await ask(
             "DEMOS Client (Alpha)[" +
                 client.STATUS_PROMPT +
                 " | " +
@@ -38,7 +37,7 @@ async function main() {
                 "] \n> ",
         )
         if (answer === "exit") {
-            exit_flag = true
+            exitFlag = true
         } else {
             //console.log(answer)
             await parser(answer)
@@ -50,19 +49,19 @@ async function main() {
 
 async function parser(cmd: string) {
     // First, we divide the command by spaces
-    let cmd_type: string
-    let cmd_args: string[]
-    let cmd_split: string[]
+    let cmdType: string
+    let cmdArgs: string[]
+    let cmdSplit: string[]
     if (cmd.includes(" ")) {
-        cmd_split = cmd.split(" ")
-        cmd_type = cmd_split[0]
-        cmd_args = cmd_split.slice(1)
+        cmdSplit = cmd.split(" ")
+        cmdType = cmdSplit[0]
+        cmdArgs = cmdSplit.slice(1)
     } else {
-        cmd_type = cmd
-        cmd_args = []
+        cmdType = cmd
+        cmdArgs = []
     }
     // Now we can parse the command and dispatch things to the client class methods
-    switch (cmd_type) {
+    switch (cmdType) {
         case "help":
             console.log("Available commands:")
             console.log("  help - Show this help")
@@ -70,11 +69,11 @@ async function parser(cmd: string) {
             break
         case "connect":
             // NOTE Connecting to the server requires an url to be specified
-            if (cmd_args.length === 0) {
+            if (cmdArgs.length === 0) {
                 console.log("You must specify an url to connect to!")
                 break
             }
-            await client.connect(cmd_args[0])
+            await client.connect(cmdArgs[0])
             break
         case "disconnect":
             // NOTE Disconnecting from the server

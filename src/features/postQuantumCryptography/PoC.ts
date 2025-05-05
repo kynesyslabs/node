@@ -1,5 +1,5 @@
 import { EnhancedCrypto } from "./enigma_lite"
-async function run_tests() {
+async function runTests() {
     console.log("Generating keys...")
     const { publicKey, privateKey } = EnhancedCrypto.generateKeys()
     console.log("Keys generated.")
@@ -31,4 +31,4 @@ async function run_tests() {
     console.log(`Decryption successful: ${message === decrypted}`)
 }
 
-run_tests()
+runTests()

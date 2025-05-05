@@ -23,11 +23,11 @@ export async function manageHelloPeer(
 ): Promise<RPCResponse> {
     log.debug("[manageHelloPeer] Content: " + JSON.stringify(content, null, 2))
     // Prepare the response
-    let response: RPCResponse = _.cloneDeep(emptyResponse)
+    const response: RPCResponse = _.cloneDeep(emptyResponse)
 
     log.info("[Handle Hello Peer] Handling hello peer...")
     log.info("[Hello Peer Listener] Building peer object...")
-    let peerObject = new Peer()
+    const peerObject = new Peer()
     peerObject.identity = content.publicKey
 
     if (
@@ -51,7 +51,7 @@ export async function manageHelloPeer(
 
     // Check if the authentication info is valid based on the sender info from the headers
     log.info("[Hello Peer Listener] Verifying authentication info...")
-    let isValid =
+    const isValid =
         sender === content.publicKey &&
         Cryptography.verify(content.url, content.signature, content.publicKey)
 
@@ -92,7 +92,7 @@ export async function manageHelloPeer(
     log.info(
         "[Hello Peer Listener] Adding peer with id: " + peerObject.identity,
     )
-    let isAddedToPeerlist = peerManager.addPeer(peerObject)
+    const isAddedToPeerlist = peerManager.addPeer(peerObject)
     if (!isAddedToPeerlist) {
         response.result = 400
         response.response = false

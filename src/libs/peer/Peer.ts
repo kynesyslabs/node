@@ -44,7 +44,7 @@ export default class Peer {
     }
 
     // Creating an empty peer
-    constructor(url: string = "", publicKey: string = "") {
+    constructor(url = "", publicKey = "") {
         this.connection = {
             string: url,
         }
@@ -68,7 +68,7 @@ export default class Peer {
 
     // Importing a peer from an IPeer
     static fromIPeer(peer: IPeer): Peer {
-        let p = new Peer()
+        const p = new Peer()
         p.connection = peer.connection
         p.identity = peer.identity
         p.verification = peer.verification
@@ -80,17 +80,17 @@ export default class Peer {
     // REVIEW Method to make the same call with multiple peers
     static async multiCall(
         request: RPCRequest,
-        isAuthenticated: boolean = true,
+        isAuthenticated = true,
         peers: Peer[],
-        timeout: number = 2000,
+        timeout = 2000,
     ): Promise<RPCResponse[]> {
-        let promises = []
+        const promises = []
         let responses: RPCResponse[] = []
-        for (let peer of peers) {
+        for (const peer of peers) {
             promises.push(peer.call(request, isAuthenticated))
         }
         // Waiting for all responses
-        let start = Date.now()
+        const start = Date.now()
         while (Date.now() - start < timeout) {
             responses = await Promise.all(promises)
         }
@@ -112,12 +112,12 @@ export default class Peer {
         console.log(
             "[PEER] Testing connection to peer: " + this.connection.string,
         )
-        let call: NodeCall = {
+        const call: NodeCall = {
             message: "ping",
             data: null,
             muid: "",
         }
-        let response = await this.call({
+        const response = await this.call({
             method: "nodeCall",
             params: [call],
         })
@@ -137,9 +137,9 @@ export default class Peer {
     // TODO (WIP) call with retries on fail
     async longCall(
         request: RPCRequest,
-        isAuthenticated: boolean = true,
-        sleepTime: number = 1000,
-        retries: number = 3,
+        isAuthenticated = true,
+        sleepTime = 1000,
+        retries = 3,
         allowedErrors: number[] = [],
     ): Promise<RPCResponse> {
         let tries = 0
@@ -197,16 +197,16 @@ export default class Peer {
     // Authenticated call
     async authenticatedCall(request: RPCRequest): Promise<RPCResponse> {
         // Generating the authenticated request
-        let authenticatedRequest = await this.authenticatedCallMaker(request)
+        const authenticatedRequest = await this.authenticatedCallMaker(request)
         // Sending the request
-        let response = await this.call(authenticatedRequest, true)
+        const response = await this.call(authenticatedRequest, true)
         return response
     }
 
     // New method to make an arbitrary RPC call
     async call(
         request: RPCRequest,
-        isAuthenticated: boolean = true,
+        isAuthenticated = true,
     ): Promise<RPCResponse> {
         log.info(
             "[RPC Call] [" +
@@ -217,8 +217,8 @@ export default class Peer {
                 this.connection.string,
         )
         // Get some informations
-        let method = request.method
-        let currentTimestampReadable = new Date(Date.now()).toISOString()
+        const method = request.method
+        const currentTimestampReadable = new Date(Date.now()).toISOString()
         // Prepare a request with our identity
         let pubkey = ""
         let signature = ""

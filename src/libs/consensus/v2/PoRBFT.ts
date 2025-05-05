@@ -1,6 +1,6 @@
 import Transaction from "src/libs/blockchain/transaction"
 import getCommonValidatorSeed from "./routines/getCommonValidatorSeed"
-import Mempool from "src/libs/blockchain/mempool"
+import Mempool from "src/libs/blockchain/mempool_v2"
 import Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
 import { getSharedState } from "src/utilities/sharedState"
@@ -17,6 +17,13 @@ import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import applyGCROperation from "src/libs/blockchain/gcr/gcr_routines/applyGCROperation"
 import { txToGCROperation } from "src/libs/blockchain/gcr/gcr_routines/txToGCROperation"
 import SecretaryManager from "./types/secretaryManager"
+import {
+    BlockInvalidError,
+    ForgingEndedError,
+    NotInShardError,
+} from "src/exceptions"
+import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
+import { GCREdit } from "@kynesyslabs/demosdk/types"
 
 /* INFO
 # Semaphore system
@@ -55,111 +62,185 @@ export async function consensusRoutine(): Promise<void> {
         )
         return
     }
-
-    await initializeConsensusState()
-    // await fastSync([], "consensusRoutine")
-    // Initialize the consensus state and check if the local node is in the shard
-
+    log.debug("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     const manager = SecretaryManager.getInstance()
 
-    // INFO: We won't use the shard returned by initializeShard
-    // as it can change through the consensus routine
-    // INFO: CONSENSUS ACTION 1: Initialize the shard
-    await initializeShard()
+    // Defining the variables needed for rolling back the GCREdits
+    let successfulTxs: string[] = []
+    let failedTxs: string[] = []
+    let tempMempool: Transaction[] = []
 
-    if (!isInShard(manager.shard.members)) {
+    try {
+        await initializeConsensusState()
+
+        // await fastSync([], "consensusRoutine")
+        // Initialize the consensus state and check if the local node is in the shard
+        // INFO: We won't use the shard returned by initializeShard
+        // as it can change through the consensus routine
+        // INFO: CONSENSUS ACTION 1: Initialize the shard
+        await initializeShard()
+        log.debug("Forgin block: " + manager.shard.blockRef)
+        log.info("[consensusRoutine] We are in the shard, creating the block")
         log.info(
-            "[consensusRoutine] We are not in the shard, waiting for the block",
+            `[consensusRoutine] shard: ${JSON.stringify(
+                manager.shard,
+                null,
+                2,
+            )}`,
+            false,
         )
-        return
-    }
 
-    log.info("[consensusRoutine] We are in the shard, creating the block")
-    log.info(
-        `[consensusRoutine] shard: ${JSON.stringify(manager.shard, null, 2)}`,
-        false,
-    )
+        // INFO: Broadcast our validation phase to the secretary
+        await updateValidatorPhase(1)
 
-    // INFO: Broadcast our validation phase to the secretary
-    await updateValidatorPhase(1)
+        // synchronize and average the time
+        // NOTE: Instead of averaging the time, we'll use the secretary timestamp
+        // await synchronizeAndAverageTime(shard)
 
-    // synchronize and average the time
-    // NOTE: Instead of averaging the time, we'll use the secretary timestamp
-    // await synchronizeAndAverageTime(shard)
-
-    // INFO: CONSENSUS ACTION 2: Merge and order the mempools
-    const mempool = await mergeAndOrderMempools(manager.shard.members)
-    log.info(
-        "[consensusRoutine] mempool merged (aka ordered transactions)",
-        true,
-    )
-    log.info(
-        "[consensusRoutine] mempool: " + JSON.stringify(mempool, null, 2),
-        true,
-    )
-
-    // INFO: CONSENSUS ACTION 3: Merge the peerlist (skipped)
-    // REVIEW Merge the peerlist
-    const peerlist = []
-    // await mergePeerlistAndWait(shard)
-
-    // INFO: CONSENSUS ACTION 4: Apply the GCR operations to the state before forging the block
-    /** REVIEW
-     * Here we apply the GCR operations to the state before forging the block
-     * so that the GCR hash is included in the block.
-     * A list of successful and failed GCR operations is returned.
-     * NOTE A mandatory validator status is updated to reflect that the GCR operations have been applied
-     * */
-    // ! Not here but check Sync.ts (syncNativeTables) and make it work with the GCR (syncing the states)
-    await applyGCRForNewBlock(mempool)
-
-    // INFO: At this point, we should have the secretary block timestamp
-    // if we're connected to the secretary and recieved atleast one successful request from them
-    if (manager.blockTimestamp) {
-        getSharedState.lastConsensusTime = manager.blockTimestamp
-    } else {
-        // INFO: This should never happen
-        // If it does, request the block timestamp from the secretary
-        log.debug(
-            "[CONSENSUS ROUTINE] Secretary block timestamp not received yet, requesting it ...",
+        // INFO: CONSENSUS ACTION 2: Merge and order the mempools
+        tempMempool = await mergeAndOrderMempools(
+            manager.shard.members,
+            manager.shard.blockRef,
         )
-        const blockTimestamp = await manager.getSecretaryBlockTimestamp()
+        log.debug("MErged mempool: " + JSON.stringify(tempMempool.map((tx) => tx.hash), null, 2))
 
-        if (blockTimestamp) {
-            getSharedState.lastConsensusTime = blockTimestamp
-        } else {
+        log.info(
+            "[consensusRoutine] mempool merged (aka ordered transactions)",
+            true,
+        )
+        // INFO: CONSENSUS ACTION 3: Merge the peerlist (skipped)
+        // Merge the peerlist
+        const peerlist = []
+        // await mergePeerlistAndWait(shard)
+
+        // INFO: CONSENSUS ACTION 4: Apply the GCR operations to the state before forging the block
+        /**
+         * Here we apply the GCR operations to the state before forging the block
+         * so that the GCR hash is included in the block.
+         * A list of successful and failed GCR operations is returned.
+         * NOTE A mandatory validator status is updated to reflect that the GCR operations have been applied
+         * */
+        // ? The following line could be outdated once we use the GCREdit stuff
+        // await applyGCRForNewBlock(mempool)
+
+        // Applying the GCREdits and see if everything is consistent
+        const [localSuccessfulTxs, localFailedTxs] =
+            await applyGCREditsFromMergedMempool(tempMempool)
+        successfulTxs = successfulTxs.concat(localSuccessfulTxs)
+        failedTxs = failedTxs.concat(localFailedTxs)
+        if (failedTxs.length > 0) {
             log.error(
-                "[CONSENSUS ROUTINE] Block timestamp is not set, stopping the node ...",
+                "[consensusRoutine] Failed Txs found, pruning the mempool",
+            )
+            //  Prune the mempool of the failed txs
+            // NOTE The mempool should now be updated with only the successful txs
+            for (const tx of failedTxs) {
+                log.error("Failed tx: " + tx)
+                await Mempool.removeTransactionsByHashes([tx])
+            }
+        }
+
+        // REVIEW Re-merge the mempools anyway to get the correct mempool from the whole shard
+        // const mempool = await mergeAndOrderMempools(manager.shard.members)
+
+        log.info(
+            "[consensusRoutine] mempool: " +
+                JSON.stringify(tempMempool, null, 2),
+            true,
+        )
+
+        // INFO: At this point, we should have the secretary block timestamp
+        // if we're connected to the secretary and recieved atleast one successful request from them
+        if (manager.blockTimestamp) {
+            getSharedState.lastConsensusTime = manager.blockTimestamp
+        } else {
+            // INFO: This should never happen
+            // If it does, request the block timestamp from the secretary
+            log.debug(
+                "[CONSENSUS ROUTINE] Secretary block timestamp not received yet, requesting it ...",
+            )
+            const blockTimestamp = await manager.getSecretaryBlockTimestamp()
+
+            if (blockTimestamp) {
+                getSharedState.lastConsensusTime = blockTimestamp
+            } else {
+                log.error(
+                    "[CONSENSUS ROUTINE] Block timestamp could not be resolved, exiting the consensus routine",
+                )
+                return
+            }
+        }
+
+        // INFO: CONSENSUS ACTION 5: Forge the block
+        const block = await forgeBlock(tempMempool, peerlist) // NOTE The GCR hash is calculated here and added to the block
+        // REVIEW Set last consensus time to the current block timestamp
+        getSharedState.lastConsensusTime = block.content.timestamp
+
+        // INFO: CONSENSUS ACTION 6: Vote on the block
+        const [pro, con] = await voteOnBlock(block, manager.shard.members)
+
+        // Check if the block is valid
+        if (isBlockValid(pro, manager.shard.members.length)) {
+            log.info(
+                "[consensusRoutine] [result] Block is valid with " +
+                    pro +
+                    " votes",
+            )
+            await finalizeBlock(block, pro)
+        } else {
+            log.info(
+                `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
             )
             process.exit(1)
+            // Raising an error to rollback the GCREdits
+            throw new BlockInvalidError(
+                `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
+            )
         }
+
+        // INFO: CONSENSUS ACTION 7: End the consensus routine
+        await updateValidatorPhase(7)
+    } catch (error) {
+        if (error instanceof NotInShardError) {
+            log.info(
+                "[consensusRoutine] We are not in the shard, waiting for the block",
+            )
+            return
+        }
+
+        if (error instanceof ForgingEndedError) {
+            log.info(
+                "[consensusRoutine] We are forging an ended block. Exiting the consensus routine",
+            )
+            return
+        }
+        if (error instanceof BlockInvalidError) {
+            log.info(
+                "[consensusRoutine] Block is invalid. Rolling back the GCREdits",
+            )
+            // REVIEW Using the successfulTxs to rollback the GCREdits derived from those txs
+            // Getting the txs from the hashes
+            const txsToRollback: Transaction[] = []
+            for (const txHash of successfulTxs) {
+                const tx = tempMempool.find(tx => tx.hash === txHash)
+                if (tx) {
+                    txsToRollback.push(tx)
+                }
+            }
+            await rollbackGCREditsFromTxs(txsToRollback)
+            await Mempool.removeTransactionsByHashes(successfulTxs)
+
+            return
+        }
+    } finally {
+        manager.endConsensusRoutine()
+        // Cleanup the consensus state
+        cleanupConsensusState()
+        // Joining the temporary mempool to the main one
+        // await Mempool.joinTemporaryMempool() // ? Is await ok here?
     }
 
-    // INFO: CONSENSUS ACTION 5: Forge the block
-    const block = await forgeBlock(mempool, peerlist) // NOTE The GCR hash is calculated here and added to the block
-    // REVIEW Set last consensus time to the current block timestamp
-    getSharedState.lastConsensusTime = block.content.timestamp
-
-    // INFO: CONSENSUS ACTION 6: Vote on the block
-    const [pro, con] = await voteOnBlock(block, manager.shard.members)
-
-    // Check if the block is valid
-    if (isBlockValid(pro, manager.shard.members.length)) {
-        log.info(
-            "[consensusRoutine] [result] Block is valid with " + pro + " votes",
-        )
-        await finalizeBlock(block, pro)
-    } else {
-        log.info(
-            `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
-        )
-    }
-
-    // INFO: CONSENSUS ACTION 7: End the consensus routine
-    await updateValidatorPhase(7)
-    manager.endConsensusRoutine()
-    // Cleanup the consensus state
-    cleanupConsensusState()
+    log.debug("👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋")
     log.debug("[consensusRoutine] CONSENSUS ROUTINE ENDED 🔥🔥🔥")
 }
 
@@ -232,7 +313,7 @@ function isInShard(shard: Peer[]): boolean {
  */
 async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
     await fastSync(shard, "synchronizeAndAverageTime")
-    var averageTimestamp = await averageTimestamps(shard)
+    let averageTimestamp = await averageTimestamps(shard)
     // Strip the decimal part
     if (!Number.isInteger(averageTimestamp)) {
         log.warning(
@@ -251,17 +332,81 @@ async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
  * @param shard - The shard members
  * @returns The ordered transactions
  */
-async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
-    const ourMempool = await Mempool.getMempool("mergeAndOrderMempools")
+async function mergeAndOrderMempools(
+    shard: Peer[],
+    blockNumber: number,
+): Promise<(Transaction & { reference_block: number })[]> {
+    const ourMempool = await Mempool.getMempool(blockNumber)
     console.log("[consensusRoutine] Our mempool:")
     console.log(ourMempool)
     log.info("[consensusRoutine] Our mempool has been retrieved")
-    const mergedMempool = await mergeMempools(ourMempool, shard)
-    log.info("[consensusRoutine] Mempools have been merged")
-    // await updateValidatorStatus("mergedMempool", true, false, true)
-    // Using the secretary to update the local statuses
+
+    // NOTE: Transactions here should be ordered by timestamp
+    await mergeMempools(ourMempool, shard)
     await updateValidatorPhase(3)
-    return await orderTransactions(mergedMempool)
+
+    return await Mempool.getMempool(blockNumber)
+}
+
+/**
+ * Rollback the GCREdits from a set of txs
+ *
+ * @param txs - The txs
+ * @returns The successful and failed GCREdits
+ */
+async function rollbackGCREditsFromTxs(
+    txs: Transaction[],
+): Promise<[string[], string[]]> {
+    const successfulTxs: string[] = []
+    const failedTxs: string[] = []
+    // 1. Parse the txs to get the GCREdits
+    for (const tx of txs) {
+        // 2. Apply the GCREdits to the state for each tx with the isRollback flag set to true
+        const result = await HandleGCR.applyToTx(tx, true)
+        if (result.success) {
+            successfulTxs.push(tx.hash)
+        } else {
+            failedTxs.push(tx.hash)
+        }
+    }
+    return [successfulTxs, failedTxs]
+}
+
+/**
+ * Apply the GCREdits from the merged mempool
+ *
+ * @param mempool - The mempool
+ * @returns The successful and failed GCREdits
+ */
+async function applyGCREditsFromMergedMempool(
+    mempool: Transaction[],
+): Promise<[string[], string[]]> {
+    // TODO Implement this
+    const successfulTxs: string[] = []
+    const failedTxs: string[] = []
+    // 1. Parse the mempool txs to get the GCREdits
+    for (const tx of mempool) {
+        const txExists = await Chain.checkTxExists(tx.hash)
+        if (txExists) {
+            failedTxs.push(tx.hash)
+            continue
+        }
+
+        const txGCREdits = tx.content.gcr_edits
+        // 2. Apply the GCREdits to the state for each tx
+        for (const gcrEdit of txGCREdits) {
+            const applyResult = await HandleGCR.apply(gcrEdit, tx)
+            if (applyResult.success) {
+                // If the apply succeeds, add the tx to the successfulTxs array
+                successfulTxs.push(tx.hash)
+            } else {
+                // If the apply fails, add the tx to the failedTxs array
+                failedTxs.push(tx.hash)
+            }
+        }
+    }
+    // 4. Return the successful and failed GCREdits // NOTE They will be used to prune the mempool
+    return [successfulTxs, failedTxs]
 }
 
 /**
@@ -273,11 +418,11 @@ async function mergeAndOrderMempools(shard: Peer[]): Promise<Transaction[]> {
 async function applyGCRForNewBlock(
     mempool: Transaction[],
 ): Promise<[string[], string[]]> {
-    let successfulTxs: string[] = []
-    let failedTxs: string[] = []
+    const successfulTxs: string[] = []
+    const failedTxs: string[] = []
     for (const tx of mempool) {
         const operation = await txToGCROperation(tx)
-        let success = await applyGCROperation(operation)
+        const success = await applyGCROperation(operation)
         if (success) {
             successfulTxs.push(tx.hash)
         } else {
@@ -396,6 +541,19 @@ async function finalizeBlock(block: Block, pro: number): Promise<void> {
     console.log(lastBlock)
 }
 
+function preventForgingEnded() {
+    const manager = SecretaryManager.getInstance()
+
+    if (
+        getSharedState.lastBlockNumber === manager.shard.blockRef &&
+        manager.ourValidatorPhase.currentPhase < 5 // forged block
+    ) {
+        throw new ForgingEndedError(
+            "We are forging an ended block. Please exit the consensus routine",
+        )
+    }
+}
+
 /**
  * Sends our validator phase to the secretary, and waits for the greenlight.
  *
@@ -405,12 +563,14 @@ async function finalizeBlock(block: Block, pro: number): Promise<void> {
 async function updateValidatorPhase(phase: number): Promise<any> {
     const manager = SecretaryManager.getInstance()
     await manager.setOurValidatorPhase(phase, true)
+    preventForgingEnded()
 
     // INFO: If it's the first phase, the secretary might not have started the consensus routine yet,
     // Increase retry steps to 10 to wait for the secretary to start
     const retries = phase === 1 ? 10 : 3
     const res = await manager.sendOurValidatorPhaseToSecretary(retries)
 
+    preventForgingEnded()
     log.debug(
         `[updateValidatorStatus 🎉] Validator phase ${phase} resolved with value: ${JSON.stringify(
             res,

@@ -13,14 +13,16 @@ import { DataSource } from "typeorm"
 
 import { Blocks } from "./entities/Blocks"
 import { Consensus } from "./entities/Consensus"
-import { Mempool } from "./entities/Mempool"
+import { Mempool, MempoolTx } from "./entities/Mempool"
 import { PgpKeyServer } from "./entities/PgpKeyServer"
-import { GCRHashes } from "./entities/GCR/GCRHashes"
 import { Transactions } from "./entities/Transactions"
 import { Validators } from "./entities/Validators"
 //import { Identities } from "./entities/Identities"
 import { GlobalChangeRegistry } from "./entities/GCR/GlobalChangeRegistry"
-import { GCRSubnetsTxs } from "./entities/GCR/GCRSubnetsTxs"
+
+import { GCRHashes } from "./entities/GCRv2/GCRHashes"
+import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs"
+import { GCRMain } from "./entities/GCRv2/GCR_Main"
 import { GCRTracker } from "./entities/GCR/GCRTracker"
 
 class Datasource {
@@ -39,6 +41,7 @@ class Datasource {
                 Blocks,
                 Transactions,
                 Mempool,
+                MempoolTx,
                 Consensus,
                 PgpKeyServer,
                 GCRHashes,
@@ -47,6 +50,8 @@ class Datasource {
                 Validators,
                 //Identities,
                 GlobalChangeRegistry,
+                GCRTracker,
+                GCRMain,
                 GCRTracker,
             ],
             synchronize: true, // set this to false in production

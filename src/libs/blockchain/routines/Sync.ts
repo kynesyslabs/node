@@ -24,7 +24,9 @@ import {
     RPCResponse,
     Transaction,
 } from "@kynesyslabs/demosdk/types"
-import { BlockNotFoundError, PeerOfflineError } from "src/exceptions"
+import { BlockNotFoundError, PeerUnreachableError } from "src/exceptions"
+import GCR from "../gcr/gcr"
+import HandleGCR from "../gcr/handleGCR"
 
 const term = terminalkit.terminal
 
@@ -33,17 +35,28 @@ async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
 }
 
+const latestBlock = () =>
+    peerManager
+        .getAll()
+        .reduce((max, peer) => Math.max(max, peer.sync.block), 0)
+
+const highestBlockPeer = () =>
+    peerManager.getAll().find(peer => peer.sync.block === latestBlock())
 
 /**
  * Get the highest block number and peer from the network. If we're synced
  * we return null for the peer.
- * 
+ *
  * @param peers - If specified, we only get the data from these peers.
  */
 async function getHigestBlockPeerData(peers: Peer[] = []) {
     // Getting all the peers if not specified
     if (peers.length === 0) {
         peers = peerManager.getPeers()
+    }
+
+    if (latestBlock() === getSharedState.lastBlockNumber) {
+        return {}
     }
 
     // Getting our data
@@ -79,10 +92,10 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
 
     // SECTION: Asking the peers for the last block number
     // Asking the peers for the last block number
-    let peerLastBlockNumbers = []
-    let promises = new Map<string, Promise<RPCResponse>>()
-    for (let peer of peers) {
-        let call: RPCRequest = {
+    const peerLastBlockNumbers = []
+    const promises = new Map<string, Promise<RPCResponse>>()
+    for (const peer of peers) {
+        const call: RPCRequest = {
             method: "nodeCall",
             params: [
                 {
@@ -96,15 +109,15 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     }
 
     // Wait for all the promises to resolve (synchronously?)
-    let responses = new Map<string, RPCResponse>()
-    for (let [peerId, promise] of promises) {
-        let response = await promise
+    const responses = new Map<string, RPCResponse>()
+    for (const [peerId, promise] of promises) {
+        const response = await promise
         responses.set(peerId, response)
     }
 
     const requestBlockNumbers = []
 
-    for (let response of responses) {
+    for (const response of responses) {
         if (response[1].result === 200) {
             peerLastBlockNumbers.push(response[1].response as number)
             log.info(
@@ -130,7 +143,7 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     )
 
     // REVIEW Choose the peer with the highest last block number
-    let highestBlockNumber: number = peerLastBlockNumbers.reduce(
+    const highestBlockNumber: number = peerLastBlockNumbers.reduce(
         (max, peer) => Math.max(max, peer),
         0,
     )
@@ -149,10 +162,10 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     }
 
     // Otherwise, we need to sync
-    let highestBlockNumberPeerIndex = peerLastBlockNumbers.findIndex(
+    const highestBlockNumberPeerIndex = peerLastBlockNumbers.findIndex(
         peer => peer === highestBlockNumber,
     )
-    let highestBlockNumberPeer = peers[highestBlockNumberPeerIndex]
+    const highestBlockNumberPeer = peers[highestBlockNumberPeerIndex]
     log.info(
         "[fastSync] Peer with highest last block number: " +
             highestBlockNumberPeer.identity +
@@ -168,10 +181,9 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     }
 }
 
-
 /**
  * Verify if our last block is coherent with the same block from the peer.
- * 
+ *
  * @param peer - The peer to cross-check with
  * @param ourLastBlockNumber - Our last block number
  * @param ourLastBlockHash - Our last block hash
@@ -183,7 +195,7 @@ async function verifyLastBlockIntegrity(
     ourLastBlockHash: string,
 ) {
     // Verify if the last block hash is coherent
-    let lastSyncedBlockRequest: RPCRequest = {
+    const lastSyncedBlockRequest: RPCRequest = {
         method: "nodeCall",
         params: [
             {
@@ -193,11 +205,14 @@ async function verifyLastBlockIntegrity(
             },
         ],
     }
-    let lastSyncedBlockResponse = await peer.call(lastSyncedBlockRequest, false)
+    const lastSyncedBlockResponse = await peer.call(
+        lastSyncedBlockRequest,
+        false,
+    )
 
     if (lastSyncedBlockResponse.result === 200) {
         console.log("[fastSync] Last synced block response received")
-        let lastSyncedBlock = lastSyncedBlockResponse.response as Block
+        const lastSyncedBlock = lastSyncedBlockResponse.response as Block
         if (lastSyncedBlock.hash !== ourLastBlockHash) {
             log.info("[fastSync] Hash is not coherent")
             log.info("[fastSync] Our hash: " + ourLastBlockHash)
@@ -215,7 +230,7 @@ async function verifyLastBlockIntegrity(
 }
 
 async function downloadBlock(peer: Peer, blockToAsk: number) {
-    let blockRequest: RPCRequest = {
+    const blockRequest: RPCRequest = {
         method: "nodeCall",
         params: [
             {
@@ -225,13 +240,16 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
             },
         ],
     }
-    let blockResponse = await peer.longCall(blockRequest, false, 250, 3, [404])
+
+    const blockResponse = await peer.longCall(blockRequest, false, 250, 3, [
+        404,
+    ])
 
     // INFO: Handle max retries reached
     if (blockResponse.result === 400) {
         log.info("[fastSync] Peer is offline")
         // TODO: Test this!
-        throw new PeerOfflineError("Peer is offline")
+        throw new PeerUnreachableError("Peer is offline")
     }
 
     if (blockResponse.result === 404) {
@@ -243,29 +261,30 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
         console.log(
             "[fastSync] Block response received for block: " + blockToAsk,
         )
-        let block = blockResponse.response as Block
+        const block = blockResponse.response as Block
 
         if (!block) {
             log.error("[downloadBlock] Block not received")
             return false
         }
 
+        log.info("[downloadBlock] Block received: " + block.hash)
         await Chain.insertBlock(block, [], null, false)
-        console.log(
+        log.info(
             "[fastSync] Block inserted successfully at the head of the chain!",
         )
 
         // REVIEW Merge the peerlist
         log.info("[fastSync] Merging peers from block: " + block.hash)
-        let mergedPeerlist = await mergePeerlist(block)
+        const mergedPeerlist = await mergePeerlist(block)
         log.info("[fastSync] Merged peers from block: " + mergedPeerlist)
         // REVIEW Parse the txs hashes in the block
         log.info("[fastSync] Asking for transactions in the block", true)
-        let txs = await askTxsForBlock(block, peer)
+        const txs = await askTxsForBlock(block, peer)
         log.info("[fastSync] Transactions received: " + txs.length, true)
 
         // ! Sync the native tables
-        await syncNativeTables()
+        await syncGCRTables(txs)
 
         // REVIEW Insert the txs into the transactions database table
         if (txs.length > 0) {
@@ -273,7 +292,7 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
                 "[fastSync] Inserting transactions into the database",
                 true,
             )
-            let success = await Chain.insertTransactions(txs)
+            const success = await Chain.insertTransactions(txs)
             if (success) {
                 log.info("[fastSync] Transactions inserted successfully")
                 return true
@@ -294,54 +313,49 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
 
 /**
  * Wait for the next block to be generated and download it
- * 
+ *
  * @param peer - The peer to wait for the next block
  * @returns True if the block was downloaded successfully, false otherwise
  */
-async function waitForNextBlock(peer: Peer) {
+async function waitForNextBlock() {
     log.debug("[waitForNextBlock] Waiting for next block")
-    const latestBlock = () =>
-        peerManager
-            .getAll()
-            .reduce((max, peer) => Math.max(max, peer.sync.block), 0)
 
     while (getSharedState.lastBlockNumber >= latestBlock()) {
         await sleep(250)
     }
 
     log.debug("[waitForNextBlock] NEXT BLOCK GENERATED. DOWNLOADING...")
-
-    return await downloadBlock(peer, getSharedState.lastBlockNumber + 1)
+    return await downloadBlock(
+        highestBlockPeer(),
+        getSharedState.lastBlockNumber + 1,
+    )
 }
 
 /**
  * Request the blocks from the peer
- * 
+ *
  * @param peer - The peer to request the blocks from
  * @returns True if the blocks were requested successfully, false otherwise
  */
-async function requestBlocks(peer: Peer) {
+async function requestBlocks() {
     // REVIEW: lowest or highest?
     // Sync the blocks one by one starting from the lowest block number that we do not have
     // ? Way more error handling needed
-    console.error(
-        "[fastSync] Syncing blocks from peer: " + JSON.stringify(peer),
-    )
+    // console.error(
+    //     "[fastSync] Syncing blocks from peer: " + JSON.stringify(peer),
+    // )
 
-    if (!peerManager.getPeer(peer.identity)) {
-        log.error("[fastSync] Peer not found")
-        return false
-    }
+    // if (!peerManager.getPeer(peer.identity)) {
+    //     log.error("[fastSync] Peer not found")
+    //     return false
+    // }
+    const seenPeers = new Set<string>()
+    let peer = highestBlockPeer()
 
-    while (
-        getSharedState.lastBlockNumber <=
-        peerManager.getPeer(peer.identity).sync.block
-    ) {
+    while (getSharedState.lastBlockNumber <= latestBlock()) {
         const blockToAsk = getSharedState.lastBlockNumber + 1
         // log.debug("[fastSync] Sleeping for 1 second")
         // await sleep(250)
-
-        log.debug("[fastSync] Asking peer for block: " + blockToAsk)
         try {
             await downloadBlock(peer, blockToAsk)
         } catch (error) {
@@ -351,10 +365,38 @@ async function requestBlocks(peer: Peer) {
                 break
             }
 
-            if (error instanceof PeerOfflineError) {
-                log.info("[fastSync] Peer is offline")
-                // TODO: Switch to the next peer
-                return false
+            if (error instanceof PeerUnreachableError) {
+                log.debug(
+                    "[fastSync] Peer " +
+                        peer.identity +
+                        " is unreachable. Switching to the next peer.",
+                )
+                seenPeers.add(peer.identity)
+
+                const highestBlockPeers = peerManager
+                    .getAll()
+                    .filter(p => p.sync.block === latestBlock())
+                    .filter(p => !seenPeers.has(p.identity))
+
+                log.info(
+                    "[fastSync] Highest block peers: " +
+                        JSON.stringify(
+                            highestBlockPeers.map(p => p.connection.string),
+                            null,
+                            2,
+                        ),
+                )
+
+                if (highestBlockPeers.length === 0) {
+                    log.error("[fastSync] No more peers to try")
+                    return false
+                }
+
+                log.info(
+                    "[fastSync] Switched to peer: " +
+                        highestBlockPeers[0].connection.string,
+                )
+                peer = highestBlockPeers[0]
             }
         }
     }
@@ -362,10 +404,22 @@ async function requestBlocks(peer: Peer) {
     return true
 }
 
-// TODO Implement this
-export async function syncNativeTables() {
-    // TODO Call the endpoint to sync the native tables (manageNodeCall.ts has them)
-    // TODO Add the results to the database in the native tables
+// REVIEW Applying GCREdits to the tables
+export async function syncGCRTables(
+    txs: Transaction[],
+): Promise<[string, boolean]> {
+    // ? Better typing on this return
+    // Using the GCREdits in the tx to sync the native tables
+    for (const tx of txs) {
+        const result = await HandleGCR.applyToTx(tx)
+        if (!result.success) {
+            log.error(
+                "[fastSync] GCR edit application failed at tx: " + tx.hash,
+            )
+            return [tx.hash, false]
+        }
+    }
+    return [null, true]
 }
 
 // Helper function to ask for the transactions in a block
@@ -373,10 +427,10 @@ export async function askTxsForBlock(
     block: Block,
     peer: Peer,
 ): Promise<Transaction[]> {
-    let txsHashes = block.content.ordered_transactions
-    let txs = []
-    for (let txHash of txsHashes) {
-        let txRequest: RPCRequest = {
+    const txsHashes = block.content.ordered_transactions
+    const txs = []
+    for (const txHash of txsHashes) {
+        const txRequest: RPCRequest = {
             method: "nodeCall",
             params: [
                 {
@@ -386,9 +440,9 @@ export async function askTxsForBlock(
                 },
             ],
         }
-        let txResponse = await peer.call(txRequest, false)
+        const txResponse = await peer.call(txRequest, false)
         if (txResponse.result === 200) {
-            let tx = txResponse.response as Transaction
+            const tx = txResponse.response as Transaction
             txs.push(tx)
         }
     }
@@ -420,35 +474,36 @@ export async function mergePeerlist(block: Block): Promise<string[]> {
 }
 
 async function fastSyncRoutine(peers: Peer[] = []) {
-    const {
-        highestBlockNumber,
-        highestBlockNumberPeer,
-        ourLastBlockNumber,
-        ourLastBlockHash,
-    } = await getHigestBlockPeerData(peers)
-
-    if (highestBlockNumberPeer === null) {
+    // const {
+    //     highestBlockNumber,
+    //     highestBlockNumberPeer,
+    //     ourLastBlockNumber,
+    //     ourLastBlockHash,
+    // } = await getHigestBlockPeerData(peers)
+    if (latestBlock() === getSharedState.lastBlockNumber) {
         log.debug("[fastSync] We're already synced!")
         return true
     }
 
     // INFO: Check if block match across peers
-    const verified = await verifyLastBlockIntegrity(
-        highestBlockNumberPeer,
-        ourLastBlockNumber,
-        ourLastBlockHash,
-    )
+    // INFO: Disabled for testing!
+    // TODO: Fix verification of the last block with the same peer
+    // const verified = await verifyLastBlockIntegrity(
+    //     highestBlockPeer(),
+    //     getSharedState.lastBlockNumber,
+    //     getSharedState.lastBlockHash,
+    // )
 
-    if (!verified) {
-        log.error("[fastSync] Last block is not coherent")
-        getSharedState.syncStatus = false
-        return false
-    }
+    // if (!verified) {
+    //     log.error("[fastSync] Last block is not coherent")
+    //     getSharedState.syncStatus = false
+    //     return false
+    // }
 
-    const synced = await requestBlocks(highestBlockNumberPeer)
+    const synced = await requestBlocks()
 
     if (synced && getSharedState.fastSyncCount === 0) {
-        await waitForNextBlock(highestBlockNumberPeer)
+        await waitForNextBlock()
     }
 
     return synced

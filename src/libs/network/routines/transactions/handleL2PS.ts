@@ -23,9 +23,9 @@ export default async function handleL2PS(
 ): Promise<RPCResponse> {
     // ! TODO Finalize the below TODOs
     let response = _.cloneDeep(emptyResponse)
-    let data = content.data
+    const data = content.data
     // REVIEW Defining a subnet from the uid
-    let subnet: Subnet = new Subnet(content.data.uid)
+    const subnet: Subnet = new Subnet(content.data.uid)
     // REVIEW Experimental type tightening
     let payloadContent: L2PSRetrieveAllTxMessage | L2PSRegisterTxMessage
     switch (content.extra) {

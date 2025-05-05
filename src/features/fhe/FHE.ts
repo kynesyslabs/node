@@ -1,4 +1,3 @@
-import { Hash } from "crypto"
 import SEAL from "node-seal"
 import { BatchEncoder } from "node-seal/implementation/batch-encoder"
 import { CipherText } from "node-seal/implementation/cipher-text"
@@ -11,13 +10,12 @@ import { KeyGenerator } from "node-seal/implementation/key-generator"
 import { PublicKey } from "node-seal/implementation/public-key"
 import { SEALLibrary } from "node-seal/implementation/seal"
 import { SecretKey } from "node-seal/implementation/secret-key"
-import Hashing from "src/libs/crypto/hashing"
 
 export default class FHE {
     public static instance: FHE
 
     // Properties
-    private initialized: boolean = false
+    private initialized = false
     public seal: SEALLibrary = null
     public schemeType: any
     public securityLevel: any
@@ -41,8 +39,6 @@ export default class FHE {
             cipher: null,
         },
     }
-
-    constructor() {}
 
     public static async getInstance(): Promise<FHE> {
         if (!FHE.instance) {

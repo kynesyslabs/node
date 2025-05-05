@@ -1,7 +1,6 @@
 import { pki } from "node-forge"
 import { Column, Entity, PrimaryGeneratedColumn } from "typeorm"
 
-
 @Entity("blocks")
 export class Blocks {
     @PrimaryGeneratedColumn({ type: "integer", name: "id" })
@@ -22,7 +21,9 @@ export class Blocks {
     @Column("varchar", { name: "proposer" })
     proposer: pki.PublicKey | pki.ed25519.BinaryBuffer
 
-    @Column("text", { name: "validation_data" })
-    validation_data: string
+    @Column("varchar", { name: "next_proposer" })
+    next_proposer: string
 
+    @Column("json", { name: "validation_data" })
+    validation_data: any
 }

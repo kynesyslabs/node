@@ -25,9 +25,30 @@ export class BlockNotFoundError extends Error {
     }
 }
 
-export class PeerOfflineError extends Error {
+export class PeerUnreachableError extends Error {
     constructor(message: string) {
         super(message)
         this.name = "PeerOfflineError"
+    }
+}
+
+export class NotInShardError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "NotInShardError"
+    }
+}
+
+export class ForgingEndedError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "ForgingEndedError"
+    }
+}
+
+export class BlockInvalidError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "BlockInvalidError"
     }
 }

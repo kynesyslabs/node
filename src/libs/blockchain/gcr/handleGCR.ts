@@ -22,9 +22,9 @@
 import { emptyResponse } from "./../../network/server_rpc"
 import _ from "lodash"
 // NOTE This will replace gcr.ts methods for calling the native tables
-import { GCRSubnetsTxs } from "src/model/entities/GCR/GCRSubnetsTxs" // TODO Put this in the sdk when done
-import { GCRHashes } from "src/model/entities/GCR/GCRHashes"
-import { EncryptedTransaction, RPCResponse } from "@kynesyslabs/demosdk/types"
+import { GCRSubnetsTxs } from "src/model/entities/GCRv2/GCRSubnetsTxs" // TODO Put this in the sdk when done
+import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
+import { RPCResponse, Transaction } from "@kynesyslabs/demosdk/types"
 import Datasource from "src/model/datasource"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
@@ -34,8 +34,20 @@ import ensureGCRForUser from "./gcr_routines/ensureGCRForUser"
 import gcrStateSave from "./gcr_routines/gcrStateSaverHelper"
 import { assignXM } from "./gcr_routines/assignXM"
 import { assignWeb2 } from "./gcr_routines/assignWeb2"
-import { txToGCROperation } from "./gcr_routines/txToGCROperation"
 import IdentityManager from "./gcr_routines/identityManager"
+import manageNative from "./gcr_routines/manageNative"
+import { GCREdit } from "@kynesyslabs/demosdk/types"
+import log from "src/utilities/logger"
+
+// REVIEW Trying to use the new GCRv2
+import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
+import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
+import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
+import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
+
+import Chain from "../chain"
+import { Repository } from "typeorm"
+import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -57,6 +69,11 @@ export type GetNativeSubnetsTxsOptions = {
     txData?: boolean
 }
 
+export type GCRResult = {
+    success: boolean
+    message: string
+}
+
 // ? Maybe sanitize the options?
 export default class HandleGCR {
     // TODO Implement this
@@ -71,51 +88,51 @@ export default class HandleGCR {
             extended: false,
         },
     ): Promise<RPCResponse> {
-        var response: RPCResponse = _.cloneDeep(emptyResponse)
+        const response: RPCResponse = _.cloneDeep(emptyResponse)
         // Getting the datasource
         const db = await Datasource.getInstance()
-        const GlobalChangeRegistryRepository = db
+        const globalChangeRegistryRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
         // Getting the status native data
-        const GlobalChangeRegistrySearch =
-            await GlobalChangeRegistryRepository.findOneBy({
+        const globalChangeRegistrySearch =
+            await globalChangeRegistryRepository.findOneBy({
                 publicKey: publicKey,
             })
-        if (!GlobalChangeRegistrySearch) {
+        if (!globalChangeRegistrySearch) {
             response.response = "Address not found"
             response.result = 404
             return response
         }
         // Preparing the response
-        let GlobalChangeRegistryData: GlobalChangeRegistry = {
-            id: GlobalChangeRegistrySearch.id,
-            publicKey: GlobalChangeRegistrySearch.publicKey,
-            details: GlobalChangeRegistrySearch.details,
-            extended: GlobalChangeRegistrySearch.extended,
+        const globalChangeRegistryData: GlobalChangeRegistry = {
+            id: globalChangeRegistrySearch.id,
+            publicKey: globalChangeRegistrySearch.publicKey,
+            details: globalChangeRegistrySearch.details,
+            extended: globalChangeRegistrySearch.extended,
         }
         // Selecting only the requested data
         if (options.balance) {
-            GlobalChangeRegistryData.details.content.balance =
-                GlobalChangeRegistrySearch.details.content.balance
+            globalChangeRegistryData.details.content.balance =
+                globalChangeRegistrySearch.details.content.balance
         }
         if (options.nonce) {
-            GlobalChangeRegistryData.details.content.nonce =
-                GlobalChangeRegistrySearch.details.content.nonce
+            globalChangeRegistryData.details.content.nonce =
+                globalChangeRegistrySearch.details.content.nonce
         }
         if (options.txList) {
-            GlobalChangeRegistryData.details.content.txs =
-                GlobalChangeRegistrySearch.details.content.txs
+            globalChangeRegistryData.details.content.txs =
+                globalChangeRegistrySearch.details.content.txs
         }
         if (options.identities) {
-            GlobalChangeRegistryData.details.content.identities =
-                GlobalChangeRegistrySearch.details.content.identities
+            globalChangeRegistryData.details.content.identities =
+                globalChangeRegistrySearch.details.content.identities
         }
         if (options.extended) {
-            GlobalChangeRegistryData.extended =
-                GlobalChangeRegistrySearch.extended
+            globalChangeRegistryData.extended =
+                globalChangeRegistrySearch.extended
         }
-        response.response = GlobalChangeRegistryData
+        response.response = globalChangeRegistryData
         return response
     }
 
@@ -129,44 +146,44 @@ export default class HandleGCR {
             other: false,
         },
     ): Promise<RPCResponse> {
-        var response: RPCResponse = _.cloneDeep(emptyResponse)
+        const response: RPCResponse = _.cloneDeep(emptyResponse)
         // Getting the datasource
         const db = await Datasource.getInstance()
-        const GCRExtendedRepository = db
+        const gcrExtendedRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
         // Getting the status properties data
-        const RepositorySearch = await GCRExtendedRepository.findOneBy({
+        const repositorySearch = await gcrExtendedRepository.findOneBy({
             publicKey: publicKey,
         })
-        const GCRExtendedSearch = RepositorySearch.extended
-        if (!GCRExtendedSearch) {
+        const gcrExtendedSearch = repositorySearch.extended
+        if (!gcrExtendedSearch) {
             response.response = "Address not found"
             response.result = 404
             return response
         }
         // Preparing the response
-        let GCRExtendedData: GCRExtended = {
-            tokens: GCRExtendedSearch.tokens,
-            nfts: GCRExtendedSearch.nfts,
-            xm: GCRExtendedSearch.xm,
-            web2: GCRExtendedSearch.web2,
-            other: GCRExtendedSearch.other,
+        const gcrExtendedData: GCRExtended = {
+            tokens: gcrExtendedSearch.tokens,
+            nfts: gcrExtendedSearch.nfts,
+            xm: gcrExtendedSearch.xm,
+            web2: gcrExtendedSearch.web2,
+            other: gcrExtendedSearch.other,
         }
         // Selecting only the requested data
         if (options.tokens) {
-            GCRExtendedData.tokens = GCRExtendedSearch.tokens
+            gcrExtendedData.tokens = gcrExtendedSearch.tokens
         }
         if (options.nfts) {
-            GCRExtendedData.nfts = GCRExtendedSearch.nfts
+            gcrExtendedData.nfts = gcrExtendedSearch.nfts
         }
         if (options.xm) {
-            GCRExtendedData.xm = GCRExtendedSearch.xm
+            gcrExtendedData.xm = gcrExtendedSearch.xm
         }
         if (options.web2) {
-            GCRExtendedData.web2 = GCRExtendedSearch.web2
+            gcrExtendedData.web2 = gcrExtendedSearch.web2
         }
-        response.response = GCRExtendedData
+        response.response = gcrExtendedData
         return response
     }
 
@@ -176,45 +193,245 @@ export default class HandleGCR {
             txData: true,
         },
     ): Promise<RPCResponse> {
-        var response: RPCResponse = _.cloneDeep(emptyResponse)
+        const response: RPCResponse = _.cloneDeep(emptyResponse)
         const db = await Datasource.getInstance()
-        const GCRSubnetsTxsRepository = db
+        const gcrSubnetsTxsRepository = db
             .getDataSource()
             .getRepository(GCRSubnetsTxs)
         // Getting the status subnets txs data
-        const GCRSubnetsTxsSearch = await GCRSubnetsTxsRepository.findBy({
+        const gcrSubnetsTxsSearch = await gcrSubnetsTxsRepository.findBy({
             subnet_id: subnetId,
         })
-        if (!GCRSubnetsTxsSearch) {
+        if (!gcrSubnetsTxsSearch) {
             response.response = "Subnet not found"
             response.result = 404
             return response
         }
         // Preparing the response
-        let GCRSubnetsTxsData: GCRSubnetsTxs[] = []
+        const gcrSubnetsTxsData: GCRSubnetsTxs[] = []
         // Selecting only the requested data
         if (!options.txData) {
-            for (const tx of GCRSubnetsTxsSearch) {
+            for (const tx of gcrSubnetsTxsSearch) {
                 tx.tx_data = null
-                GCRSubnetsTxsData.push(tx)
+                gcrSubnetsTxsData.push(tx)
             }
         }
-        response.response = GCRSubnetsTxsData
+        response.response = gcrSubnetsTxsData
         return response
     }
 
     // Routines
 
-    // Assign methods
+    // REVIEW Implement the execution of GCREdit objects
+    // TODO Add this after the tx is synced in Sync.ts and in the consensus
+    // ? Should we add the rollbacks here?
+    // NOTE Once this is implemented, we can remove the old methods from gcr.ts and the other methods that overlap with this one
+    /**
+     * Applies a single GCR edit operation to the blockchain state
+     * @param editOperation The GCR edit to apply
+     * @param tx The original transaction containing this edit
+     * @param rollback Whether the operation is a rollback
+     * @param simulate Whether the operation is being simulated (used for pre-consensus simulation)
+     * @returns Result indicating success/failure and any error messages
+     * @throws May throw database errors during repository operations
+     */
+    static async apply(
+        editOperation: GCREdit,
+        tx: Transaction,
+        rollback = false, // operations will be reverse in the rollback
+        simulate = false, // used to simulate the GCREdit application
+    ): Promise<GCRResult> {
+        /*if (tx.hash !== editOperation.txhash) {
+            return { success: false, message: "Invalid txhash" }
+        }*/
+
+        const repositories = await this.getRepositories()
+
+        // NOTE The rollbacks are applied within the single routines based on the isRollback flag
+        if (rollback) {
+            editOperation.isRollback = true
+        }
+
+        // Applying the edit operations
+        switch (editOperation.type) {
+            case "balance":
+                return GCRBalanceRoutines.apply(
+                    editOperation,
+                    repositories.main as Repository<GCRMain>,
+                    simulate,
+                )
+            case "nonce":
+                return GCRNonceRoutines.apply(
+                    editOperation,
+                    repositories.main as Repository<GCRMain>,
+                    simulate,
+                )
+            case "identity":
+                return GCRIdentityRoutines.apply(
+                    editOperation,
+                    repositories.main as Repository<GCRMain>,
+                    simulate,
+                )
+            case "assign":
+            case "subnetsTx":
+                // TODO implementations
+                console.log(`Assigning GCREdit ${editOperation.type}`)
+                return { success: true, message: "Not implemented" }
+            default:
+                return { success: false, message: "Invalid GCREdit type" }
+        }
+    }
+
+    /**
+     * Applies all GCR edits from a transaction
+     * @param tx Transaction containing GCR edits to apply
+     * @param isRollback Whether the operation is a rollback
+     * @param simulate Whether the operation is being simulated (used for pre-consensus simulation)
+     * @returns Combined result of all edit applications
+     * @throws May throw if any edit application fails
+     */
+    static async applyToTx(
+        tx: Transaction,
+        isRollback = false,
+        simulate = false,
+    ): Promise<GCRResult> {
+        const editsResults: GCRResult[] = []
+        const txExists = await Chain.checkTxExists(tx.hash)
+        if (txExists) {
+            return {
+                success: false,
+                message: "Transaction already executed",
+            }
+        }
+
+        console.log(
+            "[applyToTx] Starting execution of " +
+                tx.content.gcr_edits.length +
+                " GCREdits",
+        )
+        // Keep track of applied edits to be able to rollback them
+        const appliedEdits: GCREdit[] = []
+        for (const edit of tx.content.gcr_edits) {
+            console.log("[applyToTx] Executing GCREdit: " + edit.type)
+            try {
+                const result = await HandleGCR.apply(
+                    edit,
+                    tx,
+                    isRollback,
+                    simulate,
+                )
+                console.log(
+                    "[applyToTx] GCREdit executed: " +
+                        edit.type +
+                        " with result: " +
+                        result.success +
+                        " and message: " +
+                        result.message,
+                )
+                // If not successful, we stop the execution
+                if (!result.success) {
+                    await this.rollback(tx, appliedEdits) // Rollback the applied edits
+                    throw new Error(
+                        "GCREdit failed for " +
+                            edit.type +
+                            " with message: " +
+                            result.message,
+                    )
+                }
+                editsResults.push(result)
+                appliedEdits.push(edit) // Keep track of applied edits
+            } catch (e) {
+                console.error("Error applying GCREdit: ", e)
+                log.error("[applyToTx] Error applying GCREdit: " + e)
+                editsResults.push({
+                    success: false,
+                    message: `${e}`,
+                })
+                await this.rollback(tx, appliedEdits) // Rollback the applied edits
+                // Stopping the execution
+                if (!simulate) {
+                    break
+                }
+            }
+        }
+
+        if (!editsResults.every(result => result.success)) {
+            log.error("[applyToTx] Failed to apply GCREdit")
+            const failedMessages = editsResults
+                .filter(result => !result.success)
+                .map(result => result.message)
+                .join(", ")
+
+            return {
+                success: false,
+                message: failedMessages,
+            }
+        }
+
+        return { success: true, message: "" }
+    }
+
+    /**
+     * Rolls back a transaction by reversing the order of applied GCR edits
+     * @param tx The transaction to rollback
+     * @param appliedEditsOriginal The original list of applied GCR edits
+     * @returns Result indicating success/failure and any error messages
+     * @throws May throw if any edit rollback fails
+     */
+    static async rollback(
+        tx: Transaction,
+        appliedEditsOriginal: GCREdit[],
+    ): Promise<GCRResult> {
+        // We need to reverse the order of the applied edits
+        const appliedEdits = appliedEditsOriginal.reverse()
+        log.info(
+            "[rollback] Rolling back " +
+                appliedEdits.length +
+                " GCREdits for tx: " +
+                tx.hash,
+        )
+        // To rollback the edits, we need to pass the rollback flag to the apply method
+        const counter = 0
+        const results: GCRResult[] = []
+        for (const edit of appliedEdits) {
+            console.log(
+                "[rollback] (" +
+                    counter +
+                    "/" +
+                    appliedEdits.length +
+                    ") Rolling back GCREdit: " +
+                    edit.type,
+            )
+            const result = await this.apply(edit, tx, true)
+            results.push(result)
+        }
+        log.info(
+            "[rollback] Rolled back " +
+                counter +
+                " GCREdits for tx: " +
+                tx.hash,
+        )
+        return {
+            success: results.every(result => result.success),
+            message: results.map(result => result.message).join(", "),
+        }
+    }
+
+    // ! SECTION GCREdit methods
+
+    // Assign methods // ? Probably to remove
+
     // TODO We have to port these methods from gcr.ts, now they are just proxies
     assign = {
         xm: assignXM,
         web2: assignWeb2,
         identity: {
             assignFromWrite: IdentityManager.inferIdentityFromWrite,
-            assignFromSignature: IdentityManager.inferIdentityFromSignature,
         },
     }
+
+    // This is a proxy to the manageNative methods for simplicity
+    native = manageNative
 
     // Utilities
     utilities = {
@@ -233,5 +450,34 @@ export default class HandleGCR {
     jsonb = {
         get: GCRJsonbHandler.getJSONBValue,
         update: GCRJsonbHandler.updateJSONBValue,
+    }
+
+    private static async getRepositories() {
+        const db = await Datasource.getInstance()
+        const dataSource = db.getDataSource()
+
+        return {
+            main: dataSource.getRepository(GCRMain),
+            hashes: dataSource.getRepository(GCRHashes),
+            subnetsTxs: dataSource.getRepository(GCRSubnetsTxs),
+            tracker: dataSource.getRepository(GCRTracker),
+        }
+    }
+
+    // Create methods
+    public static createAccount = async (pubkey: string) => {
+        const db = await Datasource.getInstance()
+        const dataSource = db.getDataSource()
+        const repository = dataSource.getRepository(GCRMain)
+        const account = new GCRMain()
+        account.pubkey = pubkey
+        account.balance = 0n
+        account.identities = {
+            xm: {},
+            web2: {},
+        }
+        account.assignedTxs = []
+        account.nonce = 0
+        return await repository.save(account)
     }
 }

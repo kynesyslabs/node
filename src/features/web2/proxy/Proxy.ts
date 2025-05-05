@@ -7,8 +7,12 @@ import {
     IWeb2Request,
     EnumWeb2Methods,
     IWeb2Result,
+    IAuthorizationConfig,
+    ISendHTTPRequestParams,
 } from "@kynesyslabs/demosdk/types"
 import required from "src/utilities/required"
+import stream from "stream"
+import SharedState from "@/utilities/sharedState"
 
 /**
  * A proxy server class that handles HTTP/HTTPS requests by creating a local proxy server.
@@ -19,55 +23,41 @@ export class Proxy {
     private _server: http.Server | https.Server | null = null
     private _proxyPort = 0
     private _isInitialized = false
-    private _authorizationConfig: {
-        requireAuthForAll: boolean
-        exceptions: Array<{ urlPattern: RegExp; methods: EnumWeb2Methods[] }>
-    }
 
     constructor(
         private readonly _dahrSessionId: string,
         private readonly _proxyHost: string = "localhost",
-        authorizationConfig?: {
-            requireAuthForAll: boolean
-            exceptions: Array<{
-                urlPattern: RegExp
-                methods: EnumWeb2Methods[]
-            }>
+        private readonly _authConfig: IAuthorizationConfig = {
+            requireAuthForAll: SharedState.getInstance().PROD,
+            exceptions: [],
         },
     ) {
-        this._authorizationConfig = authorizationConfig || {
-            requireAuthForAll: false, // TODO: Set to true before production
-            exceptions: [],
-        }
         required(this._dahrSessionId, "Missing dahr session Id")
     }
 
     /**
      * Sends an HTTP/HTTPS request through the proxy.
-     * @param {IWeb2Request} web2Request - The request details including URL and headers
-     * @param {EnumWeb2Methods} targetMethod - The HTTP method to use (GET, POST, etc)
-     * @param {IWeb2Request["raw"]["headers"]} targetHeaders - The headers to send with the request
-     * @param {any} payload - The payload to send with the request
-     * @param {string} targetAuthorization - The authorization token to send with the request
-     * @returns {Promise<IWeb2Result>} Promise resolving to the response data
-     * @throws {Error} if the proxy server fails to start or if the request fails
+     * @returns Promise resolving to the response data
+     * @throws Error if the proxy server fails to start or if the request fails
      */
     async sendHTTPRequest(
-        web2Request: IWeb2Request,
-        targetMethod: EnumWeb2Methods,
-        targetHeaders: IWeb2Request["raw"]["headers"],
-        payload: any,
-        targetAuthorization: string,
+        params: ISendHTTPRequestParams,
     ): Promise<IWeb2Result> {
+        const {
+            web2Request,
+            targetMethod,
+            targetHeaders,
+            payload,
+            targetAuthorization,
+        } = params
         required(web2Request.raw, "web2Request.raw")
-        required(web2Request.raw.url, "web2Request.raw.url")
 
-        const targetUrl = web2Request.raw.url
+        const targetUrl = web2Request.raw.url || ""
 
         // Only initialize the proxy server if it's not already running
         if (!this._isInitialized) {
             try {
-                await this._startProxyServer(targetUrl)
+                await this.startProxyServer(targetUrl)
                 this._isInitialized = true
             } catch (error) {
                 console.error("[Web2API] Error starting proxy server:", error)
@@ -77,8 +67,8 @@ export class Proxy {
 
         return new Promise((resolve, reject) => {
             const { targetProtocol, targetHostname, targetPort } =
-                this._parseUrl(targetUrl)
-            const headers = this._createHeaders(
+                this.parseUrl(targetUrl)
+            const headers = this.createHeaders(
                 targetHostname,
                 targetPort,
                 targetMethod,
@@ -163,6 +153,7 @@ export class Proxy {
      * Stops the proxy server and cleans up resources.
      * This method should be called when the proxy is no longer needed.
      * It stops the proxy server and closes any open connections.
+     * @returns void
      */
     stopProxy(): void {
         if (this._server) {
@@ -192,31 +183,21 @@ export class Proxy {
         throw new Error("Unable to determine proxy server address")
     }
 
-    /**
-     * Starts the proxy server if it's not already running.
-     * @param {string} targetUrl - The target URL to proxy requests to.
-     * @returns {Promise<void>} Promise resolving when the server is created.
-     */
-    private _startProxyServer(targetUrl: string): Promise<void> {
+    private startProxyServer(targetUrl: string): Promise<void> {
         // Don't create a new server if one is already running
         if (this._server) {
             return Promise.resolve()
         }
 
         return new Promise((resolve, reject) => {
-            this._createNewServer(targetUrl).then(resolve).catch(reject)
+            this.createNewServer(targetUrl).then(resolve).catch(reject)
         })
     }
 
-    /**
-     * Creates a new proxy server.
-     * @param targetUrl - The target URL to proxy requests to.
-     * @returns Promise resolving when the server is created.
-     */
-    private _createNewServer(targetUrl: string): Promise<void> {
+    private createNewServer(targetUrl: string): Promise<void> {
         return new Promise((resolve, reject) => {
             const { targetProtocol, targetHostname, targetPort } =
-                this._parseUrl(targetUrl)
+                this.parseUrl(targetUrl)
 
             // Create the proxy server
             const proxyServer = httpProxy.createProxyServer({
@@ -252,7 +233,7 @@ export class Proxy {
 
             // Create the main HTTP server
             this._server = http.createServer((req, res) => {
-                if (!this._isAuthorizedRequest(req)) {
+                if (!this.isAuthorizedRequest(req)) {
                     res.writeHead(403)
                     res.end("Unauthorized")
                     return
@@ -262,7 +243,7 @@ export class Proxy {
 
             // Handle HTTPS CONNECT
             this._server.on("connect", (req, clientSocket, head) => {
-                if (!this._isAuthorizedRequest(req)) {
+                if (!this.isAuthorizedRequest(req)) {
                     clientSocket.write(
                         "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nUnauthorized request",
                     )
@@ -275,34 +256,60 @@ export class Proxy {
                     parseInt(targetPort) || 443,
                     targetHost,
                     () => {
-                        clientSocket.write(
-                            "HTTP/1.1 200 Connection Established\r\n" +
-                                "Proxy-agent: DAHR-Proxy\r\n" +
-                                "\r\n",
-                        )
+                        try {
+                            if (
+                                !clientSocket.destroyed &&
+                                clientSocket.writable
+                            ) {
+                                clientSocket.write(
+                                    "HTTP/1.1 200 Connection Established\r\n" +
+                                        "Proxy-agent: DAHR-Proxy\r\n" +
+                                        "\r\n",
+                                )
 
-                        targetSocket.write(head)
-                        targetSocket.pipe(clientSocket)
-                        clientSocket.pipe(targetSocket)
+                                if (
+                                    !targetSocket.destroyed &&
+                                    targetSocket.writable
+                                ) {
+                                    targetSocket.write(head)
+
+                                    // Only set up pipes if both sockets are still valid
+                                    if (
+                                        !clientSocket.destroyed &&
+                                        !targetSocket.destroyed
+                                    ) {
+                                        targetSocket.pipe(clientSocket)
+                                        clientSocket.pipe(targetSocket)
+                                    }
+                                }
+                            }
+                        } catch (error) {
+                            console.error(
+                                "[Web2API] Error during connection setup:",
+                                error,
+                            )
+                            this.safelyCloseSocket(clientSocket)
+                            this.safelyCloseSocket(targetSocket)
+                        }
                     },
                 )
 
                 targetSocket.on("error", err => {
                     console.error("[Web2API] Target connection error:", err)
-                    clientSocket.end()
+                    this.safelyCloseSocket(clientSocket)
                 })
 
                 clientSocket.on("error", err => {
                     console.error("[Web2API] Client connection error:", err)
-                    targetSocket.end()
+                    this.safelyCloseSocket(targetSocket)
                 })
 
                 targetSocket.on("end", () => {
-                    clientSocket.end()
+                    this.safelyCloseSocket(clientSocket)
                 })
 
                 clientSocket.on("end", () => {
-                    targetSocket.end()
+                    this.safelyCloseSocket(targetSocket)
                 })
             })
 
@@ -328,40 +335,33 @@ export class Proxy {
         })
     }
 
-    /**
-     * Checks if the request is authorized by verifying the session ID header.
-     * @param req - The incoming HTTP request message.
-     * @returns True if the request is authorized, false otherwise.
-     */
-    private _isAuthorizedRequest(req: http.IncomingMessage): boolean {
+    private isAuthorizedRequest(req: http.IncomingMessage): boolean {
         const sessionIdHeader = req.headers["x-dahr-session-id"]
+        const url = req.url || ""
+        const method = req.method as EnumWeb2Methods
 
-        if (!sessionIdHeader) {
-            console.log("[Web2API] Request rejected: Missing session ID header")
-            return false
+        // Check if this URL/method combination is in exceptions
+        const isExempt = this._authConfig.exceptions.some(
+            exception =>
+                exception.urlPattern.test(url) &&
+                exception.methods.includes(method),
+        )
+
+        if (isExempt) {
+            return true
         }
 
-        if (Array.isArray(sessionIdHeader)) {
-            console.log(
-                "[Web2API] Request rejected: Multiple session ID headers",
+        if (this._authConfig.requireAuthForAll) {
+            return (
+                typeof sessionIdHeader === "string" &&
+                sessionIdHeader === this._dahrSessionId
             )
-            return false
-        }
-
-        if (sessionIdHeader !== this._dahrSessionId) {
-            console.log("[Web2API] Request rejected: Session ID mismatch")
-            return false
         }
 
         return true
     }
 
-    /**
-     * Parses the URL to extract the protocol, hostname, and port.
-     * @param url - The URL to parse.
-     * @returns The parsed URL details.
-     */
-    private _parseUrl(url: string) {
+    private parseUrl(url: string) {
         const parsedUrl = new URL(url)
         return {
             targetProtocol: parsedUrl.protocol,
@@ -376,17 +376,7 @@ export class Proxy {
         }
     }
 
-    /**
-     * Creates the headers for a request.
-     * @param targetHostname - The hostname of the target URL.
-     * @param targetPort - The port of the target URL.
-     * @param targetMethod - The HTTP method to use.
-     * @param targetHeaders - The headers to send with the request.
-     * @param targetAuthorization - The authorization token to send with the request.
-     * @param targetUrl - The URL of the target.
-     * @returns The headers for the request.
-     */
-    private _createHeaders(
+    private createHeaders(
         targetHostname: string,
         targetPort: number,
         targetMethod: EnumWeb2Methods,
@@ -410,37 +400,32 @@ export class Proxy {
             }
         }
 
-        // Add Content-Type for methods with a body
+        // Only set Content-Type if not provided by user
         if (
             [
                 EnumWeb2Methods.POST,
                 EnumWeb2Methods.PUT,
                 EnumWeb2Methods.PATCH,
-            ].includes(targetMethod)
+            ].includes(targetMethod) &&
+            !headers["Content-Type"]
         ) {
             headers["Content-Type"] = "application/json"
         }
 
         // Add Authorization if required
-        if (this._requiresAuthorization(targetUrl, targetMethod)) {
+        if (this.requiresAuthorization(targetUrl, targetMethod)) {
             headers["Authorization"] = `Bearer ${targetAuthorization}`
         }
 
         return headers
     }
 
-    /**
-     * Checks if the request requires authorization based on the configuration.
-     * @param url - The URL of the target.
-     * @param method - The HTTP method to use.
-     * @returns True if the request requires authorization, false otherwise.
-     */
-    private _requiresAuthorization(
+    private requiresAuthorization(
         url: string,
         method: EnumWeb2Methods,
     ): boolean {
-        if (this._authorizationConfig.requireAuthForAll) {
-            for (const exception of this._authorizationConfig.exceptions) {
+        if (this._authConfig.requireAuthForAll) {
+            for (const exception of this._authConfig.exceptions) {
                 if (
                     exception.urlPattern.test(url) &&
                     exception.methods.includes(method)
@@ -451,5 +436,19 @@ export class Proxy {
             return true
         }
         return false
+    }
+
+    // Helper function to safely close a socket
+    private safelyCloseSocket(socket: net.Socket | stream.Duplex): void {
+        try {
+            if (!socket.destroyed) {
+                if (socket.writable) {
+                    socket.end()
+                }
+                socket.destroy()
+            }
+        } catch (error) {
+            console.error("[Web2API] Error while safely closing socket:", error)
+        }
     }
 }

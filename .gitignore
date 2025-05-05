@@ -14,7 +14,8 @@ docker/node_base
 last_crash_memory_usage.txt
 node[0-9]*
 .env
-
+twitter_cookies.json
+.RUN
 .vscode
 
 #OSX files
@@ -79,7 +80,7 @@ documentation/export
 
 # Bun files
 .bun
-bun.lockb
+bun.lock
 /.env.orig
 /src/libs/blockchain/*_BACKUP_*.ts
 /src/libs/blockchain/block_REMOTE_224733.ts
@@ -91,3 +92,8 @@ src/GPATH
 src/GRTAGS
 src/GTAGS
 .vscode/settings.json
+.aider*
+
+# Output files
+output/*
+.env

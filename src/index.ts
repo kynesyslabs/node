@@ -30,18 +30,21 @@ import log from "src/utilities/logger"
 import { Peer } from "./libs/peer"
 import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
+import net from "net"
+import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 
 const term = terminalkit.terminal
 
 dotenv.config()
 
 // NOTE This is a global variable that will be used to store the warmup routine and the index needed variables
-let indexState: {
+const indexState: {
     OVERRIDE_PORT: number | null
     OVERRIDE_IS_TESTER: boolean | null
     COMMANDLINE_MODE: boolean | null
     RPC_FEE: number
     SERVER_PORT: number
+    SIGNALING_SERVER_PORT: number
     EXPOSED_URL: string
     PG_PORT: number
     enough_peers: boolean
@@ -53,6 +56,7 @@ let indexState: {
     COMMANDLINE_MODE: null,
     RPC_FEE: 10,
     SERVER_PORT: 0,
+    SIGNALING_SERVER_PORT: 0,
     EXPOSED_URL: "",
     PG_PORT: 5332,
     enough_peers: true,
@@ -70,7 +74,7 @@ async function calibrateTime() {
 }
 // ANCHOR Routine to handle parameters in advanced mode
 async function digestArguments() {
-    let args = process.argv
+    const args = process.argv
     if (args.length > 3) {
         console.log("digest arguments")
         for (let i = 3; i < args.length; i++) {
@@ -80,7 +84,7 @@ async function digestArguments() {
                 process.exit(0)
             }
             // Handle configurations
-            let param = args[i].split("=")
+            const param = args[i].split("=")
             // NOTE These are all the parameters supported
             switch (param[0]) {
                 case "port":
@@ -106,6 +110,40 @@ async function digestArguments() {
         }
     }
 }
+
+async function isPortAvailable(port: number): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+        const server = net.createServer()
+        server.once("error", err => {
+            server.close()
+            if (err["code"] == "EADDRINUSE") {
+                resolve(false)
+            } else {
+                resolve(false) // or throw error!!
+                // reject(err);
+            }
+        })
+
+        server.once("listening", () => {
+            resolve(true)
+            server.close()
+        })
+        server.listen(port)
+    })
+}
+
+async function getNextAvailablePort(startFrom: number) {
+    let availablePort: number = null
+    while (startFrom < 65535 || !!availablePort) {
+        if (await isPortAvailable(startFrom)) {
+            availablePort = startFrom
+            break
+        }
+        startFrom++
+    }
+    return availablePort
+}
+
 // ANCHOR Warmup method
 async function warmup() {
     // INFO Cleaning the logs directory (except custom logs)
@@ -134,6 +172,19 @@ async function warmup() {
     if (indexState.SERVER_PORT == 0) {
         indexState.SERVER_PORT = parseInt(process.env.SERVER_PORT, 10) || 53550
     }
+    // Allow overriding signaling server port through RPC_SIGNALING_PORT
+    indexState.SIGNALING_SERVER_PORT =
+        parseInt(process.env.RPC_SIGNALING_PORT, 10) || 0
+    if (indexState.SIGNALING_SERVER_PORT == 0) {
+        indexState.SIGNALING_SERVER_PORT =
+            parseInt(process.env.SIGNALING_SERVER_PORT, 10) || 3005
+    }
+
+    // Use next available port for the signaling server
+    // (useful when we have multiple nodes running the same code on the same machine)
+    indexState.SIGNALING_SERVER_PORT = await getNextAvailablePort(
+        indexState.SIGNALING_SERVER_PORT,
+    )
     // Setting the server port to the shared state
     getSharedState.serverPort = indexState.SERVER_PORT
     // Exposed URL
@@ -145,6 +196,7 @@ async function warmup() {
     console.log("PG_PORT: " + indexState.PG_PORT)
     console.log("RPC_FEE: " + indexState.RPC_FEE)
     console.log("SERVER_PORT: " + indexState.SERVER_PORT)
+    console.log("SIGNALING_SERVER_PORT: " + indexState.SIGNALING_SERVER_PORT)
     console.log("= End of Configuration = \n")
     // Configure the logs directory
     log.setLogsDir(indexState.SERVER_PORT)
@@ -178,7 +230,7 @@ async function preMainLoop() {
         "\n[MAIN] 🔗 WE ARE " + id.ed25519.publicKey.toString("hex") + " 🔗 \n",
     )
     // Creating ourselves as a peer // ? Should this be removed in production?
-    let ourselves = "http://127.0.0.1:" + indexState.SERVER_PORT
+    const ourselves = "http://127.0.0.1:" + indexState.SERVER_PORT
     getSharedState.connectionString = ourselves
     log.info("Our connection string is: " + ourselves)
     // And saves the public key file
@@ -254,6 +306,17 @@ async function main() {
         }
         if (indexState.COMMANDLINE_MODE) {
             // commandLine() // While doing the rest of the stuff needed, a comand line interface is available
+        }
+        // Starting the signaling server
+        const signalingServer = new SignalingServer(
+            indexState.SIGNALING_SERVER_PORT,
+        )
+        if (signalingServer) {
+            getSharedState.isSignalingServerStarted = true
+            console.log("[MAIN] Signaling server started")
+        } else {
+            console.log("[MAIN] Failed to start the signaling server")
+            process.exit(1)
         }
         term.yellow("[MAIN] ✅ Starting the background loop\n")
         // ANCHOR Starting the main loop

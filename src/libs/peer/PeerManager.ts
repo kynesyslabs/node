@@ -15,17 +15,9 @@ import Cryptography from "../crypto/cryptography"
 import { getSharedState } from "src/utilities/sharedState"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { HelloPeerRequest } from "../network/manageHelloPeer"
+import { forgeToHex } from "../crypto/forgeUtils"
 import fs from "fs"
 
-function ForgeToHex(forgeBuffer: any) {
-    console.log("[forge to string encoded]")
-    //console.log(forgeBuffer)
-    let rebuffer = Buffer.from(forgeBuffer)
-    forgeBuffer = rebuffer.toString("hex")
-    console.log("DECODED INTO:")
-    console.log("0x" + forgeBuffer)
-    return "0x" + forgeBuffer
-}
 
 export default class PeerManager {
     private static instance: PeerManager
@@ -53,11 +45,11 @@ export default class PeerManager {
 
     // Loading the peer list from the demos_peer.json
     loadPeerList() {
-        let rawPeerList = fs.readFileSync(getSharedState.peerListFile, "utf8")
-        let peerList = JSON.parse(rawPeerList)
+        const rawPeerList = fs.readFileSync(getSharedState.peerListFile, "utf8")
+        const peerList = JSON.parse(rawPeerList)
         // Creating a peer object for each peer in the peer list, assigning the connection string and adding it to the peer list
         for (const peer in peerList) {
-            let peerObject = this.createNewPeer(peer)
+            const peerObject = this.createNewPeer(peer)
             peerObject.connection.string = peerList[peer]
             this.addPeer(peerObject)
         }
@@ -76,7 +68,7 @@ export default class PeerManager {
     }
 
     getPeers(): Peer[] {
-        return this._getActors(true, false)
+        return this.getActors(true, false)
     }
 
     getPeer(identity: string): Peer {
@@ -88,14 +80,14 @@ export default class PeerManager {
     }
 
     getAll(): Peer[] {
-        return this._getActors(true, true)
+        return this.getActors(true, true)
     }
 
     getOfflinePeers(): Record<string, Peer> {
         return this.offlinePeers
     }
 
-    private _getActors(peers: boolean, connections: boolean): Peer[] {
+    private getActors(peers: boolean, connections: boolean): Peer[] {
         console.log("[PeerManager] Getting all peers...")
         console.log("[PeerManager] peers: " + peers)
         console.log("[PeerManager] connections: " + connections)
@@ -107,19 +99,19 @@ export default class PeerManager {
         //console.log(this.peerList)
         for (const peer in this.peerList) {
             console.log("[PeerManager] Getting peer " + peer)
-            let _peer = this.peerList[peer]
-            console.log("[PeerManager] With url: " + _peer.connection.string)
+            const peerInstance = this.peerList[peer]
+            console.log("[PeerManager] With url: " + peerInstance.connection.string)
             // Filtering
-            if (_peer.identity != undefined) {
+            if (peerInstance.identity != undefined) {
                 console.log(
                     "[PEERMANAGER] This peer has an identity: treating it as an authenticated peer",
                 )
-                authenticatedList.push(_peer)
+                authenticatedList.push(peerInstance)
             } else {
                 console.log(
                     "[PEERMANAGER] This peer has no identity: treating it as a connection only peer",
                 )
-                connectedList.push(_peer)
+                connectedList.push(peerInstance)
             }
         }
 
@@ -141,18 +133,18 @@ export default class PeerManager {
 
     // Creating a JSON object with the peerlist and logging it
     logPeerList() {
-        const json_peerlist = {}
+        const jsonPeerList = {}
         for (const peer in this.peerList) {
-            json_peerlist[peer] = {
-                connection_string: this.peerList[peer].connection.string,
+            jsonPeerList[peer] = {
+                connectionString: this.peerList[peer].connection.string,
                 identity: this.peerList[peer].identity,
-                is_authenticated: this.peerList[peer].verification.status,
+                isAuthenticated: this.peerList[peer].verification.status,
             }
         }
         // Flushing the log file and logging the peerlist
         log.custom(
             "peer_list",
-            JSON.stringify(json_peerlist, null, 2),
+            JSON.stringify(jsonPeerList, null, 2),
             false,
             true,
         )
@@ -160,10 +152,7 @@ export default class PeerManager {
 
     async getOnlinePeers(): Promise<Peer[]> {
         //const onlinePeers: Peer[] = []
-        for await (const _peer of Object.values(this.peerList)) {
-            const peerInstance = new Peer()
-            peerInstance.identity = _peer.identity
-            peerInstance.connection.string = _peer.connection.string
+        for await (const peerInstance of Object.values(this.peerList)) {
             log.info(
                 "[PEERMANAGER] Checking online status of peer " +
                     peerInstance.identity,
@@ -294,8 +283,8 @@ export default class PeerManager {
         delete this.offlinePeers[identity]
     }
 
-    setPeers(peerlist: Peer[], discard_current_peerlist: boolean = true) {
-        if (discard_current_peerlist) {
+    setPeers(peerlist: Peer[], discardCurrentPeerlist = true) {
+        if (discardCurrentPeerlist) {
             this.peerList = {}
         }
         for (const peer of peerlist) {
@@ -309,26 +298,26 @@ export default class PeerManager {
 
         // TODO test and finalize this method
         log.debug("[Hello Peer] Saying hello to peer " + peer.identity)
-        const our_id = getSharedState.identity.ed25519.publicKey
-        let connection_string = getSharedState.exposedUrl // ? Are we sure about this
-        let signed_connection_string = Cryptography.sign(
-            connection_string,
+        const ourId = getSharedState.identity.ed25519.publicKey
+        const connectionString = getSharedState.exposedUrl // ? Are we sure about this
+        const signedConnectionString = Cryptography.sign(
+            connectionString,
             getSharedState.identity.ed25519.privateKey,
         )
 
         log.debug(
-            "[Hello Peer] Signing connection string: " + connection_string,
+            "[Hello Peer] Signing connection string: " + connectionString,
         )
         log.debug(
             "[Hello Peer] Signed connection string: " +
-                ForgeToHex(signed_connection_string),
+                forgeToHex(signedConnectionString),
         )
 
         // Sending the transmission to the peer
-        const hello_request: HelloPeerRequest = {
-            url: connection_string,
-            publicKey: our_id.toString("hex"),
-            signature: signed_connection_string.toString("hex"),
+        const helloRequest: HelloPeerRequest = {
+            url: connectionString,
+            publicKey: ourId.toString("hex"),
+            signature: signedConnectionString.toString("hex"),
             syncData: {
                 block: getSharedState.lastBlockNumber,
                 block_hash: getSharedState.lastBlockHash,
@@ -338,20 +327,23 @@ export default class PeerManager {
 
         log.debug(
             "[Hello Peer] Hello request: " +
-                JSON.stringify(hello_request, null, 2),
+                JSON.stringify(helloRequest, null, 2),
         )
         // Not awaiting the response to not block the main thread
-        peer.longCall(
+        const response = await peer.longCall(
             {
                 method: "hello_peer",
-                params: [hello_request],
+                params: [helloRequest],
             },
             true,
             250,
             3,
-        ).then(response => {
-            PeerManager.helloPeerCallback(response, peer)
-        })
+        )
+        return PeerManager.helloPeerCallback(response, peer)
+
+        // then(response => {
+        //     PeerManager.helloPeerCallback(response, peer)
+        // })
         log.debug("[Hello Peer] Hello request sent: waiting for response")
     }
 

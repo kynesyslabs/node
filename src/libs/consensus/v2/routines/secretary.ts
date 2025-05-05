@@ -14,7 +14,7 @@ import {
 } from "./shardManager"
 import log from "src/utilities/logger"
 import { Cryptography } from "node_modules/@kynesyslabs/demosdk/build/encryption"
-import { HexToForge } from "src/libs/crypto/forgeUtils"
+import { hexToForge } from "src/libs/crypto/forgeUtils"
 
 /** NOTE
  * This class is used both by the secretary itself and the other shard partecipants.
@@ -28,11 +28,11 @@ class Secretary {
 
     // REVIEW The below variables are used to avoid premature consensus end and to avoid nodes being left behind
     private phaseStatus: Map<string, ValidatorPhase> = new Map() // Map of the shard partecipants
-    public consensusEnded: boolean = false
+    public consensusEnded = false
 
     // SECTION Secretary routine controls
-    private isSecretaryRoutineRunning: boolean = false
-    private stopSecretaryRoutine: boolean = false
+    private isSecretaryRoutineRunning = false
+    private stopSecretaryRoutine = false
 
     constructor() {
         this.secretary = getShardManager.getShard()[0]
@@ -79,10 +79,10 @@ class Secretary {
     // REVIEW Authenticated endpoint to update the last seen time of a shard partecipant
     public updateLastSeen(peerKey: string, signature: string): void {
         // Checking the signature against the peerKey
-        let isValid = Cryptography.verify(
+        const isValid = Cryptography.verify(
             peerKey,
-            HexToForge(signature),
-            HexToForge(peerKey),
+            hexToForge(signature),
+            hexToForge(peerKey),
         )
         if (!isValid) {
             return
@@ -121,15 +121,15 @@ class Secretary {
         peerKey: string,
         waitStatus: boolean,
         signature: string,
-    ): Boolean {
+    ): boolean {
         console.log(
             "[setWaitStatus] Received setWaitStatus request: processing",
         )
         // Checking the signature against the peerKey
-        let isValid = Cryptography.verify(
+        const isValid = Cryptography.verify(
             peerKey,
-            HexToForge(signature),
-            HexToForge(peerKey),
+            hexToForge(signature),
+            hexToForge(peerKey),
         )
         if (!isValid) {
             log.warning(
@@ -159,7 +159,7 @@ class Secretary {
     // Setting the status of a shard partecipant
     // ! We need authentication for this
     public setStatus(peerKey: string, status: ValidatorStatus): RPCResponse {
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
+        const response: RPCResponse = _.cloneDeep(emptyResponse)
         // Creating a deep copy of the status if it is not yet in the map
         if (!this.status.has(peerKey)) {
             this.status.set(peerKey, _.cloneDeep(emptyValidatorStatus))
@@ -231,13 +231,13 @@ class Secretary {
     public isConsensusEnded(): [boolean, string[]] {
         // Returns a boolean and the list of validators that have not ended the consensus
         // TODO Implement this
-        let notEndedValidators: string[] = []
+        const notEndedValidators: string[] = []
         if (this.consensusEnded) {
             return [true, notEndedValidators]
         }
         // Checking if there are any validators that have not ended the consensus
         for (const [index, phase] of this.phaseStatus.entries()) {
-            let validatorKey = Array.from(this.phaseStatus.keys())[index]
+            const validatorKey = Array.from(this.phaseStatus.keys())[index]
             if (!phase.readyToEndConsensus) {
                 notEndedValidators.push(validatorKey)
             }
@@ -258,9 +258,9 @@ class Secretary {
 
     // REVIEW This will be used to check if there is someone waiting for the status update
     public isSomeoneWaiting(): [boolean, string[]] {
-        let waitingValidators: string[] = []
+        const waitingValidators: string[] = []
         for (const [index, phase] of this.phaseStatus.entries()) {
-            let validatorKey = Array.from(this.phaseStatus.keys())[index]
+            const validatorKey = Array.from(this.phaseStatus.keys())[index]
             if (phase.waitStatus) {
                 waitingValidators.push(validatorKey)
             }
@@ -276,10 +276,10 @@ class Secretary {
     // REVIEW This will be used to end the consensus for a shard partecipant
     public readyToEndConsensus(peerKey: string, signature: string): boolean {
         // Checking the signature against the peerKey
-        let isValid = Cryptography.verify(
+        const isValid = Cryptography.verify(
             peerKey,
-            HexToForge(signature),
-            HexToForge(peerKey),
+            hexToForge(signature),
+            hexToForge(peerKey),
         )
         if (!isValid) {
             return false
@@ -299,25 +299,25 @@ class Secretary {
     // REVIEW This will be used to broadcast the status of the shard members to the waiting shard members
     public async hitWaitingShardMembers(): Promise<[boolean, string[]]> {
         // Success + peers hit
-        let waitingShardMembers: Peer[] = []
-        let waitingShardMembersRequest = this.isSomeoneWaiting()
-        let routineResponse: [boolean, string[]] = [true, []]
+        const waitingShardMembers: Peer[] = []
+        const waitingShardMembersRequest = this.isSomeoneWaiting()
+        const routineResponse: [boolean, string[]] = [true, []]
         // If there are shard members waiting for the status update, we hit them
         if (!waitingShardMembersRequest[0]) {
             return routineResponse
         }
         // Extracting the keys of the shard members that are waiting
-        let waitingShardMembersKeys = waitingShardMembersRequest[1]
+        const waitingShardMembersKeys = waitingShardMembersRequest[1]
         // Getting the shard members
-        let shardMembers = getShardManager.getShard()
+        const shardMembers = getShardManager.getShard()
         // Finding the shard members that are waiting and adding them to the list as Peer objects
         for (const peerKey of waitingShardMembersKeys) {
-            let peer = shardMembers.find(peer => peer.identity === peerKey)
+            const peer = shardMembers.find(peer => peer.identity === peerKey)
             waitingShardMembers.push(peer)
         }
-        let currentStatus = this.getAllStatus()
+        const currentStatus = this.getAllStatus()
         // Preparing the json call to broadcast the status of the shard members to the waiting shard members
-        let jsonCall: RPCRequest = {
+        const jsonCall: RPCRequest = {
             method: "consensus_routine",
             params: [
                 {
@@ -327,7 +327,7 @@ class Secretary {
             ],
         }
         // Broadcasting the status of the shard members to the waiting shard members
-        let promises: Promise<RPCResponse>[] = []
+        const promises: Promise<RPCResponse>[] = []
         for (const peer of waitingShardMembers) {
             promises.push(peer.authenticatedCall(jsonCall))
             routineResponse[1].push(peer.identity)
@@ -341,10 +341,10 @@ class Secretary {
     // REVIEW This will be used to hit a validator with a green light
     // NOTE This is to be called only by the secretary (it will fail on authentication otherwise)
     public hitValidator(peerKey: string): void {
-        let allStatuses = this.getAllStatus()
-        let currentStatus = this.getStatus(peerKey)
+        const allStatuses = this.getAllStatus()
+        const currentStatus = this.getStatus(peerKey)
         // Broadcasting the status of the shard members to the waiting shard members
-        let jsonCall: RPCRequest = {
+        const jsonCall: RPCRequest = {
             method: "consensus_routine",
             params: [
                 {
@@ -354,7 +354,7 @@ class Secretary {
             ],
         }
         // Hitting the validator
-        let response = this.secretary.authenticatedCall(jsonCall)
+        const response = this.secretary.authenticatedCall(jsonCall)
     }
 
     // REVIEW This will start an async loop that the secretary will use to send statuses to the waiting shard members
@@ -387,7 +387,7 @@ class Secretary {
             // Sleeping for a while
             await new Promise(resolve => setTimeout(resolve, 250)) // 250ms
             // Checking all the waiting shard members
-            let waitingShardMembers = this.isSomeoneWaiting()
+            const waitingShardMembers = this.isSomeoneWaiting()
             // If there are no waiting shard members, we can continue with the routine
             if (!waitingShardMembers[0]) {
                 continue
@@ -419,11 +419,11 @@ class Secretary {
     private async checkIfValidatorCanProceed(peerKey: string): Promise<void> {
         // TODO Implement this
         // Determining the target status of the validator
-        let targetStatus = this.getStatus(peerKey)
-        let targetStatusReached: boolean = true
+        const targetStatus = this.getStatus(peerKey)
+        let targetStatusReached = true
         // Checking if all the validators have the same status
         for (const [index, status] of this.status.entries()) {
-            let validatorKey = Array.from(this.status.keys())[index]
+            const validatorKey = Array.from(this.status.keys())[index]
             if (status !== targetStatus) {
                 targetStatusReached = false
                 log.custom(

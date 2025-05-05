@@ -1,11 +1,6 @@
-import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
+import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
-import { Peer } from "../peer"
-import { Blocks } from "src/model/entities/Blocks"
-import Transaction from "../blockchain/transaction"
-import { AddressInfo } from "@kynesyslabs/demosdk/types"
 import Chain from "../blockchain/chain"
-import { StatusNative } from "@kynesyslabs/demosdk/types"
 import GCR from "../blockchain/gcr/gcr"
 import eggs from "./routines/eggs"
 import { getSharedState } from "src/utilities/sharedState"
@@ -19,13 +14,12 @@ import getBlockHeaderByNumber from "./routines/nodecalls/getBlockHeaderByNumber"
 import getBlockHeaderByHash from "./routines/nodecalls/getBlockHeaderByHash"
 import getBlockByNumber from "./routines/nodecalls/getBlockByNumber"
 import getBlockByHash from "./routines/nodecalls/getBlockByHash"
-import { Hashing } from "node_modules/@kynesyslabs/demosdk/build/encryption"
+import getBlocks from "./routines/nodecalls/getBlocks"
+import getTransactions from "./routines/nodecalls/getTransactions"
+import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
-import {
-    GlobalChangeRegistry,
-    GCRExtended,
-} from "src/model/entities/GCR/GlobalChangeRegistry"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 
 export interface NodeCall {
     message: string
@@ -39,7 +33,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
     // ...
     let result: any // Storage for the result
     let nStat: any // Storage for the native status
-    let { data } = content
+    const { data } = content
     let response = _.cloneDeep(emptyResponse)
     response.result = 200 // Until proven otherwise
     response.require_reply = false // Until proven otherwise
@@ -99,6 +93,10 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "getBlockByNumber":
             console.log(`get block by number ${data.blockNumber}`)
             return await getBlockByNumber(data)
+        case "getBlocks":
+            return await getBlocks(data)
+        case "getTransactions":
+            return await getTransactions(data)
         case "getBlockByHash":
             // Check if we have .hash or .blockHash
             if (data.hash) {
@@ -160,8 +158,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             try {
                 nStat = (await GCR.getGCRNativeStatus(
                     data.address,
-                )) as GlobalChangeRegistry
-                response = nStat //.toString() // REVIEW It works ?
+                )) as GCRMain
+                response.response = nStat
             } catch (error) {
                 response.result = 400
                 response.response = "error"
@@ -176,16 +174,16 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             }
             nStat = (await GCR.getGCRNativeStatus(
                 data.address,
-            )) as GlobalChangeRegistry
-            response.response = nStat.details.content.nonce
+            )) as GCRMain
+            response.response = nStat.nonce
             break
         case "getPeerTime":
             response.response = new Date().getTime()
             break
 
         case "getAllTxs":
-            var response_object = await Chain.getAllTxs()
-            response.response = response_object
+            var responseObject = await Chain.getAllTxs()
+            response.response = responseObject
             break
 
         // REVIEW Implement native tables requests

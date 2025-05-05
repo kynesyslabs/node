@@ -32,10 +32,8 @@ async function mainLoopCycle() {
         true,
     )
     // ANCHOR Get the current UTC time (set the currentUTCTime variable in sharedState)
-    await getSharedState.getUTCTime()
-    log.info(
-        `[MAIN LOOP] Current UTC time: ${getSharedState.currentUTCTime}`,
-    )
+    // await getSharedState.getUTCTime()
+    log.info(`[MAIN LOOP] Current UTC time: ${getSharedState.currentUTCTime}`)
 
     // Check if the main loop is paused
     if (getSharedState.mainLoopPaused) {
@@ -50,20 +48,22 @@ async function mainLoopCycle() {
 
     // ANCHOR Execute the peer routine before the consensus loop
     /* NOTE The peerRoutine also checks getOnlinePeers, so it works by waiting for
-       getSharedState.peerRoutineRunning to be 0 so we don't get into conflicts while
-       running the consensus routine. */
-    let currentlyOnlinePeers: Peer[] = await peerRoutine()
+    getSharedState.peerRoutineRunning to be 0 so we don't get into conflicts while
+    running the consensus routine. */
+    // let currentlyOnlinePeers: Peer[] = await peerRoutine()
+    await checkOfflinePeers()
+    await peerGossip()
+    await fastSync([], "mainloop") // REVIEW Test here
     // we now have a list of online peers that can be used for consensus
 
     // ANCHOR Syncing the blockchain after the peer routine
-    await fastSync([], 'mainloop') // REVIEW Test here
     log.info("[MAIN LOOP] Synced! 🟢", true)
 
-    await PeerManager.getInstance().sayHelloToAllPeers()
+    // await PeerManager.getInstance().sayHelloToAllPeers()
     // SECTION Todo list for a typical consensus operation
 
     // ANCHOR Check if we have to forge the block now
-    let isConsensusTimeReached = await consensusTime.checkConsensusTime()
+    const isConsensusTimeReached = await consensusTime.checkConsensusTime()
     log.info("[MAINLOOP]: about to check if its time for consensus")
 
     if (!isConsensusTimeReached) {
@@ -75,9 +75,16 @@ async function mainLoopCycle() {
     // NOTE We need both the consensus time and the sync status to be true, to avoid
     // conflicts with the sync loop that would alead to a failure in the consensus mechanism.
     log.debug("[MAINLOOP]: isConsensusTimeReached: " + isConsensusTimeReached)
-    log.debug("[MAINLOOP]: getSharedState.syncStatus: " + getSharedState.syncStatus)
-    log.debug("[MAINLOOP]: startingConsensus: " + getSharedState.startingConsensus)
-    log.debug("[MAINLOOP]: getSharedState.inConsensusLoop: " + getSharedState.inConsensusLoop)
+    log.debug(
+        "[MAINLOOP]: getSharedState.syncStatus: " + getSharedState.syncStatus,
+    )
+    log.debug(
+        "[MAINLOOP]: startingConsensus: " + getSharedState.startingConsensus,
+    )
+    log.debug(
+        "[MAINLOOP]: getSharedState.inConsensusLoop: " +
+            getSharedState.inConsensusLoop,
+    )
 
     if (
         isConsensusTimeReached &&
@@ -86,9 +93,7 @@ async function mainLoopCycle() {
     ) {
         // Set the startingConsensus flag to true to avoid conflicts with starting loops
         getSharedState.startingConsensus = true
-        log.info(
-            "[MAIN LOOP] Consensus time reached and sync status is true",
-        )
+        log.info("[MAIN LOOP] Consensus time reached and sync status is true")
         // Wait for the peer routine to finish if it is still running
         log.info("[MAIN LOOP] Waiting for the peer routine to finish")
         let timer = 0
@@ -156,7 +161,7 @@ async function peerRoutine(): Promise<Peer[]> {
     peerGossip() // ? Await or not? I'd say not because it's good to have it in the background having anyway a reentry prevention
 
     log.info("[MAINLOOP]: family:", true)
-    let famLen = currentlyOnlinePeers.length
+    const famLen = currentlyOnlinePeers.length
     let famString = ""
     for (let i = 0; i < famLen; i++) {
         famString += "🐸 "
@@ -166,7 +171,6 @@ async function peerRoutine(): Promise<Peer[]> {
     // Returns the list of currently online peers
     return currentlyOnlinePeers
 }
-
 
 // Diagnostic
 

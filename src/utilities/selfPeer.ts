@@ -3,14 +3,14 @@ import * as fs from "fs"
 // NOTE This method is mainly used by index.ts when we generate a new identity and we have no valid peers
 // (aka talking to ourselves)
 export default async function selfPeer() {
-    let public_key_file = "publickey"
-    let public_key = fs.readFileSync(public_key_file, "utf8")
-    let basic_peer_script = `
+    const publicKeyFile = "publickey"
+    const publicKey = fs.readFileSync(publicKeyFile, "utf8")
+    const basicPeerScript = `
     {
-        "${public_key}": "${process.env.EXPOSED_URL}"
+        "${publicKey}": "${process.env.EXPOSED_URL}"
     }
     `
-    let basic_peer_script_file = "demos_peerlist.json"
-    fs.rmSync(basic_peer_script_file)
-    fs.writeFileSync(basic_peer_script_file, basic_peer_script)
+    const basicPeerScriptFile = "demos_peerlist.json"
+    fs.rmSync(basicPeerScriptFile)
+    fs.writeFileSync(basicPeerScriptFile, basicPeerScript)
 }

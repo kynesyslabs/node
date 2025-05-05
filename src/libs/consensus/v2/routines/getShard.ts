@@ -3,6 +3,7 @@ import { Peer } from "src/libs/peer"
 import Alea from "alea"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
+import Chain from "src/libs/blockchain/chain"
 
 export default async function getShard(seed: string): Promise<Peer[]> {
     // ! we need to get the peers from the last 3 blocks too
@@ -11,6 +12,39 @@ export default async function getShard(seed: string): Promise<Peer[]> {
 
     // NOTE: Undo this when merging from testnet
     const peers = PeerManager.getInstance().getAll()
+
+    // const peerIdentites = peers.map(peer => peer.identity)
+
+    // const lastBlock = await Chain.getLastBlock()
+
+    // log.debug(
+    //     "typeof lastBlock.validation_data: " + typeof lastBlock.validation_data,
+    // )
+    // log.debug(`Last block: ${lastBlock.validation_data}`)
+
+    // let signatures: { [key: string]: string } = {}
+
+    // if (lastBlock.validation_data !== "genesis") {
+    //     signatures = JSON.parse(lastBlock.validation_data)["signatures"]
+    // }
+
+    // // INFO: Include the validators from the last block
+    // // REVIEW: Do we include all peers from the last N blocks or only the validators?
+    // for (const identity of Object.keys(signatures)) {
+    //     if (peerIdentites.includes(identity)) {
+    //         continue
+    //     }
+
+    //     const peer = PeerManager.getInstance().getPeer(identity)
+    //     log.debug(
+    //         `Peer result for ${identity}: ${JSON.stringify(peer, null, 2)}`,
+    //     )
+
+    //     if (peer) {
+    //         log.debug(`Peer ${identity} not in the shard, adding it`)
+    //         peers.push(peer)
+    //     }
+    // }
 
     // Select up to 10 peers from the list using the seed as a source of randomness
     let maxShardSize = 10
@@ -22,7 +56,7 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     log.custom("last_shard", "Shard seed is: " + seed)
     getSharedState.lastShardSeed = seed
     const random = Alea(seed)
-    let availablePeers = [...peers]
+    const availablePeers = [...peers]
 
     // REVIEW: sort available peers by .identity (which is a hex string)
     // before choosing the peers for a uniform sample across nodes

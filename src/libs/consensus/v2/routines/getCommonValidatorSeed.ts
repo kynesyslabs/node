@@ -7,79 +7,70 @@ import log from "src/utilities/logger"
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
+function defaultLogger(message: string) {
+    return log.debug(message)
+}
+
 // REVIEW Probably to improve entropy
-export default async function getCommonValidatorSeed(): Promise<{
+export default async function getCommonValidatorSeed(
+    lastBlock: Blocks = null,
+    logger: (message: string) => void = defaultLogger,
+): Promise<{
     commonValidatorSeed: string
     lastBlockNumber: number
 }> {
-    var lastThreeBlocks: Blocks[] = []
-    let lastBlock = await Chain.getLastBlock()
+    const blockCount = 3
 
-    log.debug("LAST BLOCK NUMBER: " + lastBlock.number)
-    log.debug("--------------------------------")
-    log.debug("LAST BLOCK: " + lastBlock.hash)
-    log.debug("--------------------------------")
+    if (!lastBlock) {
+        lastBlock = await Chain.getLastBlock()
+    }
+
     const lastBlockNumber = lastBlock.number
+    const lastFewBlocks: Blocks[] = [lastBlock]
 
-    // getSharedState.currentValidatorSeed = lastBlock.number.toString()
-    // return { commonValidatorSeed: lastBlock.number.toString(), lastBlockNumber }
+    logger("LAST BLOCK NUMBER: " + lastBlock.number)
+    logger("--------------------------------")
+    logger("LAST BLOCK: " + lastBlock.hash)
+    logger("--------------------------------")
 
-    // If we have less than 3 blocks, the hash is calculated from the last block // ? Maybe we should revamp this a little
-    if (lastBlockNumber < 3) {
-        const block = await Chain.getBlockByNumber(lastBlockNumber)
-        lastThreeBlocks.push(block)
-    } else {
-        // Get the last three blocks
-        for (let i = 0; i < 3; i++) {
-            const block = await Chain.getBlockByNumber(lastBlockNumber - i)
-            lastThreeBlocks.push(block)
+    while (lastFewBlocks.length < blockCount) {
+        const block = await Chain.getBlockByNumber(
+            lastBlockNumber - lastFewBlocks.length,
+        )
+
+        if (block) {
+            lastFewBlocks.push(block)
+        } else {
+            // INFO: Should only happen iff lastBlockNumber < 3
+            break
         }
     }
-    // Getting the proposers of the last three blocks
-    const proposers = lastThreeBlocks.map(block => block.proposer)
-    const hashes = lastThreeBlocks.map(block => block.hash)
-    const validationDatas = lastThreeBlocks.map(block => {
-        // Sort the signatures by the key and create a string
-        try {
-            const signatures = JSON.parse(block.validation_data)["signatures"]
-            const sortedSignatures = Object.keys(signatures)
-                .sort()
-                .map(key => "key:" + key + "signature:" + signatures[key] + ";")
-                .join("")
-            return sortedSignatures
-        } catch (error) {
-            return block.validation_data
-        }
-    })
-    const lastTimestamps = lastThreeBlocks.map(block => block.content.timestamp)
 
-    log.debug("proposers: " + JSON.stringify(proposers))
-    log.debug("hashes: " + JSON.stringify(hashes))
-    log.debug("validationDatas: " + JSON.stringify(validationDatas))
-    log.debug("lastTimestamps: " + JSON.stringify(lastTimestamps))
-    log.debug("--------------------------------")
+    // Getting the proposers of the last three blocks
+    const proposers = lastFewBlocks.map(block => block.proposer)
+    const hashes = lastFewBlocks.map(block => block.hash)
+    const lastTimestamps = lastFewBlocks.map(block => block.content.timestamp)
+
+    logger("proposers: " + JSON.stringify(proposers))
+    logger("hashes: " + JSON.stringify(hashes))
+    logger("lastTimestamps: " + JSON.stringify(lastTimestamps))
+    logger("--------------------------------")
+
     // Hash everything
     const hashedProposers = Hashing.sha256(JSON.stringify(proposers))
     const hashedHashes = Hashing.sha256(JSON.stringify(hashes))
-    const hashedValidationDatas = Hashing.sha256(
-        JSON.stringify(validationDatas),
-    )
     const hashedTimestamps = Hashing.sha256(JSON.stringify(lastTimestamps))
 
-    log.debug("hashedProposers: " + hashedProposers)
-    log.debug("hashedHashes: " + hashedHashes)
-    log.debug("hashedValidationDatas: " + hashedValidationDatas)
-    log.debug("hashedTimestamps: " + hashedTimestamps)
+    logger("hashedProposers: " + hashedProposers)
+    logger("hashedHashes: " + hashedHashes)
+    logger("hashedTimestamps: " + hashedTimestamps)
     // Get the common validator seed
     const commonValidatorSeed = Hashing.sha256(
-        hashedProposers +
-            hashedHashes +
-            // hashedValidationDatas +
-            hashedTimestamps,
+        hashedProposers + hashedHashes + hashedTimestamps,
     )
 
     // NOTE The common validator seed is set in the sharedState as soon as it is computed
     getSharedState.currentValidatorSeed = commonValidatorSeed
-    log.info(`Common validator seed: ${commonValidatorSeed}`)
+    logger(`Common validator seed: ${commonValidatorSeed}`)
     return { commonValidatorSeed, lastBlockNumber }
 }
