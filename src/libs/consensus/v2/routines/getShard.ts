@@ -7,11 +7,8 @@ import Chain from "src/libs/blockchain/chain"
 
 export default async function getShard(seed: string): Promise<Peer[]> {
     // ! we need to get the peers from the last 3 blocks too
-    // const allPeers = await PeerManager.getInstance().getOnlinePeers()
-    // const peers = allPeers.filter(peer => peer.sync.status)
-
-    // NOTE: Undo this when merging from testnet
-    const peers = PeerManager.getInstance().getAll()
+    const allPeers = await PeerManager.getInstance().getOnlinePeers()
+    const peers = allPeers.filter(peer => peer.sync.status)
 
     // const peerIdentites = peers.map(peer => peer.identity)
 

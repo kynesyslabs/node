@@ -191,7 +191,6 @@ export async function consensusRoutine(): Promise<void> {
             log.info(
                 `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
             )
-            process.exit(1)
             // Raising an error to rollback the GCREdits
             throw new BlockInvalidError(
                 `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
