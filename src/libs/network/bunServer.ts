@@ -83,8 +83,7 @@ export class BunServer {
 
 // Helper functions for common middleware
 export const cors = (): Middleware => {
-    // eslint-disable-next-line @typescript-eslint/naming-convention
-    const CORS_HEADERS = {
+    let headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "*",
@@ -92,11 +91,15 @@ export const cors = (): Middleware => {
 
     return async (req, next) => {
         if (req.method === "OPTIONS") {
-            return new Response("OK", { headers: CORS_HEADERS })
+            return new Response("OK", { headers: headers })
         }
 
         const response = await next()
-        return new Response(response.body, { headers: CORS_HEADERS })
+        headers = { ...headers, ...response.headers.toJSON() }
+
+        return new Response(response.body, {
+            headers: headers,
+        })
     }
 }
 
@@ -116,6 +119,8 @@ export const text = (body: string, status = 200): Response => {
 export const jsonResponse = (body: any, status = 200): Response => {
     return new Response(JSON.stringify(body), {
         status,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+            "Content-Type": "application/json",
+        },
     })
 }

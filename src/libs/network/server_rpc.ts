@@ -189,7 +189,7 @@ export async function serverRpcBun() {
     server.use(json())
 
     // GET endpoints
-    server.get("/", () => new Response("Hello, World!"))
+    server.get("/", () => new Response("{\"message\": \"Hello, World!\"}"))
 
     server.get("/info", async () => {
         const info = await sharedState.getInstance().getInfo()
