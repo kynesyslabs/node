@@ -32,6 +32,7 @@ import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
 import net from "net"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
+import { serverRpcBun } from "./libs/network/server_rpc"
 
 const term = terminalkit.terminal
 
@@ -203,8 +204,8 @@ async function warmup() {
     // ? REVIEW Starting the server_rpc: should we keep this async?
     // This should start the server_rpc without any other needed operation
     log.info("[MAIN] Starting the RPC server")
-    server_rpc()
-
+    //server_rpc()
+    serverRpcBun()
     indexState.peerManager = PeerManager.getInstance()
     console.log("[MAIN] peerManager started")
 
