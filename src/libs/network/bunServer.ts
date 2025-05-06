@@ -83,15 +83,20 @@ export class BunServer {
 
 // Helper functions for common middleware
 export const cors = (): Middleware => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    const CORS_HEADERS = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+    }
+
     return async (req, next) => {
+        if (req.method === "OPTIONS") {
+            return new Response("OK", { headers: CORS_HEADERS })
+        }
+
         const response = await next()
-        response.headers.set("Access-Control-Allow-Origin", "*")
-        response.headers.set(
-            "Access-Control-Allow-Methods",
-            "GET, POST, OPTIONS",
-        )
-        response.headers.set("Access-Control-Allow-Headers", "*")
-        return response
+        return new Response(response.body, { headers: CORS_HEADERS })
     }
 }
 
