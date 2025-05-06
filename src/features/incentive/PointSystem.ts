@@ -87,13 +87,25 @@ export class PointSystem {
 
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
-        const account = await gcrMainRepository.findOneBy({ pubkey: userIdStr })
+        let account = await gcrMainRepository.findOneBy({ pubkey: userIdStr })
 
         const { linkedWallets, linkedSocials } =
             await this.getUserIdentitiesFromGCR(userIdStr)
 
-        // Create the response object
-        const userPoints = {
+        if (!account) {
+            account = await HandleGCR.createAccount(userIdStr)
+            account.points.totalPoints = 0
+            account.points.breakdown = {
+                web3Wallets: 0,
+                socialAccounts: 0,
+            }
+            account.points.lastUpdated = new Date()
+
+            await gcrMainRepository.save(account)
+        }
+
+        // Create and return the response object
+        return {
             userId: userIdStr,
             totalPoints: account.points.totalPoints || 0,
             breakdown: {
@@ -104,8 +116,6 @@ export class PointSystem {
             linkedSocials,
             lastUpdated: account.points.lastUpdated || new Date(),
         }
-
-        return userPoints
     }
 
     /**
