@@ -20,11 +20,12 @@ import Hashing from "../crypto/hashing"
 import PeerManager from "../peer/PeerManager"
 import Block from "./block"
 // INFO Singleton Mempool class
-import type { ISignature } from "@kynesyslabs/demosdk/types"
+import type { ISignature, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import Transaction from "./transaction"
 import { forgeToHex } from "../crypto/forgeUtils"
+import { ucrypto } from "@kynesyslabs/demosdk/encryption"
 
 // Bun does not support NodeJS.Timeout, so we need to create a type for it
 type TimeoutType = ReturnType<typeof setTimeout>
@@ -495,11 +496,20 @@ export default class Mempool {
             console.log(signature.data.toString("hex"))
             console.log("[DEBUG] public_key: (" + typeof publicKey + ")")
             console.log(publicKey)
-            const signatureValid = Cryptography.verify(
-                txHash,
-                forgeToHex(signature.data),
-                forgeToHex(publicKey),
-            )
+            // const signatureValid = Cryptography.verify(
+            //     txHash,
+            //     forgeToHex(signature.data),
+            //     forgeToHex(publicKey),
+            // )
+            log.only("signature.type: " + signature.type)
+            const signatureValid = await ucrypto.verify({
+                algorithm: signature.type as SigningAlgorithm,
+                message: new TextEncoder().encode(txHash),
+                publicKey: publicKey as any,
+                signature: signature.data as any,
+            })
+            log.only("signatureValid: " + signatureValid)
+
             if (!signatureValid) {
                 log.info("[X] [MEMPOOL VERIFICATION] The signature is invalid")
                 return false

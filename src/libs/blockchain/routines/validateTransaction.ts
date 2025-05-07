@@ -23,6 +23,7 @@ import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import required from "src/utilities/required"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
+import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 const term = terminalkit.terminal
 
 // INFO Cryptographically validate a transaction and calculate gas
@@ -54,8 +55,15 @@ export async function confirmTransaction(
             transaction: tx,
         },
         signature: null,
-        rpc_public_key: getSharedState.identity.ed25519
-            .publicKey as pki.ed25519.BinaryBuffer,
+        // rpc_public_key: getSharedState.identity.ed25519
+        //     .publicKey as pki.ed25519.BinaryBuffer,
+        rpc_public_key: {
+            type: getSharedState.signingAlgorithm,
+            data: uint8ArrayToHex(
+                (await ucrypto.getIdentity(getSharedState.signingAlgorithm))
+                    .publicKey,
+            ),
+        },
     }
     /* REVIEW We are not using this method anymore, GCREdits take care of the gas operation
     let gas_operation: Operation
@@ -89,7 +97,7 @@ export async function confirmTransaction(
         tx,
         privateKey as pki.ed25519.BinaryBuffer,
         publicKey as pki.ed25519.BinaryBuffer,
-    )// REVIEW Are the buffers ok?
+    ) // REVIEW Are the buffers ok?
     if (!verified) {
         validityData.data.message =
             "[Native Tx Validation] [SIGNATURE ERROR] Transaction signature not verified\n"
@@ -108,9 +116,20 @@ export async function confirmTransaction(
 }
 
 async function signValidityData(data: ValidityData): Promise<ValidityData> {
-    const privateKey = getSharedState.identity.ed25519.privateKey
+    // const privateKey = getSharedState.identity.ed25519.privateKey
     const hash = Hashing.sha256(JSON.stringify(data.data))
-    data.signature = Cryptography.sign(hash, privateKey)
+    // data.signature = Cryptography.sign(hash, privateKey)
+    // return data
+
+    const signature = await ucrypto.sign(
+        getSharedState.signingAlgorithm,
+        new TextEncoder().encode(hash),
+    )
+
+    data.signature = {
+        type: getSharedState.signingAlgorithm,
+        data: uint8ArrayToHex(signature.signature),
+    }
     return data
 }
 

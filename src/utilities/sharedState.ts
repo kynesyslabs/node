@@ -8,6 +8,7 @@ import { Identity } from "src/libs/identity"
 import * as ntpClient from "ntp-client"
 import { Peer, PeerManager } from "src/libs/peer"
 import { MempoolData } from "src/libs/blockchain/mempool"
+import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 
 dotenv.config()
 
@@ -18,6 +19,7 @@ export default class SharedState {
     prod = process.env.PROD == "true" || false
     version = "0.9.5"
     version_name = "Entangled Polymer"
+    signingAlgorithm = "ed25519" as SigningAlgorithm
 
     block_time = 10 // TODO Get it from the genesis (or see Consensus module)
 

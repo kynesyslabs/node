@@ -88,13 +88,11 @@ async function validateHeaders(headers: Headers): Promise<[boolean, string]> {
     const message = identity
 
     const splits = identity.split(":")
-    console.log("splits: " + JSON.stringify(splits, null, 2))
 
     let isValid = false
+    let signatureObj: signedObject
 
     if (splits.length > 1) {
-        let signatureObj: signedObject
-
         // INFO: Handle Ed25519 signatures
         if (splits[0] === "ed25519") {
             const publicKey = hexToUint8Array(splits[1])
@@ -109,11 +107,16 @@ async function validateHeaders(headers: Headers): Promise<[boolean, string]> {
         }
 
         // TODO: Handle other signature algorithms
-        isValid = await ucrypto.verify(signatureObj)
     } else {
-        // INFO: Handle legacy signature format
-        isValid = Cryptography.verify(message, signature, identity)
+        signatureObj = {
+            algorithm: "ed25519",
+            signature: hexToUint8Array(signature),
+            message: new TextEncoder().encode(message),
+            publicKey: hexToUint8Array(identity),
+        } as Ed25519SignedObject
     }
+
+    isValid = await ucrypto.verify(signatureObj)
 
     if (isValid) {
         log.info("[RPC Call] Headers are valid for: " + identity)
@@ -273,7 +276,12 @@ export async function serverRpcBun() {
                     "[RPC Call] Headers: " + JSON.stringify(headers, null, 2),
                     true,
                 )
-                const headerValidation = validateHeaders(headers)
+                const headerValidation = await validateHeaders(headers)
+                console.log("headerValidation", headerValidation)
+                console.log(
+                    "headerValidation: " +
+                        JSON.stringify(headerValidation, null, 2),
+                )
                 if (!headerValidation[0]) {
                     return jsonResponse(
                         { error: "Invalid headers:" + headerValidation[1] },

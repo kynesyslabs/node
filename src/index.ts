@@ -33,6 +33,7 @@ import getTimestampCorrection from "./libs/utils/calibrateTime"
 import net from "net"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import { serverRpcBun } from "./libs/network/server_rpc"
+import { ucrypto } from "@kynesyslabs/demosdk/encryption"
 
 const term = terminalkit.terminal
 
@@ -284,6 +285,7 @@ async function preMainLoop() {
 
 // ANCHOR Entry point
 async function main() {
+    await ucrypto.generateAllIdentities()
     // INFO Warming up the node (including arguments digesting)
     await warmup()
     // INFO Calibrating the time at the start of the node

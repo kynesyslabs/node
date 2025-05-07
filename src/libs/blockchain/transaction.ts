@@ -24,13 +24,14 @@ import {
     RawTransaction,
     Transaction as ITransaction,
 } from "@kynesyslabs/demosdk/types"
-import type { ISignature } from "@kynesyslabs/demosdk/types"
+import type { ISignature, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import Confirmation from "./types/confirmation"
 import { forgeToHex } from "../crypto/forgeUtils"
 import log from "src/utilities/logger"
+import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 
 interface TransactionResponse {
     status: string
@@ -89,22 +90,22 @@ export default class Transaction implements ITransaction {
 
     // INFO Given a signed transaction, verify it against the address of the sender
     // Returns [result, message]
-    static verify(tx: Transaction) {
-        // Check sanity of the structure of the tx object
-        if (!tx.content) {
-            return [false, "Missing tx.content"]
-        }
-        if (!tx.signature) {
-            return [false, "Missing tx.signature"]
-        }
-        // verify using identity.cryptography.verify(tx.content, tx.signature, publicKey)
-        const verified = Cryptography.verify(
-            JSON.stringify(tx.content),
-            tx.signature.data.toString("hex"),
-            tx.content.from.toString("hex"),
-        )
-        return [verified, "Result of verify()"]
-    }
+    // static verify(tx: Transaction) {
+    //     // Check sanity of the structure of the tx object
+    //     if (!tx.content) {
+    //         return [false, "Missing tx.content"]
+    //     }
+    //     if (!tx.signature) {
+    //         return [false, "Missing tx.signature"]
+    //     }
+    //     // verify using identity.cryptography.verify(tx.content, tx.signature, publicKey)
+    //     const verified = Cryptography.verify(
+    //         JSON.stringify(tx.content),
+    //         tx.signature.data.toString("hex"),
+    //         tx.content.from.toString("hex"),
+    //     )
+    //     return [verified, "Result of verify()"]
+    // }
 
     // INFO Hashing the content of a transaction
     static hash(tx: Transaction): any {
@@ -150,21 +151,20 @@ export default class Transaction implements ITransaction {
     }
 
     // INFO Checks the integrity of a transaction
-    public static validateSignature(tx: Transaction) {
+    public static async validateSignature(tx: Transaction) {
         console.log("[validateSignature] Checking the signature of the tx")
         console.log("Hash: " + tx.hash)
         console.log("Signature: ")
         console.log(forgeToHex(tx.signature.data))
         console.log("From: ")
         console.log(forgeToHex(tx.content.from))
-        //let tx_content_hash = Hashing.sha256(JSON.stringify(tx.content))
-        const result = Cryptography.verify(
-            tx.hash,
-            forgeToHex(tx.signature.data),
-            forgeToHex(tx.content.from),
-        )
-        console.log("[validateSignature] Sanity: " + result)
-        return result
+
+        return await ucrypto.verify({
+            algorithm: tx.signature.type as SigningAlgorithm,
+            message: new TextEncoder().encode(tx.hash),
+            publicKey: tx.content.from as any,
+            signature: hexToUint8Array(tx.signature.data),
+        })
     }
 
     // INFO Checking if the tx is coherent to the current state of the blockchain (and the txs pending before it)
