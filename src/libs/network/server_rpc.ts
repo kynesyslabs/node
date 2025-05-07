@@ -4,6 +4,7 @@
 import {
     BrowserRequest,
     BundleContent,
+    Ed25519SignedObject,
     RPCRequest,
     RPCResponse,
 } from "@kynesyslabs/demosdk/types"
@@ -23,6 +24,9 @@ import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyR
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import manageBridges from "./manageBridge"
 import { BunServer, cors, json, jsonResponse } from "./bunServer"
+import { ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { signedObject } from "@kynesyslabs/demosdk/types"
+import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 
 // Reading the port from sharedState
 
@@ -62,12 +66,15 @@ function isRPCRequest(obj: any): obj is RPCRequest {
 }
 
 // Validate the headers
-function validateHeaders(headers: Headers): [boolean, string] {
+async function validateHeaders(headers: Headers): Promise<[boolean, string]> {
     // Check if we have a valid signature and identity header
-    log.info("[RPC Call] Validating headers...") // + JSON.stringify(headers, null, 2))    
+    log.info("[RPC Call] Validating headers...") // + JSON.stringify(headers, null, 2))
     if (!headers.get("signature")) {
         log.error("[RPC Call] Missing signature header")
-        log.info("[RPC Call] Headers: " + JSON.stringify(headers, null, 2), true)
+        log.info(
+            "[RPC Call] Headers: " + JSON.stringify(headers, null, 2),
+            true,
+        )
         //process.exit(0)
         return [false, "Missing signature header"]
     }
@@ -79,14 +86,42 @@ function validateHeaders(headers: Headers): [boolean, string] {
     const signature = headers.get("signature") as string
     const identity = headers.get("identity") as string
     const message = identity
-    const isValid = Cryptography.verify(message, signature, identity)
-    if (!isValid) {
-        log.error("[RPC Call] Invalid signature for: " + identity)
-        return [false, "Invalid signature"]
+
+    const splits = identity.split(":")
+    console.log("splits: " + JSON.stringify(splits, null, 2))
+
+    let isValid = false
+
+    if (splits.length > 1) {
+        let signatureObj: signedObject
+
+        // INFO: Handle Ed25519 signatures
+        if (splits[0] === "ed25519") {
+            const publicKey = hexToUint8Array(splits[1])
+            const _signature = hexToUint8Array(signature)
+
+            signatureObj = {
+                algorithm: splits[0],
+                signature: _signature,
+                message: new TextEncoder().encode(splits[1]),
+                publicKey: publicKey,
+            } as Ed25519SignedObject
+        }
+
+        // TODO: Handle other signature algorithms
+        isValid = await ucrypto.verify(signatureObj)
     } else {
-        log.info("[RPC Call] Headers are valid for: " + identity)
+        // INFO: Handle legacy signature format
+        isValid = Cryptography.verify(message, signature, identity)
     }
-    return [true, ""]
+
+    if (isValid) {
+        log.info("[RPC Call] Headers are valid for: " + identity)
+        return [true, "Signature validated"]
+    }
+
+    log.error("[RPC Call] Invalid signature for: " + identity)
+    return [false, "Invalid signature"]
 }
 
 /* End of helper functions */
@@ -175,10 +210,9 @@ async function processPayload(
 }
 /* End of processor method */
 
-
 /**
  *  HTTP server using Bun
- */ 
+ */
 
 export async function serverRpcBun() {
     const port = getSharedState.serverPort
@@ -189,7 +223,7 @@ export async function serverRpcBun() {
     server.use(json())
 
     // GET endpoints
-    server.get("/", () => new Response("{\"message\": \"Hello, World!\"}"))
+    server.get("/", () => new Response('{"message": "Hello, World!"}'))
 
     server.get("/info", async () => {
         const info = await sharedState.getInstance().getInfo()
@@ -259,4 +293,3 @@ export async function serverRpcBun() {
     log.info("[RPC Call] Server is running on 0.0.0.0:" + port, true)
     return server.start()
 }
-
