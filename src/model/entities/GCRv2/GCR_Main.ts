@@ -1,5 +1,5 @@
 import { Column, Entity, PrimaryColumn } from "typeorm"
-import { StoredIdentities } from "../types/IdentityTypes"
+import type { StoredIdentities } from "../types/IdentityTypes"
 // Define the shape of your JSON data
 
 @Entity("gcr_main")

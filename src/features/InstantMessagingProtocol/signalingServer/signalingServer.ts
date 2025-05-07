@@ -1,4 +1,5 @@
 // TODO Once tested, implement blockchain registration for the data we want to store (or the hashes of the data)
+// TODO Implement handle@[first_2_chars_of_signing_public_key][mid_2_chars_of_signing_public_key][last_2_chars_of_signing_public_key] as handle and give it back to the peer
 // FIXME Offline messaging is not implemented, we need to implement it by storing messages in a database if the peer is offline
 // REVIEW Probably need to implement a way to verify the public key of the peer for retrieval purposes (e.g. offline messages)
 /**
@@ -42,56 +43,36 @@
  */
 
 import { Server } from "bun"
+import { ImPeer } from "./ImPeers"
+import { ImErrorType } from "./types/Errors"
+import {
+    ImBaseMessage,
+    ImRegisterMessage,
+    ImDiscoverMessage,
+    ImPeerMessage,
+    ImPublicKeyRequestMessage,
+} from "./types/IMMessage"
+import Transaction from "@/libs/blockchain/transaction"
+import {
+    signedObject,
+    SerializedSignedObject,
+    ucrypto,
+} from "@kynesyslabs/demosdk/encryption"
 
-/**
- * Represents a connected peer in the signaling server
- */
-interface Peer {
-    id: string
-    ws: WebSocket
-    publicKey: Uint8Array
-}
-
-/**
- * Message format for all server-client communication
- */
-interface Message {
-    type:
-        | "register"
-        | "discover"
-        | "message"
-        | "peer_disconnected"
-        | "request_public_key"
-        | "public_key_response"
-        | "error"
-    payload: any
-}
-
-/**
- * Error types that can occur in the signaling server
- */
-enum ErrorType {
-    INVALID_MESSAGE = "INVALID_MESSAGE",
-    CLIENT_ID_TAKEN = "CLIENT_ID_TAKEN",
-    PEER_NOT_FOUND = "PEER_NOT_FOUND",
-    INVALID_PUBLIC_KEY = "INVALID_PUBLIC_KEY",
-    REGISTRATION_REQUIRED = "REGISTRATION_REQUIRED",
-    INTERNAL_ERROR = "INTERNAL_ERROR",
-}
-
+import { deserializeUint8Array } from "@kynesyslabs/demosdk/utils" // FIXME Import from the sdk once we can
 /**
  * SignalingServer class that manages peer connections and message routing
  */
-class SignalingServer {
+export class SignalingServer {
     /** Map of connected peers, keyed by their client IDs */
-    private peers: Map<string, Peer> = new Map()
+    private peers: Map<string, ImPeer> = new Map()
     private server: Server
 
     /**
      * Creates a new signaling server instance
      * @param port - Port number to listen on (default: 3000)
      */
-    constructor(port = 3000) {
+    constructor(port = 3005) {
         this.server = Bun.serve({
             port,
             fetch: (req, server) => {
@@ -116,7 +97,8 @@ class SignalingServer {
      * @param errorType - The type of error that occurred
      * @param details - Additional error details
      */
-    private sendError(ws: WebSocket, errorType: ErrorType, details?: string) {
+    private sendError(ws: WebSocket, errorType: ImErrorType, details?: string) {
+        console.log("[IM] Sending an error message: ", errorType, details)
         ws.send(
             JSON.stringify({
                 type: "error",
@@ -160,33 +142,51 @@ class SignalingServer {
      */
     private handleMessage(ws: WebSocket, message: string) {
         try {
-            const data: Message = JSON.parse(message)
-
+            const data: ImBaseMessage = JSON.parse(message)
+            //console.log("[IM] Received a message: ", data)
             // Validate message format
             if (!data.type || !data.payload) {
                 this.sendError(
                     ws,
-                    ErrorType.INVALID_MESSAGE,
+                    ImErrorType.INVALID_MESSAGE,
                     "Invalid message format",
                 )
                 return
             }
 
+            // Check if any response handlers can handle this message
+            for (const handler of this.responseHandlers) {
+                handler(ws, message)
+            }
+
             switch (data.type) {
                 case "register":
-                    if (!data.payload.clientId || !data.payload.publicKey) {
+                    console.log("[IM] Received a register message")
+                    // Validate the message schema
+                    console.log(data)
+                    var registerMessage: ImRegisterMessage =
+                        data as ImRegisterMessage
+                    if (
+                        registerMessage.type !== "register" ||
+                        !registerMessage.payload.clientId ||
+                        !registerMessage.payload.publicKey ||
+                        !registerMessage.payload.verification
+                    ) {
                         this.sendError(
                             ws,
-                            ErrorType.INVALID_MESSAGE,
-                            "Missing required registration fields",
+                            ImErrorType.INVALID_MESSAGE,
+                            "Invalid message schema",
                         )
-                        return
                     }
+                    console.log("[IM] Register message validated")
+                    // Once we have the data, we can use it
                     this.handleRegister(
                         ws,
-                        data.payload.clientId,
-                        data.payload.publicKey,
-                    )
+                        registerMessage.payload.clientId,
+                        registerMessage.payload.publicKey,
+                        registerMessage.payload.verification,
+                    ) // REVIEW As this is async, is ok not to await it?
+                    console.log("[IM] Register message handled")
                     break
                 case "discover":
                     this.handleDiscover(ws)
@@ -195,7 +195,7 @@ class SignalingServer {
                     if (!data.payload.targetId || !data.payload.message) {
                         this.sendError(
                             ws,
-                            ErrorType.INVALID_MESSAGE,
+                            ImErrorType.INVALID_MESSAGE,
                             "Missing required message fields",
                         )
                         return
@@ -206,17 +206,35 @@ class SignalingServer {
                     if (!data.payload.targetId) {
                         this.sendError(
                             ws,
-                            ErrorType.INVALID_MESSAGE,
+                            ImErrorType.INVALID_MESSAGE,
                             "Missing target ID",
                         )
                         return
                     }
                     this.handlePublicKeyRequest(ws, data.payload.targetId)
                     break
+                case "debug_question": {
+                    // Handle debug message to trigger a question
+                    console.log("[IM] Received debug question request")
+                    const senderId = this.getPeerIdByWebSocket(ws)
+                    if (!senderId) {
+                        this.sendError(
+                            ws,
+                            ImErrorType.REGISTRATION_REQUIRED,
+                            "You must register before sending debug messages",
+                        )
+                        return
+                    }
+                    // Send a question to the peer
+                    this.sendQuestionToPeer(senderId, {
+                        text: "This is a debug question. What is your favorite programming language?",
+                    })
+                    break
+                }
                 default:
                     this.sendError(
                         ws,
-                        ErrorType.INVALID_MESSAGE,
+                        ImErrorType.INVALID_MESSAGE,
                         `Unknown message type: ${data.type}`,
                     )
             }
@@ -224,7 +242,7 @@ class SignalingServer {
             console.error("Error handling message:", error)
             this.sendError(
                 ws,
-                ErrorType.INTERNAL_ERROR,
+                ImErrorType.INTERNAL_ERROR,
                 error instanceof Error ? error.message : "Unknown error",
             )
         }
@@ -236,32 +254,58 @@ class SignalingServer {
      * @param clientId - The unique identifier for the peer
      * @param publicKey - The peer's public key as Uint8Array
      */
-    private handleRegister(
+    private async handleRegister(
         ws: WebSocket,
         clientId: string,
         publicKey: Uint8Array,
+        proof: SerializedSignedObject,
     ) {
         try {
             if (this.peers.has(clientId)) {
                 this.sendError(
                     ws,
-                    ErrorType.CLIENT_ID_TAKEN,
+                    ImErrorType.CLIENT_ID_TAKEN,
                     `Client ID ${clientId} is already taken`,
                 )
                 return
             }
 
             // Validate public key format
-            if (!(publicKey instanceof Uint8Array) || publicKey.length === 0) {
+            // Transform the public key to a Uint8Array
+            var publicKeyUint8Array = new Uint8Array(publicKey)
+            console.log("[IM] Public key: ", publicKey)
+            if (publicKeyUint8Array.length === 0) {
                 this.sendError(
                     ws,
-                    ErrorType.INVALID_PUBLIC_KEY,
+                    ImErrorType.INVALID_PUBLIC_KEY,
                     "Invalid public key format",
                 )
                 return
             }
 
-            this.peers.set(clientId, { id: clientId, ws, publicKey })
+            // Deserialize the proof
+            const deserializedProof: signedObject = {
+                algorithm: proof.algorithm,
+                signedData: deserializeUint8Array(proof.serializedSignedData),
+                publicKey: deserializeUint8Array(proof.serializedPublicKey),
+                message: deserializeUint8Array(proof.serializedMessage),
+            }
+
+            const signingPublicKey = deserializedProof.publicKey
+
+            // Validate the proof
+            const verified = await ucrypto.verify(deserializedProof)
+
+            if (!verified) {
+                this.sendError(ws, ImErrorType.INVALID_PROOF, "Invalid proof")
+                return
+            }
+            this.peers.set(clientId, {
+                id: clientId,
+                ws,
+                publicKey,
+                signingPublicKey,
+            })
             console.log(`Peer registered with ID: ${clientId}`)
 
             // Send confirmation to the registering peer
@@ -275,7 +319,7 @@ class SignalingServer {
             console.error("Registration error:", error)
             this.sendError(
                 ws,
-                ErrorType.INTERNAL_ERROR,
+                ImErrorType.INTERNAL_ERROR,
                 "Failed to complete registration",
             )
         }
@@ -298,7 +342,7 @@ class SignalingServer {
             console.error("Discovery error:", error)
             this.sendError(
                 ws,
-                ErrorType.INTERNAL_ERROR,
+                ImErrorType.INTERNAL_ERROR,
                 "Failed to retrieve peer list",
             )
         }
@@ -315,17 +359,20 @@ class SignalingServer {
             targetId: string
             message: {
                 algorithm: "ml-kem-aes" | "rsa"
-                encryptedData: Uint8Array
-                cipherText?: Uint8Array
+                serializedEncryptedData: string
+                serializedCipherText?: string
             }
-        }, // TODO use encryptedObject once we can import it from the sdk
+        }, // TODO use serializedEncryptedObject once we can import it from the sdk
     ) {
+        // FIXME Adjust the TODOs below
+        // TODO Insert the message into the blockchain through the sdk and the node running on this same server
+        // TODO Implement support for offline messages (store them in a database and allow the peer to retrieve them later)
         try {
             const senderId = this.getPeerIdByWebSocket(ws)
             if (!senderId) {
                 this.sendError(
                     ws,
-                    ErrorType.REGISTRATION_REQUIRED,
+                    ImErrorType.REGISTRATION_REQUIRED,
                     "You must register before sending messages",
                 )
                 return
@@ -335,7 +382,7 @@ class SignalingServer {
             if (!targetPeer) {
                 this.sendError(
                     ws,
-                    ErrorType.PEER_NOT_FOUND,
+                    ImErrorType.PEER_NOT_FOUND,
                     `Target peer ${payload.targetId} not found`,
                 )
                 return
@@ -355,7 +402,7 @@ class SignalingServer {
             console.error("Message routing error:", error)
             this.sendError(
                 ws,
-                ErrorType.INTERNAL_ERROR,
+                ImErrorType.INTERNAL_ERROR,
                 "Failed to route message",
             )
         }
@@ -372,7 +419,7 @@ class SignalingServer {
             if (!targetPeer) {
                 this.sendError(
                     ws,
-                    ErrorType.PEER_NOT_FOUND,
+                    ImErrorType.PEER_NOT_FOUND,
                     `Target peer ${targetId} not found`,
                 )
                 return
@@ -392,10 +439,60 @@ class SignalingServer {
             console.error("Public key request error:", error)
             this.sendError(
                 ws,
-                ErrorType.INTERNAL_ERROR,
+                ImErrorType.INTERNAL_ERROR,
                 "Failed to retrieve public key",
             )
         }
+    }
+
+    /**
+     * Sends a question to a specific peer
+     * @param peerId - The ID of the peer to send the question to
+     * @param question - The question to send
+     */
+    private sendQuestionToPeer(peerId: string, question: any): void {
+        try {
+            const peer = this.peers.get(peerId)
+            if (!peer) {
+                console.error(`Target peer ${peerId} not found`)
+                return
+            }
+
+            const questionId = crypto.randomUUID()
+
+            // Send the question to the peer
+            peer.ws.send(
+                JSON.stringify({
+                    type: "server_question",
+                    payload: {
+                        questionId,
+                        question,
+                    },
+                }),
+            )
+
+            console.log(`Question sent to peer ${peerId} with ID ${questionId}`)
+        } catch (error) {
+            console.error("Error sending question to peer:", error)
+        }
+    }
+
+    // Temporary storage for response handlers
+    private responseHandlers: Set<(ws: WebSocket, message: string) => void> =
+        new Set()
+
+    // Add a response handler
+    private addResponseHandler(
+        handler: (ws: WebSocket, message: string) => void,
+    ): void {
+        this.responseHandlers.add(handler)
+    }
+
+    // Remove a response handler
+    private removeResponseHandler(
+        handler: (ws: WebSocket, message: string) => void,
+    ): void {
+        this.responseHandlers.delete(handler)
     }
 
     /**
@@ -431,9 +528,31 @@ class SignalingServer {
             // Don't send error here as the peer is already disconnected
         }
     }
+
+    /**
+     * Disconnects the server and cleans up resources
+     */
+    public disconnect(): void {
+        // Close all peer connections
+        for (const peer of this.peers.values()) {
+            try {
+                peer.ws.close()
+            } catch (error) {
+                console.error("Error closing peer connection:", error)
+            }
+        }
+
+        // Clear the peers map
+        this.peers.clear()
+
+        // Stop the server
+        this.server.stop()
+
+        console.log("Signaling server disconnected")
+    }
 }
 
 // Create and start the signaling server if this file is run directly
 if (import.meta.main) {
-    const signalingServer = new SignalingServer(3000)
+    const signalingServer = new SignalingServer(3005)
 }

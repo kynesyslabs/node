@@ -21,12 +21,11 @@ NOTE: The fee is locked by the node and released when the block itself is confir
 import forge from "node-forge"
 
 import {
-    ISignature,
     RawTransaction,
     Transaction as ITransaction,
-    TransactionContent,
 } from "@kynesyslabs/demosdk/types"
-
+import type { ISignature } from "@kynesyslabs/demosdk/types"
+import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import Confirmation from "./types/confirmation"
@@ -72,7 +71,7 @@ export default class Transaction implements ITransaction {
     public static sign(
         tx: Transaction,
         privateKey: forge.pki.ed25519.BinaryBuffer,
-    ): any[] {
+    ): [boolean, any] {
         // Check sanity of the structure of the tx object
         if (!tx.content) {
             return [false, "Missing tx.content"]

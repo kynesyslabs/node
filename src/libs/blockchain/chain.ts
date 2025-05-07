@@ -23,9 +23,8 @@ import {
     Operation,
     StatusNative as StatusNativeType,
     StatusProperties as StatusPropertiesType,
-    TransactionContent,
 } from "@kynesyslabs/demosdk/types"
-
+import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import Hashing from "../crypto/hashing"
 
 import Block from "./block"
@@ -287,13 +286,21 @@ export default class Chain {
         const gcrRepository = db
             .getDataSource()
             .getRepository(GlobalChangeRegistry)
+        // REVIEW If not found, return an empty address object with default values (aka a GlobalChangeRegistry object with empty details and extended properties)
+        try {
+            const gcrSearch = (await gcrRepository.findOneBy({
+                publicKey: ILike(address),
+            })) as GlobalChangeRegistry
 
-        const gcrSearch = (await gcrRepository.findOneBy({
-            publicKey: ILike(address),
-        })) as GlobalChangeRegistry
-
-        return {
-            native: gcrSearch,
+            return {
+                native: gcrSearch,
+            }
+        } catch (error) {
+            const emptyGCR = new GlobalChangeRegistry()
+            emptyGCR.publicKey = address
+            return {
+                native: emptyGCR,
+            }
         }
     }
 

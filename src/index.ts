@@ -30,6 +30,9 @@ import log from "src/utilities/logger"
 import { Peer } from "./libs/peer"
 import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
+import net from "net"
+import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
+import { serverRpcBun } from "./libs/network/server_rpc"
 
 const term = terminalkit.terminal
 
@@ -42,6 +45,7 @@ const indexState: {
     COMMANDLINE_MODE: boolean | null
     RPC_FEE: number
     SERVER_PORT: number
+    SIGNALING_SERVER_PORT: number
     EXPOSED_URL: string
     PG_PORT: number
     enough_peers: boolean
@@ -53,6 +57,7 @@ const indexState: {
     COMMANDLINE_MODE: null,
     RPC_FEE: 10,
     SERVER_PORT: 0,
+    SIGNALING_SERVER_PORT: 0,
     EXPOSED_URL: "",
     PG_PORT: 5332,
     enough_peers: true,
@@ -106,6 +111,40 @@ async function digestArguments() {
         }
     }
 }
+
+async function isPortAvailable(port: number): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+        const server = net.createServer()
+        server.once("error", err => {
+            server.close()
+            if (err["code"] == "EADDRINUSE") {
+                resolve(false)
+            } else {
+                resolve(false) // or throw error!!
+                // reject(err);
+            }
+        })
+
+        server.once("listening", () => {
+            resolve(true)
+            server.close()
+        })
+        server.listen(port)
+    })
+}
+
+async function getNextAvailablePort(startFrom: number) {
+    let availablePort: number = null
+    while (startFrom < 65535 || !!availablePort) {
+        if (await isPortAvailable(startFrom)) {
+            availablePort = startFrom
+            break
+        }
+        startFrom++
+    }
+    return availablePort
+}
+
 // ANCHOR Warmup method
 async function warmup() {
     // INFO Cleaning the logs directory (except custom logs)
@@ -134,6 +173,19 @@ async function warmup() {
     if (indexState.SERVER_PORT == 0) {
         indexState.SERVER_PORT = parseInt(process.env.SERVER_PORT, 10) || 53550
     }
+    // Allow overriding signaling server port through RPC_SIGNALING_PORT
+    indexState.SIGNALING_SERVER_PORT =
+        parseInt(process.env.RPC_SIGNALING_PORT, 10) || 0
+    if (indexState.SIGNALING_SERVER_PORT == 0) {
+        indexState.SIGNALING_SERVER_PORT =
+            parseInt(process.env.SIGNALING_SERVER_PORT, 10) || 3005
+    }
+
+    // Use next available port for the signaling server
+    // (useful when we have multiple nodes running the same code on the same machine)
+    indexState.SIGNALING_SERVER_PORT = await getNextAvailablePort(
+        indexState.SIGNALING_SERVER_PORT,
+    )
     // Setting the server port to the shared state
     getSharedState.serverPort = indexState.SERVER_PORT
     // Exposed URL
@@ -145,14 +197,15 @@ async function warmup() {
     console.log("PG_PORT: " + indexState.PG_PORT)
     console.log("RPC_FEE: " + indexState.RPC_FEE)
     console.log("SERVER_PORT: " + indexState.SERVER_PORT)
+    console.log("SIGNALING_SERVER_PORT: " + indexState.SIGNALING_SERVER_PORT)
     console.log("= End of Configuration = \n")
     // Configure the logs directory
     log.setLogsDir(indexState.SERVER_PORT)
     // ? REVIEW Starting the server_rpc: should we keep this async?
     // This should start the server_rpc without any other needed operation
     log.info("[MAIN] Starting the RPC server")
-    server_rpc()
-
+    //server_rpc()
+    serverRpcBun()
     indexState.peerManager = PeerManager.getInstance()
     console.log("[MAIN] peerManager started")
 
@@ -254,6 +307,17 @@ async function main() {
         }
         if (indexState.COMMANDLINE_MODE) {
             // commandLine() // While doing the rest of the stuff needed, a comand line interface is available
+        }
+        // Starting the signaling server
+        const signalingServer = new SignalingServer(
+            indexState.SIGNALING_SERVER_PORT,
+        )
+        if (signalingServer) {
+            getSharedState.isSignalingServerStarted = true
+            console.log("[MAIN] Signaling server started")
+        } else {
+            console.log("[MAIN] Failed to start the signaling server")
+            process.exit(1)
         }
         term.yellow("[MAIN] ✅ Starting the background loop\n")
         // ANCHOR Starting the main loop

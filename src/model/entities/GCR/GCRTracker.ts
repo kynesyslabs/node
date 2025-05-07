@@ -1,5 +1,5 @@
 import { Column, Entity, PrimaryGeneratedColumn } from "typeorm"
-import { StoredIdentities } from "../types/IdentityTypes"
+import type { StoredIdentities } from "../types/IdentityTypes"
 
 /* NOTE
     This table is used to track the changes in the GCR.
