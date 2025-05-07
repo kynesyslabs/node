@@ -40,6 +40,7 @@ const chains: { [key: string]: typeof DefaultChain } = {
     xrpl: XRPL,
     ibc: IBC,
     near: NEAR,
+    // @ts-expect-error - BTC module contains more fields than the DefaultChain type
     btc: BTC
 }
 
