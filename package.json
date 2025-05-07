@@ -120,7 +120,7 @@
         "reflect-metadata": "^0.1.13",
         "rijndael-js": "^2.0.0",
         "rollup-plugin-polyfill-node": "^0.12.0",
-        "rubic-sdk": "5.52.6",
+        "rubic-sdk": "^5.57.4",
         "seedrandom": "^3.0.5",
         "socket.io": "^4.7.1",
         "socket.io-client": "^4.7.2",
