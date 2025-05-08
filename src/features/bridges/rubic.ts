@@ -29,9 +29,9 @@ import { Signer } from "@solana/web3.js"
 
 // TODO: Remove mock data and use real data
 const mockSolanaPrivateKey =
-    "58abB98rVDhwQmVLp9WJ9ewzYsaqNA6hcTdUcjLVc1USo3wPtnJ6ERBwifoLsfPa8Q585pLy6xEUTNWpTPVFZ1FZ"
+    ""
 const mockEvmPrivateKey =
-    "8a4bd30f4c20716e78f52889313b3eda3badbfe0f150fc20ad9f9f0b49da6d58"
+    ""
 
 class CustomEVMProvider {
     private httpProvider: HttpProvider
@@ -422,7 +422,7 @@ export default class RubicService {
             )
             // Dynamically select the correct address for fromAddress
             let fromAddress = ""
-            
+
             if (
                 this.getBlockchainName(payload.fromChainId) ===
                 BLOCKCHAIN_NAME.SOLANA
