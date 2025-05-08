@@ -9,6 +9,7 @@ import { IncentiveController } from "@/features/incentive/IncentiveController"
 import { verifyCloudflareTurnstileToken } from "@/utilities/turnstile"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
+import { TurnstileVerificationPayload } from "node_modules/@kynesyslabs/demosdk/build/types/abstraction"
 
 // Define response types for better type checking
 interface IdentityResponse {
@@ -68,14 +69,11 @@ export default async function handleIdentityRequest(
                     message: `Error querying points: ${error}`,
                 }
             }
-
-        //TODO To be implemented
         case "verify_turnstile":
             try {
                 const tokenData =
-                    // @ts-expect-error - need to fix this
-                    payload.payload as Web2CoreTargetIdentityPayload
-                const token = tokenData?.proof
+                    payload.payload as TurnstileVerificationPayload["payload"]
+                const token = tokenData.token
 
                 if (!token) {
                     return {

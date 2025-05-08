@@ -1,5 +1,4 @@
 import axios from "axios"
-import log from "@/utilities/logger"
 
 /**
  * Verifies a Cloudflare Turnstile token
@@ -11,13 +10,9 @@ export async function verifyCloudflareTurnstileToken(
     token: string,
 ): Promise<boolean> {
     try {
-        // Get secret key from environment
         const secretKey = process.env.TURNSTILE_SECRET_KEY
 
-        if (!secretKey) {
-            log.error("Missing TURNSTILE_SECRET_KEY in environment")
-            return false
-        }
+        if (!secretKey) return false
 
         // Verify the token with Cloudflare's API
         const response = await axios.post(
@@ -36,7 +31,6 @@ export async function verifyCloudflareTurnstileToken(
         // Return true if success
         return response.data?.success === true
     } catch (error) {
-        log.error(`Error verifying Turnstile token: ${error}`)
         return false
     }
 }
