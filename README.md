@@ -32,6 +32,11 @@
 This repository contains the official implementation of the Demos Network RPC software.
 The included software follows the Demos Network specifications and can be used as a node for the Demos Network.
 
+> **Note:**  
+> For development and testing purposes, the Rubic bridge integration uses mock private keys in the codebase.  
+> **Do not use real or production keys in development environments.**  
+> Replace mock keys with secure, real keys only in production and after removing all test data.
+
 ## Hardware and software requirements
 
 ### Hardware
