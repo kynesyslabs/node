@@ -41,4 +41,8 @@ export const chainProviders = {
         mainnet: "https://blockstream.info/api",
         testnet: "https://blockstream.info/testnet/api",
     },
+    sui: {
+        mainnet: "https://sui-rpc.publicnode.com",
+        testnet: "https://sui-testnet-rpc.publicnode.com",
+    },
 }

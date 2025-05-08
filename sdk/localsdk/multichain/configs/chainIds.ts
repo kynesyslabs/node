@@ -27,4 +27,8 @@ export const chainIds = {
         mainnet: 2203,
         testnet: 1501,
     },
+    sui: {
+        mainnet: 101,
+        testnet: 103,
+    },
 }

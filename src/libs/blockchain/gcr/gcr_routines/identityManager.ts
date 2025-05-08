@@ -13,7 +13,7 @@ import {
     TON,
     XRPL,
     BTC,
-    SUI
+    SUI,
 } from "@kynesyslabs/demosdk/xm-localsdk"
 
 import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
@@ -43,7 +43,7 @@ const chains: { [key: string]: typeof DefaultChain } = {
     near: NEAR,
     // @ts-expect-error - BTC module contains more fields than the DefaultChain type
     btc: BTC,
-    sui: SUI
+    sui: SUI,
 }
 
 export default class IdentityManager {

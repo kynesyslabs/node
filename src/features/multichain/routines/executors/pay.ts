@@ -86,6 +86,10 @@ export default async function handlePayOperation(
             result = await genericJsonRpcPay(multichain.BTC, rpcUrl, operation)
             break
 
+        case "sui":
+            result = await genericJsonRpcPay(multichain.SUI, rpcUrl, operation)
+            break
+
         default:
             result = {
                 result: "error",
