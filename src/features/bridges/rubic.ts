@@ -27,7 +27,7 @@ import nacl from "tweetnacl"
 import bs58 from "bs58"
 import { Signer } from "@solana/web3.js"
 
-// TODO: Remove mock data and use real data
+// TODO: Need to use mock Private keys for now then remove mock data and use real data
 const mockSolanaPrivateKey =
     ""
 const mockEvmPrivateKey =
