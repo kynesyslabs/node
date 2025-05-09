@@ -33,7 +33,7 @@ import getTimestampCorrection from "./libs/utils/calibrateTime"
 import net from "net"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import { serverRpcBun } from "./libs/network/server_rpc"
-import { ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { hexToUint8Array, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
 const term = terminalkit.terminal
 
@@ -225,20 +225,34 @@ async function preMainLoop() {
 
     // ANCHOR The whole first part of main ensures the environment is ready to run
     await getSharedState.identity.ensureIdentity() // ? Should we generate the identity option based too? (see SERVER_PORT and others    )
-    const id = getSharedState.identity
+    // INFO: Initialize Unified Crypto with ed25519 private key
+    await ucrypto.generateAllIdentities(
+        getSharedState.identity.ed25519.privateKey as Uint8Array,
+    )
+    getSharedState.keypair = await ucrypto.getIdentity(
+        getSharedState.signingAlgorithm,
+    )
+    const identity = await ucrypto.getIdentity(getSharedState.signingAlgorithm)
+    console.log(identity)
+
+    // const id = getSharedState.identity
     term.green("[BOOTSTRAP] Our identity is ready\n")
     // Log identity
+    const publicKeyHex = uint8ArrayToHex(identity.publicKey as Uint8Array)
     term.green(
-        "\n[MAIN] 🔗 WE ARE " + id.ed25519.publicKey.toString("hex") + " 🔗 \n",
+        "\n[MAIN] 🔗 WE ARE " + publicKeyHex + " 🔗 \n",
     )
     // Creating ourselves as a peer // ? Should this be removed in production?
     const ourselves = "http://127.0.0.1:" + indexState.SERVER_PORT
     getSharedState.connectionString = ourselves
     log.info("Our connection string is: " + ourselves)
     // And saves the public key file
-    const publicKeyHex = id.ed25519.publicKey.toString("hex")
-    fs.writeFileSync("publickey_" + publicKeyHex, publicKeyHex + "\n")
+    fs.writeFileSync(
+        "publickey_" + getSharedState.signingAlgorithm + "_" + publicKeyHex,
+        publicKeyHex + "\n",
+    )
     log.info("Our public key is: " + publicKeyHex)
+
 
     // ANCHOR Preparing the peer manager and loading the peer list
     PeerManager.getInstance().loadPeerList()
@@ -285,7 +299,6 @@ async function preMainLoop() {
 
 // ANCHOR Entry point
 async function main() {
-    await ucrypto.generateAllIdentities()
     // INFO Warming up the node (including arguments digesting)
     await warmup()
     // INFO Calibrating the time at the start of the node
@@ -323,7 +336,7 @@ async function main() {
         }
         term.yellow("[MAIN] ✅ Starting the background loop\n")
         // ANCHOR Starting the main loop
-        // mainLoop() // Is an async function so running without waiting send that to the background
+        mainLoop() // Is an async function so running without waiting send that to the background
     }
 }
 

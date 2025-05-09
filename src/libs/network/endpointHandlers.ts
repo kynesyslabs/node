@@ -44,7 +44,6 @@ import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Ren
 
 // ? Note: this is to be implemented once demosWork is in place
 import { DemoScript } from "@kynesyslabs/demosdk/types"
-import { forgeToHex } from "../crypto/forgeUtils"
 import { Peer } from "../peer"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
@@ -52,7 +51,6 @@ import { SubnetPayload } from "@kynesyslabs/demosdk/l2ps"
 import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
-import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
 import {
     hexToUint8Array,
@@ -150,10 +148,6 @@ export default class ServerHandlers {
             const hashedValidationData = Hashing.sha256(
                 JSON.stringify(validationData.data),
             )
-            // validationData.signature = Cryptography.sign(
-            //     hashedValidationData,
-            //     getSharedState.identity.ed25519.privateKey,
-            // )
             const signature = await ucrypto.sign(
                 getSharedState.signingAlgorithm,
                 new TextEncoder().encode(hashedValidationData),
@@ -627,7 +621,7 @@ export default class ServerHandlers {
             console.error(error)
         }
 
-        const ourId = getSharedState.identity.ed25519.publicKey.toString("hex")
+        const ourId = getSharedState.publicKeyHex
         const ourDate = new Date().toISOString()
 
         return {

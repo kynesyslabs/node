@@ -5,7 +5,7 @@ import { emptyResponse } from "src/libs/network/server_rpc"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
 import ensureCandidateBlockFormed from "./ensureCandidateBlockFormed"
-import Cryptography from "src/libs/crypto/cryptography"
+import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 
 export default async function manageProposeBlockHash(
     blockHash: string,
@@ -25,8 +25,7 @@ export default async function manageProposeBlockHash(
             "[manageProposeBlockHash] Validator is not in the shard: refusing the block hash",
         )
         response.result = 401
-        response.response =
-            getSharedState.identity.ed25519.publicKey.toString("hex")
+        response.response = getSharedState.publicKeyHex
         response.extra = "Validator is not in the shard"
         return response
     }
@@ -48,8 +47,7 @@ export default async function manageProposeBlockHash(
         // process.exit(0)
 
         response.result = 401
-        response.response =
-            getSharedState.identity.ed25519.publicKey.toString("hex")
+        response.response = getSharedState.publicKeyHex
         response.extra = "Candidate block not formed"
         return response
     }
@@ -59,18 +57,20 @@ export default async function manageProposeBlockHash(
             "[manageProposeBlockHash] Hash corresponds to our candidate block",
         )
         response.result = 200
-        response.response =
-            getSharedState.identity.ed25519.publicKey.toString("hex")
+        response.response = getSharedState.publicKeyHex
 
         // INFO: Copy the incoming signatures to our candidate block
         for (const [identity, signature] of Object.entries(
             validationData["signatures"],
         )) {
-            const isValid = Cryptography.verify(
-                getSharedState.candidateBlock.hash,
-                signature,
-                identity,
-            )
+            const isValid = await ucrypto.verify({
+                algorithm: getSharedState.signingAlgorithm,
+                message: new TextEncoder().encode(
+                    getSharedState.candidateBlock.hash,
+                ),
+                signature: hexToUint8Array(signature),
+                publicKey: hexToUint8Array(identity),
+            })
 
             if (isValid) {
                 getSharedState.candidateBlock.validation_data.signatures[
@@ -98,8 +98,7 @@ export default async function manageProposeBlockHash(
         "[manageProposeBlockHash] Hash does not correspond to our candidate block",
     )
     response.result = 401
-    response.response =
-        getSharedState.identity.ed25519.publicKey.toString("hex")
+    response.response = getSharedState.publicKeyHex
     response.extra = "Hash does not correspond to our candidate block"
     return response
 }

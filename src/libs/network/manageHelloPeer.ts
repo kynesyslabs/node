@@ -1,4 +1,4 @@
-import { RPCResponse } from "@kynesyslabs/demosdk/types"
+import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
 import { getSharedState } from "src/utilities/sharedState"
 import { PeerManager, Peer } from "../peer"
@@ -7,11 +7,15 @@ import _ from "lodash"
 import * as forge from "node-forge"
 import Cryptography from "../crypto/cryptography"
 import { SyncData } from "../peer/Peer"
+import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 
 export interface HelloPeerRequest {
     url: string
     publicKey: string
-    signature: string
+    signature: {
+        type: SigningAlgorithm
+        data: string
+    }
     syncData: SyncData
 }
 
@@ -30,10 +34,7 @@ export async function manageHelloPeer(
     const peerObject = new Peer()
     peerObject.identity = content.publicKey
 
-    if (
-        peerObject.identity ==
-        getSharedState.identity.ed25519.publicKey.toString("hex")
-    ) {
+    if (peerObject.identity == getSharedState.publicKeyHex) {
         console.log("[Hello Peer Listener] Peer is us: skipping")
         response.result = 200
         response.response = true
@@ -51,9 +52,14 @@ export async function manageHelloPeer(
 
     // Check if the authentication info is valid based on the sender info from the headers
     log.info("[Hello Peer Listener] Verifying authentication info...")
-    const isValid =
-        sender === content.publicKey &&
-        Cryptography.verify(content.url, content.signature, content.publicKey)
+    const signatureValid = await ucrypto.verify({
+        algorithm: content.signature.type,
+        message: new TextEncoder().encode(content.url),
+        signature: hexToUint8Array(content.signature.data as string),
+        publicKey: hexToUint8Array(content.publicKey),
+    })
+
+    const isValid = sender === content.publicKey && signatureValid
 
     if (!isValid) {
         log.error(

@@ -7,6 +7,7 @@ import Mempool from "../../blockchain/mempool"
 import { Operation } from "@kynesyslabs/demosdk/types"
 /* eslint-disable no-unused-vars */
 import Transaction from "../../blockchain/transaction"
+import { ucrypto } from "@kynesyslabs/demosdk/encryption"
 
 export interface DerivableNative {
     from: string
@@ -175,7 +176,7 @@ export async function createTransaction(
     transaction.content.type = derivable.type
     // REVIEW Why? Should be done differently I guess
     // Setting us as the sender
-    transaction.content.from = getSharedState.identity.ed25519.publicKey
+    transaction.content.from = getSharedState.keypair.publicKey
     transaction.content.to = derivable.to
     transaction.content.amount = 0
     transaction.content.nonce = 0
@@ -189,9 +190,9 @@ export async function createTransaction(
     transaction.content.timestamp = derivable.timestamp
     // Hashing the content and signing the transaction
     transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
-    const signature = Cryptography.sign(
-        transaction.hash,
-        getSharedState.identity.ed25519.privateKey,
+    const signature = await ucrypto.sign(
+        getSharedState.signingAlgorithm,
+        new TextEncoder().encode(transaction.hash),
     )
     transaction.signature = signature as any // REVIEW Should be correct but it was transaction.signature = signature before
     // TODO See how to be general purpose but specific (a shared format?)

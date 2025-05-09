@@ -135,6 +135,10 @@ async function processPayload(
     payload: RPCRequest,
     sender: string,
 ): Promise<RPCResponse> {
+    const splits = sender.split(":")
+    if (splits.length > 1) {
+        sender = splits[1]
+    }
     // Payloads management
     switch (payload.method) {
         case "ping":
@@ -184,8 +188,12 @@ async function processPayload(
             )
         /* !SECTION Possibly deprecated methods */
 
-        case "consensus_routine": // ? Change in consensus once we have the new consensus mechanism
-            return await manageConsensusRoutines(payload.params[0])
+        case "consensus_routine": {
+            // ? Change in consensus once we have the new consensus mechanism
+            // TODO: Remove signature verification from secretary manager and manageConsensusRoutines
+            // and handle the checks here - before calling manageConsensusRoutines.
+            return await manageConsensusRoutines(sender, payload.params[0])
+        }
 
         case "gcr_routine":
             return await manageGCRRoutines(sender, payload.params[0])
@@ -239,9 +247,7 @@ export async function serverRpcBun() {
 
     server.get("/version", () => jsonResponse(getSharedState.version))
 
-    server.get("/publickey", () =>
-        jsonResponse(getSharedState.identity.ed25519.publicKey.toString("hex")),
-    )
+    server.get("/publickey", () => jsonResponse(getSharedState.publicKeyHex))
 
     server.get("/connectionstring", async () =>
         jsonResponse(await getSharedState.getConnectionString()),

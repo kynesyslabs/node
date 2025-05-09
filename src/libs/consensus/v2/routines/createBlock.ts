@@ -8,7 +8,7 @@ import { Transaction } from "@kynesyslabs/demosdk/types"
 import Peer from "src/libs/peer/Peer"
 import hashGCRTables from "src/libs/blockchain/gcr/gcr_routines/hashGCR"
 import getCommonValidatorSeed from "./getCommonValidatorSeed"
-
+import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 export async function createBlock(
     orderedTransactions: Transaction[],
     commonValidatorSeed: string,
@@ -37,9 +37,10 @@ export async function createBlock(
     block.content.timestamp = getSharedState.lastConsensusTime
     block.hash = Hashing.sha256(JSON.stringify(block.content))
     // Signing the block and adding the signature to the block validation data
-    const blockSignature = Cryptography.sign(
-        block.hash,
-        getSharedState.identity.ed25519.privateKey,
+
+    const blockSignature = await ucrypto.sign(
+        getSharedState.signingAlgorithm,
+        new TextEncoder().encode(block.hash),
     )
 
     // ? Probably to remove once we have the mechanism working for v2
@@ -47,9 +48,8 @@ export async function createBlock(
         block.validation_data = { signatures: {} }
     }
 
-    block.validation_data.signatures[ // ! Define a decent type for validation_data
-        getSharedState.identity.ed25519.publicKey.toString("hex")
-    ] = blockSignature.toString("hex")
+    block.validation_data.signatures[getSharedState.publicKeyHex] = // ! Define a decent type for validation_data
+        uint8ArrayToHex(blockSignature.signature)
 
     /* NOTE - The block timestamp is the average timestamp of the shard 
     see averageTimestamp.ts for more details */

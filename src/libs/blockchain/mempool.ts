@@ -496,11 +496,6 @@ export default class Mempool {
             console.log(signature.data.toString("hex"))
             console.log("[DEBUG] public_key: (" + typeof publicKey + ")")
             console.log(publicKey)
-            // const signatureValid = Cryptography.verify(
-            //     txHash,
-            //     forgeToHex(signature.data),
-            //     forgeToHex(publicKey),
-            // )
             log.only("signature.type: " + signature.type)
             const signatureValid = await ucrypto.verify({
                 algorithm: signature.type as SigningAlgorithm,

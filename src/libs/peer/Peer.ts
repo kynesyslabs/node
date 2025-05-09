@@ -40,7 +40,7 @@ export default class Peer {
     get isLocalNode(): boolean {
         return (
             this.identity ===
-            getSharedState.identity.ed25519.publicKey.toString("hex")
+            uint8ArrayToHex(getSharedState.keypair.publicKey as Uint8Array)
         )
     }
 

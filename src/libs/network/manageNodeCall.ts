@@ -20,6 +20,7 @@ import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
 export interface NodeCall {
     message: string
@@ -143,8 +144,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         // INFO Authentication listener
         case "getPeerIdentity":
             // NOTE We don't need to sign anything as the headers are signed already
-            response.response =
-                getSharedState.identity.ed25519.publicKey.toString("hex")
+            response.response = uint8ArrayToHex(getSharedState.keypair.publicKey as Uint8Array)
             //console.log(response)
             break
 

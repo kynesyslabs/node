@@ -31,7 +31,12 @@ import Hashing from "../crypto/hashing"
 import Confirmation from "./types/confirmation"
 import { forgeToHex } from "../crypto/forgeUtils"
 import log from "src/utilities/logger"
-import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import {
+    hexToUint8Array,
+    ucrypto,
+    uint8ArrayToHex,
+} from "@kynesyslabs/demosdk/encryption"
+import { getSharedState } from "@/utilities/sharedState"
 
 interface TransactionResponse {
     status: string
@@ -119,16 +124,12 @@ export default class Transaction implements ITransaction {
     }
 
     // INFO Compile a verification for a transaction and spit out the resulting tx
-    static confirmTx(
+    static async confirmTx(
         tx: Transaction,
-        publicKey: forge.pki.ed25519.BinaryBuffer,
-        privateKey: forge.pki.ed25519.BinaryBuffer,
+        // publicKey: forge.pki.ed25519.BinaryBuffer,
+        // privateKey: forge.pki.ed25519.BinaryBuffer,
     ) {
         console.log("[TRANSACTION]: confirmTx")
-        console.log("Public key: ")
-        console.log(publicKey)
-        console.log("Private key: ")
-        console.log(privateKey)
         console.log("Signature: ")
         console.log(tx.signature)
         const structured = this.structured(tx)
@@ -138,12 +139,21 @@ export default class Transaction implements ITransaction {
         const confirmed = this.validateSignature(tx) && this.isCoherent(tx)
         if (confirmed) {
             const confirmation = new Confirmation()
-            confirmation.data.validator = publicKey
+            confirmation.data.validator = getSharedState.keypair
+                .publicKey as Uint8Array
             confirmation.data.tx_hash_validated = tx.hash
-            confirmation.signature = Cryptography.sign(
-                JSON.stringify(confirmation.data),
-                privateKey,
-            ).toString()
+            // confirmation.signature = Cryptography.sign(
+            //     JSON.stringify(confirmation.data),
+            //     privateKey,
+            // ).toString()
+            const signature = await ucrypto.sign(
+                getSharedState.signingAlgorithm,
+                new TextEncoder().encode(JSON.stringify(confirmation.data)),
+            )
+            confirmation.signature = {
+                type: getSharedState.signingAlgorithm,
+                data: uint8ArrayToHex(signature.signature),
+            }
             return confirmation
         } else {
             return null

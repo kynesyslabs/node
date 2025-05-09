@@ -20,7 +20,6 @@ import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
 import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
-import required from "src/utilities/required"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
@@ -34,10 +33,6 @@ export async function confirmTransaction(
     term.yellow("\n[Native Tx Validation] Validating transaction...\n")
     // Getting the current block number
     const referenceBlock = await Chain.getLastBlockNumber()
-    // Loading identity
-    const idEd25519 = getSharedState.identity.ed25519
-    const publicKey = idEd25519.publicKey
-    const privateKey = idEd25519.privateKey
     // REVIEW This should work just fine
     console.log("Signature: ")
     console.log(tx.signature)
@@ -61,7 +56,7 @@ export async function confirmTransaction(
             type: getSharedState.signingAlgorithm,
             data: uint8ArrayToHex(
                 (await ucrypto.getIdentity(getSharedState.signingAlgorithm))
-                    .publicKey,
+                    .publicKey as Uint8Array,
             ),
         },
     }
@@ -93,11 +88,7 @@ export async function confirmTransaction(
     */
     // Verify tx validity
 
-    const verified = Transaction.confirmTx(
-        tx,
-        privateKey as pki.ed25519.BinaryBuffer,
-        publicKey as pki.ed25519.BinaryBuffer,
-    ) // REVIEW Are the buffers ok?
+    const verified = await Transaction.confirmTx(tx) // REVIEW Are the buffers ok?
     if (!verified) {
         validityData.data.message =
             "[Native Tx Validation] [SIGNATURE ERROR] Transaction signature not verified\n"
@@ -165,7 +156,14 @@ async function defineGas(
         // Hash the validation data
         const hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
-        validityData.signature = Cryptography.sign(hash, privateKey)
+        const signature = await ucrypto.sign(
+            getSharedState.signingAlgorithm,
+            new TextEncoder().encode(hash),
+        )
+        validityData.signature = {
+            type: getSharedState.signingAlgorithm,
+            data: uint8ArrayToHex(signature.signature),
+        }
         return [false, validityData]
     }
     let fromBalance = 0
@@ -184,8 +182,14 @@ async function defineGas(
         // Hash the validation data
         const hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
-        validityData.signature = Cryptography.sign(hash, privateKey)
-        return [false, validityData]
+        const signature = await ucrypto.sign(
+            getSharedState.signingAlgorithm,
+            new TextEncoder().encode(hash),
+        )
+        validityData.signature = {
+            type: getSharedState.signingAlgorithm,
+            data: uint8ArrayToHex(signature.signature),
+        }
     }
     // TODO Work on this method
     const compositeFeeAmount = await calculateCurrentGas(tx)
@@ -209,7 +213,14 @@ async function defineGas(
         // Hash the validation data
         const hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
-        validityData.signature = Cryptography.sign(hash, privateKey)
+        const signature = await ucrypto.sign(
+            getSharedState.signingAlgorithm,
+            new TextEncoder().encode(hash),
+        )
+        validityData.signature = {
+            type: getSharedState.signingAlgorithm,
+            data: uint8ArrayToHex(signature.signature),
+        }
         return [false, validityData]
     }
 
