@@ -25,7 +25,7 @@ export class BlockNotFoundError extends Error {
     }
 }
 
-export class PeerOfflineError extends Error {
+export class PeerUnreachableError extends Error {
     constructor(message: string) {
         super(message)
         this.name = "PeerOfflineError"
