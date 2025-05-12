@@ -1,8 +1,7 @@
-import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import { PeerManager } from "src/libs/peer"
 import required from "src/utilities/required"
-import SharedState from "src/utilities/sharedState"
+import SharedState, { getSharedState } from "src/utilities/sharedState"
 
 import {
     IWeb2Attestation,
@@ -12,6 +11,7 @@ import {
 import { DAHR } from "./dahr/DAHR"
 
 import terminalKit from "terminal-kit"
+import { hexToUint8Array, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
 const term = terminalKit.terminal
 
@@ -49,8 +49,10 @@ export class Web2RequestManager {
      * @param {IWeb2Result} web2Result - The result of the Web2 request to be attested.
      * @returns {IWeb2Attestation} The combined attestation for the Web2 request and result.
      */
-    getAttestedResult(web2Result: IWeb2Result): IWeb2Attestation {
-        const combinedAttestation = this.validateWeb2RequestAndResult(
+    async getAttestedResult(
+        web2Result: IWeb2Result,
+    ): Promise<IWeb2Attestation> {
+        const combinedAttestation = await this.validateWeb2RequestAndResult(
             this.dahr.web2Request,
             web2Result,
         )
@@ -63,10 +65,10 @@ export class Web2RequestManager {
         return combinedAttestation
     }
 
-    private validateWeb2RequestAndResult(
+    private async validateWeb2RequestAndResult(
         web2Request: IWeb2Request,
         web2Result: IWeb2Result,
-    ): IWeb2Attestation {
+    ): Promise<IWeb2Attestation> {
         term.yellow.bold("[Web2Parser] Validating request and result...\n")
 
         // Combine request and result into a single object
@@ -81,31 +83,36 @@ export class Web2RequestManager {
         term.bold("[Web2Parser] Combined hash:\n")
         console.log(hashedCombined)
 
-        const signature = Cryptography.sign(
-            hashedCombined,
-            SharedState.getInstance().identity.ed25519.privateKey,
+        const signature = await ucrypto.sign(
+            getSharedState.signingAlgorithm,
+            new TextEncoder().encode(hashedCombined),
         )
 
         const attestation: IWeb2Attestation = {
             hash: hashedCombined,
             timestamp: Date.now(),
             identity: SharedState.getInstance().identity.ed25519.publicKey,
-            signature: signature,
+            signature: {
+                type: getSharedState.signingAlgorithm,
+                signature: uint8ArrayToHex(signature.signature),
+            },
             valid: null,
         }
         term.bold("[Web2Parser] Combined Attestation:\n")
         console.log(attestation)
 
-        const hexKey = SharedState
-            .getInstance()
-            .identity.ed25519.publicKey.toString("hex")
+        const hexKey =
+            SharedState.getInstance().identity.ed25519.publicKey.toString("hex")
 
         // Store the attestation in the web2Request
         web2Request.attestations[hexKey] = attestation
 
         // Update the hash and signature of the web2Request
         web2Request.hash = hashedCombined
-        web2Request.signature = signature
+        web2Request.signature = {
+            type: getSharedState.signingAlgorithm,
+            signature: uint8ArrayToHex(signature.signature),
+        }
 
         // Store the result in the web2Request if it's not already set
         if (web2Request.result === undefined) {
@@ -117,7 +124,7 @@ export class Web2RequestManager {
         return attestation
     }
 
-    private verifyWeb2RequestAndResult(): boolean {
+    private async verifyWeb2RequestAndResult(): Promise<boolean> {
         required(this.dahr.web2Request, "Missing request")
         let valid = true
 
@@ -127,11 +134,12 @@ export class Web2RequestManager {
             const hash = Hashing.sha256(stringifiedContent)
 
             const hashIsValid = hash === attestation.hash
-            const signatureIsValid = Cryptography.verify(
-                attestation.signature.toString("hex"),
-                attestation.hash,
-                attestation.identity,
-            )
+            const signatureIsValid = await ucrypto.verify({
+                algorithm: attestation.signature.type,
+                publicKey: attestation.identity as Uint8Array,
+                signature: hexToUint8Array(attestation.signature.signature),
+                message: new TextEncoder().encode(attestation.hash),
+            })
             const isValid = hashIsValid && signatureIsValid
             attestation.valid = isValid
 
@@ -169,10 +177,7 @@ export class Web2RequestManager {
      * @param {number} timeout - The timeout.
      * @returns {Promise<boolean>} Whether the quorum is reached.
      */
-    async quorumIsReached(
-        quorum = 10,
-        timeout = 9000,
-    ): Promise<boolean> {
+    async quorumIsReached(quorum = 10, timeout = 9000): Promise<boolean> {
         let reachedQuorum = false
         let timer = 0
         // NOTE We wait for timeout seconds before surrendering

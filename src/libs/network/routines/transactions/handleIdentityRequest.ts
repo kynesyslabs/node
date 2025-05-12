@@ -12,7 +12,10 @@ import { verifyWeb2Proof } from "@/libs/abstraction"
  * @param payload - The identity payload
  * @returns true if the identity request is valid, false otherwise
  */
-export default async function handleIdentityRequest(payload: IdentityPayload) {
+export default async function handleIdentityRequest(
+    payload: IdentityPayload,
+    sender: string,
+) {
     switch (payload.method) {
         case "xm_identity_assign":
             return await IdentityManager.verifyPayload(
@@ -21,6 +24,7 @@ export default async function handleIdentityRequest(payload: IdentityPayload) {
         case "web2_identity_assign":
             return await verifyWeb2Proof(
                 payload.payload as Web2CoreTargetIdentityPayload,
+                sender,
             )
         case "xm_identity_remove":
         case "web2_identity_remove":

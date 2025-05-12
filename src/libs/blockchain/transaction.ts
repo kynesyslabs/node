@@ -82,7 +82,6 @@ export default class Transaction implements ITransaction {
         if (!tx.content) {
             return [false, "Missing tx.content"]
         }
-        // Sign using identity.cryptography.sign(tx.content, privateKey)
         const signature = Cryptography.sign(
             JSON.stringify(tx.content),
             privateKey,
@@ -92,25 +91,6 @@ export default class Transaction implements ITransaction {
         }
         return [true, signature]
     }
-
-    // INFO Given a signed transaction, verify it against the address of the sender
-    // Returns [result, message]
-    // static verify(tx: Transaction) {
-    //     // Check sanity of the structure of the tx object
-    //     if (!tx.content) {
-    //         return [false, "Missing tx.content"]
-    //     }
-    //     if (!tx.signature) {
-    //         return [false, "Missing tx.signature"]
-    //     }
-    //     // verify using identity.cryptography.verify(tx.content, tx.signature, publicKey)
-    //     const verified = Cryptography.verify(
-    //         JSON.stringify(tx.content),
-    //         tx.signature.data.toString("hex"),
-    //         tx.content.from.toString("hex"),
-    //     )
-    //     return [verified, "Result of verify()"]
-    // }
 
     // INFO Hashing the content of a transaction
     static hash(tx: Transaction): any {
@@ -142,10 +122,6 @@ export default class Transaction implements ITransaction {
             confirmation.data.validator = getSharedState.keypair
                 .publicKey as Uint8Array
             confirmation.data.tx_hash_validated = tx.hash
-            // confirmation.signature = Cryptography.sign(
-            //     JSON.stringify(confirmation.data),
-            //     privateKey,
-            // ).toString()
             const signature = await ucrypto.sign(
                 getSharedState.signingAlgorithm,
                 new TextEncoder().encode(JSON.stringify(confirmation.data)),

@@ -182,10 +182,6 @@ export default class Peer {
      */
     async authenticatedCallMaker(request: RPCRequest): Promise<RPCRequest> {
         // Signing our identity to send the request
-        // const bufferSignature = await Cryptography.sign(
-        //     getSharedState.identity.ed25519.publicKey.toString("hex"),
-        //     getSharedState.identity.ed25519.privateKey,
-        // )
         const ourPublicKey = (
             await ucrypto.getIdentity(getSharedState.signingAlgorithm)
         ).publicKey

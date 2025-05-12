@@ -168,6 +168,7 @@ export default class ServerHandlers {
     // TODO Either put this into a module or do something to make it more modular
     static async handleExecuteTransaction(
         validatedData: ValidityData,
+        sender: string,
     ): Promise<ExecutionResult> {
         // Log the entire validatedData object to inspect its structure
         console.log("[handleExecuteTransaction] Validated Data:", validatedData)
@@ -344,6 +345,7 @@ export default class ServerHandlers {
                 try {
                     const { success, message } = await handleIdentityRequest(
                         tx.content.data[1] as IdentityPayload,
+                        sender,
                     )
                     const status = success ? "applied" : "not applied"
 
@@ -359,7 +361,7 @@ export default class ServerHandlers {
                         message: "Failed to verify signature",
                     }
                     result.extra = {
-                        error: e,
+                        error: e.toString(),
                     }
                 }
 

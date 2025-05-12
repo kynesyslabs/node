@@ -4,6 +4,7 @@ import { GithubProofParser } from "./web2/github"
 import { TwitterProofParser } from "./web2/twitter"
 import { type Web2ProofParser } from "./web2/parsers"
 import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
+import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 
 /**
  * Fetches the proof data using the appropriate parser and verifies the signature
@@ -11,7 +12,10 @@ import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
  * @param payload - The proof payload
  * @returns true if the proof is valid, false otherwise
  */
-export async function verifyWeb2Proof(payload: Web2CoreTargetIdentityPayload) {
+export async function verifyWeb2Proof(
+    payload: Web2CoreTargetIdentityPayload,
+    sender: string,
+) {
     let parser: typeof Web2ProofParser
 
     switch (payload.context) {
@@ -31,11 +35,15 @@ export async function verifyWeb2Proof(payload: Web2CoreTargetIdentityPayload) {
     const instance = await parser.getInstance()
 
     try {
-        const { message, publicKey, signature } = await instance.readData(
+        const { message, type, signature } = await instance.readData(
             payload.proof,
         )
-        const verified = Cryptography.verify(message, signature, publicKey)
-
+        const verified = await ucrypto.verify({
+            algorithm: type,
+            message: new TextEncoder().encode(message),
+            publicKey: hexToUint8Array(sender),
+            signature: hexToUint8Array(signature),
+        })
         return {
             success: verified,
             message: `Verified ${payload.context} proof`,

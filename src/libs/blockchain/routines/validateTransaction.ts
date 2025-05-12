@@ -107,9 +107,7 @@ export async function confirmTransaction(
 }
 
 async function signValidityData(data: ValidityData): Promise<ValidityData> {
-    // const privateKey = getSharedState.identity.ed25519.privateKey
     const hash = Hashing.sha256(JSON.stringify(data.data))
-    // data.signature = Cryptography.sign(hash, privateKey)
     // return data
 
     const signature = await ucrypto.sign(

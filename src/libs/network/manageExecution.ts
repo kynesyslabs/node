@@ -12,6 +12,7 @@ const term = terminalkit.terminal
 
 export async function manageExecution(
     content: BundleContent,
+    sender: string,
 ): Promise<RPCResponse> {
     const returnValue = _.cloneDeep(emptyResponse)
 
@@ -68,6 +69,7 @@ export async function manageExecution(
             try {
                 const result = await ServerHandlers.handleExecuteTransaction(
                     validityDataPayload,
+                    sender,
                 )
                 console.log(
                     "[SERVER] Transaction executed. Sending back the result",
