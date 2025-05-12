@@ -131,6 +131,7 @@ export default class GCRIdentityRoutines {
     ): Promise<GCRResult> {
         const { context, data } = editOperation.data as Web2GCRData
         const accountGCR = await ensureGCRForUser(editOperation.account)
+
         accountGCR.identities.web2 = accountGCR.identities.web2 || {}
         accountGCR.identities.web2[context] =
             accountGCR.identities.web2[context] || []
@@ -143,6 +144,9 @@ export default class GCRIdentityRoutines {
             return { success: false, message: "Identity already exists" }
         }
 
+        /**
+         * Verify the proof
+         */
         const proofOk = Hashing.sha256(data.proof) === data.proofHash
 
         if (!proofOk) {
@@ -167,7 +171,6 @@ export default class GCRIdentityRoutines {
         if (context === "twitter") {
             await incentiveController.onTwitterLinked(
                 editOperation.account,
-                data.username,
             )
         } else if (context === "github") {
             // Future implementation for GitHub

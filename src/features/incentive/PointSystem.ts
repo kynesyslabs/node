@@ -30,18 +30,22 @@ export class PointSystem {
         linkedSocials: { twitter?: string }
     }> {
         const xmIdentities = await IdentityManager.getIdentities(userId)
-        const web2Identities = await IdentityManager.getWeb2Identities(
+        const twitterIdentities = await IdentityManager.getWeb2Identities(
+            userId,
+            "twitter",
+        )
+        const githubIdentities = await IdentityManager.getWeb2Identities(
             userId,
             "github",
         )
 
         const linkedWallets: string[] = []
 
-        if (xmIdentities) {
-            const chains = Object.keys(xmIdentities)
+        if (xmIdentities?.xm) {
+            const chains = Object.keys(xmIdentities.xm)
 
             for (const chain of chains) {
-                const subChains = xmIdentities[chain]
+                const subChains = xmIdentities.xm[chain]
                 const subChainKeys = Object.keys(subChains)
 
                 for (const subChain of subChainKeys) {
@@ -59,18 +63,8 @@ export class PointSystem {
 
         const linkedSocials: { twitter?: string } = {}
 
-        if (
-            web2Identities &&
-            typeof web2Identities === "object" &&
-            "twitter" in web2Identities &&
-            Array.isArray(web2Identities.twitter) &&
-            web2Identities.twitter.length > 0
-        ) {
-            const twitterProof = web2Identities.twitter[0]
-            linkedSocials.twitter =
-                typeof twitterProof === "string"
-                    ? twitterProof
-                    : twitterProof.username || ""
+        if (Array.isArray(twitterIdentities) && twitterIdentities.length > 0) {
+            linkedSocials.twitter = twitterIdentities[0].username
         }
 
         return { linkedWallets, linkedSocials }
@@ -97,7 +91,11 @@ export class PointSystem {
             account.points.totalPoints = 0
             account.points.breakdown = {
                 web3Wallets: 0,
-                socialAccounts: 0,
+                socialAccounts: {
+                    twitter: 0,
+                    github: 0,
+                    discord: 0,
+                },
             }
             account.points.lastUpdated = new Date()
 
@@ -110,7 +108,11 @@ export class PointSystem {
             totalPoints: account.points.totalPoints || 0,
             breakdown: {
                 web3Wallets: account.points.breakdown?.web3Wallets || 0,
-                socialAccounts: account.points.breakdown?.socialAccounts || 0,
+                socialAccounts: account.points.breakdown?.socialAccounts || {
+                    twitter: 0,
+                    github: 0,
+                    discord: 0,
+                },
             },
             linkedWallets,
             linkedSocials,
@@ -125,6 +127,7 @@ export class PointSystem {
         userId: string,
         points: number,
         type: "web3Wallets" | "socialAccounts",
+        platform?: "twitter" | "github" | "discord",
     ): Promise<void> {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
@@ -133,7 +136,25 @@ export class PointSystem {
         if (!account) {
             const newAccount = await HandleGCR.createAccount(userId)
             newAccount.points.totalPoints = points
-            newAccount.points.breakdown[type] = points
+            if (type === "socialAccounts" && platform) {
+                newAccount.points.breakdown = {
+                    web3Wallets: 0,
+                    socialAccounts: {
+                        twitter: platform === "twitter" ? points : 0,
+                        github: platform === "github" ? points : 0,
+                        discord: platform === "discord" ? points : 0,
+                    },
+                }
+            } else {
+                newAccount.points.breakdown = {
+                    web3Wallets: type === "web3Wallets" ? points : 0,
+                    socialAccounts: {
+                        twitter: 0,
+                        github: 0,
+                        discord: 0,
+                    },
+                }
+            }
             newAccount.points.lastUpdated = new Date()
 
             await gcrMainRepository.save(newAccount)
@@ -141,8 +162,19 @@ export class PointSystem {
             const oldTotal = account.points.totalPoints || 0
             account.points.totalPoints = oldTotal + points
 
-            const oldCategoryPoints = account.points.breakdown[type] || 0
-            account.points.breakdown[type] = oldCategoryPoints + points
+            if (type === "socialAccounts" && platform) {
+                const oldPlatformPoints =
+                    account.points.breakdown?.socialAccounts?.[platform] || 0
+                account.points.breakdown.socialAccounts[platform] =
+                    oldPlatformPoints + points
+            } else {
+                if (type === "web3Wallets") {
+                    const oldCategoryPoints =
+                        account.points.breakdown.web3Wallets || 0
+                    account.points.breakdown.web3Wallets =
+                        oldCategoryPoints + points
+                }
+            }
             account.points.lastUpdated = new Date()
 
             await gcrMainRepository.save(account)
@@ -270,25 +302,22 @@ export class PointSystem {
     /**
      * Award points for linking a Twitter account
      * @param userId The user's Demos address
-     * @param twitterHandle The user's Twitter handle
      * @returns RPCResponse
      */
-    async awardTwitterPoints(
-        userId: string,
-        twitterHandle: string,
-    ): Promise<RPCResponse> {
+    async awardTwitterPoints(userId: string): Promise<RPCResponse> {
         try {
             const userPointsWithIdentities = await this.getUserPointsInternal(
                 userId,
             )
 
-            if (userPointsWithIdentities.linkedSocials.twitter) {
+            // Check if user already has Twitter points specifically
+            if (userPointsWithIdentities.breakdown.socialAccounts.twitter > 0) {
                 return {
                     result: 200,
                     response: {
                         pointsAwarded: 0,
                         totalPoints: userPointsWithIdentities.totalPoints,
-                        message: "Twitter is already linked",
+                        message: "Twitter points already awarded",
                     },
                     require_reply: false,
                     extra: {},
@@ -299,6 +328,7 @@ export class PointSystem {
                 userId,
                 pointValues.LINK_TWITTER,
                 "socialAccounts",
+                "twitter",
             )
 
             const updatedPoints = await this.getUserPointsInternal(userId)

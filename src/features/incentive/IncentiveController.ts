@@ -34,11 +34,8 @@ export class IncentiveController {
     /**
      * Hook to be called after Twitter linking
      */
-    async onTwitterLinked(
-        userId: string,
-        twitterHandle: string,
-    ): Promise<RPCResponse> {
-        return await this.pointSystem.awardTwitterPoints(userId, twitterHandle)
+    async onTwitterLinked(userId: string): Promise<RPCResponse> {
+        return await this.pointSystem.awardTwitterPoints(userId)
     }
 
     async onGetPoints(userId: string): Promise<RPCResponse> {
