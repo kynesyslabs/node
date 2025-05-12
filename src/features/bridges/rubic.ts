@@ -28,10 +28,8 @@ import bs58 from "bs58"
 import { Signer } from "@solana/web3.js"
 
 // TODO: Need to use mock Private keys for now then remove mock data and use real data
-const mockSolanaPrivateKey =
-    ""
-const mockEvmPrivateKey =
-    ""
+const mockSolanaPrivateKey = ""
+const mockEvmPrivateKey = ""
 
 class CustomEVMProvider {
     private httpProvider: HttpProvider
@@ -280,11 +278,7 @@ export default class RubicService {
     private initPromise: Promise<void> | null = null
     private receiverAddress: string | null = null
 
-    constructor(
-        privateKey: string,
-        chain: string,
-        receiverAddress?: string,
-    ) {
+    constructor(privateKey: string, chain: string, receiverAddress?: string) {
         const mockPrivateKey =
             chain === BLOCKCHAIN_NAME.SOLANA
                 ? mockSolanaPrivateKey
@@ -434,28 +428,42 @@ export default class RubicService {
                 fromAddress = this.signer?.address
             }
 
-            const trades = await this.sdk.crossChainManager.calculateTrade(
-                {
-                    address: fromTokenAddress,
-                    blockchain: this.getBlockchainName(payload.fromChainId),
-                },
-                payload.amount,
-                {
-                    address: toTokenAddress,
-                    blockchain: this.getBlockchainName(payload.toChainId),
-                },
-                {
-                    fromAddress,
-                    bridgeTypes: Object.values(BRIDGE_PROTOCOLS)
-                        .filter(p => p !== "all")
-                        .map(p => p.toLowerCase()),
-                    gasCalculation: "enabled",
-                } as ExtendedCrossChainManagerCalculationOptions,
-            )
+            let trades = []
 
-            console.log(`Received ${trades.length} trade options`)
-
-            if (trades.length === 0) {
+            if (payload.fromChainId === payload.toChainId) {
+                trades = await this.sdk.onChainManager.calculateTrade(
+                    {
+                        address: fromTokenAddress,
+                        blockchain: this.getBlockchainName(payload.fromChainId),
+                    },
+                    payload.amount,
+                    toTokenAddress,
+                )
+                console.log(`Received ${trades.length} on-chain trade options`)
+            } else {
+                trades = await this.sdk.crossChainManager.calculateTrade(
+                    {
+                        address: fromTokenAddress,
+                        blockchain: this.getBlockchainName(payload.fromChainId),
+                    },
+                    payload.amount,
+                    {
+                        address: toTokenAddress,
+                        blockchain: this.getBlockchainName(payload.toChainId),
+                    },
+                    {
+                        fromAddress,
+                        bridgeTypes: Object.values(BRIDGE_PROTOCOLS)
+                            .filter(p => p !== "all")
+                            .map(p => p.toLowerCase()),
+                        gasCalculation: "enabled",
+                    } as ExtendedCrossChainManagerCalculationOptions,
+                )
+                console.log(
+                    `Received ${trades.length} cross-chain trade options`,
+                )
+            }
+            if (!trades || trades.length === 0) {
                 const error = new Error("No trades found") as RubicSdkError
                 return error
             }
