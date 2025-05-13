@@ -412,7 +412,7 @@ export default class ServerHandlers {
         // Only if the transaction is valid we add it to the mempool
         if (result.success) {
             // REVIEW Simulating gcr edits application as we will apply them in the consensus
-            const simulate = false
+            const simulate = true
             // NOTE We apply the GCREdit to the GCR and check if it is successful. If not, we return an error
             const editsResults = await HandleGCR.applyToTx(
                 queriedTx,

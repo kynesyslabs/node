@@ -50,15 +50,15 @@ export default class GCRIdentityRoutines {
 
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
-        }
 
-        // Award incentive points for wallet linking
-        const incentiveController = IncentiveController.getInstance()
-        await incentiveController.onWalletLinked(
-            accountGCR.pubkey,
-            normalizedAddress,
-            chain,
-        )
+            // Award incentive points for wallet linking
+            const incentiveController = IncentiveController.getInstance()
+            await incentiveController.onWalletLinked(
+                accountGCR.pubkey,
+                normalizedAddress,
+                chain,
+            )
+        }
 
         return { success: true, message: "Identity applied" }
     }
@@ -164,21 +164,19 @@ export default class GCRIdentityRoutines {
 
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
-        }
 
-        // Award incentive points for social media linking
-        const incentiveController = IncentiveController.getInstance()
-        if (context === "twitter") {
-            await incentiveController.onTwitterLinked(
-                editOperation.account,
-            )
-        } else if (context === "github") {
-            // Future implementation for GitHub
-            log.info(
-                `GitHub linking for ${data.username}, no incentive handler yet`,
-            )
-        } else {
-            log.info(`Web2 identity linked: ${context}/${data.username}`)
+            // Award incentive points for social media linking
+            const incentiveController = IncentiveController.getInstance()
+            if (context === "twitter") {
+                await incentiveController.onTwitterLinked(editOperation.account)
+            } else if (context === "github") {
+                // Future implementation for GitHub
+                log.info(
+                    `GitHub linking for ${data.username}, no incentive handler yet`,
+                )
+            } else {
+                log.info(`Web2 identity linked: ${context}/${data.username}`)
+            }
         }
 
         return { success: true, message: "Web2 identity added" }
