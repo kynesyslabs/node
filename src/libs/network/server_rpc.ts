@@ -91,10 +91,11 @@ async function validateHeaders(headers: Headers): Promise<[boolean, string]> {
 
     let isValid = false
     let signatureObj: signedObject
+    const supportedAlgorithms = ["ed25519", "falcon", "ml-dsa"]
 
     if (splits.length > 1) {
         // INFO: Handle Ed25519 signatures
-        if (splits[0] === "ed25519") {
+        if (supportedAlgorithms.includes(splits[0])) {
             const publicKey = hexToUint8Array(splits[1])
             const _signature = hexToUint8Array(signature)
 

@@ -74,22 +74,29 @@ export default class Transaction implements ITransaction {
     }
 
     // INFO Given a transaction, sign it with the private key of the sender
-    public static sign(
+    public static async sign(
         tx: Transaction,
         privateKey: forge.pki.ed25519.BinaryBuffer,
-    ): [boolean, any] {
+    ): Promise<[boolean, any]> {
         // Check sanity of the structure of the tx object
         if (!tx.content) {
             return [false, "Missing tx.content"]
         }
-        const signature = Cryptography.sign(
-            JSON.stringify(tx.content),
-            privateKey,
+        const signature_ = await ucrypto.sign(
+            getSharedState.signingAlgorithm,
+            new TextEncoder().encode(JSON.stringify(tx.content)),
         )
-        if (!signature) {
+
+        if (!signature_) {
             return [false, "Failed to sign transaction"]
         }
-        return [true, signature]
+        return [
+            true,
+            {
+                type: getSharedState.signingAlgorithm,
+                data: uint8ArrayToHex(signature_.signature),
+            },
+        ]
     }
 
     // INFO Hashing the content of a transaction
@@ -389,8 +396,8 @@ export default class Transaction implements ITransaction {
 
         tx.blockNumber = rawTx.blockNumber
         tx.signature = {
-            type: "ed25519", // Assuming the signature type as ed25519; adjust accordingly
-            data: Buffer.from(rawTx.signature, "hex"),
+            type: getSharedState.signingAlgorithm, // Assuming the signature type as ed25519; adjust accordingly
+            data: rawTx.signature,
         }
         tx.status = rawTx.status
         tx.hash = rawTx.hash
