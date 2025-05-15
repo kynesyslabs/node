@@ -54,6 +54,8 @@ import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
 import { IdentityPayload } from "@kynesyslabs/demosdk/abstraction"
+import { NativeBridgeOperation, NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
+import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
 /* // ! Note: this will be removed once demosWork is in place
 import {
     NativePayload,
@@ -392,6 +394,22 @@ export default class ServerHandlers {
                 }
 
                 break
+
+            case "nativeBridge":
+                payload = tx.content.data
+                var nativeBridgeResult = await handleNativeBridgeTx(
+                    payload[1] as NativeBridgeOperationCompiled,
+                )
+                if (nativeBridgeResult === null) {
+                    result.success = false
+                    result.response = false
+                    result.extra = {
+                        error: "Failed to handle native bridge transaction",
+                    }
+                }
+                result.response = nativeBridgeResult
+                break
+
         }
 
         // Only if the transaction is valid we add it to the mempool
