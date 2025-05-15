@@ -23,7 +23,8 @@ import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyR
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import manageBridges from "./manageBridge"
 import { BunServer, cors, json, jsonResponse } from "./bunServer"
-
+import { bridge } from "@kynesyslabs/demosdk"
+import { manageNativeBridge } from "./manageNativeBridge"
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
@@ -108,6 +109,12 @@ async function processPayload(
             }
         case "execute":
             return await manageExecution(payload.params[0] as BundleContent)
+        case "nativeBridge":
+            /**
+             * TODO & REVIEW The NativeBridgeOperation is sent to the handler to obtain a response
+             * that includes the compiled operation, so that the client can generate a proper transaction
+             */
+            return await manageNativeBridge(payload.params[0] as bridge.NativeBridgeOperation)
         case "hello_peer": // As it is authenticated, we can use it to check if the peer is still alive and is in our peer list
             var helloPeerRequest = payload.params[0] as HelloPeerRequest
             return await manageHelloPeer(
