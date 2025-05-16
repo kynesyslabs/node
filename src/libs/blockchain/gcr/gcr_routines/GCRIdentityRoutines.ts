@@ -5,8 +5,8 @@ import { Repository } from "typeorm"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import ensureGCRForUser from "./ensureGCRForUser"
 import Hashing from "@/libs/crypto/hashing"
-import { IncentiveController } from "@/features/incentive/IncentiveController"
 import log from "@/utilities/logger"
+import { IncentiveManager } from "./IncentiveManager"
 
 export default class GCRIdentityRoutines {
     static async applyXmIdentityAdd(
@@ -52,8 +52,7 @@ export default class GCRIdentityRoutines {
             await gcrMainRepository.save(accountGCR)
 
             // Award incentive points for wallet linking
-            const incentiveController = IncentiveController.getInstance()
-            await incentiveController.onWalletLinked(
+            await IncentiveManager.walletLinked(
                 accountGCR.pubkey,
                 normalizedAddress,
                 chain,
@@ -166,9 +165,8 @@ export default class GCRIdentityRoutines {
             await gcrMainRepository.save(accountGCR)
 
             // Award incentive points for social media linking
-            const incentiveController = IncentiveController.getInstance()
             if (context === "twitter") {
-                await incentiveController.onTwitterLinked(editOperation.account)
+                await IncentiveManager.twitterLinked(editOperation.account)
             } else if (context === "github") {
                 // Future implementation for GitHub
                 log.info(

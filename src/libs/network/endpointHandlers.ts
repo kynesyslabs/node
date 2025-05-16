@@ -50,7 +50,6 @@ import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyR
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
 import { IdentityPayload } from "@kynesyslabs/demosdk/abstraction"
-import { IncentiveController } from "@/features/incentive/IncentiveController"
 /* // ! Note: this will be removed once demosWork is in place
 import {
     NativePayload,

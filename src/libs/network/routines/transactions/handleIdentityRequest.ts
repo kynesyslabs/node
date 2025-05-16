@@ -5,11 +5,7 @@ import {
 } from "@kynesyslabs/demosdk/abstraction"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import { verifyWeb2Proof } from "@/libs/abstraction"
-import { IncentiveController } from "@/features/incentive/IncentiveController"
-import { verifyCloudflareTurnstileToken } from "@/utilities/turnstile"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
-import { forgeToHex } from "@/libs/crypto/forgeUtils"
-import { TurnstileVerificationPayload } from "node_modules/@kynesyslabs/demosdk/build/types/abstraction"
 
 // Define response types for better type checking
 interface IdentityResponse {
@@ -44,59 +40,6 @@ export default async function handleIdentityRequest(
                 success: true,
                 message: "Identity removed",
             }
-        case "query_points":
-            try {
-                if (!sender) {
-                    return {
-                        success: false,
-                        message: "Missing sender address for points query",
-                    }
-                }
-                const senderHex = forgeToHex(sender)
-                const incentiveController = IncentiveController.getInstance()
-                const pointsResponse = await incentiveController.onGetPoints(
-                    senderHex,
-                )
-
-                return {
-                    success: true,
-                    message: "Points retrieved successfully",
-                    response: pointsResponse,
-                }
-            } catch (error) {
-                return {
-                    success: false,
-                    message: `Error querying points: ${error}`,
-                }
-            }
-        case "verify_turnstile":
-            try {
-                const tokenData =
-                    payload.payload as TurnstileVerificationPayload["payload"]
-                const token = tokenData.token
-
-                if (!token) {
-                    return {
-                        success: false,
-                        message: "Missing Turnstile token",
-                    }
-                }
-
-                const isValid = await verifyCloudflareTurnstileToken(token)
-
-                return {
-                    success: isValid,
-                    message: isValid
-                        ? "Turnstile token verified successfully"
-                        : "Invalid Turnstile token",
-                }
-            } catch (error) {
-                return {
-                    success: false,
-                    message: `Error verifying Turnstile token: ${error}`,
-                }
-            }
-
         default:
             return {
                 success: false,

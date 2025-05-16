@@ -2,6 +2,8 @@ import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
 import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
 import { emptyResponse } from "./server_rpc"
+import { IncentiveManager } from "../blockchain/gcr/gcr_routines/IncentiveManager"
+import { SecurityManager } from "../blockchain/gcr/gcr_routines/SecurityManager"
 
 interface GCRRoutinePayload {
     method: string
@@ -31,11 +33,25 @@ export default async function manageGCRRoutines(
             break
 
         case "getWeb2Identities":
-            response.response = await IdentityManager.getIdentities(sender, "web2")
+            response.response = await IdentityManager.getIdentities(
+                sender,
+                "web2",
+            )
             break
 
         case "getXmIdentities":
-            response.response = await IdentityManager.getIdentities(sender, "xm")
+            response.response = await IdentityManager.getIdentities(
+                sender,
+                "xm",
+            )
+            break
+
+        case "getPoints":
+            response.response = await IncentiveManager.getPoints(sender)
+            break
+
+        case "verifyTurnstile":
+            response.response = await SecurityManager.verifyTurnstile(params[0])
             break
 
         // SECTION Web2 Identity Management
