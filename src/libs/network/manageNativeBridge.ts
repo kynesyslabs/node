@@ -53,9 +53,9 @@ export async function manageNativeBridge(
  */
 function parseOperation(operation: bridge.NativeBridgeOperation): bridge.NativeBridgeOperationCompiled["content"] {
     let derivedContent: bridge.NativeBridgeOperationCompiled["content"]
-    if (operation.originChain === "EVM") {
+    if (operation.originChainType === "EVM") {
         derivedContent = parseEVMOperation(operation)
-    } else if (operation.originChain === "SOLANA") {
+    } else if (operation.originChainType === "SOLANA") {
         derivedContent = parseSOLANAOperation(operation)
     }
     return derivedContent
