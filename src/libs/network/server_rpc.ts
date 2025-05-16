@@ -65,10 +65,13 @@ function isRPCRequest(obj: any): obj is RPCRequest {
 // Validate the headers
 function validateHeaders(headers: Headers): [boolean, string] {
     // Check if we have a valid signature and identity header
-    log.info("[RPC Call] Validating headers...") // + JSON.stringify(headers, null, 2))    
+    log.info("[RPC Call] Validating headers...") // + JSON.stringify(headers, null, 2))
     if (!headers.get("signature")) {
         log.error("[RPC Call] Missing signature header")
-        log.info("[RPC Call] Headers: " + JSON.stringify(headers, null, 2), true)
+        log.info(
+            "[RPC Call] Headers: " + JSON.stringify(headers, null, 2),
+            true,
+        )
         //process.exit(0)
         return [false, "Missing signature header"]
     }
@@ -114,7 +117,10 @@ async function processPayload(
              * TODO & REVIEW The NativeBridgeOperation is sent to the handler to obtain a response
              * that includes the compiled operation, so that the client can generate a proper transaction
              */
-            return await manageNativeBridge(payload.params[0] as bridge.NativeBridgeOperation)
+            return await manageNativeBridge(
+                payload.params[0] as bridge.NativeBridgeOperation,
+                payload.params[1] as string,
+            )
         case "hello_peer": // As it is authenticated, we can use it to check if the peer is still alive and is in our peer list
             var helloPeerRequest = payload.params[0] as HelloPeerRequest
             return await manageHelloPeer(
@@ -182,10 +188,9 @@ async function processPayload(
 }
 /* End of processor method */
 
-
 /**
  *  HTTP server using Bun
- */ 
+ */
 
 export async function serverRpcBun() {
     const port = getSharedState.serverPort
@@ -196,7 +201,8 @@ export async function serverRpcBun() {
     server.use(json())
 
     // GET endpoints
-    server.get("/", () => new Response("{\"message\": \"Hello, World!\"}"))
+    // eslint-disable-next-line quotes
+    server.get("/", () => new Response('{"message": "Hello, World!"}'))
 
     server.get("/info", async () => {
         const info = await sharedState.getInstance().getInfo()
@@ -266,4 +272,3 @@ export async function serverRpcBun() {
     log.info("[RPC Call] Server is running on 0.0.0.0:" + port, true)
     return server.start()
 }
-

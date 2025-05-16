@@ -396,10 +396,7 @@ export default class ServerHandlers {
                 break
 
             case "nativeBridge":
-                payload = tx.content.data
-                var nativeBridgeResult = await handleNativeBridgeTx(
-                    payload[1] as NativeBridgeOperationCompiled,
-                )
+                var nativeBridgeResult = await handleNativeBridgeTx(tx)
                 if (nativeBridgeResult === null) {
                     result.success = false
                     result.response = false
