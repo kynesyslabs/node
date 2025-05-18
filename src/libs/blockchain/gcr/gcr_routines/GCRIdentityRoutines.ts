@@ -5,6 +5,8 @@ import { Repository } from "typeorm"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import ensureGCRForUser from "./ensureGCRForUser"
 import Hashing from "@/libs/crypto/hashing"
+import log from "@/utilities/logger"
+import { IncentiveManager } from "./IncentiveManager"
 
 export default class GCRIdentityRoutines {
     static async applyXmIdentityAdd(
@@ -45,8 +47,16 @@ export default class GCRIdentityRoutines {
         }
 
         accountGCR.identities.xm[chain][subchain].push(normalizedAddress)
+
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
+
+            // Award incentive points for wallet linking
+            await IncentiveManager.walletLinked(
+                accountGCR.pubkey,
+                normalizedAddress,
+                chain,
+            )
         }
 
         return { success: true, message: "Identity applied" }
@@ -67,7 +77,9 @@ export default class GCRIdentityRoutines {
             ? targetAddress.toLowerCase()
             : targetAddress
 
-        const accountGCR = await gcrMainRepository.findOneBy({ pubkey: editOperation.account })
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
 
         if (!accountGCR) {
             return { success: false, message: "Account not found" }
@@ -118,10 +130,10 @@ export default class GCRIdentityRoutines {
     ): Promise<GCRResult> {
         const { context, data } = editOperation.data as Web2GCRData
         const accountGCR = await ensureGCRForUser(editOperation.account)
+
         accountGCR.identities.web2 = accountGCR.identities.web2 || {}
         accountGCR.identities.web2[context] =
             accountGCR.identities.web2[context] || []
-
 
         const exists = accountGCR.identities.web2[context].some(
             (id: Web2GCRData["data"]) => id.username === data.username,
@@ -131,20 +143,42 @@ export default class GCRIdentityRoutines {
             return { success: false, message: "Identity already exists" }
         }
 
+        /**
+         * Verify the proof
+         */
         const proofOk = Hashing.sha256(data.proof) === data.proofHash
 
         if (!proofOk) {
-            return { success: false, message: "Sha256 proof mismatch: Expected " + data.proofHash + " but got " + Hashing.sha256(data.proof) }
+            return {
+                success: false,
+                message:
+                    "Sha256 proof mismatch: Expected " +
+                    data.proofHash +
+                    " but got " +
+                    Hashing.sha256(data.proof),
+            }
         }
 
         accountGCR.identities.web2[context].push(data)
 
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
+
+            // Award incentive points for social media linking
+            if (context === "twitter") {
+                await IncentiveManager.twitterLinked(editOperation.account)
+            } else if (context === "github") {
+                // Future implementation for GitHub
+                log.info(
+                    `GitHub linking for ${data.username}, no incentive handler yet`,
+                )
+            } else {
+                log.info(`Web2 identity linked: ${context}/${data.username}`)
+            }
         }
 
         return { success: true, message: "Web2 identity added" }
-    } 
+    }
 
     static async applyWeb2IdentityRemove(
         editOperation: any,
@@ -195,7 +229,7 @@ export default class GCRIdentityRoutines {
         const identityEdit = structuredClone(editOperation)
 
         let operation = identityEdit.operation
-        if (identityEdit.isRollback) {
+        if (identityEdit.isRollback && operation !== "query") {
             operation = operation === "add" ? "remove" : "add"
         }
 
@@ -206,6 +240,17 @@ export default class GCRIdentityRoutines {
             typeof identityEdit.account === "string"
                 ? identityEdit.account
                 : forgeToHex(identityEdit.account)
+
+        /**
+         * INFO: For query operations, we don't need to modify any data
+         * Just return success since queries are handled separately in handleIdentityRequest
+         */
+        if (operation === "query") {
+            return {
+                success: true,
+                message: "Query operation handled by identity request handler",
+            }
+        }
 
         switch (identityEdit.context + operation) {
             case "xmadd":

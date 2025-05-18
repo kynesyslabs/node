@@ -13,18 +13,15 @@ KyneSys Labs: https://www.kynesys.xyz/
 // REVIEW Pay attention to the return types (RPCResponse)
 
 import Chain from "src/libs/blockchain/chain"
-import { abstraction } from "@kynesyslabs/demosdk"
 import Mempool from "src/libs/blockchain/mempool_v2"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
 import Transaction from "src/libs/blockchain/transaction"
-// import { Transaction as TransactionType } from "@kynesyslabs/demosdk/types"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import handleL2PS from "./routines/transactions/handleL2PS"
 import { getSharedState } from "src/utilities/sharedState"
 import _ from "lodash"
-// NOTE Terminal kit for useful logging
-import terminalkit from "terminal-kit"
+import terminalKit from "terminal-kit"
 import {
     ExecutionResult,
     ValidityData,
@@ -51,7 +48,6 @@ import { SubnetPayload } from "@kynesyslabs/demosdk/l2ps"
 import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
-import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
 import { IdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { NativeBridgeOperation, NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
@@ -65,7 +61,7 @@ import {
 } from "@kynesyslabs/demosdk/types"
 */
 
-const term = terminalkit.terminal
+const term = terminalKit.terminal
 
 function isReferenceBlockAllowed(referenceBlock: number, lastBlock: number) {
     return (
@@ -363,6 +359,7 @@ export default class ServerHandlers {
                     result.extra = "Error in demosWork"
                 }
                 break
+
             case "native":
                 // INFO: Just update the response text
                 result.response = {
@@ -370,16 +367,34 @@ export default class ServerHandlers {
                 }
                 result.success = true
                 break
+
             case "identity":
                 try {
-                    const { success, message } = await handleIdentityRequest(
+                    const identityResult = await handleIdentityRequest(
                         tx.content.data[1] as IdentityPayload,
+                        tx.content.from as string,
                     )
-                    const status = success ? "applied" : "not applied"
+                    const status = identityResult.success
+                        ? "applied"
+                        : "not applied"
 
-                    result.success = success
-                    result.response = {
-                        message: message + `. Transaction ${status}.`,
+                    result.success = identityResult.success
+
+                    // If we have a nested response (like from points query), include it
+                    if (identityResult.response) {
+                        result.response = identityResult.response
+                        result.extra = {
+                            message:
+                                identityResult.message +
+                                `. Transaction ${status}.`,
+                        }
+                    } else {
+                        // Default case for normal identity operations
+                        result.response = {
+                            message:
+                                identityResult.message +
+                                `. Transaction ${status}.`,
+                        }
                     }
                 } catch (e) {
                     console.error(e)
@@ -392,7 +407,6 @@ export default class ServerHandlers {
                         error: e,
                     }
                 }
-
                 break
 
             case "nativeBridge":

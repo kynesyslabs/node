@@ -1,4 +1,6 @@
-// TODO Implement the identity manager
+import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
+import ensureGCRForUser from "./ensureGCRForUser"
+import log from "src/utilities/logger"
 import {
     InferFromWritePayload,
     InferFromSignatureTargetIdentityPayload,
@@ -15,10 +17,6 @@ import {
     BTC,
 } from "@kynesyslabs/demosdk/xm-localsdk"
 
-import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
-import ensureGCRForUser from "./ensureGCRForUser"
-import log from "src/utilities/logger"
-
 /*
  * Example of a payload for the gcr_routine method
  * payload = {
@@ -32,6 +30,7 @@ import log from "src/utilities/logger"
  * }
  */
 
+// SUPPORTED CHAINS
 const chains: { [key: string]: typeof DefaultChain } = {
     solana: SOLANA,
     evm: EVM,
