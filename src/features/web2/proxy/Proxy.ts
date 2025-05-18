@@ -80,70 +80,46 @@ export class Proxy {
             const req = http.request({
                 hostname: this._proxyHost,
                 port: this._proxyPort,
-                method: targetProtocol === "https:" ? "CONNECT" : targetMethod,
-                path: `${targetHostname}:${targetPort}`,
+                method: targetMethod,
+                path: "/",
                 headers,
                 timeout: 30000,
-                agent: false,
             })
+            const chunks: Buffer[] = []
+            let responseHeaders: http.IncomingHttpHeaders = {}
+            let statusCode = 500
+            let statusMessage = "Unknown"
 
-            req.on("connect", (res, socket) => {
-                if (res.statusCode !== 200) {
-                    socket.destroy()
-                    reject(
-                        new Error(
-                            `Tunnel connection failed: ${res.statusCode}`,
-                        ),
-                    )
-                    return
-                }
+            req.on("response", res => {
+                statusCode = res.statusCode || 500
+                statusMessage = res.statusMessage || "Unknown"
+                responseHeaders = res.headers
 
-                // For HTTPS, establish the tunnel
-                const options = {
-                    host: targetHostname,
-                    port: targetPort,
-                    method: targetMethod,
-                    path:
-                        new URL(targetUrl).pathname + new URL(targetUrl).search,
-                    headers,
-                    socket: socket,
-                    agent: false,
-                }
+                res.on("data", chunk => {
+                    chunks.push(Buffer.from(chunk))
+                })
 
-                const httpsReq = https.request(options, httpsRes => {
-                    let data = ""
-                    httpsRes.on("data", chunk => (data += chunk))
-                    httpsRes.on("end", () => {
-                        resolve({
-                            status: httpsRes.statusCode || 500,
-                            statusText: httpsRes.statusMessage || "Unknown",
-                            headers: httpsRes.headers,
-                            data: data,
-                        })
+                res.on("end", () => {
+                    const data = Buffer.concat(chunks).toString()
+                    resolve({
+                        status: statusCode,
+                        statusText: statusMessage,
+                        headers: responseHeaders,
+                        data: data,
                     })
                 })
-
-                httpsReq.on("error", err => {
-                    console.error("[Web2API] HTTPS request error:", err)
-                    socket.destroy()
-                    reject(err)
-                })
-
-                if (
-                    targetMethod !== EnumWeb2Methods.GET &&
-                    targetMethod !== EnumWeb2Methods.DELETE
-                ) {
-                    httpsReq.write(JSON.stringify(payload))
-                }
-
-                httpsReq.end()
             })
 
             req.on("error", error => {
-                console.error("[Web2API] Request error:", error)
-
                 reject(error)
             })
+
+            if (
+                targetMethod !== EnumWeb2Methods.GET &&
+                targetMethod !== EnumWeb2Methods.DELETE
+            ) {
+                req.write(JSON.stringify(payload))
+            }
 
             req.end()
         })
@@ -158,7 +134,6 @@ export class Proxy {
     stopProxy(): void {
         if (this._server) {
             this._server.close(() => {
-                console.log("[Web2API] Proxy server stopped")
                 this._isInitialized = false
                 this._server = null
             })
@@ -201,11 +176,7 @@ export class Proxy {
 
             // Create the proxy server
             const proxyServer = httpProxy.createProxyServer({
-                target: {
-                    protocol: targetProtocol,
-                    host: targetHostname,
-                    port: targetPort,
-                },
+                target: targetUrl,
                 changeOrigin: true,
                 secure: false, // TODO: Enable SSL certificate verification before production
                 ssl:
@@ -218,7 +189,6 @@ export class Proxy {
             proxyServer.on("error", (err, req, res) => {
                 console.error("[Web2API] Proxy server error:", err)
                 if (res instanceof http.ServerResponse) {
-                    console.log("[Web2API] Writing response")
                     res.writeHead(500, {
                         "Content-Type": "text/plain",
                     })
@@ -238,78 +208,11 @@ export class Proxy {
                     res.end("Unauthorized")
                     return
                 }
-                proxyServer.web(req, res)
-            })
 
-            // Handle HTTPS CONNECT
-            this._server.on("connect", (req, clientSocket, head) => {
-                if (!this.isAuthorizedRequest(req)) {
-                    clientSocket.write(
-                        "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nUnauthorized request",
-                    )
-                    clientSocket.destroy()
-                    return
-                }
-
-                const [targetHost, targetPort] = req.url.split(":")
-                const targetSocket = net.connect(
-                    parseInt(targetPort) || 443,
-                    targetHost,
-                    () => {
-                        try {
-                            if (
-                                !clientSocket.destroyed &&
-                                clientSocket.writable
-                            ) {
-                                clientSocket.write(
-                                    "HTTP/1.1 200 Connection Established\r\n" +
-                                        "Proxy-agent: DAHR-Proxy\r\n" +
-                                        "\r\n",
-                                )
-
-                                if (
-                                    !targetSocket.destroyed &&
-                                    targetSocket.writable
-                                ) {
-                                    targetSocket.write(head)
-
-                                    // Only set up pipes if both sockets are still valid
-                                    if (
-                                        !clientSocket.destroyed &&
-                                        !targetSocket.destroyed
-                                    ) {
-                                        targetSocket.pipe(clientSocket)
-                                        clientSocket.pipe(targetSocket)
-                                    }
-                                }
-                            }
-                        } catch (error) {
-                            console.error(
-                                "[Web2API] Error during connection setup:",
-                                error,
-                            )
-                            this.safelyCloseSocket(clientSocket)
-                            this.safelyCloseSocket(targetSocket)
-                        }
-                    },
-                )
-
-                targetSocket.on("error", err => {
-                    console.error("[Web2API] Target connection error:", err)
-                    this.safelyCloseSocket(clientSocket)
-                })
-
-                clientSocket.on("error", err => {
-                    console.error("[Web2API] Client connection error:", err)
-                    this.safelyCloseSocket(targetSocket)
-                })
-
-                targetSocket.on("end", () => {
-                    this.safelyCloseSocket(clientSocket)
-                })
-
-                clientSocket.on("end", () => {
-                    this.safelyCloseSocket(targetSocket)
+                proxyServer.web(req, res, {
+                    target: targetUrl,
+                    changeOrigin: true,
+                    secure: false,
                 })
             })
 
@@ -318,9 +221,6 @@ export class Proxy {
                 const address = this._server?.address()
                 if (typeof address === "object" && address !== null) {
                     this._proxyPort = address.port
-                    console.log(
-                        `[Web2API] Proxy server running at http://127.0.0.1:${this._proxyPort}/`,
-                    )
                     resolve()
                 } else {
                     reject(new Error("[Web2API] Failed to get server address"))
