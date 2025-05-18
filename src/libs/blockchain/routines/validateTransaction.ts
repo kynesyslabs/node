@@ -50,8 +50,6 @@ export async function confirmTransaction(
             transaction: tx,
         },
         signature: null,
-        // rpc_public_key: getSharedState.identity.ed25519
-        //     .publicKey as pki.ed25519.BinaryBuffer,
         rpc_public_key: {
             type: getSharedState.signingAlgorithm,
             data: uint8ArrayToHex(

@@ -123,8 +123,11 @@ export default class Transaction implements ITransaction {
         if (!structured.valid) {
             return null // TODO Improve return type
         }
-        const confirmed = this.validateSignature(tx) && this.isCoherent(tx)
-        if (confirmed) {
+
+        const isSignatureOk = await this.validateSignature(tx)
+        const isCoherent = this.isCoherent(tx)
+
+        if (isSignatureOk && isCoherent) {
             const confirmation = new Confirmation()
             confirmation.data.validator = getSharedState.keypair
                 .publicKey as Uint8Array
@@ -148,14 +151,14 @@ export default class Transaction implements ITransaction {
         console.log("[validateSignature] Checking the signature of the tx")
         console.log("Hash: " + tx.hash)
         console.log("Signature: ")
-        console.log(forgeToHex(tx.signature.data))
+        console.log(tx.signature)
         console.log("From: ")
-        console.log(forgeToHex(tx.content.from))
+        console.log(tx.content.from)
 
         return await ucrypto.verify({
             algorithm: tx.signature.type as SigningAlgorithm,
             message: new TextEncoder().encode(tx.hash),
-            publicKey: tx.content.from as any,
+            publicKey: hexToUint8Array(tx.content.from as string),
             signature: hexToUint8Array(tx.signature.data),
         })
     }

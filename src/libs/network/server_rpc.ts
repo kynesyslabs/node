@@ -150,7 +150,10 @@ async function processPayload(
                 extra: null,
             }
         case "execute":
-            return await manageExecution(payload.params[0] as BundleContent, sender)
+            return await manageExecution(
+                payload.params[0] as BundleContent,
+                sender,
+            )
         case "hello_peer": // As it is authenticated, we can use it to check if the peer is still alive and is in our peer list
             var helloPeerRequest = payload.params[0] as HelloPeerRequest
             return await manageHelloPeer(
@@ -264,6 +267,8 @@ export async function serverRpcBun() {
 
     // Main RPC endpoint
     server.post("/", async req => {
+        console.log("req", req)
+
         try {
             const payload = await req.json()
             if (!isRPCRequest(payload)) {
