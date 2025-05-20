@@ -10,22 +10,9 @@ export async function verifyCloudflareTurnstileToken(
     token: string,
 ): Promise<boolean> {
     try {
-        const secretKey = process.env.TURNSTILE_SECRET_KEY
-
-        if (!secretKey) return false
-
-        // Verify the token with Cloudflare's API
         const response = await axios.post(
-            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-            new URLSearchParams({
-                secret: secretKey,
-                response: token,
-            }),
-            {
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-            },
+            "http://localhost:4000/api/verify-turnstile",
+            { token },
         )
 
         // Return true if success
