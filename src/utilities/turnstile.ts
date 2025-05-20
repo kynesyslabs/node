@@ -11,7 +11,7 @@ export async function verifyCloudflareTurnstileToken(
 ): Promise<boolean> {
     try {
         const response = await axios.post(
-            "http://localhost:4000/api/verify-turnstile",
+            "http://verifier:4000/api/verify-turnstile",
             { token },
         )
 
