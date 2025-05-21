@@ -18,6 +18,9 @@ import {
 import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
 import ensureGCRForUser from "./ensureGCRForUser"
 import log from "src/utilities/logger"
+// TODO: refactor import to use high level abstraction module
+import { PqcIdentityAssignPayload } from "node_modules/@kynesyslabs/demosdk/build/types/abstraction"
+import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 
 /*
  * Example of a payload for the gcr_routine method
@@ -104,6 +107,44 @@ export default class IdentityManager {
                 success: false,
                 message: error.toString(),
             }
+        }
+    }
+
+    /**
+     * Verify the payload signature for a pqc identity assign payload
+     *
+     * @param payloads - An array of payloads to verify
+     * @param message - The message to verify. Should be the same for all payloads (the ed25519 public key of the sender)
+     *
+     * @returns {success: boolean, message: string}
+     */
+    static async verifyPqcPayload(
+        payloads: PqcIdentityAssignPayload["payload"],
+        message: string,
+    ): Promise<{ success: boolean; message: string }> {
+        for (const payload of payloads) {
+            const verified = await ucrypto.verify({
+                algorithm: payload.algorithm,
+                signature: hexToUint8Array(payload.signature),
+                publicKey: hexToUint8Array(payload.address),
+                message: new TextEncoder().encode(message),
+            })
+
+            if (!verified) {
+                return {
+                    success: false,
+                    message: `${payload.algorithm} payload could not be verified`,
+                }
+            }
+        }
+
+        return {
+            success: true,
+            message: `Signature proof${
+                payloads.length > 1 ? "s" : ""
+            } verified. ${JSON.stringify(
+                payloads.map(p => p.algorithm),
+            )} identities assigned`,
         }
     }
 

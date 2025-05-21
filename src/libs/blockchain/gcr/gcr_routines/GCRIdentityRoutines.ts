@@ -7,6 +7,7 @@ import ensureGCRForUser from "./ensureGCRForUser"
 import Hashing from "@/libs/crypto/hashing"
 
 export default class GCRIdentityRoutines {
+    // SECTION XM Identity Routines
     static async applyXmIdentityAdd(
         editOperation: any,
         gcrMainRepository: Repository<GCRMain>,
@@ -67,7 +68,9 @@ export default class GCRIdentityRoutines {
             ? targetAddress.toLowerCase()
             : targetAddress
 
-        const accountGCR = await gcrMainRepository.findOneBy({ pubkey: editOperation.account })
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
 
         if (!accountGCR) {
             return { success: false, message: "Account not found" }
@@ -111,6 +114,7 @@ export default class GCRIdentityRoutines {
         return { success: true, message: "Identity removed" }
     }
 
+    // SECTION Web2 Identity Routines
     static async applyWeb2IdentityAdd(
         editOperation: any,
         gcrMainRepository: Repository<GCRMain>,
@@ -121,7 +125,6 @@ export default class GCRIdentityRoutines {
         accountGCR.identities.web2 = accountGCR.identities.web2 || {}
         accountGCR.identities.web2[context] =
             accountGCR.identities.web2[context] || []
-
 
         const exists = accountGCR.identities.web2[context].some(
             (id: Web2GCRData["data"]) => id.username === data.username,
@@ -134,7 +137,14 @@ export default class GCRIdentityRoutines {
         const proofOk = Hashing.sha256(data.proof) === data.proofHash
 
         if (!proofOk) {
-            return { success: false, message: "Sha256 proof mismatch: Expected " + data.proofHash + " but got " + Hashing.sha256(data.proof) }
+            return {
+                success: false,
+                message:
+                    "Sha256 proof mismatch: Expected " +
+                    data.proofHash +
+                    " but got " +
+                    Hashing.sha256(data.proof),
+            }
         }
 
         accountGCR.identities.web2[context].push(data)
@@ -144,7 +154,7 @@ export default class GCRIdentityRoutines {
         }
 
         return { success: true, message: "Web2 identity added" }
-    } 
+    }
 
     static async applyWeb2IdentityRemove(
         editOperation: any,
@@ -175,6 +185,29 @@ export default class GCRIdentityRoutines {
         }
 
         return { success: true, message: "Web2 identity removed" }
+    }
+
+    // SECTION PQC Identity Routines
+    static async applyPqcIdentityAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        return {
+            success: true,
+            message: "PQC identity added",
+        }
+    }
+
+    static async applyPqcIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        return {
+            success: true,
+            message: "PQC identity removed",
+        }
     }
 
     static async apply(
@@ -231,6 +264,20 @@ export default class GCRIdentityRoutines {
                 break
             case "web2remove":
                 result = await this.applyWeb2IdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "pqcadd":
+                result = await this.applyPqcIdentityAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "pqcremove":
+                result = await this.applyPqcIdentityRemove(
                     identityEdit,
                     gcrMainRepository,
                     simulate,
