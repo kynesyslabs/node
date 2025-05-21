@@ -193,10 +193,40 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        return {
-            success: true,
-            message: "PQC identity added",
+        const identities = editOperation.data
+
+        if (!Array.isArray(identities)) {
+            return { success: false, message: "Invalid edit operation data: expected array" }
         }
+
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+        accountGCR.identities.pqc = accountGCR.identities.pqc || {}
+
+        for (const identity of identities) {
+            const { algorithm, address } = identity
+
+            if (!algorithm || !address) {
+                return { success: false, message: "Invalid identity data: missing algorithm or address" }
+            }
+
+            accountGCR.identities.pqc[algorithm] = accountGCR.identities.pqc[algorithm] || []
+
+            const keyExists = accountGCR.identities.pqc[algorithm].some(
+                (key: string) => key === address,
+            )
+
+            if (keyExists) {
+                return { success: false, message: `Identity already exists for algorithm ${algorithm}` }
+            }
+
+            accountGCR.identities.pqc[algorithm].push(address)
+        }
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+        }
+
+        return { success: true, message: "PQC identities added" }
     }
 
     static async applyPqcIdentityRemove(
@@ -204,10 +234,59 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        return {
-            success: true,
-            message: "PQC identity removed",
+        const identities = editOperation.data
+
+        if (!Array.isArray(identities)) {
+            return { success: false, message: "Invalid edit operation data: expected array" }
         }
+
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
+
+        if (!accountGCR) {
+            return { success: false, message: "Account not found" }
+        }
+
+        if (!accountGCR.identities || !accountGCR.identities.pqc) {
+            return {
+                success: false,
+                message: "No PQC identities found",
+            }
+        }
+
+        for (const identity of identities) {
+            const { algorithm, address } = identity
+
+            if (!algorithm || !address) {
+                return { success: false, message: "Invalid identity data: missing algorithm or address" }
+            }
+
+            if (!accountGCR.identities.pqc[algorithm] || !Array.isArray(accountGCR.identities.pqc[algorithm])) {
+                return {
+                    success: false,
+                    message: `No PQC identities found for algorithm ${algorithm}`,
+                }
+            }
+
+            const keyExists = accountGCR.identities.pqc[algorithm].some(
+                (key: string) => key === address,
+            )
+
+            if (!keyExists) {
+                return { success: false, message: `Identity not found for algorithm ${algorithm}` }
+            }
+
+            accountGCR.identities.pqc[algorithm] = accountGCR.identities.pqc[algorithm].filter(
+                (key: string) => key !== address,
+            )
+        }
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+        }
+
+        return { success: true, message: "PQC identities removed" }
     }
 
     static async apply(

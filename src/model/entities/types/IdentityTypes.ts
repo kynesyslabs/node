@@ -14,6 +14,10 @@ export type StoredIdentities = {
     }
     web2: {
         [key: string]: Web2GCRData["data"][]
+    },
+    pqc: {
+        [key: string]: string[]
+        // eg. falcon: ["pubkey1", "pubkey2"]
     }
 }
 
