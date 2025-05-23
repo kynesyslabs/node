@@ -3,7 +3,6 @@ import _ from "lodash"
 import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
 import { emptyResponse } from "./server_rpc"
 import { IncentiveManager } from "../blockchain/gcr/gcr_routines/IncentiveManager"
-import { SecurityManager } from "../blockchain/gcr/gcr_routines/SecurityManager"
 
 interface GCRRoutinePayload {
     method: string
@@ -48,10 +47,6 @@ export default async function manageGCRRoutines(
 
         case "getPoints":
             response.response = await IncentiveManager.getPoints(sender)
-            break
-
-        case "verifyTurnstile":
-            response.response = await SecurityManager.verifyTurnstile(params[0])
             break
 
         // SECTION Web2 Identity Management
