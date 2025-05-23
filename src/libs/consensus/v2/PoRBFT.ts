@@ -24,6 +24,7 @@ import {
 } from "src/exceptions"
 import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
 import { GCREdit } from "@kynesyslabs/demosdk/types"
+import executeBridgeOperations from "./routines/executeBridgeOperations"
 
 /* INFO
 # Semaphore system
@@ -114,6 +115,14 @@ export async function consensusRoutine(): Promise<void> {
         // await mergePeerlistAndWait(shard)
 
         // INFO: CONSENSUS ACTION 4: Apply the GCR operations to the state before forging the block
+
+        // SUB ACTION 1: Execute the native bridge operations
+        log.info("[consensusRoutine] Executing the native bridge operations")
+        const [successfulBridgeOperations, failedBridgeOperations] = await executeBridgeOperations()
+        successfulTxs = successfulTxs.concat(successfulBridgeOperations)
+        failedTxs = failedTxs.concat(failedBridgeOperations)
+
+        // SUB ACTION 2: Apply the GCR operations to the state before forging the block
         /**
          * Here we apply the GCR operations to the state before forging the block
          * so that the GCR hash is included in the block.
