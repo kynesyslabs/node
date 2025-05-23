@@ -42,7 +42,7 @@ export async function manageNativeBridge(
     // TODO Generate the validUntil value based on current block + 3
     // Incorporate the compiled operation into a RPCResponse
     response.response = compiledOperation
-    // TODO Return the response
+    // Return the response
     return response
 }
 
