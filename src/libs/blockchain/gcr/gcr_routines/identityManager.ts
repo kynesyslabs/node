@@ -16,6 +16,7 @@ import {
     XRPL,
     BTC,
 } from "@kynesyslabs/demosdk/xm-localsdk"
+import Web3 from "web3"
 
 /*
  * Example of a payload for the gcr_routine method
@@ -67,6 +68,19 @@ export default class IdentityManager {
 
         let messageVerified = false
         try {
+            const checksumAddress =
+                chainId === "evm"
+                    ? Web3.utils.toChecksumAddress(targetAddress)
+                    : undefined
+
+            if (checksumAddress && checksumAddress !== targetAddress) {
+                return {
+                    success: false,
+                    message:
+                        "The provided address format is invalid. Please check and try again.",
+                }
+            }
+
             if (
                 chainId === "xrpl" ||
                 chainId === "ton" ||
