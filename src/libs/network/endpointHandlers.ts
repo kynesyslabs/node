@@ -54,8 +54,9 @@ import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
 import { IdentityPayload } from "@kynesyslabs/demosdk/abstraction"
-import { NativeBridgeOperation, NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
+import { bridge } from "@kynesyslabs/demosdk"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
+
 /* // ! Note: this will be removed once demosWork is in place
 import {
     NativePayload,
