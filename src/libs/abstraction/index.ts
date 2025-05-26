@@ -3,6 +3,7 @@ import { GithubProofParser } from "./web2/github"
 import { TwitterProofParser } from "./web2/twitter"
 import { type Web2ProofParser } from "./web2/parsers"
 import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
+import { forgeToHex } from "../crypto/forgeUtils"
 
 /**
  * Fetches the proof data using the appropriate parser and verifies the signature
@@ -10,7 +11,10 @@ import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
  * @param payload - The proof payload
  * @returns true if the proof is valid, false otherwise
  */
-export async function verifyWeb2Proof(payload: Web2CoreTargetIdentityPayload) {
+export async function verifyWeb2Proof(
+    payload: Web2CoreTargetIdentityPayload,
+    sender: string,
+) {
     let parser: typeof TwitterProofParser | typeof GithubProofParser
 
     switch (payload.context) {
@@ -33,6 +37,14 @@ export async function verifyWeb2Proof(payload: Web2CoreTargetIdentityPayload) {
         const { message, publicKey, signature } = await instance.readData(
             payload.proof,
         )
+
+        sender = forgeToHex(sender)
+        if (sender !== publicKey) {
+            return {
+                success: false,
+                message: "Unable to verify proof: public key does not match sender",
+            }
+        }
         const verified = Cryptography.verify(message, signature, publicKey)
 
         return {

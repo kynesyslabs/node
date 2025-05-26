@@ -33,6 +33,7 @@ export default async function handleIdentityRequest(
         case "web2_identity_assign":
             return await verifyWeb2Proof(
                 payload.payload as Web2CoreTargetIdentityPayload,
+                sender,
             )
         case "xm_identity_remove":
         case "web2_identity_remove":
