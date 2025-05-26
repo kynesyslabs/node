@@ -43,6 +43,7 @@ export async function manageExecution(
             // eslint-disable-next-line no-var
             var validityData = await ServerHandlers.handleValidateTransaction(
                 content.data as Transaction,
+                sender,
             )
             returnValue.result = 200
             returnValue.response = validityData

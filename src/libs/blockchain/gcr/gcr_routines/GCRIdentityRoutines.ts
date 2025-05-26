@@ -196,30 +196,42 @@ export default class GCRIdentityRoutines {
         const identities = editOperation.data
 
         if (!Array.isArray(identities)) {
-            return { success: false, message: "Invalid edit operation data: expected array" }
+            return {
+                success: false,
+                message: "Invalid edit operation data: expected array",
+            }
         }
 
         const accountGCR = await ensureGCRForUser(editOperation.account)
         accountGCR.identities.pqc = accountGCR.identities.pqc || {}
 
         for (const identity of identities) {
-            const { algorithm, address } = identity
+            const { algorithm, address, signature } = identity
 
-            if (!algorithm || !address) {
-                return { success: false, message: "Invalid identity data: missing algorithm or address" }
+            if (!algorithm || !address || !signature) {
+                return {
+                    success: false,
+                    message:
+                        "Invalid identity data: missing algorithm, address or signature",
+                }
             }
 
-            accountGCR.identities.pqc[algorithm] = accountGCR.identities.pqc[algorithm] || []
+            accountGCR.identities.pqc[algorithm] =
+                accountGCR.identities.pqc[algorithm] || []
 
             const keyExists = accountGCR.identities.pqc[algorithm].some(
-                (key: string) => key === address,
+                (key: { address: string; signature: string }) =>
+                    key.address === address,
             )
 
             if (keyExists) {
-                return { success: false, message: `Identity already exists for algorithm ${algorithm}` }
+                return {
+                    success: false,
+                    message: `Identity already exists for algorithm ${algorithm}`,
+                }
             }
 
-            accountGCR.identities.pqc[algorithm].push(address)
+            accountGCR.identities.pqc[algorithm].push({ address, signature })
         }
 
         if (!simulate) {
@@ -237,7 +249,10 @@ export default class GCRIdentityRoutines {
         const identities = editOperation.data
 
         if (!Array.isArray(identities)) {
-            return { success: false, message: "Invalid edit operation data: expected array" }
+            return {
+                success: false,
+                message: "Invalid edit operation data: expected array",
+            }
         }
 
         const accountGCR = await gcrMainRepository.findOneBy({
@@ -259,10 +274,17 @@ export default class GCRIdentityRoutines {
             const { algorithm, address } = identity
 
             if (!algorithm || !address) {
-                return { success: false, message: "Invalid identity data: missing algorithm or address" }
+                return {
+                    success: false,
+                    message:
+                        "Invalid identity data: missing algorithm or address",
+                }
             }
 
-            if (!accountGCR.identities.pqc[algorithm] || !Array.isArray(accountGCR.identities.pqc[algorithm])) {
+            if (
+                !accountGCR.identities.pqc[algorithm] ||
+                !Array.isArray(accountGCR.identities.pqc[algorithm])
+            ) {
                 return {
                     success: false,
                     message: `No PQC identities found for algorithm ${algorithm}`,
@@ -270,15 +292,22 @@ export default class GCRIdentityRoutines {
             }
 
             const keyExists = accountGCR.identities.pqc[algorithm].some(
-                (key: string) => key === address,
+                (key: { address: string; signature: string }) =>
+                    key.address === address,
             )
 
             if (!keyExists) {
-                return { success: false, message: `Identity not found for algorithm ${algorithm}` }
+                return {
+                    success: false,
+                    message: `Identity not found for algorithm ${algorithm}`,
+                }
             }
 
-            accountGCR.identities.pqc[algorithm] = accountGCR.identities.pqc[algorithm].filter(
-                (key: string) => key !== address,
+            accountGCR.identities.pqc[algorithm] = accountGCR.identities.pqc[
+                algorithm
+            ].filter(
+                (key: { address: string; signature: string }) =>
+                    key.address !== address,
             )
         }
 

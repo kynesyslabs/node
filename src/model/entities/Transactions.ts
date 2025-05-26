@@ -11,6 +11,9 @@ export class Transactions {
     @Column("varchar", { name: "signature" })
     signature: string
 
+    @Column("varchar", { name: "ed25519_signature", nullable: true })
+    ed25519_signature: string
+
     @Column("varchar", { name: "status" })
     status: string
 
@@ -25,6 +28,9 @@ export class Transactions {
 
     @Column("varchar", { name: "from" })
     from: string
+
+    @Column("varchar", { name: "ed25519_address" })
+    ed25519_address: string
 
     @Column("varchar", { name: "to" })
     to: string

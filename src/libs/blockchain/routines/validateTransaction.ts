@@ -29,6 +29,7 @@ const term = terminalkit.terminal
 // REVIEW is it overkill to write an interface for the return value?
 export async function confirmTransaction(
     tx: Transaction, // Must contain a tx property being a Transaction object
+    sender: string,
 ): Promise<ValidityData> {
     term.yellow("\n[Native Tx Validation] Validating transaction...\n")
     // Getting the current block number
@@ -86,19 +87,25 @@ export async function confirmTransaction(
     */
     // Verify tx validity
 
-    const verified = await Transaction.confirmTx(tx) // REVIEW Are the buffers ok?
+    const {
+        confirmation,
+        message,
+        success: verified,
+    } = await Transaction.confirmTx(tx, sender) // REVIEW Are the buffers ok?
+
     if (!verified) {
         validityData.data.message =
-            "[Native Tx Validation] [SIGNATURE ERROR] Transaction signature not verified\n"
+            "[Tx Validation] [SIGNATURE ERROR] " + message + "\n"
         validityData.data.valid = false
         validityData = await signValidityData(validityData)
         return validityData
     }
+
     console.log(
-        "[Native Tx Validation] Transaction validity verified, compiling ValidityData\n",
+        "[Tx Validation] Transaction validity verified, compiling ValidityData\n",
     )
     validityData.data.message =
-        "[Native Tx Validation] Transaction signature verified\n"
+        "[Tx Validation] Transaction signature verified\n"
     validityData.data.valid = true
     validityData = await signValidityData(validityData)
     return validityData

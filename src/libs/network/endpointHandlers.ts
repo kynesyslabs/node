@@ -80,6 +80,7 @@ export default class ServerHandlers {
     // ANCHOR Validate transaction
     static async handleValidateTransaction(
         tx: Transaction,
+        sender: string,
     ): Promise<ValidityData> {
         term.yellow("[handleTransactions] Handling a DEMOS tx...\n")
         const fname = "[handleTransactions] "
@@ -94,7 +95,7 @@ export default class ServerHandlers {
              * The validation data can be used by the client to effectively execute the tx
              */
             //console.log(fname + "Validating transaction...")
-            validationData = await confirmTransaction(tx)
+            validationData = await confirmTransaction(tx, sender)
 
             // NOTE Gas operation is created at this point (and balance is checked)
             // NOTE Nonce assignment is done in the GCR too

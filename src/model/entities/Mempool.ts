@@ -1,7 +1,5 @@
 import Block from "@/libs/blockchain/block"
-import {
-    Transaction,
-} from "@kynesyslabs/demosdk/types"
+import { Transaction } from "@kynesyslabs/demosdk/types"
 import type { ISignature } from "@kynesyslabs/demosdk/types"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import {
@@ -48,6 +46,9 @@ export class MempoolTx implements Transaction {
 
     @Column("json", { name: "signature" })
     signature: ISignature
+
+    @Column("varchar", { name: "ed25519_signature", nullable: true })
+    ed25519_signature: string
 
     @Column("text", { name: "status" })
     status: string

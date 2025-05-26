@@ -180,6 +180,10 @@ export default class IdentityManager {
         return data[context] || []
     }
 
+    static async getPQCIdentity(address: string) {
+        return await this.getIdentities(address, "pqc")
+    }
+
     /**
      * Get the identities related to a demos address
      * @param address - The address to get the identities of
