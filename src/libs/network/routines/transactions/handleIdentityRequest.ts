@@ -5,13 +5,10 @@ import {
 } from "@kynesyslabs/demosdk/abstraction"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import { verifyWeb2Proof } from "@/libs/abstraction"
-import { RPCResponse } from "@kynesyslabs/demosdk/types"
 
-// Define response types for better type checking
 interface IdentityResponse {
     success: boolean
     message: string
-    response?: RPCResponse
 }
 
 /**

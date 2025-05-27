@@ -50,7 +50,7 @@ import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyR
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
 import { IdentityPayload } from "@kynesyslabs/demosdk/abstraction"
-import { NativeBridgeOperation, NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
+import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
 /* // ! Note: this will be removed once demosWork is in place
 import {
@@ -379,22 +379,9 @@ export default class ServerHandlers {
                         : "not applied"
 
                     result.success = identityResult.success
-
-                    // If we have a nested response (like from points query), include it
-                    if (identityResult.response) {
-                        result.response = identityResult.response
-                        result.extra = {
-                            message:
-                                identityResult.message +
-                                `. Transaction ${status}.`,
-                        }
-                    } else {
-                        // Default case for normal identity operations
-                        result.response = {
-                            message:
-                                identityResult.message +
-                                `. Transaction ${status}.`,
-                        }
+                    result.extra = {
+                        message:
+                            identityResult.message + `. Transaction ${status}.`,
                     }
                 } catch (e) {
                     console.error(e)
@@ -423,7 +410,6 @@ export default class ServerHandlers {
                 }
                 result.response = nativeBridgeResult
                 break
-
         }
 
         // Only if the transaction is valid we add it to the mempool
