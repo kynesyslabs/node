@@ -136,7 +136,7 @@ export default class GCRIdentityRoutines {
             accountGCR.identities.web2[context] || []
 
         const exists = accountGCR.identities.web2[context].some(
-            (id: Web2GCRData["data"]) => id.username === data.username,
+            (id: Web2GCRData["data"]) => id.userId === data.userId,
         )
 
         if (exists) {
