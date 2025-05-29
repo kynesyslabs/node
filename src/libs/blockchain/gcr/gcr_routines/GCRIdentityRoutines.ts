@@ -5,6 +5,9 @@ import { Repository } from "typeorm"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import ensureGCRForUser from "./ensureGCRForUser"
 import Hashing from "@/libs/crypto/hashing"
+import { SavedXmIdentity } from "@/model/entities/types/IdentityTypes"
+
+import log from "@/utilities/logger"
 
 export default class GCRIdentityRoutines {
     // SECTION XM Identity Routines
@@ -35,17 +38,25 @@ export default class GCRIdentityRoutines {
             accountGCR.identities.xm[chain][subchain] || []
 
         const addressExists = accountGCR.identities.xm[chain][subchain].some(
-            (addr: string) =>
+            (id: SavedXmIdentity) =>
                 isEVM
-                    ? addr.toLowerCase() === normalizedAddress
-                    : addr === normalizedAddress,
+                    ? id.address.toLowerCase() === normalizedAddress
+                    : id.address === normalizedAddress,
         )
 
         if (addressExists) {
             return { success: false, message: "Identity already exists" }
         }
 
-        accountGCR.identities.xm[chain][subchain].push(normalizedAddress)
+        const data = {
+            address: normalizedAddress,
+            signature: editOperation.data.signature,
+            publicKey: editOperation.data.publicKey || "",
+            timestamp: editOperation.data.timestamp,
+        }
+
+        accountGCR.identities.xm[chain][subchain].push(data)
+
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
         }
@@ -89,10 +100,10 @@ export default class GCRIdentityRoutines {
         }
 
         const addressExists = accountGCR.identities.xm[chain][subchain].some(
-            (addr: string) =>
+            (addr: SavedXmIdentity) =>
                 isEVM
-                    ? addr.toLowerCase() === normalizedAddress
-                    : addr === normalizedAddress,
+                    ? addr.address.toLowerCase() === normalizedAddress
+                    : addr.address === normalizedAddress,
         )
 
         if (!addressExists) {
@@ -101,10 +112,10 @@ export default class GCRIdentityRoutines {
 
         accountGCR.identities.xm[chain][subchain] = accountGCR.identities.xm[
             chain
-        ][subchain].filter((id: string) =>
+        ][subchain].filter((id: SavedXmIdentity) =>
             isEVM
-                ? id.toLowerCase() !== normalizedAddress
-                : id !== normalizedAddress,
+                ? id.address.toLowerCase() !== normalizedAddress
+                : id.address !== normalizedAddress,
         )
 
         if (!simulate) {

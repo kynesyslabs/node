@@ -3,9 +3,10 @@ import {
     InferFromSignaturePayload,
     Web2CoreTargetIdentityPayload,
 } from "@kynesyslabs/demosdk/abstraction"
-import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import { verifyWeb2Proof } from "@/libs/abstraction"
-import { PqcIdentityAssignPayload } from "node_modules/@kynesyslabs/demosdk/build/types/abstraction"
+import { Transaction } from "@kynesyslabs/demosdk/types"
+import { PqcIdentityAssignPayload } from "@kynesyslabs/demosdk/abstraction"
+import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 
 /**
  * Verifies the signature in the identity payload using the appropriate handler
@@ -14,20 +15,29 @@ import { PqcIdentityAssignPayload } from "node_modules/@kynesyslabs/demosdk/buil
  * @returns true if the identity request is valid, false otherwise
  */
 export default async function handleIdentityRequest(
-    payload: IdentityPayload,
+    tx: Transaction,
     sender: string,
 ) {
+    const payload = tx.content.data[1] as IdentityPayload
+    const senderEd25519 = tx.content.ed25519_address
+
     switch (payload.method) {
         case "xm_identity_assign":
+            // NOTE: Sender here is the ed25519 address coming from the transaction body
+            // because the xm identity tx can be signed with both ed25519 and pqc.
+            // The sender address here will be the message to verify using the signature in the payload.
             return await IdentityManager.verifyPayload(
                 payload.payload as InferFromSignaturePayload,
+                senderEd25519,
             )
         case "pqc_identity_assign":
+            // NOTE: Sender here should be the ed25519 address coming from the request headers
             return await IdentityManager.verifyPqcPayload(
                 payload.payload as PqcIdentityAssignPayload["payload"],
                 sender,
             )
         case "web2_identity_assign":
+            // NOTE: Sender here should be the ed25519 address coming from the request headers
             return await verifyWeb2Proof(
                 payload.payload as Web2CoreTargetIdentityPayload,
                 sender,

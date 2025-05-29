@@ -58,15 +58,25 @@ export default class IdentityManager {
         return false
     }
 
-    // Verify the payload signature
+    /**
+     * Verify the xm identity payload signature
+     *
+     * @param payload - The payload containing the signature to verify
+     * @param senderEd25519 - The ed25519 address of the sender (signed message)
+     *
+     * @returns {success: boolean, message: string}
+     */
     static async verifyPayload(
         payload: InferFromSignaturePayload,
+        senderEd25519: string,
     ): Promise<{ success: boolean; message: string }> {
+        log.debug("Verifying payload: " + JSON.stringify(payload, null, 2))
         const chainId = payload.target_identity.chain
         // @ts-expect-error - This is a workaround to avoid type errors
         const sdk = await chains[chainId].create(null)
 
-        const { signedData, signature, publicKey, targetAddress } =
+        const signedData = senderEd25519
+        const { signature, publicKey, targetAddress } =
             payload.target_identity as unknown as InferFromSignatureTargetIdentityPayload
 
         let messageVerified = false

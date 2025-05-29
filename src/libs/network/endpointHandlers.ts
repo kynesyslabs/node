@@ -345,7 +345,7 @@ export default class ServerHandlers {
             case "identity":
                 try {
                     const { success, message } = await handleIdentityRequest(
-                        tx.content.data[1] as IdentityPayload,
+                        tx,
                         sender,
                     )
                     const status = success ? "applied" : "not applied"

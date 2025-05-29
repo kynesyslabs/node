@@ -38,15 +38,27 @@ export async function verifyWeb2Proof(
         const { message, type, signature } = await instance.readData(
             payload.proof,
         )
-        const verified = await ucrypto.verify({
-            algorithm: type,
-            message: new TextEncoder().encode(message),
-            publicKey: hexToUint8Array(sender),
-            signature: hexToUint8Array(signature),
-        })
-        return {
-            success: verified,
-            message: `Verified ${payload.context} proof`,
+        try {
+            const verified = await ucrypto.verify({
+                algorithm: type,
+                message: new TextEncoder().encode(message),
+                publicKey: hexToUint8Array(sender),
+                signature: hexToUint8Array(signature),
+            })
+
+            return {
+                success: verified,
+                message: verified
+                    ? `Verified ${payload.context} proof`
+                    : `Failed to verify ${payload.context} proof`,
+            }
+        } catch (error: any) {
+            return {
+                success: false,
+                message: `Failed to verify ${
+                    payload.context
+                } proof: ${error.toString()}`,
+            }
         }
     } catch (error: any) {
         console.error(error)
