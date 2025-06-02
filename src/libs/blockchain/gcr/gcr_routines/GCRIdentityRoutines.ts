@@ -241,17 +241,6 @@ export default class GCRIdentityRoutines {
                 ? identityEdit.account
                 : forgeToHex(identityEdit.account)
 
-        /**
-         * INFO: For query operations, we don't need to modify any data
-         * Just return success since queries are handled separately in handleIdentityRequest
-         */
-        if (operation === "query") {
-            return {
-                success: true,
-                message: "Query operation handled by identity request handler",
-            }
-        }
-
         switch (identityEdit.context + operation) {
             case "xmadd":
                 result = await this.applyXmIdentityAdd(
