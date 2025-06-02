@@ -21,6 +21,7 @@ import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 
+import { TwitterProofParser } from "../abstraction/web2/twitter"
 export interface NodeCall {
     message: string
     data: any
@@ -156,9 +157,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 break
             }
             try {
-                nStat = (await GCR.getGCRNativeStatus(
-                    data.address,
-                )) as GCRMain
+                nStat = (await GCR.getGCRNativeStatus(data.address)) as GCRMain
                 response.response = nStat
             } catch (error) {
                 response.result = 400
@@ -172,9 +171,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "No address specified"
                 break
             }
-            nStat = (await GCR.getGCRNativeStatus(
-                data.address,
-            )) as GCRMain
+            nStat = (await GCR.getGCRNativeStatus(data.address)) as GCRMain
             response.response = nStat.nonce
             break
         case "getPeerTime":
@@ -206,6 +203,21 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 ...(data.options ? [data.options] : []),
             )
             break
+
+        case "getTweet": {
+            if (!data.tweetUrl) {
+                response.result = 400
+                response.response = "No tweet URL specified"
+                break
+            }
+
+            const twitter = await TwitterProofParser.getInstance()
+            const res = await twitter.getTweet(data.tweetUrl)
+
+            response.result = res.success ? 200 : 400
+            response.response = res
+            break
+        }
 
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen
