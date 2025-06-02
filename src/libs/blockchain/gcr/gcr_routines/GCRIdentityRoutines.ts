@@ -307,26 +307,6 @@ export default class GCRIdentityRoutines {
         return result
     }
 
-    private static async isTwitterUserIdUnique(
-        userId: string,
-        gcrMainRepository: Repository<GCRMain>,
-    ): Promise<boolean> {
-        /**
-         * Query to check if this userId exists in any account's Twitter identities
-         */
-        const result = await gcrMainRepository
-            .createQueryBuilder("gcr")
-            .where("gcr.identities->'web2'->'twitter' @> :userId", {
-                userId: JSON.stringify([{ userId }]),
-            })
-            .getOne()
-
-        /**
-         * Return true if no account has this userId
-         */
-        return !result
-    }
-
     private static async isFirstConnection(
         type: "twitter" | "web3",
         data: {
@@ -347,6 +327,7 @@ export default class GCRIdentityRoutines {
                 .where("gcr.identities->'web2'->'twitter' @> :userId", {
                     userId: JSON.stringify([{ userId: data.userId }]),
                 })
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()
 
             /**
@@ -357,12 +338,15 @@ export default class GCRIdentityRoutines {
             /**
              * For web3 wallets, check if this address exists in any account for this chain/subchain
              */
+            const addressToCheck =
+                data.chain === "evm" ? data.address.toLowerCase() : data.address
+
             const result = await gcrMainRepository
                 .createQueryBuilder("gcr")
                 .where("gcr.identities->'xm'->:chain->:subchain @> :address", {
                     chain: data.chain,
                     subchain: data.subchain,
-                    address: JSON.stringify([data.address.toLowerCase()]),
+                    address: JSON.stringify([addressToCheck]),
                 })
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()

@@ -127,7 +127,7 @@ export class PointSystem {
         userId: string,
         points: number,
         type: "web3Wallets" | "socialAccounts",
-        platform?: string,
+        platform: string,
     ): Promise<void> {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
