@@ -136,6 +136,15 @@ export default class GCRIdentityRoutines {
 
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
+
+            /**
+             * Deduct incentive points for wallet unlinking
+             */
+            await IncentiveManager.walletUnlinked(
+                accountGCR.pubkey,
+                normalizedAddress,
+                chain,
+            )
         }
 
         return { success: true, message: "Identity removed" }
@@ -212,7 +221,10 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const { context, username } = editOperation.data
+        const {
+            context,
+            data: { username },
+        } = editOperation.data as Web2GCRData
         const accountGCR = await ensureGCRForUser(editOperation.account)
 
         accountGCR.identities.web2 = accountGCR.identities.web2 || {}
@@ -233,6 +245,13 @@ export default class GCRIdentityRoutines {
 
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
+
+            /**
+             * Deduct incentive points for Twitter unlinking
+             */
+            if (context === "twitter") {
+                await IncentiveManager.twitterUnlinked(editOperation.account)
+            }
         }
 
         return { success: true, message: "Web2 identity removed" }

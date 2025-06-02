@@ -366,4 +366,110 @@ export class PointSystem {
             }
         }
     }
+
+    /**
+     * Deduct points for unlinking a Web3 wallet
+     * @param userId The user's Demos address
+     * @param walletAddress The wallet address
+     * @param chain The chain type
+     * @returns RPCResponse
+     */
+    async deductWeb3WalletPoints(
+        userId: string,
+        walletAddress: string,
+        chain: string,
+    ): Promise<RPCResponse> {
+        try {
+            // Deduct points by updating the GCR
+            await this.addPointsToGCR(
+                userId,
+                -pointValues.LINK_WEB3_WALLET,
+                "web3Wallets",
+                chain,
+            )
+
+            // Get updated points
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsDeducted: pointValues.LINK_WEB3_WALLET,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: "Points deducted for unlinking wallet",
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error deducting points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Deduct points for unlinking a Twitter account
+     * @param userId The user's Demos address
+     * @returns RPCResponse
+     */
+    async deductTwitterPoints(userId: string): Promise<RPCResponse> {
+        try {
+            const userPointsWithIdentities = await this.getUserPointsInternal(
+                userId,
+            )
+
+            // Check if user has Twitter points to deduct
+            if (
+                userPointsWithIdentities.breakdown.socialAccounts.twitter <= 0
+            ) {
+                return {
+                    result: 200,
+                    response: {
+                        pointsDeducted: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "No Twitter points to deduct",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            await this.addPointsToGCR(
+                userId,
+                -pointValues.LINK_TWITTER,
+                "socialAccounts",
+                "twitter",
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsDeducted: pointValues.LINK_TWITTER,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: "Points deducted for unlinking Twitter",
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error deducting points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
 }

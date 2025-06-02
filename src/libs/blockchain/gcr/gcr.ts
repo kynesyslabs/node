@@ -570,8 +570,6 @@ export default class GCR {
                             identities: {
                                 xm: {},
                                 web2: {},
-                                xm: {},
-                                web2: {},
                             },
                             txs: [],
                             nonce: 0,
