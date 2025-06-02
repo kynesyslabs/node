@@ -127,7 +127,7 @@ export class TwitterProofParser extends Web2ProofParser {
             console.error(error)
             return {
                 success: false,
-                message: "Failed to get tweet",
+                error: "Failed to get tweet",
             }
         }
     }
