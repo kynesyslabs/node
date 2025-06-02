@@ -18,7 +18,7 @@ export class GCRMain {
     points: {
         totalPoints: number
         breakdown: {
-            web3Wallets: number
+            web3Wallets: { [chain: string]: number }
             socialAccounts: {
                 twitter: number
                 github: number

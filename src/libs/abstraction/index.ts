@@ -42,7 +42,8 @@ export async function verifyWeb2Proof(
         if (sender !== publicKey) {
             return {
                 success: false,
-                message: "Unable to verify proof: public key does not match sender",
+                message:
+                    "Unable to verify proof: public key does not match sender",
             }
         }
         const verified = Cryptography.verify(message, signature, publicKey)

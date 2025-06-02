@@ -90,7 +90,7 @@ export class PointSystem {
             account = await HandleGCR.createAccount(userIdStr)
             account.points.totalPoints = 0
             account.points.breakdown = {
-                web3Wallets: 0,
+                web3Wallets: {},
                 socialAccounts: {
                     twitter: 0,
                     github: 0,
@@ -107,7 +107,7 @@ export class PointSystem {
             userId: userIdStr,
             totalPoints: account.points.totalPoints || 0,
             breakdown: {
-                web3Wallets: account.points.breakdown?.web3Wallets || 0,
+                web3Wallets: account.points.breakdown?.web3Wallets || {},
                 socialAccounts: account.points.breakdown?.socialAccounts || {
                     twitter: 0,
                     github: 0,
@@ -127,7 +127,7 @@ export class PointSystem {
         userId: string,
         points: number,
         type: "web3Wallets" | "socialAccounts",
-        platform?: "twitter" | "github" | "discord",
+        platform?: string,
     ): Promise<void> {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
@@ -136,9 +136,14 @@ export class PointSystem {
         if (!account) {
             const newAccount = await HandleGCR.createAccount(userId)
             newAccount.points.totalPoints = points
-            if (type === "socialAccounts" && platform) {
+            if (
+                type === "socialAccounts" &&
+                (platform === "twitter" ||
+                    platform === "github" ||
+                    platform === "discord")
+            ) {
                 newAccount.points.breakdown = {
-                    web3Wallets: 0,
+                    web3Wallets: {},
                     socialAccounts: {
                         twitter: platform === "twitter" ? points : 0,
                         github: platform === "github" ? points : 0,
@@ -147,7 +152,7 @@ export class PointSystem {
                 }
             } else {
                 newAccount.points.breakdown = {
-                    web3Wallets: type === "web3Wallets" ? points : 0,
+                    web3Wallets: {},
                     socialAccounts: {
                         twitter: 0,
                         github: 0,
@@ -162,18 +167,23 @@ export class PointSystem {
             const oldTotal = account.points.totalPoints || 0
             account.points.totalPoints = oldTotal + points
 
-            if (type === "socialAccounts" && platform) {
+            if (
+                type === "socialAccounts" &&
+                (platform === "twitter" ||
+                    platform === "github" ||
+                    platform === "discord")
+            ) {
                 const oldPlatformPoints =
                     account.points.breakdown?.socialAccounts?.[platform] || 0
                 account.points.breakdown.socialAccounts[platform] =
                     oldPlatformPoints + points
-            } else {
-                if (type === "web3Wallets") {
-                    const oldCategoryPoints =
-                        account.points.breakdown.web3Wallets || 0
-                    account.points.breakdown.web3Wallets =
-                        oldCategoryPoints + points
-                }
+            } else if (type === "web3Wallets" && platform) {
+                account.points.breakdown.web3Wallets =
+                    account.points.breakdown.web3Wallets || {}
+                const oldChainPoints =
+                    account.points.breakdown.web3Wallets[platform] || 0
+                account.points.breakdown.web3Wallets[platform] =
+                    oldChainPoints + points
             }
             account.points.lastUpdated = new Date()
 
@@ -261,6 +271,7 @@ export class PointSystem {
                 userId,
                 pointValues.LINK_WEB3_WALLET,
                 "web3Wallets",
+                chain,
             )
 
             // Get updated points
