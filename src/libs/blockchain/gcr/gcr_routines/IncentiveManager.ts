@@ -30,6 +30,31 @@ export class IncentiveManager {
         return await this.pointSystem.awardTwitterPoints(userId)
     }
 
+    /**
+     * Hook to be called after Web3 wallet unlinking
+     */
+    static async walletUnlinked(
+        userId: string,
+        walletAddress: string,
+        chain: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.deductWeb3WalletPoints(
+            userId,
+            walletAddress,
+            chain,
+        )
+    }
+
+    /**
+     * Hook to be called after Twitter unlinking
+     */
+    static async twitterUnlinked(userId: string): Promise<RPCResponse> {
+        return await this.pointSystem.deductTwitterPoints(userId)
+    }
+
+    /**
+     * Hook to get the points for a user
+     */
     static async getPoints(address: string): Promise<RPCResponse> {
         return await this.pointSystem.getUserPoints(address)
     }

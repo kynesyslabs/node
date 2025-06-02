@@ -90,7 +90,7 @@ export class PointSystem {
             account = await HandleGCR.createAccount(userIdStr)
             account.points.totalPoints = 0
             account.points.breakdown = {
-                web3Wallets: 0,
+                web3Wallets: {},
                 socialAccounts: {
                     twitter: 0,
                     github: 0,
@@ -107,7 +107,7 @@ export class PointSystem {
             userId: userIdStr,
             totalPoints: account.points.totalPoints || 0,
             breakdown: {
-                web3Wallets: account.points.breakdown?.web3Wallets || 0,
+                web3Wallets: account.points.breakdown?.web3Wallets || {},
                 socialAccounts: account.points.breakdown?.socialAccounts || {
                     twitter: 0,
                     github: 0,
@@ -127,7 +127,7 @@ export class PointSystem {
         userId: string,
         points: number,
         type: "web3Wallets" | "socialAccounts",
-        platform?: "twitter" | "github" | "discord",
+        platform: string,
     ): Promise<void> {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
@@ -136,9 +136,14 @@ export class PointSystem {
         if (!account) {
             const newAccount = await HandleGCR.createAccount(userId)
             newAccount.points.totalPoints = points
-            if (type === "socialAccounts" && platform) {
+            if (
+                type === "socialAccounts" &&
+                (platform === "twitter" ||
+                    platform === "github" ||
+                    platform === "discord")
+            ) {
                 newAccount.points.breakdown = {
-                    web3Wallets: 0,
+                    web3Wallets: {},
                     socialAccounts: {
                         twitter: platform === "twitter" ? points : 0,
                         github: platform === "github" ? points : 0,
@@ -147,7 +152,7 @@ export class PointSystem {
                 }
             } else {
                 newAccount.points.breakdown = {
-                    web3Wallets: type === "web3Wallets" ? points : 0,
+                    web3Wallets: {},
                     socialAccounts: {
                         twitter: 0,
                         github: 0,
@@ -162,18 +167,23 @@ export class PointSystem {
             const oldTotal = account.points.totalPoints || 0
             account.points.totalPoints = oldTotal + points
 
-            if (type === "socialAccounts" && platform) {
+            if (
+                type === "socialAccounts" &&
+                (platform === "twitter" ||
+                    platform === "github" ||
+                    platform === "discord")
+            ) {
                 const oldPlatformPoints =
                     account.points.breakdown?.socialAccounts?.[platform] || 0
                 account.points.breakdown.socialAccounts[platform] =
                     oldPlatformPoints + points
-            } else {
-                if (type === "web3Wallets") {
-                    const oldCategoryPoints =
-                        account.points.breakdown.web3Wallets || 0
-                    account.points.breakdown.web3Wallets =
-                        oldCategoryPoints + points
-                }
+            } else if (type === "web3Wallets") {
+                account.points.breakdown.web3Wallets =
+                    account.points.breakdown.web3Wallets || {}
+                const oldChainPoints =
+                    account.points.breakdown.web3Wallets[platform] || 0
+                account.points.breakdown.web3Wallets[platform] =
+                    oldChainPoints + points
             }
             account.points.lastUpdated = new Date()
 
@@ -261,6 +271,7 @@ export class PointSystem {
                 userId,
                 pointValues.LINK_WEB3_WALLET,
                 "web3Wallets",
+                chain,
             )
 
             // Get updated points
@@ -347,6 +358,112 @@ export class PointSystem {
             return {
                 result: 500,
                 response: "Error awarding points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Deduct points for unlinking a Web3 wallet
+     * @param userId The user's Demos address
+     * @param walletAddress The wallet address
+     * @param chain The chain type
+     * @returns RPCResponse
+     */
+    async deductWeb3WalletPoints(
+        userId: string,
+        walletAddress: string,
+        chain: string,
+    ): Promise<RPCResponse> {
+        try {
+            // Deduct points by updating the GCR
+            await this.addPointsToGCR(
+                userId,
+                -pointValues.LINK_WEB3_WALLET,
+                "web3Wallets",
+                chain,
+            )
+
+            // Get updated points
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsDeducted: pointValues.LINK_WEB3_WALLET,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: "Points deducted for unlinking wallet",
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error deducting points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Deduct points for unlinking a Twitter account
+     * @param userId The user's Demos address
+     * @returns RPCResponse
+     */
+    async deductTwitterPoints(userId: string): Promise<RPCResponse> {
+        try {
+            const userPointsWithIdentities = await this.getUserPointsInternal(
+                userId,
+            )
+
+            // Check if user has Twitter points to deduct
+            if (
+                userPointsWithIdentities.breakdown.socialAccounts.twitter <= 0
+            ) {
+                return {
+                    result: 200,
+                    response: {
+                        pointsDeducted: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "No Twitter points to deduct",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            await this.addPointsToGCR(
+                userId,
+                -pointValues.LINK_TWITTER,
+                "socialAccounts",
+                "twitter",
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsDeducted: pointValues.LINK_TWITTER,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: "Points deducted for unlinking Twitter",
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error deducting points",
                 require_reply: false,
                 extra: {
                     error:

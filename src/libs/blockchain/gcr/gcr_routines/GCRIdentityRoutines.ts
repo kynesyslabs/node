@@ -51,12 +51,30 @@ export default class GCRIdentityRoutines {
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
 
-            // Award incentive points for wallet linking
-            await IncentiveManager.walletLinked(
-                accountGCR.pubkey,
-                normalizedAddress,
-                chain,
+            /**
+             * Check if this is the first connection
+             */
+            const isFirst = await this.isFirstConnection(
+                "web3",
+                {
+                    chain,
+                    subchain,
+                    address: normalizedAddress,
+                },
+                gcrMainRepository,
+                editOperation.account,
             )
+
+            /**
+             * Award incentive points for wallet linking
+             */
+            if (isFirst) {
+                await IncentiveManager.walletLinked(
+                    accountGCR.pubkey,
+                    normalizedAddress,
+                    chain,
+                )
+            }
         }
 
         return { success: true, message: "Identity applied" }
@@ -118,6 +136,15 @@ export default class GCRIdentityRoutines {
 
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
+
+            /**
+             * Deduct incentive points for wallet unlinking
+             */
+            await IncentiveManager.walletUnlinked(
+                accountGCR.pubkey,
+                normalizedAddress,
+                chain,
+            )
         }
 
         return { success: true, message: "Identity removed" }
@@ -147,7 +174,6 @@ export default class GCRIdentityRoutines {
          * Verify the proof
          */
         const proofOk = Hashing.sha256(data.proof) === data.proofHash
-
         if (!proofOk) {
             return {
                 success: false,
@@ -164,9 +190,19 @@ export default class GCRIdentityRoutines {
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
 
-            // Award incentive points for social media linking
+            /**
+             * Only award points if this is the first time this identity is being connected
+             */
             if (context === "twitter") {
-                await IncentiveManager.twitterLinked(editOperation.account)
+                const isFirst = await this.isFirstConnection(
+                    "twitter",
+                    { userId: data.userId },
+                    gcrMainRepository,
+                    editOperation.account,
+                )
+                if (isFirst) {
+                    await IncentiveManager.twitterLinked(editOperation.account)
+                }
             } else if (context === "github") {
                 // Future implementation for GitHub
                 log.info(
@@ -185,7 +221,10 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const { context, username } = editOperation.data
+        const {
+            context,
+            data: { username },
+        } = editOperation.data as Web2GCRData
         const accountGCR = await ensureGCRForUser(editOperation.account)
 
         accountGCR.identities.web2 = accountGCR.identities.web2 || {}
@@ -206,6 +245,13 @@ export default class GCRIdentityRoutines {
 
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
+
+            /**
+             * Deduct incentive points for Twitter unlinking
+             */
+            if (context === "twitter") {
+                await IncentiveManager.twitterUnlinked(editOperation.account)
+            }
         }
 
         return { success: true, message: "Web2 identity removed" }
@@ -229,7 +275,7 @@ export default class GCRIdentityRoutines {
         const identityEdit = structuredClone(editOperation)
 
         let operation = identityEdit.operation
-        if (identityEdit.isRollback && operation !== "query") {
+        if (identityEdit.isRollback) {
             operation = operation === "add" ? "remove" : "add"
         }
 
@@ -240,17 +286,6 @@ export default class GCRIdentityRoutines {
             typeof identityEdit.account === "string"
                 ? identityEdit.account
                 : forgeToHex(identityEdit.account)
-
-        /**
-         * INFO: For query operations, we don't need to modify any data
-         * Just return success since queries are handled separately in handleIdentityRequest
-         */
-        if (operation === "query") {
-            return {
-                success: true,
-                message: "Query operation handled by identity request handler",
-            }
-        }
 
         switch (identityEdit.context + operation) {
             case "xmadd":
@@ -289,5 +324,56 @@ export default class GCRIdentityRoutines {
         }
 
         return result
+    }
+
+    private static async isFirstConnection(
+        type: "twitter" | "web3",
+        data: {
+            userId?: string // for twitter
+            chain?: string // for web3
+            subchain?: string // for web3
+            address?: string // for web3
+        },
+        gcrMainRepository: Repository<GCRMain>,
+        currentAccount?: string,
+    ): Promise<boolean> {
+        if (type === "twitter") {
+            /**
+             * Check if this Twitter userId exists anywhere
+             */
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where("gcr.identities->'web2'->'twitter' @> :userId", {
+                    userId: JSON.stringify([{ userId: data.userId }]),
+                })
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
+
+            /**
+             * Return true if no account has this userId
+             */
+            return !result
+        } else {
+            /**
+             * For web3 wallets, check if this address exists in any account for this chain/subchain
+             */
+            const addressToCheck =
+                data.chain === "evm" ? data.address.toLowerCase() : data.address
+
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where("gcr.identities->'xm'->:chain->:subchain @> :address", {
+                    chain: data.chain,
+                    subchain: data.subchain,
+                    address: JSON.stringify([addressToCheck]),
+                })
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
+
+            /**
+             * Return true if this is the first connection
+             */
+            return !result
+        }
     }
 }
