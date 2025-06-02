@@ -10,6 +10,22 @@ export interface SavedXmIdentity {
     timestamp: number
 }
 
+/**
+ * The PQC identity saved in the GCR
+ */
+export interface SavedPqcIdentity {
+    address: string
+    signature: string
+    timestamp: number
+}
+
+/**
+ * The PQC identity GCR edit operation data
+ */
+export interface PqcIdentityEdit extends SavedPqcIdentity {
+    algorithm: string
+}
+
 export type StoredIdentities = {
     xm: {
         [key: string]: {
@@ -22,9 +38,6 @@ export type StoredIdentities = {
     pqc: {
         // A mapping of the algorithm identifier a list of the signature and address objects
         // eg. falcon: [{address: "pubkey1", signature: "signature1"}, {address: "pubkey2", signature: "signature2"}]
-        [key: string]: {
-            address: string
-            signature: string
-        }[]
+        [key: string]: SavedPqcIdentity[]
     }
 }

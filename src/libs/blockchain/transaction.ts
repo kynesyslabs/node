@@ -38,6 +38,7 @@ import {
 } from "@kynesyslabs/demosdk/encryption"
 import { getSharedState } from "@/utilities/sharedState"
 import IdentityManager from "./gcr/gcr_routines/identityManager"
+import { SavedPqcIdentity } from "@/model/entities/types/IdentityTypes"
 
 interface TransactionResponse {
     status: string
@@ -208,10 +209,8 @@ export default class Transaction implements ITransaction {
                     )) || {}
 
                 // INFO: Get all the indexed pubkeys for the PQC signer type (eg. falcon, etc.)
-                const indexedPubKeys: {
-                    signature: string
-                    address: string
-                }[] = identities[tx.signature.type] || []
+                const indexedPubKeys: SavedPqcIdentity[] =
+                    identities[tx.signature.type] || []
 
                 // INFO: Check if sender's PQC pubkey is indexed in PQC identities
                 const found = indexedPubKeys.find(
@@ -229,11 +228,9 @@ export default class Transaction implements ITransaction {
 
                 // Verify the found key's signature with the tx's ed25519 address
                 ed25519SignatureVerified = await ucrypto.verify({
-                    algorithm: tx.signature.type,
-                    message: new TextEncoder().encode(
-                        tx.content.ed25519_address,
-                    ),
-                    publicKey: hexToUint8Array(found.address),
+                    algorithm: "ed25519",
+                    message: new TextEncoder().encode(found.address),
+                    publicKey: hexToUint8Array(tx.content.ed25519_address),
                     signature: hexToUint8Array(found.signature),
                 })
             } else {

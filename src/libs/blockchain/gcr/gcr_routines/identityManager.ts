@@ -130,14 +130,14 @@ export default class IdentityManager {
      */
     static async verifyPqcPayload(
         payloads: PqcIdentityAssignPayload["payload"],
-        message: string,
+        senderEd25519: string,
     ): Promise<{ success: boolean; message: string }> {
         for (const payload of payloads) {
             const verified = await ucrypto.verify({
-                algorithm: payload.algorithm,
+                algorithm: "ed25519",
                 signature: hexToUint8Array(payload.signature),
-                publicKey: hexToUint8Array(payload.address),
-                message: new TextEncoder().encode(message),
+                publicKey: hexToUint8Array(senderEd25519),
+                message: new TextEncoder().encode(payload.address),
             })
 
             if (!verified) {

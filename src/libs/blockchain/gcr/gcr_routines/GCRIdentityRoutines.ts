@@ -5,9 +5,10 @@ import { Repository } from "typeorm"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import ensureGCRForUser from "./ensureGCRForUser"
 import Hashing from "@/libs/crypto/hashing"
-import { SavedXmIdentity } from "@/model/entities/types/IdentityTypes"
-
-import log from "@/utilities/logger"
+import {
+    PqcIdentityEdit,
+    SavedXmIdentity,
+} from "@/model/entities/types/IdentityTypes"
 
 export default class GCRIdentityRoutines {
     // SECTION XM Identity Routines
@@ -16,13 +17,16 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const { chain, isEVM, subchain, targetAddress } = editOperation.data
+        const { chain, isEVM, subchain, targetAddress, signature, timestamp } =
+            editOperation.data
 
         if (
             !chain ||
             !subchain ||
             typeof isEVM !== "boolean" ||
-            !targetAddress
+            !targetAddress ||
+            !signature ||
+            !timestamp
         ) {
             return { success: false, message: "Invalid edit operation data" }
         }
@@ -204,7 +208,7 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const identities = editOperation.data
+        const identities: PqcIdentityEdit[] = editOperation.data
 
         if (!Array.isArray(identities)) {
             return {
@@ -217,9 +221,9 @@ export default class GCRIdentityRoutines {
         accountGCR.identities.pqc = accountGCR.identities.pqc || {}
 
         for (const identity of identities) {
-            const { algorithm, address, signature } = identity
+            const { algorithm, address, signature, timestamp } = identity
 
-            if (!algorithm || !address || !signature) {
+            if (!algorithm || !address || !signature || !timestamp) {
                 return {
                     success: false,
                     message:
@@ -242,7 +246,11 @@ export default class GCRIdentityRoutines {
                 }
             }
 
-            accountGCR.identities.pqc[algorithm].push({ address, signature })
+            accountGCR.identities.pqc[algorithm].push({
+                address,
+                signature,
+                timestamp,
+            })
         }
 
         if (!simulate) {
