@@ -177,7 +177,7 @@ export class PointSystem {
                     account.points.breakdown?.socialAccounts?.[platform] || 0
                 account.points.breakdown.socialAccounts[platform] =
                     oldPlatformPoints + points
-            } else if (type === "web3Wallets" && platform) {
+            } else if (type === "web3Wallets") {
                 account.points.breakdown.web3Wallets =
                     account.points.breakdown.web3Wallets || {}
                 const oldChainPoints =
