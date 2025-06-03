@@ -1,4 +1,6 @@
-// TODO Implement the identity manager
+import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
+import ensureGCRForUser from "./ensureGCRForUser"
+import log from "src/utilities/logger"
 import {
     InferFromWritePayload,
     InferFromSignatureTargetIdentityPayload,
@@ -35,6 +37,7 @@ import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
  * }
  */
 
+// SUPPORTED CHAINS
 const chains: { [key: string]: typeof DefaultChain } = {
     solana: SOLANA,
     evm: EVM,

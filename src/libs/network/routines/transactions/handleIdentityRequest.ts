@@ -8,16 +8,22 @@ import { Transaction } from "@kynesyslabs/demosdk/types"
 import { PqcIdentityAssignPayload } from "@kynesyslabs/demosdk/abstraction"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 
+interface IdentityResponse {
+    success: boolean
+    message: string
+}
+
 /**
  * Verifies the signature in the identity payload using the appropriate handler
  *
  * @param payload - The identity payload
- * @returns true if the identity request is valid, false otherwise
+ * @param sender - The sender's address (from the transaction)
+ * @returns Response with success status, message, and optional data
  */
 export default async function handleIdentityRequest(
     tx: Transaction,
     sender: string,
-) {
+) : Promise<IdentityResponse> {
     const payload = tx.content.data[1] as IdentityPayload
     const senderEd25519 = tx.content.ed25519_address
 

@@ -33,6 +33,14 @@ async function setBalance(
         balance: BigInt(balance),
         nonce: 0,
         pubkey: publicKey,
+        points: {
+            totalPoints: 0,
+            breakdown: {
+                web3Wallets: 0,
+                socialAccounts: 0,
+            },
+            lastUpdated: new Date(),
+        },
     }
 
     const db = await Datasource.getInstance()

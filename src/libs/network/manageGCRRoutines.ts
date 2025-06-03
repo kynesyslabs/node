@@ -2,6 +2,7 @@ import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
 import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
 import { emptyResponse } from "./server_rpc"
+import { IncentiveManager } from "../blockchain/gcr/gcr_routines/IncentiveManager"
 
 interface GCRRoutinePayload {
     method: string
@@ -16,6 +17,7 @@ export default async function manageGCRRoutines(
     response.result = 200
     // Handle the payload
     const { method, params } = payload
+
     switch (method) {
         // SECTION XM Identity Management
 
@@ -41,6 +43,10 @@ export default async function manageGCRRoutines(
                 params[0],
                 "xm",
             )
+            break
+
+        case "getPoints":
+            response.response = await IncentiveManager.getPoints(sender)
             break
 
         // SECTION Web2 Identity Management

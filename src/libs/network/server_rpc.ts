@@ -27,7 +27,8 @@ import { BunServer, cors, json, jsonResponse } from "./bunServer"
 import { ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { signedObject } from "@kynesyslabs/demosdk/types"
 import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
-
+import { bridge } from "@kynesyslabs/demosdk"
+import { manageNativeBridge } from "./manageNativeBridge"
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
@@ -154,6 +155,12 @@ async function processPayload(
                 payload.params[0] as BundleContent,
                 sender,
             )
+        case "nativeBridge":
+            /**
+             * TODO & REVIEW The NativeBridgeOperation is sent to the handler to obtain a response
+             * that includes the compiled operation, so that the client can generate a proper transaction
+             */
+            return await manageNativeBridge(payload.params[0] as bridge.NativeBridgeOperation)
         case "hello_peer": // As it is authenticated, we can use it to check if the peer is still alive and is in our peer list
             var helloPeerRequest = payload.params[0] as HelloPeerRequest
             return await manageHelloPeer(

@@ -1,5 +1,4 @@
 import Cryptography from "../crypto/cryptography"
-
 import { GithubProofParser } from "./web2/github"
 import { TwitterProofParser } from "./web2/twitter"
 import { type Web2ProofParser } from "./web2/parsers"
@@ -16,7 +15,7 @@ export async function verifyWeb2Proof(
     payload: Web2CoreTargetIdentityPayload,
     sender: string,
 ) {
-    let parser: typeof Web2ProofParser
+    let parser: typeof TwitterProofParser | typeof GithubProofParser
 
     switch (payload.context) {
         case "twitter":

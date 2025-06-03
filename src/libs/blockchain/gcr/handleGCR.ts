@@ -69,9 +69,10 @@ export type GetNativeSubnetsTxsOptions = {
     txData?: boolean
 }
 
-export type GCRResult = {
+export interface GCRResult {
     success: boolean
     message: string
+    response?: any
 }
 
 // ? Maybe sanitize the options?
@@ -478,6 +479,18 @@ export default class HandleGCR {
         }
         account.assignedTxs = []
         account.nonce = 0
+        account.points = {
+            totalPoints: 0,
+            breakdown: {
+                web3Wallets: {},
+                socialAccounts: {
+                    twitter: 0,
+                    github: 0,
+                    discord: 0,
+                },
+            },
+            lastUpdated: new Date(),
+        }
         return await repository.save(account)
     }
 }
