@@ -25,7 +25,7 @@ export default async function handleIdentityRequest(
     sender: string,
 ) : Promise<IdentityResponse> {
     const payload = tx.content.data[1] as IdentityPayload
-    const senderEd25519 = tx.content.ed25519_address
+    const senderEd25519 = tx.content.from_ed25519_address
 
     switch (payload.method) {
         case "xm_identity_assign":

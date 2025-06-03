@@ -59,7 +59,7 @@ export default class Transaction implements ITransaction {
         this.content = {
             type: null,
             from: "",
-            ed25519_address: "",
+            from_ed25519_address: "",
             to: "",
             amount: null,
             data: [null, null],
@@ -187,7 +187,7 @@ export default class Transaction implements ITransaction {
             sender &&
             (tx.content.from != sender ||
                 (tx.signature.type == "ed25519" &&
-                    tx.content.ed25519_address != sender))
+                    tx.content.from_ed25519_address != sender))
         ) {
             return {
                 success: false,
@@ -204,7 +204,7 @@ export default class Transaction implements ITransaction {
             if (!tx.ed25519_signature) {
                 const identities =
                     (await IdentityManager.getIdentities(
-                        tx.content.ed25519_address,
+                        tx.content.from_ed25519_address,
                         "pqc",
                     )) || {}
 
@@ -222,7 +222,7 @@ export default class Transaction implements ITransaction {
                         success: false,
                         message:
                             "Transaction is missing ed25519 signature, and the PQC signer is not added as an identity. Please provide an ed25519 signature or add the PQC signer as an identity for " +
-                            tx.content.ed25519_address,
+                            tx.content.from_ed25519_address,
                     }
                 }
 
@@ -230,7 +230,7 @@ export default class Transaction implements ITransaction {
                 ed25519SignatureVerified = await ucrypto.verify({
                     algorithm: "ed25519",
                     message: new TextEncoder().encode(found.address),
-                    publicKey: hexToUint8Array(tx.content.ed25519_address),
+                    publicKey: hexToUint8Array(tx.content.from_ed25519_address),
                     signature: hexToUint8Array(found.signature),
                 })
             } else {
@@ -238,7 +238,7 @@ export default class Transaction implements ITransaction {
                 ed25519SignatureVerified = await ucrypto.verify({
                     algorithm: "ed25519",
                     message: new TextEncoder().encode(tx.hash),
-                    publicKey: hexToUint8Array(tx.content.ed25519_address),
+                    publicKey: hexToUint8Array(tx.content.from_ed25519_address),
                     signature: hexToUint8Array(tx.ed25519_signature),
                 })
             }
@@ -482,7 +482,7 @@ export default class Transaction implements ITransaction {
             type: tx.content.type,
             to: tx.content.to,
             from: tx.content.from,
-            ed25519_address: tx.content.ed25519_address,
+            from_ed25519_address: tx.content.from_ed25519_address,
             amount: tx.content.amount,
             nonce: tx.content.nonce,
             timestamp: tx.content.timestamp,
@@ -514,7 +514,7 @@ export default class Transaction implements ITransaction {
                 | "NODE_ONLINE",
             from: rawTx.from,
             to: rawTx.to,
-            ed25519_address: rawTx.ed25519_address,
+            from_ed25519_address: rawTx.from_ed25519_address,
             amount: rawTx.amount,
             nonce: rawTx.nonce,
             timestamp: rawTx.timestamp,

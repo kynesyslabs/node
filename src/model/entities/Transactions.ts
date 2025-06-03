@@ -29,8 +29,8 @@ export class Transactions {
     @Column("varchar", { name: "from" })
     from: string
 
-    @Column("varchar", { name: "ed25519_address" })
-    ed25519_address: string
+    @Column("varchar", { name: "from_ed25519_address" })
+    from_ed25519_address: string
 
     @Column("varchar", { name: "to" })
     to: string
