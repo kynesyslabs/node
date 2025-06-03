@@ -56,6 +56,7 @@ import Transaction from "@/libs/blockchain/transaction"
 import {
     signedObject,
     SerializedSignedObject,
+    SerializedEncryptedObject,
     ucrypto,
 } from "@kynesyslabs/demosdk/encryption"
 
@@ -357,12 +358,8 @@ export class SignalingServer {
         ws: WebSocket,
         payload: {
             targetId: string
-            message: {
-                algorithm: "ml-kem-aes" | "rsa"
-                serializedEncryptedData: string
-                serializedCipherText?: string
-            }
-        }, // TODO use serializedEncryptedObject once we can import it from the sdk
+            message: SerializedEncryptedObject
+        },
     ) {
         // FIXME Adjust the TODOs below
         // TODO Insert the message into the blockchain through the sdk and the node running on this same server
