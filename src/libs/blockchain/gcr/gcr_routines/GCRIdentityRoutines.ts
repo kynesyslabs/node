@@ -237,10 +237,10 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const {
-            context,
-            data: { username },
-        } = editOperation.data as Web2GCRData
+        const { context, username } = editOperation.data as {
+            context: string
+            username: string
+        }
         const accountGCR = await ensureGCRForUser(editOperation.account)
 
         accountGCR.identities.web2 = accountGCR.identities.web2 || {}
