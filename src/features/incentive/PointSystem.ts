@@ -4,6 +4,7 @@ import { UserPoints } from "@kynesyslabs/demosdk/abstraction"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import HandleGCR from "@/libs/blockchain/gcr/handleGCR"
+import log from "@/utilities/logger"
 
 const pointValues = {
     LINK_WEB3_WALLET: 2,
@@ -49,11 +50,11 @@ export class PointSystem {
                 const subChainKeys = Object.keys(subChains)
 
                 for (const subChain of subChainKeys) {
-                    const addresses = subChains[subChain]
+                    const identities = subChains[subChain]
 
-                    if (Array.isArray(addresses)) {
-                        addresses.forEach(address => {
-                            const walletId = `${chain}:${address}`
+                    if (Array.isArray(identities)) {
+                        identities.forEach(identity => {
+                            const walletId = `${chain}:${identity.address}`
                             linkedWallets.push(walletId)
                         })
                     }
@@ -199,6 +200,7 @@ export class PointSystem {
     async getUserPoints(userId: string): Promise<RPCResponse> {
         try {
             const userPoints = await this.getUserPointsInternal(userId)
+            log.only("userPoints: " + JSON.stringify(userPoints, null, 2))
 
             return {
                 result: 200,
