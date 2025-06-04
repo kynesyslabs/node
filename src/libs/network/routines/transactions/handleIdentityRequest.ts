@@ -25,7 +25,6 @@ export default async function handleIdentityRequest(
     sender: string,
 ) : Promise<IdentityResponse> {
     const payload = tx.content.data[1] as IdentityPayload
-    const senderEd25519 = tx.content.from_ed25519_address
 
     switch (payload.method) {
         case "xm_identity_assign":
@@ -34,7 +33,6 @@ export default async function handleIdentityRequest(
             // The sender address here will be the message to verify using the signature in the payload.
             return await IdentityManager.verifyPayload(
                 payload.payload as InferFromSignaturePayload,
-                senderEd25519,
             )
         case "pqc_identity_assign":
             // NOTE: Sender here should be the ed25519 address coming from the request headers

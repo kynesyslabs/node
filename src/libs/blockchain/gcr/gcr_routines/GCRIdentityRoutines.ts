@@ -19,16 +19,18 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const { chain, isEVM, subchain, targetAddress, signature, timestamp } =
+        const { chain, isEVM, subchain, targetAddress, signature, timestamp, signedData } =
             editOperation.data
 
+        // REVIEW: Is there a better way to check this?
         if (
             !chain ||
             !subchain ||
             typeof isEVM !== "boolean" ||
             !targetAddress ||
             !signature ||
-            !timestamp
+            !timestamp ||
+            !signedData
         ) {
             return { success: false, message: "Invalid edit operation data" }
         }
@@ -59,6 +61,7 @@ export default class GCRIdentityRoutines {
             signature: editOperation.data.signature,
             publicKey: editOperation.data.publicKey || "",
             timestamp: editOperation.data.timestamp,
+            signedData: editOperation.data.signedData,
         }
 
         accountGCR.identities.xm[chain][subchain].push(data)

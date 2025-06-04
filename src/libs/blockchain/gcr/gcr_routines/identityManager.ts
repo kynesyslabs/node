@@ -17,9 +17,6 @@ import {
     BTC,
 } from "@kynesyslabs/demosdk/xm-localsdk"
 
-import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
-import ensureGCRForUser from "./ensureGCRForUser"
-import log from "src/utilities/logger"
 // TODO: refactor import to use high level abstraction module
 import { PqcIdentityAssignPayload } from "node_modules/@kynesyslabs/demosdk/build/types/abstraction"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
@@ -65,21 +62,18 @@ export default class IdentityManager {
      * Verify the xm identity payload signature
      *
      * @param payload - The payload containing the signature to verify
-     * @param senderEd25519 - The ed25519 address of the sender (signed message)
      *
      * @returns {success: boolean, message: string}
      */
     static async verifyPayload(
         payload: InferFromSignaturePayload,
-        senderEd25519: string,
     ): Promise<{ success: boolean; message: string }> {
         log.debug("Verifying payload: " + JSON.stringify(payload, null, 2))
         const chainId = payload.target_identity.chain
         // @ts-expect-error - This is a workaround to avoid type errors
         const sdk = await chains[chainId].create(null)
 
-        const signedData = senderEd25519
-        const { signature, publicKey, targetAddress } =
+        const { signature, publicKey, targetAddress, signedData } =
             payload.target_identity as unknown as InferFromSignatureTargetIdentityPayload
 
         let messageVerified = false

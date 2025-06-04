@@ -8,6 +8,7 @@ export interface SavedXmIdentity {
     signature: string
     publicKey: string
     timestamp: number
+    signedData: string
 }
 
 /**
