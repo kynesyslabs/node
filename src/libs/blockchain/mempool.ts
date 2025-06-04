@@ -496,14 +496,12 @@ export default class Mempool {
             console.log(signature.data.toString("hex"))
             console.log("[DEBUG] public_key: (" + typeof publicKey + ")")
             console.log(publicKey)
-            log.only("signature.type: " + signature.type)
             const signatureValid = await ucrypto.verify({
                 algorithm: signature.type as SigningAlgorithm,
                 message: new TextEncoder().encode(txHash),
                 publicKey: publicKey as any,
                 signature: signature.data as any,
             })
-            log.only("signatureValid: " + signatureValid)
 
             if (!signatureValid) {
                 log.info("[X] [MEMPOOL VERIFICATION] The signature is invalid")

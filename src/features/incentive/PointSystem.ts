@@ -200,7 +200,6 @@ export class PointSystem {
     async getUserPoints(userId: string): Promise<RPCResponse> {
         try {
             const userPoints = await this.getUserPointsInternal(userId)
-            log.only("userPoints: " + JSON.stringify(userPoints, null, 2))
 
             return {
                 result: 200,
