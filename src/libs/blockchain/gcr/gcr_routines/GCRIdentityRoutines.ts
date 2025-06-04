@@ -511,8 +511,8 @@ export default class GCRIdentityRoutines {
              */
             const result = await gcrMainRepository
                 .createQueryBuilder("gcr")
-                .where("gcr.identities->'web2'->'twitter' @> :userId", {
-                    userId: JSON.stringify([{ userId: data.userId }]),
+                .where("EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'userId' = :userId)", {
+                    userId: data.userId,
                 })
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()
@@ -530,10 +530,10 @@ export default class GCRIdentityRoutines {
 
             const result = await gcrMainRepository
                 .createQueryBuilder("gcr")
-                .where("gcr.identities->'xm'->:chain->:subchain @> :address", {
+                .where("EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)", {
                     chain: data.chain,
                     subchain: data.subchain,
-                    address: JSON.stringify([addressToCheck]),
+                    address: addressToCheck,
                 })
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()
