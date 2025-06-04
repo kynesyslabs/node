@@ -60,7 +60,6 @@ import {
     ucrypto,
 } from "@kynesyslabs/demosdk/encryption"
 
-
 import { deserializeUint8Array } from "@kynesyslabs/demosdk/utils" // FIXME Import from the sdk once we can
 /**
  * SignalingServer class that manages peer connections and message routing
@@ -364,7 +363,8 @@ export class SignalingServer {
     ) {
         // FIXME Adjust the TODOs below
         // TODO Insert the message into the blockchain through the sdk and the node running on this same server
-        // TODO Implement support for offline messages (store them in a database and allow the peer to retrieve them later)
+        // TODO  Implement support for offline messages (store them in a database and allow the peer to retrieve them later)
+        // LINK ./plan_of_action_for_offline_messages.md
         try {
             const senderId = this.getPeerIdByWebSocket(ws)
             if (!senderId) {
