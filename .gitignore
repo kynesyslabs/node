@@ -97,3 +97,4 @@ src/GTAGS
 # Output files
 output/*
 .env
+bun.lockb
