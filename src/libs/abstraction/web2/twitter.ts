@@ -100,6 +100,7 @@ export class TwitterProofParser extends Web2ProofParser {
 
         const loggedIn = await this.scraper.isLoggedIn()
         if (!loggedIn) {
+            process.exit(1)
             throw new Error("Unable to authenticate with Twitter")
         }
 
