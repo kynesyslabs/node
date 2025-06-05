@@ -103,7 +103,7 @@ export class TwitterProofParser extends Web2ProofParser {
             throw new Error("Unable to authenticate with Twitter")
         }
 
-        log.debug("🐦 Successfully logged in with credentials")
+        log.only("🐦 Successfully logged in with credentials")
         const cookies = await this.scraper.getCookies()
 
         // INFO: Save cookies to file
