@@ -59,6 +59,12 @@ import {
     SerializedEncryptedObject,
     ucrypto,
 } from "@kynesyslabs/demosdk/encryption"
+import Mempool from "@/libs/blockchain/mempool"
+import Cryptography from "@/libs/crypto/cryptography"
+import Hashing from "@/libs/crypto/hashing"
+import { getSharedState } from "@/utilities/sharedState"
+import Datasource from "@/model/datasource"
+import { OfflineMessage } from "@/model/entities/OfflineMessages"
 
 import { deserializeUint8Array } from "@kynesyslabs/demosdk/utils" // FIXME Import from the sdk once we can
 /**
@@ -287,7 +293,7 @@ export class SignalingServer {
             // Deserialize the proof
             const deserializedProof: signedObject = {
                 algorithm: proof.algorithm,
-                signedData: deserializeUint8Array(proof.serializedSignedData),
+                signature: deserializeUint8Array(proof.serializedSignedData),
                 publicKey: deserializeUint8Array(proof.serializedPublicKey),
                 message: deserializeUint8Array(proof.serializedMessage),
             }
@@ -316,6 +322,9 @@ export class SignalingServer {
                     payload: { success: true, clientId },
                 }),
             )
+
+            // Deliver any offline messages to the newly registered peer
+            await this.deliverOfflineMessages(ws, clientId)
         } catch (error) {
             console.error("Registration error:", error)
             this.sendError(
@@ -354,17 +363,13 @@ export class SignalingServer {
      * @param ws - The WebSocket sending the message
      * @param payload - Message payload containing target ID and message content
      */
-    private handlePeerMessage(
+    private async handlePeerMessage(
         ws: WebSocket,
         payload: {
             targetId: string
             message: SerializedEncryptedObject
         },
     ) {
-        // FIXME Adjust the TODOs below
-        // TODO Insert the message into the blockchain through the sdk and the node running on this same server
-        // TODO  Implement support for offline messages (store them in a database and allow the peer to retrieve them later)
-        // LINK ./plan_of_action_for_offline_messages.md
         try {
             const senderId = this.getPeerIdByWebSocket(ws)
             if (!senderId) {
@@ -376,12 +381,17 @@ export class SignalingServer {
                 return
             }
 
+            // Create blockchain transaction for the message
+            await this.storeMessageOnBlockchain(senderId, payload.targetId, payload.message)
+
             const targetPeer = this.peers.get(payload.targetId)
             if (!targetPeer) {
+                // Store as offline message if target is not online
+                await this.storeOfflineMessage(senderId, payload.targetId, payload.message)
                 this.sendError(
                     ws,
                     ImErrorType.PEER_NOT_FOUND,
-                    `Target peer ${payload.targetId} not found`,
+                    `Target peer ${payload.targetId} not found - stored as offline message`,
                 )
                 return
             }
@@ -524,6 +534,103 @@ export class SignalingServer {
         } catch (error) {
             console.error("Broadcast error:", error)
             // Don't send error here as the peer is already disconnected
+        }
+    }
+
+    /**
+     * Stores a message on the blockchain
+     * @param senderId - The ID of the sender
+     * @param targetId - The ID of the target recipient
+     * @param message - The encrypted message content
+     */
+    private async storeMessageOnBlockchain(senderId: string, targetId: string, message: SerializedEncryptedObject) {
+        const transaction = new Transaction()
+        transaction.content = {
+            type: "instantMessaging",
+            from: senderId,
+            to: targetId,
+            from_ed25519_address: senderId,
+            amount: 0,
+            data: ["instantMessaging", { message, timestamp: Date.now() }] as any,
+            gcr_edits: [],
+            nonce: 0,
+            timestamp: Date.now(),
+            transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0 },
+        }
+
+        // Sign and hash transaction
+        const signature = Cryptography.sign(
+            JSON.stringify(transaction.content),
+            getSharedState.identity.ed25519.privateKey,
+        )
+        transaction.signature = signature as any
+        transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
+
+        // Add to mempool
+        await Mempool.addTransaction(transaction)
+    }
+
+    /**
+     * Stores a message in the database for offline delivery
+     * @param senderId - The ID of the sender
+     * @param targetId - The ID of the target recipient
+     * @param message - The encrypted message content
+     */
+    private async storeOfflineMessage(senderId: string, targetId: string, message: SerializedEncryptedObject) {
+        const db = await Datasource.getInstance()
+        const offlineMessageRepository = db.getDataSource().getRepository(OfflineMessage)
+
+        const messageHash = Hashing.sha256(JSON.stringify({ senderId, targetId, message, timestamp: Date.now() }))
+
+        const offlineMessage = offlineMessageRepository.create({
+            recipientPublicKey: targetId,
+            senderPublicKey: senderId,
+            messageHash,
+            encryptedContent: message,
+            signature: "", // Could add signature for integrity
+            timestamp: BigInt(Date.now()),
+            status: "pending",
+        })
+
+        await offlineMessageRepository.save(offlineMessage)
+    }
+
+    /**
+     * Retrieves offline messages for a specific recipient
+     * @param recipientId - The ID of the recipient
+     * @returns Array of offline messages
+     */
+    private async getOfflineMessages(recipientId: string): Promise<OfflineMessage[]> {
+        const db = await Datasource.getInstance()
+        const offlineMessageRepository = db.getDataSource().getRepository(OfflineMessage)
+
+        return await offlineMessageRepository.find({
+            where: { recipientPublicKey: recipientId, status: "pending" },
+        })
+    }
+
+    /**
+     * Delivers offline messages to a peer when they come online
+     * @param ws - The WebSocket connection of the peer
+     * @param peerId - The ID of the peer
+     */
+    private async deliverOfflineMessages(ws: WebSocket, peerId: string) {
+        const offlineMessages = await this.getOfflineMessages(peerId)
+
+        for (const msg of offlineMessages) {
+            ws.send(JSON.stringify({
+                type: "message",
+                payload: {
+                    message: msg.encryptedContent,
+                    fromId: msg.senderPublicKey,
+                    timestamp: Number(msg.timestamp),
+                },
+            }))
+
+            // Mark as delivered
+            const db = await Datasource.getInstance()
+            const offlineMessageRepository = db.getDataSource().getRepository(OfflineMessage)
+            await offlineMessageRepository.update(msg.id, { status: "delivered" })
         }
     }
 
