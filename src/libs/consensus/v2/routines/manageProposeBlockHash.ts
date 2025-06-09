@@ -63,14 +63,21 @@ export default async function manageProposeBlockHash(
         for (const [identity, signature] of Object.entries(
             validationData["signatures"],
         )) {
-            const isValid = await ucrypto.verify({
-                algorithm: getSharedState.signingAlgorithm,
-                message: new TextEncoder().encode(
-                    getSharedState.candidateBlock.hash,
-                ),
-                signature: hexToUint8Array(signature),
-                publicKey: hexToUint8Array(identity),
-            })
+            let isValid = false
+
+            try {
+                isValid = await ucrypto.verify({
+                    algorithm: getSharedState.signingAlgorithm,
+                    message: new TextEncoder().encode(
+                        getSharedState.candidateBlock.hash,
+                    ),
+                    signature: hexToUint8Array(signature),
+                    publicKey: hexToUint8Array(identity),
+                })
+            } catch (e) {
+                log.error("Signature verification failed. Signature not added.")
+                continue
+            }
 
             if (isValid) {
                 getSharedState.candidateBlock.validation_data.signatures[

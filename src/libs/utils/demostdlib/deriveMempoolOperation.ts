@@ -1,8 +1,6 @@
-import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 
-import GCR from "../../blockchain/gcr/gcr"
 import Mempool from "../../blockchain/mempool"
 import { Operation } from "@kynesyslabs/demosdk/types"
 /* eslint-disable no-unused-vars */
@@ -157,6 +155,7 @@ export async function createTransaction(
             from: null,
             to: null,
             amount: null,
+            from_ed25519_address: null,
             data: ["demoswork", null], // type as string and content in hex string
             gcr_edits: [],
             nonce: null, // Increments every time a transaction is sent from the same account
@@ -171,12 +170,13 @@ export async function createTransaction(
         hash: null,
         status: null,
         blockNumber: null,
+        ed25519_signature: null,
     }
     // Setting the type
     transaction.content.type = derivable.type
     // REVIEW Why? Should be done differently I guess
     // Setting us as the sender
-    transaction.content.from = getSharedState.keypair.publicKey
+    transaction.content.from = getSharedState.publicKeyHex
     transaction.content.to = derivable.to
     transaction.content.amount = 0
     transaction.content.nonce = 0

@@ -93,11 +93,18 @@ export default class SharedState {
         genKey?: Uint8Array
     }
     get publicKeyHex(): string {
-        if (this.keypair) {
-            return uint8ArrayToHex(this.keypair.publicKey as Uint8Array)
-        } else {
+        if (!this.keypair?.publicKey) {
             return null
         }
+
+        if (this.keypair.publicKey instanceof Uint8Array) {
+            return uint8ArrayToHex(this.keypair.publicKey)
+        }
+
+        throw new Error(
+            `Unsupported public key type for hex conversion: ${typeof this
+                .keypair.publicKey}`,
+        )
     }
     lastConsensusTime = 0
 

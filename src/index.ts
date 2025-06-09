@@ -232,13 +232,11 @@ async function preMainLoop() {
     getSharedState.keypair = await ucrypto.getIdentity(
         getSharedState.signingAlgorithm,
     )
-    const identity = await ucrypto.getIdentity(getSharedState.signingAlgorithm)
-    console.log(identity)
 
     // const id = getSharedState.identity
     term.green("[BOOTSTRAP] Our identity is ready\n")
     // Log identity
-    const publicKeyHex = uint8ArrayToHex(identity.publicKey as Uint8Array)
+    const publicKeyHex = uint8ArrayToHex(getSharedState.keypair.publicKey as Uint8Array)
     term.green(
         "\n[MAIN] 🔗 WE ARE " + publicKeyHex + " 🔗 \n",
     )

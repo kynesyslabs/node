@@ -11,7 +11,11 @@ import {
 import { DAHR } from "./dahr/DAHR"
 
 import terminalKit from "terminal-kit"
-import { hexToUint8Array, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import {
+    hexToUint8Array,
+    ucrypto,
+    uint8ArrayToHex,
+} from "@kynesyslabs/demosdk/encryption"
 
 const term = terminalKit.terminal
 
@@ -91,18 +95,17 @@ export class Web2RequestManager {
         const attestation: IWeb2Attestation = {
             hash: hashedCombined,
             timestamp: Date.now(),
-            identity: SharedState.getInstance().identity.ed25519.publicKey,
+            identity: getSharedState.keypair.publicKey,
             signature: {
                 type: getSharedState.signingAlgorithm,
-                signature: uint8ArrayToHex(signature.signature),
+                data: uint8ArrayToHex(signature.signature),
             },
             valid: null,
         }
         term.bold("[Web2Parser] Combined Attestation:\n")
         console.log(attestation)
 
-        const hexKey =
-            SharedState.getInstance().identity.ed25519.publicKey.toString("hex")
+        const hexKey = getSharedState.publicKeyHex
 
         // Store the attestation in the web2Request
         web2Request.attestations[hexKey] = attestation
@@ -111,7 +114,7 @@ export class Web2RequestManager {
         web2Request.hash = hashedCombined
         web2Request.signature = {
             type: getSharedState.signingAlgorithm,
-            signature: uint8ArrayToHex(signature.signature),
+            data: uint8ArrayToHex(signature.signature),
         }
 
         // Store the result in the web2Request if it's not already set

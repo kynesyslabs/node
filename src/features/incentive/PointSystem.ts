@@ -4,7 +4,6 @@ import { UserPoints } from "@kynesyslabs/demosdk/abstraction"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import HandleGCR from "@/libs/blockchain/gcr/handleGCR"
-import log from "@/utilities/logger"
 
 const pointValues = {
     LINK_WEB3_WALLET: 2,

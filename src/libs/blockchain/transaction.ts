@@ -78,10 +78,7 @@ export default class Transaction implements ITransaction {
     }
 
     // INFO Given a transaction, sign it with the private key of the sender
-    public static async sign(
-        tx: Transaction,
-        privateKey: forge.pki.ed25519.BinaryBuffer,
-    ): Promise<[boolean, any]> {
+    public static async sign(tx: Transaction): Promise<[boolean, any]> {
         // Check sanity of the structure of the tx object
         if (!tx.content) {
             return [false, "Missing tx.content"]

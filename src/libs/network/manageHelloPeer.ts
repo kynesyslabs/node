@@ -4,8 +4,6 @@ import { getSharedState } from "src/utilities/sharedState"
 import { PeerManager, Peer } from "../peer"
 import log from "src/utilities/logger"
 import _ from "lodash"
-import * as forge from "node-forge"
-import Cryptography from "../crypto/cryptography"
 import { SyncData } from "../peer/Peer"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 
