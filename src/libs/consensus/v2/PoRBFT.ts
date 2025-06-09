@@ -289,20 +289,6 @@ async function initializeShard(): Promise<Peer[]> {
     return await manager.initializeShard(commonValidatorSeed, lastBlockNumber)
 }
 
-// SECTION Checks
-
-/**
- * Check if the local node is in the shard
- *
- * @param shard - The shard members
- * @returns True if the local node is in the shard, false otherwise
- */
-function isInShard(shard: Peer[]): boolean {
-    const ourIdentity =
-        getSharedState.identity.ed25519.publicKey.toString("hex")
-    return shard.some(peer => peer.identity === ourIdentity)
-}
-
 // SECTION Routines
 
 /**
