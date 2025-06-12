@@ -8,7 +8,7 @@ import { INativePayload } from "node_modules/@kynesyslabs/demosdk/build/types/na
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { handleWeb2ProxyRequest } from "../handleWeb2ProxyRequest"
 import handleL2PS from "../handleL2PS"
-import { L2PSMessage } from "src/libs/l2ps/parallelNetworks"
+import { L2PSMessage } from "@/libs/l2ps/parallelNetworks_deprecated"
 import _ from "lodash"
 import handleNativeRequest from "../handleNativeRequest"
 // ? Remove this proxy if possible

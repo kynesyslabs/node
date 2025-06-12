@@ -60,7 +60,8 @@ import {
     ucrypto,
 } from "@kynesyslabs/demosdk/encryption"
 import Mempool from "@/libs/blockchain/mempool"
-import Cryptography from "@/libs/crypto/cryptography"
+import { Cryptography } from "@kynesyslabs/demosdk/encryption"
+import { UnifiedCrypto } from "@kynesyslabs/demosdk/encryption"
 import Hashing from "@/libs/crypto/hashing"
 import { getSharedState } from "@/utilities/sharedState"
 import Datasource from "@/model/datasource"

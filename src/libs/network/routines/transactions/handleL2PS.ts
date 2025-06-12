@@ -4,8 +4,8 @@ import Hashing from "src/libs/crypto/hashing"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "../../server_rpc"
 import _ from "lodash"
-import { L2PSMessage, L2PSRetrieveAllTxMessage, L2PSRegisterTxMessage } from "src/libs/l2ps/parallelNetworks"
-import { Subnet } from "src/libs/l2ps/parallelNetworks"
+import { L2PSMessage, L2PSRetrieveAllTxMessage, L2PSRegisterTxMessage } from "@/libs/l2ps/parallelNetworks_deprecated"
+import { Subnet } from "@/libs/l2ps/parallelNetworks_deprecated"
 /* NOTE
 - Each l2ps is a list of nodes that are part of the l2ps
 - Each l2ps partecipant has the private key of the l2ps (or equivalent)

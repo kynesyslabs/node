@@ -50,7 +50,7 @@ Implementation Plan
       }
   }
 
-  private async storeMessageOnBlockchain(senderId: string, targetId: 
+  private async storeMessageOnBlockchain(senderId: string, targetId:
   string, message: SerializedEncryptedObject) {
       const transaction = new Transaction()
       transaction.content = {
@@ -211,103 +211,143 @@ All features from this plan have been successfully implemented:
 - ✅ Offline message storage, retrieval, and delivery methods
 - ✅ All integration points completed
 
-# PHASE 1.5: L2PS Falcon Migration (PREREQUISITE) # TODO
+# PHASE 1.5: L2PS ML-KEM-AES Integration ✅ READY
 
-### 1.5.1 L2PS Cryptographic Migration # TODO
-**CRITICAL DEPENDENCY**: Current L2PS uses RSA (forge.pki.rsa.KeyPair), must migrate to Falcon first:
+### 1.5.1 Unified Cryptographic Architecture ✅ SDK READY
+**ARCHITECTURE**: ed25519 for authentication + ML-KEM-AES for L2PS transaction encryption:
 
 ```typescript
-// Current L2PS in parallelNetworks.ts:
-private keypair: forge.pki.rsa.KeyPair  // ❌ RSA-based
+// Complete quantum-safe L2PS architecture using @kynesyslabs/demosdk:
+import { UnifiedCrypto } from "@kynesyslabs/demosdk/encryption"
+import { Cryptography } from "@kynesyslabs/demosdk/encryption" // ed25519 auth
 
-// Target L2PS:
-private falconKeyPair: FalconKeyPair    // ✅ Falcon-based  
+// Authentication: ed25519 (proven, fast)
+const authSignature = Cryptography.sign(message, ed25519PrivateKey)
+const isValid = Cryptography.verify(message, authSignature, ed25519PublicKey)
+
+// L2PS Encryption: ML-KEM-AES (quantum-safe)
+const unifiedCrypto = UnifiedCrypto.getInstance(l2ps_uid, masterSeed)
+await unifiedCrypto.generateIdentity("ml-kem-aes", derivedSeed)
+const encryptedTx = await unifiedCrypto.encrypt("ml-kem-aes", txData, peerPublicKey)
+const decryptedTx = await unifiedCrypto.decrypt(encryptedTx)
 ```
 
-### 1.5.2 Falcon Integration Points # TODO
-- **Replace RSA key generation** with Falcon in `Subnet` class
-- **Update L2PS authentication methods** to use Falcon signatures  
-- **Migrate existing L2PS instances** (if any) to new Falcon format
-- **Update L2PS message signing/verification** to use EnhancedCrypto from PQC module
+### 1.5.2 Available ML-KEM-AES Capabilities ✅ COMPLETE
+**Quantum-safe encryption ready for L2PS transactions**:
+- ✅ **Key Encapsulation**: `unifiedCrypto.generateIdentity("ml-kem-aes", seed)`
+- ✅ **Encryption**: `unifiedCrypto.encrypt("ml-kem-aes", data, peerPublicKey)`
+- ✅ **Decryption**: `unifiedCrypto.decrypt(encryptedObject)`
+- ✅ **Shared Secrets**: ML-KEM establishes shared AES keys for subnet access
+- ✅ **Performance**: AES symmetric encryption for high-throughput L2PS operations
 
-### 1.5.3 L2PS-Falcon Interface # TODO
+### 1.5.3 L2PS Architecture: Authentication + Encryption ✅ READY TO CODE
 ```typescript
-// New L2PS Falcon interface
-interface L2PSFalconKeys {
-    publicKey: Uint8Array     // Falcon public key
-    privateKey: Uint8Array    // Falcon private key
-    uid: string              // L2PS identifier (hash of public key)
+// Updated Subnet class with quantum-safe architecture
+export class Subnet {
+    private unifiedCrypto: UnifiedCrypto
+    private subnetMasterSeed: Uint8Array
+    
+    async initializeMLKEM(ed25519Identity: Uint8Array): Promise<void> {
+        // Derive L2PS master seed from ed25519 identity for consistency
+        this.subnetMasterSeed = this.deriveSubnetSeed(ed25519Identity, this.uid)
+        this.unifiedCrypto = UnifiedCrypto.getInstance(this.uid, this.subnetMasterSeed)
+        await this.unifiedCrypto.generateIdentity("ml-kem-aes", this.subnetMasterSeed)
+    }
+    
+    // Replace RSA encryptTransaction with ML-KEM-AES
+    async encryptTransaction(transaction: Transaction, peerPublicKey: Uint8Array): Promise<EncryptedTransaction> {
+        const txData = new TextEncoder().encode(JSON.stringify(transaction))
+        const encryptedObject = await this.unifiedCrypto.encrypt("ml-kem-aes", txData, peerPublicKey)
+        return this.createEncryptedTransaction(encryptedObject)
+    }
+    
+    async decryptTransaction(encryptedTx: EncryptedTransaction): Promise<Transaction> {
+        const decryptedData = await this.unifiedCrypto.decrypt(encryptedTx.encryptedObject)
+        return JSON.parse(new TextDecoder().decode(decryptedData))
+    }
+    
+    getMLKEMPublicKey(): Uint8Array {
+        return this.unifiedCrypto.getIdentity("ml-kem-aes").publicKey
+    }
 }
-
-// Update Subnet class methods:
-setFalconPrivateKey(privateKey: Uint8Array): RPCResponse
-getFalconPublicKey(): Uint8Array  
-signWithFalcon(data: string): string
-verifyFalconSignature(data: string, signature: string, publicKey: Uint8Array): boolean
 ```
 
-### 1.5.4 Backward Compatibility Strategy # TODO
-- **Deprecate RSA methods** gracefully
-- **Support both formats** during transition period (if needed)
-- **Clear migration path** for existing L2PS users
+### 1.5.4 Integration Strategy ✅ HYBRID APPROACH
+- ✅ **ed25519 Authentication**: Keep proven ed25519 for identity/auth layer
+- ✅ **ML-KEM-AES L2PS**: Replace RSA with quantum-safe encryption for L2PS transactions
+- ✅ **Unified SDK**: Use UnifiedCrypto for all ML-KEM-AES operations
+- ✅ **Backward Compatibility**: Maintain RSA support during transition period
 
 # PHASE 2: L2PS-Integrated Messaging System
 
 ## PHASE 2A: L2PS Protocol Integration # TODO
 
 ### 2A.1 WebSocket Protocol Updates # TODO
-Modify messaging protocol to be L2PS-native:
+Modify messaging protocol for L2PS with ML-KEM-AES encryption:
 ```typescript
-// New message format
+// L2PS-aware message format
 interface L2PSMessage {
     type: "message"
     payload: {
         l2ps_id: string                    // REQUIRED - which L2PS subnet
         targetId: string                   // recipient within L2PS
-        message: SerializedEncryptedObject // encrypted content
-        l2ps_signature?: string            // Falcon signature for L2PS auth
+        message: SerializedEncryptedObject // ML-KEM-AES encrypted L2PS transaction
+        auth_signature: string             // ed25519 signature for authentication
     }
 }
 
-// New registration format  
+// Enhanced registration with L2PS capabilities
 interface L2PSRegisterMessage {
     type: "register"
     payload: {
         clientId: string
-        publicKey: Uint8Array
-        verification: SerializedSignedObject
-        l2ps_memberships: L2PSMembership[]  // which L2PS subnets user belongs to
+        publicKey: Uint8Array              // ed25519 public key for authentication
+        verification: SerializedSignedObject // ed25519 signature proof
+        l2ps_memberships: L2PSMembership[]  // ML-KEM public keys for L2PS access
     }
 }
 
 interface L2PSMembership {
     l2ps_id: string
-    falcon_public_key: Uint8Array    // PQC key for this specific L2PS
-    proof_of_membership: string      // signature proving L2PS membership
+    ml_kem_public_key: Uint8Array      // ML-KEM public key for this L2PS subnet
+    access_proof: SerializedSignedObject // ed25519 signature proving right to access L2PS
+    shared_secret_hash: string         // Hash of encapsulated shared secret for verification
 }
 ```
 
 ### 2A.2 L2PS Membership Verification # TODO
-Integrate with existing PQC/Falcon system:
-- Replace RSA-based L2PS auth with Falcon signatures
-- Verify L2PS membership during peer registration
-- Reject messages from non-members to unauthorized L2PS
+Integrate ed25519 authentication with ML-KEM-AES L2PS access:
+- Use ed25519 signatures to verify identity and L2PS access rights
+- Verify ML-KEM public keys match registered L2PS membership during peer registration
+- Reject messages from peers without valid ML-KEM keys for target L2PS
+- Validate shared secret derivation for L2PS transaction decryption
 
 ### 2A.3 SignalingServer L2PS Logic # TODO
-Update core message handling:
+Update core message handling for ML-KEM-AES L2PS transactions:
 ```typescript
 private async handlePeerMessage(ws: WebSocket, payload: L2PSMessage) {
-    // 1. Verify sender is L2PS member
-    const senderMembership = await this.verifyL2PSMembership(senderId, payload.l2ps_id)
-    if (!senderMembership) throw new Error("Not L2PS member")
+    // 1. Verify ed25519 authentication signature
+    const senderId = this.getPeerIdByWebSocket(ws)
+    const authValid = Cryptography.verify(
+        JSON.stringify(payload.message), 
+        payload.auth_signature, 
+        this.peers.get(senderId).ed25519PublicKey
+    )
+    if (!authValid) throw new Error("Invalid authentication")
     
-    // 2. Verify recipient is L2PS member  
-    const recipientMembership = await this.verifyL2PSMembership(payload.targetId, payload.l2ps_id)
-    if (!recipientMembership) throw new Error("Recipient not L2PS member")
+    // 2. Verify sender has ML-KEM access to L2PS
+    const senderL2PSAccess = await this.verifyML_KEM_L2PSAccess(senderId, payload.l2ps_id)
+    if (!senderL2PSAccess) throw new Error("No L2PS access")
     
-    // 3. Store to blockchain (with L2PS context)
-    // 4. Store to database (with L2PS context)
-    // 5. Deliver if online (L2PS members only)
+    // 3. Verify recipient has ML-KEM access to L2PS
+    const recipientL2PSAccess = await this.verifyML_KEM_L2PSAccess(payload.targetId, payload.l2ps_id)
+    if (!recipientL2PSAccess) throw new Error("Recipient no L2PS access")
+    
+    // 4. Store ML-KEM encrypted L2PS transaction to blockchain
+    await this.storeL2PSTransactionOnBlockchain(senderId, payload.targetId, payload.message, payload.l2ps_id)
+    
+    // 5. Store to database with L2PS context
+    // 6. Deliver if online (L2PS members with ML-KEM keys only)
 }
 ```
 
@@ -324,7 +364,7 @@ CREATE INDEX idx_l2ps_recipient ON offline_messages(l2ps_id, recipient_public_ke
 
 ### 2B.2 Entity Updates # TODO
 ```typescript
-@Entity("l2ps_messages") // Rename table to reflect L2PS-native approach
+@Entity("l2ps_messages") // L2PS-native messaging with ML-KEM-AES
 export class L2PSMessage {
     // ... existing fields ...
     
@@ -332,8 +372,14 @@ export class L2PSMessage {
     @Column("text", { name: "l2ps_id" })
     l2psId: string // REQUIRED - every message belongs to an L2PS
     
-    @Column("text", { name: "falcon_signature", nullable: true })
-    falconSignature?: string // PQC signature for L2PS verification
+    @Column("text", { name: "ml_kem_encrypted_content" })
+    mlKemEncryptedContent: string // ML-KEM-AES encrypted L2PS transaction
+    
+    @Column("text", { name: "ed25519_auth_signature" })
+    ed25519AuthSignature: string // ed25519 signature for authentication
+    
+    @Column("text", { name: "shared_secret_hash" })
+    sharedSecretHash: string // Hash of ML-KEM shared secret for verification
 }
 ```
 
@@ -398,9 +444,10 @@ interface L2PSMessageDigest {
 - L2PS-aware cleanup (respect L2PS-specific retention policies)
 
 ### 2D.2 Enhanced Security # TODO
-- Message signature verification using Falcon
-- L2PS membership rotation handling
-- Audit trails for L2PS membership changes
+- Message authentication using ed25519 signatures
+- ML-KEM key rotation for L2PS subnets
+- Audit trails for L2PS membership and key changes
+- Quantum-safe forward secrecy with ML-KEM key refresh
 
 
 # TODO (Future Enhancements)
@@ -409,10 +456,24 @@ interface L2PSMessageDigest {
 - Consider implementing message priority levels
 - Add metrics/logging for message delivery statistics
 
-## Implementation Order (FINAL) # TODO
+## Implementation Order (UPDATED) # TODO
 1. ✅ **Phase 1** (Basic offline messaging) - COMPLETED
-2. 🔄 **Phase 1.5** (L2PS Falcon Migration) - **PREREQUISITE FOR PHASE 2**
-3. 🔄 **Phase 2A** (L2PS Protocol Integration) - WebSocket + membership verification
-4. 🔄 **Phase 2B** (Database Integration) - Schema + storage + universal messaging
-5. 🔄 **Phase 2C** (GCR Integration) - Consensus-time hash computation  
-6. 🔄 **Phase 2D** (Optional Features) - Cleanup + enhanced security
+2. ✅ **Phase 1.5** (L2PS ML-KEM-AES Integration) - **SDK READY, HYBRID ARCHITECTURE**
+3. 🔄 **Phase 2A** (L2PS Protocol Integration) - WebSocket + ML-KEM access verification  
+4. 🔄 **Phase 2B** (Database Integration) - Schema + ML-KEM encrypted storage
+5. 🔄 **Phase 2C** (GCR Integration) - Consensus-time L2PS transaction hashing  
+6. 🔄 **Phase 2D** (Optional Features) - Key rotation + enhanced security
+
+## ARCHITECTURE DECISION ✅
+**Hybrid Quantum-Safe Design**: 
+- **ed25519 for Authentication**: Proven, fast, maintains existing identity system
+- **ML-KEM-AES for L2PS Encryption**: Quantum-safe, high-performance encryption for L2PS transactions
+- **UnifiedCrypto Integration**: Ready-to-use ML-KEM-AES implementation from @kynesyslabs/demosdk
+- **Backward Compatibility**: RSA support maintained during transition period
+
+## KEY BENEFITS ✅
+- **Quantum-Safe L2PS**: ML-KEM-AES protects L2PS transactions against quantum attacks
+- **Performance**: AES symmetric encryption ensures high-throughput L2PS operations
+- **Shared Secrets**: ML-KEM enables efficient shared-key access control for L2PS subnets
+- **Authentication**: ed25519 provides proven, fast identity verification
+- **SDK Ready**: Complete implementation available in UnifiedCrypto
