@@ -98,3 +98,6 @@ src/GTAGS
 output/*
 .env
 bun.lockb
+
+# L2PS files
+data/l2ps/*
