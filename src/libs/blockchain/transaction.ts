@@ -48,36 +48,42 @@ interface TransactionResponse {
 }
 
 export default class Transaction implements ITransaction {
-    content: TransactionContent
-    signature: ISignature
-    ed25519_signature: string
-    hash: string
-    status: string
-    blockNumber: number
-    ed25519_signature: string
+    // Properties automatically follow ITransaction interface
+    content!: TransactionContent
+    signature!: ISignature
+    ed25519_signature!: string
+    hash!: string
+    status!: string
+    blockNumber!: number
 
-    constructor() {
-        this.content = {
-            from_ed25519_address: null,
-            type: null,
-            from: "",
-            from_ed25519_address: "",
-            to: "",
-            amount: null,
-            data: [null, null],
-            gcr_edits: [],
-            nonce: null,
-            timestamp: null,
-            transaction_fee: {
-                network_fee: null,
-                rpc_fee: null,
-                additional_fee: null,
+    constructor(data?: Partial<ITransaction>) {
+        // Initialize with defaults or provided data
+        Object.assign(this, {
+            content: {
+                from_ed25519_address: null,
+                type: null,
+                from: "",
+                to: "",
+                amount: null,
+                data: [null, null],
+                gcr_edits: [],
+                nonce: null,
+                timestamp: null,
+                transaction_fee: {
+                    network_fee: null,
+                    rpc_fee: null,
+                    additional_fee: null,
+                },
             },
-        }
-        this.signature = null
-        this.hash = null
-        this.status = null
+            signature: null,
+            ed25519_signature: null,
+            hash: null,
+            status: null,
+            blockNumber: null,
+            ...data,
+        })
     }
+
 
     // INFO Given a transaction, sign it with the private key of the sender
     public static async sign(tx: Transaction): Promise<[boolean, any]> {
@@ -480,11 +486,9 @@ export default class Transaction implements ITransaction {
             content: JSON.stringify(tx.content),
             type: tx.content.type,
             from_ed25519_address: tx.content.from_ed25519_address,
-            ed25519_signature: tx.ed25519_signature,
             
             to: tx.content.to,
             from: tx.content.from,
-            from_ed25519_address: tx.content.from_ed25519_address,
             amount: tx.content.amount,
             nonce: tx.content.nonce,
             timestamp: tx.content.timestamp,
