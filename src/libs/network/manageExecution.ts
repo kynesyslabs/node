@@ -18,16 +18,6 @@ export async function manageExecution(
     console.log("[serverListeners] content.type: " + content.type)
     console.log("[serverListeners] content.extra: " + content.extra)
 
-    if (content.type === "l2ps") {
-        const response = await ServerHandlers.handleL2PS(content.data)
-        if (response.result !== 200) {
-            term.red.bold(
-                "[SERVER] Error while handling L2PS request, aborting",
-            )
-        }
-        return response
-    }
-
     // TODO Better to modularize this
     // REVIEW We use the 'extra' field to see if it is a confirmTx request (prior to execution)
     // or an broadcastTx request (to execute the transaction after gas cost is calculated).

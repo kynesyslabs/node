@@ -72,6 +72,10 @@ export default class SharedState {
     }
 
     peerRoutineRunning = 0
+
+    // SECTION L2PS
+    l2psJoinedUids: string[] = [] // UIDs of the L2PS networks that are joined to the node (loaded from the data directory)
+
     // SECTION shared state variables
     shard: Peer[]
     lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard

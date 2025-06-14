@@ -15,7 +15,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool_v2"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
-import Transaction from "src/libs/blockchain/transaction"
+import { Transaction } from "@kynesyslabs/demosdk/types"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import handleL2PS from "./routines/transactions/handleL2PS"
@@ -44,8 +44,7 @@ import { forgeToHex } from "../crypto/forgeUtils"
 import { Peer } from "../peer"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
-import { SubnetPayload } from "@kynesyslabs/demosdk/l2ps"
-import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks_deprecated"
+import { L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
@@ -142,10 +141,10 @@ export default class ServerHandlers {
             const hashedValidationData = Hashing.sha256(
                 JSON.stringify(validationData.data),
             )
-            validationData.signature = Cryptography.sign(
-                hashedValidationData,
-                getSharedState.identity.ed25519.privateKey,
-            )
+            validationData.signature = {
+                type: "ed25519",
+                data: getSharedState.identity.ed25519.privateKey.toString("hex"),
+            }
         }
 
         term.bold.white(fname + "Transaction handled.")
@@ -327,7 +326,7 @@ export default class ServerHandlers {
                     "[handleExecuteTransaction] Subnet payload: " + payload[1],
                 )
                 var subnetResult = await ServerHandlers.handleSubnetTx(
-                    payload[1] as SubnetPayload,
+                    tx,
                 )
                 result.response = subnetResult
                 break
@@ -527,36 +526,10 @@ export default class ServerHandlers {
     }
 
     // NOTE If we receive a SubnetPayload, we use handleL2PS to register the transaction
-    static async handleSubnetTx(content: SubnetPayload) {
+    static async handleSubnetTx(content: Transaction) {
         let response: RPCResponse = _.cloneDeep(emptyResponse)
-        const payload: L2PSRegisterTxMessage = {
-            type: "registerTx",
-            data: {
-                uid: content.uid,
-                encryptedTransaction: content.data,
-            },
-            extra: "register",
-        }
-        response = await handleL2PS(payload)
+        response = await handleL2PS(content)
         return response
-    }
-
-    // Proxy method for handleL2PS, used for non encrypted L2PS Calls
-    // TODO Implement this in server_rpc, this is not a tx
-    static async handleL2PS(content: L2PSMessage): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
-        // REVIEW Refuse registerTx calls as they are managed in endpointHandlers.ts
-        if (content.type === "registerTx") {
-            response.result = 400
-            response.response = false
-            response.extra = "registerTx calls should be sent in a Transaction"
-            return response
-        }
-        // REVIEW Refuse registerAsPartecipant calls as they are managed in endpointHandlers.ts
-        if (content.type === "registerAsPartecipant") {
-            response = await handleL2PS(content)
-            return response
-        }
     }
 
     static async handleConsensusRequest(
