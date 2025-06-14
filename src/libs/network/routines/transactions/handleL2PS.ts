@@ -1,11 +1,11 @@
-import type { BlockContent, EncryptedTransaction } from "@kynesyslabs/demosdk/types"
+import type { BlockContent, L2PSTransaction, Transaction } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
 import Hashing from "src/libs/crypto/hashing"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "../../server_rpc"
 import _ from "lodash"
-import { L2PSMessage, L2PSRetrieveAllTxMessage, L2PSRegisterTxMessage } from "@/libs/l2ps/parallelNetworks_deprecated"
-import { Subnet } from "@/libs/l2ps/parallelNetworks_deprecated"
+import { L2PS, L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
+import { Cryptography } from "@kynesyslabs/demosdk/encryption"
 /* NOTE
 - Each l2ps is a list of nodes that are part of the l2ps
 - Each l2ps partecipant has the private key of the l2ps (or equivalent)
@@ -19,42 +19,32 @@ import { Subnet } from "@/libs/l2ps/parallelNetworks_deprecated"
 
 
 export default async function handleL2PS(
-    content: L2PSMessage,
+    l2psTx: L2PSTransaction,
 ): Promise<RPCResponse> {
     // ! TODO Finalize the below TODOs
-    let response = _.cloneDeep(emptyResponse)
-    const data = content.data
-    // REVIEW Defining a subnet from the uid
-    const subnet: Subnet = new Subnet(content.data.uid)
-    // REVIEW Experimental type tightening
-    let payloadContent: L2PSRetrieveAllTxMessage | L2PSRegisterTxMessage
-    switch (content.extra) {
-        case "retrieve":
-            // TODO
-            break
-        // This will retrieve all the transactions from the L2PS on a given block
-        case "retrieveAll":
-            payloadContent = content as L2PSRetrieveAllTxMessage
-            response = await subnet.getTransactions(payloadContent.data.blockNumber)
-            return response
-        // This will register a transaction in the L2PS
-        case "registerTx":
-            payloadContent = content as L2PSRegisterTxMessage
-            var encryptedTxData: EncryptedTransaction =
-                payloadContent.data.encryptedTransaction
-            // REVIEW Using the subnet to register the transaction
-            response = await subnet.registerTx(encryptedTxData)
-            return response
-        // SECTION Management methods
-        case "registerAsPartecipant":
-            // TODO
-            break
-        default:
-            // TODO
-            response.result = 400
-            response.response = "error"
-            response.require_reply = true
-            response.extra = "Invalid extra"
-            return response
+    const response = _.cloneDeep(emptyResponse)
+    // TODO Defining a subnet from the uid: checking if we have the config
+    var key = null
+    var iv = null
+    // REVIEW Once we have the config, we should create a new L2PS instance and use it to decrypt the data
+    const l2ps = await L2PS.create(key, iv)
+    const decryptedTx = await l2ps.decryptTx(l2psTx)
+    // NOTE Hash is already verified in the decryptTx function (sdk)
+    // REVIEW Verify the signature of the decrypted transaction
+    const from = decryptedTx.content.from
+    const signature = decryptedTx.ed25519_signature
+    const derivedHash = Hashing.sha256(JSON.stringify(decryptedTx.content)) // REVIEW This should be ok, check anyway
+    // REVIEW We have to re-verify this one as confirmTransaction just confirm the encrypted tx
+    const verified = Cryptography.verify(derivedHash, signature, from)
+    if (!verified) {
+        response.result = 400
+        response.response = false
+        response.extra = "Signature verification failed"
+        return response
     }
+    // TODO Add the encrypted transaction (NOT the decrypted one) to the local L2PS mempool
+    // TODO Is the execution to be delegated to the l2ps nodes? As it cannot be done by the consensus as it will be in the future for the other txs
+    response.result = 200
+    response.response = decryptedTx
+    return response
 }
