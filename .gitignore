@@ -101,3 +101,6 @@ bun.lockb
 
 # L2PS files
 data/l2ps/*
+
+# Claude specific files
+CLAUDE.md
