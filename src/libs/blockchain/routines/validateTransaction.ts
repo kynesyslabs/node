@@ -54,8 +54,10 @@ export async function confirmTransaction(
             transaction: tx,
         },
         signature: null,
-        rpc_public_key: getSharedState.identity.ed25519
-            .publicKey as pki.ed25519.BinaryBuffer,
+        rpc_public_key: {
+            type: "ed25519",
+            data: getSharedState.identity.ed25519.publicKey.toString(),
+        },
     }
     /* REVIEW We are not using this method anymore, GCREdits take care of the gas operation
     let gas_operation: Operation
@@ -110,7 +112,10 @@ export async function confirmTransaction(
 async function signValidityData(data: ValidityData): Promise<ValidityData> {
     const privateKey = getSharedState.identity.ed25519.privateKey
     const hash = Hashing.sha256(JSON.stringify(data.data))
-    data.signature = Cryptography.sign(hash, privateKey)
+    data.signature = {
+        type: "ed25519",
+        data: privateKey.toString(),
+    }
     return data
 }
 
@@ -146,7 +151,10 @@ async function defineGas(
         // Hash the validation data
         const hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
-        validityData.signature = Cryptography.sign(hash, privateKey)
+        validityData.signature = {
+            type: "ed25519",
+            data: privateKey.toString(),
+        }
         return [false, validityData]
     }
     let fromBalance = 0
@@ -165,7 +173,10 @@ async function defineGas(
         // Hash the validation data
         const hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
-        validityData.signature = Cryptography.sign(hash, privateKey)
+        validityData.signature = {
+            type: "ed25519",
+            data: privateKey.toString(),
+        }
         return [false, validityData]
     }
     // TODO Work on this method
@@ -190,7 +201,10 @@ async function defineGas(
         // Hash the validation data
         const hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
-        validityData.signature = Cryptography.sign(hash, privateKey)
+        validityData.signature = {
+            type: "ed25519",
+            data: privateKey.toString(),
+        }
         return [false, validityData]
     }
 

@@ -42,12 +42,14 @@ interface TransactionResponse {
 export default class Transaction implements ITransaction {
     content: TransactionContent
     signature: ISignature
+    ed25519_signature: string
     hash: string
     status: string
     blockNumber: number
 
     constructor() {
         this.content = {
+            from_ed25519_address: null,
             type: null,
             from: null,
             to: null,
@@ -100,8 +102,8 @@ export default class Transaction implements ITransaction {
         // verify using identity.cryptography.verify(tx.content, tx.signature, publicKey)
         const verified = Cryptography.verify(
             JSON.stringify(tx.content),
-            tx.signature.data.toString("hex"),
-            tx.content.from.toString("hex"),
+            tx.signature.data,
+            tx.content.from,
         )
         return [verified, "Result of verify()"]
     }
@@ -378,6 +380,9 @@ export default class Transaction implements ITransaction {
             hash: tx.hash,
             content: JSON.stringify(tx.content),
             type: tx.content.type,
+            from_ed25519_address: tx.content.from_ed25519_address,
+            ed25519_signature: tx.ed25519_signature,
+            
             to: tx.content.to,
             from: tx.content.from,
             amount: tx.content.amount,
@@ -404,7 +409,7 @@ export default class Transaction implements ITransaction {
         tx.blockNumber = rawTx.blockNumber
         tx.signature = {
             type: "ed25519", // Assuming the signature type as ed25519; adjust accordingly
-            data: Buffer.from(rawTx.signature, "hex"),
+            data: rawTx.signature,
         }
         tx.status = rawTx.status
         tx.hash = rawTx.hash
@@ -414,8 +419,9 @@ export default class Transaction implements ITransaction {
                 | "crosschainOperation"
                 | "demoswork" // ! Remove this horrible thing when possible
                 | "NODE_ONLINE",
-            from: Buffer.from(rawTx.from, "hex"),
-            to: Buffer.from(rawTx.to, "hex"),
+            from: rawTx.from,
+            to: rawTx.to,
+            from_ed25519_address: rawTx.from_ed25519_address,
             amount: rawTx.amount,
             nonce: rawTx.nonce,
             timestamp: rawTx.timestamp,
