@@ -1,11 +1,10 @@
-import type { BlockContent, L2PSTransaction, Transaction } from "@kynesyslabs/demosdk/types"
+import type { BlockContent, L2PSTransaction } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
-import Hashing from "src/libs/crypto/hashing"
+import Transaction from "src/libs/blockchain/transaction"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "../../server_rpc"
 import _ from "lodash"
 import { L2PS, L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
-import { Cryptography } from "@kynesyslabs/demosdk/encryption"
 /* NOTE
 - Each l2ps is a list of nodes that are part of the l2ps
 - Each l2ps partecipant has the private key of the l2ps (or equivalent)
@@ -26,20 +25,20 @@ export default async function handleL2PS(
     // TODO Defining a subnet from the uid: checking if we have the config
     var key = null
     var iv = null
-    // REVIEW Once we have the config, we should create a new L2PS instance and use it to decrypt the data
+    // Once we have the config, we should create a new L2PS instance and use it to decrypt the data
     const l2ps = await L2PS.create(key, iv)
     const decryptedTx = await l2ps.decryptTx(l2psTx)
     // NOTE Hash is already verified in the decryptTx function (sdk)
-    // REVIEW Verify the signature of the decrypted transaction
-    const from = decryptedTx.content.from
-    const signature = decryptedTx.ed25519_signature
-    const derivedHash = Hashing.sha256(JSON.stringify(decryptedTx.content)) // REVIEW This should be ok, check anyway
-    // REVIEW We have to re-verify this one as confirmTransaction just confirm the encrypted tx
-    const verified = Cryptography.verify(derivedHash, signature, from)
-    if (!verified) {
+    
+    // NOTE Re-verify the decrypted transaction signature using the same method as other transactions
+    // This is necessary because the L2PS transaction was encrypted and bypassed initial verification.
+    // The encrypted L2PSTransaction was verified, but we need to verify the underlying Transaction
+    // after decryption to ensure integrity of the actual transaction content.
+    const verificationResult = await Transaction.confirmTx(decryptedTx, decryptedTx.content.from)
+    if (!verificationResult) {
         response.result = 400
         response.response = false
-        response.extra = "Signature verification failed"
+        response.extra = "Transaction signature verification failed"
         return response
     }
     // TODO Add the encrypted transaction (NOT the decrypted one) to the local L2PS mempool
