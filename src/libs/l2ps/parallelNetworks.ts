@@ -1,4 +1,3 @@
-// FIXME Add endpoints for server_rpc.ts to handle L2PS transactions with this module
 // FIXME Add L2PS private mempool logic with L2PS mempool/txs hash in the global GCR for integrity
 // FIXME Add L2PS Sync in Sync.ts (I guess)
 
@@ -14,27 +13,51 @@ import {
 import { L2PSTransaction, Transaction } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 
+/**
+ * Configuration interface for an L2PS node.
+ * @interface L2PSNodeConfig
+ */
 interface L2PSNodeConfig {
+    /** Unique identifier for the L2PS node */
     uid: string
+    /** Display name of the L2PS node */
     name: string
+    /** Optional description of the L2PS node */
     description?: string
+    /** Configuration parameters for the L2PS node */
     config: {
+        /** Block number when the L2PS node was created */
         created_at_block: number
+        /** List of known RPC endpoints for the network */
         known_rpcs: string[]
+        /** Optional network-specific parameters */
         network_params?: {
+            /** Maximum number of transactions per block */
             max_tx_per_block?: number
+            /** Block time in milliseconds */
             block_time_ms?: number
+            /** Consensus threshold for block validation */
             consensus_threshold?: number
         }
     }
+    /** Key configuration for encryption/decryption */
     keys: {
+        /** Path to the private key file */
         private_key_path: string
+        /** Path to the initialization vector file */
         iv_path: string
     }
+    /** Whether the L2PS node is enabled */
     enabled: boolean
+    /** Whether the L2PS node should start automatically */
     auto_start?: boolean
 }
 
+/**
+ * Manages parallel L2PS (Layer 2 Private System) networks.
+ * This class implements the Singleton pattern to ensure only one instance exists.
+ * It handles loading, managing, and processing L2PS networks and their transactions.
+ */
 export default class ParallelNetworks {
     private static instance: ParallelNetworks
     private l2pses: Map<string, L2PS> = new Map()
@@ -42,6 +65,10 @@ export default class ParallelNetworks {
 
     private constructor() {}
 
+    /**
+     * Gets the singleton instance of ParallelNetworks.
+     * @returns {ParallelNetworks} The singleton instance
+     */
     static getInstance(): ParallelNetworks {
         if (!ParallelNetworks.instance) {
             ParallelNetworks.instance = new ParallelNetworks()
@@ -49,6 +76,12 @@ export default class ParallelNetworks {
         return ParallelNetworks.instance
     }
 
+    /**
+     * Loads an L2PS network configuration and initializes it.
+     * @param {string} uid - The unique identifier of the L2PS network
+     * @returns {Promise<L2PS>} The initialized L2PS instance
+     * @throws {Error} If the configuration is invalid or required files are missing
+     */
     async loadL2PS(uid: string): Promise<L2PS> {
         if (this.l2pses.has(uid)) {
             return this.l2pses.get(uid) as L2PS
@@ -98,6 +131,11 @@ export default class ParallelNetworks {
         return l2ps
     }
 
+    /**
+     * Attempts to get an L2PS instance, loading it if necessary.
+     * @param {string} uid - The unique identifier of the L2PS network
+     * @returns {Promise<L2PS | undefined>} The L2PS instance if successful, undefined otherwise
+     */
     async getL2PS(uid: string): Promise<L2PS | undefined> {
         try {
             return await this.loadL2PS(uid)
@@ -107,10 +145,18 @@ export default class ParallelNetworks {
         }
     }
 
+    /**
+     * Gets all currently loaded L2PS network IDs.
+     * @returns {string[]} Array of L2PS network IDs
+     */
     getAllL2PSIds(): string[] {
         return Array.from(this.l2pses.keys())
     }
 
+    /**
+     * Loads all available L2PS networks from the data directory.
+     * @returns {Promise<string[]>} Array of successfully loaded L2PS network IDs
+     */
     async loadAllL2PS(): Promise<string[]> {
         var l2psJoinedUids = []
         const l2psDir = path.join(process.cwd(), "data", "l2ps")
@@ -140,12 +186,10 @@ export default class ParallelNetworks {
 
     /**
      * Encrypts a transaction for the specified L2PS network.
-     * Returns a new Transaction object containing the encrypted data.
-     * 
-     * @param uid - The L2PS network UID
-     * @param tx - The original transaction to encrypt
-     * @param senderIdentity - Optional sender identity for the encrypted transaction wrapper
-     * @returns Promise resolving to an encrypted Transaction object
+     * @param {string} uid - The L2PS network UID
+     * @param {Transaction} tx - The original transaction to encrypt
+     * @param {any} [senderIdentity] - Optional sender identity for the encrypted transaction wrapper
+     * @returns {Promise<Transaction>} A new Transaction object containing the encrypted data
      */
     async encryptTransaction(
         uid: string,
@@ -159,10 +203,9 @@ export default class ParallelNetworks {
 
     /**
      * Decrypts an L2PS encrypted transaction.
-     * 
-     * @param uid - The L2PS network UID
-     * @param encryptedTx - The encrypted Transaction object
-     * @returns Promise resolving to the original decrypted Transaction
+     * @param {string} uid - The L2PS network UID
+     * @param {L2PSTransaction} encryptedTx - The encrypted Transaction object
+     * @returns {Promise<Transaction>} The original decrypted Transaction
      */
     async decryptTransaction(
         uid: string,
@@ -175,9 +218,8 @@ export default class ParallelNetworks {
 
     /**
      * Checks if a transaction is an L2PS encrypted transaction.
-     * 
-     * @param tx - The transaction to check
-     * @returns True if the transaction is of type l2psEncryptedTx
+     * @param {L2PSTransaction} tx - The transaction to check
+     * @returns {boolean} True if the transaction is of type l2psEncryptedTx
      */
     isL2PSTransaction(tx: L2PSTransaction): boolean {
         return tx.content.type === "l2psEncryptedTx"
@@ -185,9 +227,8 @@ export default class ParallelNetworks {
 
     /**
      * Extracts the L2PS UID from an encrypted transaction.
-     * 
-     * @param tx - The encrypted transaction
-     * @returns The L2PS UID if valid, undefined otherwise
+     * @param {L2PSTransaction} tx - The encrypted transaction
+     * @returns {string | undefined} The L2PS UID if valid, undefined otherwise
      */
     getL2PSUidFromTransaction(tx: L2PSTransaction): string | undefined {
         if (!this.isL2PSTransaction(tx)) {
@@ -208,11 +249,9 @@ export default class ParallelNetworks {
     }
 
     /**
-     * TODO: Process an L2PS transaction in the mempool.
-     * This function will be called when an L2PS encrypted transaction is received.
-     * 
-     * @param tx - The L2PS encrypted transaction to process
-     * @returns Promise resolving to processing result or error
+     * Processes an L2PS transaction in the mempool.
+     * @param {L2PSTransaction} tx - The L2PS encrypted transaction to process
+     * @returns {Promise<{success: boolean, error?: string, l2ps_uid?: string, processed?: boolean}>} Processing result
      */
     async processL2PSTransaction(tx: L2PSTransaction): Promise<{
         success: boolean
@@ -274,14 +313,29 @@ export default class ParallelNetworks {
         }
     }
 
+    /**
+     * Gets the configuration for a specific L2PS network.
+     * @param {string} uid - The L2PS network UID
+     * @returns {L2PSNodeConfig | undefined} The L2PS network configuration if found
+     */
     getL2PSConfig(uid: string): L2PSNodeConfig | undefined {
         return this.configs.get(uid)
     }
 
+    /**
+     * Checks if an L2PS network is currently loaded.
+     * @param {string} uid - The L2PS network UID
+     * @returns {boolean} True if the L2PS network is loaded
+     */
     isL2PSLoaded(uid: string): boolean {
         return this.l2pses.has(uid)
     }
 
+    /**
+     * Unloads an L2PS network and removes its configuration.
+     * @param {string} uid - The L2PS network UID
+     * @returns {boolean} True if the L2PS network was successfully unloaded
+     */
     unloadL2PS(uid: string): boolean {
         this.configs.delete(uid)
         return this.l2pses.delete(uid)
