@@ -4,6 +4,7 @@ import axios from "axios"
 import { getSharedState } from "src/utilities/sharedState"
 import Cryptography from "../crypto/cryptography"
 import { NodeCall } from "../network/manageNodeCall"
+import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
 export interface SyncData {
     status: boolean
@@ -39,7 +40,7 @@ export default class Peer {
     get isLocalNode(): boolean {
         return (
             this.identity ===
-            getSharedState.identity.ed25519.publicKey.toString("hex")
+            uint8ArrayToHex(getSharedState.keypair.publicKey as Uint8Array)
         )
     }
 
@@ -181,16 +182,22 @@ export default class Peer {
      */
     async authenticatedCallMaker(request: RPCRequest): Promise<RPCRequest> {
         // Signing our identity to send the request
-        const bufferSignature = await Cryptography.sign(
-            getSharedState.identity.ed25519.publicKey.toString("hex"),
-            getSharedState.identity.ed25519.privateKey,
+        const ourPublicKey = (
+            await ucrypto.getIdentity(getSharedState.signingAlgorithm)
+        ).publicKey
+        const hexPublicKey = uint8ArrayToHex(ourPublicKey as Uint8Array)
+        const bufferSignature = await ucrypto.sign(
+            getSharedState.signingAlgorithm,
+            new TextEncoder().encode(hexPublicKey),
         )
+        const hexSignature = uint8ArrayToHex(bufferSignature.signature)
+
         // Adding the public key at the beginning of the params
         request.params.unshift(
-            getSharedState.identity.ed25519.publicKey.toString("hex"),
+            getSharedState.signingAlgorithm + ":" + hexPublicKey,
         )
         // Adding the signature at the end of the params
-        request.params.push(bufferSignature.toString("hex"))
+        request.params.push(hexSignature)
         return request
     }
 
@@ -222,13 +229,21 @@ export default class Peer {
         // Prepare a request with our identity
         let pubkey = ""
         let signature = ""
+
         if (isAuthenticated) {
-            pubkey = getSharedState.identity.ed25519.publicKey.toString("hex")
-            signature = Cryptography.sign(
-                pubkey,
-                getSharedState.identity.ed25519.privateKey,
-            ).toString("hex")
+            const ourPublicKey = (
+                await ucrypto.getIdentity(getSharedState.signingAlgorithm)
+            ).publicKey
+            const hexPublicKey = uint8ArrayToHex(ourPublicKey as Uint8Array)
+            const bufferSignature = await ucrypto.sign(
+                getSharedState.signingAlgorithm,
+                new TextEncoder().encode(hexPublicKey),
+            )
+
+            pubkey = getSharedState.signingAlgorithm + ":" + hexPublicKey
+            signature = uint8ArrayToHex(bufferSignature.signature)
         }
+
         // REVIEW Using the connection string as the url with the new format
         let connectionUrl = this.connection.string
 

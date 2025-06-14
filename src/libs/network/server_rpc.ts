@@ -4,12 +4,12 @@
 import {
     BrowserRequest,
     BundleContent,
+    Ed25519SignedObject,
     RPCRequest,
     RPCResponse,
 } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import sharedState, { getSharedState } from "src/utilities/sharedState"
-import Cryptography from "../crypto/cryptography"
 import { PeerManager } from "../peer"
 import ServerHandlers from "./endpointHandlers"
 import { AuthMessage, manageAuth } from "./manageAuth"
@@ -23,6 +23,9 @@ import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyR
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import manageBridges from "./manageBridge"
 import { BunServer, cors, json, jsonResponse } from "./bunServer"
+import { ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { signedObject } from "@kynesyslabs/demosdk/types"
+import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import { bridge } from "@kynesyslabs/demosdk"
 import { manageNativeBridge } from "./manageNativeBridge"
 // Reading the port from sharedState
@@ -63,13 +66,9 @@ function isRPCRequest(obj: any): obj is RPCRequest {
 }
 
 // Validate the headers
-function validateHeaders(headers: Headers): [boolean, string] {
+async function validateHeaders(headers: Headers): Promise<[boolean, string]> {
     // Check if we have a valid signature and identity header
-    log.info("[RPC Call] Validating headers...") // + JSON.stringify(headers, null, 2))    
     if (!headers.get("signature")) {
-        log.error("[RPC Call] Missing signature header")
-        log.info("[RPC Call] Headers: " + JSON.stringify(headers, null, 2), true)
-        //process.exit(0)
         return [false, "Missing signature header"]
     }
     if (!headers.get("identity")) {
@@ -80,14 +79,51 @@ function validateHeaders(headers: Headers): [boolean, string] {
     const signature = headers.get("signature") as string
     const identity = headers.get("identity") as string
     const message = identity
-    const isValid = Cryptography.verify(message, signature, identity)
-    if (!isValid) {
-        log.error("[RPC Call] Invalid signature for: " + identity)
-        return [false, "Invalid signature"]
+
+    const splits = identity.split(":")
+
+    let isValid = false
+    let signatureObj: signedObject
+    const supportedAlgorithms = ["ed25519", "falcon", "ml-dsa"]
+
+    if (splits.length > 1) {
+        // INFO: Handle Ed25519 signatures
+        if (supportedAlgorithms.includes(splits[0])) {
+            const publicKey = hexToUint8Array(splits[1])
+            const _signature = hexToUint8Array(signature)
+
+            signatureObj = {
+                algorithm: splits[0],
+                signature: _signature,
+                message: new TextEncoder().encode(splits[1]),
+                publicKey: publicKey,
+            } as Ed25519SignedObject
+        }
+
+        // TODO: Handle other signature algorithms
     } else {
-        log.info("[RPC Call] Headers are valid for: " + identity)
+        signatureObj = {
+            algorithm: "ed25519",
+            signature: hexToUint8Array(signature),
+            message: new TextEncoder().encode(message),
+            publicKey: hexToUint8Array(identity),
+        } as Ed25519SignedObject
     }
-    return [true, ""]
+
+    if (!signatureObj) {
+        log.error("[RPC Call] Invalid signature object")
+        return [false, "Unsupported or malformed identity or signature header"]
+    }
+
+    isValid = await ucrypto.verify(signatureObj)
+
+    if (isValid) {
+        log.info("[RPC Call] Headers are valid for: " + identity)
+        return [true, "Signature validated"]
+    }
+
+    log.error("[RPC Call] Invalid signature for: " + identity)
+    return [false, "Invalid signature"]
 }
 
 /* End of helper functions */
@@ -98,6 +134,10 @@ async function processPayload(
     payload: RPCRequest,
     sender: string,
 ): Promise<RPCResponse> {
+    const splits = sender.split(":")
+    if (splits.length > 1) {
+        sender = splits[1]
+    }
     // Payloads management
     switch (payload.method) {
         case "ping":
@@ -108,13 +148,18 @@ async function processPayload(
                 extra: null,
             }
         case "execute":
-            return await manageExecution(payload.params[0] as BundleContent)
+            return await manageExecution(
+                payload.params[0] as BundleContent,
+                sender,
+            )
         case "nativeBridge":
             /**
              * TODO & REVIEW The NativeBridgeOperation is sent to the handler to obtain a response
              * that includes the compiled operation, so that the client can generate a proper transaction
              */
-            return await manageNativeBridge(payload.params[0] as bridge.NativeBridgeOperation)
+            return await manageNativeBridge(
+                payload.params[0] as bridge.NativeBridgeOperation,
+            )
         case "hello_peer": // As it is authenticated, we can use it to check if the peer is still alive and is in our peer list
             var helloPeerRequest = payload.params[0] as HelloPeerRequest
             return await manageHelloPeer(
@@ -153,8 +198,12 @@ async function processPayload(
             )
         /* !SECTION Possibly deprecated methods */
 
-        case "consensus_routine": // ? Change in consensus once we have the new consensus mechanism
-            return await manageConsensusRoutines(payload.params[0])
+        case "consensus_routine": {
+            // ? Change in consensus once we have the new consensus mechanism
+            // TODO: Remove signature verification from secretary manager and manageConsensusRoutines
+            // and handle the checks here - before calling manageConsensusRoutines.
+            return await manageConsensusRoutines(sender, payload.params[0])
+        }
 
         case "gcr_routine":
             return await manageGCRRoutines(sender, payload.params[0])
@@ -182,10 +231,9 @@ async function processPayload(
 }
 /* End of processor method */
 
-
 /**
  *  HTTP server using Bun
- */ 
+ */
 
 export async function serverRpcBun() {
     const port = getSharedState.serverPort
@@ -196,7 +244,7 @@ export async function serverRpcBun() {
     server.use(json())
 
     // GET endpoints
-    server.get("/", () => new Response("{\"message\": \"Hello, World!\"}"))
+    server.get("/", () => new Response('{"message": "Hello, World!"}'))
 
     server.get("/info", async () => {
         const info = await sharedState.getInstance().getInfo()
@@ -209,9 +257,7 @@ export async function serverRpcBun() {
 
     server.get("/version", () => jsonResponse(getSharedState.version))
 
-    server.get("/publickey", () =>
-        jsonResponse(getSharedState.identity.ed25519.publicKey.toString("hex")),
-    )
+    server.get("/publickey", () => jsonResponse(getSharedState.publicKeyHex))
 
     server.get("/connectionstring", async () =>
         jsonResponse(await getSharedState.getConnectionString()),
@@ -227,6 +273,8 @@ export async function serverRpcBun() {
 
     // Main RPC endpoint
     server.post("/", async req => {
+        console.log("req", req)
+
         try {
             const payload = await req.json()
             if (!isRPCRequest(payload)) {
@@ -246,7 +294,12 @@ export async function serverRpcBun() {
                     "[RPC Call] Headers: " + JSON.stringify(headers, null, 2),
                     true,
                 )
-                const headerValidation = validateHeaders(headers)
+                const headerValidation = await validateHeaders(headers)
+                console.log("headerValidation", headerValidation)
+                console.log(
+                    "headerValidation: " +
+                        JSON.stringify(headerValidation, null, 2),
+                )
                 if (!headerValidation[0]) {
                     return jsonResponse(
                         { error: "Invalid headers:" + headerValidation[1] },
@@ -266,4 +319,3 @@ export async function serverRpcBun() {
     log.info("[RPC Call] Server is running on 0.0.0.0:" + port, true)
     return server.start()
 }
-

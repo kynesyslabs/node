@@ -3,7 +3,7 @@ import { GithubProofParser } from "./web2/github"
 import { TwitterProofParser } from "./web2/twitter"
 import { type Web2ProofParser } from "./web2/parsers"
 import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
-import { forgeToHex } from "../crypto/forgeUtils"
+import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 
 /**
  * Fetches the proof data using the appropriate parser and verifies the signature
@@ -34,23 +34,30 @@ export async function verifyWeb2Proof(
     const instance = await parser.getInstance()
 
     try {
-        const { message, publicKey, signature } = await instance.readData(
+        const { message, type, signature } = await instance.readData(
             payload.proof,
         )
+        try {
+            const verified = await ucrypto.verify({
+                algorithm: type,
+                message: new TextEncoder().encode(message),
+                publicKey: hexToUint8Array(sender),
+                signature: hexToUint8Array(signature),
+            })
 
-        sender = forgeToHex(sender)
-        if (sender !== publicKey) {
+            return {
+                success: verified,
+                message: verified
+                    ? `Verified ${payload.context} proof`
+                    : `Failed to verify ${payload.context} proof`,
+            }
+        } catch (error: any) {
             return {
                 success: false,
-                message:
-                    "Unable to verify proof: public key does not match sender",
+                message: `Failed to verify ${
+                    payload.context
+                } proof: ${error.toString()}`,
             }
-        }
-        const verified = Cryptography.verify(message, signature, publicKey)
-
-        return {
-            success: verified,
-            message: `Verified ${payload.context} proof`,
         }
     } catch (error: any) {
         console.error(error)

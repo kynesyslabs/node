@@ -86,7 +86,7 @@ export class DAHR {
         })
 
         const attestedResult =
-            web2RequestManager.getAttestedResult(web2Response)
+            await web2RequestManager.getAttestedResult(web2Response)
 
         return {
             ...attestedResult,

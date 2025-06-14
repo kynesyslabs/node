@@ -28,25 +28,27 @@ export default async function manageGCRRoutines(
             break
 
         case "getIdentities":
-            response.response = await IdentityManager.getIdentities(sender)
+            response.response = await IdentityManager.getIdentities(params[0])
             break
 
         case "getWeb2Identities":
             response.response = await IdentityManager.getIdentities(
-                sender,
+                params[0],
                 "web2",
             )
             break
 
         case "getXmIdentities":
             response.response = await IdentityManager.getIdentities(
-                sender,
+                params[0],
                 "xm",
             )
             break
 
         case "getPoints":
-            response.response = await IncentiveManager.getPoints(sender)
+            response.response = await IncentiveManager.getPoints(
+                params[0],
+            )
             break
 
         // SECTION Web2 Identity Management

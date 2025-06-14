@@ -6,7 +6,7 @@ import log from "src/utilities/logger"
 
 export default async function getPeerlist(): Promise<Peer[]> {
     console.log("[SERVER] Executing getPeerlist")
-    // Getting our current peerlist     
+    // Getting our current peerlist
     const socketizedResponse = PeerManager.getInstance().getPeers()
     const response = [] as Peer[]
 
@@ -16,8 +16,7 @@ export default async function getPeerlist(): Promise<Peer[]> {
         response.push(peer)
 
         if (
-            peer.identity ===
-                getSharedState.identity.ed25519.publicKey.toString("hex") &&
+            peer.identity === getSharedState.publicKeyHex &&
             peer.connection.string.startsWith("http://127.0.0.1")
         ) {
             log.debug("Was returning local connection string")

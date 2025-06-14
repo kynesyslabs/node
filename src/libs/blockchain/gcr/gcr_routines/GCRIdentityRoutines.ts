@@ -5,22 +5,32 @@ import { Repository } from "typeorm"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import ensureGCRForUser from "./ensureGCRForUser"
 import Hashing from "@/libs/crypto/hashing"
+import {
+    PqcIdentityEdit,
+    SavedXmIdentity,
+} from "@/model/entities/types/IdentityTypes"
 import log from "@/utilities/logger"
 import { IncentiveManager } from "./IncentiveManager"
 
 export default class GCRIdentityRoutines {
+    // SECTION XM Identity Routines
     static async applyXmIdentityAdd(
         editOperation: any,
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const { chain, isEVM, subchain, targetAddress } = editOperation.data
+        const { chain, isEVM, subchain, targetAddress, signature, timestamp, signedData } =
+            editOperation.data
 
+        // REVIEW: Is there a better way to check this?
         if (
             !chain ||
             !subchain ||
             typeof isEVM !== "boolean" ||
-            !targetAddress
+            !targetAddress ||
+            !signature ||
+            !timestamp ||
+            !signedData
         ) {
             return { success: false, message: "Invalid edit operation data" }
         }
@@ -36,17 +46,25 @@ export default class GCRIdentityRoutines {
             accountGCR.identities.xm[chain][subchain] || []
 
         const addressExists = accountGCR.identities.xm[chain][subchain].some(
-            (addr: string) =>
+            (id: SavedXmIdentity) =>
                 isEVM
-                    ? addr.toLowerCase() === normalizedAddress
-                    : addr === normalizedAddress,
+                    ? id.address.toLowerCase() === normalizedAddress
+                    : id.address === normalizedAddress,
         )
 
         if (addressExists) {
             return { success: false, message: "Identity already exists" }
         }
 
-        accountGCR.identities.xm[chain][subchain].push(normalizedAddress)
+        const data = {
+            address: normalizedAddress,
+            signature: editOperation.data.signature,
+            publicKey: editOperation.data.publicKey || "",
+            timestamp: editOperation.data.timestamp,
+            signedData: editOperation.data.signedData,
+        }
+
+        accountGCR.identities.xm[chain][subchain].push(data)
 
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
@@ -116,10 +134,10 @@ export default class GCRIdentityRoutines {
         }
 
         const addressExists = accountGCR.identities.xm[chain][subchain].some(
-            (addr: string) =>
+            (addr: SavedXmIdentity) =>
                 isEVM
-                    ? addr.toLowerCase() === normalizedAddress
-                    : addr === normalizedAddress,
+                    ? addr.address.toLowerCase() === normalizedAddress
+                    : addr.address === normalizedAddress,
         )
 
         if (!addressExists) {
@@ -128,10 +146,10 @@ export default class GCRIdentityRoutines {
 
         accountGCR.identities.xm[chain][subchain] = accountGCR.identities.xm[
             chain
-        ][subchain].filter((id: string) =>
+        ][subchain].filter((id: SavedXmIdentity) =>
             isEVM
-                ? id.toLowerCase() !== normalizedAddress
-                : id !== normalizedAddress,
+                ? id.address.toLowerCase() !== normalizedAddress
+                : id.address !== normalizedAddress,
         )
 
         if (!simulate) {
@@ -150,6 +168,7 @@ export default class GCRIdentityRoutines {
         return { success: true, message: "Identity removed" }
     }
 
+    // SECTION Web2 Identity Routines
     static async applyWeb2IdentityAdd(
         editOperation: any,
         gcrMainRepository: Repository<GCRMain>,
@@ -221,10 +240,10 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const {
-            context,
-            data: { username },
-        } = editOperation.data as Web2GCRData
+        const { context, username } = editOperation.data as {
+            context: string
+            username: string
+        }
         const accountGCR = await ensureGCRForUser(editOperation.account)
 
         accountGCR.identities.web2 = accountGCR.identities.web2 || {}
@@ -255,6 +274,141 @@ export default class GCRIdentityRoutines {
         }
 
         return { success: true, message: "Web2 identity removed" }
+    }
+
+    // SECTION PQC Identity Routines
+    static async applyPqcIdentityAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const identities: PqcIdentityEdit[] = editOperation.data
+
+        if (!Array.isArray(identities)) {
+            return {
+                success: false,
+                message: "Invalid edit operation data: expected array",
+            }
+        }
+
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+        accountGCR.identities.pqc = accountGCR.identities.pqc || {}
+
+        for (const identity of identities) {
+            const { algorithm, address, signature, timestamp } = identity
+
+            if (!algorithm || !address || !signature || !timestamp) {
+                return {
+                    success: false,
+                    message:
+                        "Invalid identity data: missing algorithm, address or signature",
+                }
+            }
+
+            accountGCR.identities.pqc[algorithm] =
+                accountGCR.identities.pqc[algorithm] || []
+
+            const keyExists = accountGCR.identities.pqc[algorithm].some(
+                (key: { address: string; signature: string }) =>
+                    key.address === address,
+            )
+
+            if (keyExists) {
+                return {
+                    success: false,
+                    message: `Identity already exists for algorithm ${algorithm}`,
+                }
+            }
+
+            accountGCR.identities.pqc[algorithm].push({
+                address,
+                signature,
+                timestamp,
+            })
+        }
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+        }
+
+        return { success: true, message: "PQC identities added" }
+    }
+
+    static async applyPqcIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const identities = editOperation.data
+
+        if (!Array.isArray(identities)) {
+            return {
+                success: false,
+                message: "Invalid edit operation data: expected array",
+            }
+        }
+
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
+
+        if (!accountGCR) {
+            return { success: false, message: "Account not found" }
+        }
+
+        if (!accountGCR.identities || !accountGCR.identities.pqc) {
+            return {
+                success: false,
+                message: "No PQC identities found",
+            }
+        }
+
+        for (const identity of identities) {
+            const { algorithm, address } = identity
+
+            if (!algorithm || !address) {
+                return {
+                    success: false,
+                    message:
+                        "Invalid identity data: missing algorithm or address",
+                }
+            }
+
+            if (
+                !accountGCR.identities.pqc[algorithm] ||
+                !Array.isArray(accountGCR.identities.pqc[algorithm])
+            ) {
+                return {
+                    success: false,
+                    message: `No PQC identities found for algorithm ${algorithm}`,
+                }
+            }
+
+            const keyExists = accountGCR.identities.pqc[algorithm].some(
+                (key: { address: string; signature: string }) =>
+                    key.address === address,
+            )
+
+            if (!keyExists) {
+                return {
+                    success: false,
+                    message: `Identity not found for algorithm ${algorithm}`,
+                }
+            }
+
+            accountGCR.identities.pqc[algorithm] = accountGCR.identities.pqc[
+                algorithm
+            ].filter(
+                (key: { address: string; signature: string }) =>
+                    key.address !== address,
+            )
+        }
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+        }
+
+        return { success: true, message: "PQC identities removed" }
     }
 
     static async apply(
@@ -316,6 +470,20 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
+            case "pqcadd":
+                result = await this.applyPqcIdentityAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "pqcremove":
+                result = await this.applyPqcIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
             default:
                 result = {
                     success: false,
@@ -343,8 +511,8 @@ export default class GCRIdentityRoutines {
              */
             const result = await gcrMainRepository
                 .createQueryBuilder("gcr")
-                .where("gcr.identities->'web2'->'twitter' @> :userId", {
-                    userId: JSON.stringify([{ userId: data.userId }]),
+                .where("EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'userId' = :userId)", {
+                    userId: data.userId,
                 })
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()
@@ -362,10 +530,10 @@ export default class GCRIdentityRoutines {
 
             const result = await gcrMainRepository
                 .createQueryBuilder("gcr")
-                .where("gcr.identities->'xm'->:chain->:subchain @> :address", {
+                .where("EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)", {
                     chain: data.chain,
                     subchain: data.subchain,
-                    address: JSON.stringify([addressToCheck]),
+                    address: addressToCheck,
                 })
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()

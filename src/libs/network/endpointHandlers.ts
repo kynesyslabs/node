@@ -30,6 +30,7 @@ import {
     RPCResponse,
     IWeb2Payload,
     GCREdit,
+    SigningAlgorithm,
 } from "@kynesyslabs/demosdk/types"
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
@@ -40,7 +41,6 @@ import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Ren
 
 // ? Note: this is to be implemented once demosWork is in place
 import { DemoScript } from "@kynesyslabs/demosdk/types"
-import { forgeToHex } from "../crypto/forgeUtils"
 import { Peer } from "../peer"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
@@ -48,6 +48,11 @@ import { L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
+import {
+    hexToUint8Array,
+    ucrypto,
+    uint8ArrayToHex,
+} from "@kynesyslabs/demosdk/encryption"
 import { IdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
@@ -73,6 +78,7 @@ export default class ServerHandlers {
     // ANCHOR Validate transaction
     static async handleValidateTransaction(
         tx: Transaction,
+        sender: string,
     ): Promise<ValidityData> {
         term.yellow("[handleTransactions] Handling a DEMOS tx...\n")
         const fname = "[handleTransactions] "
@@ -87,7 +93,7 @@ export default class ServerHandlers {
              * The validation data can be used by the client to effectively execute the tx
              */
             //console.log(fname + "Validating transaction...")
-            validationData = await confirmTransaction(tx)
+            validationData = await confirmTransaction(tx, sender)
 
             // NOTE Gas operation is created at this point (and balance is checked)
             // NOTE Nonce assignment is done in the GCR too
@@ -141,9 +147,14 @@ export default class ServerHandlers {
             const hashedValidationData = Hashing.sha256(
                 JSON.stringify(validationData.data),
             )
+            const signature = await ucrypto.sign(
+                getSharedState.signingAlgorithm,
+                new TextEncoder().encode(hashedValidationData),
+            )
+
             validationData.signature = {
-                type: "ed25519",
-                data: getSharedState.identity.ed25519.privateKey.toString("hex"),
+                type: getSharedState.signingAlgorithm,
+                data: uint8ArrayToHex(signature.signature),
             }
         }
 
@@ -156,6 +167,7 @@ export default class ServerHandlers {
     // TODO Either put this into a module or do something to make it more modular
     static async handleExecuteTransaction(
         validatedData: ValidityData,
+        sender: string,
     ): Promise<ExecutionResult> {
         // Log the entire validatedData object to inspect its structure
         console.log("[handleExecuteTransaction] Validated Data:", validatedData)
@@ -169,44 +181,13 @@ export default class ServerHandlers {
         }
         // NOTE Content should contain validity data and our signature to proceed
         // Integrity checks
-        const ourKey = getSharedState.identity.ed25519.publicKey
-        const hexOurKey = ourKey.toString("hex")
-        const dataKey = _.cloneDeep(validatedData.rpc_public_key)
-        console.log("validatedData.rpc_public_key:  ")
-        console.log(validatedData.rpc_public_key)
-        /*  console.log("[handleExecuteTransaction] dataKey: ")
-        console.log(dataKey)
-        console.log(typeof dataKey)
-        console.log("\n") */
-        let hexDataKey: string
-        if (typeof dataKey === "string") {
-            console.log(
-                "[handleExecuteTransaction] dataKey is a string: using as is",
-            )
-            hexDataKey = dataKey
-        } else {
-            console.log(
-                "[handleExecuteTransaction] dataKey is a buffer: using ForgeToHex",
-            )
-            console.log(dataKey)
-            hexDataKey = forgeToHex(dataKey)
-        }
-        console.log("dataKey: " + hexDataKey)
-        const dataSignature = validatedData.signature
-        let hexDataSignature: string
-        if (typeof dataSignature === "string") {
-            console.log(
-                "[handleExecuteTransaction] dataSignature is a string: using as is",
-            )
-            hexDataSignature = dataSignature
-        } else {
-            console.log(
-                "[handleExecuteTransaction] dataSignature is a buffer: using ForgeToHex",
-            )
-            console.log(dataSignature)
-            hexDataSignature = forgeToHex(dataSignature)
-        }
-        console.log("dataSignature: " + hexDataSignature)
+        // const ourKey = getSharedState.identity.ed25519.publicKey
+        const ourKey = (
+            await ucrypto.getIdentity(getSharedState.signingAlgorithm)
+        ).publicKey
+
+        log.debug("Our key: " + ourKey)
+        const hexOurKey = uint8ArrayToHex(ourKey as Uint8Array)
         const queriedTx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
         // REVIEW Correct? If the transaction has no block number, we set it to the last block number + 1
         if (!queriedTx.blockNumber) {
@@ -225,15 +206,9 @@ export default class ServerHandlers {
             "[handleExecuteTransaction] Queried tx processing in block: " +
                 queriedTx.blockNumber,
         )
-        // queriedTx.content.from = queriedTx?.content?.from?.toString()
-        // queriedTx.content.from = queriedTx?.content?.to?.toString()
-
-        console.log(
-            "[SERVER] Received transaction for execution: " + queriedTx.hash,
-        )
 
         // We need to have issued the validity data
-        if (hexDataKey !== hexOurKey) {
+        if (validatedData.rpc_public_key.data !== hexOurKey) {
             term.red.bold(
                 fname + "Invalid validityData signature key (not us) 💀 : ",
             )
@@ -246,21 +221,21 @@ export default class ServerHandlers {
         // Also the signature must be valid
 
         const hashedData = Hashing.sha256(JSON.stringify(validatedData.data))
-        console.log(JSON.stringify(validatedData))
-        console.log("Backend - Hash:", hashedData)
-        console.log("Backend - Data Signature:", hexDataSignature)
-        console.log("Backend - Data Key:", hexDataKey)
-        const signatureValid = Cryptography.verify(
-            hashedData,
-            hexDataSignature, // REVIEW use dataSignature if needed
-            hexDataKey, // REVIEW use dataKey if needed
-        )
+        const signatureValid = await ucrypto.verify({
+            algorithm: validatedData.signature.type as SigningAlgorithm,
+            message: new TextEncoder().encode(hashedData),
+            publicKey: hexToUint8Array(
+                validatedData.rpc_public_key.data,
+            ) as any,
+            signature: hexToUint8Array(validatedData.signature.data) as any,
+        })
+
         if (!signatureValid) {
             log.error(
                 "[handleExecuteTransaction] Invalid validityData signature: " +
-                    hexDataSignature +
+                    validatedData.signature.data +
                     " - " +
-                    hexDataKey,
+                    validatedData.rpc_public_key.data,
             )
             result.success = false
             result.response = false
@@ -370,8 +345,8 @@ export default class ServerHandlers {
             case "identity":
                 try {
                     const identityResult = await handleIdentityRequest(
-                        tx.content.data[1] as IdentityPayload,
-                        tx.content.from as string,
+                        tx,
+                        sender,
                     )
                     const status = identityResult.success
                         ? "applied"
@@ -390,7 +365,7 @@ export default class ServerHandlers {
                         message: "Failed to verify signature",
                     }
                     result.extra = {
-                        error: e,
+                        error: e.toString(),
                     }
                 }
                 break
@@ -640,7 +615,7 @@ export default class ServerHandlers {
             console.error(error)
         }
 
-        const ourId = getSharedState.identity.ed25519.publicKey.toString("hex")
+        const ourId = getSharedState.publicKeyHex
         const ourDate = new Date().toISOString()
 
         return {

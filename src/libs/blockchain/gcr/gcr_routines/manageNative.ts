@@ -29,6 +29,7 @@ async function setBalance(
         identities: {
             xm: {},
             web2: {},
+            pqc: {},
         },
         balance: BigInt(balance),
         nonce: 0,
@@ -36,8 +37,12 @@ async function setBalance(
         points: {
             totalPoints: 0,
             breakdown: {
-                web3Wallets: 0,
-                socialAccounts: 0,
+                web3Wallets: {},
+                socialAccounts: {
+                    twitter: 0,
+                    github: 0,
+                    discord: 0,
+                },
             },
             lastUpdated: new Date(),
         },

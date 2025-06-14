@@ -49,11 +49,11 @@ export class PointSystem {
                 const subChainKeys = Object.keys(subChains)
 
                 for (const subChain of subChainKeys) {
-                    const addresses = subChains[subChain]
+                    const identities = subChains[subChain]
 
-                    if (Array.isArray(addresses)) {
-                        addresses.forEach(address => {
-                            const walletId = `${chain}:${address}`
+                    if (Array.isArray(identities)) {
+                        identities.forEach(identity => {
+                            const walletId = `${chain}:${identity.address}`
                             linkedWallets.push(walletId)
                         })
                     }
