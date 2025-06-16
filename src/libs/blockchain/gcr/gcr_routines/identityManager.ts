@@ -1,4 +1,6 @@
-// TODO Implement the identity manager
+import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
+import ensureGCRForUser from "./ensureGCRForUser"
+import log from "src/utilities/logger"
 import {
     InferFromWritePayload,
     InferFromSignatureTargetIdentityPayload,
@@ -15,9 +17,9 @@ import {
     BTC,
 } from "@kynesyslabs/demosdk/xm-localsdk"
 
-import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
-import ensureGCRForUser from "./ensureGCRForUser"
-import log from "src/utilities/logger"
+// TODO: refactor import to use high level abstraction module
+import { PqcIdentityAssignPayload } from "node_modules/@kynesyslabs/demosdk/build/types/abstraction"
+import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 
 /*
  * Example of a payload for the gcr_routine method
@@ -32,6 +34,7 @@ import log from "src/utilities/logger"
  * }
  */
 
+// SUPPORTED CHAINS
 const chains: { [key: string]: typeof DefaultChain } = {
     solana: SOLANA,
     evm: EVM,
@@ -55,15 +58,22 @@ export default class IdentityManager {
         return false
     }
 
-    // Verify the payload signature
+    /**
+     * Verify the xm identity payload signature
+     *
+     * @param payload - The payload containing the signature to verify
+     *
+     * @returns {success: boolean, message: string}
+     */
     static async verifyPayload(
         payload: InferFromSignaturePayload,
     ): Promise<{ success: boolean; message: string }> {
+        log.debug("Verifying payload: " + JSON.stringify(payload, null, 2))
         const chainId = payload.target_identity.chain
         // @ts-expect-error - This is a workaround to avoid type errors
         const sdk = await chains[chainId].create(null)
 
-        const { signedData, signature, publicKey, targetAddress } =
+        const { signature, publicKey, targetAddress, signedData } =
             payload.target_identity as unknown as InferFromSignatureTargetIdentityPayload
 
         let messageVerified = false
@@ -107,6 +117,44 @@ export default class IdentityManager {
         }
     }
 
+    /**
+     * Verify the payload signature for a pqc identity assign payload
+     *
+     * @param payloads - An array of payloads to verify
+     * @param message - The message to verify. Should be the same for all payloads (the ed25519 public key of the sender)
+     *
+     * @returns {success: boolean, message: string}
+     */
+    static async verifyPqcPayload(
+        payloads: PqcIdentityAssignPayload["payload"],
+        senderEd25519: string,
+    ): Promise<{ success: boolean; message: string }> {
+        for (const payload of payloads) {
+            const verified = await ucrypto.verify({
+                algorithm: "ed25519",
+                signature: hexToUint8Array(payload.signature),
+                publicKey: hexToUint8Array(senderEd25519),
+                message: new TextEncoder().encode(payload.address),
+            })
+
+            if (!verified) {
+                return {
+                    success: false,
+                    message: `${payload.algorithm} payload could not be verified`,
+                }
+            }
+        }
+
+        return {
+            success: true,
+            message: `Signature proof${
+                payloads.length > 1 ? "s" : ""
+            } verified. ${JSON.stringify(
+                payloads.map(p => p.algorithm),
+            )} identities assigned`,
+        }
+    }
+
     // SECTION Helper functions and Getters
     /**
      * Get the identities related to a demos address
@@ -137,6 +185,10 @@ export default class IdentityManager {
     static async getWeb2Identities(address: string, context: string) {
         const data = await this.getIdentities(address, "web2")
         return data[context] || []
+    }
+
+    static async getPQCIdentity(address: string) {
+        return await this.getIdentities(address, "pqc")
     }
 
     /**

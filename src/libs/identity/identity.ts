@@ -91,7 +91,7 @@ export default class Identity {
 
     async getPublicIP(): Promise<string> {
         this.publicIP = await getRemoteIP()
-        return await this.publicIP
+        return this.publicIP
     }
 
     getPublicKeyHex(): string | undefined {
