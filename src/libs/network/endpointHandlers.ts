@@ -12,16 +12,15 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 // REVIEW Pay attention to the return types (RPCResponse)
 
+import _ from "lodash"
+import terminalKit from "terminal-kit"
 import Chain from "src/libs/blockchain/chain"
+import Hashing from "src/libs/crypto/hashing"
 import Mempool from "src/libs/blockchain/mempool_v2"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
 import Transaction from "src/libs/blockchain/transaction"
-import Cryptography from "src/libs/crypto/cryptography"
-import Hashing from "src/libs/crypto/hashing"
 import handleL2PS from "./routines/transactions/handleL2PS"
 import { getSharedState } from "src/utilities/sharedState"
-import _ from "lodash"
-import terminalKit from "terminal-kit"
 import {
     ExecutionResult,
     ValidityData,
@@ -31,6 +30,7 @@ import {
     IWeb2Payload,
     GCREdit,
     SigningAlgorithm,
+    NativeBridgeTransaction,
 } from "@kynesyslabs/demosdk/types"
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
@@ -54,8 +54,6 @@ import {
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
-import { IdentityPayload } from "@kynesyslabs/demosdk/abstraction"
-import { bridge } from "@kynesyslabs/demosdk"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
 
 /* // ! Note: this will be removed once demosWork is in place
@@ -373,7 +371,7 @@ export default class ServerHandlers {
                 break
 
             case "nativeBridge":
-                var nativeBridgeResult = await handleNativeBridgeTx(tx)
+                var nativeBridgeResult = await handleNativeBridgeTx(tx as NativeBridgeTransaction)
                 if (nativeBridgeResult === null) {
                     result.success = false
                     result.response = false

@@ -23,7 +23,6 @@ import {
     NotInShardError,
 } from "src/exceptions"
 import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
-import { GCREdit } from "@kynesyslabs/demosdk/types"
 import executeBridgeOperations from "./routines/executeBridgeOperations"
 
 /* INFO
@@ -69,7 +68,7 @@ export async function consensusRoutine(): Promise<void> {
     // Defining the variables needed for rolling back the GCREdits
     let successfulTxs: string[] = []
     let failedTxs: string[] = []
-    let tempMempool: Transaction[] = []
+    let mempool: Transaction[] = []
 
     try {
         await initializeConsensusState()
@@ -99,11 +98,11 @@ export async function consensusRoutine(): Promise<void> {
         // await synchronizeAndAverageTime(shard)
 
         // INFO: CONSENSUS ACTION 2: Merge and order the mempools
-        tempMempool = await mergeAndOrderMempools(
+        mempool = await mergeAndOrderMempools(
             manager.shard.members,
             manager.shard.blockRef,
         )
-        log.debug("MErged mempool: " + JSON.stringify(tempMempool.map((tx) => tx.hash), null, 2))
+        log.debug("MErged mempool: " + JSON.stringify(mempool.map((tx) => tx.hash), null, 2))
 
         log.info(
             "[consensusRoutine] mempool merged (aka ordered transactions)",
@@ -118,7 +117,7 @@ export async function consensusRoutine(): Promise<void> {
 
         // SUB ACTION 1: Execute the native bridge operations
         log.info("[consensusRoutine] Executing the native bridge operations")
-        const [successfulBridgeOperations, failedBridgeOperations] = await executeBridgeOperations()
+        const [successfulBridgeOperations, failedBridgeOperations] = await executeBridgeOperations(mempool)
         successfulTxs = successfulTxs.concat(successfulBridgeOperations)
         failedTxs = failedTxs.concat(failedBridgeOperations)
 
@@ -134,7 +133,7 @@ export async function consensusRoutine(): Promise<void> {
 
         // Applying the GCREdits and see if everything is consistent
         const [localSuccessfulTxs, localFailedTxs] =
-            await applyGCREditsFromMergedMempool(tempMempool)
+            await applyGCREditsFromMergedMempool(mempool)
         successfulTxs = successfulTxs.concat(localSuccessfulTxs)
         failedTxs = failedTxs.concat(localFailedTxs)
         if (failedTxs.length > 0) {
@@ -154,7 +153,7 @@ export async function consensusRoutine(): Promise<void> {
 
         log.info(
             "[consensusRoutine] mempool: " +
-                JSON.stringify(tempMempool, null, 2),
+                JSON.stringify(mempool, null, 2),
             true,
         )
 
@@ -181,7 +180,7 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         // INFO: CONSENSUS ACTION 5: Forge the block
-        const block = await forgeBlock(tempMempool, peerlist) // NOTE The GCR hash is calculated here and added to the block
+        const block = await forgeBlock(mempool, peerlist) // NOTE The GCR hash is calculated here and added to the block
         // REVIEW Set last consensus time to the current block timestamp
         getSharedState.lastConsensusTime = block.content.timestamp
 
@@ -230,7 +229,7 @@ export async function consensusRoutine(): Promise<void> {
             // Getting the txs from the hashes
             const txsToRollback: Transaction[] = []
             for (const txHash of successfulTxs) {
-                const tx = tempMempool.find(tx => tx.hash === txHash)
+                const tx = mempool.find(tx => tx.hash === txHash)
                 if (tx) {
                     txsToRollback.push(tx)
                 }

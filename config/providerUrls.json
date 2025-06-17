@@ -1,0 +1,34 @@
+{
+    "evm.eth": {
+        "sepolia": "https://sepolia.infura.io/v3/YOUR_INFURA_PROJECT_ID",
+        "mainnet": "https://sepolia.infura.io/v3/YOUR_INFURA_PROJECT_ID"
+    },
+    "evm.polygon": {
+        "mumbai": "https://polygon-mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID",
+        "mainnet": "https://polygon-mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID"
+    },
+    "evm.bsc": {
+        "testnet": "https://bsc-dataseed.binance.org/",
+        "mainnet": "https://bsc-dataseed.binance.org/"
+    },
+    "evm.arbitrum": {
+        "sepolia": "https://arbitrum-mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID",
+        "mainnet": "https://arbitrum-mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID"
+    },
+    "evm.optimism": {
+        "sepolia": "https://optimism-mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID",
+        "mainnet": "https://optimism-mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID"
+    },
+    "evm.avalanche": {
+        "fuji": "https://avalanche-mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID",
+        "mainnet": "https://avalanche-mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID"
+    },
+    "evm.base": {
+        "sepolia": "https://base-mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID",
+        "mainnet": "https://base-mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID"
+    },
+    "solana": {
+        "devnet": "https://api.devnet-beta.solana.com",
+        "mainnet": "https://api.mainnet-beta.solana.com"
+    }
+} 

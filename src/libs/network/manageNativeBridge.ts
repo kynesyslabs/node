@@ -1,42 +1,69 @@
-import { Cryptography, Hashing } from "@kynesyslabs/demosdk/encryption"
-import { getSharedState } from "@/utilities/sharedState"
+import {
+    Hashing,
+    hexToUint8Array,
+    ucrypto,
+    uint8ArrayToHex,
+} from "@kynesyslabs/demosdk/encryption"
 import { bridge } from "@kynesyslabs/demosdk"
-import { RPCResponse } from "@kynesyslabs/demosdk/types"
+import { getSharedState } from "@/utilities/sharedState"
+import { ISignature, RPCResponse } from "@kynesyslabs/demosdk/types"
+import { JsonConfig } from "@/utilities/JsonConfig"
+import Chain from "../blockchain/chain"
 
 // TODO Better error handling
 /**
  * Manages the native bridge operation to send back to the client a compiled operation as a RPCResponse
- * @param operation 
+ * @param operation
  * @returns RPCResponse containing the compiled operation
  */
 export async function manageNativeBridge(
     operation: bridge.NativeBridgeOperation,
-    signature: string,
+    signature: ISignature,
 ): Promise<RPCResponse> {
     // Prepare the response
     // eslint-disable-next-line prefer-const
     let response: RPCResponse = {
-        result: 200,
+        result: null,
         response: null,
         require_reply: false,
-        extra: null,
+        extra: {},
     }
+
     // First, verify the signature
-    const publicKey = operation.demoAddress
+    const publicKey = operation.address
     const opHash = Hashing.sha256(JSON.stringify(operation))
-    const verified = Cryptography.verify(opHash, signature, publicKey)
+    const verified = ucrypto.verify({
+        algorithm: signature.type,
+        signature: hexToUint8Array(signature.data),
+        message: new TextEncoder().encode(opHash),
+        publicKey: hexToUint8Array(publicKey),
+    })
+
     if (!verified) {
         response.result = 400
-        response.response = "Invalid signature"
+        response.response = {
+            error: "Invalid signature",
+        }
+
         return response
     }
+
     // Parse the operation to get the right compiled operation content
-    const derivedContent: bridge.NativeBridgeOperationCompiled["content"] = parseOperation(operation)
-    // eslint-disable-next-line prefer-const
-    let compiledOperation: bridge.NativeBridgeOperationCompiled = {
+    const derivedContent = await parseOperation(operation)
+
+    const hash = Hashing.sha256(JSON.stringify(derivedContent))
+    const compiledSignature = await ucrypto.sign(
+        getSharedState.signingAlgorithm,
+        new TextEncoder().encode(hash),
+    )
+
+    const compiledOperation: bridge.NativeBridgeOperationCompiled = {
         content: derivedContent,
-        signature: "",
-        rpc: getSharedState.identity.ed25519_hex.publicKey, 
+        signature: {
+            type: getSharedState.signingAlgorithm,
+            data: uint8ArrayToHex(compiledSignature.signature),
+        },
+        rpcPublicKey: getSharedState.publicKeyHex,
     }
     // TODO Generate the deposit addresses based on the operation chains
     // TODO Generate the validUntil value based on current block + 3
@@ -48,25 +75,59 @@ export async function manageNativeBridge(
 
 /**
  * Parses the operation to get the right compiled operation content
- * @param operation 
+ * @param operation
  * @returns The compiled operation content
  */
-function parseOperation(operation: bridge.NativeBridgeOperation): bridge.NativeBridgeOperationCompiled["content"] {
-    let derivedContent: bridge.NativeBridgeOperationCompiled["content"]
-    if (operation.originChainType === "EVM") {
-        derivedContent = parseEVMOperation(operation)
-    } else if (operation.originChainType === "SOLANA") {
-        derivedContent = parseSOLANAOperation(operation)
+async function parseOperation(
+    operation: bridge.NativeBridgeOperation,
+): Promise<bridge.CompiledContent> {
+    const contracts = JsonConfig.getUsdcContracts()
+    const contract = contracts[operation.from.chain][operation.from.subchain]
+
+    if (!contract) {
+        throw new Error(
+            `No contract found for ${operation.from.chain}.${operation.from.subchain}`,
+        )
     }
-    return derivedContent
+
+    let tankData: bridge.SolanaTankData | bridge.EVMTankData = null
+
+    if (operation.from.chain.startsWith("evm")) {
+        tankData = await parseEVMOperation(contract, operation)
+    } else if (operation.from.chain === "solana") {
+        tankData = await parseSOLANAOperation(contract, operation)
+    } else {
+        throw new Error(`Unsupported chain: ${operation.from.chain}`)
+    }
+
+    const lastBlockNumber = await Chain.getLastBlockNumber()
+
+    return {
+        operation,
+        tankData,
+        validUntil: lastBlockNumber + 3,
+    }
 }
 
-function parseEVMOperation(operation: bridge.NativeBridgeOperation): bridge.NativeBridgeOperationCompiled["content"] {
-    // TODO Implement the parsing
-    return null
+async function parseEVMOperation(
+    contract: string,
+    operation: bridge.NativeBridgeOperation,
+): Promise<bridge.EVMTankData> {
+    return {
+        type: "evm",
+        abi: [],
+        address: contract,
+        amountExpected: operation.token.amount,
+    }
 }
 
-function parseSOLANAOperation(operation: bridge.NativeBridgeOperation): bridge.NativeBridgeOperationCompiled["content"] {
-    // TODO Implement the parsing
-    return null
+async function parseSOLANAOperation(
+    contract: string,
+    operation: bridge.NativeBridgeOperation,
+): Promise<bridge.SolanaTankData> {
+    return {
+        type: "solana",
+        address: contract,
+        amountExpected: operation.token.amount,
+    }
 }
