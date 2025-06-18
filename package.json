@@ -22,7 +22,11 @@
         "upgrade_deps:force": "ncu -u && yarn",
         "keygen": "tsx -r tsconfig-paths/register src/libs/utils/keyMaker.ts",
         "test:chains": "jest --testMatch '**/tests/**/*.ts' --testPathIgnorePatterns src/* tests/utils/* tests/**/_template*  --verbose",
-        "dump_balance": "bun run src/utilities/balanceDumper.ts"
+        "dump_balance": "bun run src/utilities/balanceDumper.ts",
+        "typeorm": "typeorm-ts-node-esm",
+        "migration:run": "NODE_OPTIONS='--loader ts-node/esm' typeorm-ts-node-esm migration:run -d ./src/model/datasource.ts",
+        "migration:revert": "NODE_OPTIONS='--loader ts-node/esm' typeorm-ts-node-esm migration:revert -d ./src/model/datasource.ts",
+        "migration:generate": "NODE_OPTIONS='--loader ts-node/esm' typeorm-ts-node-esm migration:generate -d ./src/model/datasource.ts"
     },
     "devDependencies": {
         "@types/bun": "^1.2.10",
