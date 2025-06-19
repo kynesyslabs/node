@@ -91,6 +91,7 @@ export default class GCRIdentityRoutines {
                     accountGCR.pubkey,
                     normalizedAddress,
                     chain,
+                    editOperation.referralCode,
                 )
             }
         }
@@ -162,6 +163,7 @@ export default class GCRIdentityRoutines {
                 accountGCR.pubkey,
                 normalizedAddress,
                 chain,
+                editOperation.referralCode,
             )
         }
 
@@ -220,7 +222,7 @@ export default class GCRIdentityRoutines {
                     editOperation.account,
                 )
                 if (isFirst) {
-                    await IncentiveManager.twitterLinked(editOperation.account)
+                    await IncentiveManager.twitterLinked(editOperation.account, editOperation.referralCode)
                 }
             } else if (context === "github") {
                 // Future implementation for GitHub
@@ -269,7 +271,7 @@ export default class GCRIdentityRoutines {
              * Deduct incentive points for Twitter unlinking
              */
             if (context === "twitter") {
-                await IncentiveManager.twitterUnlinked(editOperation.account)
+                await IncentiveManager.twitterUnlinked(editOperation.account, editOperation.referralCode)
             }
         }
 

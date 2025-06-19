@@ -231,12 +231,14 @@ export class PointSystem {
      * @param userId The user's Demos address
      * @param walletAddress The wallet address
      * @param chain The chain type
+     * @param referralCode Optional referral code
      * @returns RPCResponse
      */
     async awardWeb3WalletPoints(
         userId: string,
         walletAddress: string,
         chain: string,
+        referralCode?: string,
     ): Promise<RPCResponse> {
         let walletIsAlreadyLinked = false
         let hasExistingWalletOnChain = false
@@ -313,9 +315,10 @@ export class PointSystem {
     /**
      * Award points for linking a Twitter account
      * @param userId The user's Demos address
+     * @param referralCode Optional referral code
      * @returns RPCResponse
      */
-    async awardTwitterPoints(userId: string): Promise<RPCResponse> {
+    async awardTwitterPoints(userId: string, referralCode?: string): Promise<RPCResponse> {
         try {
             const userPointsWithIdentities = await this.getUserPointsInternal(
                 userId,
@@ -372,12 +375,14 @@ export class PointSystem {
      * @param userId The user's Demos address
      * @param walletAddress The wallet address
      * @param chain The chain type
+     * @param referralCode Optional referral code
      * @returns RPCResponse
      */
     async deductWeb3WalletPoints(
         userId: string,
         walletAddress: string,
         chain: string,
+        referralCode?: string,
     ): Promise<RPCResponse> {
         try {
             // Deduct points by updating the GCR
@@ -417,9 +422,10 @@ export class PointSystem {
     /**
      * Deduct points for unlinking a Twitter account
      * @param userId The user's Demos address
+     * @param referralCode Optional referral code
      * @returns RPCResponse
      */
-    async deductTwitterPoints(userId: string): Promise<RPCResponse> {
+    async deductTwitterPoints(userId: string, referralCode?: string): Promise<RPCResponse> {
         try {
             const userPointsWithIdentities = await this.getUserPointsInternal(
                 userId,

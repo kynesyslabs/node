@@ -35,7 +35,7 @@ export class GCRMain {
         referralCode: string
         referrals: Array<{
             referredUserId: string
-            referredAt: Date
+            referredAt: string
             pointsAwarded: number
         }>
     }
