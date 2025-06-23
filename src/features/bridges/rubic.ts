@@ -27,10 +27,6 @@ import nacl from "tweetnacl"
 import bs58 from "bs58"
 import { Signer } from "@solana/web3.js"
 
-// TODO: Need to use mock Private keys for now then remove mock data and use real data
-const mockSolanaPrivateKey = ""
-const mockEvmPrivateKey = ""
-
 class CustomEVMProvider {
     private httpProvider: HttpProvider
     private eventHandlers: Record<string, Function[]> = {}
@@ -281,8 +277,8 @@ export default class RubicService {
     constructor(privateKey: string, chain: string, receiverAddress?: string) {
         const mockPrivateKey =
             chain === BLOCKCHAIN_NAME.SOLANA
-                ? mockSolanaPrivateKey
-                : `0x${mockEvmPrivateKey}`
+                ? process.env.SOLANA_PRIVATE_KEY
+                : `0x${process.env.EVM_PRIVATE_KEY}`
 
         this.chain = chain
         this.receiverAddress = receiverAddress
