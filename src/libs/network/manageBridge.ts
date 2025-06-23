@@ -18,7 +18,13 @@ export default async function manageBridges(
     response.result = 200
 
     const { method, chain, params } = payload
-    const rubicService = new RubicService(sender, chain)
+
+    const rubicService = new RubicService(
+        sender,
+        chain,
+        params[0].receiverAddress,
+    )
+
     await rubicService.waitForInitialization()
 
     switch (method) {
