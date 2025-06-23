@@ -97,3 +97,5 @@ src/GTAGS
 # Output files
 output/*
 .env
+data/l2ps/*
+CLAUDE.md

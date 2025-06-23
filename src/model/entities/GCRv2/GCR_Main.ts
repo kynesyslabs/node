@@ -14,4 +14,17 @@ export class GCRMain {
     balance: bigint
     @Column({ type: "jsonb", name: "identities" })
     identities: StoredIdentities
+    @Column({ type: "jsonb", name: "points", default: () => "'{}'" })
+    points: {
+        totalPoints: number
+        breakdown: {
+            web3Wallets: { [chain: string]: number }
+            socialAccounts: {
+                twitter: number
+                github: number
+                discord: number
+            }
+        }
+        lastUpdated: Date
+    }
 }

@@ -24,13 +24,21 @@ import {
     RawTransaction,
     Transaction as ITransaction,
 } from "@kynesyslabs/demosdk/types"
-import type { ISignature } from "@kynesyslabs/demosdk/types"
+import type { ISignature, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"
 import Confirmation from "./types/confirmation"
 import { forgeToHex } from "../crypto/forgeUtils"
 import log from "src/utilities/logger"
+import {
+    hexToUint8Array,
+    ucrypto,
+    uint8ArrayToHex,
+} from "@kynesyslabs/demosdk/encryption"
+import { getSharedState } from "@/utilities/sharedState"
+import IdentityManager from "./gcr/gcr_routines/identityManager"
+import { SavedPqcIdentity } from "@/model/entities/types/IdentityTypes"
 
 interface TransactionResponse {
     status: string
@@ -45,12 +53,14 @@ export default class Transaction implements ITransaction {
     hash: string
     status: string
     blockNumber: number
+    ed25519_signature: string
 
     constructor() {
         this.content = {
             type: null,
-            from: null,
-            to: null,
+            from: "",
+            from_ed25519_address: "",
+            to: "",
             amount: null,
             data: [null, null],
             gcr_edits: [],
@@ -68,42 +78,26 @@ export default class Transaction implements ITransaction {
     }
 
     // INFO Given a transaction, sign it with the private key of the sender
-    public static sign(
-        tx: Transaction,
-        privateKey: forge.pki.ed25519.BinaryBuffer,
-    ): [boolean, any] {
+    public static async sign(tx: Transaction): Promise<[boolean, any]> {
         // Check sanity of the structure of the tx object
         if (!tx.content) {
             return [false, "Missing tx.content"]
         }
-        // Sign using identity.cryptography.sign(tx.content, privateKey)
-        const signature = Cryptography.sign(
-            JSON.stringify(tx.content),
-            privateKey,
+        const signature_ = await ucrypto.sign(
+            getSharedState.signingAlgorithm,
+            new TextEncoder().encode(JSON.stringify(tx.content)),
         )
-        if (!signature) {
+
+        if (!signature_) {
             return [false, "Failed to sign transaction"]
         }
-        return [true, signature]
-    }
-
-    // INFO Given a signed transaction, verify it against the address of the sender
-    // Returns [result, message]
-    static verify(tx: Transaction) {
-        // Check sanity of the structure of the tx object
-        if (!tx.content) {
-            return [false, "Missing tx.content"]
-        }
-        if (!tx.signature) {
-            return [false, "Missing tx.signature"]
-        }
-        // verify using identity.cryptography.verify(tx.content, tx.signature, publicKey)
-        const verified = Cryptography.verify(
-            JSON.stringify(tx.content),
-            tx.signature.data.toString("hex"),
-            tx.content.from.toString("hex"),
-        )
-        return [verified, "Result of verify()"]
+        return [
+            true,
+            {
+                type: getSharedState.signingAlgorithm,
+                data: uint8ArrayToHex(signature_.signature),
+            },
+        ]
     }
 
     // INFO Hashing the content of a transaction
@@ -118,53 +112,157 @@ export default class Transaction implements ITransaction {
     }
 
     // INFO Compile a verification for a transaction and spit out the resulting tx
-    static confirmTx(
+    static async confirmTx(
         tx: Transaction,
-        publicKey: forge.pki.ed25519.BinaryBuffer,
-        privateKey: forge.pki.ed25519.BinaryBuffer,
+        sender: string,
+        // publicKey: forge.pki.ed25519.BinaryBuffer,
+        // privateKey: forge.pki.ed25519.BinaryBuffer,
     ) {
         console.log("[TRANSACTION]: confirmTx")
-        console.log("Public key: ")
-        console.log(publicKey)
-        console.log("Private key: ")
-        console.log(privateKey)
         console.log("Signature: ")
         console.log(tx.signature)
         const structured = this.structured(tx)
         if (!structured.valid) {
             return null // TODO Improve return type
         }
-        const confirmed = this.validateSignature(tx) && this.isCoherent(tx)
-        if (confirmed) {
-            const confirmation = new Confirmation()
-            confirmation.data.validator = publicKey
-            confirmation.data.tx_hash_validated = tx.hash
-            confirmation.signature = Cryptography.sign(
-                JSON.stringify(confirmation.data),
-                privateKey,
-            ).toString()
-            return confirmation
-        } else {
-            return null
+
+        const { success, message } = await this.validateSignature(tx, sender)
+
+        if (!success) {
+            return {
+                success: false,
+                message: message,
+                confirmation: null,
+            }
+        }
+
+        const isCoherent = this.isCoherent(tx)
+
+        if (!isCoherent) {
+            return {
+                success: false,
+                message: "Transaction hash mismatch",
+                confirmation: null,
+            }
+        }
+
+        const confirmation = new Confirmation()
+        confirmation.data.validator = getSharedState.keypair
+            .publicKey as Uint8Array
+        confirmation.data.tx_hash_validated = tx.hash
+        const signature = await ucrypto.sign(
+            getSharedState.signingAlgorithm,
+            new TextEncoder().encode(JSON.stringify(confirmation.data)),
+        )
+        confirmation.signature = {
+            type: getSharedState.signingAlgorithm,
+            data: uint8ArrayToHex(signature.signature),
+        }
+
+        return {
+            success: true,
+            message: "Transaction validated",
+            confirmation: confirmation,
         }
     }
 
     // INFO Checks the integrity of a transaction
-    public static validateSignature(tx: Transaction) {
+    public static async validateSignature(
+        tx: Transaction,
+        sender: string = null,
+    ): Promise<{ success: boolean; message: string }> {
         console.log("[validateSignature] Checking the signature of the tx")
         console.log("Hash: " + tx.hash)
         console.log("Signature: ")
-        console.log(forgeToHex(tx.signature.data))
+        console.log(tx.signature)
         console.log("From: ")
-        console.log(forgeToHex(tx.content.from))
-        //let tx_content_hash = Hashing.sha256(JSON.stringify(tx.content))
-        const result = Cryptography.verify(
-            tx.hash,
-            forgeToHex(tx.signature.data),
-            forgeToHex(tx.content.from),
-        )
-        console.log("[validateSignature] Sanity: " + result)
-        return result
+        console.log(tx.content.from)
+
+        // INFO: Ensure tx signer is the sender of the tx request
+        // TIP: This function is also called without the sender to validate mempool txs
+        if (
+            sender &&
+            (tx.content.from != sender ||
+                (tx.signature.type == "ed25519" &&
+                    tx.content.from_ed25519_address != sender))
+        ) {
+            return {
+                success: false,
+                message: "Transaction signer does not match sender address",
+            }
+        }
+
+        let ed25519SignatureVerified = false
+
+        // INFO: If a PQC signer is used, make sure identity is in the GCR
+        // or there's an ed25519 signature to verify ownership of ed25519 address
+        if (tx.signature.type !== "ed25519") {
+            // INFO: check if sender's PQC pubkey is indexed in the GCR
+            if (!tx.ed25519_signature) {
+                const identities =
+                    (await IdentityManager.getIdentities(
+                        tx.content.from_ed25519_address,
+                        "pqc",
+                    )) || {}
+
+                // INFO: Get all the indexed pubkeys for the PQC signer type (eg. falcon, etc.)
+                const indexedPubKeys: SavedPqcIdentity[] =
+                    identities[tx.signature.type] || []
+
+                // INFO: Check if sender's PQC pubkey is indexed in PQC identities
+                const found = indexedPubKeys.find(
+                    identity => identity.address === tx.content.from,
+                )
+
+                if (!found) {
+                    return {
+                        success: false,
+                        message:
+                            "Transaction is missing ed25519 signature, and the PQC signer is not added as an identity. Please provide an ed25519 signature or add the PQC signer as an identity for " +
+                            tx.content.from_ed25519_address,
+                    }
+                }
+
+                // Verify the found key's signature with the tx's ed25519 address
+                ed25519SignatureVerified = await ucrypto.verify({
+                    algorithm: "ed25519",
+                    message: new TextEncoder().encode(found.address),
+                    publicKey: hexToUint8Array(tx.content.from_ed25519_address),
+                    signature: hexToUint8Array(found.signature),
+                })
+            } else {
+                // INFO: Verify ed25519 signature
+                ed25519SignatureVerified = await ucrypto.verify({
+                    algorithm: "ed25519",
+                    message: new TextEncoder().encode(tx.hash),
+                    publicKey: hexToUint8Array(tx.content.from_ed25519_address),
+                    signature: hexToUint8Array(tx.ed25519_signature),
+                })
+            }
+        } else {
+            ed25519SignatureVerified = true
+        }
+
+        if (!ed25519SignatureVerified) {
+            return {
+                success: false,
+                message: "Ed25519 signature verification failed",
+            }
+        }
+
+        const mainSignatureVerified = await ucrypto.verify({
+            algorithm: tx.signature.type as SigningAlgorithm,
+            message: new TextEncoder().encode(tx.hash),
+            publicKey: hexToUint8Array(tx.content.from as string),
+            signature: hexToUint8Array(tx.signature.data),
+        })
+
+        return {
+            success: mainSignatureVerified,
+            message: mainSignatureVerified
+                ? "Transaction signature verified"
+                : "Transaction signature verification failed",
+        }
     }
 
     // INFO Checking if the tx is coherent to the current state of the blockchain (and the txs pending before it)
@@ -373,13 +471,15 @@ export default class Transaction implements ITransaction {
         console.log("[toRawTransaction] To: " + tx.content.to)
         const rawTx = {
             blockNumber: tx.blockNumber,
-            signature: JSON.stringify(tx.signature.data), // REVIEW This is a horrible thing, if it even works
+            signature: JSON.stringify(tx.signature), // REVIEW This is a horrible thing, if it even works
+            ed25519_signature: tx.ed25519_signature,
             status: status,
             hash: tx.hash,
             content: JSON.stringify(tx.content),
             type: tx.content.type,
             to: tx.content.to,
             from: tx.content.from,
+            from_ed25519_address: tx.content.from_ed25519_address,
             amount: tx.content.amount,
             nonce: tx.content.nonce,
             timestamp: tx.content.timestamp,
@@ -399,13 +499,8 @@ export default class Transaction implements ITransaction {
         )
         const tx = new Transaction()
 
-        console.log(rawTx)
-
         tx.blockNumber = rawTx.blockNumber
-        tx.signature = {
-            type: "ed25519", // Assuming the signature type as ed25519; adjust accordingly
-            data: Buffer.from(rawTx.signature, "hex"),
-        }
+        tx.signature = JSON.parse(rawTx.signature) as ISignature
         tx.status = rawTx.status
         tx.hash = rawTx.hash
         tx.content = {
@@ -414,8 +509,9 @@ export default class Transaction implements ITransaction {
                 | "crosschainOperation"
                 | "demoswork" // ! Remove this horrible thing when possible
                 | "NODE_ONLINE",
-            from: Buffer.from(rawTx.from, "hex"),
-            to: Buffer.from(rawTx.to, "hex"),
+            from: rawTx.from,
+            to: rawTx.to,
+            from_ed25519_address: rawTx.from_ed25519_address,
             amount: rawTx.amount,
             nonce: rawTx.nonce,
             timestamp: rawTx.timestamp,
@@ -428,6 +524,8 @@ export default class Transaction implements ITransaction {
             data: JSON.parse(rawTx.content).data,
             gcr_edits: JSON.parse(rawTx.content).gcr_edits,
         }
+        tx.ed25519_signature = rawTx.ed25519_signature
+
         return tx
     }
 }

@@ -33,6 +33,7 @@ import getTimestampCorrection from "./libs/utils/calibrateTime"
 import net from "net"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import { serverRpcBun } from "./libs/network/server_rpc"
+import { hexToUint8Array, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
 const term = terminalkit.terminal
 
@@ -224,20 +225,32 @@ async function preMainLoop() {
 
     // ANCHOR The whole first part of main ensures the environment is ready to run
     await getSharedState.identity.ensureIdentity() // ? Should we generate the identity option based too? (see SERVER_PORT and others    )
-    const id = getSharedState.identity
+    // INFO: Initialize Unified Crypto with ed25519 private key
+    await ucrypto.generateAllIdentities(
+        getSharedState.identity.ed25519.privateKey as Uint8Array,
+    )
+    getSharedState.keypair = await ucrypto.getIdentity(
+        getSharedState.signingAlgorithm,
+    )
+
+    // const id = getSharedState.identity
     term.green("[BOOTSTRAP] Our identity is ready\n")
     // Log identity
+    const publicKeyHex = uint8ArrayToHex(getSharedState.keypair.publicKey as Uint8Array)
     term.green(
-        "\n[MAIN] 🔗 WE ARE " + id.ed25519.publicKey.toString("hex") + " 🔗 \n",
+        "\n[MAIN] 🔗 WE ARE " + publicKeyHex + " 🔗 \n",
     )
     // Creating ourselves as a peer // ? Should this be removed in production?
     const ourselves = "http://127.0.0.1:" + indexState.SERVER_PORT
     getSharedState.connectionString = ourselves
     log.info("Our connection string is: " + ourselves)
     // And saves the public key file
-    const publicKeyHex = id.ed25519.publicKey.toString("hex")
-    fs.writeFileSync("publickey_" + publicKeyHex, publicKeyHex + "\n")
+    fs.writeFileSync(
+        "publickey_" + getSharedState.signingAlgorithm + "_" + publicKeyHex,
+        publicKeyHex + "\n",
+    )
     log.info("Our public key is: " + publicKeyHex)
+
 
     // ANCHOR Preparing the peer manager and loading the peer list
     PeerManager.getInstance().loadPeerList()

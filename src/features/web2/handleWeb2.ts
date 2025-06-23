@@ -1,13 +1,13 @@
-import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import required from "src/utilities/required"
-import SharedState from "src/utilities/sharedState"
+import SharedState, { getSharedState } from "src/utilities/sharedState"
 import { IWeb2Request } from "@kynesyslabs/demosdk/types"
 import { Web2RequestManager } from "./Web2RequestManager"
 import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
 
 import terminalKit from "terminal-kit"
 import { DAHR } from "./dahr/DAHR"
+import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
 const term = terminalKit.terminal
 
@@ -77,11 +77,9 @@ export async function handleWeb2(
                 const hashedAttestations = Hashing.sha256(
                     JSON.stringify(dahr.web2Request.attestations),
                 )
-                const ourPrivateKey =
-                    SharedState.getInstance().identity.ed25519.privateKey
-                const signedAttestations = Cryptography.sign(
-                    hashedAttestations,
-                    ourPrivateKey,
+                const signature = await ucrypto.sign(
+                    getSharedState.signingAlgorithm,
+                    new TextEncoder().encode(hashedAttestations),
                 )
 
                 term.green(
@@ -89,7 +87,10 @@ export async function handleWeb2(
                 )
 
                 dahr.web2Request.hash = hashedAttestations
-                dahr.web2Request.signature = signedAttestations
+                dahr.web2Request.signature = {
+                    type: getSharedState.signingAlgorithm,
+                    signature: uint8ArrayToHex(signature.signature),
+                }
             } catch (error) {
                 console.log("[handleWeb2] Error: " + JSON.stringify(error))
                 return JSON.stringify(error)
@@ -97,6 +98,7 @@ export async function handleWeb2(
         } else {
             /* TODO Activate the below on production  */
             // First, we have to validate the attestations
+            // NOTE: (For Massouji) web2RequestManager.web2ResultIsValid now returns a Promise<boolean>
             // web2RequestManager.web2ResultIsValid
             // Now that our web2request.request object is updated,
             // TODO we have to merge the attestations' arrays with valid values

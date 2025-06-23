@@ -1,12 +1,11 @@
-import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 
-import GCR from "../../blockchain/gcr/gcr"
 import Mempool from "../../blockchain/mempool"
 import { Operation } from "@kynesyslabs/demosdk/types"
 /* eslint-disable no-unused-vars */
 import Transaction from "../../blockchain/transaction"
+import { ucrypto } from "@kynesyslabs/demosdk/encryption"
 
 export interface DerivableNative {
     from: string
@@ -156,6 +155,7 @@ export async function createTransaction(
             from: null,
             to: null,
             amount: null,
+            from_ed25519_address: null,
             data: ["demoswork", null], // type as string and content in hex string
             gcr_edits: [],
             nonce: null, // Increments every time a transaction is sent from the same account
@@ -170,12 +170,13 @@ export async function createTransaction(
         hash: null,
         status: null,
         blockNumber: null,
+        ed25519_signature: null,
     }
     // Setting the type
     transaction.content.type = derivable.type
     // REVIEW Why? Should be done differently I guess
     // Setting us as the sender
-    transaction.content.from = getSharedState.identity.ed25519.publicKey
+    transaction.content.from = getSharedState.publicKeyHex
     transaction.content.to = derivable.to
     transaction.content.amount = 0
     transaction.content.nonce = 0
@@ -189,9 +190,9 @@ export async function createTransaction(
     transaction.content.timestamp = derivable.timestamp
     // Hashing the content and signing the transaction
     transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
-    const signature = Cryptography.sign(
-        transaction.hash,
-        getSharedState.identity.ed25519.privateKey,
+    const signature = await ucrypto.sign(
+        getSharedState.signingAlgorithm,
+        new TextEncoder().encode(transaction.hash),
     )
     transaction.signature = signature as any // REVIEW Should be correct but it was transaction.signature = signature before
     // TODO See how to be general purpose but specific (a shared format?)

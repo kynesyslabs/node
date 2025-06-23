@@ -5,6 +5,7 @@ import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 import { TransactionResponse } from "sdk/localsdk/multichain/types/multichain"
 import checkSignedPayloads from "src/utilities/checkSignedPayloads"
+import validateIfUint8Array from "@/utilities/validateUint8Array"
 
 /**
  * Executes a XM pay operation and returns
@@ -125,8 +126,10 @@ async function genericJsonRpcPay(
     }
 
     try {
-        const signedTx = operation.task.signedPayloads[0]
+        let signedTx = operation.task.signedPayloads[0];
 
+        signedTx = validateIfUint8Array(signedTx);
+        
         // INFO: Send payload and return the result
         const result = await instance.sendTransaction(signedTx)
         console.log("[XMScript Parser] Generic JSON RPC Pay: result: ")

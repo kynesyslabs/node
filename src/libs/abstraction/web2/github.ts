@@ -1,7 +1,7 @@
 import axios from "axios"
 import { Octokit } from "@octokit/core"
 import { Web2ProofParser } from "./parsers"
-import log from "@/utilities/logger"
+import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 
 export class GithubProofParser extends Web2ProofParser {
     private static instance: GithubProofParser
@@ -39,7 +39,7 @@ export class GithubProofParser extends Web2ProofParser {
 
     async readData(
         proofUrl: string,
-    ): Promise<{ message: string; signature: string; publicKey: string }> {
+    ): Promise<{ message: string; type: SigningAlgorithm; signature: string }> {
         this.verifyProofFormat(proofUrl, "github")
         const { username, gistId } = this.parseGistDetails(proofUrl)
         let content: string
@@ -90,12 +90,7 @@ export class GithubProofParser extends Web2ProofParser {
     static async getInstance() {
         if (!this.instance) {
             this.instance = new this()
-
-            try {
-                await this.instance.login()
-            } catch (error) {
-                log.error("Failed to login to github: " + error)
-            }
+            await this.instance.login()
         }
 
         return this.instance

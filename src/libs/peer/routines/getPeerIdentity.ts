@@ -26,12 +26,9 @@ export default async function getPeerIdentity(
     expectedKey: string,
 ): Promise<Peer> {
 
-    // Getting our identity
-    const id = getSharedState.identity.ed25519
-    
+    // Getting our identity    
     console.warn("[PEER AUTHENTICATION] Getting peer identity")
     console.log(peer)
-    console.log(id)
     console.log(expectedKey)
 
     const nodeCall: NodeCall = {
