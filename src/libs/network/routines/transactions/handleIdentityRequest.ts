@@ -7,6 +7,9 @@ import { verifyWeb2Proof } from "@/libs/abstraction"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import { PqcIdentityAssignPayload } from "@kynesyslabs/demosdk/abstraction"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
+import { Referrals } from "@/features/incentive/referrals"
+import HandleGCR from "@/libs/blockchain/gcr/handleGCR"
+import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
 
 interface IdentityResponse {
     success: boolean
@@ -23,8 +26,56 @@ interface IdentityResponse {
 export default async function handleIdentityRequest(
     tx: Transaction,
     sender: string,
-) : Promise<IdentityResponse> {
-    const payload = tx.content.data[1] as IdentityPayload
+): Promise<IdentityResponse> {
+    const payload = tx.content.data[1] as IdentityPayload & {
+        payload: {
+            referralCode?: string
+        }
+    }
+    const referralCode = payload.payload.referralCode
+
+    if (referralCode) {
+        const referrerAccount = await Referrals.findAccountByReferralCode(
+            referralCode,
+        )
+
+        if (!referrerAccount) {
+            return {
+                success: false,
+                message: "Error: Referrer account not found",
+            }
+        }
+
+        if (referrerAccount.pubkey === tx.content.from_ed25519_address) {
+            return {
+                success: false,
+                message: "Error: Referrer and new user are the same",
+            }
+        }
+
+        if (
+            Referrals.isAlreadyReferred(
+                referrerAccount,
+                tx.content.from_ed25519_address,
+            )
+        ) {
+            return {
+                success: false,
+                message: "Error: Referrer and new user are the same",
+            }
+        }
+
+        const newUserAccount = await ensureGCRForUser(
+            tx.content.from_ed25519_address,
+        )
+
+        if (!Referrals.isEligibleForReferral(newUserAccount)) {
+            return {
+                success: false,
+                message: "Error: Referrer account is not eligible for referral",
+            }
+        }
+    }
 
     switch (payload.method) {
         case "xm_identity_assign":

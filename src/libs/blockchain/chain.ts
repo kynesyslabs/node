@@ -279,31 +279,6 @@ export default class Chain {
 
     // REVIEW Giving back all the properties of an address
 
-    static async getAddressInfo(
-        address: string,
-    ): Promise<{ native: GlobalChangeRegistry }> {
-        const db = await Datasource.getInstance()
-        const gcrRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-        // REVIEW If not found, return an empty address object with default values (aka a GlobalChangeRegistry object with empty details and extended properties)
-        try {
-            const gcrSearch = (await gcrRepository.findOneBy({
-                publicKey: ILike(address),
-            })) as GlobalChangeRegistry
-
-            return {
-                native: gcrSearch,
-            }
-        } catch (error) {
-            const emptyGCR = new GlobalChangeRegistry()
-            emptyGCR.publicKey = address
-            return {
-                native: emptyGCR,
-            }
-        }
-    }
-
     static isGenesis(block: Block): boolean {
         // Check if there are any ordered transactions
         if (block.number === 0) {

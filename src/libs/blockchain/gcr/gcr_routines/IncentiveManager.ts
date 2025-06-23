@@ -39,21 +39,19 @@ export class IncentiveManager {
         userId: string,
         walletAddress: string,
         chain: string,
-        referralCode?: string,
     ): Promise<RPCResponse> {
         return await this.pointSystem.deductWeb3WalletPoints(
             userId,
             walletAddress,
             chain,
-            referralCode,
         )
     }
 
     /**
      * Hook to be called after Twitter unlinking
      */
-    static async twitterUnlinked(userId: string, referralCode?: string): Promise<RPCResponse> {
-        return await this.pointSystem.deductTwitterPoints(userId, referralCode)
+    static async twitterUnlinked(userId: string): Promise<RPCResponse> {
+        return await this.pointSystem.deductTwitterPoints(userId)
     }
 
     /**

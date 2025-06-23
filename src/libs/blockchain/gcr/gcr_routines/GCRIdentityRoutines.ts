@@ -163,7 +163,6 @@ export default class GCRIdentityRoutines {
                 accountGCR.pubkey,
                 normalizedAddress,
                 chain,
-                editOperation.referralCode,
             )
         }
 
@@ -271,7 +270,7 @@ export default class GCRIdentityRoutines {
              * Deduct incentive points for Twitter unlinking
              */
             if (context === "twitter") {
-                await IncentiveManager.twitterUnlinked(editOperation.account, editOperation.referralCode)
+                await IncentiveManager.twitterUnlinked(editOperation.account)
             }
         }
 

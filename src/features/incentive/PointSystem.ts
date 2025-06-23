@@ -1,9 +1,11 @@
+import log from "@/utilities/logger"
+import { Referrals } from "./referrals"
 import Datasource from "../../model/datasource"
+import HandleGCR from "@/libs/blockchain/gcr/handleGCR"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { UserPoints } from "@kynesyslabs/demosdk/abstraction"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
-import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import HandleGCR from "@/libs/blockchain/gcr/handleGCR"
 
 const pointValues = {
     LINK_WEB3_WALLET: 2,
@@ -88,23 +90,36 @@ export class PointSystem {
 
         if (!account) {
             account = await HandleGCR.createAccount(userIdStr)
-            account.points.totalPoints = 0
-            account.points.breakdown = {
-                web3Wallets: {},
-                socialAccounts: {
-                    twitter: 0,
-                    github: 0,
-                    discord: 0,
-                },
-            }
-            account.points.lastUpdated = new Date()
+            // REVIEW: Commented out code is a duplicate of the default values in the GCRMain entity
+            // account.points.totalPoints = 0
+            // account.points.breakdown = {
+            //     web3Wallets: {},
+            //     socialAccounts: {
+            //         twitter: 0,
+            //         github: 0,
+            //         discord: 0,
+            //     },
+            //     referrals: 0,
+            // }
+            // account.points.lastUpdated = new Date()
+            // await gcrMainRepository.save(account)
+        }
 
+        // INFO: This is a fallback for accounts that were created before the referral code was added
+        if (!account.referralInfo || !account.referralInfo.referralCode) {
+            account.referralInfo = {
+                totalReferrals: 0,
+                referralCode: Referrals.generateReferralCode(userIdStr),
+                referrals: [],
+                referredBy: null,
+            }
             await gcrMainRepository.save(account)
         }
 
         // Create and return the response object
         return {
             userId: userIdStr,
+            referralCode: account.referralInfo?.referralCode || "",
             totalPoints: account.points.totalPoints || 0,
             breakdown: {
                 web3Wallets: account.points.breakdown?.web3Wallets || {},
@@ -113,6 +128,7 @@ export class PointSystem {
                     github: 0,
                     discord: 0,
                 },
+                referrals: account.points.breakdown?.referrals || 0,
             },
             linkedWallets,
             linkedSocials,
@@ -128,14 +144,19 @@ export class PointSystem {
         points: number,
         type: "web3Wallets" | "socialAccounts",
         platform: string,
+        referralCode?: string,
     ): Promise<void> {
+        log.only("referral code: " + referralCode)
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
         const account = await gcrMainRepository.findOneBy({ pubkey: userId })
 
+        log.only("account: " + JSON.stringify(account))
+
         if (!account) {
             const newAccount = await HandleGCR.createAccount(userId)
             newAccount.points.totalPoints = points
+
             if (
                 type === "socialAccounts" &&
                 (platform === "twitter" ||
@@ -149,6 +170,7 @@ export class PointSystem {
                         github: platform === "github" ? points : 0,
                         discord: platform === "discord" ? points : 0,
                     },
+                    referrals: 0,
                 }
             } else {
                 newAccount.points.breakdown = {
@@ -158,12 +180,27 @@ export class PointSystem {
                         github: 0,
                         discord: 0,
                     },
+                    referrals: 0,
                 }
             }
             newAccount.points.lastUpdated = new Date()
 
+            // Process referral for new account
+            if (referralCode) {
+                log.only("Processing referral for new account")
+                await Referrals.processReferral(
+                    newAccount,
+                    referralCode,
+                    gcrMainRepository,
+                )
+            }
+
             await gcrMainRepository.save(newAccount)
         } else {
+            const isEligibleForReferral =
+                Referrals.isEligibleForReferral(account)
+            log.only("isEligibleForReferral: " + isEligibleForReferral)
+
             const oldTotal = account.points.totalPoints || 0
             account.points.totalPoints = oldTotal + points
 
@@ -187,6 +224,16 @@ export class PointSystem {
             }
             account.points.lastUpdated = new Date()
 
+            // Process referral for existing account if eligible
+            if (referralCode && isEligibleForReferral) {
+                log.only("Processing referral for existing account")
+                await Referrals.processReferral(
+                    account,
+                    referralCode,
+                    gcrMainRepository,
+                )
+            }
+
             await gcrMainRepository.save(account)
         }
     }
@@ -204,6 +251,7 @@ export class PointSystem {
                 result: 200,
                 response: {
                     userId: userPoints.userId,
+                    referralCode: userPoints.referralCode,
                     totalPoints: userPoints.totalPoints,
                     breakdown: userPoints.breakdown,
                     linkedWallets: userPoints.linkedWallets,
@@ -274,6 +322,7 @@ export class PointSystem {
                 pointValues.LINK_WEB3_WALLET,
                 "web3Wallets",
                 chain,
+                referralCode,
             )
 
             // Get updated points
@@ -318,7 +367,10 @@ export class PointSystem {
      * @param referralCode Optional referral code
      * @returns RPCResponse
      */
-    async awardTwitterPoints(userId: string, referralCode?: string): Promise<RPCResponse> {
+    async awardTwitterPoints(
+        userId: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
         try {
             const userPointsWithIdentities = await this.getUserPointsInternal(
                 userId,
@@ -343,6 +395,7 @@ export class PointSystem {
                 pointValues.LINK_TWITTER,
                 "socialAccounts",
                 "twitter",
+                referralCode,
             )
 
             const updatedPoints = await this.getUserPointsInternal(userId)
@@ -382,7 +435,6 @@ export class PointSystem {
         userId: string,
         walletAddress: string,
         chain: string,
-        referralCode?: string,
     ): Promise<RPCResponse> {
         try {
             // Deduct points by updating the GCR
@@ -425,7 +477,7 @@ export class PointSystem {
      * @param referralCode Optional referral code
      * @returns RPCResponse
      */
-    async deductTwitterPoints(userId: string, referralCode?: string): Promise<RPCResponse> {
+    async deductTwitterPoints(userId: string): Promise<RPCResponse> {
         try {
             const userPointsWithIdentities = await this.getUserPointsInternal(
                 userId,
