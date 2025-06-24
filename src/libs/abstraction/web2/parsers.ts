@@ -1,3 +1,5 @@
+import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+
 export abstract class Web2ProofParser {
     formats = {
         github: [
@@ -38,8 +40,8 @@ export abstract class Web2ProofParser {
 
             return {
                 message: splits[1],
-                signature: splits[2],
-                publicKey: splits[3],
+                type: splits[2] as SigningAlgorithm,
+                signature: splits[3],
             }
         } catch (error) {
             console.error(error)
@@ -52,8 +54,8 @@ export abstract class Web2ProofParser {
      */
     abstract readData(proofUrl: string): Promise<{
         message: string
+        type: SigningAlgorithm
         signature: string
-        publicKey: string
     }>
 
     static getInstance(): Promise<Web2ProofParser> {

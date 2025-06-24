@@ -25,6 +25,7 @@ import TxUtils from "../blockchain/transaction"
 import Mempool from "../blockchain/mempool_v2"
 import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 
+import { TwitterProofParser } from "../abstraction/web2/twitter"
 export interface NodeCall {
     message: string
     data: any
@@ -147,8 +148,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         // INFO Authentication listener
         case "getPeerIdentity":
             // NOTE We don't need to sign anything as the headers are signed already
-            response.response =
-                getSharedState.identity.ed25519.publicKey.toString("hex")
+            response.response = uint8ArrayToHex(getSharedState.keypair.publicKey as Uint8Array)
             //console.log(response)
             break
 
@@ -160,9 +160,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 break
             }
             try {
-                nStat = (await GCR.getGCRNativeStatus(
-                    data.address,
-                )) as GCRMain
+                nStat = (await GCR.getGCRNativeStatus(data.address)) as GCRMain
                 response.response = nStat
             } catch (error) {
                 response.result = 400
@@ -176,9 +174,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "No address specified"
                 break
             }
-            nStat = (await GCR.getGCRNativeStatus(
-                data.address,
-            )) as GCRMain
+            nStat = (await GCR.getGCRNativeStatus(data.address)) as GCRMain
             response.response = nStat.nonce
             break
         case "getPeerTime":
@@ -210,6 +206,21 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 ...(data.options ? [data.options] : []),
             )
             break
+
+        case "getTweet": {
+            if (!data.tweetUrl) {
+                response.result = 400
+                response.response = "No tweet URL specified"
+                break
+            }
+
+            const twitter = await TwitterProofParser.getInstance()
+            const res = await twitter.getTweet(data.tweetUrl)
+
+            response.result = res.success ? 200 : 400
+            response.response = res
+            break
+        }
 
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen

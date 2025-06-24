@@ -1,7 +1,7 @@
 export const evmProviders = {
     eth: {
         mainnet: "https://rpc.ankr.com/eth",
-        sepolia: "https://rpc.ankr.com/eth_sepolia",
+        sepolia: "https://ethereum-sepolia-rpc.publicnode.com",
         goerli: "https://ethereum-goerli.publicnode.com",
     },
     bsc: {

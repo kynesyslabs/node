@@ -29,10 +29,23 @@ async function setBalance(
         identities: {
             xm: {},
             web2: {},
+            pqc: {},
         },
         balance: BigInt(balance),
         nonce: 0,
         pubkey: publicKey,
+        points: {
+            totalPoints: 0,
+            breakdown: {
+                web3Wallets: {},
+                socialAccounts: {
+                    twitter: 0,
+                    github: 0,
+                    discord: 0,
+                },
+            },
+            lastUpdated: new Date(),
+        },
     }
 
     const db = await Datasource.getInstance()

@@ -39,6 +39,8 @@ module.exports = {
             {
                 selector: "variableLike",
                 format: ["camelCase"],
+                leadingUnderscore: "allow",
+                trailingUnderscore: "allow",
             },
             {
                 selector: "function",
