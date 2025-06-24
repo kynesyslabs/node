@@ -97,5 +97,7 @@ src/GTAGS
 # Output files
 output/*
 .env
+data/l2ps/example/config.json
+data/l2ps/example/iv.key
 data/l2ps/*
 CLAUDE.md
