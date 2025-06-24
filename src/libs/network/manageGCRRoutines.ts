@@ -46,7 +46,9 @@ export default async function manageGCRRoutines(
             break
 
         case "getPoints":
-            response.response = await IncentiveManager.getPoints(sender)
+            response.response = await IncentiveManager.getPoints(
+                params[0],
+            )
             break
 
         // SECTION Web2 Identity Management
