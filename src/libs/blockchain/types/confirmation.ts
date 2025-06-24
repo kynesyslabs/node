@@ -10,13 +10,16 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import forge from "node-forge"
-
+import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 export default class Confirmation {
     data: {
         validator: forge.pki.ed25519.BinaryBuffer
         tx_hash_validated: string
     }
-    signature: forge.pki.ed25519.BinaryBuffer
+    signature: {
+        type: SigningAlgorithm
+        data: string
+    }
 
     constructor() {
         this.data = {

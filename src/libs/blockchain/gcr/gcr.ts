@@ -369,6 +369,18 @@ export default class GCR {
                         xm: {},
                         web2: {},
                     },
+                    points: {
+                        totalPoints: 0,
+                        breakdown: {
+                            web3Wallets: {},
+                            socialAccounts: {
+                                twitter: 0,
+                                github: 0,
+                                discord: 0,
+                            },
+                        },
+                        lastUpdated: new Date(),
+                    },
                 }
             }
         } catch (e) {
@@ -380,6 +392,18 @@ export default class GCR {
                 identities: {
                     xm: {},
                     web2: {},
+                },
+                points: {
+                    totalPoints: 0,
+                    breakdown: {
+                        web3Wallets: {},
+                        socialAccounts: {
+                            twitter: 0,
+                            github: 0,
+                            discord: 0,
+                        },
+                    },
+                    lastUpdated: new Date(),
                 },
             }
         }

@@ -9,15 +9,13 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import Peer, { SyncData } from "./Peer"
+import Peer from "./Peer"
 import log from "src/utilities/logger"
-import Cryptography from "../crypto/cryptography"
 import { getSharedState } from "src/utilities/sharedState"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { HelloPeerRequest } from "../network/manageHelloPeer"
-import { forgeToHex } from "../crypto/forgeUtils"
+import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import fs from "fs"
-
 
 export default class PeerManager {
     private static instance: PeerManager
@@ -30,9 +28,7 @@ export default class PeerManager {
     }
 
     get ourSyncData() {
-        const identity =
-            getSharedState.identity.ed25519.publicKey.toString("hex")
-        const peer = this.peerList[identity]
+        const peer = this.peerList[getSharedState.publicKeyHex]
         return peer.sync
     }
 
@@ -100,7 +96,9 @@ export default class PeerManager {
         for (const peer in this.peerList) {
             console.log("[PeerManager] Getting peer " + peer)
             const peerInstance = this.peerList[peer]
-            console.log("[PeerManager] With url: " + peerInstance.connection.string)
+            console.log(
+                "[PeerManager] With url: " + peerInstance.connection.string,
+            )
             // Filtering
             if (peerInstance.identity != undefined) {
                 console.log(
@@ -158,10 +156,7 @@ export default class PeerManager {
                     peerInstance.identity,
                 false,
             )
-            if (
-                peerInstance.identity ==
-                getSharedState.identity.ed25519.publicKey.toString("hex")
-            ) {
+            if (peerInstance.identity == getSharedState.publicKeyHex) {
                 log.info("[PEERMANAGER] Peer is us: skipping", false)
                 continue
             }
@@ -247,8 +242,7 @@ export default class PeerManager {
      * Updates the sync data for our peer in the peerlist
      */
     updateOurPeerSyncData() {
-        const identity =
-            getSharedState.identity.ed25519.publicKey.toString("hex")
+        const identity = getSharedState.publicKeyHex
         const peer = this.peerList[identity]
 
         if (!peer) {
@@ -298,26 +292,26 @@ export default class PeerManager {
 
         // TODO test and finalize this method
         log.debug("[Hello Peer] Saying hello to peer " + peer.identity)
-        const ourId = getSharedState.identity.ed25519.publicKey
         const connectionString = getSharedState.exposedUrl // ? Are we sure about this
-        const signedConnectionString = Cryptography.sign(
-            connectionString,
-            getSharedState.identity.ed25519.privateKey,
+        const signedConnectionString = await ucrypto.sign(
+            getSharedState.signingAlgorithm,
+            new TextEncoder().encode(connectionString),
         )
 
-        log.debug(
-            "[Hello Peer] Signing connection string: " + connectionString,
-        )
+        log.debug("[Hello Peer] Signing connection string: " + connectionString)
         log.debug(
             "[Hello Peer] Signed connection string: " +
-                forgeToHex(signedConnectionString),
+                uint8ArrayToHex(signedConnectionString.signature),
         )
 
         // Sending the transmission to the peer
         const helloRequest: HelloPeerRequest = {
             url: connectionString,
-            publicKey: ourId.toString("hex"),
-            signature: signedConnectionString.toString("hex"),
+            publicKey: getSharedState.publicKeyHex,
+            signature: {
+                type: getSharedState.signingAlgorithm,
+                data: uint8ArrayToHex(signedConnectionString.signature),
+            },
             syncData: {
                 block: getSharedState.lastBlockNumber,
                 block_hash: getSharedState.lastBlockHash,

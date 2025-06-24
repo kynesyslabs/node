@@ -533,17 +533,17 @@ export default class Chain {
         genesisTx.content.type = "genesis"
         genesisTx.blockNumber = 0
         genesisTx.content.to = {
-            type: "ed25519",
+            type: getSharedState.signingAlgorithm,
             data: new Uint8Array(Buffer.from("0x0", "hex")),
         }.data.toString()
         genesisTx.content.from = {
-            type: "ed25519",
+            type: getSharedState.signingAlgorithm,
             data: new Uint8Array(Buffer.from("0x0", "hex")),
         }.data.toString()
 
         genesisTx.signature = {
-            type: "ed25519",
-            data: new Uint8Array(Buffer.from("0x0", "hex")),
+            type: getSharedState.signingAlgorithm,
+            data: "0x0",
         }
         genesisTx.status = "confirmed"
 

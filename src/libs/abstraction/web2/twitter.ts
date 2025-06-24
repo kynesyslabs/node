@@ -4,6 +4,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { Cookie } from "tough-cookie"
 import log from "@/utilities/logger"
 import { Web2ProofParser } from "./parsers"
+import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 
 export class TwitterProofParser extends Web2ProofParser {
     private static instance: TwitterProofParser
@@ -114,10 +115,28 @@ export class TwitterProofParser extends Web2ProofParser {
         return loggedIn
     }
 
+    async getTweet(tweetUrl: string) {
+        const { tweetId } = this.getTweetDetails(tweetUrl)
+
+        try {
+            const tweet = await this.scraper.getTweet(tweetId)
+            return {
+                success: true,
+                tweet: tweet,
+            }
+        } catch (error) {
+            console.error(error)
+            return {
+                success: false,
+                error: "Failed to get tweet",
+            }
+        }
+    }
+
     async readData(tweetUrl: string): Promise<{
         message: string
         signature: string
-        publicKey: string
+        type: SigningAlgorithm
     }> {
         this.verifyProofFormat(tweetUrl, "twitter")
         // INFO: Get the tweet ID from the URL
