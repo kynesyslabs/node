@@ -37,6 +37,9 @@ import {
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
 import { emptyResponse } from "./server_rpc"
+import isValidatorForNextBlock from "src/libs/consensus/v2/routines/isValidator"
+import getShard from "src/libs/consensus/v2/routines/getShard"
+import getCommonValidatorSeed from "src/libs/consensus/v2/routines/getCommonValidatorSeed"
 // SECTION Handlers for different types of transactions
 import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
 import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Rename to handleXMRequest
@@ -416,7 +419,43 @@ export default class ServerHandlers {
                 return result
             }
 
-            // We add the transaction to the mempool
+            // REVIEW We add the transaction to the mempool
+            // DTR: Check if we should relay instead of storing locally
+            if (process.env.DTR_ENABLED === "true") {
+                const isValidator = await isValidatorForNextBlock()
+                
+                if (!isValidator) {
+                    console.log("[DTR] Non-validator node: relaying transaction to validators")
+                    try {
+                        const { commonValidatorSeed } = await getCommonValidatorSeed()
+                        const validators = await getShard(commonValidatorSeed)
+                        // REVIEW Big if. Is status.online something we are using?
+                        const relayTarget = validators.find(v => v.status.online && v.sync.status)
+                        
+                        // REVIEW Relaying to next block validators
+                        if (relayTarget) {
+                            await relayTarget.call({
+                                method: "nodeCall",
+                                params: [{
+                                    type: "RELAY_TX",
+                                    data: { transaction: queriedTx, validityData: validatedData },
+                                }],
+                            }, true)
+                            
+                            result.success = true
+                            result.response = { message: "Transaction relayed to validator" }
+                            result.require_reply = false
+                            return result
+                        } else {
+                            console.log("[DTR] No validator available for relay, falling back to local storage")
+                        }
+                    } catch (relayError) {
+                        console.log("[DTR] Relay failed, falling back to local storage:", relayError)
+                    }
+                }
+            }
+
+            // Proceeding with the mempool addition (either we are a validator or this is a fallback)
             console.log(
                 "[handleExecuteTransaction] Adding tx with hash: " +
                     queriedTx.hash +
