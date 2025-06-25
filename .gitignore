@@ -100,6 +100,8 @@ output/*
 bun.lockb
 
 # L2PS files
+data/l2ps/example/config.json
+data/l2ps/example/iv.key
 data/l2ps/*
 
 # Claude specific files

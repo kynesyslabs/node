@@ -9,9 +9,23 @@ import {
     SwapTransactionOptions,
     RubicSdkError,
     BasicTransactionOptions,
+    SolanaWalletProviderCore,
+    SolanaWeb3,
 } from "rubic-sdk"
-import { BridgeTradePayload, SupportedTokens, ChainProviders } from "@kynesyslabs/demosdk/types"
-import { BlockchainName, BRIDGE_PROTOCOLS, ExtendedCrossChainManagerCalculationOptions } from "./bridgeUtils"
+import {
+    BridgeTradePayload,
+    SupportedTokens,
+    ChainProviders,
+} from "@kynesyslabs/demosdk/types"
+import {
+    BlockchainName,
+    BRIDGE_PROTOCOLS,
+    ExtendedCrossChainManagerCalculationOptions,
+} from "./bridgeUtils"
+import { Connection, Keypair, PublicKey, Transaction } from "@solana/web3.js"
+import nacl from "tweetnacl"
+import bs58 from "bs58"
+import { Signer } from "@solana/web3.js"
 
 class CustomEVMProvider {
     private httpProvider: HttpProvider
@@ -124,36 +138,181 @@ class CustomEVMProvider {
     }
 }
 
+class CustomSolanaProvider implements SolanaWalletProviderCore {
+    private connection: Connection
+    private signer: Keypair
+    publicKey: PublicKey
+    core: SolanaWeb3
+    address: string
+
+    constructor(rpcUrl: string, privateKey: string) {
+        this.connection = new Connection(rpcUrl, "confirmed")
+
+        let secretKey: Uint8Array
+        if (privateKey.startsWith("[") || privateKey.startsWith("{")) {
+            secretKey = Uint8Array.from(JSON.parse(privateKey))
+        } else {
+            secretKey = bs58.decode(privateKey)
+        }
+        if (secretKey.length !== 64) {
+            throw new Error(
+                "Invalid Solana private key size. Expected 64 bytes.",
+            )
+        }
+        this.signer = Keypair.fromSecretKey(secretKey)
+        this.publicKey = this.signer.publicKey
+    }
+
+    async signTransaction(transaction: Transaction): Promise<Transaction> {
+        if ("sign" in transaction && typeof transaction.sign === "function") {
+            transaction.sign([this.signer] as unknown as Signer)
+            return transaction
+        } else {
+            throw new Error("Unknown transaction type for signing")
+        }
+    }
+
+    async getLatestBlockhash(): Promise<{ blockhash: string }> {
+        const { blockhash } = await this.connection.getLatestBlockhash()
+        return { blockhash }
+    }
+
+    async sendTransaction(transaction: Transaction): Promise<string> {
+        try {
+            const { blockhash } = await this.connection.getLatestBlockhash()
+            transaction.recentBlockhash = blockhash
+        } catch (error) {
+            console.warn(
+                "getLatestBlockhash failed, falling back to getRecentBlockhash:",
+                error,
+            )
+            const { blockhash } = await this.connection.getRecentBlockhash(
+                "confirmed",
+            )
+            transaction.recentBlockhash = blockhash
+        }
+
+        transaction.sign(this.signer)
+
+        const txId = await this.connection.sendRawTransaction(
+            transaction.serialize(),
+        )
+
+        await this.connection.confirmTransaction(txId, "confirmed")
+
+        return txId
+    }
+
+    getPublicKey(): PublicKey {
+        return this.signer.publicKey
+    }
+
+    // Implementing missing methods and properties from SolanaWeb3
+    isConnected = true // Assuming always connected
+
+    async signAllTransactions(
+        transactions: Transaction[],
+    ): Promise<Transaction[]> {
+        return transactions.map(tx => {
+            tx.sign(this.signer)
+            return tx
+        })
+    }
+
+    async signMessage(message: Uint8Array): Promise<{ signature: Uint8Array }> {
+        const signature = nacl.sign.detached(message, this.signer.secretKey)
+        return { signature }
+    }
+
+    async request(args: any): Promise<any> {
+        throw new Error("Method not implemented.")
+    }
+
+    connect(): Promise<boolean> {
+        console.log("Connected to Solana provider")
+        return Promise.resolve(true)
+    }
+
+    disconnect(): Promise<boolean> {
+        console.log("Disconnected from Solana provider")
+        return Promise.resolve(true)
+    }
+
+    async signAndSendTransaction(
+        transaction: Transaction,
+    ): Promise<{ signature: string }> {
+        const signedTransaction = await this.signTransaction(transaction)
+
+        const txId = await this.connection.sendRawTransaction(
+            signedTransaction.serialize(),
+        )
+
+        await this.connection.confirmTransaction(txId, "confirmed")
+
+        return { signature: txId }
+    }
+
+    on(event: string, listener: (...args: any[]) => void): void {
+        console.log(`Event listener registered for event: ${event}`)
+    }
+
+    off(event: string, listener: (...args: any[]) => void): void {
+        console.log(`Event listener removed for event: ${event}`)
+    }
+
+    get signers() {
+        return [this.signer]
+    }
+}
+
 export default class RubicService {
     private sdk: SDK | null = null
-    private customEVMProvider: CustomEVMProvider
-    private signer: any
+    private customEVMProvider: CustomEVMProvider | null = null
+    private customSolanaProvider: CustomSolanaProvider | null = null
+    private signer: any = null
+    private chain: string
     private initPromise: Promise<void> | null = null
+    private receiverAddress: string | null = null
 
-    constructor(privateKey: string, chain: string) {
-        const web3Instance = new Web3(ChainProviders[`${chain}`].mainnet)
+    constructor(privateKey: string, chain: string, receiverAddress?: string) {
+        const mockPrivateKey =
+            chain === BLOCKCHAIN_NAME.SOLANA
+                ? process.env.SOLANA_PRIVATE_KEY
+                : `0x${process.env.EVM_PRIVATE_KEY}`
 
-        const httpProvider =
-            web3Instance.currentProvider as unknown as HttpProvider
+        this.chain = chain
+        this.receiverAddress = receiverAddress
 
-        const formattedKey = privateKey.startsWith("0x")
-            ? privateKey
-            : `0x${privateKey}`
-
-        this.signer =
-            web3Instance.eth.accounts.privateKeyToAccount(formattedKey)
-        web3Instance.eth.accounts.wallet.add(this.signer)
-        this.customEVMProvider = new CustomEVMProvider(
-            httpProvider,
-            this.signer,
-        )
+        if (chain === BLOCKCHAIN_NAME.SOLANA) {
+            this.customSolanaProvider = new CustomSolanaProvider(
+                ChainProviders.SOLANA.mainnet,
+                mockPrivateKey,
+            )
+        } else {
+            const web3Instance = new Web3(ChainProviders[`${chain}`].mainnet)
+            const httpProvider =
+                web3Instance.currentProvider as unknown as HttpProvider
+            const formattedKey = mockPrivateKey.startsWith("0x")
+                ? mockPrivateKey
+                : `0x${mockPrivateKey}`
+            this.signer =
+                web3Instance.eth.accounts.privateKeyToAccount(formattedKey)
+            web3Instance.eth.accounts.wallet.add(this.signer)
+            this.customEVMProvider = new CustomEVMProvider(
+                httpProvider,
+                this.signer,
+            )
+        }
 
         this.initPromise = this.initializeSDK()
     }
 
     private async initializeSDK(): Promise<void> {
         try {
-            const walletAddress = this.signer.address
+            const walletAddress =
+                this.chain === BLOCKCHAIN_NAME.SOLANA
+                    ? this.customSolanaProvider?.getPublicKey().toBase58()
+                    : this.signer?.address
 
             const configuration: Configuration = {
                 rpcProviders: {
@@ -190,12 +349,24 @@ export default class RubicService {
                         crossChain: walletAddress,
                         onChain: walletAddress,
                     },
+                    [CHAIN_TYPE.SOLANA]: {
+                        crossChain: walletAddress,
+                        onChain: walletAddress,
+                    },
                 },
                 walletProvider: {
-                    [CHAIN_TYPE.EVM]: {
-                        core: this.customEVMProvider,
-                        address: walletAddress,
-                    },
+                    ...(this.chain !== BLOCKCHAIN_NAME.SOLANA && {
+                        [CHAIN_TYPE.EVM]: {
+                            core: this.customEVMProvider,
+                            address: walletAddress,
+                        },
+                    }),
+                    ...(this.chain === BLOCKCHAIN_NAME.SOLANA && {
+                        [CHAIN_TYPE.SOLANA]: {
+                            address: walletAddress,
+                            core: this.customSolanaProvider,
+                        },
+                    }),
                 },
             }
 
@@ -226,7 +397,6 @@ export default class RubicService {
 
         if (!this.sdk) {
             const error = new Error("SDK not initialized") as RubicSdkError
-
             return error
         }
 
@@ -235,32 +405,62 @@ export default class RubicService {
                 payload.fromChainId,
                 payload.fromToken,
             )
-            const toTokenAddress = this.getTokenAddress(payload.toChainId, payload.toToken)
 
-            const trades = await this.sdk.crossChainManager.calculateTrade(
-                {
-                    address: fromTokenAddress,
-                    blockchain: this.getBlockchainName(payload.fromChainId),
-                },
-                payload.amount,
-                {
-                    address: toTokenAddress,
-                    blockchain: this.getBlockchainName(payload.toChainId),
-                },
-                {
-                    fromAddress: this.signer.address,
-                    bridgeTypes: Object.values(BRIDGE_PROTOCOLS)
-                        .filter(p => p !== "all")
-                        .map(p => p.toLowerCase()),
-                    gasCalculation: "enabled",
-                } as ExtendedCrossChainManagerCalculationOptions,
+            const toTokenAddress = this.getTokenAddress(
+                payload.toChainId,
+                payload.toToken,
             )
+            // Dynamically select the correct address for fromAddress
+            let fromAddress = ""
 
-            console.log(`Received ${trades.length} trade options`)
+            if (
+                this.getBlockchainName(payload.fromChainId) ===
+                BLOCKCHAIN_NAME.SOLANA
+            ) {
+                fromAddress = this.customSolanaProvider
+                    ?.getPublicKey()
+                    .toBase58()
+            } else {
+                fromAddress = this.signer?.address
+            }
 
-            if (trades.length === 0) {
+            let trades = []
+
+            if (payload.fromChainId === payload.toChainId) {
+                trades = await this.sdk.onChainManager.calculateTrade(
+                    {
+                        address: fromTokenAddress,
+                        blockchain: this.getBlockchainName(payload.fromChainId),
+                    },
+                    payload.amount,
+                    toTokenAddress,
+                )
+                console.log(`Received ${trades.length} on-chain trade options`)
+            } else {
+                trades = await this.sdk.crossChainManager.calculateTrade(
+                    {
+                        address: fromTokenAddress,
+                        blockchain: this.getBlockchainName(payload.fromChainId),
+                    },
+                    payload.amount,
+                    {
+                        address: toTokenAddress,
+                        blockchain: this.getBlockchainName(payload.toChainId),
+                    },
+                    {
+                        fromAddress,
+                        bridgeTypes: Object.values(BRIDGE_PROTOCOLS)
+                            .filter(p => p !== "all")
+                            .map(p => p.toLowerCase()),
+                        gasCalculation: "enabled",
+                    } as ExtendedCrossChainManagerCalculationOptions,
+                )
+                console.log(
+                    `Received ${trades.length} cross-chain trade options`,
+                )
+            }
+            if (!trades || trades.length === 0) {
                 const error = new Error("No trades found") as RubicSdkError
-
                 return error
             }
 
@@ -269,32 +469,46 @@ export default class RubicService {
             )
 
             const bestTrade = filteredTrades[0]
-            
             return bestTrade
         } catch (error: any) {
             console.error("Error getting trade:", error)
-
             return error as RubicSdkError
         }
     }
 
     async executeTrade(wrappedTrade: WrappedCrossChainTrade) {
-        if (!this.sdk) throw new Error("SDK not initialized")
-
-        if (!wrappedTrade) throw new Error("Trade object is null or undefined")
-
-        if (wrappedTrade.error) {
-            console.error("Trade contains an error:", wrappedTrade.error)
-            throw wrappedTrade.error
-        }
-
-        const trade = wrappedTrade.trade as unknown as CrossChainTrade
-
-        if (!trade) throw new Error("Invalid trade object: trade is null")
-            
         try {
-            const signerAddress = this.signer.address
-            this.sdk.updateWalletAddress(CHAIN_TYPE.EVM, signerAddress)
+            if (!this.sdk) throw new Error("SDK not initialized")
+
+            if (!wrappedTrade)
+                throw new Error("Trade object is null or undefined")
+
+            if (wrappedTrade.error) {
+                console.error("Trade contains an error:", wrappedTrade.error)
+                throw wrappedTrade.error
+            }
+
+            const trade = wrappedTrade.trade as unknown as CrossChainTrade
+
+            if (!trade) throw new Error("Invalid trade object: trade is null")
+
+            let signerAddress = ""
+
+            if (this.chain === BLOCKCHAIN_NAME.SOLANA) {
+                signerAddress = this.customSolanaProvider
+                    ?.getPublicKey()
+                    .toBase58()
+                this.sdk.updateWalletAddress(CHAIN_TYPE.SOLANA, signerAddress)
+            } else {
+                signerAddress = this.signer?.address
+                this.sdk.updateWalletAddress(CHAIN_TYPE.EVM, signerAddress)
+            }
+
+            const receiverAddress = this.receiverAddress
+                ? this.receiverAddress
+                : this.chain === BLOCKCHAIN_NAME.SOLANA
+                ? this.customSolanaProvider?.getPublicKey().toBase58()
+                : this.signer?.address
 
             const swapOptions: SwapTransactionOptions = {
                 onConfirm: (hash: string) => {
@@ -303,7 +517,7 @@ export default class RubicService {
                 onApprove: (hash: string | null) => {
                     console.log("Approval transaction:", hash)
                 },
-                receiverAddress: signerAddress,
+                receiverAddress,
                 skipAmountCheck: false,
                 useCacheData: false,
                 testMode: false,
@@ -318,7 +532,6 @@ export default class RubicService {
             }
 
             const needsApproval = await trade.needApprove()
-
             if (needsApproval) {
                 console.log("Approving...")
                 const approve = await trade.approve(
@@ -335,6 +548,21 @@ export default class RubicService {
 
             return receipt
         } catch (error) {
+            if (
+                error instanceof RubicSdkError &&
+                error.message.includes("eth_estimateGas")
+            ) {
+                const customError = Object.assign(
+                    new RubicSdkError(error.message),
+                    {
+                        details: {
+                            message:
+                                "Insufficient gas funds for the transaction.",
+                        },
+                    },
+                )
+                throw customError
+            }
             console.error("Error executing trade:", error)
             throw error
         }
