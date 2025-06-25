@@ -34,6 +34,7 @@ import net from "net"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import { serverRpcBun } from "./libs/network/server_rpc"
 import { hexToUint8Array, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { RelayRetryService } from "./libs/network/dtr/relayRetryService"
 
 const term = terminalkit.terminal
 
@@ -335,8 +336,33 @@ async function main() {
         term.yellow("[MAIN] ✅ Starting the background loop\n")
         // ANCHOR Starting the main loop
         mainLoop() // Is an async function so running without waiting send that to the background
+        
+        // Start DTR relay retry service after background loop initialization
+        // The service will wait for syncStatus to be true before actually processing
+        if (getSharedState.PROD) {
+            console.log("[DTR] Initializing relay retry service (will start after sync)")
+            // Service will check syncStatus internally before processing
+            RelayRetryService.getInstance().start()
+        }
     }
 }
+
+// Graceful shutdown handling for DTR service
+process.on("SIGINT", () => {
+    console.log("[DTR] Received SIGINT, shutting down gracefully...")
+    if (getSharedState.PROD) {
+        RelayRetryService.getInstance().stop()
+    }
+    process.exit(0)
+})
+
+process.on("SIGTERM", () => {
+    console.log("[DTR] Received SIGTERM, shutting down gracefully...")
+    if (getSharedState.PROD) {
+        RelayRetryService.getInstance().stop()
+    }
+    process.exit(0)
+})
 
 // INFO Starting the main routine
 main()
