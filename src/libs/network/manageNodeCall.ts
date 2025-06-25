@@ -20,7 +20,10 @@ import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
+import TxUtils from "../blockchain/transaction"
+import Mempool from "../blockchain/mempool_v2"
+import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 
 import { TwitterProofParser } from "../abstraction/web2/twitter"
 export interface NodeCall {
@@ -145,7 +148,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         // INFO Authentication listener
         case "getPeerIdentity":
             // NOTE We don't need to sign anything as the headers are signed already
-            response.response = uint8ArrayToHex(getSharedState.keypair.publicKey as Uint8Array)
+            response.response = getSharedState.keypair.publicKey as Uint8Array // REVIEW Check if this is correct
             //console.log(response)
             break
 
@@ -224,6 +227,61 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "hots":
             console.log("[SERVER] Received hots")
             response.response = eggs.hots()
+            break
+        // REVIEW DTR: Handle relayed transactions from non-validator nodes
+        case "RELAY_TX":
+            console.log("[DTR] Received relayed transaction")
+            try {
+                // Verify we are actually a validator for next block
+                const isValidator = await isValidatorForNextBlock()
+                if (!isValidator) {
+                    console.log("[DTR] Rejecting relay: not a validator")
+                    response.result = 403
+                    response.response = "Node is not a validator for next block"
+                    break
+                }
+
+                const relayData = data as { transaction: Transaction; validityData: ValidityData }
+                const { transaction, validityData } = relayData
+
+                // Validate transaction coherence (hash matches content)
+                const isCoherent = TxUtils.isCoherent(transaction)
+                if (!isCoherent) {
+                    log.error("[DTR] Transaction coherence validation failed: " + transaction.hash)
+                    response.result = 400
+                    response.response = "Transaction coherence validation failed"
+                    break
+                }
+
+                // Validate transaction signature
+                const signatureValid = TxUtils.validateSignature(transaction)
+                if (!signatureValid) {
+                    log.error("[DTR] Transaction signature validation failed: " + transaction.hash)
+                    response.result = 400
+                    response.response = "Transaction signature validation failed"
+                    break
+                }
+
+                // Add validated transaction to mempool
+                const { confirmationBlock, error } = await Mempool.addTransaction({
+                    ...transaction,
+                    reference_block: validityData.data.reference_block,
+                })
+
+                if (error) {
+                    response.result = 500
+                    response.response = "Failed to add relayed transaction to mempool"
+                    log.error("[DTR] Failed to add relayed transaction to mempool: " + error)
+                } else {
+                    response.result = 200
+                    response.response = { message: "Relayed transaction accepted", confirmationBlock }
+                    console.log("[DTR] Successfully added relayed transaction to mempool: " + transaction.hash)
+                }
+            } catch (error) {
+                log.error("[DTR] Error processing relayed transaction: " + error)
+                response.result = 500
+                response.response = "Internal error processing relayed transaction"
+            }
             break
         default:
             console.log("[SERVER] Received unknown message")

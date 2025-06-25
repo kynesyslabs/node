@@ -35,6 +35,9 @@ import {
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
 import { emptyResponse } from "./server_rpc"
+import isValidatorForNextBlock from "src/libs/consensus/v2/routines/isValidator"
+import getShard from "src/libs/consensus/v2/routines/getShard"
+import getCommonValidatorSeed from "src/libs/consensus/v2/routines/getCommonValidatorSeed"
 // SECTION Handlers for different types of transactions
 import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
 import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Rename to handleXMRequest
@@ -408,7 +411,65 @@ export default class ServerHandlers {
                 return result
             }
 
-            // We add the transaction to the mempool
+            // REVIEW We add the transaction to the mempool
+            // DTR: Check if we should relay instead of storing locally (Production only)
+            if (getSharedState.PROD) {
+                const isValidator = await isValidatorForNextBlock()
+                
+                if (!isValidator) {
+                    console.log("[DTR] Non-validator node: attempting relay to all validators")
+                    try {
+                        const { commonValidatorSeed } = await getCommonValidatorSeed()
+                        const validators = await getShard(commonValidatorSeed)
+                        const availableValidators = validators
+                            .filter(v => v.status.online && v.sync.status)
+                            .sort(() => Math.random() - 0.5) // Random order for load balancing
+                        
+                        console.log(`[DTR] Found ${availableValidators.length} available validators, trying all`)
+                        
+                        // Try ALL validators in random order
+                        for (let i = 0; i < availableValidators.length; i++) {
+                            try {
+                                const validator = availableValidators[i]
+                                console.log(`[DTR] Attempting relay ${i + 1}/${availableValidators.length} to validator ${validator.identity.substring(0, 8)}...`)
+                                
+                                const relayResult = await validator.call({
+                                    method: "nodeCall",
+                                    params: [{
+                                        type: "RELAY_TX",
+                                        data: { transaction: queriedTx, validityData: validatedData },
+                                    }],
+                                }, true)
+                                
+                                if (relayResult.result === 200) {
+                                    console.log(`[DTR] Successfully relayed to validator ${validator.identity.substring(0, 8)}...`)
+                                    result.success = true
+                                    result.response = { message: "Transaction relayed to validator" }
+                                    result.require_reply = false
+                                    return result
+                                }
+                                
+                                console.log(`[DTR] Validator ${validator.identity.substring(0, 8)}... rejected: ${relayResult.response}`)
+                                
+                            } catch (error: any) {
+                                console.log(`[DTR] Validator ${availableValidators[i].identity.substring(0, 8)}... error: ${error.message}`)
+                                continue // Try next validator
+                            }
+                        }
+                        
+                        console.log("[DTR] All validators failed, storing locally for background retry")
+                        
+                    } catch (relayError) {
+                        console.log("[DTR] Relay system error, storing locally:", relayError)
+                    }
+                    
+                    // Store ValidityData in shared state for retry service
+                    getSharedState.validityDataCache.set(queriedTx.hash, validatedData)
+                    console.log(`[DTR] Stored ValidityData for ${queriedTx.hash} in memory cache for retry service`)
+                }
+            }
+
+            // Proceeding with the mempool addition (either we are a validator or this is a fallback)
             console.log(
                 "[handleExecuteTransaction] Adding tx with hash: " +
                     queriedTx.hash +

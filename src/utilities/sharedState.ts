@@ -9,7 +9,7 @@ import { Identity } from "src/libs/identity"
 import * as ntpClient from "ntp-client"
 import { Peer, PeerManager } from "src/libs/peer"
 import { MempoolData } from "src/libs/blockchain/mempool"
-import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import { SigningAlgorithm, ValidityData } from "@kynesyslabs/demosdk/types"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
 dotenv.config()
@@ -52,6 +52,10 @@ export default class SharedState {
     inCleanMempool = false
     // REVIEW Mempool caching
     mempoolCache: MempoolData | null = null
+
+    // DTR (Distributed Transaction Routing) - ValidityData cache for retry mechanism
+    // Stores ValidityData for transactions that need to be relayed to validators
+    validityDataCache = new Map<string, ValidityData>() // txHash -> ValidityData
 
     // States
     runMainLoop = true
