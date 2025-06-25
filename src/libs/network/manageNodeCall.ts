@@ -148,7 +148,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         // INFO Authentication listener
         case "getPeerIdentity":
             // NOTE We don't need to sign anything as the headers are signed already
-            response.response = uint8ArrayToHex(getSharedState.keypair.publicKey as Uint8Array)
+            response.response = getSharedState.keypair.publicKey as Uint8Array // REVIEW Check if this is correct
             //console.log(response)
             break
 

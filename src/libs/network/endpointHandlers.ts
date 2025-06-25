@@ -47,7 +47,7 @@ import { DemoScript } from "@kynesyslabs/demosdk/types"
 import { Peer } from "../peer"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
-import { SubnetPayload } from "@kynesyslabs/demosdk/l2ps"
+//import { SubnetPayload } from "@kynesyslabs/demosdk/l2ps"
 import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
@@ -305,7 +305,7 @@ export default class ServerHandlers {
                     "[handleExecuteTransaction] Subnet payload: " + payload[1],
                 )
                 var subnetResult = await ServerHandlers.handleSubnetTx(
-                    payload[1] as SubnetPayload,
+                    payload[1] as any, // TODO Add proper type when l2ps is implemented correctly
                 )
                 result.response = subnetResult
                 break
@@ -413,38 +413,60 @@ export default class ServerHandlers {
             }
 
             // REVIEW We add the transaction to the mempool
-            // DTR: Check if we should relay instead of storing locally
-            if (process.env.DTR_ENABLED === "true") {
+            // DTR: Check if we should relay instead of storing locally (Production only)
+            if (getSharedState.PROD) {
                 const isValidator = await isValidatorForNextBlock()
                 
                 if (!isValidator) {
-                    console.log("[DTR] Non-validator node: relaying transaction to validators")
+                    console.log("[DTR] Non-validator node: attempting relay to all validators")
                     try {
                         const { commonValidatorSeed } = await getCommonValidatorSeed()
                         const validators = await getShard(commonValidatorSeed)
-                        // REVIEW Big if. Is status.online something we are using?
-                        const relayTarget = validators.find(v => v.status.online && v.sync.status)
+                        const availableValidators = validators
+                            .filter(v => v.status.online && v.sync.status)
+                            .sort(() => Math.random() - 0.5) // Random order for load balancing
                         
-                        // REVIEW Relaying to next block validators
-                        if (relayTarget) {
-                            await relayTarget.call({
-                                method: "nodeCall",
-                                params: [{
-                                    type: "RELAY_TX",
-                                    data: { transaction: queriedTx, validityData: validatedData },
-                                }],
-                            }, true)
-                            
-                            result.success = true
-                            result.response = { message: "Transaction relayed to validator" }
-                            result.require_reply = false
-                            return result
-                        } else {
-                            console.log("[DTR] No validator available for relay, falling back to local storage")
+                        console.log(`[DTR] Found ${availableValidators.length} available validators, trying all`)
+                        
+                        // Try ALL validators in random order
+                        for (let i = 0; i < availableValidators.length; i++) {
+                            try {
+                                const validator = availableValidators[i]
+                                console.log(`[DTR] Attempting relay ${i + 1}/${availableValidators.length} to validator ${validator.identity.substring(0, 8)}...`)
+                                
+                                const relayResult = await validator.call({
+                                    method: "nodeCall",
+                                    params: [{
+                                        type: "RELAY_TX",
+                                        data: { transaction: queriedTx, validityData: validatedData },
+                                    }],
+                                }, true)
+                                
+                                if (relayResult.result === 200) {
+                                    console.log(`[DTR] Successfully relayed to validator ${validator.identity.substring(0, 8)}...`)
+                                    result.success = true
+                                    result.response = { message: "Transaction relayed to validator" }
+                                    result.require_reply = false
+                                    return result
+                                }
+                                
+                                console.log(`[DTR] Validator ${validator.identity.substring(0, 8)}... rejected: ${relayResult.response}`)
+                                
+                            } catch (error: any) {
+                                console.log(`[DTR] Validator ${availableValidators[i].identity.substring(0, 8)}... error: ${error.message}`)
+                                continue // Try next validator
+                            }
                         }
+                        
+                        console.log("[DTR] All validators failed, storing locally for background retry")
+                        
                     } catch (relayError) {
-                        console.log("[DTR] Relay failed, falling back to local storage:", relayError)
+                        console.log("[DTR] Relay system error, storing locally:", relayError)
                     }
+                    
+                    // Store ValidityData in shared state for retry service
+                    getSharedState.validityDataCache.set(queriedTx.hash, validatedData)
+                    console.log(`[DTR] Stored ValidityData for ${queriedTx.hash} in memory cache for retry service`)
                 }
             }
 
@@ -541,7 +563,7 @@ export default class ServerHandlers {
     }
 
     // NOTE If we receive a SubnetPayload, we use handleL2PS to register the transaction
-    static async handleSubnetTx(content: SubnetPayload) {
+    static async handleSubnetTx(content: any) { // TODO Add proper type when l2ps is implemented correctly
         let response: RPCResponse = _.cloneDeep(emptyResponse)
         const payload: L2PSRegisterTxMessage = {
             type: "registerTx",
