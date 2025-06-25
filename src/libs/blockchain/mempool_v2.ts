@@ -198,6 +198,27 @@ export default class Mempool {
             mempool: final,
         }
     }
+
+    /**
+     * Removes a specific transaction from the mempool by hash
+     * Used by DTR relay service when transactions are successfully relayed to validators
+     * @param txHash - Hash of the transaction to remove
+     * @returns {Promise<void>}
+     */
+    static async removeTransaction(txHash: string): Promise<void> {
+        try {
+            const result = await this.repo.delete({ hash: txHash })
+            
+            if (result.affected > 0) {
+                console.log(`[Mempool] Removed transaction ${txHash} (DTR relay success)`)
+            } else {
+                console.log(`[Mempool] Transaction ${txHash} not found for removal`)
+            }
+        } catch (error) {
+            console.log(`[Mempool] Error removing transaction ${txHash}:`, error)
+            throw error
+        }
+    }
 }
 
 await Mempool.init()
