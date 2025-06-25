@@ -5,6 +5,7 @@ import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "../../server_rpc"
 import _ from "lodash"
 import { L2PS, L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
+import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 /* NOTE
 - Each l2ps is a list of nodes that are part of the l2ps
 - Each l2ps partecipant has the private key of the l2ps (or equivalent)
@@ -22,12 +23,22 @@ export default async function handleL2PS(
 ): Promise<RPCResponse> {
     // ! TODO Finalize the below TODOs
     const response = _.cloneDeep(emptyResponse)
-    // TODO Defining a subnet from the uid: checking if we have the config
-    var key = null
-    var iv = null
-    // Once we have the config, we should create a new L2PS instance and use it to decrypt the data
-    const l2ps = await L2PS.create(key, iv)
-    const decryptedTx = await l2ps.decryptTx(l2psTx)
+    // Defining a subnet from the uid: checking if we have the config or if its loaded already
+    const parallelNetworks = ParallelNetworks.getInstance()
+    const l2psUid = l2psTx.content.data[1].l2ps_uid
+    var l2psInstance = await parallelNetworks.getL2PS(l2psUid)
+    if (!l2psInstance) {
+        // Try to load the l2ps from the local storage (if the node is part of the l2ps)
+        l2psInstance = await parallelNetworks.loadL2PS(l2psUid)
+        if (!l2psInstance) {
+            response.result = 400
+            response.response = false
+            response.extra = "L2PS network not found and not joined (missing config)"
+            return response
+        }
+    }
+    // Now we should have the l2ps instance, we can decrypt the transaction
+    const decryptedTx = await l2psInstance.decryptTx(l2psTx)
     // NOTE Hash is already verified in the decryptTx function (sdk)
     
     // NOTE Re-verify the decrypted transaction signature using the same method as other transactions
