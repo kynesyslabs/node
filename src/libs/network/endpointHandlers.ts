@@ -15,7 +15,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool_v2"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
-import { Transaction } from "@kynesyslabs/demosdk/types"
+import { L2PSTransaction, Transaction } from "@kynesyslabs/demosdk/types"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import handleL2PS from "./routines/transactions/handleL2PS"
@@ -296,12 +296,12 @@ export default class ServerHandlers {
                 break
 
             case "subnet":
-                payload = tx.content.data
+                payload = tx.content.data 
                 console.log(
                     "[handleExecuteTransaction] Subnet payload: " + payload[1],
                 )
                 var subnetResult = await ServerHandlers.handleSubnetTx(
-                    tx,
+                    tx as L2PSTransaction,
                 )
                 result.response = subnetResult
                 break
@@ -501,7 +501,7 @@ export default class ServerHandlers {
     }
 
     // NOTE If we receive a SubnetPayload, we use handleL2PS to register the transaction
-    static async handleSubnetTx(content: Transaction) {
+    static async handleSubnetTx(content: L2PSTransaction) {
         let response: RPCResponse = _.cloneDeep(emptyResponse)
         response = await handleL2PS(content)
         return response
