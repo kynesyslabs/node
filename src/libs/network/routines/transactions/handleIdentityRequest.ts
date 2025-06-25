@@ -8,7 +8,7 @@ import { Transaction } from "@kynesyslabs/demosdk/types"
 import { PqcIdentityAssignPayload } from "@kynesyslabs/demosdk/abstraction"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import { Referrals } from "@/features/incentive/referrals"
-import HandleGCR from "@/libs/blockchain/gcr/handleGCR"
+import log from "@/utilities/logger"
 import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
 
 interface IdentityResponse {
@@ -50,29 +50,6 @@ export default async function handleIdentityRequest(
             return {
                 success: false,
                 message: "Error: Referrer and new user are the same",
-            }
-        }
-
-        if (
-            Referrals.isAlreadyReferred(
-                referrerAccount,
-                tx.content.from_ed25519_address,
-            )
-        ) {
-            return {
-                success: false,
-                message: "Error: Referrer and new user are the same",
-            }
-        }
-
-        const newUserAccount = await ensureGCRForUser(
-            tx.content.from_ed25519_address,
-        )
-
-        if (!Referrals.isEligibleForReferral(newUserAccount)) {
-            return {
-                success: false,
-                message: "Error: Referrer account is not eligible for referral",
             }
         }
     }

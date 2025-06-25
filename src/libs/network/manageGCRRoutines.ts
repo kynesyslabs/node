@@ -3,6 +3,8 @@ import _ from "lodash"
 import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
 import { emptyResponse } from "./server_rpc"
 import { IncentiveManager } from "../blockchain/gcr/gcr_routines/IncentiveManager"
+import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
+import { Referrals } from "@/features/incentive/referrals"
 
 interface GCRRoutinePayload {
     method: string
@@ -46,10 +48,25 @@ export default async function manageGCRRoutines(
             break
 
         case "getPoints":
-            response.response = await IncentiveManager.getPoints(
-                params[0],
-            )
+            response.response = await IncentiveManager.getPoints(params[0])
             break
+        case "getReferralInfo": {
+            const account = await ensureGCRForUser(params[0])
+            response.response = account.referralInfo
+            break
+        }
+
+        case "validateReferralCode": {
+            const account = await Referrals.findAccountByReferralCode(params[0])
+            response.response = {
+                isValid: account !== null,
+                referrerPubkey: account?.pubkey || null,
+                message: account
+                    ? "Referral code is valid"
+                    : "Referral code is invalid",
+            }
+            break
+        }
 
         // SECTION Web2 Identity Management
 
