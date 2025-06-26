@@ -276,11 +276,6 @@ export default async function manageConsensusRoutines(
 
             // INFO: Check if the sender is the secretary
             if (sender !== manager.secretary.identity) {
-                log.only("sender key: " + sender)
-                log.only(
-                    "manager.secretary.identity: " + manager.secretary.identity,
-                )
-                process.exit(0)
                 response.result = 401
                 response.response = "Greenlight not accepted"
                 response.extra = "Secretary identity mismatch"
