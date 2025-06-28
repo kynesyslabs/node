@@ -507,19 +507,21 @@ export class L2PSExecutor {
 ## Files Modified Summary
 
 ### **New Files (7)**
-- `src/model/L2PSMempool.ts` - L2PS transaction storage
-- `src/model/L2PSHashes.ts` - Validator hash storage  
-- `src/libs/l2ps/L2PSHashService.ts` - Hash generation service
-- `src/libs/l2ps/L2PSValidator.ts` - Participation validation
-- `src/libs/l2ps/L2PSExecutor.ts` - Transaction execution
-- `src/libs/network/L2PSSync.ts` - Sync mechanism
-- SDK changes for transaction types
+- ✅ `src/model/entities/L2PSMempool.ts` - L2PS transaction entity (COMPLETED)
+- ✅ `src/libs/blockchain/l2ps_mempool.ts` - L2PS mempool manager (COMPLETED)
+- ✅ `sdks/src/types/blockchain/TransactionSubtypes/L2PSHashTransaction.ts` - Hash transaction types (COMPLETED)
+- 🔄 `src/libs/l2ps/L2PSHashService.ts` - Hash generation service (PLANNED)
+- 🔄 `src/libs/l2ps/L2PSValidator.ts` - Participation validation (PLANNED)
+- 🔄 `src/libs/l2ps/L2PSExecutor.ts` - Transaction execution (PLANNED)
+- 🔄 `src/libs/network/L2PSSync.ts` - Sync mechanism (PLANNED)
 
-### **Modified Files (4)**
-- `src/libs/network/routines/transactions/handleL2PS.ts` - Mempool integration
-- `src/libs/network/endpointHandlers.ts` - Hash update handler
-- `src/libs/network/server_rpc.ts` - L2PS sync endpoint
-- `src/index.ts` - Service startup
+### **Modified Files (6)**
+- ✅ `sdks/src/types/blockchain/Transaction.ts` - Added transaction type unions (COMPLETED)
+- ✅ `sdks/src/types/blockchain/TransactionSubtypes/index.ts` - Exported new types (COMPLETED)  
+- ✅ `sdks/src/websdk/DemosTransactions.ts` - Added createL2PSHashUpdate method (COMPLETED)
+- 🔄 `src/libs/network/routines/transactions/handleL2PS.ts` - Mempool integration (PLANNED)
+- 🔄 `src/libs/network/endpointHandlers.ts` - Hash update handler (PLANNED)
+- 🔄 `src/index.ts` - Service startup (PLANNED)
 
 ### **Total Code Addition**: ~600 lines
 ### **Total New Dependencies**: 0 (uses existing infrastructure)
@@ -606,19 +608,23 @@ export class L2PSExecutor {
                                   ┌─────────────────┐
                                   │ Create L2PS     │
                                   │ Hash Update TX  │
-                                  │ (New SDK Type)  │
+                                  │ DemosTransactions│
+                                  │ .createL2PSHashUpdate()│
                                   └─────────┬───────┘
                                            │
                                            ▼
                                   ┌─────────────────┐
-                                  │ Sign Hash TX    │
-                                  │ with Node Key   │
+                                  │ Sign Self-      │
+                                  │ Directed TX     │
+                                  │ (from = to)     │
                                   └─────────┬───────┘
                                            │
                                            ▼
 ┌──────────────────────────────────────────┼──────────────────────────────────────────┐
 │                      DTR                 │                                          │
 │              (Relay Infrastructure)      │                                          │
+│          Self-directed TX triggers DTR   │                                          │
+│          routing to ALL validators        │                                          │
 └──────────────────────────────────────────┼──────────────────────────────────────────┘
                                            ▼
                                   ┌─────────────────┐
