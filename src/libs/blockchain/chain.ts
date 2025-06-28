@@ -187,14 +187,7 @@ export default class Chain {
     }
 
     static async getGenesisBlock(): Promise<Blocks> {
-        console.log("get genesis block")
-        const db = await Datasource.getInstance()
-        const blockRepository = db.getDataSource().getRepository(Blocks)
-
-        const genBlock = await blockRepository.findOneBy({ number: 0 })
-        console.log("[getGenesisBlock] genesis Block retrieved")
-        //console.log(genBlock)
-        return genBlock
+        return await this.getBlockByNumber(0)
     }
 
     // INFO Get the current pending transactions pool
