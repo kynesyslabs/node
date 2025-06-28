@@ -476,6 +476,7 @@ export default class HandleGCR {
         account.identities = {
             xm: {},
             web2: {},
+            pqc: {},
         }
         account.assignedTxs = []
         account.nonce = 0
