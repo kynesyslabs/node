@@ -66,16 +66,12 @@ export class Twitter {
      * @param data - The data to send with the request (optional)
      * @returns The response from the request
      */
-    async makeRequest<T>(
-        url: string,
-        data: any = {},
-    ): Promise<AxiosResponse<T>> {
+    async makeRequest<T>(url: string): Promise<AxiosResponse<T>> {
         return await axios.get<T>(url, {
             headers: {
                 "x-rapidapi-key": this.api_key,
                 "x-rapidapi-host": this.api_host,
             },
-            data,
         })
     }
 
