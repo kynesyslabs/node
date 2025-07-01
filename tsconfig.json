@@ -3,7 +3,7 @@
         "target": "ESNext",
         "module": "ESNext",
         "esModuleInterop": true,
-        "moduleResolution": "Bundler",
+        "moduleResolution": "bundler",
         "declaration": true,
         "removeComments": true,
         "emitDecoratorMetadata": true,
