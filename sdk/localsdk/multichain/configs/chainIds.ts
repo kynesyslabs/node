@@ -27,4 +27,8 @@ export const chainIds = {
         mainnet: 2203,
         testnet: 1501,
     },
+    base: {
+        mainnet: 8453,
+        sepolia: 84532,
+    },
 }
