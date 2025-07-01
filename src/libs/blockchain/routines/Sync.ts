@@ -474,12 +474,6 @@ export async function mergePeerlist(block: Block): Promise<string[]> {
 }
 
 async function fastSyncRoutine(peers: Peer[] = []) {
-    // const {
-    //     highestBlockNumber,
-    //     highestBlockNumberPeer,
-    //     ourLastBlockNumber,
-    //     ourLastBlockHash,
-    // } = await getHigestBlockPeerData(peers)
     if (latestBlock() === getSharedState.lastBlockNumber) {
         log.debug("[fastSync] We're already synced!")
         return true
@@ -496,8 +490,7 @@ async function fastSyncRoutine(peers: Peer[] = []) {
 
     // if (!verified) {
     //     log.error("[fastSync] Last block is not coherent")
-    //     getSharedState.syncStatus = false
-    //     return false
+    //     process.exit(0)
     // }
 
     const synced = await requestBlocks()

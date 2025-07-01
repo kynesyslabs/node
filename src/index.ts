@@ -33,7 +33,8 @@ import getTimestampCorrection from "./libs/utils/calibrateTime"
 import net from "net"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import { serverRpcBun } from "./libs/network/server_rpc"
-import { hexToUint8Array, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import Chain from "./libs/blockchain/chain"
 
 const term = terminalkit.terminal
 
@@ -293,6 +294,11 @@ async function preMainLoop() {
             indexState.peerManager.getPeers().length +
             ")\n",
     )
+
+    // INFO: Set initial last block data
+    const lastBlock = await Chain.getLastBlock()
+    getSharedState.lastBlockNumber = lastBlock.number
+    getSharedState.lastBlockHash = lastBlock.hash
 }
 
 // ANCHOR Entry point
