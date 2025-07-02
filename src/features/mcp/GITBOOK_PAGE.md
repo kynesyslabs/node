@@ -1,90 +1,107 @@
-# MCP Integration for Demos Network
+# MCP Integration in Demos Network Node
 
-The Model Context Protocol (MCP) integration enables AI assistants and external applications to interact with Demos Network nodes through a standardized protocol. This integration provides both local and remote access capabilities, making it easy to build AI-powered applications that can query blockchain data, monitor network status, and manage peer connections.
+The Model Context Protocol (MCP) integration is automatically enabled in Demos Network nodes, providing AI assistants and external applications with standardized access to blockchain data, network monitoring, and peer management capabilities.
 
 ## Overview
 
-MCP (Model Context Protocol) is an open standard that allows AI assistants to connect to external data sources and tools. The Demos Network MCP integration provides:
+MCP (Model Context Protocol) is an open standard that allows AI assistants to connect to external data sources and tools. The Demos Network node automatically starts an MCP server that provides:
 
 - **Dual Transport Support**: stdio for local applications, SSE for remote network access
 - **Comprehensive Tools**: blockchain queries, network monitoring, and peer management
 - **Production Ready**: Full error handling, logging, and security considerations
 - **Type Safe**: Complete TypeScript support with runtime validation
+- **Automatic Integration**: Started automatically with your Demos Network node
 
-## Quick Start
+## How It Works in the Node
 
-### Basic Local Setup
+### Automatic Startup
 
-For local development and testing, you can quickly start an MCP server with stdio transport:
+The MCP server is automatically started when you run your Demos Network node (`src/index.ts`). The integration follows these steps:
 
-{% code title="Basic MCP Server Setup" overflow="wrap" lineNumbers="true" %}
-```typescript
-import { createDemosMCPServer, createDemosNetworkTools } from "@/features/mcp"
+1. **Environment Configuration**: Loads MCP settings from environment variables
+2. **Port Management**: Automatically selects available ports using the same system as other services
+3. **Failsafe Design**: Node continues running even if MCP server fails to start
+4. **State Tracking**: MCP server status is tracked in shared state for monitoring
 
-async function startLocalMCPServer() {
-    // Create MCP server with default stdio transport
-    const mcpServer = createDemosMCPServer()
-    
-    // Add all Demos Network tools
-    const tools = createDemosNetworkTools()
-    tools.forEach(tool => mcpServer.registerTool(tool))
-    
-    // Start the server
-    await mcpServer.start()
-    console.log("MCP server started successfully!")
-    
-    return mcpServer
-}
+### Configuration
 
-// Start the server
-startLocalMCPServer().catch(console.error)
+The MCP server is configured through environment variables in your `.env` file:
+
+{% code title="Environment Configuration" overflow="wrap" lineNumbers="true" %}
+```bash
+# MCP Server Configuration
+MCP_ENABLED=true              # Enable/disable MCP server (default: true)
+MCP_SERVER_PORT=3001          # Preferred port for MCP server (default: 3001)
+# Alternative port override
+RPC_MCP_PORT=3001             # Alternative way to set MCP port
 ```
 {% endcode %}
 
-### Remote Access Setup
+### Integration Architecture
 
-For production deployments or remote access, use the SSE (Server-Sent Events) transport:
+The MCP server is integrated into the main node process following the same patterns as the signaling server:
 
-{% code title="Remote MCP Server Setup" overflow="wrap" lineNumbers="true" %}
+{% code title="Node Integration Pattern" overflow="wrap" lineNumbers="true" %}
 ```typescript
-import { createDemosMCPServer, createDemosNetworkTools } from "@/features/mcp"
-
-async function startRemoteMCPServer() {
-    // Create MCP server with SSE transport for remote access
-    const mcpServer = createDemosMCPServer({
-        transport: "sse",
-        port: 3001,
-        host: "0.0.0.0"  // Listen on all network interfaces
-    })
-    
-    // Add Demos Network tools
-    const tools = createDemosNetworkTools({
-        enableBlockchainTools: true,
-        enableNetworkTools: true,
-        enablePeerTools: true
-    })
-    
-    tools.forEach(tool => mcpServer.registerTool(tool))
-    
-    // Start the server
-    await mcpServer.start()
-    
-    console.log("Remote MCP server started!")
-    console.log("SSE endpoint: http://your-server-ip:3001/sse")
-    console.log("Message endpoint: POST http://your-server-ip:3001/message")
-    
-    return mcpServer
+// From src/index.ts - MCP server startup
+if (indexState.MCP_ENABLED) {
+    try {
+        const { createDemosMCPServer, createDemosNetworkTools } = await import("./features/mcp")
+        
+        // Get available port
+        indexState.MCP_SERVER_PORT = await getNextAvailablePort(indexState.MCP_SERVER_PORT)
+        
+        // Create server with SSE transport for remote access
+        const mcpServer = createDemosMCPServer({
+            transport: "sse",
+            port: indexState.MCP_SERVER_PORT,
+            host: "localhost"
+        })
+        
+        // Add all Demos Network tools
+        const tools = createDemosNetworkTools()
+        tools.forEach(tool => mcpServer.registerTool(tool))
+        
+        await mcpServer.start()
+        
+        // Track in state
+        indexState.mcpServer = mcpServer
+        getSharedState.isMCPServerStarted = true
+        console.log(`[MAIN] MCP server started on port ${indexState.MCP_SERVER_PORT}`)
+    } catch (error) {
+        console.log("[MAIN] Failed to start MCP server:", error)
+        getSharedState.isMCPServerStarted = false
+        // Continue without MCP (failsafe)
+    }
 }
-
-startRemoteMCPServer().catch(console.error)
 ```
 {% endcode %}
 
-## Available Tools
+## Monitoring MCP Server Status
 
-The Demos Network MCP integration provides several categories of tools:
+### Status Endpoint
 
-### Network Status Tools
+The node provides a dedicated `/mcp` endpoint to check MCP server status:
+
+{% code title="MCP Status Endpoint" overflow="wrap" lineNumbers="true" %}
+```bash
+# Check MCP server status
+curl http://localhost:53550/mcp
+
+# Example response:
+{
+  "enabled": true,
+  "transport": "sse",
+  "status": "running"
+}
+```
+{% endcode %}
+
+### Available Tools
+
+The MCP server automatically provides these tools when started with your node:
+
+#### Network Status Tools
 
 Monitor the health and status of your Demos Network node:
 
@@ -106,7 +123,7 @@ console.log("Public IP:", nodeIdentity.publicIP)
 ```
 {% endcode %}
 
-### Blockchain Query Tools
+#### Blockchain Query Tools
 
 Access blockchain data and query block information:
 
@@ -132,7 +149,7 @@ console.log("Current chain height:", chainHeight.height)
 ```
 {% endcode %}
 
-### Peer Management Tools
+#### Peer Management Tools
 
 Monitor and manage network peer connections:
 
@@ -154,191 +171,57 @@ console.log("Total peers:", peerCount.peerCount)
 ```
 {% endcode %}
 
+## Connecting to the MCP Server
+
+### Remote Access (SSE Transport)
+
+The node starts the MCP server with SSE transport by default, making it accessible remotely:
+
+{% code title="MCP Server Connection" overflow="wrap" lineNumbers="true" %}
+```typescript
+// Connect to your running Demos Network node's MCP server
+const serverUrl = "http://localhost:3001"  // Use your node's MCP port
+
+// For SSE (remote) connections:
+// SSE endpoint: http://localhost:3001/sse
+// Message endpoint: POST http://localhost:3001/message
+```
+{% endcode %}
+
+### Local Access (stdio Transport)
+
+For local development, you can also create a separate stdio MCP server:
+
+{% code title="Local MCP Development" overflow="wrap" lineNumbers="true" %}
+```typescript
+import { createDemosMCPServer, createDemosNetworkTools } from "@/features/mcp"
+
+// Create a separate stdio server for development
+const devServer = createDemosMCPServer({
+    transport: "stdio"  // For local development tools
+})
+
+const tools = createDemosNetworkTools()
+tools.forEach(tool => devServer.registerTool(tool))
+
+await devServer.start()
+```
+{% endcode %}
+
 ## Advanced Configuration
 
-### Custom Server Configuration
+### Custom Tool Selection
 
-Create a customized MCP server with specific capabilities:
+You can customize which tools are available if needed:
 
-{% code title="Custom Server Configuration" overflow="wrap" lineNumbers="true" %}
+{% code title="Custom Tool Configuration" overflow="wrap" lineNumbers="true" %}
 ```typescript
-import { MCPServerManager } from "@/features/mcp"
-
-// Create server with custom configuration
-const server = new MCPServerManager({
-    name: "custom-demos-mcp",
-    version: "2.0.0",
-    description: "Custom Demos Network MCP Server",
-    capabilities: {
-        tools: {},
-        resources: {},
-        prompts: {},
-        logging: {}
-    },
-    transport: {
-        type: "sse",
-        port: 4001,
-        host: "localhost"
-    }
+// In a custom implementation, you can select specific tools
+const tools = createDemosNetworkTools({
+    enableBlockchainTools: true,
+    enableNetworkTools: true,
+    enablePeerTools: false  // Disable peer tools if not needed
 })
-
-// Register custom tools
-server.registerTool({
-    name: "custom_blockchain_query",
-    description: "Perform custom blockchain queries",
-    inputSchema: z.object({
-        query: z.string().describe("Custom query to execute"),
-        parameters: z.record(z.any()).optional()
-    }),
-    handler: async (args) => {
-        // Your custom logic here
-        return {
-            result: `Executed query: ${args.query}`,
-            timestamp: new Date().toISOString()
-        }
-    }
-})
-
-await server.start()
-```
-{% endcode %}
-
-### Production Deployment
-
-Set up a production-ready MCP server with error handling and graceful shutdown:
-
-{% code title="Production MCP Server" overflow="wrap" lineNumbers="true" %}
-```typescript
-import { createDemosMCPServer, createDemosNetworkTools } from "@/features/mcp"
-
-class ProductionMCPServer {
-    private server: any = null
-    
-    async start() {
-        try {
-            // Use environment variables for configuration
-            this.server = createDemosMCPServer({
-                transport: "sse",
-                port: parseInt(process.env.MCP_PORT || "3001"),
-                host: process.env.MCP_HOST || "0.0.0.0"
-            })
-            
-            // Add tools with error handling
-            const tools = createDemosNetworkTools({
-                enableBlockchainTools: process.env.ENABLE_BLOCKCHAIN !== "false",
-                enableNetworkTools: process.env.ENABLE_NETWORK !== "false",
-                enablePeerTools: process.env.ENABLE_PEERS !== "false"
-            })
-            
-            tools.forEach(tool => this.server.registerTool(tool))
-            
-            // Start server
-            await this.server.start()
-            
-            // Setup graceful shutdown
-            this.setupGracefulShutdown()
-            
-            console.log("Production MCP server started successfully")
-            console.log(`Listening on port: ${process.env.MCP_PORT || "3001"}`)
-            
-        } catch (error) {
-            console.error("Failed to start production MCP server:", error)
-            process.exit(1)
-        }
-    }
-    
-    private setupGracefulShutdown() {
-        const shutdown = async (signal: string) => {
-            console.log(`Received ${signal}, shutting down gracefully...`)
-            
-            if (this.server) {
-                await this.server.shutdown()
-                console.log("MCP server stopped")
-            }
-            
-            process.exit(0)
-        }
-        
-        process.on('SIGTERM', () => shutdown('SIGTERM'))
-        process.on('SIGINT', () => shutdown('SIGINT'))
-    }
-}
-
-// Start production server
-const productionServer = new ProductionMCPServer()
-productionServer.start()
-```
-{% endcode %}
-
-## Integration with Demos Network Node
-
-### Adding MCP to Main Node Process
-
-Integrate the MCP server directly into your main Demos Network node:
-
-{% code title="Node Integration" overflow="wrap" lineNumbers="true" %}
-```typescript
-// In your main node startup file (e.g., src/index.ts)
-import { createDemosMCPServer, createDemosNetworkTools } from "@/features/mcp"
-
-async function startDemosNodeWithMCP() {
-    // ... existing node startup code ...
-    
-    // Start MCP server after node initialization
-    const mcpServer = createDemosMCPServer({
-        transport: process.env.MCP_REMOTE === "true" ? "sse" : "stdio",
-        port: parseInt(process.env.MCP_PORT || "3001"),
-        host: process.env.MCP_HOST || "localhost"
-    })
-    
-    // Add all available tools
-    const tools = createDemosNetworkTools()
-    tools.forEach(tool => mcpServer.registerTool(tool))
-    
-    // Start MCP server
-    await mcpServer.start()
-    console.log("Demos Network node with MCP server started")
-    
-    // Store server reference for shutdown
-    global.mcpServer = mcpServer
-}
-
-// Enhanced shutdown handling
-process.on('SIGINT', async () => {
-    console.log('Shutting down Demos Network node...')
-    
-    // Shutdown MCP server first
-    if (global.mcpServer) {
-        await global.mcpServer.shutdown()
-    }
-    
-    // ... existing node shutdown code ...
-    process.exit(0)
-})
-
-startDemosNodeWithMCP()
-```
-{% endcode %}
-
-### Environment Configuration
-
-Use environment variables for flexible deployment:
-
-{% code title=".env Configuration" overflow="wrap" lineNumbers="true" %}
-```bash
-# MCP Server Configuration
-MCP_REMOTE=true                    # Enable remote access
-MCP_PORT=3001                      # Server port
-MCP_HOST=0.0.0.0                   # Listen on all interfaces
-
-# Tool Configuration
-ENABLE_BLOCKCHAIN=true             # Enable blockchain tools
-ENABLE_NETWORK=true                # Enable network tools
-ENABLE_PEERS=true                  # Enable peer tools
-
-# Security Configuration
-MCP_CORS_ORIGIN=*                  # CORS allowed origins
-MCP_MAX_CONNECTIONS=100            # Maximum concurrent connections
 ```
 {% endcode %}
 
@@ -346,16 +229,35 @@ MCP_MAX_CONNECTIONS=100            # Maximum concurrent connections
 
 ### Using with Claude Desktop
 
-Configure Claude Desktop to connect to your MCP server:
+Configure Claude Desktop to connect to your Demos Network node's MCP server:
 
-{% code title="Claude Desktop Configuration" overflow="wrap" lineNumbers="true" %}
+{% code title="Claude Desktop Configuration (SSE)" overflow="wrap" lineNumbers="true" %}
+```json
+{
+  "mcp_servers": {
+    "demos-network": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/cli", "sse", "http://localhost:3001/sse"],
+      "env": {
+        "NODE_ENV": "production"
+      }
+    }
+  }
+}
+```
+{% endcode %}
+
+Or for local stdio connection to a running node:
+
+{% code title="Claude Desktop Configuration (stdio)" overflow="wrap" lineNumbers="true" %}
 ```json
 {
   "mcp_servers": {
     "demos-network": {
       "command": "node",
-      "args": ["dist/mcp-server.js"],
+      "args": ["dist/index.js"],
       "env": {
+        "MCP_ENABLED": "true",
         "NODE_ENV": "production"
       }
     }
@@ -366,7 +268,7 @@ Configure Claude Desktop to connect to your MCP server:
 
 ### Custom MCP Client
 
-Create a custom client to interact with the MCP server:
+Create a custom client to interact with your running node's MCP server:
 
 {% code title="Custom MCP Client" overflow="wrap" lineNumbers="true" %}
 ```typescript
@@ -640,8 +542,39 @@ await server.start()
 ```
 {% endcode %}
 
+## Troubleshooting
+
+### Common Issues
+
+**MCP Server Not Starting**
+- Check if port 3001 is available or change `MCP_SERVER_PORT` in your environment
+- Verify `MCP_ENABLED=true` in your `.env` file
+- Check node logs for MCP startup errors
+
+**Can't Connect to MCP Server**
+- Verify the node is running and MCP server started successfully
+- Check the `/mcp` status endpoint: `curl http://localhost:53550/mcp`
+- Ensure firewall allows connections to the MCP port
+
+**Tools Not Working**
+- Verify the node is fully synced and operational
+- Check that blockchain data is accessible
+- Review MCP server logs for tool execution errors
+
+### Debug Mode
+
+Enable debug logging for MCP operations:
+
+{% code title="Debug Configuration" overflow="wrap" lineNumbers="true" %}
+```bash
+# Add to your .env file
+DEBUG=mcp:*
+MCP_LOG_LEVEL=debug
+```
+{% endcode %}
+
 ## Conclusion
 
-The Demos Network MCP integration provides a powerful and flexible way to expose blockchain functionality to AI assistants and external applications. With support for both local and remote access, comprehensive tooling, and production-ready features, it enables seamless integration with the broader AI ecosystem while maintaining security and reliability.
+The MCP integration is automatically available in every Demos Network node, providing seamless access to blockchain data and network information for AI assistants and external applications. The failsafe design ensures your node continues operating even if MCP encounters issues, while the comprehensive tooling enables powerful AI-driven blockchain interactions.
 
-For more detailed API documentation and advanced usage patterns, refer to the source code and examples in the `/src/features/mcp/` directory.
+For detailed API documentation and tool specifications, refer to the implementation in `/src/features/mcp/`.
