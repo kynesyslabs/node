@@ -48,6 +48,7 @@ import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import Chain from "../chain"
 import { Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
+import { Referrals } from "@/features/incentive/referrals"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -489,9 +490,17 @@ export default class HandleGCR {
                     github: 0,
                     discord: 0,
                 },
+                referrals: 0,
             },
             lastUpdated: new Date(),
         }
+        account.referralInfo = {
+            totalReferrals: 0,
+            referralCode: Referrals.generateReferralCode(pubkey),
+            referrals: [],
+            referredBy: null,
+        }
+
         return await repository.save(account)
     }
 }

@@ -22,7 +22,11 @@
         "upgrade_deps:force": "ncu -u && yarn",
         "keygen": "tsx -r tsconfig-paths/register src/libs/utils/keyMaker.ts",
         "test:chains": "jest --testMatch '**/tests/**/*.ts' --testPathIgnorePatterns src/* tests/utils/* tests/**/_template*  --verbose",
-        "dump_balance": "bun run src/utilities/balanceDumper.ts"
+        "dump_balance": "bun run src/utilities/balanceDumper.ts",
+        "typeorm": "typeorm-ts-node-esm",
+        "migration:run": "NODE_OPTIONS='--loader ts-node/esm' typeorm-ts-node-esm migration:run -d ./src/model/datasource.ts",
+        "migration:revert": "NODE_OPTIONS='--loader ts-node/esm' typeorm-ts-node-esm migration:revert -d ./src/model/datasource.ts",
+        "migration:generate": "NODE_OPTIONS='--loader ts-node/esm' typeorm-ts-node-esm migration:generate -d ./src/model/datasource.ts"
     },
     "devDependencies": {
         "@types/bun": "^1.2.10",
@@ -46,9 +50,8 @@
         "@fastify/cors": "^9.0.1",
         "@fastify/swagger": "^8.15.0",
         "@fastify/swagger-ui": "^4.1.0",
-        "@kynesyslabs/demosdk": "^2.2.63",
+        "@kynesyslabs/demosdk": "^2.2.70",
         "@octokit/core": "^6.1.5",
-        "@the-convocation/twitter-scraper": "^0.17.0",
         "@types/express": "^4.17.21",
         "@types/http-proxy": "^1.17.14",
         "@types/lodash": "^4.17.4",

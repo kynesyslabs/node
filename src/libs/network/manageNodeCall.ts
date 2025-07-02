@@ -21,8 +21,9 @@ import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { Twitter } from "../identity/tools/twitter"
+import { Tweet } from "@kynesyslabs/demosdk/types"
 
-import { TwitterProofParser } from "../abstraction/web2/twitter"
 export interface NodeCall {
     message: string
     data: any
@@ -145,7 +146,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         // INFO Authentication listener
         case "getPeerIdentity":
             // NOTE We don't need to sign anything as the headers are signed already
-            response.response = uint8ArrayToHex(getSharedState.keypair.publicKey as Uint8Array)
+            response.response = uint8ArrayToHex(
+                getSharedState.keypair.publicKey as Uint8Array,
+            )
             //console.log(response)
             break
 
@@ -211,11 +214,39 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 break
             }
 
-            const twitter = await TwitterProofParser.getInstance()
-            const res = await twitter.getTweet(data.tweetUrl)
+            const twitter = Twitter.getInstance()
+            let tweet: Tweet = null
 
-            response.result = res.success ? 200 : 400
-            response.response = res
+            try {
+                tweet = await twitter.getTweetByUrl(data.tweetUrl)
+            } catch (error) {
+                response.result = 400
+                response.response = {
+                    success: false,
+                    error: "Failed to get tweet",
+                }
+                break
+            }
+
+            response.result = tweet ? 200 : 400
+            if (tweet) {
+                const data = {
+                    id: tweet.id,
+                    created_at: tweet.created_at,
+                    text: tweet.text,
+                    username: tweet.author.screen_name,
+                    userId: tweet.author.rest_id,
+                }
+                response.response = {
+                    tweet: data,
+                    success: true,
+                }
+            } else {
+                response.response = {
+                    success: false,
+                    error: "Failed to get tweet",
+                }
+            }
             break
         }
 

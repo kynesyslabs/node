@@ -6,10 +6,10 @@ import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 
 import handlePayOperation from "./executors/pay"
 import handleContractRead from "./executors/contract_read"
+import handleContractWrite from "./executors/contract_write"
 
 // NOTE We define multichain into global so that we can use it later
 global.multichain = multichain
-
 
 // NOTE: We receive the operations as:
 /*
@@ -55,15 +55,9 @@ class XMParser {
         let name: string, operation: IOperation
         // Iterating over the operations
         // TODO Enforce order
-        for (
-            let id = 0;
-            id < Object.keys(fullscript.operations).length;
-            id++
-        ) {
+        for (let id = 0; id < Object.keys(fullscript.operations).length; id++) {
             try {
-                name = Object.keys(fullscript.operations)[
-                    id
-                ]
+                name = Object.keys(fullscript.operations)[id]
                 console.log("[" + name + "] ")
                 operation = fullscript.operations[name]
                 console.log("[XMParser]: full script operation")
@@ -74,7 +68,7 @@ class XMParser {
                 console.log("[RESULT]: " + results[name])
             } catch (e) {
                 console.log("[XM EXECUTE] Error: " + e)
-                results[name] = { result: "error", error: e }
+                results[name] = { result: "error", error: e.toString() }
             }
         }
         return results // REVIEW Is the type ok?
@@ -123,6 +117,9 @@ class XMParser {
             // INFO Read contract task
             case "contract_read":
                 return await handleContractRead(operation, chainID)
+            case "contract_write": {
+                return await handleContractWrite(operation, chainID)
+            }
 
             default:
                 return {
