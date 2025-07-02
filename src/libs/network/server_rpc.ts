@@ -285,6 +285,14 @@ export async function serverRpcBun() {
 
     server.get("/diagnostics", () => jsonResponse(log.getDiagnostics()))
 
+    server.get("/mcp", () => {
+        return jsonResponse({
+            enabled: getSharedState.isMCPServerStarted,
+            transport: "sse",
+            status: getSharedState.isMCPServerStarted ? "running" : "stopped"
+        })
+    })
+
     // Main RPC endpoint
     server.post("/", async req => {
         console.log("req", req)
