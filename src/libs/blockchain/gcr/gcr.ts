@@ -368,6 +368,7 @@ export default class GCR {
                     identities: {
                         xm: {},
                         web2: {},
+                        pqc: {},
                     },
                     points: {
                         totalPoints: 0,
@@ -392,6 +393,7 @@ export default class GCR {
                 identities: {
                     xm: {},
                     web2: {},
+                    pqc: {},
                 },
                 points: {
                     totalPoints: 0,

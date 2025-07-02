@@ -108,5 +108,7 @@ data/l2ps/example/iv.key
 data/l2ps/*
 
 # Claude specific files
-CLAUDE.mdGEMINI.md
+CLAUDE.md
 GEMINI.md
+
+architecture

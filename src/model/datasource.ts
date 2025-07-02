@@ -11,19 +11,17 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { DataSource } from "typeorm"
 
-import { Blocks } from "./entities/Blocks"
-import { Consensus } from "./entities/Consensus"
-import { Mempool, MempoolTx } from "./entities/Mempool"
-import { PgpKeyServer } from "./entities/PgpKeyServer"
-import { Transactions } from "./entities/Transactions"
-import { Validators } from "./entities/Validators"
-//import { Identities } from "./entities/Identities"
-import { GlobalChangeRegistry } from "./entities/GCR/GlobalChangeRegistry"
-
-import { GCRHashes } from "./entities/GCRv2/GCRHashes"
-import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs"
-import { GCRMain } from "./entities/GCRv2/GCR_Main"
-import { GCRTracker } from "./entities/GCR/GCRTracker"
+import { Blocks } from "./entities/Blocks.js"
+import { Consensus } from "./entities/Consensus.js"
+import { Mempool, MempoolTx } from "./entities/Mempool.js"
+import { PgpKeyServer } from "./entities/PgpKeyServer.js"
+import { Transactions } from "./entities/Transactions.js"
+import { Validators } from "./entities/Validators.js"
+import { GlobalChangeRegistry } from "./entities/GCR/GlobalChangeRegistry.js"
+import { GCRHashes } from "./entities/GCRv2/GCRHashes.js"
+import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs.js"
+import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
+import { GCRTracker } from "./entities/GCR/GCRTracker.js"
 import { OfflineMessage } from "./entities/OfflineMessages"
 
 class Datasource {

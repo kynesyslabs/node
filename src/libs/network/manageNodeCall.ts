@@ -24,8 +24,9 @@ import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
 import TxUtils from "../blockchain/transaction"
 import Mempool from "../blockchain/mempool_v2"
 import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
+import { Twitter } from "../identity/tools/twitter"
+import { Tweet } from "@kynesyslabs/demosdk/types"
 
-import { TwitterProofParser } from "../abstraction/web2/twitter"
 export interface NodeCall {
     message: string
     data: any
@@ -214,11 +215,39 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 break
             }
 
-            const twitter = await TwitterProofParser.getInstance()
-            const res = await twitter.getTweet(data.tweetUrl)
+            const twitter = Twitter.getInstance()
+            let tweet: Tweet = null
 
-            response.result = res.success ? 200 : 400
-            response.response = res
+            try {
+                tweet = await twitter.getTweetByUrl(data.tweetUrl)
+            } catch (error) {
+                response.result = 400
+                response.response = {
+                    success: false,
+                    error: "Failed to get tweet",
+                }
+                break
+            }
+
+            response.result = tweet ? 200 : 400
+            if (tweet) {
+                const data = {
+                    id: tweet.id,
+                    created_at: tweet.created_at,
+                    text: tweet.text,
+                    username: tweet.author.screen_name,
+                    userId: tweet.author.rest_id,
+                }
+                response.response = {
+                    tweet: data,
+                    success: true,
+                }
+            } else {
+                response.response = {
+                    success: false,
+                    error: "Failed to get tweet",
+                }
+            }
             break
         }
 

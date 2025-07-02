@@ -186,8 +186,21 @@ async function processPayload(
         case "auth":
             return await manageAuth(payload.params[0] as AuthMessage)
         // NOTE Communications not requiring authentication
-        case "nodeCall":
-            return await manageNodeCall(payload.params[0] as NodeCall)
+        case "nodeCall": {
+            try {
+                return await manageNodeCall(payload.params[0] as NodeCall)
+            } catch (error) {
+                log.error("[RPC Call] Error in nodeCall: " + error)
+                return {
+                    result: 500,
+                    response: "Error in nodeCall: ",
+                    require_reply: false,
+                    extra: {
+                        error: error.toString(),
+                    },
+                }
+            }
+        }
 
         // ! When things are working, we should remove the login_request and login_response methods and use a "login" method with params
         case "login_request":
@@ -244,6 +257,7 @@ export async function serverRpcBun() {
     server.use(json())
 
     // GET endpoints
+    // eslint-disable-next-line quotes
     server.get("/", () => new Response('{"message": "Hello, World!"}'))
 
     server.get("/info", async () => {
@@ -270,6 +284,14 @@ export async function serverRpcBun() {
     server.get("/public_logs", () => jsonResponse(log.getPublicLogs()))
 
     server.get("/diagnostics", () => jsonResponse(log.getDiagnostics()))
+
+    server.get("/mcp", () => {
+        return jsonResponse({
+            enabled: getSharedState.isMCPServerStarted,
+            transport: "sse",
+            status: getSharedState.isMCPServerStarted ? "running" : "stopped"
+        })
+    })
 
     // Main RPC endpoint
     server.post("/", async req => {

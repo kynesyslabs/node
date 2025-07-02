@@ -43,6 +43,7 @@ export default class SharedState {
     inPeerGossip = false
     startingConsensus = false
     isSignalingServerStarted = false
+    isMCPServerStarted = false
 
     // Running as a node (is false when running specific modules like the signaling server)
     runningAsNode = true

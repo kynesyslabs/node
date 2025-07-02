@@ -24,7 +24,19 @@ export class GCRMain {
                 github: number
                 discord: number
             }
+            referrals: number
         }
         lastUpdated: Date
+    }
+    @Column({ type: "jsonb", name: "referralInfo", default: () => "'{}'" })
+    referralInfo: {
+        totalReferrals: number
+        referredBy?: string
+        referralCode: string
+        referrals: Array<{
+            referredUserId: string
+            referredAt: string
+            pointsAwarded: number
+        }>
     }
 }

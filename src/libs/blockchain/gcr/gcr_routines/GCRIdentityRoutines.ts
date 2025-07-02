@@ -91,6 +91,7 @@ export default class GCRIdentityRoutines {
                     accountGCR.pubkey,
                     normalizedAddress,
                     chain,
+                    editOperation.referralCode,
                 )
             }
         }
@@ -220,7 +221,7 @@ export default class GCRIdentityRoutines {
                     editOperation.account,
                 )
                 if (isFirst) {
-                    await IncentiveManager.twitterLinked(editOperation.account)
+                    await IncentiveManager.twitterLinked(editOperation.account, editOperation.referralCode)
                 }
             } else if (context === "github") {
                 // Future implementation for GitHub
