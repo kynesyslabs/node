@@ -1,6 +1,10 @@
-import { Column, Entity, PrimaryGeneratedColumn } from "typeorm"
+import { Column, Entity, Index, PrimaryGeneratedColumn } from "typeorm"
 
 @Entity("transactions")
+@Index("idx_transactions_hash", ["hash"])
+@Index("idx_transactions_blockNumber", ["blockNumber"])
+@Index("idx_transactions_from_ed25519_address", ["from_ed25519_address"])
+@Index("idx_transactions_to", ["to"])
 export class Transactions {
     @PrimaryGeneratedColumn({ type: "integer", name: "id" })
     id: number

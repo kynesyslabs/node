@@ -194,11 +194,12 @@ async function warmup() {
     indexState.SIGNALING_SERVER_PORT = await getNextAvailablePort(
         indexState.SIGNALING_SERVER_PORT,
     )
-    
+
     // MCP Server configuration
     indexState.MCP_SERVER_PORT = parseInt(process.env.RPC_MCP_PORT, 10) || 0
     if (indexState.MCP_SERVER_PORT == 0) {
-        indexState.MCP_SERVER_PORT = parseInt(process.env.MCP_SERVER_PORT, 10) || 3001
+        indexState.MCP_SERVER_PORT =
+            parseInt(process.env.MCP_SERVER_PORT, 10) || 3001
     }
     indexState.MCP_ENABLED = process.env.MCP_ENABLED !== "false"
     // Setting the server port to the shared state
@@ -252,10 +253,10 @@ async function preMainLoop() {
     // const id = getSharedState.identity
     term.green("[BOOTSTRAP] Our identity is ready\n")
     // Log identity
-    const publicKeyHex = uint8ArrayToHex(getSharedState.keypair.publicKey as Uint8Array)
-    term.green(
-        "\n[MAIN] 🔗 WE ARE " + publicKeyHex + " 🔗 \n",
+    const publicKeyHex = uint8ArrayToHex(
+        getSharedState.keypair.publicKey as Uint8Array,
     )
+    term.green("\n[MAIN] 🔗 WE ARE " + publicKeyHex + " 🔗 \n")
     // Creating ourselves as a peer // ? Should this be removed in production?
     const ourselves = "http://127.0.0.1:" + indexState.SERVER_PORT
     getSharedState.connectionString = ourselves
@@ -266,7 +267,6 @@ async function preMainLoop() {
         publicKeyHex + "\n",
     )
     log.info("Our public key is: " + publicKeyHex)
-
 
     // ANCHOR Preparing the peer manager and loading the peer list
     PeerManager.getInstance().loadPeerList()
@@ -318,6 +318,7 @@ async function preMainLoop() {
 
 // ANCHOR Entry point
 async function main() {
+    await Chain.setup()
     // INFO Warming up the node (including arguments digesting)
     await warmup()
     // INFO Calibrating the time at the start of the node
@@ -353,28 +354,33 @@ async function main() {
             console.log("[MAIN] Failed to start the signaling server")
             process.exit(1)
         }
-        
+
         // Start MCP server (failsafe)
         if (indexState.MCP_ENABLED) {
             try {
-                const { createDemosMCPServer, createDemosNetworkTools } = await import("./features/mcp")
-                
-                indexState.MCP_SERVER_PORT = await getNextAvailablePort(indexState.MCP_SERVER_PORT)
-                
+                const { createDemosMCPServer, createDemosNetworkTools } =
+                    await import("./features/mcp")
+
+                indexState.MCP_SERVER_PORT = await getNextAvailablePort(
+                    indexState.MCP_SERVER_PORT,
+                )
+
                 const mcpServer = createDemosMCPServer({
                     transport: "sse",
                     port: indexState.MCP_SERVER_PORT,
-                    host: "localhost"
+                    host: "localhost",
                 })
-                
+
                 const tools = createDemosNetworkTools()
                 tools.forEach(tool => mcpServer.registerTool(tool))
-                
+
                 await mcpServer.start()
-                
+
                 indexState.mcpServer = mcpServer
                 getSharedState.isMCPServerStarted = true
-                console.log(`[MAIN] MCP server started on port ${indexState.MCP_SERVER_PORT}`)
+                console.log(
+                    `[MAIN] MCP server started on port ${indexState.MCP_SERVER_PORT}`,
+                )
             } catch (error) {
                 console.log("[MAIN] Failed to start MCP server:", error)
                 getSharedState.isMCPServerStarted = false

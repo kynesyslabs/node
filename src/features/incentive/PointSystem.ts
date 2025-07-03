@@ -146,12 +146,9 @@ export class PointSystem {
         platform: string,
         referralCode?: string,
     ): Promise<void> {
-        log.only("referral code: " + referralCode)
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
         const account = await gcrMainRepository.findOneBy({ pubkey: userId })
-
-        log.only("account: " + JSON.stringify(account))
 
         if (!account) {
             const newAccount = await HandleGCR.createAccount(userId)
@@ -187,7 +184,6 @@ export class PointSystem {
 
             // Process referral for new account
             if (referralCode) {
-                log.only("Processing referral for new account")
                 await Referrals.processReferral(
                     newAccount,
                     referralCode,
@@ -199,7 +195,6 @@ export class PointSystem {
         } else {
             const isEligibleForReferral =
                 Referrals.isEligibleForReferral(account)
-            log.only("isEligibleForReferral: " + isEligibleForReferral)
 
             const oldTotal = account.points.totalPoints || 0
             account.points.totalPoints = oldTotal + points
@@ -226,7 +221,6 @@ export class PointSystem {
 
             // Process referral for existing account if eligible
             if (referralCode && isEligibleForReferral) {
-                log.only("Processing referral for existing account")
                 await Referrals.processReferral(
                     account,
                     referralCode,
