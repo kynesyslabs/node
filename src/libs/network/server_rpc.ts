@@ -295,8 +295,6 @@ export async function serverRpcBun() {
 
     // Main RPC endpoint
     server.post("/", async req => {
-        console.log("req", req)
-
         try {
             const payload = await req.json()
             if (!isRPCRequest(payload)) {
