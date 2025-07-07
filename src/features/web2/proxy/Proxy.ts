@@ -31,6 +31,11 @@ export class Proxy {
             requireAuthForAll: SharedState.getInstance().PROD,
             exceptions: [],
         },
+        private readonly _sslConfig: {
+            verifyCertificates: boolean
+        } = {
+            verifyCertificates: SharedState.getInstance().PROD, // Enable in production, disable in dev
+        },
     ) {
         required(this._dahrSessionId, "Missing dahr session Id")
     }
@@ -176,25 +181,61 @@ export class Proxy {
             const proxyServer = httpProxy.createProxyServer({
                 target: targetUrl,
                 changeOrigin: true,
-                secure: false, // TODO: Enable SSL certificate verification before production
+                secure:
+                    targetProtocol === "https:"
+                        ? this._sslConfig.verifyCertificates
+                        : false,
                 ssl:
                     targetProtocol === "https:"
-                        ? { rejectUnauthorized: false }
-                        : undefined, // TODO: Properly handle SSL certificate verification in production
+                        ? {
+                              rejectUnauthorized:
+                                  this._sslConfig.verifyCertificates,
+                          }
+                        : undefined,
             })
 
             // Handle proxy errors
-            proxyServer.on("error", (err, _req, res) => {
-                console.error("[Web2API] Proxy server error:", err)
+            proxyServer.on("error", (err: any, _req, res) => {
+                // Handle SSL certificate errors specifically
+                if (
+                    err.code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" ||
+                    err.code === "CERT_HAS_EXPIRED" ||
+                    err.code === "DEPTH_ZERO_SELF_SIGNED_CERT"
+                ) {
+                    if (res instanceof http.ServerResponse) {
+                        res.writeHead(502, {
+                            "Content-Type": "application/json",
+                        })
+                        res.end(
+                            JSON.stringify({
+                                error: "SSL Certificate verification failed",
+                                message: err.message,
+                                code: err.code,
+                            }),
+                        )
+                    }
+                    return
+                }
+
+                // Handle other proxy errors
                 if (res instanceof http.ServerResponse) {
                     res.writeHead(500, {
-                        "Content-Type": "text/plain",
+                        "Content-Type": "application/json",
                     })
-                    res.end("Something went wrong with the proxy.")
+                    res.end(
+                        JSON.stringify({
+                            error: "Proxy error",
+                            message: err.message,
+                        }),
+                    )
                 } else if (res instanceof net.Socket) {
                     console.error("[Web2API] Socket error:", err)
                     res.end(
-                        "HTTP/1.1 500 Internal Server Error\r\n\r\nSomething went wrong with the proxy.",
+                        "HTTP/1.1 500 Internal Server Error\r\n\r\n" +
+                            JSON.stringify({
+                                error: "Proxy error",
+                                message: err.message,
+                            }),
                     )
                 }
             })
@@ -223,7 +264,10 @@ export class Proxy {
                 proxyServer.web(req, res, {
                     target: targetOrigin,
                     changeOrigin: true,
-                    secure: false,
+                    secure:
+                        targetProtocol === "https:"
+                            ? this._sslConfig.verifyCertificates
+                            : false,
                 })
             })
 
