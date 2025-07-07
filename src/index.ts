@@ -30,6 +30,11 @@ import log from "src/utilities/logger"
 import { Peer } from "./libs/peer"
 import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
+import net from "net"
+import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
+import { serverRpcBun } from "./libs/network/server_rpc"
+import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import Chain from "./libs/blockchain/chain"
 
 const term = terminalkit.terminal
 
@@ -42,22 +47,30 @@ const indexState: {
     COMMANDLINE_MODE: boolean | null
     RPC_FEE: number
     SERVER_PORT: number
+    SIGNALING_SERVER_PORT: number
     EXPOSED_URL: string
     PG_PORT: number
     enough_peers: boolean
     PeerList: Peer[]
     peerManager: PeerManager
+    MCP_SERVER_PORT: number
+    MCP_ENABLED: boolean
+    mcpServer: any
 } = {
     OVERRIDE_PORT: null,
     OVERRIDE_IS_TESTER: null,
     COMMANDLINE_MODE: null,
     RPC_FEE: 10,
     SERVER_PORT: 0,
+    SIGNALING_SERVER_PORT: 0,
     EXPOSED_URL: "",
     PG_PORT: 5332,
     enough_peers: true,
     PeerList: [],
     peerManager: null,
+    MCP_SERVER_PORT: 0,
+    MCP_ENABLED: true,
+    mcpServer: null,
 }
 
 // SECTION Preparation methods
@@ -106,6 +119,40 @@ async function digestArguments() {
         }
     }
 }
+
+async function isPortAvailable(port: number): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+        const server = net.createServer()
+        server.once("error", err => {
+            server.close()
+            if (err["code"] == "EADDRINUSE") {
+                resolve(false)
+            } else {
+                resolve(false) // or throw error!!
+                // reject(err);
+            }
+        })
+
+        server.once("listening", () => {
+            resolve(true)
+            server.close()
+        })
+        server.listen(port)
+    })
+}
+
+async function getNextAvailablePort(startFrom: number) {
+    let availablePort: number = null
+    while (startFrom < 65535 || !!availablePort) {
+        if (await isPortAvailable(startFrom)) {
+            availablePort = startFrom
+            break
+        }
+        startFrom++
+    }
+    return availablePort
+}
+
 // ANCHOR Warmup method
 async function warmup() {
     // INFO Cleaning the logs directory (except custom logs)
@@ -134,6 +181,27 @@ async function warmup() {
     if (indexState.SERVER_PORT == 0) {
         indexState.SERVER_PORT = parseInt(process.env.SERVER_PORT, 10) || 53550
     }
+    // Allow overriding signaling server port through RPC_SIGNALING_PORT
+    indexState.SIGNALING_SERVER_PORT =
+        parseInt(process.env.RPC_SIGNALING_PORT, 10) || 0
+    if (indexState.SIGNALING_SERVER_PORT == 0) {
+        indexState.SIGNALING_SERVER_PORT =
+            parseInt(process.env.SIGNALING_SERVER_PORT, 10) || 3005
+    }
+
+    // Use next available port for the signaling server
+    // (useful when we have multiple nodes running the same code on the same machine)
+    indexState.SIGNALING_SERVER_PORT = await getNextAvailablePort(
+        indexState.SIGNALING_SERVER_PORT,
+    )
+
+    // MCP Server configuration
+    indexState.MCP_SERVER_PORT = parseInt(process.env.RPC_MCP_PORT, 10) || 0
+    if (indexState.MCP_SERVER_PORT == 0) {
+        indexState.MCP_SERVER_PORT =
+            parseInt(process.env.MCP_SERVER_PORT, 10) || 3001
+    }
+    indexState.MCP_ENABLED = process.env.MCP_ENABLED !== "false"
     // Setting the server port to the shared state
     getSharedState.serverPort = indexState.SERVER_PORT
     // Exposed URL
@@ -145,14 +213,17 @@ async function warmup() {
     console.log("PG_PORT: " + indexState.PG_PORT)
     console.log("RPC_FEE: " + indexState.RPC_FEE)
     console.log("SERVER_PORT: " + indexState.SERVER_PORT)
+    console.log("SIGNALING_SERVER_PORT: " + indexState.SIGNALING_SERVER_PORT)
+    console.log("MCP_SERVER_PORT: " + indexState.MCP_SERVER_PORT)
+    console.log("MCP_ENABLED: " + indexState.MCP_ENABLED)
     console.log("= End of Configuration = \n")
     // Configure the logs directory
     log.setLogsDir(indexState.SERVER_PORT)
     // ? REVIEW Starting the server_rpc: should we keep this async?
     // This should start the server_rpc without any other needed operation
     log.info("[MAIN] Starting the RPC server")
-    server_rpc()
-
+    //server_rpc()
+    serverRpcBun()
     indexState.peerManager = PeerManager.getInstance()
     console.log("[MAIN] peerManager started")
 
@@ -171,19 +242,30 @@ async function preMainLoop() {
 
     // ANCHOR The whole first part of main ensures the environment is ready to run
     await getSharedState.identity.ensureIdentity() // ? Should we generate the identity option based too? (see SERVER_PORT and others    )
-    const id = getSharedState.identity
+    // INFO: Initialize Unified Crypto with ed25519 private key
+    await ucrypto.generateAllIdentities(
+        getSharedState.identity.ed25519.privateKey as Uint8Array,
+    )
+    getSharedState.keypair = await ucrypto.getIdentity(
+        getSharedState.signingAlgorithm,
+    )
+
+    // const id = getSharedState.identity
     term.green("[BOOTSTRAP] Our identity is ready\n")
     // Log identity
-    term.green(
-        "\n[MAIN] 🔗 WE ARE " + id.ed25519.publicKey.toString("hex") + " 🔗 \n",
+    const publicKeyHex = uint8ArrayToHex(
+        getSharedState.keypair.publicKey as Uint8Array,
     )
+    term.green("\n[MAIN] 🔗 WE ARE " + publicKeyHex + " 🔗 \n")
     // Creating ourselves as a peer // ? Should this be removed in production?
     const ourselves = "http://127.0.0.1:" + indexState.SERVER_PORT
     getSharedState.connectionString = ourselves
     log.info("Our connection string is: " + ourselves)
     // And saves the public key file
-    const publicKeyHex = id.ed25519.publicKey.toString("hex")
-    fs.writeFileSync("publickey_" + publicKeyHex, publicKeyHex + "\n")
+    fs.writeFileSync(
+        "publickey_" + getSharedState.signingAlgorithm + "_" + publicKeyHex,
+        publicKeyHex + "\n",
+    )
     log.info("Our public key is: " + publicKeyHex)
 
     // ANCHOR Preparing the peer manager and loading the peer list
@@ -227,10 +309,16 @@ async function preMainLoop() {
             indexState.peerManager.getPeers().length +
             ")\n",
     )
+
+    // INFO: Set initial last block data
+    const lastBlock = await Chain.getLastBlock()
+    getSharedState.lastBlockNumber = lastBlock.number
+    getSharedState.lastBlockHash = lastBlock.hash
 }
 
 // ANCHOR Entry point
 async function main() {
+    await Chain.setup()
     // INFO Warming up the node (including arguments digesting)
     await warmup()
     // INFO Calibrating the time at the start of the node
@@ -254,6 +342,50 @@ async function main() {
         }
         if (indexState.COMMANDLINE_MODE) {
             // commandLine() // While doing the rest of the stuff needed, a comand line interface is available
+        }
+        // Starting the signaling server
+        const signalingServer = new SignalingServer(
+            indexState.SIGNALING_SERVER_PORT,
+        )
+        if (signalingServer) {
+            getSharedState.isSignalingServerStarted = true
+            console.log("[MAIN] Signaling server started")
+        } else {
+            console.log("[MAIN] Failed to start the signaling server")
+            process.exit(1)
+        }
+
+        // Start MCP server (failsafe)
+        if (indexState.MCP_ENABLED) {
+            try {
+                const { createDemosMCPServer, createDemosNetworkTools } =
+                    await import("./features/mcp")
+
+                indexState.MCP_SERVER_PORT = await getNextAvailablePort(
+                    indexState.MCP_SERVER_PORT,
+                )
+
+                const mcpServer = createDemosMCPServer({
+                    transport: "sse",
+                    port: indexState.MCP_SERVER_PORT,
+                    host: "localhost",
+                })
+
+                const tools = createDemosNetworkTools()
+                tools.forEach(tool => mcpServer.registerTool(tool))
+
+                await mcpServer.start()
+
+                indexState.mcpServer = mcpServer
+                getSharedState.isMCPServerStarted = true
+                console.log(
+                    `[MAIN] MCP server started on port ${indexState.MCP_SERVER_PORT}`,
+                )
+            } catch (error) {
+                console.log("[MAIN] Failed to start MCP server:", error)
+                getSharedState.isMCPServerStarted = false
+                // Continue without MCP (failsafe)
+            }
         }
         term.yellow("[MAIN] ✅ Starting the background loop\n")
         // ANCHOR Starting the main loop

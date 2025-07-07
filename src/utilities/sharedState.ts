@@ -1,6 +1,7 @@
 // INFO This singleton is used to store the state of the application through different parts of the application.
 
 import * as dotenv from "dotenv"
+import * as forge from "node-forge"
 import Block from "src/libs/blockchain/block"
 import chain from "src/libs/blockchain/chain"
 import { Identity } from "src/libs/identity"
@@ -8,6 +9,8 @@ import { Identity } from "src/libs/identity"
 import * as ntpClient from "ntp-client"
 import { Peer, PeerManager } from "src/libs/peer"
 import { MempoolData } from "src/libs/blockchain/mempool"
+import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
 dotenv.config()
 
@@ -16,8 +19,9 @@ export default class SharedState {
 
     // !SECTION Constants
     prod = process.env.PROD == "true" || false
-    version = "0.9.0"
-    version_name = "Prismatic Evolution"
+    version = "0.9.5"
+    version_name = "Entangled Polymer"
+    signingAlgorithm = "ed25519" as SigningAlgorithm
 
     block_time = 10 // TODO Get it from the genesis (or see Consensus module)
 
@@ -38,6 +42,11 @@ export default class SharedState {
     inPeerRecheckLoop = false
     inPeerGossip = false
     startingConsensus = false
+    isSignalingServerStarted = false
+    isMCPServerStarted = false
+
+    // Running as a node (is false when running specific modules like the signaling server)
+    runningAsNode = true
 
     // Mempool
     inGetMempool = false
@@ -73,6 +82,31 @@ export default class SharedState {
     lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard
     currentValidatorSeed: string
     identity: Identity
+    keypair: {
+        publicKey:
+            | Uint8Array
+            | forge.pki.rsa.PublicKey
+            | forge.pki.ed25519.NativeBuffer
+        privateKey:
+            | Uint8Array
+            | forge.pki.rsa.PrivateKey
+            | forge.pki.ed25519.NativeBuffer
+        genKey?: Uint8Array
+    }
+    get publicKeyHex(): string {
+        if (!this.keypair?.publicKey) {
+            return null
+        }
+
+        if (this.keypair.publicKey instanceof Uint8Array) {
+            return uint8ArrayToHex(this.keypair.publicKey)
+        }
+
+        throw new Error(
+            `Unsupported public key type for hex conversion: ${typeof this
+                .keypair.publicKey}`,
+        )
+    }
     lastConsensusTime = 0
 
     // SECTION Consensus states

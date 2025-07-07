@@ -33,6 +33,7 @@ export interface ConsensusMethod {
 }
 
 export default async function manageConsensusRoutines(
+    sender: string,
     payload: ConsensusMethod,
 ): Promise<RPCResponse> {
     let response = _.cloneDeep(emptyResponse)
@@ -72,20 +73,23 @@ export default async function manageConsensusRoutines(
 
     // Also refuses the routine if we are not in the shard
     const shard = await getShard(getSharedState.currentValidatorSeed)
-    const ourId = getSharedState.identity.ed25519.publicKey.toString("hex")
+    const ourId = getSharedState.publicKeyHex
     let isInShard = false
+
     for (const peer of shard) {
         if (peer.identity == ourId) {
             isInShard = true
             break
         }
     }
+
     if (!isInShard) {
         response.result = 400
         response.response =
             "We are not in the shard, cannot proceed with the routine"
         return response
     }
+
     // NOTE Each method has its own logic to be implemented
     switch (payload.method) {
         /*
@@ -154,9 +158,7 @@ export default async function manageConsensusRoutines(
         // SECTION: New Secretary Manager class handlers
         case "setValidatorPhase": {
             try {
-                const [peerSignature, peerKey, phase, seed, blockRef] =
-                    payload.params
-
+                const [phase, seed, blockRef] = payload.params
                 const manager = SecretaryManager.getInstance()
 
                 // INFO: Seed check
@@ -187,19 +189,7 @@ export default async function manageConsensusRoutines(
                     }
                 }
 
-                // INFO: Authentication
-                const isSignatureValid = Cryptography.verify(
-                    peerKey,
-                    peerSignature,
-                    peerKey,
-                )
-
-                if (!isSignatureValid) {
-                    response.result = 401
-                    response.response = "Invalid signature"
-                    response.extra = "Signature verification failed"
-                    return response
-                }
+                const peerKey = sender
 
                 // INFO: If we receive a setValidatorPhase request, and the
                 // secretary routine has not started, wait for it to start
@@ -225,6 +215,14 @@ export default async function manageConsensusRoutines(
                     }
                 }
 
+                // INFO: Check if sender is in the consensus
+                if (!manager.shard.members.some(m => m.identity === sender)) {
+                    response.result = 401
+                    response.response = "Sender not in the consensus"
+                    response.extra = "Sender not in the consensus"
+                    return response
+                }
+
                 if (blockRef < manager.shard.blockRef) {
                     response.result = 400
                     response.response =
@@ -232,9 +230,7 @@ export default async function manageConsensusRoutines(
                     return response
                 }
 
-                const isUs =
-                    peerKey ===
-                    getSharedState.identity.ed25519.publicKey.toString("hex")
+                const isUs = peerKey === getSharedState.publicKeyHex
                 log.warning(
                     "[Consensus Message Received] setValidatorPhase from: " +
                         peerKey,
@@ -264,31 +260,22 @@ export default async function manageConsensusRoutines(
         }
 
         case "greenlight": {
-            const [secretarySignature, senderKey, timestamp, validatorPhase] =
-                payload.params as [string, string, number, number]
-
-            log.warning(
-                "[Consensus Message Received] greenlight from: " + senderKey,
-            )
+            // TODO: Check if the sender is the secretary (without verifying the signature
+            // as we have already done that) in validateHeaders
+            const [timestamp, validatorPhase] = payload.params as [
+                number,
+                number,
+            ]
             log.info(
                 "payload.params: " + JSON.stringify(payload.params, null, 2),
             )
             const manager = SecretaryManager.getInstance()
 
             log.debug("Our secretary identity: " + manager.secretary.identity)
-            log.debug("Received secretary signature: " + secretarySignature)
             log.debug("shard: " + manager.shard.members.map(m => m.identity))
 
-            // INFO: Check if the request came from our secretary
-            const isOurSecretary = Cryptography.verify(
-                manager.secretary.identity,
-                secretarySignature,
-                manager.secretary.identity,
-            )
-
-            log.debug("Is our secretary: " + isOurSecretary)
-
-            if (!isOurSecretary) {
+            // INFO: Check if the sender is the secretary
+            if (sender !== manager.secretary.identity) {
                 response.result = 401
                 response.response = "Greenlight not accepted"
                 response.extra = "Secretary identity mismatch"

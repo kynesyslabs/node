@@ -368,6 +368,19 @@ export default class GCR {
                     identities: {
                         xm: {},
                         web2: {},
+                        pqc: {},
+                    },
+                    points: {
+                        totalPoints: 0,
+                        breakdown: {
+                            web3Wallets: {},
+                            socialAccounts: {
+                                twitter: 0,
+                                github: 0,
+                                discord: 0,
+                            },
+                        },
+                        lastUpdated: new Date(),
                     },
                 }
             }
@@ -380,6 +393,19 @@ export default class GCR {
                 identities: {
                     xm: {},
                     web2: {},
+                    pqc: {},
+                },
+                points: {
+                    totalPoints: 0,
+                    breakdown: {
+                        web3Wallets: {},
+                        socialAccounts: {
+                            twitter: 0,
+                            github: 0,
+                            discord: 0,
+                        },
+                    },
+                    lastUpdated: new Date(),
                 },
             }
         }

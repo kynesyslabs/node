@@ -8,6 +8,7 @@ import { Proxy } from "src/features/web2/proxy/Proxy"
 import { ProxyFactory } from "src/features/web2/proxy/ProxyFactory"
 import required from "src/utilities/required"
 import { generateUniqueId } from "src/utilities/generateUniqueId"
+import { EnumWeb2Actions } from "@kynesyslabs/demosdk/types"
 
 /**
  * DAHR - Data Agnostic HTTPS Relay, class that handles the Web2 request and attestation process.
@@ -71,7 +72,13 @@ export class DAHR {
 
         const web2RequestManager = new Web2RequestManager(this)
         const web2Response = await this._proxy.sendHTTPRequest({
-            web2Request: this._web2Request,
+            web2Request: {
+                ...this._web2Request,
+                raw: {
+                    ...this._web2Request.raw,
+                    action: EnumWeb2Actions.START_PROXY,
+                },
+            },
             targetMethod: method,
             targetHeaders: headers,
             payload,
@@ -79,7 +86,7 @@ export class DAHR {
         })
 
         const attestedResult =
-            web2RequestManager.getAttestedResult(web2Response)
+            await web2RequestManager.getAttestedResult(web2Response)
 
         return {
             ...attestedResult,

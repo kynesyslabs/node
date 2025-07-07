@@ -48,6 +48,7 @@ import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import Chain from "../chain"
 import { Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
+import { Referrals } from "@/features/incentive/referrals"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -69,9 +70,10 @@ export type GetNativeSubnetsTxsOptions = {
     txData?: boolean
 }
 
-export type GCRResult = {
+export interface GCRResult {
     success: boolean
     message: string
+    response?: any
 }
 
 // ? Maybe sanitize the options?
@@ -486,9 +488,30 @@ export default class HandleGCR {
         account.identities = fillData["identities"] || {
             xm: {},
             web2: {},
+            pqc: {},
         }
         account.assignedTxs = []
         account.nonce = fillData["nonce"] || 0
+        account.points = {
+            totalPoints: 0,
+            breakdown: {
+                web3Wallets: {},
+                socialAccounts: {
+                    twitter: 0,
+                    github: 0,
+                    discord: 0,
+                },
+                referrals: 0,
+            },
+            lastUpdated: new Date(),
+        }
+        account.referralInfo = {
+            totalReferrals: 0,
+            referralCode: Referrals.generateReferralCode(pubkey),
+            referrals: [],
+            referredBy: null,
+        }
+
         return await repository.save(account)
     }
 }

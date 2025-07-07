@@ -11,52 +11,52 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { DataSource } from "typeorm"
 
-import { Blocks } from "./entities/Blocks"
-import { Consensus } from "./entities/Consensus"
-import { Mempool, MempoolTx } from "./entities/Mempool"
-import { PgpKeyServer } from "./entities/PgpKeyServer"
-import { Transactions } from "./entities/Transactions"
-import { Validators } from "./entities/Validators"
-//import { Identities } from "./entities/Identities"
-import { GlobalChangeRegistry } from "./entities/GCR/GlobalChangeRegistry"
+import { Blocks } from "./entities/Blocks.js"
+import { Consensus } from "./entities/Consensus.js"
+import { MempoolTx } from "./entities/Mempool.js"
+import { PgpKeyServer } from "./entities/PgpKeyServer.js"
+import { Transactions } from "./entities/Transactions.js"
+import { Validators } from "./entities/Validators.js"
+import { GlobalChangeRegistry } from "./entities/GCR/GlobalChangeRegistry.js"
+import { GCRHashes } from "./entities/GCRv2/GCRHashes.js"
+import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs.js"
+import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
+import { GCRTracker } from "./entities/GCR/GCRTracker.js"
 
-import { GCRHashes } from "./entities/GCRv2/GCRHashes"
-import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs"
-import { GCRMain } from "./entities/GCRv2/GCR_Main"
-import { GCRTracker } from "./entities/GCR/GCRTracker"
+export const dataSource = new DataSource({
+    type: "postgres",
+    host: "localhost",
+    port: parseInt(process.env.PG_PORT) || 5332,
+    username: "demosuser",
+    password: "demospassword",
+    database: "demos",
+    migrations: ["../migrations/*.{ts,js}"],
+    entities: [
+        Blocks,
+        Transactions,
+        MempoolTx,
+        Consensus,
+        PgpKeyServer,
+        GCRHashes,
+        GCRSubnetsTxs,
+        Transactions,
+        Validators,
+        GlobalChangeRegistry,
+        GCRTracker,
+        GCRMain,
+        GCRTracker,
+    ],
+    synchronize: true,
+    logging: false,
+})
+
 
 class Datasource {
     private static instance: Datasource
     private dataSource: DataSource
 
     private constructor() {
-        this.dataSource = new DataSource({
-            type: "postgres",
-            host: "localhost",
-            port: parseInt(process.env.PG_PORT) || 5332,
-            username: "demosuser",
-            password: "demospassword",
-            database: "demos",
-            entities: [
-                Blocks,
-                Transactions,
-                Mempool,
-                MempoolTx,
-                Consensus,
-                PgpKeyServer,
-                GCRHashes,
-                GCRSubnetsTxs,
-                Transactions,
-                Validators,
-                //Identities,
-                GlobalChangeRegistry,
-                GCRTracker,
-                GCRMain,
-                GCRTracker,
-            ],
-            synchronize: true, // set this to false in production
-            logging: false,
-        })
+        this.dataSource = dataSource
     }
 
     public static async getInstance(): Promise<Datasource> {

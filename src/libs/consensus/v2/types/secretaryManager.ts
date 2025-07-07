@@ -9,7 +9,6 @@ import { _required as required } from "@kynesyslabs/demosdk/websdk"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { TimeoutError, AbortError, NotInShardError } from "src/exceptions"
-import Cryptography from "src/libs/crypto/cryptography"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 
 // ANCHOR SecretaryManager
@@ -28,14 +27,6 @@ export default class SecretaryManager {
     public ourKey: string
     public runSecretaryRoutine = false
     public blockTimestamp: number = null
-
-    // INFO: Our signature is send with the greenlight request
-    get ourSignature() {
-        return Cryptography.sign(
-            getSharedState.identity.ed25519.publicKey.toString("hex"),
-            getSharedState.identity.ed25519.privateKey,
-        ).toString("hex")
-    }
 
     constructor() {}
 
@@ -57,7 +48,8 @@ export default class SecretaryManager {
 
         // Reusing the method to create the members
         this.shard.members = await getShard(cVSA)
-        this.ourKey = getSharedState.identity.ed25519.publicKey.toString("hex")
+        // this.ourKey = getSharedState.identity.ed25519.publicKey.toString("hex")
+        this.ourKey = getSharedState.publicKeyHex
 
         if (
             !this.shard.members.map(peer => peer.identity).includes(this.ourKey)
@@ -112,10 +104,7 @@ export default class SecretaryManager {
 
     // REVIEW Base check to see if we are the secretary, called by all the methods that the Secretary can call
     public checkIfWeAreSecretary() {
-        return (
-            this.shard.secretaryKey ===
-            forgeToHex(getSharedState.identity.ed25519.publicKey)
-        )
+        return this.shard.secretaryKey === getSharedState.publicKeyHex
     }
 
     /**
@@ -546,12 +535,7 @@ export default class SecretaryManager {
                 params: [
                     {
                         method: "greenlight",
-                        params: [
-                            this.ourSignature,
-                            this.ourKey,
-                            this.blockTimestamp,
-                            phase,
-                        ],
+                        params: [this.blockTimestamp, phase],
                     },
                 ],
             }
@@ -717,8 +701,6 @@ export default class SecretaryManager {
                     {
                         method: "setValidatorPhase",
                         params: [
-                            this.ourSignature,
-                            this.ourKey,
                             this.ourValidatorPhase.currentPhase,
                             this.shard.CVSA,
                             this.shard.blockRef,
@@ -773,6 +755,12 @@ export default class SecretaryManager {
                 // lower than the secretary's block reference
                 // await this.handleSecretaryGoneOffline()
                 // await sendStatus()
+            }
+
+            if (res.result == 401) {
+                log.only("received a 401")
+                log.only(JSON.stringify(res, null, 2))
+                process.exit(1)
             }
 
             log.debug(

@@ -20,6 +20,10 @@ import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { Twitter } from "../identity/tools/twitter"
+import { Tweet } from "@kynesyslabs/demosdk/types"
+import Mempool from "../blockchain/mempool_v2"
 
 export interface NodeCall {
     message: string
@@ -138,13 +142,14 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             }
             break
         case "getMempool":
-            response.response = await Chain.getPendingPool()
+            response.response = await Mempool.getMempool()
             break
         // INFO Authentication listener
         case "getPeerIdentity":
             // NOTE We don't need to sign anything as the headers are signed already
-            response.response =
-                getSharedState.identity.ed25519.publicKey.toString("hex")
+            response.response = uint8ArrayToHex(
+                getSharedState.keypair.publicKey as Uint8Array,
+            )
             //console.log(response)
             break
 
@@ -156,9 +161,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 break
             }
             try {
-                nStat = (await GCR.getGCRNativeStatus(
-                    data.address,
-                )) as GCRMain
+                nStat = (await GCR.getGCRNativeStatus(data.address)) as GCRMain
                 response.response = nStat
             } catch (error) {
                 response.result = 400
@@ -172,9 +175,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "No address specified"
                 break
             }
-            nStat = (await GCR.getGCRNativeStatus(
-                data.address,
-            )) as GCRMain
+            nStat = (await GCR.getGCRNativeStatus(data.address)) as GCRMain
             response.response = nStat.nonce
             break
         case "getPeerTime":
@@ -182,8 +183,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             break
 
         case "getAllTxs":
-            var responseObject = await Chain.getAllTxs()
-            response.response = responseObject
+            // NOTE: Endpoint deprecated
+            response.response = {}
             break
 
         // REVIEW Implement native tables requests
@@ -206,6 +207,49 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 ...(data.options ? [data.options] : []),
             )
             break
+
+        case "getTweet": {
+            if (!data.tweetUrl) {
+                response.result = 400
+                response.response = "No tweet URL specified"
+                break
+            }
+
+            const twitter = Twitter.getInstance()
+            let tweet: Tweet = null
+
+            try {
+                tweet = await twitter.getTweetByUrl(data.tweetUrl)
+            } catch (error) {
+                response.result = 400
+                response.response = {
+                    success: false,
+                    error: "Failed to get tweet",
+                }
+                break
+            }
+
+            response.result = tweet ? 200 : 400
+            if (tweet) {
+                const data = {
+                    id: tweet.id,
+                    created_at: tweet.created_at,
+                    text: tweet.text,
+                    username: tweet.author.screen_name,
+                    userId: tweet.author.rest_id,
+                }
+                response.response = {
+                    tweet: data,
+                    success: true,
+                }
+            } else {
+                response.response = {
+                    success: false,
+                    error: "Failed to get tweet",
+                }
+            }
+            break
+        }
 
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen
