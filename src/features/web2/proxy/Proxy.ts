@@ -66,8 +66,7 @@ export class Proxy {
         }
 
         return new Promise((resolve, reject) => {
-            const { targetProtocol, targetHostname, targetPort } =
-                this.parseUrl(targetUrl)
+            const { targetHostname, targetPort } = this.parseUrl(targetUrl)
             const headers = this.createHeaders(
                 targetHostname,
                 targetPort,
@@ -171,8 +170,7 @@ export class Proxy {
 
     private createNewServer(targetUrl: string): Promise<void> {
         return new Promise((resolve, reject) => {
-            const { targetProtocol, targetHostname, targetPort } =
-                this.parseUrl(targetUrl)
+            const { targetProtocol } = this.parseUrl(targetUrl)
 
             // Create the proxy server
             const proxyServer = httpProxy.createProxyServer({
@@ -186,7 +184,7 @@ export class Proxy {
             })
 
             // Handle proxy errors
-            proxyServer.on("error", (err, req, res) => {
+            proxyServer.on("error", (err, _req, res) => {
                 console.error("[Web2API] Proxy server error:", err)
                 if (res instanceof http.ServerResponse) {
                     res.writeHead(500, {
@@ -201,6 +199,12 @@ export class Proxy {
                 }
             })
 
+            // Listen for proxy responses to set the correct status code
+            proxyServer.on("proxyRes", (proxyRes, _req, res) => {
+                // Set the status code and headers from the target API
+                res.writeHead(proxyRes.statusCode || 500, proxyRes.headers)
+            })
+
             // Create the main HTTP server
             this._server = http.createServer((req, res) => {
                 if (!this.isAuthorizedRequest(req)) {
@@ -209,8 +213,15 @@ export class Proxy {
                     return
                 }
 
+                const { targetPathname, targetSearch, targetOrigin } =
+                    this.parseUrl(targetUrl)
+                const outgoingPath = targetPathname + targetSearch
+
+                // Overwrite req.url with the correct path/query before proxying
+                req.url = outgoingPath
+
                 proxyServer.web(req, res, {
-                    target: targetUrl,
+                    target: targetOrigin,
                     changeOrigin: true,
                     secure: false,
                 })
@@ -266,6 +277,10 @@ export class Proxy {
         return {
             targetProtocol: parsedUrl.protocol,
             targetHostname: parsedUrl.hostname,
+            targetPathname: parsedUrl.pathname,
+            targetSearch: parsedUrl.search,
+            targetFullPath: parsedUrl.pathname + parsedUrl.search,
+            targetOrigin: parsedUrl.origin,
             targetPort: parsedUrl.port
                 ? Number(parsedUrl.port)
                 : parsedUrl.protocol === "https:"
