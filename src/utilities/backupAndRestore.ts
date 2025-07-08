@@ -35,8 +35,8 @@ async function dumpUserData(): Promise<void> {
         await client.connect()
         console.log("Connected successfully!")
 
-        // Query to get all fields for users with positive balance
-        const query = `SELECT * FROM ${dbConfig.table} WHERE balance < 1000000000`
+        // Query to get all fields for users (minus faucet addresses)
+        const query = `SELECT * FROM ${dbConfig.table} WHERE balance < 10000000000000`
 
         // Execute the query
         console.log("Executing query...")
