@@ -6,6 +6,7 @@ import { emptyResponse } from "../../server_rpc"
 import _ from "lodash"
 import { L2PS, L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
+import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 /* NOTE
 - Each l2ps is a list of nodes that are part of the l2ps
 - Each l2ps partecipant has the private key of the l2ps (or equivalent)
@@ -52,9 +53,43 @@ export default async function handleL2PS(
         response.extra = "Transaction signature verification failed"
         return response
     }
-    // TODO Add the encrypted transaction (NOT the decrypted one) to the local L2PS mempool
+    // Extract original hash from encrypted payload for duplicate detection
+    const encryptedPayload = l2psTx.content.data[1] as L2PSEncryptedPayload
+    const originalHash = encryptedPayload.original_hash
+    
+    // Check for duplicates (prevent reprocessing)
+    const alreadyProcessed = await L2PSMempool.existsByOriginalHash(originalHash)
+    if (alreadyProcessed) {
+        response.result = 409
+        response.response = "Transaction already processed"
+        response.extra = "Duplicate L2PS transaction detected"
+        return response
+    }
+    
+    // Store encrypted transaction (NOT decrypted) in L2PS-specific mempool
+    // This preserves privacy while enabling DTR hash generation
+    const mempoolResult = await L2PSMempool.addTransaction(
+        l2psUid, 
+        l2psTx, 
+        originalHash, 
+        "processed",
+    )
+    
+    if (!mempoolResult.success) {
+        response.result = 500
+        response.response = false
+        response.extra = `Failed to store in L2PS mempool: ${mempoolResult.error}`
+        return response
+    }
+    
     // TODO Is the execution to be delegated to the l2ps nodes? As it cannot be done by the consensus as it will be in the future for the other txs
     response.result = 200
-    response.response = decryptedTx
+    response.response = {
+        message: "L2PS transaction processed and stored",
+        encrypted_hash: l2psTx.hash,
+        original_hash: originalHash,
+        l2ps_uid: l2psUid,
+        decrypted_tx: decryptedTx, // Include for client confirmation
+    }
     return response
 }

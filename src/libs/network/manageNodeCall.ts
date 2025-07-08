@@ -312,6 +312,56 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "Internal error processing relayed transaction"
             }
             break
+
+        // REVIEW L2PS: Node-to-node communication for L2PS mempool synchronization
+        case "getL2PSParticipationById":
+            console.log("[L2PS] Received L2PS participation query")
+            if (!data.l2psUid) {
+                response.result = 400
+                response.response = "No L2PS UID specified"
+                break
+            }
+            try {
+                // Check if this node participates in the specified L2PS network
+                const joinedUIDs = getSharedState.l2psJoinedUids || []
+                const isParticipating = joinedUIDs.includes(data.l2psUid)
+                
+                response.result = 200
+                response.response = {
+                    participating: isParticipating,
+                    l2psUid: data.l2psUid,
+                    nodeIdentity: getSharedState.publicKeyHex
+                }
+                
+                log.debug(`[L2PS] Participation query for ${data.l2psUid}: ${isParticipating}`)
+            } catch (error) {
+                log.error("[L2PS] Error checking L2PS participation: " + error)
+                response.result = 500
+                response.response = "Internal error checking L2PS participation"
+            }
+            break
+
+        case "getL2PSMempoolInfo":
+            console.log("[L2PS] Received L2PS mempool info request")
+            if (!data.l2psUid) {
+                response.result = 400
+                response.response = "No L2PS UID specified"
+                break
+            }
+            response.result = 501
+            response.response = "UNIMPLEMENTED - L2PS mempool info endpoint"
+            break
+
+        case "getL2PSTransactions":
+            console.log("[L2PS] Received L2PS transactions sync request")
+            if (!data.l2psUid) {
+                response.result = 400
+                response.response = "No L2PS UID specified"
+                break
+            }
+            response.result = 501
+            response.response = "UNIMPLEMENTED - L2PS transactions sync endpoint"
+            break
         default:
             console.log("[SERVER] Received unknown message")
             // eslint-disable-next-line quotes

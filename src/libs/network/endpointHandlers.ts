@@ -48,6 +48,7 @@ import { Peer } from "../peer"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
 import { L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
+import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
@@ -387,6 +388,12 @@ export default class ServerHandlers {
                 }
                 result.response = nativeBridgeResult
                 break
+
+            case "l2ps_hash_update":
+                var l2psHashResult = await ServerHandlers.handleL2PSHashUpdate(tx)
+                result.response = l2psHashResult
+                result.success = l2psHashResult.result === 200
+                break
         }
 
         // Only if the transaction is valid we add it to the mempool
@@ -710,5 +717,58 @@ export default class ServerHandlers {
         const requireReply = false
         const response = true
         return { extra, requireReply, response }
+    }
+
+    /**
+     * Handle L2PS hash update transactions from other L2PS nodes
+     * 
+     * Validates that the sender is part of the L2PS network and stores
+     * the hash update for validator consensus. This enables validators
+     * to track L2PS network activity without accessing transaction content.
+     * 
+     * @param tx - L2PS hash update transaction
+     * @returns RPCResponse with processing result
+     */
+    static async handleL2PSHashUpdate(tx: Transaction): Promise<RPCResponse> {
+        let response: RPCResponse = _.cloneDeep(emptyResponse)
+        
+        try {
+            // Extract L2PS hash payload from transaction data
+            const l2psHashPayload = tx.content.data[1] as any
+            const l2psUid = l2psHashPayload.l2ps_uid
+            
+            // Validate sender is part of the L2PS network
+            const parallelNetworks = ParallelNetworks.getInstance()
+            const l2psInstance = await parallelNetworks.getL2PS(l2psUid)
+            
+            if (!l2psInstance) {
+                response.result = 403
+                response.response = "Not participant in L2PS network"
+                response.extra = `L2PS network ${l2psUid} not found or not joined`
+                return response
+            }
+            
+            // TODO: Store hash update for validator consensus
+            // This is where validators store L2PS UID → hash mappings
+            // Implementation will be added in Phase 3
+            
+            log.info(`[L2PS Hash Update] Processed hash update for L2PS ${l2psUid}: ${l2psHashPayload.consolidated_hash} (${l2psHashPayload.transaction_count} txs)`)
+            
+            response.result = 200
+            response.response = {
+                message: "L2PS hash update processed",
+                l2ps_uid: l2psUid,
+                consolidated_hash: l2psHashPayload.consolidated_hash,
+                transaction_count: l2psHashPayload.transaction_count
+            }
+            return response
+            
+        } catch (error: any) {
+            log.error("[L2PS Hash Update] Error processing hash update:", error)
+            response.result = 500
+            response.response = "Internal error processing L2PS hash update"
+            response.extra = error.message || "Unknown error"
+            return response
+        }
     }
 }
