@@ -1,6 +1,8 @@
 import { Client } from "pg"
 import * as fs from "fs"
 import * as path from "path"
+import * as dotenv from "dotenv"
+dotenv.config()
 
 interface UserBalance {
     id: number
@@ -16,12 +18,13 @@ interface OutputData {
 }
 
 async function dumpUserData(): Promise<void> {
+    console.log("PG_PORT: " + process.env.PG_PORT)
     // Database connection configuration
     const dbConfig = {
         user: "demosuser",
         password: "demospassword",
         host: "127.0.0.1",
-        port: 5332,
+        port: process.env.PG_PORT,
         database: "demos", // Assuming this is the database name
         table: "gcr_main",
     }
@@ -36,6 +39,7 @@ async function dumpUserData(): Promise<void> {
         console.log("Connected successfully!")
 
         // Query to get all fields for users (minus faucet addresses)
+        // TODO: REMOVE THE WHERE CLAUSE AFTER FIRST RESTORE
         const query = `SELECT * FROM ${dbConfig.table} WHERE balance < 10000000000000`
 
         // Execute the query
