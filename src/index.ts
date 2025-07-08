@@ -35,6 +35,7 @@ import { SignalingServer } from "./features/InstantMessagingProtocol/signalingSe
 import { serverRpcBun } from "./libs/network/server_rpc"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { RelayRetryService } from "./libs/network/dtr/relayRetryService"
+import { L2PSHashService } from "./libs/l2ps/L2PSHashService"
 import Chain from "./libs/blockchain/chain"
 
 const term = terminalkit.terminal
@@ -365,7 +366,7 @@ async function main() {
                 const mcpServer = createDemosMCPServer({
                     transport: "sse",
                     port: indexState.MCP_SERVER_PORT,
-                    host: "localhost"
+                    host: "localhost",
                 })
                 
                 const tools = createDemosNetworkTools()
@@ -393,23 +394,53 @@ async function main() {
             // Service will check syncStatus internally before processing
             RelayRetryService.getInstance().start()
         }
+
+        // Start L2PS hash generation service (for L2PS participating nodes)
+        // Note: l2psJoinedUids is populated during ParallelNetworks initialization
+        if (getSharedState.l2psJoinedUids && getSharedState.l2psJoinedUids.length > 0) {
+            try {
+                const l2psHashService = L2PSHashService.getInstance()
+                await l2psHashService.start()
+                console.log(`[L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`)
+            } catch (error) {
+                console.error("[L2PS] Failed to start hash generation service:", error)
+            }
+        } else {
+            console.log("[L2PS] No L2PS networks joined, hash service not started")
+        }
     }
 }
 
 // Graceful shutdown handling for DTR service
 process.on("SIGINT", () => {
-    console.log("[DTR] Received SIGINT, shutting down gracefully...")
+    console.log("[Services] Received SIGINT, shutting down gracefully...")
     if (getSharedState.PROD) {
         RelayRetryService.getInstance().stop()
     }
+    
+    // Stop L2PS hash service if running
+    try {
+        L2PSHashService.getInstance().stop()
+    } catch (error) {
+        console.error("[L2PS] Error stopping hash service:", error)
+    }
+    
     process.exit(0)
 })
 
 process.on("SIGTERM", () => {
-    console.log("[DTR] Received SIGTERM, shutting down gracefully...")
+    console.log("[Services] Received SIGTERM, shutting down gracefully...")
     if (getSharedState.PROD) {
         RelayRetryService.getInstance().stop()
     }
+    
+    // Stop L2PS hash service if running
+    try {
+        L2PSHashService.getInstance().stop()
+    } catch (error) {
+        console.error("[L2PS] Error stopping hash service:", error)
+    }
+    
     process.exit(0)
 })
 
