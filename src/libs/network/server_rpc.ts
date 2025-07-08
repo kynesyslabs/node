@@ -28,6 +28,7 @@ import { signedObject } from "@kynesyslabs/demosdk/types"
 import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import { bridge } from "@kynesyslabs/demosdk"
 import { manageNativeBridge } from "./manageNativeBridge"
+import Chain from "../blockchain/chain"
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
@@ -289,8 +290,19 @@ export async function serverRpcBun() {
         return jsonResponse({
             enabled: getSharedState.isMCPServerStarted,
             transport: "sse",
-            status: getSharedState.isMCPServerStarted ? "running" : "stopped"
+            status: getSharedState.isMCPServerStarted ? "running" : "stopped",
         })
+    })
+
+    server.get("/genesis", async () => {
+        const genesisBlock = await Chain.getGenesisBlock()
+        let genesisData = genesisBlock.content.extra?.genesisData || null
+
+        if (typeof genesisData === "string") {
+            genesisData = JSON.parse(genesisData)
+        }
+
+        return jsonResponse(genesisData)
     })
 
     // Main RPC endpoint

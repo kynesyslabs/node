@@ -240,17 +240,9 @@ async function preMainLoop() {
     getSharedState.serverPort = indexState.SERVER_PORT // Sharing this with any module that needs it
     getSharedState.rpcFee = indexState.RPC_FEE
 
-    // ANCHOR The whole first part of main ensures the environment is ready to run
-    await getSharedState.identity.ensureIdentity() // ? Should we generate the identity option based too? (see SERVER_PORT and others    )
     // INFO: Initialize Unified Crypto with ed25519 private key
-    await ucrypto.generateAllIdentities(
-        getSharedState.identity.ed25519.privateKey as Uint8Array,
-    )
-    getSharedState.keypair = await ucrypto.getIdentity(
-        getSharedState.signingAlgorithm,
-    )
+    getSharedState.keypair = await getSharedState.identity.loadIdentity()
 
-    // const id = getSharedState.identity
     term.green("[BOOTSTRAP] Our identity is ready\n")
     // Log identity
     const publicKeyHex = uint8ArrayToHex(

@@ -483,6 +483,7 @@ export default class HandleGCR {
         const dataSource = db.getDataSource()
         const repository = dataSource.getRepository(GCRMain)
         const account = new GCRMain()
+
         account.pubkey = pubkey
         account.balance = fillData["balance"] || 0n
         account.identities = fillData["identities"] || {
@@ -490,9 +491,10 @@ export default class HandleGCR {
             web2: {},
             pqc: {},
         }
+
         account.assignedTxs = []
         account.nonce = fillData["nonce"] || 0
-        account.points = {
+        account.points = fillData["points"] || {
             totalPoints: 0,
             breakdown: {
                 web3Wallets: {},
@@ -505,7 +507,8 @@ export default class HandleGCR {
             },
             lastUpdated: new Date(),
         }
-        account.referralInfo = {
+
+        account.referralInfo = fillData["referralInfo"] || {
             totalReferrals: 0,
             referralCode: Referrals.generateReferralCode(pubkey),
             referrals: [],

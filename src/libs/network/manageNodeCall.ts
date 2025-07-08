@@ -95,7 +95,6 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             response.response = await Chain.getLastBlockHash()
             break
         case "getBlockByNumber":
-            console.log(`get block by number ${data.blockNumber}`)
             return await getBlockByNumber(data)
         case "getBlocks":
             return await getBlocks(data)

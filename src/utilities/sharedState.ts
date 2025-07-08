@@ -8,7 +8,6 @@ import { Identity } from "src/libs/identity"
 // eslint-disable-next-line no-unused-vars
 import * as ntpClient from "ntp-client"
 import { Peer, PeerManager } from "src/libs/peer"
-import { MempoolData } from "src/libs/blockchain/mempool"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
@@ -51,8 +50,6 @@ export default class SharedState {
     // Mempool
     inGetMempool = false
     inCleanMempool = false
-    // REVIEW Mempool caching
-    mempoolCache: MempoolData | null = null
 
     // States
     runMainLoop = true
@@ -216,7 +213,7 @@ export default class SharedState {
     public async getInfo(): Promise<any> {
         const info = {
             version: this.version,
-            identity: this.identity.ed25519.publicKey.toString("hex"),
+            identity: this.publicKeyHex,
             connectionString: await this.getConnectionString(),
             peerlist: PeerManager.getInstance().getPeers(),
         }

@@ -13,13 +13,23 @@ import * as fs from "fs"
 import { pki } from "node-forge"
 import terminalkit from "terminal-kit"
 
+import * as bip39 from "bip39"
+import log from "@/utilities/logger"
 import { cryptography } from "../crypto"
 import getRemoteIP from "../network/routines/getRemoteIP"
 import { getSharedState } from "src/utilities/sharedState"
+import { Demos } from "@kynesyslabs/demosdk/websdk"
+import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import {
+    Hashing,
+    ucrypto,
+    uint8ArrayToHex,
+} from "@kynesyslabs/demosdk/encryption"
 
 const term = terminalkit.terminal
 
 export default class Identity {
+    public masterSeed: Uint8Array
     private static instance: Identity
     public ed25519: pki.KeyPair
     public ed25519_hex: {
@@ -49,24 +59,10 @@ export default class Identity {
         return Identity.instance
     }
 
+    /**
+     * @deprecated Use loadIdentity instead
+     */
     async ensureIdentity(): Promise<void> {
-        // const filename = ".demos_identity2"
-        // const newfile = cryptography.new()
-        // await cryptography.save(newfile, filename)
-
-        // console.error("New identity file: " + filename + "\n")
-        // console.error(
-        //     "Generated private key: " +
-        //         "0x" +
-        //         newfile.privateKey.toString("hex") +
-        //         "\n",
-        // )
-        // console.error(
-        //     "Generated public key: " + newfile.publicKey.toString("hex") + "\n",
-        // )
-
-        // process.exit(0)
-
         if (fs.existsSync(getSharedState.identityFile)) {
             // Loading the identity
             // TODO Add load with cryptography
@@ -104,5 +100,50 @@ export default class Identity {
 
     getConnectionString(): string {
         return getSharedState.exposedUrl
+    }
+
+    // SECTION: unified crypto
+
+    /**
+     * Converts a mnemonic to a seed.
+     * @param mnemonic - The mnemonic of the wallet
+     * @returns A 128 bytes seed
+     */
+    async mnemonicToSeed(mnemonic: string) {
+        if (!(mnemonic.split(" ").length % 3 === 0)) {
+            log.error("Invalid mnemonic: must be a string of words")
+            process.exit(1)
+        }
+
+        const hashable = bip39.mnemonicToSeedSync(mnemonic)
+        const seedHash = Hashing.sha3_512(hashable)
+
+        // remove the 0x prefix
+        const seedHashHex = uint8ArrayToHex(seedHash).slice(2)
+        return new TextEncoder().encode(seedHashHex)
+    }
+
+    /**
+     * Loads the identity from the identity file.
+     * If the identity file does not exist, it creates a new one.
+     *
+     * @returns The keypair of the configured signing algorithm
+     */
+    async loadIdentity() {
+        const demos = new Demos()
+
+        if (fs.existsSync(getSharedState.identityFile)) {
+            const mnemonic = fs.readFileSync(
+                getSharedState.identityFile,
+                "utf8",
+            )
+            this.masterSeed = await this.mnemonicToSeed(mnemonic)
+        } else {
+            this.masterSeed = await this.mnemonicToSeed(demos.newMnemonic())
+            fs.writeFileSync(getSharedState.identityFile, this.masterSeed)
+        }
+
+        await ucrypto.generateAllIdentities(this.masterSeed)
+        return await ucrypto.getIdentity(getSharedState.signingAlgorithm)
     }
 }

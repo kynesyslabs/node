@@ -58,7 +58,7 @@ CLEAN="false"
 PORT=53550
 
 # Getting arguments
-while getopts "p:d:c:i:n:u:l:r:t:" opt; do
+while getopts "p:d:c:i:n:u:l:r:b:" opt; do
     case $opt in
         p) PORT=$OPTARG;;
         d) PG_PORT=$OPTARG;;
@@ -68,7 +68,7 @@ while getopts "p:d:c:i:n:u:l:r:t:" opt; do
         n) GIT_PULL=false;;
         u) EXPOSED_URL=$OPTARG;;
         r) RUNTIME=$OPTARG;;
-        t) RESTORE=$OPTARG;;
+        b) RESTORE=$OPTARG;;
         #...
     esac
 done
@@ -223,8 +223,12 @@ if [ "$RESTORE" == "true" ]; then
     echo "Database ready to accept connections"
 
     echo "Restoring the node"
-    yarn dump_balance
+    if ! yarn restore; then
+        echo "Error: Failed to restore the node"
+        exit 1
+    fi
     # sleep 20
+    # exit 0
 
     # Stop the database
     echo "Stopping the database"
@@ -244,9 +248,9 @@ if [ "$RESTORE" == "true" ]; then
     # Wait for the database to be available
     echo "Restarting database"
     wait_for_database $PG_PORT
-else
-    echo "Cleaning the output/ folder"
-    rm -rf output/*
+# else
+#     echo "Cleaning the output/ folder"
+#     rm -rf output/*
 fi
 
 # Ensuring the logs folder exists

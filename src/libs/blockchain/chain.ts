@@ -285,7 +285,7 @@ export default class Chain {
         operations: Operation[] = [],
         position?: number,
         cleanMempool = true,
-    ): Promise<any> {
+    ): Promise<Blocks> {
         log.info(
             "[insertBlock] Attempting to insert a block with hash: " +
                 block.hash,
@@ -432,6 +432,7 @@ export default class Chain {
         }
         genesisBlock.status = "confirmed"
         genesisBlock.proposer = "0x000000000000000000000000"
+        genesisBlock.content.encrypted_transactions_hashes = new Map()
         genesisBlock.validation_data = {
             signatures: {
                 "0x000000000000000000000000": "0x0",
@@ -468,10 +469,11 @@ export default class Chain {
         //await this.insertTransaction(genesis_tx)
         await Mempool.addTransaction({ ...genesisTx, reference_block: 0 }) // ! FIXME This fails
         console.log("[GENESIS] inserted transaction")
-        await this.insertBlock(genesisBlock, [genesisOp], 0)
 
+        // SECTION: Restoring account data
         const users = {}
 
+        // INFO: Create genesis users
         for (const balance of genesisData.balances) {
             const user = {
                 pubkey: balance[0],
@@ -480,37 +482,27 @@ export default class Chain {
             users[user.pubkey] = user
         }
 
+        // INFO: Update genesis users with existing balances
         for (const user of genesisData?.users || []) {
             // If the user is already indexed, use existing balance
             const balance = users[user.pubkey]?.balance || 0n
 
             users[user.pubkey] = {
-                pubkey: user.pubkey,
-                identities: user.identities,
-                nonce: user.nonce,
+                ...user,
                 balance: balance,
             }
         }
 
         const userAccounts: Record<string, any>[] = Object.values(users)
 
+        // INFO: Create all users
         for (const user of userAccounts) {
             await HandleGCR.createAccount(user.pubkey, user)
         }
 
-        // REVIEW Maybe this should be done prior to inserting the block
-        // NOTE Assigning balances from the genesis block
-        // const allBalances = genesisData.balances
-        // for (let i = 0; i < allBalances.length; i++) {
-        //     const individualBalance = allBalances[i]
-        //     const address = individualBalance[0]
-        //     const balance = BigInt(individualBalance[1])
+        // !SECTION Restoring account data
 
-        //     await manageNative.balance.setBalance(address, balance)
-        // }
-
-        // Adding an empty encrypted transactions list
-        genesisBlock.content.encrypted_transactions_hashes = new Map()
+        await this.insertBlock(genesisBlock, [genesisOp], 0)
         return genesisBlock
     }
 
