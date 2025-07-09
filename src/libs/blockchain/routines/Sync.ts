@@ -229,9 +229,11 @@ async function verifyLastBlockIntegrity(
         process.exit(1)
     }
 
-    if (genesisBlock.hash !== ourLastBlockHash) {
+    const ourGenesis = await Chain.getGenesisBlock()
+
+    if (genesisBlock.hash !== ourGenesis.hash) {
         log.error("[fastSync] Genesis hash is not coherent")
-        log.info("[fastSync] Our hash: " + ourLastBlockHash)
+        log.info("[fastSync] Our hash: " + ourGenesis.hash)
         log.info("[fastSync] Peer hash: " + genesisBlock.hash)
         process.exit(1)
     }

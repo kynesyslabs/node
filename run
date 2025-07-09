@@ -134,6 +134,7 @@ export PG_PORT=$PG_PORT
 export IDENTITY_FILE=$IDENTITY_FILE
 export EXPOSED_URL=$EXPOSED_URL
 export PEER_LIST_FILE=$PEER_LIST_FILE
+export RESTORE=$RESTORE
 
 # Database management with proper folder based on the port
 # Create a unique postgres folder for this instance based on the port number

@@ -14,6 +14,11 @@ import * as fs from "fs"
 import Chain from "src/libs/blockchain/chain"
 
 function getLatestGCRRecoveryData() {
+    if (!process.env.RESTORE) {
+        log.only("RESTORE is not set, skipping recovery")
+        return null
+    }
+
     const path = "output/"
 
     // return the file with the latest timestamp

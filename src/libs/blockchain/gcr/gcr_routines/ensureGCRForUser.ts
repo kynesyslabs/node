@@ -2,7 +2,6 @@
 
 import HandleGCR from "../handleGCR"
 import Datasource from "src/model/datasource"
-import HandleGCR from "../handleGCR"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { validateEd25519Address } from "@kynesyslabs/demosdk/utils"
 
