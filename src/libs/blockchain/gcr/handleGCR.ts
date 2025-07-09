@@ -477,7 +477,7 @@ export default class HandleGCR {
      */
     public static createAccount = async (
         pubkey: string,
-        fillData?: Record<string, any>,
+        fillData: Record<string, any> = {},
     ) => {
         const db = await Datasource.getInstance()
         const dataSource = db.getDataSource()
