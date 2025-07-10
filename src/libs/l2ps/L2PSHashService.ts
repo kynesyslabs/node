@@ -284,8 +284,8 @@ export class L2PSHashService {
                         method: "nodeCall",
                         params: [{
                             type: "RELAY_TX",
-                            data: { transaction: hashUpdateTx }
-                        }]
+                            data: { transaction: hashUpdateTx },
+                        }],
                     }, true)
 
                     if (result.result === 200) {

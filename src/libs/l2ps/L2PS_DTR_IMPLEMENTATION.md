@@ -161,14 +161,133 @@ Sync Triggers:
 
 **Privacy Preservation**: Maintains L2PS encryption during peer-to-peer sync
 
-#### **Phase 3c-3: Implementation Steps** **[PLANNED]**
-1. **L2PS Peer Discovery**: Extend existing peer management with L2PS filtering
-2. **Mempool Info Endpoint**: Implement `getL2PSMempoolInfo` with transaction counts
-3. **Transaction Sync Endpoint**: Implement `getL2PSTransactions` with delta support
-4. **L2PS Sync Service**: Create service following `Sync.ts` patterns
-5. **Integration**: Start service alongside `L2PSHashService`
+#### **Phase 3c-3: Concurrent L2PS Sync Integration** **[REVISED ARCHITECTURE]**
+
+**New Approach**: **Integrate L2PS sync directly into existing `Sync.ts` flow** instead of separate service
+
+### **🔄 Concurrent Sync + Smart Gossip Implementation Steps**
+
+#### **Step 1: Implement L2PS Mempool Endpoints** **[READY]**
+**Files**: `src/libs/network/manageNodeCall.ts` (small modifications)
+**Pattern**: Follow existing NodeCall endpoint patterns
+```typescript
+// Implement getL2PSMempoolInfo - replace UNIMPLEMENTED
+const transactions = await L2PSMempool.getByUID(data.l2psUid, "processed")
+response.response = {
+    l2psUid: data.l2psUid,
+    transactionCount: transactions.length,
+    lastTimestamp: transactions[transactions.length - 1]?.created_at || 0
+}
+
+// Implement getL2PSTransactions with delta sync support
+const transactions = await L2PSMempool.getByUID(
+    data.l2psUid, 
+    "processed",
+    data.since_timestamp // Optional timestamp filter
+)
+```
+
+#### **Step 2: Create L2PS Concurrent Sync Utilities** **[NEW]**
+**File**: `src/libs/l2ps/L2PSConcurrentSync.ts` (NEW small utility)
+**Pattern**: Small focused utility functions for integration
+```typescript
+export async function discoverL2PSParticipants(peers: Peer[]): Promise<void>
+export async function syncL2PSWithPeer(peer: Peer): Promise<void>  
+export async function exchangeL2PSParticipation(peers: Peer[]): Promise<void>
+```
+
+#### **Step 3: Enhance Existing Sync.ts with L2PS Hooks** **[MINIMAL CHANGES]**
+**File**: `src/libs/blockchain/routines/Sync.ts` (targeted additions)
+**Pattern**: Add L2PS hooks to existing functions without breaking changes
+```typescript
+// Add L2PS imports at top
+import { discoverL2PSParticipants, syncL2PSWithPeer } from "@/libs/l2ps/L2PSConcurrentSync"
+
+// Enhance mergePeerlist() - add L2PS participant exchange
+export async function mergePeerlist(block: Block): Promise<string[]> {
+    // Existing peer merging logic...
+    // NEW: Exchange L2PS participation info concurrently
+    await exchangeL2PSParticipation(newPeers)
+}
+
+// Enhance getHigestBlockPeerData() - add concurrent L2PS discovery
+async function getHigestBlockPeerData(peers: Peer[] = []) {
+    // Existing block discovery logic...
+    // NEW: Concurrent L2PS participant discovery
+    await discoverL2PSParticipants(peers)
+}
+
+// Enhance requestBlocks() - add concurrent L2PS sync
+async function requestBlocks() {
+    while (getSharedState.lastBlockNumber <= latestBlock()) {
+        await downloadBlock(peer, blockToAsk)
+        // NEW: Concurrent L2PS sync with discovered participants
+        await syncL2PSWithPeer(peer)
+    }
+}
+```
+
+#### **Step 4: Enhance PeerManager with L2PS Participant Caching** **[SMALL ADDITION]**
+**File**: `src/libs/peer/PeerManager.ts` (minimal addition)
+**Pattern**: Add L2PS-specific caching to existing peer management
+```typescript
+class PeerManager {
+    private l2psParticipantCache = new Map<string, Set<string>>() // l2psUid -> nodeIds
+    
+    addL2PSParticipant(l2psUid: string, nodeId: string): void
+    getL2PSParticipants(l2psUid: string): string[]
+    clearL2PSCache(): void
+}
+```
+
+#### **Step 5: Smart L2PS Gossip via Hello Peer** **[TWEAKABLE]**
+**File**: `src/libs/network/manageHelloPeer.ts` (small enhancement)
+**Pattern**: Piggyback L2PS participation on existing hello mechanism
+```typescript
+// Enhance hello_peer response to include L2PS participation
+case "hello_peer": 
+    // Existing hello logic...
+    // NEW: Include L2PS participation in response
+    response.extra = {
+        l2psParticipation: getSharedState.l2psJoinedUids || []
+    }
+```
+**Note**: This step may be tweaked based on privacy/gossip strategy
+
+#### **Step 6: Integration Testing** **[GRADUAL ROLLOUT]**
+**Testing Strategy**: Test each step independently
+1. Test L2PS mempool endpoints
+2. Test L2PS peer discovery utility
+3. Test Sync.ts enhancements (gradual rollout)
+4. Test PeerManager L2PS caching
+5. Test smart gossip mechanism
+6. End-to-end L2PS sync validation
+
+### **🚀 Architecture Benefits**
+
+#### **Concurrent Operation**
+- **L2PS sync runs alongside blockchain sync**: No separate processes
+- **Efficient discovery**: Reuses existing peer connections
+- **Smart gossip**: L2PS networks self-organize through existing communication
+
+#### **Minimal Risk**
+- **Small targeted changes**: No breaking modifications to Sync.ts
+- **Reuses proven patterns**: Leverages existing sync infrastructure  
+- **Independent testing**: Each step can be validated separately
+
+#### **Smart L2PS Network Formation**
+```
+Regular Sync Process                    L2PS Sync Process (Concurrent)
+├── Discover peers                 ├──► Query L2PS participation  
+├── Sync blocks                    ├──► Sync L2PS mempool data
+├── Merge peerlist                 ├──► Exchange L2PS participant info
+├── Gossip peer info               ├──► Smart L2PS network gossip
+└── Continue sync                  └──► L2PS networks self-organize
+```
 
 **Priority**: **HIGH** - Required for production L2PS networks
+**Approach**: **Concurrent integration** instead of separate service
+**Timeline**: 6 steps, each independently testable and deployable
 
 ## **Architecture Validation**
 
@@ -194,13 +313,14 @@ L2PS Hash Service → createL2PSHashUpdate() → Self-directed TX → DTR Routin
 
 ## **File Modification Summary**
 
-### **New Files (4)**
+### **New Files (5)**
 - ✅ `src/model/entities/L2PSMempool.ts` - L2PS transaction entity
 - ✅ `src/libs/blockchain/l2ps_mempool.ts` - L2PS mempool manager  
 - ✅ `src/libs/l2ps/L2PSHashService.ts` - Hash generation service with reentrancy protection
 - ✅ `sdks/src/types/blockchain/TransactionSubtypes/L2PSHashTransaction.ts` - Hash transaction types
+- ⏳ `src/libs/l2ps/L2PSConcurrentSync.ts` - L2PS concurrent sync utilities (planned)
 
-### **Modified Files (7)**
+### **Modified Files (10)**
 - ✅ `sdks/src/types/blockchain/Transaction.ts` - Added transaction type unions
 - ✅ `sdks/src/types/blockchain/TransactionSubtypes/index.ts` - Exported new types
 - ✅ `sdks/src/websdk/DemosTransactions.ts` - Added createL2PSHashUpdate method  
@@ -208,6 +328,9 @@ L2PS Hash Service → createL2PSHashUpdate() → Self-directed TX → DTR Routin
 - ✅ `src/libs/network/endpointHandlers.ts` - Hash update handler
 - ✅ `src/libs/network/manageNodeCall.ts` - L2PS sync NodeCall endpoints
 - ✅ `src/index.ts` - Service startup and shutdown
+- ⏳ `src/libs/blockchain/routines/Sync.ts` - L2PS concurrent sync hooks (planned)
+- ⏳ `src/libs/peer/PeerManager.ts` - L2PS participant caching (planned)
+- ⏳ `src/libs/network/manageHelloPeer.ts` - Smart L2PS gossip (planned, tweakable)
 
 ### **Total Implementation**
 - **Code Added**: ~900 lines
@@ -465,9 +588,13 @@ DTR = Distributed Transaction Routing
 1. **L2PS Hash Storage**: Create validator hash storage entity
 2. **Hash Update Storage**: Complete `handleL2PSHashUpdate()` implementation
 
-### **Medium Term (Phase 3c - 3 hours)**
-1. **L2PS Mempool Sync**: **CRITICAL** - P2P sync between L2PS participants
-2. **Monitoring**: Enhanced statistics and performance metrics
+### **Medium Term (Phase 3c - 6 steps, concurrent sync integration)**
+1. **Step 1**: Implement L2PS mempool endpoints (`getL2PSMempoolInfo`, `getL2PSTransactions`)
+2. **Step 2**: Create L2PS concurrent sync utilities (`L2PSConcurrentSync.ts`)
+3. **Step 3**: Enhance existing `Sync.ts` with L2PS hooks (minimal changes)
+4. **Step 4**: Enhance `PeerManager` with L2PS participant caching
+5. **Step 5**: Smart L2PS gossip via hello peer mechanism (tweakable)
+6. **Step 6**: Integration testing and gradual rollout
 
 ### **Critical Architecture Gap**
 
