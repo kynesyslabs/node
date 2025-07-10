@@ -26,6 +26,7 @@ import Mempool from "../blockchain/mempool_v2"
 import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import { Twitter } from "../identity/tools/twitter"
 import { Tweet } from "@kynesyslabs/demosdk/types"
+import Mempool from "../blockchain/mempool_v2"
 
 export interface NodeCall {
     message: string
@@ -144,7 +145,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             }
             break
         case "getMempool":
-            response.response = await Chain.getPendingPool()
+            response.response = await Mempool.getMempool()
             break
         // INFO Authentication listener
         case "getPeerIdentity":
@@ -183,8 +184,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             break
 
         case "getAllTxs":
-            var responseObject = await Chain.getAllTxs()
-            response.response = responseObject
+            // NOTE: Endpoint deprecated
+            response.response = {}
             break
 
         // REVIEW Implement native tables requests

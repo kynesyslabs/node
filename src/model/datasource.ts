@@ -13,7 +13,7 @@ import { DataSource } from "typeorm"
 
 import { Blocks } from "./entities/Blocks.js"
 import { Consensus } from "./entities/Consensus.js"
-import { Mempool, MempoolTx } from "./entities/Mempool.js"
+import { MempoolTx } from "./entities/Mempool.js"
 import { PgpKeyServer } from "./entities/PgpKeyServer.js"
 import { Transactions } from "./entities/Transactions.js"
 import { Validators } from "./entities/Validators.js"

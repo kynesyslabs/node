@@ -1,8 +1,9 @@
-import { Column, Entity, PrimaryColumn } from "typeorm"
+import { Column, Entity, Index, PrimaryColumn } from "typeorm"
 import type { StoredIdentities } from "../types/IdentityTypes"
 // Define the shape of your JSON data
 
 @Entity("gcr_main")
+@Index("idx_gcr_main_pubkey", ["pubkey"])
 export class GCRMain {
     @PrimaryColumn({ type: "text", name: "pubkey" })
     pubkey: string

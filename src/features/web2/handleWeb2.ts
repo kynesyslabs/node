@@ -1,24 +1,14 @@
-import Hashing from "src/libs/crypto/hashing"
-import required from "src/utilities/required"
-import SharedState, { getSharedState } from "src/utilities/sharedState"
 import { IWeb2Request } from "@kynesyslabs/demosdk/types"
-import { Web2RequestManager } from "./Web2RequestManager"
 import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
-
-import terminalKit from "terminal-kit"
 import { DAHR } from "./dahr/DAHR"
-import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-
-const term = terminalKit.terminal
 
 /**
  * Handles a Web2 request.
  *
- * This function receives a request from a socket, attests and handles other attestations,
- * and then sends back to the client or to the origin rpc a DAHR instance promise.
+ * This function receives a request from a socket and creates a DAHR instance
+ * to handle the Web2 proxy functionality.
  *
  * @param {IWeb2Request} web2Request - The Web2 request to handle.
- * @param {string} sessionId - The session ID.
  *
  * @returns {Promise<DAHR | string>} - Returns a DAHR instance or an error message.
  *
@@ -38,78 +28,8 @@ export async function handleWeb2(
     try {
         const dahrFactoryInstance = DAHRFactory.instance
         const dahr = dahrFactoryInstance.createDAHR(web2Request)
-        const web2RequestManager = new Web2RequestManager(dahr)
 
         console.log("[handleWeb2] DAHR instance created.")
-
-        const numOfAttestations = Object.keys(web2Request.attestations).length
-        const originalFlag = numOfAttestations === 1
-        console.log("[handleWeb2] Number of attestations: " + numOfAttestations)
-
-        /**
-         * Original RPC logic
-         *
-         * If we are the original rpc and this is the original request, we need to validate the request and wait for the attestations to arrive
-         *
-         */
-        if (originalFlag) {
-            console.log(
-                "[handleWeb2] This is the original rpc. We will wait for attestations.",
-            )
-            try {
-                term.yellow(
-                    "[handleWeb2] [*] Waiting for the required quorum for this chain of trust...",
-                )
-
-                /* FIXME DEVEL Activate in production */
-                if (SharedState.getInstance().prod) {
-                    required(
-                        await web2RequestManager.quorumIsReached(),
-                        "Not enough attestations to reach quorum",
-                    )
-                }
-
-                term.green("[handleWeb2] [+] Quorum reached!")
-                term.green(
-                    "[handleWeb2] [*] Hashing and signing the request's attestations...",
-                )
-
-                const hashedAttestations = Hashing.sha256(
-                    JSON.stringify(dahr.web2Request.attestations),
-                )
-                const signature = await ucrypto.sign(
-                    getSharedState.signingAlgorithm,
-                    new TextEncoder().encode(hashedAttestations),
-                )
-
-                term.green(
-                    "[handleWeb2] [*] Compiling and certifying the result on our side...",
-                )
-
-                dahr.web2Request.hash = hashedAttestations
-                dahr.web2Request.signature = {
-                    type: getSharedState.signingAlgorithm,
-                    signature: uint8ArrayToHex(signature.signature),
-                }
-            } catch (error) {
-                console.log("[handleWeb2] Error: " + JSON.stringify(error))
-                return JSON.stringify(error)
-            }
-        } else {
-            /* TODO Activate the below on production  */
-            // First, we have to validate the attestations
-            // NOTE: (For Massouji) web2RequestManager.web2ResultIsValid now returns a Promise<boolean>
-            // web2RequestManager.web2ResultIsValid
-            // Now that our web2request.request object is updated,
-            // TODO we have to merge the attestations' arrays with valid values
-        }
-
-        console.log(
-            "[handleWeb2] Done! Sending the response back to the client...",
-        )
-        console.log(
-            "[handleWeb2] Attestations validated. Deriving a transaction + operation...",
-        )
 
         return dahr
     } catch (error: any) {
