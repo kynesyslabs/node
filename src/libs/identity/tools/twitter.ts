@@ -4,6 +4,7 @@ import { Tweet } from "@kynesyslabs/demosdk/types"
 export class Twitter {
     private static instance: Twitter
 
+    demos_twitter_username = "demosxyz"
     api_key = process.env.RAPID_API_KEY
     api_host = process.env.RAPID_API_HOST
     api_url = "https://" + this.api_host
@@ -90,6 +91,20 @@ export class Twitter {
     async getTweetByUrl(tweetUrl: string): Promise<Tweet> {
         const { tweetId } = this.extractTweetDetails(tweetUrl)
         return await this.getTweetById(tweetId)
+    }
+
+    async checkFollow(username: string): Promise<boolean> {
+        const res = await this.makeRequest<{
+            is_follow: boolean
+        }>(
+            `${this.api_url}/checkfollow.php?user=${username}&follows=${this.demos_twitter_username}`,
+        )
+
+        if (res.status === 200) {
+            return res.data.is_follow
+        } else {
+            return false
+        }
     }
 
     static getInstance() {

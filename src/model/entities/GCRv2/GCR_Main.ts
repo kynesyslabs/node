@@ -26,6 +26,7 @@ export class GCRMain {
                 discord: number
             }
             referrals: number
+            demosFollow: number
         }
         lastUpdated: Date
     }

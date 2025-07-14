@@ -9,13 +9,16 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+import { Twitter } from "@/libs/identity/tools/twitter"
+import Datasource from "@/model/datasource"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import log from "@/utilities/logger"
+import { Web2GCRData } from "@kynesyslabs/demosdk/types"
 import * as fs from "fs"
 import Chain from "src/libs/blockchain/chain"
 
 function getLatestGCRRecoveryData() {
     if (!process.env.RESTORE) {
-        log.only("RESTORE is not set, skipping recovery")
         return null
     }
 
@@ -36,7 +39,95 @@ function getLatestGCRRecoveryData() {
     }
 }
 
+/**
+ * Award demos follow points to all users who have a twitter identity
+ * but don't have the demosFollow property
+ */
+async function awardDemosFollowPoints() {
+    return
+    const twitter = Twitter.getInstance()
+    const db = await Datasource.getInstance()
+    const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+    const seenAccounts = {}
+
+    // Use JSONB query to fetch accounts that have Twitter identities
+    const accountsWithTwitter = await gcrMainRepository
+        .createQueryBuilder("gcr")
+        .where("gcr.identities->'web2'->'twitter' IS NOT NULL")
+        .getMany()
+
+    log.only(
+        `[DEMOS FOLLOW] Found ${accountsWithTwitter.length} accounts with Twitter identities`,
+    )
+
+    for (const account of accountsWithTwitter) {
+        if (account.points.breakdown.demosFollow) {
+            log.only(
+                `[DEMOS FOLLOW] User ${account.pubkey} already has demos follow points`,
+            )
+            continue
+        }
+
+        try {
+            // Get the first Twitter identity for this account
+            const twitterIdentities = account.identities.web2["twitter"]
+            if (
+                !twitterIdentities ||
+                !Array.isArray(twitterIdentities) ||
+                twitterIdentities.length === 0
+            ) {
+                continue
+            }
+
+            const twitterIdentity = twitterIdentities[0] as Web2GCRData["data"]
+            if (!twitterIdentity.username) {
+                continue
+            }
+
+            if (seenAccounts[twitterIdentity.userId]) {
+                continue
+            }
+            seenAccounts[twitterIdentity.userId] = true
+
+            // Check if the user follows demos
+            const isFollowingDemos = await twitter.checkFollow(
+                twitterIdentity.username,
+            )
+
+            log.only(
+                `[DEMOS FOLLOW] User ${twitterIdentity.username} ${
+                    isFollowingDemos ? "follows" : "does not follow"
+                } demos`,
+            )
+
+            if (!isFollowingDemos) {
+                continue
+            }
+
+            // Award the demos follow point
+            account.points.breakdown.demosFollow = 1
+            account.points.totalPoints = (account.points.totalPoints || 0) + 1
+            // account.points.lastUpdated = new Date()
+
+            await gcrMainRepository.save(account)
+
+            log.only(
+                `[DEMOS FOLLOW] Awarded point to user ${account.pubkey} (Twitter: @${twitterIdentity.username})`,
+            )
+        } catch (error) {
+            log.error(
+                `[DEMOS FOLLOW] Error processing account ${account.pubkey}: ${error}`,
+            )
+        }
+    }
+
+    // process.exit(0)
+}
+
 export default async function findGenesisBlock() {
+    await awardDemosFollowPoints()
+
     log.info("[GENESIS] Looking for the genesis block...")
     const genesisBlock = await Chain.getGenesisBlock()
 

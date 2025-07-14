@@ -5,7 +5,7 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 
 export class Referrals {
     static readonly REFERRER_BONUS = 3
-    static readonly REFERRED_USER_BONUS = 3
+    static readonly REFERRED_USER_BONUS = 1
 
     /**
      * Calculate optimal bytes needed for target length

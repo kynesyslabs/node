@@ -504,6 +504,7 @@ export default class HandleGCR {
                     discord: 0,
                 },
                 referrals: 0,
+                demosFollow: 0,
             },
             lastUpdated: new Date(),
         }

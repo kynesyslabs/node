@@ -52,7 +52,7 @@ import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistr
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { Validators } from "src/model/entities/Validators"
 import terminalkit from "terminal-kit"
-import { LessThanOrEqual, Repository } from "typeorm"
+import { LessThan, LessThanOrEqual, Repository } from "typeorm"
 
 import {
     Operation,
@@ -64,6 +64,8 @@ import Chain from "../chain"
 import executeOperations, { Actor } from "../routines/executeOperations"
 import gcrStateSave from "./gcr_routines/gcrStateSaverHelper"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import { Referrals } from "@/features/incentive/referrals"
+import log from "@/utilities/logger"
 
 const term = terminalkit.terminal
 
@@ -609,6 +611,97 @@ export default class GCR {
             console.log(e)
             return false
         }
+    }
+
+    static async getCampaignData() {
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+        const allUsers = await gcrMainRepository.find({
+            where: {
+                balance: LessThan(BigInt(1000000000000)),
+            },
+        })
+
+        const twitterUsers = new Set()
+
+        const campaignData = {
+            users: {
+                total: 0,
+                withTwitter: {
+                    total: 0,
+                    followDemos: 0,
+                },
+                withWeb3Wallet: 0,
+                fromReferral: 0,
+            },
+            points: {
+                total: 0,
+                twitter: 0,
+                web3Wallets: 0,
+                accountsWithTwitterTotal: 0,
+                referrals: 0,
+                demosFollow: 0,
+                demTotal: 0,
+                accountsWithTwitterDemTotal: 0,
+            },
+            evmAccounts: 0,
+            solanaAccounts: 0,
+        }
+
+        for (const user of allUsers) {
+            campaignData.users.total++
+            campaignData.points.total += user.points.totalPoints
+            campaignData.points.twitter +=
+                user.points.breakdown.socialAccounts.twitter
+            campaignData.points.referrals +=
+                user.points.breakdown.referrals || 0
+            campaignData.points.demosFollow +=
+                user.points.breakdown.demosFollow || 0
+
+            const web3WalletPoints = Object.values(
+                user.points.breakdown.web3Wallets,
+            ).reduce(function (acc, curr) {
+                return acc + curr
+            }, 0)
+
+            campaignData.points.web3Wallets += web3WalletPoints
+            campaignData.users.withWeb3Wallet += web3WalletPoints ? 1 : 0
+
+            if (user.identities.web2.twitter) {
+                campaignData.points.accountsWithTwitterTotal +=
+                    user.points.totalPoints || 0
+                for (const twitterAccount of user.identities.web2.twitter) {
+                    twitterUsers.add(twitterAccount.userId)
+                    campaignData.users.withTwitter.followDemos += user.points
+                        .breakdown.demosFollow
+                        ? 1
+                        : 0
+                }
+            }
+
+            if (user.identities.xm["evm"]) {
+                for (const evmAccount of Object.keys(
+                    user.identities.xm["evm"],
+                )) {
+                    campaignData.evmAccounts++
+                }
+            }
+
+            if (user.identities.xm["solana"]) {
+                campaignData.solanaAccounts++
+            }
+
+            if (user.referralInfo && user.referralInfo.referredBy) {
+                campaignData.users.fromReferral++
+            }
+        }
+
+        campaignData.users.withTwitter.total = twitterUsers.size
+        campaignData.points.demTotal = campaignData.points.total * 30
+        campaignData.points.accountsWithTwitterDemTotal =
+            campaignData.points.accountsWithTwitterTotal * 30
+
+        return campaignData
     }
 
     // TODO Build objects for tokens and nfts and write setters for them

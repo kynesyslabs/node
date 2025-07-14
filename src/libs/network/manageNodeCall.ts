@@ -250,6 +250,11 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             break
         }
 
+        case "getCampaignData": {
+            response.response = await GCR.getCampaignData()
+            break
+        }
+
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen
         case "hots":

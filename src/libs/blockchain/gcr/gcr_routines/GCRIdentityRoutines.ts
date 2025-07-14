@@ -19,8 +19,15 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const { chain, isEVM, subchain, targetAddress, signature, timestamp, signedData } =
-            editOperation.data
+        const {
+            chain,
+            isEVM,
+            subchain,
+            targetAddress,
+            signature,
+            timestamp,
+            signedData,
+        } = editOperation.data
 
         // REVIEW: Is there a better way to check this?
         if (
@@ -221,7 +228,11 @@ export default class GCRIdentityRoutines {
                     editOperation.account,
                 )
                 if (isFirst) {
-                    await IncentiveManager.twitterLinked(editOperation.account, editOperation.referralCode)
+                    await IncentiveManager.twitterLinked(
+                        editOperation.account,
+                        data.userId,
+                        editOperation.referralCode,
+                    )
                 }
             } else if (context === "github") {
                 // Future implementation for GitHub
@@ -512,9 +523,12 @@ export default class GCRIdentityRoutines {
              */
             const result = await gcrMainRepository
                 .createQueryBuilder("gcr")
-                .where("EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'userId' = :userId)", {
-                    userId: data.userId,
-                })
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'userId' = :userId)",
+                    {
+                        userId: data.userId,
+                    },
+                )
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()
 
@@ -531,11 +545,14 @@ export default class GCRIdentityRoutines {
 
             const result = await gcrMainRepository
                 .createQueryBuilder("gcr")
-                .where("EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)", {
-                    chain: data.chain,
-                    subchain: data.subchain,
-                    address: addressToCheck,
-                })
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)",
+                    {
+                        chain: data.chain,
+                        subchain: data.subchain,
+                        address: addressToCheck,
+                    },
+                )
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()
 

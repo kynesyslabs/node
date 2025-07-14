@@ -2,14 +2,17 @@ import log from "@/utilities/logger"
 import { Referrals } from "./referrals"
 import Datasource from "../../model/datasource"
 import HandleGCR from "@/libs/blockchain/gcr/handleGCR"
-import { RPCResponse } from "@kynesyslabs/demosdk/types"
+import { RPCResponse, Web2GCRData } from "@kynesyslabs/demosdk/types"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { UserPoints } from "@kynesyslabs/demosdk/abstraction"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
+import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
+import { Twitter } from "@/libs/identity/tools/twitter"
 
 const pointValues = {
     LINK_WEB3_WALLET: 2,
     LINK_TWITTER: 5,
+    FOLLOW_DEMOS: 1,
 }
 
 export class PointSystem {
@@ -35,10 +38,6 @@ export class PointSystem {
         const twitterIdentities = await IdentityManager.getWeb2Identities(
             userId,
             "twitter",
-        )
-        const githubIdentities = await IdentityManager.getWeb2Identities(
-            userId,
-            "github",
         )
 
         const linkedWallets: string[] = []
@@ -90,19 +89,6 @@ export class PointSystem {
 
         if (!account) {
             account = await HandleGCR.createAccount(userIdStr)
-            // REVIEW: Commented out code is a duplicate of the default values in the GCRMain entity
-            // account.points.totalPoints = 0
-            // account.points.breakdown = {
-            //     web3Wallets: {},
-            //     socialAccounts: {
-            //         twitter: 0,
-            //         github: 0,
-            //         discord: 0,
-            //     },
-            //     referrals: 0,
-            // }
-            // account.points.lastUpdated = new Date()
-            // await gcrMainRepository.save(account)
         }
 
         // INFO: This is a fallback for accounts that were created before the referral code was added
@@ -145,91 +131,108 @@ export class PointSystem {
         type: "web3Wallets" | "socialAccounts",
         platform: string,
         referralCode?: string,
+        twitterUserId?: string,
     ): Promise<void> {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
-        const account = await gcrMainRepository.findOneBy({ pubkey: userId })
+        const account = await ensureGCRForUser(userId)
 
-        if (!account) {
-            const newAccount = await HandleGCR.createAccount(userId)
-            newAccount.points.totalPoints = points
+        // const account = await gcrMainRepository.findOneBy({ pubkey: userId })
+        // if (!account) {
+        //     const newAccount = await HandleGCR.createAccount(userId)
+        //     newAccount.points.totalPoints = points
 
-            if (
-                type === "socialAccounts" &&
-                (platform === "twitter" ||
-                    platform === "github" ||
-                    platform === "discord")
-            ) {
-                newAccount.points.breakdown = {
-                    web3Wallets: {},
-                    socialAccounts: {
-                        twitter: platform === "twitter" ? points : 0,
-                        github: platform === "github" ? points : 0,
-                        discord: platform === "discord" ? points : 0,
-                    },
-                    referrals: 0,
-                }
-            } else {
-                newAccount.points.breakdown = {
-                    web3Wallets: {},
-                    socialAccounts: {
-                        twitter: 0,
-                        github: 0,
-                        discord: 0,
-                    },
-                    referrals: 0,
-                }
-            }
-            newAccount.points.lastUpdated = new Date()
+        //     if (
+        //         type === "socialAccounts" &&
+        //         (platform === "twitter" ||
+        //             platform === "github" ||
+        //             platform === "discord")
+        //     ) {
+        //         newAccount.points.breakdown = {
+        //             web3Wallets: {},
+        //             socialAccounts: {
+        //                 twitter: platform === "twitter" ? points : 0,
+        //                 github: platform === "github" ? points : 0,
+        //                 discord: platform === "discord" ? points : 0,
+        //             },
+        //             referrals: 0,
+        //         }
+        //     } else {
+        //         newAccount.points.breakdown = {
+        //             web3Wallets: {},
+        //             socialAccounts: {
+        //                 twitter: 0,
+        //                 github: 0,
+        //                 discord: 0,
+        //             },
+        //             referrals: 0,
+        //         }
+        //     }
+        //     newAccount.points.lastUpdated = new Date()
 
-            // Process referral for new account
-            if (referralCode) {
-                await Referrals.processReferral(
-                    newAccount,
-                    referralCode,
-                    gcrMainRepository,
-                )
-            }
+        //     // Process referral for new account
+        //     if (referralCode) {
+        //         await Referrals.processReferral(
+        //             newAccount,
+        //             referralCode,
+        //             gcrMainRepository,
+        //         )
+        //     }
 
-            await gcrMainRepository.save(newAccount)
-        } else {
-            const isEligibleForReferral =
-                Referrals.isEligibleForReferral(account)
+        //     await gcrMainRepository.save(newAccount)
+        // } else {
+        const isEligibleForReferral = Referrals.isEligibleForReferral(account)
 
-            const oldTotal = account.points.totalPoints || 0
-            account.points.totalPoints = oldTotal + points
+        const oldTotal = account.points.totalPoints || 0
+        account.points.totalPoints = oldTotal + points
 
-            if (
-                type === "socialAccounts" &&
-                (platform === "twitter" ||
-                    platform === "github" ||
-                    platform === "discord")
-            ) {
-                const oldPlatformPoints =
-                    account.points.breakdown?.socialAccounts?.[platform] || 0
-                account.points.breakdown.socialAccounts[platform] =
-                    oldPlatformPoints + points
-            } else if (type === "web3Wallets") {
-                account.points.breakdown.web3Wallets =
-                    account.points.breakdown.web3Wallets || {}
-                const oldChainPoints =
-                    account.points.breakdown.web3Wallets[platform] || 0
-                account.points.breakdown.web3Wallets[platform] =
-                    oldChainPoints + points
-            }
-            account.points.lastUpdated = new Date()
-
-            // Process referral for existing account if eligible
-            if (referralCode && isEligibleForReferral) {
-                await Referrals.processReferral(
-                    account,
-                    referralCode,
-                    gcrMainRepository,
-                )
-            }
-
-            await gcrMainRepository.save(account)
+        if (
+            type === "socialAccounts" &&
+            (platform === "twitter" ||
+                platform === "github" ||
+                platform === "discord")
+        ) {
+            const oldPlatformPoints =
+                account.points.breakdown?.socialAccounts?.[platform] || 0
+            account.points.breakdown.socialAccounts[platform] =
+                oldPlatformPoints + points
+        } else if (type === "web3Wallets") {
+            account.points.breakdown.web3Wallets =
+                account.points.breakdown.web3Wallets || {}
+            const oldChainPoints =
+                account.points.breakdown.web3Wallets[platform] || 0
+            account.points.breakdown.web3Wallets[platform] =
+                oldChainPoints + points
         }
+        account.points.lastUpdated = new Date()
+
+        // Process referral for existing account if eligible
+        if (referralCode && isEligibleForReferral) {
+            await Referrals.processReferral(
+                account,
+                referralCode,
+                gcrMainRepository,
+            )
+        }
+
+        const twitter = Twitter.getInstance()
+        const twitterUser = account.identities.web2["twitter"].find(
+            (twitterIdentity: Web2GCRData["data"]) =>
+                twitterIdentity.userId === twitterUserId,
+        )
+
+        if (twitterUser && twitterUser.username) {
+            const isFollowingDemos = await twitter.checkFollow(
+                twitterUser.username,
+            )
+
+            if (isFollowingDemos) {
+                account.points.breakdown.demosFollow = pointValues.FOLLOW_DEMOS
+                account.points.totalPoints += pointValues.FOLLOW_DEMOS
+            }
+        }
+
+        await gcrMainRepository.save(account)
     }
 
     /**
@@ -363,6 +366,7 @@ export class PointSystem {
      */
     async awardTwitterPoints(
         userId: string,
+        twitterUserId: string,
         referralCode?: string,
     ): Promise<RPCResponse> {
         try {
@@ -390,6 +394,7 @@ export class PointSystem {
                 "socialAccounts",
                 "twitter",
                 referralCode,
+                twitterUserId,
             )
 
             const updatedPoints = await this.getUserPointsInternal(userId)
