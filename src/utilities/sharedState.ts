@@ -209,6 +209,37 @@ export default class SharedState {
         return this.exposedUrl
     }
 
+    // SECTION Rate limiting configuration
+    rateLimitConfig = {
+        enabled: true,
+        defaultLimit: { maxRequests: 50, windowMs: 60000 },
+        blockDurationMs: undefined,
+        whitelistedIPs: [
+            "127.0.0.1",
+            // "::1",
+        ],
+        methodLimits: {
+            "POST": { maxRequests: 50, windowMs: 86400000 },
+            // INFO: POST method limits per IP address
+            // "nodeCall": { maxRequests: 200, windowMs: 60000 },
+            // "execute": { maxRequests: 1, windowMs: 86400000 },
+            // "login_request": { maxRequests: 5, windowMs: 60000 },
+            // "auth": { maxRequests: 20, windowMs: 60000 },
+            // "ping": { maxRequests: 100, windowMs: 60000 },
+            // "info": { maxRequests: 100, windowMs: 60000 },
+            // "version": { maxRequests: 200, windowMs: 60000 },
+            // "publickey": { maxRequests: 100, windowMs: 60000 },
+            // "connectionstring": { maxRequests: 100, windowMs: 60000 },
+            // "peerlist": { maxRequests: 50, windowMs: 60000 },
+            // "public_logs": { maxRequests: 30, windowMs: 60000 },
+            // "diagnostics": { maxRequests: 20, windowMs: 60000 },
+            // "genesis": { maxRequests: 100, windowMs: 60000 },
+            // "rate_limit_stats": { maxRequests: 50, windowMs: 60000 },
+            // "rate_limit_unblock": { maxRequests: 5, windowMs: 60000 },
+        },
+        txPerBlock: 2,
+    }
+
     // NOTE This is a wrapper for many stats that are used by the node and the rpc server
     public async getInfo(): Promise<any> {
         const info = {

@@ -29,6 +29,7 @@ import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import { bridge } from "@kynesyslabs/demosdk"
 import { manageNativeBridge } from "./manageNativeBridge"
 import Chain from "../blockchain/chain"
+import { RateLimiter } from "./middleware/rateLimiter"
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
@@ -253,8 +254,12 @@ export async function serverRpcBun() {
     const port = getSharedState.serverPort
     const server = new BunServer(port)
 
+    // Initialize rate limiter with configuration from shared state
+    const rateLimiter = new RateLimiter(getSharedState.rateLimitConfig)
+
     // Apply middlewares
     server.use(cors())
+    server.use(rateLimiter.createMiddleware())
     server.use(json())
 
     // GET endpoints
@@ -305,10 +310,48 @@ export async function serverRpcBun() {
         return jsonResponse(genesisData)
     })
 
+    server.get("/rate-limit/stats", () => {
+        return jsonResponse(rateLimiter.getStats())
+    })
+
+    // server.post("/rate-limit/unblock", async req => {
+    //     try {
+    //         const { ip } = await req.json()
+    //         if (!ip) {
+    //             return jsonResponse({ error: "IP address is required" }, 400)
+    //         }
+
+    //         const success = rateLimiter.unblockIP(ip)
+    //         return jsonResponse({
+    //             success,
+    //             message: success ? `IP ${ip} unblocked` : `IP ${ip} not found or not blocked`
+    //         })
+    //     } catch (e) {
+    //         return jsonResponse({ error: "Invalid request format" }, 400)
+    //     }
+    // })
+
     // Main RPC endpoint
     server.post("/", async req => {
         try {
+            const ip = server.server?.requestIP(req)
+
+            if (!ip || !ip.address) {
+                return jsonResponse({ error: "IP address not found" }, 400)
+            }
+
             const payload = await req.json()
+
+            const rateLimitResponse = handleIdentityTxRateLimit(
+                ip.address,
+                payload,
+                rateLimiter,
+            )
+
+            if (rateLimitResponse) {
+                return rateLimitResponse
+            }
+
             if (!isRPCRequest(payload)) {
                 return jsonResponse({ error: "Invalid request format" }, 400)
             }
@@ -350,4 +393,62 @@ export async function serverRpcBun() {
 
     log.info("[RPC Call] Server is running on 0.0.0.0:" + port, true)
     return server.start()
+}
+
+/**
+ * Rate limit identity transaction per IP address per block
+ *
+ * @param ip IP address of the client
+ * @param payload RPC request payload
+ * @param rateLimiter Rate limiter instance
+ * @returns Response if rate limit is exceeded, otherwise null
+ */
+function handleIdentityTxRateLimit(
+    ip: string,
+    payload: RPCRequest,
+    rateLimiter: RateLimiter,
+) {
+    if (rateLimiter.config.whitelistedIPs.includes(ip)) {
+        return null
+    }
+
+    const ipData = rateLimiter.ipRequests.get(ip)
+    if (!ipData) {
+        process.exit(1)
+    }
+
+    if (payload.method !== "execute") {
+        return null
+    }
+
+    if (payload.params[0].extra !== "confirmTx") {
+        return null
+    }
+
+    // INFO: Exit if not an identity tx
+    if (payload.params[0].data.content.data[0] !== "identity") {
+        return null
+    }
+
+    if (ipData.lastSeenBlockNumber === getSharedState.lastBlockNumber) {
+        ipData.lastSeenWithinBlockCount++
+    } else {
+        ipData.lastSeenWithinBlockCount = 1
+        ipData.lastSeenBlockNumber = getSharedState.lastBlockNumber
+    }
+
+    if (ipData.lastSeenWithinBlockCount >= rateLimiter.config.txPerBlock) {
+        ipData.blocked = true
+        rateLimiter.ipRequests.set(ip, ipData)
+
+        return new Response(
+            JSON.stringify({
+                error: "Rate limit exceeded",
+                retryAfter: null,
+            }),
+            { status: 429 },
+        )
+    }
+
+    return null
 }
