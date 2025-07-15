@@ -237,7 +237,7 @@ export default class SharedState {
             // "rate_limit_stats": { maxRequests: 50, windowMs: 60000 },
             // "rate_limit_unblock": { maxRequests: 5, windowMs: 60000 },
         },
-        txPerBlock: 2,
+        txPerBlock: 4,
     }
 
     // NOTE This is a wrapper for many stats that are used by the node and the rpc server
