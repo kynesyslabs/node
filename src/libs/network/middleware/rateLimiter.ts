@@ -40,10 +40,10 @@ export class RateLimiter {
         // Clean up expired entries every 5 minutes
         this.cleanupInterval = setInterval(() => {
             this.cleanup()
-            this.dumpBlockedIPs()
+            this.dumpIPs()
         }, 100000)
 
-        this.loadBlockedIPs()
+        this.loadIPs()
     }
 
     private cleanup(): void {
@@ -78,21 +78,19 @@ export class RateLimiter {
         }
     }
 
-    private dumpBlockedIPs(): void {
+    private dumpIPs(): void {
         const filePath = "blocked_ips.json"
-        // get all RateLimitData that are blocked as an object of IP: RateLimitData
-        const blockedIPs: Record<string, RateLimitData> = {}
+        // get all RateLimitData for all IPs as an object of IP: RateLimitData
+        const allIPs: Record<string, RateLimitData> = {}
 
         for (const [ip, data] of this.ipRequests.entries()) {
-            if (data.blocked) {
-                blockedIPs[ip] = data
-            }
+            allIPs[ip] = data
         }
 
-        fs.writeFileSync(filePath, JSON.stringify(blockedIPs, null, 2))
+        fs.writeFileSync(filePath, JSON.stringify(allIPs, null, 2))
     }
 
-    private loadBlockedIPs(): void {
+    private loadIPs(): void {
         const filePath = "blocked_ips.json"
 
         try {
