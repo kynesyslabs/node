@@ -4,6 +4,8 @@ import { TwitterProofParser } from "./web2/twitter"
 import { type Web2ProofParser } from "./web2/parsers"
 import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { Twitter } from "../identity/tools/twitter"
+import log from "@/utilities/logger"
 
 /**
  * Fetches the proof data using the appropriate parser and verifies the signature
@@ -29,6 +31,27 @@ export async function verifyWeb2Proof(
                 success: false,
                 message: `Unsupported proof context: ${payload.context}`,
             }
+    }
+
+    // INFO: Check if Twitter account is a bot
+    if (payload.context === "twitter") {
+        const isBot = await Twitter.getInstance().checkIsBot(
+            payload.username,
+            payload.userId,
+        )
+        if (isBot === undefined) {
+            return {
+                success: false,
+                message: "Failed to verify Twitter/X account",
+            }
+        }
+
+        if (isBot) {
+            return {
+                success: false,
+                message: "You cannot connect this Twitter/X account",
+            }
+        }
     }
 
     const instance = await parser.getInstance()

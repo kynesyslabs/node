@@ -255,6 +255,20 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             break
         }
 
+        case "checkIsBot": {
+            if (!data.username || !data.userId) {
+                response.result = 400
+                response.response = "No username or userId specified"
+                break
+            }
+
+            response.response = await Twitter.getInstance().checkIsBot(
+                data.username,
+                data.userId,
+            )
+            break
+        }
+
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen
         case "hots":

@@ -67,8 +67,19 @@ export default class IdentityManager {
      */
     static async verifyPayload(
         payload: InferFromSignaturePayload,
+        sender: string,
     ): Promise<{ success: boolean; message: string }> {
-        log.debug("Verifying payload: " + JSON.stringify(payload, null, 2))
+        // INFO: Check if the user has a Twitter account
+        const account = await ensureGCRForUser(sender)
+        const twitterAccounts = account.identities.web2["twitter"] || []
+        if (twitterAccounts.length === 0) {
+            return {
+                success: false,
+                message:
+                    "Error: No Twitter account found. Please connect a Twitter account first",
+            }
+        }
+
         const chainId = payload.target_identity.chain
         // @ts-expect-error - This is a workaround to avoid type errors
         const sdk = await chains[chainId].create(null)
