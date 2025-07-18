@@ -20,6 +20,8 @@ import {
 // TODO: refactor import to use high level abstraction module
 import { PqcIdentityAssignPayload } from "node_modules/@kynesyslabs/demosdk/build/types/abstraction"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { CrossChainTools } from "@/libs/identity/tools/crosschain"
+import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 
 /*
  * Example of a payload for the gcr_routine method
@@ -59,6 +61,92 @@ export default class IdentityManager {
     }
 
     /**
+     * Filter the connections of a user
+     *
+     * @param sender The ed25519 address of the user
+     * @param payload The payload containing the signature to verify
+     */
+    static async filterConnections(
+        sender: string,
+        payload: InferFromSignaturePayload,
+    ): Promise<{ success: boolean; message: string }> {
+        // // INFO: Check if the user has a Twitter account
+        // const account = await ensureGCRForUser(sender)
+        // const twitterAccounts = account.identities.web2["twitter"] || []
+        // if (twitterAccounts.length === 0) {
+        //     return {
+        //         success: false,
+        //         message:
+        //             "Error: No Twitter account found. Please connect a Twitter account first",
+        //     }
+        // }
+
+        // INFO: Check if target address is active
+        const { chain, subchain, chainId, targetAddress, isEVM } =
+            payload.target_identity
+        log.only("chainId: " + chainId)
+        log.only("chainId type: " + typeof chainId)
+        log.only("isEVM: " + isEVM)
+        log.only("targetAddress: " + targetAddress)
+
+        if (isEVM && !chainId) {
+            return {
+                success: false,
+                message: "Failed: EVM chainId not provided",
+            }
+        }
+
+        if (isEVM && chainId === chainIds.eth.sepolia) {
+            return {
+                success: false,
+                message: "Failed: Testnet addresses are not supported",
+            }
+        }
+
+        if (isEVM && typeof chainId === "number") {
+            const txcount = await CrossChainTools.countEthTransactionsByAddress(
+                targetAddress,
+                chainId,
+            )
+            log.only("txcount: " + txcount)
+
+            if (txcount === 0) {
+                return {
+                    success: false,
+                    message: "Failed: Target address is not active",
+                }
+            }
+        }
+
+        if (chain === "solana" && subchain !== "mainnet") {
+            return {
+                success: false,
+                message: "Failed: Testnet addresses are not supported",
+            }
+        }
+
+        if (chain === "solana") {
+            const txcount =
+                await CrossChainTools.countSolanaTransactionsByAddress(
+                    targetAddress,
+                )
+            log.only("txcount: " + txcount)
+
+            if (txcount === 0) {
+                return {
+                    success: false,
+                    message: "Failed: Target address is not active",
+                }
+            }
+        }
+
+        return {
+            success: true,
+            message: "Filter check passed",
+        }
+    }
+
+    /**
      * Verify the xm identity payload signature
      *
      * @param payload - The payload containing the signature to verify
@@ -69,16 +157,28 @@ export default class IdentityManager {
         payload: InferFromSignaturePayload,
         sender: string,
     ): Promise<{ success: boolean; message: string }> {
-        // INFO: Check if the user has a Twitter account
-        const account = await ensureGCRForUser(sender)
-        const twitterAccounts = account.identities.web2["twitter"] || []
-        if (twitterAccounts.length === 0) {
+        // // INFO: Check if the user has a Twitter account
+        // const account = await ensureGCRForUser(sender)
+        // const twitterAccounts = account.identities.web2["twitter"] || []
+        // if (twitterAccounts.length === 0) {
+        //     return {
+        //         success: false,
+        //         message:
+        //             "Error: No Twitter account found. Please connect a Twitter account first",
+        //     }
+        // }
+        const { success, message } = await this.filterConnections(
+            sender,
+            payload,
+        )
+        if (!success) {
             return {
                 success: false,
-                message:
-                    "Error: No Twitter account found. Please connect a Twitter account first",
+                message: message,
             }
         }
+
+        // Filter out crosschain addresses without activity here!
 
         const chainId = payload.target_identity.chain
         // @ts-expect-error - This is a workaround to avoid type errors
