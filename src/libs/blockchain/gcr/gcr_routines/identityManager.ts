@@ -84,10 +84,6 @@ export default class IdentityManager {
         // INFO: Check if target address is active
         const { chain, subchain, chainId, targetAddress, isEVM } =
             payload.target_identity
-        log.only("chainId: " + chainId)
-        log.only("chainId type: " + typeof chainId)
-        log.only("isEVM: " + isEVM)
-        log.only("targetAddress: " + targetAddress)
 
         if (isEVM && !chainId) {
             return {
@@ -108,7 +104,6 @@ export default class IdentityManager {
                 targetAddress,
                 chainId,
             )
-            log.only("txcount: " + txcount)
 
             if (txcount === 0) {
                 return {
@@ -130,7 +125,6 @@ export default class IdentityManager {
                 await CrossChainTools.countSolanaTransactionsByAddress(
                     targetAddress,
                 )
-            log.only("txcount: " + txcount)
 
             if (txcount === 0) {
                 return {
@@ -157,16 +151,6 @@ export default class IdentityManager {
         payload: InferFromSignaturePayload,
         sender: string,
     ): Promise<{ success: boolean; message: string }> {
-        // // INFO: Check if the user has a Twitter account
-        // const account = await ensureGCRForUser(sender)
-        // const twitterAccounts = account.identities.web2["twitter"] || []
-        // if (twitterAccounts.length === 0) {
-        //     return {
-        //         success: false,
-        //         message:
-        //             "Error: No Twitter account found. Please connect a Twitter account first",
-        //     }
-        // }
         const { success, message } = await this.filterConnections(
             sender,
             payload,

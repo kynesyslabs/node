@@ -1,12 +1,14 @@
+import axios from "axios"
 import {
     EthTransactionResponse,
     EthTransaction,
+    SolanaTransactionResponse,
 } from "@kynesyslabs/demosdk/types"
-import axios from "axios"
 
 export class CrossChainTools {
     private static readonly ETHERSCAN_BASE_URL =
         "https://api.etherscan.io/v2/api"
+    private static readonly HELIUS_BASE_URL = "https://api.helius.xyz/v0"
 
     /**
      * Get Ethereum transactions by address using Etherscan API
@@ -22,7 +24,7 @@ export class CrossChainTools {
         address: string,
         chainId: number,
         page = 1,
-        offset = 5,
+        offset = 1,
         startBlock = 0,
         endBlock = 99999999,
     ): Promise<EthTransactionResponse> {
@@ -90,10 +92,6 @@ export class CrossChainTools {
             const response = await this.getEthTransactionsByAddress(
                 address,
                 chainId,
-                1,
-                10000,
-                0,
-                99999999,
             )
 
             return response.result.length
@@ -106,7 +104,74 @@ export class CrossChainTools {
         }
     }
 
-    static async getSolanaTransactionsByAddress(address: string) {}
+    /**
+     * Get Solana transactions by address using Helius API
+     * @param address - The Solana address to query
+     * @param limit - Number of transactions to return (default: 100)
+     * @param before - Transaction signature to paginate before
+     * @param until - Transaction signature to paginate until
+     * @returns Promise<SolanaTransactionResponse>
+     */
+    static async getSolanaTransactionsByAddress(
+        address: string,
+        limit = 1,
+        before?: string,
+        until?: string,
+    ): Promise<SolanaTransactionResponse> {
+        const apiKey = process.env.HELIUS_API_KEY
+        if (!apiKey) {
+            throw new Error("HELIUS_API_KEY environment variable is not set")
+        }
 
-    static async countSolanaTransactionsByAddress(address: string) {}
+        const params: any = {
+            "api-key": apiKey,
+            limit: limit.toString(),
+        }
+
+        if (before) params.before = before
+        if (until) params.until = until
+
+        try {
+            const response = await axios.get(
+                `${this.HELIUS_BASE_URL}/addresses/${address}/transactions`,
+                { params },
+            )
+
+            return response.data as SolanaTransactionResponse
+        } catch (error) {
+            if (axios.isAxiosError(error)) {
+                throw new Error(
+                    `Failed to fetch Solana transactions: ${error.message}`,
+                )
+            }
+
+            throw new Error(
+                `Failed to fetch Solana transactions: ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
+            )
+        }
+    }
+
+    /**
+     * Count Solana transactions by address using Helius API
+     * @param address - The Solana address to query
+     * @returns Promise<number>
+     */
+    static async countSolanaTransactionsByAddress(
+        address: string,
+    ): Promise<number> {
+        try {
+            const response = await this.getSolanaTransactionsByAddress(address)
+            return Array.isArray(response)
+                ? response.length
+                : (response as any).length || 0
+        } catch (error) {
+            throw new Error(
+                `Failed to count Solana transactions: ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
+            )
+        }
+    }
 }
