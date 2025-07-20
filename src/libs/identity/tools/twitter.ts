@@ -1,3 +1,4 @@
+import * as fs from "fs"
 import axios, { AxiosResponse } from "axios"
 import {
     Tweet,
@@ -469,7 +470,12 @@ export class Twitter {
      * @param data - The data to send with the request (optional)
      * @returns The response from the request
      */
-    async makeRequest<T>(url: string): Promise<AxiosResponse<T>> {
+    async makeRequest<T>(url: string, delay = 0): Promise<AxiosResponse<T>> {
+        if (delay > 0) {
+            await new Promise(resolve => setTimeout(resolve, delay))
+            log.only(`☺️😔👀 Delayed request to ${url} for ${delay}ms`)
+        }
+
         return await axios.get<T>(url, {
             headers: {
                 "x-rapidapi-key": this.api_key,
@@ -518,18 +524,29 @@ export class Twitter {
         )
 
         if (res.status === 200) {
+            fs.writeFileSync(
+                `data/twitter/${userId}.json`,
+                JSON.stringify(res.data, null, 2),
+            )
             return res.data
         } else {
             throw new Error("Failed to get timeline")
         }
     }
 
-    async getFollowers(username: string): Promise<TwitterFollowersResponse> {
+    async getFollowers(
+        username: string,
+        userId: string,
+    ): Promise<TwitterFollowersResponse> {
         const res = await this.makeRequest<TwitterFollowersResponse>(
             `${this.api_url}/followers.php?screenname=${username}`,
         )
 
         if (res.status === 200) {
+            fs.writeFileSync(
+                `data/twitter/${userId}_followers.json`,
+                JSON.stringify(res.data, null, 2),
+            )
             return res.data
         } else {
             throw new Error("Failed to get followers")
@@ -539,7 +556,7 @@ export class Twitter {
     async checkIsBot(username: string, userId: string): Promise<boolean> {
         try {
             const timelineData = await this.getTimeline(username, userId)
-            const followersData = await this.getFollowers(username)
+            const followersData = await this.getFollowers(username, userId)
 
             const detector = new TwitterBotDetector(
                 timelineData,

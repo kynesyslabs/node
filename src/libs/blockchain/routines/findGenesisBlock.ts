@@ -9,13 +9,17 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import { Twitter } from "@/libs/identity/tools/twitter"
-import Datasource from "@/model/datasource"
-import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import log from "@/utilities/logger"
-import { Web2GCRData } from "@kynesyslabs/demosdk/types"
 import * as fs from "fs"
+import { LessThan } from "typeorm"
+import log from "@/utilities/logger"
+import Datasource from "@/model/datasource"
 import Chain from "src/libs/blockchain/chain"
+import { Twitter } from "@/libs/identity/tools/twitter"
+import { Web2GCRData } from "@kynesyslabs/demosdk/types"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import { SavedXmIdentity } from "@/model/entities/types/IdentityTypes"
+import { CrossChainTools } from "@/libs/identity/tools/crosschain"
+import GCR from "../gcr/gcr"
 
 function getLatestGCRRecoveryData() {
     if (!process.env.RESTORE) {
@@ -125,7 +129,132 @@ async function awardDemosFollowPoints() {
     // process.exit(0)
 }
 
+/**
+ * Review all account and flag them if they are bots or have no EVM/Solana transactions
+ */
+async function reviewAccounts() {
+    if (!fs.existsSync("data/twitter")) {
+        fs.mkdirSync("data/twitter", { recursive: true })
+    }
+
+    const db = await Datasource.getInstance()
+    const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+    const accounts = await gcrMainRepository.find({
+        where: {
+            balance: LessThan(BigInt(10000000000)),
+            reviewed: false,
+            flagged: false,
+        },
+    })
+
+    for (const account of accounts) {
+        log.only("Reviewing account: " + account.pubkey)
+        if (account.flagged || account.reviewed) {
+            continue
+        }
+
+        // INFO: Review Twitter identity
+        const twitterIdentities = account.identities.web2["twitter"]
+
+        if (twitterIdentities && twitterIdentities.length > 0) {
+            const twitterIdentity = twitterIdentities[0] as Web2GCRData["data"]
+            if (twitterIdentity.username) {
+                log.only(
+                    "Checking Twitter identity: " + twitterIdentity.username,
+                )
+                const isBot = await Twitter.getInstance().checkIsBot(
+                    twitterIdentity.username,
+                    twitterIdentity.userId,
+                )
+
+                if (isBot) {
+                    log.only("Flagged account: " + account.pubkey)
+                    log.only("Twitter identity: " + twitterIdentity.username)
+                    account.flagged = true
+                    account.flaggedReason = "twitter_bot"
+                    account.reviewed = true
+                    await gcrMainRepository.save(account)
+                    process.exit(0)
+                }
+            }
+        } else {
+            // log.only("Flagged account: " + account.pubkey)
+            // log.only("No Twitter identity")
+            // account.flagged = true
+            // account.reviewed = true
+            // await gcrMainRepository.save(account)
+            await GCR.removeAccount(account.pubkey)
+            continue
+        }
+
+        // INFO: Review EVM identity
+        const evmIdentities = account.identities.xm["evm"] || {}
+        const ethIdentity = evmIdentities["mainnet"] || []
+
+        if (ethIdentity && ethIdentity.length > 0) {
+            const id1 = ethIdentity[0] as SavedXmIdentity
+            log.only("Checking EVM identity: " + id1.address)
+
+            const txcount = await CrossChainTools.countEthTransactionsByAddress(
+                id1.address,
+                1,
+            )
+
+            if (txcount === 0) {
+                account.flagged = true
+                account.flaggedReason = "evm_no_tx"
+                account.reviewed = true
+                await gcrMainRepository.save(account)
+                log.only(
+                    `[GENESIS] Flagged account ${account.pubkey} because it has no EVM transactions`,
+                )
+                // process.exit(0)
+                continue
+            } else {
+                log.only("EVM identity: " + id1.address)
+                log.only("Txcount: " + txcount)
+            }
+        }
+
+        // INFO: Review Solana identity
+        const solanaIdentities = account.identities.xm["solana"] || {}
+        const solanaIdentity = solanaIdentities["mainnet"] || []
+
+        if (solanaIdentity && solanaIdentity.length > 0) {
+            const id1 = solanaIdentity[0] as SavedXmIdentity
+            log.only("Checking Solana identity: " + id1.address)
+
+            const txcount =
+                await CrossChainTools.countSolanaTransactionsByAddress(
+                    id1.address,
+                )
+
+            if (txcount === 0) {
+                account.flagged = true
+                account.flaggedReason = "solana_no_tx"
+                account.reviewed = true
+                await gcrMainRepository.save(account)
+                log.only(
+                    `[GENESIS] Flagged account ${account.pubkey} because it has no Solana transactions`,
+                )
+                // process.exit(0)
+                continue
+            } else {
+                log.only("Solana identity: " + id1.address)
+                log.only("Txcount: " + txcount)
+            }
+        }
+
+        account.reviewed = true
+        await gcrMainRepository.save(account)
+    }
+}
+
 export default async function findGenesisBlock() {
+    await reviewAccounts()
+    process.exit(0)
+
     await awardDemosFollowPoints()
 
     log.info("[GENESIS] Looking for the genesis block...")

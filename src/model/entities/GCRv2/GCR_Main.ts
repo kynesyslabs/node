@@ -41,4 +41,10 @@ export class GCRMain {
             pointsAwarded: number
         }>
     }
+    @Column({ type: "boolean", name: "flagged", default: false })
+    flagged: boolean
+    @Column({ type: "text", name: "flaggedReason", default: "" })
+    flaggedReason: string
+    @Column({ type: "boolean", name: "reviewed", default: false })
+    reviewed: boolean
 }

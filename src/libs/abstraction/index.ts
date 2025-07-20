@@ -1,11 +1,9 @@
-import Cryptography from "../crypto/cryptography"
 import { GithubProofParser } from "./web2/github"
 import { TwitterProofParser } from "./web2/twitter"
 import { type Web2ProofParser } from "./web2/parsers"
 import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { Twitter } from "../identity/tools/twitter"
-import log from "@/utilities/logger"
 
 /**
  * Fetches the proof data using the appropriate parser and verifies the signature
