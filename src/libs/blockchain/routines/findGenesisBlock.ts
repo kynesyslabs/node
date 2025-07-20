@@ -260,8 +260,6 @@ async function reviewAccounts() {
         },
     })
 
-    log.only(`Found ${accounts.length} accounts to review`)
-
     // Process accounts in batches of 3
     const batchSize = 6
     for (let i = 0; i < accounts.length; i += batchSize) {
@@ -279,8 +277,6 @@ async function reviewAccounts() {
             ),
         )
     }
-
-    log.only("Finished reviewing all accounts")
 }
 
 export default async function findGenesisBlock() {
