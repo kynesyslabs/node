@@ -497,7 +497,9 @@ export default class Chain {
 
         // INFO: Create all users
         for (const user of userAccounts) {
+            console.log("[GENESIS] Creating account: " + user.pubkey)
             await HandleGCR.createAccount(user.pubkey, user)
+            console.log("[GENESIS] Account created: " + user.pubkey)
         }
 
         // !SECTION Restoring account data
