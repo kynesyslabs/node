@@ -218,6 +218,7 @@ export default class SharedState {
             "127.0.0.1",
             "155.133.23.153", // node2
             "84.247.142.137", // node3
+            "62.84.178.34", // mungaist.com
             // "::1",
         ],
         methodLimits: {

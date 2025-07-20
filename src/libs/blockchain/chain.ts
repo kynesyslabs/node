@@ -421,7 +421,6 @@ export default class Chain {
         genesisTx.content.transaction_fee.additional_fee = 0
 
         genesisTx.hash = Hashing.sha256(JSON.stringify(genesisTx.content))
-        console.log(genesisTx)
 
         // Build a block containing the genesis tx
         genesisBlock.content.timestamp = genesisTx.content.timestamp
@@ -463,9 +462,9 @@ export default class Chain {
         // Insert the genesis block into the database
         //console.log(genesis_block)
         console.log("[GENESIS] Block generated, ready to insert it")
-        console.log(genesisBlock)
+        // console.log(genesisBlock)
         console.log("[GENESIS] inserting transaction into the mempool")
-        console.log(genesisTx)
+        // console.log(genesisTx)
         //await this.insertTransaction(genesis_tx)
         await Mempool.addTransaction({ ...genesisTx, reference_block: 0 }) // ! FIXME This fails
         console.log("[GENESIS] inserted transaction")
@@ -494,6 +493,7 @@ export default class Chain {
         }
 
         const userAccounts: Record<string, any>[] = Object.values(users)
+        console.log("total users: " + userAccounts.length)
 
         // INFO: Create all users
         for (const user of userAccounts) {
