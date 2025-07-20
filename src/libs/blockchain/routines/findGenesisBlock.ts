@@ -175,7 +175,7 @@ async function reviewAccounts() {
                     account.flaggedReason = "twitter_bot"
                     account.reviewed = true
                     await gcrMainRepository.save(account)
-                    process.exit(0)
+                    continue
                 }
             }
         } else {
