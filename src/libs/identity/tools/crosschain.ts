@@ -137,6 +137,10 @@ export class CrossChainTools {
                 { params },
             )
 
+            if (response.status === 404) {
+                return []
+            }
+
             return response.data as SolanaTransactionResponse
         } catch (error) {
             if (axios.isAxiosError(error)) {
