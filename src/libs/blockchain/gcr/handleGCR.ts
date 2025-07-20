@@ -515,6 +515,9 @@ export default class HandleGCR {
             referrals: [],
             referredBy: null,
         }
+        account.flagged = fillData["flagged"] || false
+        account.flaggedReason = fillData["flaggedReason"] || ""
+        account.reviewed = fillData["reviewed"] || false
 
         return await repository.save(account)
     }
