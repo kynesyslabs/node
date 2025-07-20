@@ -130,28 +130,16 @@ async function awardDemosFollowPoints() {
 }
 
 /**
- * Review all account and flag them if they are bots or have no EVM/Solana transactions
+ * Review a single account and flag if it's a bot or has no EVM/Solana transactions
  */
-async function reviewAccounts() {
-    if (!fs.existsSync("data/twitter")) {
-        fs.mkdirSync("data/twitter", { recursive: true })
-    }
-
-    const db = await Datasource.getInstance()
-    const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
-
-    const accounts = await gcrMainRepository.find({
-        where: {
-            balance: LessThan(BigInt(10000000000)),
-            reviewed: false,
-            flagged: false,
-        },
-    })
-
-    for (const account of accounts) {
+async function reviewSingleAccount(
+    account: GCRMain,
+    gcrMainRepository: any,
+): Promise<void> {
+    try {
         log.only("Reviewing account: " + account.pubkey)
         if (account.flagged || account.reviewed) {
-            continue
+            return
         }
 
         // INFO: Review Twitter identity
@@ -175,7 +163,7 @@ async function reviewAccounts() {
                     account.flaggedReason = "twitter_bot"
                     account.reviewed = true
                     await gcrMainRepository.save(account)
-                    continue
+                    return
                 }
             }
         } else {
@@ -185,7 +173,7 @@ async function reviewAccounts() {
             // account.reviewed = true
             // await gcrMainRepository.save(account)
             await GCR.removeAccount(account.pubkey)
-            continue
+            return
         }
 
         // INFO: Review EVM identity
@@ -210,7 +198,7 @@ async function reviewAccounts() {
                     `[GENESIS] Flagged account ${account.pubkey} because it has no EVM transactions`,
                 )
                 // process.exit(0)
-                continue
+                return
             } else {
                 log.only("EVM identity: " + id1.address)
                 log.only("Txcount: " + txcount)
@@ -239,7 +227,7 @@ async function reviewAccounts() {
                     `[GENESIS] Flagged account ${account.pubkey} because it has no Solana transactions`,
                 )
                 // process.exit(0)
-                continue
+                return
             } else {
                 log.only("Solana identity: " + id1.address)
                 log.only("Txcount: " + txcount)
@@ -248,7 +236,51 @@ async function reviewAccounts() {
 
         account.reviewed = true
         await gcrMainRepository.save(account)
+    } catch (error) {
+        log.error(`Error reviewing account ${account.pubkey}: ${error}`)
     }
+}
+
+/**
+ * Review all account and flag them if they are bots or have no EVM/Solana transactions
+ */
+async function reviewAccounts() {
+    if (!fs.existsSync("data/twitter")) {
+        fs.mkdirSync("data/twitter", { recursive: true })
+    }
+
+    const db = await Datasource.getInstance()
+    const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+    const accounts = await gcrMainRepository.find({
+        where: {
+            balance: LessThan(BigInt(10000000000)),
+            reviewed: false,
+            flagged: false,
+        },
+    })
+
+    log.only(`Found ${accounts.length} accounts to review`)
+
+    // Process accounts in batches of 3
+    const batchSize = 3
+    for (let i = 0; i < accounts.length; i += batchSize) {
+        const batch = accounts.slice(i, i + batchSize)
+        log.only(
+            `Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(
+                accounts.length / batchSize,
+            )} (${batch.length} accounts)`,
+        )
+
+        // Process all accounts in the current batch concurrently
+        await Promise.all(
+            batch.map(account =>
+                reviewSingleAccount(account, gcrMainRepository),
+            ),
+        )
+    }
+
+    log.only("Finished reviewing all accounts")
 }
 
 export default async function findGenesisBlock() {
