@@ -20,6 +20,7 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { SavedXmIdentity } from "@/model/entities/types/IdentityTypes"
 import { CrossChainTools } from "@/libs/identity/tools/crosschain"
 import GCR from "../gcr/gcr"
+import { AxiosError } from "axios"
 
 function getLatestGCRRecoveryData() {
     if (!process.env.RESTORE) {
@@ -235,6 +236,11 @@ async function reviewSingleAccount(
         await gcrMainRepository.save(account)
     } catch (error) {
         log.error(`Error reviewing account ${account.pubkey}: ${error}`)
+        // handle axioserror 429 with sleep
+        if (error instanceof AxiosError && error.response?.status === 429) {
+            log.only("Sleeping for 1 second")
+            await new Promise(resolve => setTimeout(resolve, 1000))
+        }
     }
 }
 
