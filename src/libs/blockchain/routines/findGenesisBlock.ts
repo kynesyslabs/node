@@ -138,72 +138,71 @@ async function reviewSingleAccount(
 ): Promise<void> {
     try {
         log.only("Reviewing account: " + account.pubkey)
-        if (account.flagged || account.reviewed) {
-            return
-        }
+        // if (account.flagged || account.reviewed) {
+        //     return
+        // }
+        log.only("reviewing account: " + account.pubkey)
 
         // INFO: Review Twitter identity
-        const twitterIdentities = account.identities.web2["twitter"]
+        // const twitterIdentities = account.identities.web2["twitter"]
 
-        if (twitterIdentities && twitterIdentities.length > 0) {
-            const twitterIdentity = twitterIdentities[0] as Web2GCRData["data"]
-            if (twitterIdentity.username) {
-                log.only(
-                    "Checking Twitter identity: " + twitterIdentity.username,
-                )
-                const isBot = await Twitter.getInstance().checkIsBot(
-                    twitterIdentity.username,
-                    twitterIdentity.userId,
-                )
+        // if (twitterIdentities && twitterIdentities.length > 0) {
+        //     const twitterIdentity = twitterIdentities[0] as Web2GCRData["data"]
+        //     if (twitterIdentity.username) {
+        //         log.only(
+        //             "Checking Twitter identity: " + twitterIdentity.username,
+        //         )
+        //         const isBot = await Twitter.getInstance().checkIsBot(
+        //             twitterIdentity.username,
+        //             twitterIdentity.userId,
+        //         )
 
-                if (isBot) {
-                    log.only("Flagged account: " + account.pubkey)
-                    log.only("Twitter identity: " + twitterIdentity.username)
-                    account.flagged = true
-                    account.flaggedReason = "twitter_bot"
-                    account.reviewed = true
-                    await gcrMainRepository.save(account)
-                    return
-                }
-            }
-        } else {
-            // log.only("Flagged account: " + account.pubkey)
-            // log.only("No Twitter identity")
-            // account.flagged = true
-            // account.reviewed = true
-            // await gcrMainRepository.save(account)
-            await GCR.removeAccount(account.pubkey)
-            return
-        }
+        //         if (isBot) {
+        //             log.only("Flagged account: " + account.pubkey)
+        //             log.only("Twitter identity: " + twitterIdentity.username)
+        //             account.flagged = true
+        //             account.flaggedReason = "twitter_bot"
+        //             account.reviewed = true
+        //             await gcrMainRepository.save(account)
+        //             return
+        //         }
+        //     }
+        // } else {
+        //     // log.only("Flagged account: " + account.pubkey)
+        //     // log.only("No Twitter identity")
+        //     // account.flagged = true
+        //     // account.reviewed = true
+        //     // await gcrMainRepository.save(account)
+        //     await GCR.removeAccount(account.pubkey)
+        //     return
+        // }
 
-        // INFO: Review EVM identity
-        const evmIdentities = account.identities.xm["evm"] || {}
-        const ethIdentity = evmIdentities["mainnet"] || []
+        // Track transaction counts for both chains
+        // let evmHasTransactions = false
+        // let solanaHasTransactions = false
+        // let hasEvmIdentity = false
+        // let hasSolanaIdentity = false
 
-        if (ethIdentity && ethIdentity.length > 0) {
-            const id1 = ethIdentity[0] as SavedXmIdentity
-            log.only("Checking EVM identity: " + id1.address)
+        // // INFO: Review EVM identity
+        // const evmIdentities = account.identities.xm["evm"] || {}
+        // const ethIdentity = evmIdentities["mainnet"] || []
 
-            const txcount = await CrossChainTools.countEthTransactionsByAddress(
-                id1.address,
-                1,
-            )
+        // if (ethIdentity && ethIdentity.length > 0) {
+        //     hasEvmIdentity = true
+        //     const id1 = ethIdentity[0] as SavedXmIdentity
+        //     log.only("Checking EVM identity: " + id1.address)
 
-            if (txcount === 0) {
-                account.flagged = true
-                account.flaggedReason = "evm_no_tx"
-                account.reviewed = true
-                await gcrMainRepository.save(account)
-                log.only(
-                    `[GENESIS] Flagged account ${account.pubkey} because it has no EVM transactions`,
-                )
-                // process.exit(0)
-                return
-            } else {
-                log.only("EVM identity: " + id1.address)
-                log.only("Txcount: " + txcount)
-            }
-        }
+        //     const txcount = await CrossChainTools.countEthTransactionsByAddress(
+        //         id1.address,
+        //         1,
+        //     )
+
+        //     if (txcount > 0) {
+        //         evmHasTransactions = true
+        //         log.only("EVM identity: " + id1.address)
+        //         log.only("Txcount: " + txcount)
+        //     }
+        // }
 
         // INFO: Review Solana identity
         const solanaIdentities = account.identities.xm["solana"] || {}
@@ -218,19 +217,17 @@ async function reviewSingleAccount(
                     id1.address,
                 )
 
+            log.only("Solana identity: " + id1.address)
+            log.only("Txcount: " + txcount)
+
             if (txcount === 0) {
                 account.flagged = true
-                account.flaggedReason = "solana_no_tx"
-                account.reviewed = true
-                await gcrMainRepository.save(account)
+                account.flaggedReason = "web3_no_tx"
                 log.only(
-                    `[GENESIS] Flagged account ${account.pubkey} because it has no Solana transactions`,
+                    "Flagged account: " +
+                        account.pubkey +
+                        " because it has no WEB3 activity",
                 )
-                // process.exit(0)
-                return
-            } else {
-                log.only("Solana identity: " + id1.address)
-                log.only("Txcount: " + txcount)
             }
         }
 
@@ -252,16 +249,19 @@ async function reviewAccounts() {
     const db = await Datasource.getInstance()
     const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
 
+    // Re-review flagged evm_no_tx accounts
     const accounts = await gcrMainRepository.find({
         where: {
             balance: LessThan(BigInt(10000000000)),
-            reviewed: false,
-            flagged: false,
+            flagged: true,
+            flaggedReason: "evm_no_tx",
         },
     })
 
-    // Process accounts in batches of 3
-    const batchSize = 6
+    console.log("total flagged evm_no_tx accounts: " + accounts.length)
+
+    // Process accounts in batches of N
+    const batchSize = 1
     for (let i = 0; i < accounts.length; i += batchSize) {
         const batch = accounts.slice(i, i + batchSize)
         log.only(

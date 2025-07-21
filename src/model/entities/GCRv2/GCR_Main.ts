@@ -44,7 +44,7 @@ export class GCRMain {
     @Column({ type: "boolean", name: "flagged", default: false })
     flagged: boolean
     @Column({ type: "text", name: "flaggedReason", default: "" })
-    flaggedReason: string
+    flaggedReason: "twitter_bot" | "evm_no_tx" | "solana_no_tx" | "web3_no_tx" | ""
     @Column({ type: "boolean", name: "reviewed", default: false })
     reviewed: boolean
 }
