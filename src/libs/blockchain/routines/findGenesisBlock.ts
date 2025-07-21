@@ -233,6 +233,8 @@ async function reviewSingleAccount(
                 account.flagged = true
                 account.flaggedReason = "only_evm_no_tx"
             }
+        } else {
+            log.error("No Solana identity found for account: " + account.pubkey)
         }
 
         account.reviewed = true
