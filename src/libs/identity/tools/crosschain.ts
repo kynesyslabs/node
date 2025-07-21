@@ -1,4 +1,4 @@
-import axios from "axios"
+import axios, { AxiosError } from "axios"
 import {
     EthTransactionResponse,
     EthTransaction,
@@ -147,6 +147,10 @@ export class CrossChainTools {
                 throw new Error(
                     `Failed to fetch Solana transactions: ${error.message}`,
                 )
+            }
+
+            if (error instanceof AxiosError && error.response?.status === 404) {
+                return []
             }
 
             throw new Error(
