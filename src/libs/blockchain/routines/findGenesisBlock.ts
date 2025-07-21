@@ -237,8 +237,8 @@ async function reviewSingleAccount(
     } catch (error) {
         log.error(`Error reviewing account ${account.pubkey}: ${error}`)
         // handle axioserror 429 with sleep
-        log.only("Sleeping for 1 second")
-        await new Promise(resolve => setTimeout(resolve, 1000))
+        log.only("Sleeping for 5 second")
+        await new Promise(resolve => setTimeout(resolve, 5000))
     }
 }
 
