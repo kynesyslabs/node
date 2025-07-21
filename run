@@ -224,10 +224,10 @@ if [ "$RESTORE" == "true" ]; then
     echo "Database ready to accept connections"
 
     echo "Restoring the node"
-    # if ! yarn restore; then
-    #     echo "Error: Failed to restore the node"
-    #     exit 1
-    # fi
+    if ! yarn restore; then
+        echo "Error: Failed to restore the node"
+        exit 1
+    fi
     # sleep 20
     # exit 0
 

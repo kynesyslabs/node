@@ -289,8 +289,8 @@ async function reviewAccounts() {
 }
 
 export default async function findGenesisBlock() {
-    await reviewAccounts()
-    process.exit(0)
+    // await reviewAccounts()
+    // process.exit(0)
     // await awardDemosFollowPoints()
 
     log.info("[GENESIS] Looking for the genesis block...")
