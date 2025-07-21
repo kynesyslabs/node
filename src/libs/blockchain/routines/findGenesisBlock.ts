@@ -229,6 +229,9 @@ async function reviewSingleAccount(
                         account.pubkey +
                         " because it has no WEB3 activity",
                 )
+            } else {
+                account.flagged = true
+                account.flaggedReason = "only_evm_no_tx"
             }
         }
 
