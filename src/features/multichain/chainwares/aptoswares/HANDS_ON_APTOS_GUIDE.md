@@ -203,7 +203,7 @@ aptos move view \
 
 ## Step 7: Your First Bridge Operation
 
-Now let's simulate a bridge operation - locking USDC when someone wants to bridge ETH from Solana to Arbitrum:
+Now let's simulate a bridge operation. In reality, Demos Network would calculate the required USDC and call this function, but we'll simulate it:
 
 ```bash
 # Initiate a bridge operation
@@ -221,14 +221,14 @@ aptos move run \
 ```
 
 **Parameters explained**:
-- `bridge_eth_sol_arb_001` - Unique bridge ID
-- `0x456` - Fake user address who wants to bridge
+- `bridge_eth_sol_arb_001` - Unique bridge ID (Demos Network would generate this)
+- `0x456` - User address who wants to bridge
 - `Solana` → `Arbitrum` - Bridge route
 - `ETH` → `ETH` - Asset being bridged
-- `2000000000` - Lock 2,000 USDC (2000 * 10^6)
+- `2000000000` - Lock 2,000 USDC (calculated by Demos Network's oracle)
 - `3600` - 1 hour timeout
 
-**What happened**: You just locked 2,000 USDC for a bridge operation. The system also collected a 0.1% fee (2 USDC).
+**What happened**: You simulated what Demos Network would do - lock 2,000 USDC for a bridge operation. The system also collected a 0.1% fee (2 USDC). Note: Fees are optional and can be set to 0%.
 
 ### Check the Bridge Status
 
@@ -249,7 +249,7 @@ aptos move view \
 
 ## Step 8: Complete the Bridge
 
-Once the bridge is successful on other chains, you can confirm it:
+Once Demos Network completes the bridge on other chains, it would call the confirm function:
 
 ```bash
 # Confirm the bridge succeeded
@@ -258,7 +258,7 @@ aptos move run \
   --args "vector<u8>:bridge_eth_sol_arb_001"
 ```
 
-**What happened**: The 2,000 USDC is now unlocked and available for other bridges. The 2 USDC fee stays collected.
+**What happened**: The 2,000 USDC is now unlocked and available for other bridges. The 2 USDC fee stays collected (though fees are optional and could be 0%).
 
 ### Check Final Status
 
@@ -282,10 +282,10 @@ aptos move view \
 
 ### Bridge Operation Lifecycle
 
-1. **Initiate**: When someone wants to bridge assets, Demos calculates how much USDC to lock as collateral
-2. **Lock**: USDC is locked in the escrow, unavailable for other operations
-3. **Bridge**: The actual cross-chain transfer happens on other blockchains
-4. **Confirm/Fail**: Once confirmed or failed, the USDC is unlocked
+1. **Price Calculation**: Demos Network (acting as oracle) calculates how much USDC to lock as collateral
+2. **Initiate**: Demos Network calls Aptos contract to lock calculated USDC amount
+3. **Cross-Chain Execution**: Demos Network performs the actual bridge operations on source/destination chains
+4. **Settlement**: Demos Network calls Aptos contract to confirm/fail based on bridge outcome, unlocking USDC
 
 ### Key Aptos Concepts You've Learned
 

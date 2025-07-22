@@ -28,39 +28,20 @@ public entry fun register_usdc(account: &signer) {
 }
 ```
 
-### 2. Oracle/Price Feed Integration
+### 2. ~~Oracle/Price Feed Integration~~ ❌ NOT NEEDED
 
-**Current State**: No price validation or external data feeds
-**Missing**:
-- Price oracles for calculating USDC requirements
-- External data validation
-- Price slippage protection
+**Status**: ✅ **DEMOS NETWORK PROVIDES THIS**
+- Demos Network acts as the oracle and price feed provider
+- Demos calculates required USDC amounts off-chain before calling the contract
+- No external oracle integration needed on Aptos contract level
 
-**Why Critical**:
-- Bridge amounts need real-time price validation
-- Cannot calculate accurate USDC collateral without price feeds
+### 3. ~~Cross-Chain Communication~~ ❌ NOT NEEDED
 
-**Implementation Needed**:
-- Integration with Pyth, Chainlink, or other Aptos oracles
-- Price validation functions
-- Slippage tolerance settings
-
-### 3. Cross-Chain Communication
-
-**Current State**: Contract works in isolation on Aptos
-**Missing**:
-- Cross-chain message validation
-- Bridge operation verification from source/destination chains
-- Integration with actual bridge infrastructure
-
-**Why Critical**:
-- No way to verify bridge operations actually happened on other chains
-- Could lead to false confirmations or failed bridges
-
-**Implementation Needed**:
-- Wormhole, LayerZero, or similar cross-chain protocol integration
-- Message verification systems
-- Cross-chain proof validation
+**Status**: ✅ **DEMOS NETWORK PROVIDES THIS**
+- Demos Network handles all cross-chain communication and verification
+- Demos performs the actual bridge operations on source/destination chains
+- Aptos contract only needs to manage liquidity lock/unlock based on Demos' instructions
+- No direct cross-chain protocol integration needed on Aptos contract level
 
 ### 4. Advanced Governance & Multisig
 
@@ -237,14 +218,16 @@ struct SecurityConfig has store {
 
 ## Business Logic Missing Features
 
-### 15. Dynamic Fee Management
+### 15. Dynamic Fee Management (OPTIONAL)
 
-**Current State**: Fixed fee rate
-**Missing**:
+**Current State**: Fixed fee rate (configurable, can be set to 0%)
+**Optional Enhancements**:
 - Dynamic fees based on market conditions
 - Volume-based fee tiers
 - Partner/whale discounts
 - Fee sharing mechanisms
+
+**Note**: Fee mechanism is entirely optional - the system works perfectly with 0% fees
 
 ### 16. Liquidity Management
 
@@ -277,10 +260,12 @@ struct SecurityConfig has store {
 
 ### Must Have (Critical for Production)
 1. USDC Token Integration
-2. Cross-Chain Communication
-3. Oracle/Price Feed Integration
-4. Advanced Security Features
-5. Upgrade Mechanism
+2. Advanced Security Features
+3. Upgrade Mechanism
+
+### Provided by Demos Network (Not Needed in Contract)
+- ✅ Cross-Chain Communication - Demos Network handles this
+- ✅ Oracle/Price Feed Integration - Demos Network provides pricing data
 
 ### Should Have (Important for Operations)
 6. Advanced Governance & Multisig
@@ -313,12 +298,12 @@ struct SecurityConfig has store {
 
 ## Next Steps for Production Readiness
 
-### Phase 1: Core Infrastructure (8-12 weeks)
+### Phase 1: Core Infrastructure (4-6 weeks)
 1. Implement USDC token integration
-2. Add oracle/price feed integration
-3. Implement cross-chain communication
-4. Add upgrade mechanism
-5. Enhanced security features
+2. Add upgrade mechanism
+3. Enhanced security features
+
+**Note**: Oracle and cross-chain communication are handled by Demos Network, significantly reducing implementation complexity
 
 ### Phase 2: Operational Features (6-8 weeks)
 1. Advanced governance and multisig

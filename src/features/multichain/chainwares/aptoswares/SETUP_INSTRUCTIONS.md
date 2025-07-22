@@ -270,7 +270,7 @@ aptos move view \
 ### 9.3 Integration with Demos Network
 
 ```javascript
-// Example Demos Network integration
+// Demos Network integration architecture
 class DemosAptosIntegration {
   constructor(contractAddress, authorizedSigner) {
     this.contractAddress = contractAddress;
@@ -278,14 +278,14 @@ class DemosAptosIntegration {
   }
 
   async initiateBridgeLock(bridgeParams) {
-    // Calculate required USDC liquidity
+    // Demos Network acts as oracle - calculate required USDC liquidity
     const usdcRequired = await this.calculateUSDCRequirement(bridgeParams);
     
     // Generate unique bridge ID
     const bridgeId = `bridge_${Date.now()}_${Math.random()}`;
     
-    // Call Aptos contract
-    return await this.callContract('initiate_bridge', [
+    // Call Aptos contract to lock liquidity
+    await this.callContract('initiate_bridge', [
       bridgeId,
       bridgeParams.userAddress,
       bridgeParams.sourceChain,
@@ -295,14 +295,32 @@ class DemosAptosIntegration {
       usdcRequired,
       bridgeParams.timeoutSeconds
     ]);
+
+    // Demos Network performs actual cross-chain bridge
+    const bridgeResult = await this.performCrossChainBridge(bridgeParams);
+    
+    // Confirm or fail on Aptos based on result
+    if (bridgeResult.success) {
+      return await this.confirmBridge(bridgeId);
+    } else {
+      return await this.failBridge(bridgeId);
+    }
   }
 
   async confirmBridge(bridgeId) {
+    // Called after successful cross-chain execution
     return await this.callContract('confirm_bridge', [bridgeId]);
   }
 
   async failBridge(bridgeId) {
+    // Called after failed cross-chain execution
     return await this.callContract('fail_bridge', [bridgeId]);
+  }
+
+  async performCrossChainBridge(bridgeParams) {
+    // Demos Network handles actual cross-chain communication
+    // This is where the real bridge happens on other chains
+    return { success: true }; // Simplified
   }
 }
 ```

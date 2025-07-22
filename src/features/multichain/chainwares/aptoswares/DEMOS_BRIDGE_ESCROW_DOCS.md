@@ -19,12 +19,20 @@ Module: `my_addrx::DemosBridgeEscrow` (Basic - Development Only)
 
 ### Bridge Operation Lifecycle
 
-1. **Initiation**: Demos calculates required USDC for a bridge operation and calls `initiate_bridge()`
-2. **Processing**: USDC is locked while the cross-chain bridge occurs on other networks
-3. **Resolution**: Bridge is either:
+1. **Price Calculation**: Demos Network calculates required USDC collateral using its oracle infrastructure
+2. **Initiation**: Demos Network calls `initiate_bridge()` to lock calculated USDC amount on Aptos
+3. **Cross-Chain Execution**: Demos Network performs the actual bridge operations on source/destination chains
+4. **Settlement**: Demos Network calls Aptos contract based on bridge outcome:
    - **Confirmed**: `confirm_bridge()` releases locked USDC back to pool
    - **Failed**: `fail_bridge()` releases locked USDC back to pool
-   - **Expired**: `expire_bridge()` releases locked USDC after timeout
+   - **Expired**: `expire_bridge()` releases locked USDC after timeout (callable by anyone)
+
+### Key Architectural Points
+
+- **Demos Network as Oracle**: Demos provides all pricing data and calculates USDC requirements off-chain
+- **Demos Network as Bridge Provider**: Demos handles all cross-chain communication and execution
+- **Aptos as Settlement Layer**: Aptos provides secure liquidity management and canonical state tracking
+- **Optional Fees**: Fee mechanism can be set to 0% for fee-free operation or any percentage for sustainability
 
 ## Core Data Structures
 
@@ -353,8 +361,8 @@ struct FeeCollectedEvent {
 
 ```move
 // 1. User wants to bridge 1 ETH from Solana to Arbitrum
-// 2. Demos calculates 2000 USDC equivalent needed for liquidity
-// 3. Demos calls initiate_bridge:
+// 2. Demos Network (acting as oracle) calculates 2000 USDC equivalent needed for liquidity
+// 3. Demos Network calls initiate_bridge on Aptos:
 
 public entry fun demos_initiate_user_bridge(demos_signer: &signer) {
     DemosBridgeEscrow::initiate_bridge(
@@ -370,13 +378,14 @@ public entry fun demos_initiate_user_bridge(demos_signer: &signer) {
     );
 }
 
-// 4. After successful bridge completion on other chains:
+// 4. Demos Network executes actual bridge on Solana and Arbitrum networks
+// 5. After successful bridge completion, Demos Network calls Aptos:
 public entry fun demos_confirm_bridge(demos_signer: &signer) {
     DemosBridgeEscrow::confirm_bridge(
         demos_signer,
         b"bridge_eth_sol_arb_001"
     );
-    // 2000 USDC released back to available pool
+    // 2000 USDC released back to available pool on Aptos
 }
 ```
 
