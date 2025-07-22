@@ -107,3 +107,7 @@ architecture
 .DS_Store
 SMART_CONTRACTS_*.md 
 .gitbook*
+
+# Aptos stuff
+aptoswares/build
+build/aptoswares
