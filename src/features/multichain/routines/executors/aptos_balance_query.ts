@@ -3,10 +3,10 @@ import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { Network } from "@aptos-labs/ts-sdk"
 
-export default async function handleAptosContractWrite(
+export default async function handleAptosBalanceQuery(
     operation: IOperation,
 ) {
-    console.log("[XM Method] Aptos Contract Write")
+    console.log("[XM Method] Aptos Balance Query")
     
     try {
         // Get the provider URL from our configuration
@@ -42,31 +42,53 @@ export default async function handleAptosContractWrite(
         const aptosInstance = new multichain.APTOS(providerUrl, network)
         await aptosInstance.connect()
 
-        // Contract writes require pre-signed transactions (following EVM pattern)
-        if (!operation.task.signedPayloads || operation.task.signedPayloads.length === 0) {
+        console.log("params: \n")
+        console.log(operation.task.params)
+        console.log("\n end params: \n")
+
+        const params = operation.task.params
+        console.log("parsed params: " + JSON.stringify(params))
+
+        // Validate required parameters for Aptos balance queries
+        if (!params.address) {
+            console.log("Missing address")
             return {
                 result: "error",
-                error: "Missing signed transaction payload. Contract writes must be pre-signed on SDK side.",
+                error: "Missing address",
             }
         }
 
-        console.log("Processing pre-signed Aptos contract write transaction")
+        if (!params.coinType) {
+            console.log("Missing coinType")
+            return {
+                result: "error",
+                error: "Missing coinType",
+            }
+        }
+
+        console.log(`querying balance for address: ${params.address}`)
+        console.log(`coin type: ${params.coinType}`)
+
+        // Query balance using the appropriate method
+        let balance: string
         
-        // Send the pre-signed transaction using LocalSDK (same pattern as EVM)
-        const signedTx = operation.task.signedPayloads[0]
-        const txResponse = await aptosInstance.sendTransaction(signedTx)
-        
-        console.log("Aptos contract write transaction result:", txResponse.result)
-        console.log("Transaction hash:", txResponse.hash)
-        
+        if (params.coinType === "0x1::aptos_coin::AptosCoin") {
+            // Use APT-specific method for efficiency
+            balance = await aptosInstance.getAPTBalanceDirect(params.address)
+        } else {
+            // Use generic coin balance method
+            balance = await aptosInstance.getCoinBalanceDirect(params.coinType, params.address)
+        }
+
+        console.log("balance query result:", balance)
+
         return {
-            result: txResponse.result,
-            hash: txResponse.hash,
-            status: txResponse.result === "success",
+            result: balance,
+            status: true,
         }
 
     } catch (error) {
-        console.error("Aptos contract write error:", error)
+        console.error("Aptos balance query error:", error)
         return {
             result: "error",
             error: error.toString(),

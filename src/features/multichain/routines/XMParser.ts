@@ -7,6 +7,7 @@ import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 import handlePayOperation from "./executors/pay"
 import handleContractRead from "./executors/contract_read"
 import handleContractWrite from "./executors/contract_write"
+import handleBalanceQuery from "./executors/balance_query"
 
 // NOTE We define multichain into global so that we can use it later
 global.multichain = multichain
@@ -120,6 +121,8 @@ class XMParser {
             case "contract_write": {
                 return await handleContractWrite(operation, chainID)
             }
+            case "balance_query":
+                return await handleBalanceQuery(operation, chainID)
 
             default:
                 return {
