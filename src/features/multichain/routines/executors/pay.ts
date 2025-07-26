@@ -87,6 +87,10 @@ export default async function handlePayOperation(
             result = await genericJsonRpcPay(multichain.BTC, rpcUrl, operation)
             break
 
+        case "aptos":
+            result = await genericJsonRpcPay(multichain.APTOS, rpcUrl, operation)
+            break
+
         default:
             result = {
                 result: "error",
@@ -126,9 +130,9 @@ async function genericJsonRpcPay(
     }
 
     try {
-        let signedTx = operation.task.signedPayloads[0];
+        let signedTx = operation.task.signedPayloads[0]
 
-        signedTx = validateIfUint8Array(signedTx);
+        signedTx = validateIfUint8Array(signedTx)
         
         // INFO: Send payload and return the result
         const result = await instance.sendTransaction(signedTx)

@@ -112,3 +112,4 @@ SMART_CONTRACTS_*.md
 aptoswares/build
 build/aptoswares
 src/features/multichain/chainwares/aptoswares/TECHNICAL_PROPOSAL_APTOS_INTEGRATION.md
+APTOS_INTEGRATION_PLAN.md
