@@ -255,6 +255,25 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         }
 
         case "getCampaignData": {
+            if (!data.signature) {
+                response.result = 400
+                response.response = "No signature found"
+                break
+            }
+
+            const isVerified = await ucrypto.verify({
+                algorithm: "ed25519",
+                message: new TextEncoder().encode("demos"),
+                publicKey: hexToUint8Array(process.env.SUDO_PUBKEY),
+                signature: hexToUint8Array(data.signature),
+            })
+
+            if (!isVerified) {
+                response.result = 400
+                response.response = "Invalid signature"
+                break
+            }
+
             response.response = await GCR.getCampaignData()
             break
         }

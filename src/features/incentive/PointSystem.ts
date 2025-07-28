@@ -10,8 +10,8 @@ import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUse
 import { Twitter } from "@/libs/identity/tools/twitter"
 
 const pointValues = {
-    LINK_WEB3_WALLET: 2,
-    LINK_TWITTER: 5,
+    LINK_WEB3_WALLET: 0.5,
+    LINK_TWITTER: 2,
     FOLLOW_DEMOS: 1,
 }
 
