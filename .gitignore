@@ -30,6 +30,7 @@ node/yarn.lock
 package-lock.json
 data/chain.db
 data/chain.db
+data/twitter/*
 
 # User-specific files
 TODO.md
