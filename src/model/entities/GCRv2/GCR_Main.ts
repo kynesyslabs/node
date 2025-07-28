@@ -1,4 +1,11 @@
-import { Column, Entity, Index, PrimaryColumn } from "typeorm"
+import {
+    Column,
+    CreateDateColumn,
+    UpdateDateColumn,
+    Entity,
+    Index,
+    PrimaryColumn,
+} from "typeorm"
 import type { StoredIdentities } from "../types/IdentityTypes"
 // Define the shape of your JSON data
 
@@ -53,4 +60,8 @@ export class GCRMain {
         | ""
     @Column({ type: "boolean", name: "reviewed", default: false })
     reviewed: boolean
+    @CreateDateColumn({ type: "timestamp", name: "createdAt" })
+    createdAt: Date
+    @UpdateDateColumn({ type: "timestamp", name: "updatedAt" })
+    updatedAt: Date
 }
