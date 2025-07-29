@@ -299,8 +299,6 @@ async function removeInvalidAccounts() {
     })
 
     const accountSet = new Set(accounts.map(account => account.pubkey))
-    console.log("total accounts: " + accounts.length)
-    process.exit(0)
 
     let removedAccounts = 0
     let globalDeductedPoints = 0
