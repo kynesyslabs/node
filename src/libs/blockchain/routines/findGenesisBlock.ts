@@ -288,7 +288,85 @@ async function reviewAccounts() {
     }
 }
 
+async function removeInvalidAccounts() {
+    const db = await Datasource.getInstance()
+    const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+    const accounts = await gcrMainRepository.find({
+        where: {
+            balance: LessThan(BigInt(10000000000)),
+        },
+    })
+
+    const accountSet = new Set(accounts.map(account => account.pubkey))
+    console.log("total accounts: " + accounts.length)
+    process.exit(0)
+
+    let removedAccounts = 0
+    let globalDeductedPoints = 0
+
+    for (const account of accounts) {
+        // if referrer is not found, remove the account
+        if (
+            account.referralInfo.referredBy &&
+            !accountSet.has(account.referralInfo.referredBy)
+        ) {
+            log.only(
+                "Removing account: " +
+                    account.pubkey +
+                    " because referrer is not found",
+            )
+            await gcrMainRepository.remove(account)
+            removedAccounts++
+            globalDeductedPoints += account.points.totalPoints
+            continue
+        }
+
+        const referrals = account.referralInfo.referrals || []
+
+        // normalize points
+        if (referrals.length > 0) {
+            let totalDeductedPoints = 0
+            // find non-existing accounts and deduct points
+            for (const referral of account.referralInfo.referrals) {
+                if (!accountSet.has(referral.referredUserId)) {
+                    log.only(
+                        "Deducting points for non-existing account: " +
+                            referral.referredUserId,
+                    )
+                    log.only("referral: " + JSON.stringify(referral, null, 2))
+
+                    account.points.totalPoints -= referral.pointsAwarded
+                    account.points.breakdown.referrals -= referral.pointsAwarded
+                    account.referralInfo.referrals =
+                        account.referralInfo.referrals.filter(
+                            r => r.referredUserId !== referral.referredUserId,
+                        )
+                    totalDeductedPoints += referral.pointsAwarded
+                }
+            }
+
+            globalDeductedPoints += totalDeductedPoints
+            log.only("total deducted points: " + totalDeductedPoints)
+        }
+
+        await gcrMainRepository.save(account)
+    }
+
+    log.only("Removed " + removedAccounts + " accounts")
+    log.only("Global deducted points: " + globalDeductedPoints)
+    return removedAccounts || globalDeductedPoints
+}
+
 export default async function findGenesisBlock() {
+    let removedWhatever = 1
+    // recursively remove invalid accounts
+    while (removedWhatever > 0) {
+        removedWhatever = await removeInvalidAccounts()
+        log.only("Removed " + removedWhatever + " accounts")
+    }
+    process.exit(0)
+
     // await reviewAccounts()
     // process.exit(0)
     // await awardDemosFollowPoints()
