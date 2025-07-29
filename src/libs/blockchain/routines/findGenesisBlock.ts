@@ -357,13 +357,13 @@ async function removeInvalidAccounts() {
 }
 
 export default async function findGenesisBlock() {
-    let removedWhatever = 1
-    // recursively remove invalid accounts
-    while (removedWhatever > 0) {
-        removedWhatever = await removeInvalidAccounts()
-        log.only("Removed " + removedWhatever + " accounts")
-    }
-    process.exit(0)
+    // let removedWhatever = 1
+    // // recursively remove invalid accounts
+    // while (removedWhatever > 0) {
+    //     removedWhatever = await removeInvalidAccounts()
+    //     log.only("Removed " + removedWhatever + " accounts")
+    // }
+    // process.exit(0)
 
     // await reviewAccounts()
     // process.exit(0)
