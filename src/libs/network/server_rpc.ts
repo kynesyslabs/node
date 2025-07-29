@@ -30,6 +30,7 @@ import { bridge } from "@kynesyslabs/demosdk"
 import { manageNativeBridge } from "./manageNativeBridge"
 import Chain from "../blockchain/chain"
 import { RateLimiter } from "./middleware/rateLimiter"
+import { Demos } from "@kynesyslabs/demosdk/websdk"
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
@@ -232,6 +233,27 @@ async function processPayload(
             return await handleWeb2ProxyRequest(params)
         }
 
+        case "rate-limit/unblock": {
+            if (sender !== getSharedState.SUDO_PUBKEY) {
+                return {
+                    result: 401,
+                    response: "Unauthorized",
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+
+            const unblocked = RateLimiter.getInstance().unblockIP(
+                payload.params[0],
+            )
+            return {
+                result: unblocked ? 200 : 400,
+                response: unblocked ? "IP unblocked" : "IP not blocked",
+                require_reply: false,
+                extra: null,
+            }
+        }
+
         default:
             log.warning(
                 "[RPC Call] [Received] Method not found: " + payload.method,
@@ -255,7 +277,7 @@ export async function serverRpcBun() {
     const server = new BunServer(port)
 
     // Initialize rate limiter with configuration from shared state
-    const rateLimiter = new RateLimiter(getSharedState.rateLimitConfig)
+    const rateLimiter = RateLimiter.getInstance()
 
     // Apply middlewares
     server.use(cors())
@@ -313,23 +335,6 @@ export async function serverRpcBun() {
     server.get("/rate-limit/stats", () => {
         return jsonResponse(rateLimiter.getStats())
     })
-
-    // server.post("/rate-limit/unblock", async req => {
-    //     try {
-    //         const { ip } = await req.json()
-    //         if (!ip) {
-    //             return jsonResponse({ error: "IP address is required" }, 400)
-    //         }
-
-    //         const success = rateLimiter.unblockIP(ip)
-    //         return jsonResponse({
-    //             success,
-    //             message: success ? `IP ${ip} unblocked` : `IP ${ip} not found or not blocked`
-    //         })
-    //     } catch (e) {
-    //         return jsonResponse({ error: "Invalid request format" }, 400)
-    //     }
-    // })
 
     // Main RPC endpoint
     server.post("/", async req => {

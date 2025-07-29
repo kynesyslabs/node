@@ -1,7 +1,8 @@
+import fs from "fs"
+import { Server } from "bun"
 import log from "src/utilities/logger"
 import { Middleware } from "../bunServer"
-import { Server } from "bun"
-import fs from "fs"
+import { getSharedState } from "@/utilities/sharedState"
 
 interface RateLimitData {
     count: number
@@ -33,6 +34,7 @@ export class RateLimiter {
     public ipRequests = new Map<string, RateLimitData>()
     public config: RateLimitConfig
     public cleanupInterval: Timer
+    private static instance: RateLimiter
 
     constructor(config: RateLimitConfig) {
         this.config = config
@@ -392,6 +394,7 @@ export class RateLimiter {
             log.info(`[Rate Limiter] Manually unblocked IP ${ip}`)
             return true
         }
+
         return false
     }
 
@@ -400,5 +403,13 @@ export class RateLimiter {
             clearInterval(this.cleanupInterval)
         }
         this.ipRequests.clear()
+    }
+
+    static getInstance(): RateLimiter {
+        if (!this.instance) {
+            this.instance = new RateLimiter(getSharedState.rateLimitConfig)
+        }
+
+        return this.instance
     }
 }

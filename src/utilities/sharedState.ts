@@ -129,7 +129,7 @@ export default class SharedState {
     connectionString: string = "http://localhost:" + this.serverPort
     exposedUrl: string = process.env.EXPOSED_URL || this.connectionString
     PROD: boolean = process.env.PROD == "true" || false // ! debug line, set to true to run in prod
-
+    SUDO_PUBKEY = process.env.SUDO_PUBKEY || null
     // ABSTRACTION
     twitterCookieFile = "twitter_cookies.json"
     // !SECTION Configuration
