@@ -249,15 +249,7 @@ export class PointSystem {
 
             return {
                 result: 200,
-                response: {
-                    userId: userPoints.userId,
-                    referralCode: userPoints.referralCode,
-                    totalPoints: userPoints.totalPoints,
-                    breakdown: userPoints.breakdown,
-                    linkedWallets: userPoints.linkedWallets,
-                    linkedSocials: userPoints.linkedSocials,
-                    lastUpdated: userPoints.lastUpdated,
-                },
+                response: userPoints,
                 require_reply: false,
                 extra: {},
             }
