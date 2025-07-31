@@ -57,6 +57,8 @@ export class GCRMain {
         | "solana_no_tx"
         | "web3_no_tx"
         | "only_evm_no_tx"
+        | "manualFlag"
+        | "referrerFlagged"
         | ""
     @Column({ type: "boolean", name: "reviewed", default: false })
     reviewed: boolean

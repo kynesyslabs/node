@@ -52,7 +52,7 @@ import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistr
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { Validators } from "src/model/entities/Validators"
 import terminalkit from "terminal-kit"
-import { LessThan, LessThanOrEqual, Repository } from "typeorm"
+import { In, LessThan, LessThanOrEqual, Not } from "typeorm"
 
 import {
     Operation,
@@ -621,7 +621,7 @@ export default class GCR {
         const allUsers = await gcrMainRepository.find({
             where: {
                 balance: LessThan(BigInt(1000000000000)),
-                flagged: false,
+                flaggedReason: Not(In(["manualFlag", "referrerFlagged"])),
             },
         })
 
