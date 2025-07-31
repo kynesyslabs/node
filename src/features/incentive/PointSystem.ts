@@ -120,6 +120,8 @@ export class PointSystem {
             linkedWallets,
             linkedSocials,
             lastUpdated: account.points.lastUpdated || new Date(),
+            flagged: account.flagged || null,
+            flaggedReason: account.flaggedReason || null,
         }
     }
 
