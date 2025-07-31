@@ -518,6 +518,8 @@ export default class HandleGCR {
         account.flagged = fillData["flagged"] || false
         account.flaggedReason = fillData["flaggedReason"] || ""
         account.reviewed = fillData["reviewed"] || false
+        account.createdAt = fillData["createdAt"] || new Date()
+        account.updatedAt = fillData["updatedAt"] || new Date()
 
         return await repository.save(account)
     }
