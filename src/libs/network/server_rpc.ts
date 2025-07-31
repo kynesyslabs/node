@@ -152,7 +152,7 @@ async function processPayload(
         if (sender !== getSharedState.SUDO_PUBKEY) {
             return {
                 result: 401,
-                response: "Unauthorized hahaha",
+                response: "Unauthorized sender",
                 require_reply: false,
                 extra: null,
             }

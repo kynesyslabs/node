@@ -85,6 +85,8 @@ export default class IdentityManager {
         const { chain, subchain, chainId, targetAddress, isEVM } =
             payload.target_identity
 
+        // SECTION: EVM Checks
+        // INFO: Check if the chainId is provided
         if (isEVM && !chainId) {
             return {
                 success: false,
@@ -92,6 +94,7 @@ export default class IdentityManager {
             }
         }
 
+        // INFO: Check if the chainId matches the subchain
         if (isEVM && chainId === chainIds.eth.sepolia) {
             return {
                 success: false,
@@ -99,20 +102,39 @@ export default class IdentityManager {
             }
         }
 
-        if (isEVM && typeof chainId === "number") {
-            const txcount = await CrossChainTools.countEthTransactionsByAddress(
-                targetAddress,
-                chainId,
-            )
-
-            if (txcount === 0) {
-                return {
-                    success: false,
-                    message: "Failed: Target address is not active",
-                }
+        // INFO: Check if the chainId matches the subchain
+        if (isEVM && chainIds.eth[subchain] !== chainId) {
+            return {
+                success: false,
+                message: "Failed: ChainId does not match the given subchain",
             }
         }
 
+        // INFO: Check if the given chainId and subchain are supported
+        if (isEVM && !chainIds.eth[subchain]) {
+            return {
+                success: false,
+                message: "Failed: Unsupported chain",
+            }
+        }
+
+        // INFO: Check if the target address is active
+        // if (isEVM && typeof chainId === "number") {
+        //     const txcount = await CrossChainTools.countEthTransactionsByAddress(
+        //         targetAddress,
+        //         chainId,
+        //     )
+
+        //     if (txcount === 0) {
+        //         return {
+        //             success: false,
+        //             message: "Failed: Target address is not active",
+        //         }
+        //     }
+        // }
+
+        // SECTION: SOLANA Checks
+        // INFO: Check if the subchain is mainnet
         if (chain === "solana" && subchain !== "mainnet") {
             return {
                 success: false,
@@ -120,19 +142,20 @@ export default class IdentityManager {
             }
         }
 
-        if (chain === "solana") {
-            const txcount =
-                await CrossChainTools.countSolanaTransactionsByAddress(
-                    targetAddress,
-                )
+        // INFO: Check if the target address is active
+    //     if (chain === "solana") {
+    //         const txcount =
+    //             await CrossChainTools.countSolanaTransactionsByAddress(
+    //                 targetAddress,
+    //             )
 
-            if (txcount === 0) {
-                return {
-                    success: false,
-                    message: "Failed: Target address is not active",
-                }
-            }
-        }
+    //         if (txcount === 0) {
+    //             return {
+    //                 success: false,
+    //                 message: "Failed: Target address is not active",
+    //             }
+    //         }
+    //     }
 
         return {
             success: true,
