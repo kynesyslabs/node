@@ -621,7 +621,7 @@ export default class GCR {
         const allUsers = await gcrMainRepository.find({
             where: {
                 balance: LessThan(BigInt(1000000000000)),
-                flaggedReason: Not(In(["manualFlag", "referrerFlagged"])),
+                flaggedReason: Not(In(["manualFlag", "referrerFlagged", "twitter_bot"])),
             },
         })
 
