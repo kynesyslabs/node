@@ -621,6 +621,7 @@ export default class GCR {
         const allUsers = await gcrMainRepository.find({
             where: {
                 balance: LessThan(BigInt(1000000000000)),
+                flagged: false,
             },
         })
 
