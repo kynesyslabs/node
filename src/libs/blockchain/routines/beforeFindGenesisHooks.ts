@@ -1,5 +1,5 @@
 import * as fs from "fs"
-import { LessThan } from "typeorm"
+import { In, LessThan, Not } from "typeorm"
 import log from "@/utilities/logger"
 import Datasource from "@/model/datasource"
 
@@ -12,93 +12,136 @@ import { SavedXmIdentity } from "@/model/entities/types/IdentityTypes"
 /**
  * This class contains various hooks used for maintenance
  */
-class BeforeFindGenesisHooks {
+export class BeforeFindGenesisHooks {
     /**
      * Award demos follow points to all users who have a twitter identity
      * but don't have the demosFollow property
      */
     async awardDemosFollowPoints() {
-        return
-        const twitter = Twitter.getInstance()
+        // return
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
 
-        const seenAccounts = {}
+        const seenAccounts = new Set<string>()
 
         // Use JSONB query to fetch accounts that have Twitter identities
         const accountsWithTwitter = await gcrMainRepository
             .createQueryBuilder("gcr")
             .where("gcr.identities->'web2'->'twitter' IS NOT NULL")
+            .andWhere({
+                flaggedReason: Not(
+                    In(["manualFlag", "referrerFlagged", "twitter_bot"]),
+                ),
+            })
             .getMany()
 
         log.only(
             `[DEMOS FOLLOW] Found ${accountsWithTwitter.length} accounts with Twitter identities`,
         )
 
-        for (const account of accountsWithTwitter) {
+        log.only(
+            `[DEMOS FOLLOW] ${accountsWithTwitter.length} accounts need processing`,
+        )
+
+        // Process accounts in batches
+        const batchSize = 10
+        for (let i = 0; i < accountsWithTwitter.length; i += batchSize) {
+            const batch = accountsWithTwitter.slice(i, i + batchSize)
+            log.only(
+                `[DEMOS FOLLOW] Processing batch ${
+                    Math.floor(i / batchSize) + 1
+                }/${Math.ceil(accountsWithTwitter.length / batchSize)} (${
+                    batch.length
+                } accounts)`,
+            )
+
+            // Process all accounts in the current batch concurrently
+            await Promise.all(
+                batch.map(account =>
+                    this.awardDemosFollowPointsToSingleAccount(
+                        account,
+                        gcrMainRepository,
+                        seenAccounts,
+                    ),
+                ),
+            )
+        }
+
+        process.exit(0)
+    }
+
+    /**
+     * Award demos follow points to a single account if they follow demos on Twitter
+     */
+    async awardDemosFollowPointsToSingleAccount(
+        account: GCRMain,
+        gcrMainRepository: any,
+        seenAccounts: Set<string>,
+    ): Promise<void> {
+        try {
+            // if account has demosFollow points, return
             if (account.points.breakdown.demosFollow) {
                 log.only(
                     `[DEMOS FOLLOW] User ${account.pubkey} already has demos follow points`,
                 )
-                continue
+                return
             }
 
-            try {
-                // Get the first Twitter identity for this account
-                const twitterIdentities = account.identities.web2["twitter"]
-                if (
-                    !twitterIdentities ||
-                    !Array.isArray(twitterIdentities) ||
-                    twitterIdentities.length === 0
-                ) {
-                    continue
-                }
-
-                const twitterIdentity =
-                    twitterIdentities[0] as Web2GCRData["data"]
-                if (!twitterIdentity.username) {
-                    continue
-                }
-
-                if (seenAccounts[twitterIdentity.userId]) {
-                    continue
-                }
-                seenAccounts[twitterIdentity.userId] = true
-
-                // Check if the user follows demos
-                const isFollowingDemos = await twitter.checkFollow(
-                    twitterIdentity.username,
-                )
-
-                log.only(
-                    `[DEMOS FOLLOW] User ${twitterIdentity.username} ${
-                        isFollowingDemos ? "follows" : "does not follow"
-                    } demos`,
-                )
-
-                if (!isFollowingDemos) {
-                    continue
-                }
-
-                // Award the demos follow point
-                account.points.breakdown.demosFollow = 1
-                account.points.totalPoints =
-                    (account.points.totalPoints || 0) + 1
-                // account.points.lastUpdated = new Date()
-
-                await gcrMainRepository.save(account)
-
-                log.only(
-                    `[DEMOS FOLLOW] Awarded point to user ${account.pubkey} (Twitter: @${twitterIdentity.username})`,
-                )
-            } catch (error) {
-                log.error(
-                    `[DEMOS FOLLOW] Error processing account ${account.pubkey}: ${error}`,
-                )
+            // Get the first Twitter identity for this account
+            const twitterIdentities = account.identities.web2["twitter"]
+            if (
+                !twitterIdentities ||
+                !Array.isArray(twitterIdentities) ||
+                twitterIdentities.length === 0
+            ) {
+                return
             }
+
+            const twitterIdentity = twitterIdentities[0] as Web2GCRData["data"]
+            if (!twitterIdentity.username || !twitterIdentity.userId) {
+                return
+            }
+
+            // Skip if we've already processed this Twitter user
+            if (seenAccounts.has(twitterIdentity.userId)) {
+                return
+            }
+            seenAccounts.add(twitterIdentity.userId)
+
+            const twitter = Twitter.getInstance()
+
+            // Check if the user follows demos
+            const isFollowingDemos = await twitter.checkFollow(
+                twitterIdentity.username,
+            )
+
+            log.only(
+                `[DEMOS FOLLOW] User ${twitterIdentity.username} ${
+                    isFollowingDemos ? "follows" : "does not follow"
+                } demos`,
+            )
+
+            if (!isFollowingDemos) {
+                return
+            }
+
+            // Award the demos follow point
+            account.points.breakdown.demosFollow = 1
+            account.points.totalPoints = (account.points.totalPoints || 0) + 1
+            account.points.lastUpdated = new Date()
+
+            await gcrMainRepository.save(account)
+
+            log.only(
+                `[DEMOS FOLLOW] Awarded point to user ${account.pubkey} (Twitter: @${twitterIdentity.username})`,
+            )
+        } catch (error) {
+            log.error(
+                `[DEMOS FOLLOW] Error processing account ${account.pubkey}: ${error}`,
+            )
+            // Add a small delay on error to prevent rate limiting issues
+            await new Promise(resolve => setTimeout(resolve, 1000))
         }
-
-        // process.exit(0)
     }
 
     /**

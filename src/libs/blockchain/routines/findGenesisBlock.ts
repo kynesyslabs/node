@@ -12,6 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import * as fs from "fs"
 import log from "@/utilities/logger"
 import Chain from "src/libs/blockchain/chain"
+import { BeforeFindGenesisHooks } from "./beforeFindGenesisHooks"
 
 function getLatestGCRRecoveryData() {
     if (!process.env.RESTORE) {
@@ -37,7 +38,7 @@ function getLatestGCRRecoveryData() {
 
 export default async function findGenesisBlock() {
     // INFO: Maintenance hooks here!
-    // await BeforeFindGenesisHooks().something()
+    await new BeforeFindGenesisHooks().awardDemosFollowPoints()
 
     log.info("[GENESIS] Looking for the genesis block...")
     const genesisBlock = await Chain.getGenesisBlock()
