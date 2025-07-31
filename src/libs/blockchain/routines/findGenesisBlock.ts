@@ -38,7 +38,7 @@ function getLatestGCRRecoveryData() {
 
 export default async function findGenesisBlock() {
     // INFO: Maintenance hooks here!
-    await new BeforeFindGenesisHooks().awardDemosFollowPoints()
+    // await new BeforeFindGenesisHooks().awardDemosFollowPoints()
 
     log.info("[GENESIS] Looking for the genesis block...")
     const genesisBlock = await Chain.getGenesisBlock()
