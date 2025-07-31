@@ -30,7 +30,7 @@ import { bridge } from "@kynesyslabs/demosdk"
 import { manageNativeBridge } from "./manageNativeBridge"
 import Chain from "../blockchain/chain"
 import { RateLimiter } from "./middleware/rateLimiter"
-import { Demos } from "@kynesyslabs/demosdk/websdk"
+import GCR from "../blockchain/gcr/gcr"
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
@@ -141,6 +141,24 @@ async function processPayload(
     if (splits.length > 1) {
         sender = splits[1]
     }
+
+    // INFO: Protected endpoints
+    const protectedEndPoints = new Set([
+        "rate-limit/unblock",
+        "getCampaignData",
+    ])
+
+    if (protectedEndPoints.has(payload.method)) {
+        if (sender !== getSharedState.SUDO_PUBKEY) {
+            return {
+                result: 401,
+                response: "Unauthorized hahaha",
+                require_reply: false,
+                extra: null,
+            }
+        }
+    }
+
     // Payloads management
     switch (payload.method) {
         case "ping":
@@ -234,21 +252,31 @@ async function processPayload(
         }
 
         case "rate-limit/unblock": {
-            if (sender !== getSharedState.SUDO_PUBKEY) {
+            const ips = payload.params
+
+            if (!Array.isArray(ips)) {
                 return {
-                    result: 401,
-                    response: "Unauthorized",
+                    result: 400,
+                    response: "Invalid IPs. Expected an array of strings.",
                     require_reply: false,
                     extra: null,
                 }
             }
 
-            const unblocked = RateLimiter.getInstance().unblockIP(
-                payload.params[0],
-            )
+            const results = RateLimiter.getInstance().unblockIP(ips)
+
             return {
-                result: unblocked ? 200 : 400,
-                response: unblocked ? "IP unblocked" : "IP not blocked",
+                result: 200,
+                response: results,
+                require_reply: false,
+                extra: null,
+            }
+        }
+
+        case "getCampaignData": {
+            return {
+                result: 200,
+                response: await GCR.getCampaignData(),
                 require_reply: false,
                 extra: null,
             }

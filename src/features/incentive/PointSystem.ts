@@ -115,6 +115,7 @@ export class PointSystem {
                     discord: 0,
                 },
                 referrals: account.points.breakdown?.referrals || 0,
+                demosFollow: account.points.breakdown?.demosFollow || 0,
             },
             linkedWallets,
             linkedSocials,

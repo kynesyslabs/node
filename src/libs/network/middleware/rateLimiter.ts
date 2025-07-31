@@ -383,19 +383,25 @@ export class RateLimiter {
         }
     }
 
-    public unblockIP(ip: string): boolean {
-        const ipData = this.ipRequests.get(ip)
-        if (ipData && ipData.blocked) {
-            ipData.blocked = false
-            delete ipData.blockExpiry
-            ipData.count = 0
-            ipData.firstRequest = Date.now()
-            this.ipRequests.set(ip, ipData)
-            log.info(`[Rate Limiter] Manually unblocked IP ${ip}`)
-            return true
+    public unblockIP(ips: string[]): Record<string, boolean> {
+        const results = {}
+
+        for (const ip of ips) {
+            const ipData = this.ipRequests.get(ip)
+            if (ipData && ipData.blocked) {
+                ipData.blocked = false
+                delete ipData.blockExpiry
+                ipData.count = 0
+                ipData.firstRequest = Date.now()
+                this.ipRequests.set(ip, ipData)
+                log.info(`[Rate Limiter] Manually unblocked IP ${ip}`)
+                results[ip] = true
+            } else {
+                results[ip] = false
+            }
         }
 
-        return false
+        return results
     }
 
     public destroy(): void {

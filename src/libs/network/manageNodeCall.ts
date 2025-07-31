@@ -28,6 +28,7 @@ import {
 import { Twitter } from "../identity/tools/twitter"
 import { Tweet } from "@kynesyslabs/demosdk/types"
 import Mempool from "../blockchain/mempool_v2"
+import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 
 export interface NodeCall {
     message: string
@@ -164,7 +165,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 break
             }
             try {
-                nStat = (await GCR.getGCRNativeStatus(data.address)) as GCRMain
+                nStat = await ensureGCRForUser(data.address)
                 response.response = nStat
             } catch (error) {
                 response.result = 400
@@ -178,7 +179,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "No address specified"
                 break
             }
-            nStat = (await GCR.getGCRNativeStatus(data.address)) as GCRMain
+            nStat = await ensureGCRForUser(data.address)
             response.response = nStat.nonce
             break
         case "getPeerTime":
@@ -254,129 +255,106 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             break
         }
 
-        case "getCampaignData": {
-            if (!data.signature) {
-                response.result = 400
-                response.response = "No signature found"
-                break
-            }
+        // INFO: Tests if twitter account is a bot
+        // case "checkIsBot": {
+        //     if (!data.username || !data.userId) {
+        //         response.result = 400
+        //         response.response = "No username or userId specified"
+        //         break
+        //     }
 
-            const isVerified = await ucrypto.verify({
-                algorithm: "ed25519",
-                message: new TextEncoder().encode("demos"),
-                publicKey: hexToUint8Array(process.env.SUDO_PUBKEY),
-                signature: hexToUint8Array(data.signature),
-            })
+        //     response.response = await Twitter.getInstance().checkIsBot(
+        //         data.username,
+        //         data.userId,
+        //     )
+        //     break
+        // }
 
-            if (!isVerified) {
-                response.result = 400
-                response.response = "Invalid signature"
-                break
-            }
+        // case "getFlaggedAccounts": {
+        //     log.only("getFlaggedAccounts")
+        //     log.only(JSON.stringify(data))
+        //     if (data.start === undefined || data.end === undefined) {
+        //         response.result = 400
+        //         response.response = "No start or end specified"
+        //         break
+        //     }
 
-            response.response = await GCR.getCampaignData()
-            break
-        }
+        //     // INFO: Verify signature
+        //     const isVerified = await ucrypto.verify({
+        //         algorithm: "ed25519",
+        //         message: new TextEncoder().encode("demos"),
+        //         publicKey: hexToUint8Array(process.env.SUDO_PUBKEY),
+        //         signature: hexToUint8Array(data.signature),
+        //     })
 
-        case "checkIsBot": {
-            if (!data.username || !data.userId) {
-                response.result = 400
-                response.response = "No username or userId specified"
-                break
-            }
+        //     if (!isVerified) {
+        //         response.result = 400
+        //         response.response = "Invalid public key on protected endpoint"
+        //         break
+        //     }
 
-            response.response = await Twitter.getInstance().checkIsBot(
-                data.username,
-                data.userId,
-            )
-            break
-        }
+        //     response.response = await GCR.getFlaggedAccounts(
+        //         data.start,
+        //         data.end,
+        //     )
+        //     break
+        // }
 
-        case "getFlaggedAccounts": {
-            log.only("getFlaggedAccounts")
-            log.only(JSON.stringify(data))
-            if (data.start === undefined || data.end === undefined) {
-                response.result = 400
-                response.response = "No start or end specified"
-                break
-            }
+        // case "removeAccount": {
+        //     if (!data.address) {
+        //         response.result = 400
+        //         response.response = "No address specified"
+        //         break
+        //     }
 
-            // INFO: Verify signature
-            const isVerified = await ucrypto.verify({
-                algorithm: "ed25519",
-                message: new TextEncoder().encode("demos"),
-                publicKey: hexToUint8Array(process.env.SUDO_PUBKEY),
-                signature: hexToUint8Array(data.signature),
-            })
+        //     // INFO: Verify signature
+        //     const isVerified = await ucrypto.verify({
+        //         algorithm: "ed25519",
+        //         message: new TextEncoder().encode("demos"),
+        //         publicKey: hexToUint8Array(process.env.SUDO_PUBKEY),
+        //         signature: hexToUint8Array(data.signature),
+        //     })
 
-            if (!isVerified) {
-                response.result = 400
-                response.response = "Invalid public key on protected endpoint"
-                break
-            }
+        //     if (!isVerified) {
+        //         response.result = 400
+        //         response.response = "Invalid public key on protected endpoint"
+        //         break
+        //     }
 
-            response.response = await GCR.getFlaggedAccounts(
-                data.start,
-                data.end,
-            )
-            break
-        }
+        //     const result = await GCR.removeAccount(data.address)
+        //     response.result = result ? 200 : 400
+        //     response.response = result ? "Account removed" : "Account not found"
+        //     break
+        // }
 
-        case "removeAccount": {
-            if (!data.address) {
-                response.result = 400
-                response.response = "No address specified"
-                break
-            }
+        // case "unflagAccount": {
+        //     if (!data.address) {
+        //         response.result = 400
+        //         response.response = "No address specified"
+        //         break
+        //     }
 
-            // INFO: Verify signature
-            const isVerified = await ucrypto.verify({
-                algorithm: "ed25519",
-                message: new TextEncoder().encode("demos"),
-                publicKey: hexToUint8Array(process.env.SUDO_PUBKEY),
-                signature: hexToUint8Array(data.signature),
-            })
+        //     // INFO: Verify signature
+        //     const isVerified = await ucrypto.verify({
+        //         algorithm: "ed25519",
+        //         message: new TextEncoder().encode("demos"),
+        //         publicKey: hexToUint8Array(process.env.SUDO_PUBKEY),
+        //         signature: hexToUint8Array(data.signature),
+        //     })
 
-            if (!isVerified) {
-                response.result = 400
-                response.response = "Invalid public key on protected endpoint"
-                break
-            }
+        //     if (!isVerified) {
+        //         response.result = 400
+        //         response.response = "Invalid public key on protected endpoint"
+        //         break
+        //     }
 
-            const result = await GCR.removeAccount(data.address)
-            response.result = result ? 200 : 400
-            response.response = result ? "Account removed" : "Account not found"
-            break
-        }
-
-        case "unflagAccount": {
-            if (!data.address) {
-                response.result = 400
-                response.response = "No address specified"
-                break
-            }
-
-            // INFO: Verify signature
-            const isVerified = await ucrypto.verify({
-                algorithm: "ed25519",
-                message: new TextEncoder().encode("demos"),
-                publicKey: hexToUint8Array(process.env.SUDO_PUBKEY),
-                signature: hexToUint8Array(data.signature),
-            })
-
-            if (!isVerified) {
-                response.result = 400
-                response.response = "Invalid public key on protected endpoint"
-                break
-            }
-
-            const result = await GCR.unflagAccount(data.address)
-            response.result = result ? 200 : 400
-            response.response = result
-                ? "Account unflagged"
-                : "Account not found"
-            break
-        }
+        //     const result = await GCR.unflagAccount(data.address)
+        //     response.result = result ? 200 : 400
+        //     response.response = result
+        //         ? "Account unflagged"
+        //         : "Account not found"
+        //     break
+        // }
 
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen

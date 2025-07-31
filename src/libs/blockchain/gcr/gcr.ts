@@ -406,6 +406,8 @@ export default class GCR {
                             github: 0,
                             discord: 0,
                         },
+                        demosFollow: 0,
+                        referrals: 0,
                     },
                     lastUpdated: new Date(),
                 },
@@ -704,33 +706,33 @@ export default class GCR {
         return campaignData
     }
 
-    static async getFlaggedAccounts(start: number, end: number) {
-        const db = await Datasource.getInstance()
-        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
-        const flaggedAccounts = await gcrMainRepository.find({
-            where: { flagged: true },
-            order: { pubkey: "ASC" },
-            skip: start,
-            take: end - start,
-        })
+    // static async getFlaggedAccounts(start: number, end: number) {
+    //     const db = await Datasource.getInstance()
+    //     const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+    //     const flaggedAccounts = await gcrMainRepository.find({
+    //         where: { flagged: true },
+    //         order: { pubkey: "ASC" },
+    //         skip: start,
+    //         take: end - start,
+    //     })
 
-        return flaggedAccounts
-    }
+    //     return flaggedAccounts
+    // }
 
-    static async removeAccount(address: string) {
-        const db = await Datasource.getInstance()
-        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
-        return await gcrMainRepository.delete({ pubkey: address })
-    }
+    // static async removeAccount(address: string) {
+    //     const db = await Datasource.getInstance()
+    //     const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+    //     return await gcrMainRepository.delete({ pubkey: address })
+    // }
 
-    static async unflagAccount(address: string) {
-        const db = await Datasource.getInstance()
-        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
-        return await gcrMainRepository.update(
-            { pubkey: address },
-            { flagged: false, flaggedReason: "", reviewed: true },
-        )
-    }
+    // static async unflagAccount(address: string) {
+    //     const db = await Datasource.getInstance()
+    //     const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+    //     return await gcrMainRepository.update(
+    //         { pubkey: address },
+    //         { flagged: false, flaggedReason: "", reviewed: true },
+    //     )
+    // }
 
     // TODO Build objects for tokens and nfts and write setters for them
 
