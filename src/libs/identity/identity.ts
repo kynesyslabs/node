@@ -110,8 +110,8 @@ export default class Identity {
      * @returns A 128 bytes seed
      */
     async mnemonicToSeed(mnemonic: string) {
-        if (!(mnemonic.split(" ").length % 3 === 0)) {
-            log.error("Invalid mnemonic: must be a string of words")
+        if (!bip39.validateMnemonic(mnemonic)) {
+            log.error("Invalid mnemonic: not a valid BIP39 mnemonic phrase")
             process.exit(1)
         }
 
