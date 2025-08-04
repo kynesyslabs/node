@@ -257,7 +257,7 @@ async function processPayload(
             if (!Array.isArray(ips)) {
                 return {
                     result: 400,
-                    response: "Invalid IPs. Expected an array of strings.",
+                    response: "Invalid input. Expected an array of strings.",
                     require_reply: false,
                     extra: null,
                 }
@@ -267,7 +267,10 @@ async function processPayload(
 
             return {
                 result: 200,
-                response: results,
+                response: {
+                    message: "Rate limit unblock processed",
+                    results,
+                },
                 require_reply: false,
                 extra: null,
             }
