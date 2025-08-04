@@ -479,6 +479,14 @@ export default class HandleGCR {
         pubkey: string,
         fillData: Record<string, any> = {},
     ) => {
+        if (
+            !pubkey ||
+            typeof pubkey !== "string" ||
+            pubkey.trim().length === 0
+        ) {
+            throw new Error("Invalid public key provided")
+        }
+
         const db = await Datasource.getInstance()
         const dataSource = db.getDataSource()
         const repository = dataSource.getRepository(GCRMain)
