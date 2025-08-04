@@ -214,15 +214,14 @@ export default class SharedState {
         enabled: true,
         defaultLimit: { maxRequests: 200, windowMs: 60000 },
         blockDurationMs: undefined,
+        // INFO: localhost is always whitelisted
         whitelistedIPs: [
             "127.0.0.1",
-            "155.133.23.153", // node2
-            "84.247.142.137", // node3
-            "62.84.178.34", // mungaist.com
-            // "::1",
+            ...(process.env.WHITELISTED_IPS?.split(",").map(ip => ip.trim()) ||
+                []),
         ],
         methodLimits: {
-            "POST": { maxRequests: 200, windowMs: 86400000 },
+            POST: { maxRequests: 200, windowMs: 86400000 },
             // INFO: POST method limits per IP address
             // "nodeCall": { maxRequests: 200, windowMs: 60000 },
             // "execute": { maxRequests: 1, windowMs: 86400000 },
