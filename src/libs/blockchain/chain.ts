@@ -290,8 +290,6 @@ export default class Chain {
             "[insertBlock] Attempting to insert a block with hash: " +
                 block.hash,
         )
-        log.info("[insertBlock] Block to be inserted: ")
-        log.info(JSON.stringify(block))
         // Convert the transactions strings back to Transaction objects
         log.info("[insertBlock] Extracting transactions from block")
         // ! FIXME The below fails when a tx like a web2Request is inserted
@@ -495,11 +493,24 @@ export default class Chain {
         const userAccounts: Record<string, any>[] = Object.values(users)
         console.log("total users: " + userAccounts.length)
 
-        // INFO: Create all users
-        for (const user of userAccounts) {
-            console.log("[GENESIS] Creating account: " + user.pubkey)
-            await HandleGCR.createAccount(user.pubkey, user)
-            console.log("[GENESIS] Account created: " + user.pubkey)
+        // INFO: Create all users in parallel batches
+        const batchSize = 100
+        for (let i = 0; i < userAccounts.length; i += batchSize) {
+            const batch = userAccounts.slice(i, i + batchSize)
+            log.info(
+                `[GENESIS] Processing batch ${
+                    Math.floor(i / batchSize) + 1
+                }/${Math.ceil(userAccounts.length / batchSize)} (${
+                    batch.length
+                } accounts)`,
+            )
+
+            // Process all accounts in the current batch concurrently
+            await Promise.all(
+                batch.map(async user => {
+                    await HandleGCR.createAccount(user.pubkey, user)
+                }),
+            )
         }
 
         // !SECTION Restoring account data
