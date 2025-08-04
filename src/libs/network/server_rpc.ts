@@ -35,6 +35,13 @@ import GCR from "../blockchain/gcr/gcr"
 
 const noAuthMethods = ["nodeCall"]
 
+// INFO: Protected endpoints
+// eslint-disable-next-line @typescript-eslint/naming-convention
+const PROTECTED_ENDPOINTS = new Set([
+    "rate-limit/unblock",
+    "getCampaignData",
+])
+
 export const emptyResponse: RPCResponse = {
     result: 0,
     response: "",
@@ -142,13 +149,8 @@ async function processPayload(
         sender = splits[1]
     }
 
-    // INFO: Protected endpoints
-    const protectedEndPoints = new Set([
-        "rate-limit/unblock",
-        "getCampaignData",
-    ])
 
-    if (protectedEndPoints.has(payload.method)) {
+    if (PROTECTED_ENDPOINTS.has(payload.method)) {
         if (sender !== getSharedState.SUDO_PUBKEY) {
             return {
                 result: 401,
