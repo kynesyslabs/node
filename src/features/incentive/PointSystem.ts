@@ -219,7 +219,7 @@ export class PointSystem {
         }
 
         const twitter = Twitter.getInstance()
-        const twitterUser = account.identities.web2["twitter"].find(
+        const twitterUser = (account.identities.web2["twitter"] || []).find(
             (twitterIdentity: Web2GCRData["data"]) =>
                 twitterIdentity.userId === twitterUserId,
         )
