@@ -31,4 +31,4 @@ The method interacts with the SDK to manage the trade swap, allowance, approval,
 Returns transaction receipt.
 
 `manageBridges` function is located in `src/libs/network/manageBridges.ts` file
-Handles the calls comming from the `sdks` for the `get_trade`, `execute_trade` and `execute_mock_trade` cases.
+Handles the calls comming from the `sdks` for the `get_trade`, `execute_trade` cases.

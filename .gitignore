@@ -107,3 +107,5 @@ GEMINI.md
 architecture
 .DS_Store
 blocked_ips.json
+SMART_CONTRACTS_*.md 
+.gitbook*
