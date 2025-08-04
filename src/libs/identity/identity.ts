@@ -139,8 +139,11 @@ export default class Identity {
             )
             this.masterSeed = await this.mnemonicToSeed(mnemonic)
         } else {
-            this.masterSeed = await this.mnemonicToSeed(demos.newMnemonic())
-            fs.writeFileSync(getSharedState.identityFile, this.masterSeed)
+            const mnemonic = demos.newMnemonic()
+            this.masterSeed = await this.mnemonicToSeed(mnemonic)
+            fs.writeFileSync(getSharedState.identityFile, mnemonic, {
+                encoding: "utf8",
+            })
         }
 
         await ucrypto.generateAllIdentities(this.masterSeed)
