@@ -447,7 +447,12 @@ function handleIdentityTxRateLimit(
 
     const ipData = rateLimiter.ipRequests.get(ip)
     if (!ipData) {
-        process.exit(1)
+        return new Response(
+            JSON.stringify({
+                error: "Rate limiter: IP address not resolved",
+            }),
+            { status: 400 },
+        )
     }
 
     if (payload.method !== "execute") {
