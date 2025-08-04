@@ -39,11 +39,11 @@ export class RateLimiter {
     constructor(config: RateLimitConfig) {
         this.config = config
 
-        // Clean up expired entries every 5 minutes
+        // Clean up expired entries every 15 minutes
         this.cleanupInterval = setInterval(() => {
             this.cleanup()
             this.dumpIPs()
-        }, 100000)
+        }, 15 * 60 * 1000)
 
         this.loadIPs()
     }
@@ -80,16 +80,21 @@ export class RateLimiter {
         }
     }
 
-    private dumpIPs(): void {
+    private async dumpIPs(): Promise<void> {
         const filePath = "blocked_ips.json"
         // get all RateLimitData for all IPs as an object of IP: RateLimitData
         const allIPs: Record<string, RateLimitData> = {}
-
         for (const [ip, data] of this.ipRequests.entries()) {
             allIPs[ip] = data
         }
-
-        fs.writeFileSync(filePath, JSON.stringify(allIPs, null, 2))
+        try {
+            await fs.promises.writeFile(
+                filePath,
+                JSON.stringify(allIPs, null, 2),
+            )
+        } catch (error) {
+            log.error(`[Rate Limiter] Failed to dump IPs: ${error}`)
+        }
     }
 
     private loadIPs(): void {
