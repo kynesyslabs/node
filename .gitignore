@@ -30,6 +30,7 @@ node/yarn.lock
 package-lock.json
 data/chain.db
 data/chain.db
+data/twitter/*
 
 # User-specific files
 TODO.md
@@ -105,5 +106,6 @@ GEMINI.md
 
 architecture
 .DS_Store
+blocked_ips.json
 SMART_CONTRACTS_*.md 
 .gitbook*

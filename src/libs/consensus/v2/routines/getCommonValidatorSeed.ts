@@ -62,7 +62,6 @@ export default async function getCommonValidatorSeed(
     commonValidatorSeed: string
     lastBlockNumber: number
 }> {
-    logger("lastBlock: " + JSON.stringify(lastBlock, null, 2))
     const blockCount = 3
 
     if (!lastBlock) {
