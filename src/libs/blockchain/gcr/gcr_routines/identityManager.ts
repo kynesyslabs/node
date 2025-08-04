@@ -102,19 +102,19 @@ export default class IdentityManager {
             }
         }
 
-        // INFO: Check if the chainId matches the subchain
-        if (isEVM && chainIds.eth[subchain] !== chainId) {
-            return {
-                success: false,
-                message: "Failed: ChainId does not match the given subchain",
-            }
-        }
-
         // INFO: Check if the given chainId and subchain are supported
         if (isEVM && !chainIds.eth[subchain]) {
             return {
                 success: false,
                 message: "Failed: Unsupported chain",
+            }
+        }
+
+        // INFO: Check if the chainId matches the subchain
+        if (isEVM && chainIds.eth[subchain] !== chainId) {
+            return {
+                success: false,
+                message: "Failed: ChainId does not match the given subchain",
             }
         }
 
