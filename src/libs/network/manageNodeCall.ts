@@ -211,6 +211,20 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 ...(data.options ? [data.options] : []),
             )
             break
+        case "getTransactionHistory": {
+            if (!data.address || !data.type) {
+                response.result = 400
+                response.response = "No address or type specified"
+                break
+            }
+            response.response = await Chain.getTransactionHistory(
+                data.address,
+                data.type,
+                data.start || 0,
+                data.limit || 100,
+            )
+            break
+        }
 
         case "getTweet": {
             if (!data.tweetUrl) {

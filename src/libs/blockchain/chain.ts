@@ -87,6 +87,32 @@ export default class Chain {
         }
     }
 
+    static async getTransactionHistory(
+        address: string,
+        txtype: TransactionContent["type"] | "all",
+        start = 0,
+        limit = 100,
+    ) {
+        const whereCondition: any = {
+            from: address,
+        }
+
+        if (txtype !== "all") {
+            whereCondition.type = txtype
+        }
+
+        const transaction = await this.transactions.find({
+            where: whereCondition,
+            order: {
+                timestamp: "DESC",
+            },
+            take: limit,
+            skip: start,
+        })
+
+        return transaction.map(tx => Transaction.fromRawTransaction(tx))
+    }
+
     // INFO Get the last block number
     static async getLastBlockNumber(): Promise<number> {
         if (!getSharedState.lastBlockNumber) {
