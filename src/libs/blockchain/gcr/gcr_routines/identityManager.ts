@@ -70,16 +70,16 @@ export default class IdentityManager {
         sender: string,
         payload: InferFromSignaturePayload,
     ): Promise<{ success: boolean; message: string }> {
-        // // INFO: Check if the user has a Twitter account
-        // const account = await ensureGCRForUser(sender)
-        // const twitterAccounts = account.identities.web2["twitter"] || []
-        // if (twitterAccounts.length === 0) {
-        //     return {
-        //         success: false,
-        //         message:
-        //             "Error: No Twitter account found. Please connect a Twitter account first",
-        //     }
-        // }
+        // INFO: Check if the user has a Twitter account
+        const account = await ensureGCRForUser(sender)
+        const twitterAccounts = account.identities.web2["twitter"] || []
+        if (twitterAccounts.length === 0) {
+            return {
+                success: false,
+                message:
+                    "Error: No Twitter account found. Please connect a Twitter account first",
+            }
+        }
 
         // INFO: Check if target address is active
         const { chain, subchain, chainId, targetAddress, isEVM } =

@@ -19,12 +19,12 @@ import { cryptography } from "../crypto"
 import getRemoteIP from "../network/routines/getRemoteIP"
 import { getSharedState } from "src/utilities/sharedState"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
-import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import {
     Hashing,
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
+import { wordlist } from "@scure/bip39/wordlists/english"
 
 const term = terminalkit.terminal
 
@@ -110,7 +110,9 @@ export default class Identity {
      * @returns A 128 bytes seed
      */
     async mnemonicToSeed(mnemonic: string) {
-        if (!bip39.validateMnemonic(mnemonic)) {
+        mnemonic = mnemonic.trim()
+
+        if (!bip39.validateMnemonic(mnemonic, wordlist)) {
             log.error("Invalid mnemonic: not a valid BIP39 mnemonic phrase")
             process.exit(1)
         }
