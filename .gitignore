@@ -1,3 +1,5 @@
+*aptos_examples*
+*APTOS*.md
 #Demos files
 /.demos_id*
 demos_peers
@@ -109,3 +111,4 @@ architecture
 blocked_ips.json
 SMART_CONTRACTS_*.md 
 .gitbook*
+TG_IDENTITY_PLAN.md
