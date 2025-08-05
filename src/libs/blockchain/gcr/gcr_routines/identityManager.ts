@@ -70,14 +70,16 @@ export default class IdentityManager {
         sender: string,
         payload: InferFromSignaturePayload,
     ): Promise<{ success: boolean; message: string }> {
-        // INFO: Check if the user has a Twitter account
+        // INFO: Check if the user has a Twitter or Telegram account
         const account = await ensureGCRForUser(sender)
         const twitterAccounts = account.identities.web2["twitter"] || []
-        if (twitterAccounts.length === 0) {
+        const telegramAccounts = account.identities.web2["telegram"] || []
+        
+        if (twitterAccounts.length === 0 && telegramAccounts.length === 0) {
             return {
                 success: false,
                 message:
-                    "Error: No Twitter account found. Please connect a Twitter account first",
+                    "Error: No Twitter or Telegram account found. Please connect a social account first",
             }
         }
 

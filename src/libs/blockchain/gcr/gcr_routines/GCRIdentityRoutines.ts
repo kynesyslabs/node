@@ -234,6 +234,20 @@ export default class GCRIdentityRoutines {
                         editOperation.referralCode,
                     )
                 }
+            } else if (context === "telegram") {
+                const isFirst = await this.isFirstConnection(
+                    "telegram",
+                    { userId: data.userId },
+                    gcrMainRepository,
+                    editOperation.account,
+                )
+                if (isFirst) {
+                    await IncentiveManager.telegramLinked(
+                        editOperation.account,
+                        data.userId,
+                        editOperation.referralCode,
+                    )
+                }
             } else if (context === "github") {
                 // Future implementation for GitHub
                 log.info(
@@ -278,10 +292,12 @@ export default class GCRIdentityRoutines {
             await gcrMainRepository.save(accountGCR)
 
             /**
-             * Deduct incentive points for Twitter unlinking
+             * Deduct incentive points for unlinking social accounts
              */
             if (context === "twitter") {
                 await IncentiveManager.twitterUnlinked(editOperation.account)
+            } else if (context === "telegram") {
+                await IncentiveManager.telegramUnlinked(editOperation.account)
             }
         }
 
