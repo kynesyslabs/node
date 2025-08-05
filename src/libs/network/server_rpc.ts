@@ -31,6 +31,8 @@ import { manageNativeBridge } from "./manageNativeBridge"
 import Chain from "../blockchain/chain"
 import { RateLimiter } from "./middleware/rateLimiter"
 import GCR from "../blockchain/gcr/gcr"
+import Telegram from "../identity/tools/telegram"
+import { TelegramChallengeRequest, TelegramVerificationRequest } from "@kynesyslabs/demosdk/types"
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
@@ -367,6 +369,60 @@ export async function serverRpcBun() {
 
     server.get("/rate-limit/stats", () => {
         return jsonResponse(rateLimiter.getStats())
+    })
+
+    // REVIEW: Telegram identity verification endpoints
+    // Generate challenge for Telegram verification
+    server.post("/api/tg-challenge", async req => {
+        try {
+            const payload = await req.json()
+            
+            // Validate request structure
+            if (!payload.demos_address || typeof payload.demos_address !== "string") {
+                return jsonResponse({ 
+                    error: "Invalid request: demos_address is required", 
+                }, 400)
+            }
+
+            const telegramTool = Telegram.getInstance()
+            const challengeResponse = telegramTool.generateChallenge(payload.demos_address)
+            
+            return jsonResponse(challengeResponse)
+        } catch (error) {
+            log.error("[Telegram] Error generating challenge: " + error)
+            return jsonResponse({ 
+                error: "Internal error generating challenge", 
+            }, 500)
+        }
+    })
+
+    // Verify Telegram attestation from bot
+    server.post("/api/tg-verify", async req => {
+        try {
+            const payload = await req.json()
+            
+            // Validate request structure - check all required fields
+            const requiredFields = ["telegram_id", "username", "signed_challenge", "timestamp", "bot_address", "bot_signature"]
+            for (const field of requiredFields) {
+                if (!payload[field]) {
+                    return jsonResponse({ 
+                        error: `Invalid request: ${field} is required`, 
+                    }, 400)
+                }
+            }
+
+            const telegramTool = Telegram.getInstance()
+            const verificationResponse = await telegramTool.verifyAttestation(payload as TelegramVerificationRequest)
+            
+            // Return appropriate HTTP status based on verification result
+            const statusCode = verificationResponse.success ? 200 : 400
+            return jsonResponse(verificationResponse, statusCode)
+        } catch (error) {
+            log.error("[Telegram] Error verifying attestation: " + error)
+            return jsonResponse({ 
+                error: "Internal error verifying attestation", 
+            }, 500)
+        }
     })
 
     // Main RPC endpoint
