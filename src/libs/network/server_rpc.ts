@@ -396,7 +396,7 @@ export async function serverRpcBun() {
         }
     })
 
-    // Verify Telegram attestation from bot
+    // Verify Telegram attestation from bot and create unsigned identity transaction
     server.post("/api/tg-verify", async req => {
         try {
             const payload = await req.json()
@@ -414,9 +414,27 @@ export async function serverRpcBun() {
             const telegramTool = Telegram.getInstance()
             const verificationResponse = await telegramTool.verifyAttestation(payload as TelegramVerificationRequest)
             
-            // Return appropriate HTTP status based on verification result
-            const statusCode = verificationResponse.success ? 200 : 400
-            return jsonResponse(verificationResponse, statusCode)
+            // REVIEW: New flow - return unsigned transaction for user to sign
+            // This follows the transaction-based pattern like Twitter identities
+            if (verificationResponse.success) {
+                log.info(`[Telegram] Verification successful, returning unsigned transaction for ${verificationResponse.demosAddress}`)
+                
+                return jsonResponse({
+                    success: true,
+                    message: verificationResponse.message,
+                    demosAddress: verificationResponse.demosAddress,
+                    telegramData: verificationResponse.telegramData,
+                    unsignedTransaction: verificationResponse.unsignedTransaction,
+                }, 200)
+            } else {
+                log.warning(`[Telegram] Verification failed: ${verificationResponse.message}`)
+                
+                return jsonResponse({
+                    success: false,
+                    message: verificationResponse.message,
+                }, 400)
+            }
+
         } catch (error) {
             log.error("[Telegram] Error verifying attestation: " + error)
             return jsonResponse({ 

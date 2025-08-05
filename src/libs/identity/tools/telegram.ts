@@ -5,7 +5,9 @@ import {
     TelegramVerificationRequest,
     TelegramVerificationResponse,
     TelegramChallengeResponse,
+    Transaction,
 } from "@kynesyslabs/demosdk/types"
+import { InferFromTelegramPayload } from "@kynesyslabs/demosdk/abstraction"
 import { ucrypto, hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 
 /**
@@ -228,18 +230,34 @@ export default class Telegram {
             // 6. Mark challenge as used
             storedChallenge.used = true
 
-            // 7. Return success with verification data
+            // 7. Create unsigned identity transaction following Twitter pattern
+            const unsignedTransaction = this.createIdentityTransaction(
+                challengeData.demosAddress,
+                request.telegram_id,
+                request.username,
+                JSON.stringify({
+                    telegram_id: request.telegram_id,
+                    username: request.username,
+                    signed_challenge: request.signed_challenge,
+                    timestamp: request.timestamp,
+                    bot_address: request.bot_address,
+                    bot_signature: request.bot_signature,
+                }),
+            )
+
+            // 8. Return success with unsigned transaction for user to sign
             log.info(`Successfully verified Telegram identity: ${request.telegram_id} ↔ ${challengeData.demosAddress}`)
             
             return {
                 success: true,
-                message: "Telegram identity verified successfully",
+                message: "Telegram identity verified. Please sign the transaction to complete binding.",
                 demosAddress: challengeData.demosAddress,
                 telegramData: {
                     userId: request.telegram_id,
                     username: request.username,
                     timestamp: request.timestamp,
                 },
+                unsignedTransaction: unsignedTransaction,
             }
 
         } catch (error) {
@@ -249,6 +267,64 @@ export default class Telegram {
                 message: "Internal verification error", 
             }
         }
+    }
+
+    /**
+     * Creates an unsigned identity transaction for Telegram verification
+     * 
+     * This follows the same pattern as Twitter identity transactions:
+     * - Transaction type: "identity"
+     * - Context: "web2" 
+     * - Method: "web2_identity_assign"
+     * - Payload contains Telegram identity data and bot attestation proof
+     * 
+     * @param demosAddress - User's Demos address
+     * @param telegramId - Telegram user ID
+     * @param username - Telegram username  
+     * @param proofData - JSON string containing bot attestation
+     * @returns Unsigned transaction ready for user signature
+     */
+    private createIdentityTransaction(
+        demosAddress: string,
+        telegramId: string,
+        username: string,
+        proofData: string,
+    ): Transaction {
+        // REVIEW: Create transaction following the exact Twitter pattern
+        // See DemosTransactions.empty() and Identities.inferWeb2Identity()
+        
+        const telegramPayload: InferFromTelegramPayload = {
+            context: "telegram",
+            proof: proofData,  // Bot attestation containing all verification data
+            username: username,
+            userId: telegramId,
+        }
+
+        // Create transaction skeleton (same structure as Twitter identity transactions)
+        const transaction: Transaction = {
+            hash: "", // Will be calculated when signed
+            content: {
+                type: "identity",
+                from_ed25519_address: demosAddress,
+                to: demosAddress, // Identity transactions are self-directed
+                amount: 0, // No tokens transferred for identity binding
+                data: [
+                    "identity", // Transaction data type identifier
+                    {
+                        context: "web2", // Web2 identity context
+                        method: "web2_identity_assign", // Identity assignment method
+                        payload: telegramPayload, // Telegram-specific payload
+                    },
+                ],
+                timestamp: Date.now(),
+                nonce: 0, // Will be set by transaction processing
+                gcr_edits: [], // Will be generated during transaction validation
+            },
+            signature: null, // User must sign this
+        }
+
+        log.info(`Created unsigned Telegram identity transaction for ${demosAddress} ↔ ${telegramId}`)
+        return transaction
     }
 
     /**
