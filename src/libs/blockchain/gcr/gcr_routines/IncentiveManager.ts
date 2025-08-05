@@ -28,8 +28,16 @@ export class IncentiveManager {
     /**
      * Hook to be called after Twitter linking
      */
-    static async twitterLinked(userId: string, referralCode?: string): Promise<RPCResponse> {
-        return await this.pointSystem.awardTwitterPoints(userId, referralCode)
+    static async twitterLinked(
+        userId: string,
+        twitterUserId: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.awardTwitterPoints(
+            userId,
+            twitterUserId,
+            referralCode,
+        )
     }
 
     /**

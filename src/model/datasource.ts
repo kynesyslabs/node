@@ -33,7 +33,6 @@ export const dataSource = new DataSource({
     migrations: ["../migrations/*.{ts,js}"],
     entities: [
         Blocks,
-        Transactions,
         MempoolTx,
         Consensus,
         PgpKeyServer,
