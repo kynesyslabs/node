@@ -27,9 +27,11 @@ console.log(result)
 
 ### Award points
 
-Awards points to accounts based on Twitter usernames.
+The method call awards points to the accounts with the supplied list of twitter usernames. Only the first account to connect a twitter account is awarded points.
 
 ```ts
 const result = await demos.call("awardPoints", ["username1", "username2"])
 console.log(result)
 ```
+
+NOTE: This endpoint is configured to award a single point to each account.
