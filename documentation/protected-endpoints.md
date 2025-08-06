@@ -11,14 +11,18 @@ await demos.connectWallet("authorized mnemonic here")
 
 ### Unblocking an IP address
 
+Unblocks all the IP addresses supplied to this endpoint.
+
 ```ts
 const result = await demos.call("rate-limit/unblock", [
     "127.0.0.1",
+    // IP addresses here
 ])
 console.log(result)
 ```
 
 ### Get campaign data
+Returns data related to the incentives campaign. eg. points and their distribution
 
 ```ts
 const result = await demos.call("getCampaignData", null)
