@@ -3,6 +3,7 @@ import * as fs from "fs"
 export class JsonConfig {
     static readonly USDC_CONTRACTS_PATH = "config/usdcContracts.json"
     static readonly PROVIDER_URLS_PATH = "config/providerUrls.json"
+    static readonly TANK_ADDRESSES_PATH = "config/tankAddresses.json"
 
     /**
      * Reads JSON data from a file given the path
@@ -45,5 +46,16 @@ export class JsonConfig {
         }
     } {
         return this.readJsonFromFile(this.PROVIDER_URLS_PATH)
+    }
+
+    /**
+     * Returns an object of chain keys mapped to their corresponding tank contract addresses
+     *
+     * @returns Tank addresses configuration object
+     */
+    static getTankAddresses(): {
+        [chainKey: string]: string
+    } {
+        return this.readJsonFromFile(this.TANK_ADDRESSES_PATH)
     }
 }
