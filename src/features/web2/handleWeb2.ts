@@ -27,7 +27,7 @@ export async function handleWeb2(
 
     try {
         const dahrFactoryInstance = DAHRFactory.instance
-        const dahr = dahrFactoryInstance.createDAHR(web2Request)
+        const dahr = await dahrFactoryInstance.createDAHR(web2Request)
 
         console.log("[handleWeb2] DAHR instance created.")
 

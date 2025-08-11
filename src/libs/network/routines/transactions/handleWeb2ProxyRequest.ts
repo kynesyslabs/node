@@ -69,25 +69,12 @@ export async function handleWeb2ProxyRequest({
                     headers,
                     payload,
                     authorization,
+                    url: web2Request.raw.url,
                 })
+
                 return createRPCResponse(200, response)
             }
 
-            case EnumWeb2Actions.STOP_PROXY: {
-                const dahr = getDAHRInstance(sessionId)
-                if (!dahr) {
-                    return createRPCResponse(
-                        400,
-                        null,
-                        "DAHR instance not found",
-                    )
-                }
-
-                dahr.stopProxy()
-                return createRPCResponse(200, {
-                    message: "Proxy stopped successfully",
-                })
-            }
             default: {
                 return createRPCResponse(
                     400,
