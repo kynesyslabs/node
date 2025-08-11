@@ -182,6 +182,33 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
 }
 
 /**
+ * Get a block from a peer
+ *
+ * @param peer - The peer to get the block from
+ * @param blockNumber - The block number to get
+ *
+ * @returns The block if found, null otherwise
+ */
+async function getRemoteBlock(peer: Peer, blockNumber: number) {
+    const blockRequest: RPCRequest = {
+        method: "nodeCall",
+        params: [
+            {
+                message: "getBlockByNumber",
+                data: { blockNumber: blockNumber.toString() },
+            },
+        ],
+    }
+
+    const blockResponse = await peer.longCall(blockRequest, false, 250, 3)
+
+    if (blockResponse.result === 200) {
+        return blockResponse.response as Block
+    }
+
+    return null
+}
+/**
  * Verify if our last block is coherent with the same block from the peer.
  *
  * @param peer - The peer to cross-check with
@@ -194,39 +221,32 @@ async function verifyLastBlockIntegrity(
     ourLastBlockNumber: number,
     ourLastBlockHash: string,
 ) {
+    // INFO: Verify genesis hash matches our genesis hash
+    const genesisBlock = await getRemoteBlock(peer, 0)
+
+    if (!genesisBlock) {
+        log.error("[fastSync] Could not get genesis block from peer")
+        process.exit(1)
+    }
+
+    const ourGenesis = await Chain.getGenesisBlock()
+
+    if (genesisBlock.hash !== ourGenesis.hash) {
+        log.error("[fastSync] Genesis hash is not coherent")
+        log.info("[fastSync] Our hash: " + ourGenesis.hash)
+        log.info("[fastSync] Peer hash: " + genesisBlock.hash)
+        process.exit(1)
+    }
+
     // Verify if the last block hash is coherent
-    const lastSyncedBlockRequest: RPCRequest = {
-        method: "nodeCall",
-        params: [
-            {
-                message: "getBlockByNumber",
-                data: { blockNumber: ourLastBlockNumber.toString() },
-                muid: null,
-            },
-        ],
-    }
-    const lastSyncedBlockResponse = await peer.call(
-        lastSyncedBlockRequest,
-        false,
-    )
+    const lastSyncedBlock = await getRemoteBlock(peer, ourLastBlockNumber)
 
-    if (lastSyncedBlockResponse.result === 200) {
-        console.log("[fastSync] Last synced block response received")
-        const lastSyncedBlock = lastSyncedBlockResponse.response as Block
-        if (lastSyncedBlock.hash !== ourLastBlockHash) {
-            log.info("[fastSync] Hash is not coherent")
-            log.info("[fastSync] Our hash: " + ourLastBlockHash)
-            log.info("[fastSync] Peer hash: " + lastSyncedBlock.hash)
-            return false
-            // TODO: Pass to the next peer
-        }
-
-        console.log(
-            "[fastSync] Hash is coherent: we can sync with: " + peer.identity,
-        )
+    if (!lastSyncedBlock) {
+        log.error("[fastSync] Could not get last block from peer")
+        process.exit(1)
     }
 
-    return true
+    return lastSyncedBlock.hash === ourLastBlockHash
 }
 
 async function downloadBlock(peer: Peer, blockToAsk: number) {
@@ -479,19 +499,19 @@ async function fastSyncRoutine(peers: Peer[] = []) {
         return true
     }
 
-    // INFO: Check if block match across peers
-    // INFO: Disabled for testing!
-    // TODO: Fix verification of the last block with the same peer
-    // const verified = await verifyLastBlockIntegrity(
-    //     highestBlockPeer(),
-    //     getSharedState.lastBlockNumber,
-    //     getSharedState.lastBlockHash,
-    // )
+    if (getSharedState.fastSyncCount == 0) {
+        // INFO: Only run integrity checks on first sync
+        const verified = await verifyLastBlockIntegrity(
+            highestBlockPeer(),
+            getSharedState.lastBlockNumber,
+            getSharedState.lastBlockHash,
+        )
 
-    // if (!verified) {
-    //     log.error("[fastSync] Last block is not coherent")
-    //     process.exit(0)
-    // }
+        if (!verified) {
+            log.error("[fastSync] Last block is not coherent")
+            process.exit(1)
+        }
+    }
 
     const synced = await requestBlocks()
 

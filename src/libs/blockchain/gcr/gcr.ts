@@ -52,7 +52,7 @@ import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistr
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { Validators } from "src/model/entities/Validators"
 import terminalkit from "terminal-kit"
-import { LessThanOrEqual, Repository } from "typeorm"
+import { In, LessThan, LessThanOrEqual, Not } from "typeorm"
 
 import {
     Operation,
@@ -64,6 +64,8 @@ import Chain from "../chain"
 import executeOperations, { Actor } from "../routines/executeOperations"
 import gcrStateSave from "./gcr_routines/gcrStateSaverHelper"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import { Referrals } from "@/features/incentive/referrals"
+import log from "@/utilities/logger"
 
 const term = terminalkit.terminal
 
@@ -346,89 +348,6 @@ export default class GCR {
 
     // !SECTION Validators management
 
-    // !SECTION Getters
-
-    static async getGCRNativeStatus(address: string): Promise<GCRMain> {
-        const db = await Datasource.getInstance()
-        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
-
-        let nativeStatus: GCRMain
-
-        try {
-            nativeStatus = await gcrMainRepository.findOne({
-                where: { pubkey: address },
-            })
-
-            if (!nativeStatus) {
-                nativeStatus = {
-                    pubkey: address,
-                    assignedTxs: [],
-                    nonce: 0,
-                    balance: BigInt(0),
-                    identities: {
-                        xm: {},
-                        web2: {},
-                        pqc: {},
-                    },
-                    points: {
-                        totalPoints: 0,
-                        breakdown: {
-                            web3Wallets: {},
-                            socialAccounts: {
-                                twitter: 0,
-                                github: 0,
-                                discord: 0,
-                            },
-                        },
-                        lastUpdated: new Date(),
-                    },
-                }
-            }
-        } catch (e) {
-            nativeStatus = {
-                pubkey: address,
-                assignedTxs: [],
-                nonce: 0,
-                balance: BigInt(0),
-                identities: {
-                    xm: {},
-                    web2: {},
-                    pqc: {},
-                },
-                points: {
-                    totalPoints: 0,
-                    breakdown: {
-                        web3Wallets: {},
-                        socialAccounts: {
-                            twitter: 0,
-                            github: 0,
-                            discord: 0,
-                        },
-                    },
-                    lastUpdated: new Date(),
-                },
-            }
-        }
-        return nativeStatus
-    }
-
-    static async getGCRStatusProperties(address: string): Promise<GCRExtended> {
-        const db = await Datasource.getInstance()
-        const gcrRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-        let statusProperties: GCRExtended
-        try {
-            const gcrSearch = await gcrRepository.findOneBy({
-                publicKey: address,
-            })
-            statusProperties = gcrSearch?.extended
-        } catch (e) {
-            statusProperties = null
-        }
-        return statusProperties
-    }
-
     // SECTION Setters
     // NOTE For consistency, setters should return a Promise<boolean>
 
@@ -610,6 +529,202 @@ export default class GCR {
             return false
         }
     }
+
+    static async getCampaignData() {
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+        const allUsers = await gcrMainRepository.find({
+            where: {
+                balance: LessThan(BigInt(1000000000000)),
+                flaggedReason: Not(
+                    In(["manualFlag", "referrerFlagged", "twitter_bot"]),
+                ),
+            },
+        })
+
+        const twitterUsers = new Set()
+
+        const campaignData = {
+            users: {
+                total: 0,
+                withTwitter: {
+                    total: 0,
+                    followDemos: 0,
+                },
+                withWeb3Wallet: 0,
+                fromReferral: 0,
+            },
+            points: {
+                total: 0,
+                twitter: 0,
+                web3Wallets: 0,
+                accountsWithTwitterTotal: 0,
+                referrals: 0,
+                demosFollow: 0,
+                demTotal: 0,
+                accountsWithTwitterDemTotal: 0,
+            },
+            evmAccounts: 0,
+            solanaAccounts: 0,
+        }
+
+        for (const user of allUsers) {
+            campaignData.users.total++
+            campaignData.points.total += user.points.totalPoints
+            campaignData.points.twitter +=
+                user.points.breakdown.socialAccounts.twitter
+            campaignData.points.referrals +=
+                user.points.breakdown.referrals || 0
+            campaignData.points.demosFollow +=
+                user.points.breakdown.demosFollow || 0
+
+            const web3WalletPoints = Object.values(
+                user.points.breakdown.web3Wallets,
+            ).reduce(function (acc, curr) {
+                return acc + curr
+            }, 0)
+
+            campaignData.points.web3Wallets += web3WalletPoints
+            campaignData.users.withWeb3Wallet += web3WalletPoints ? 1 : 0
+
+            if (user.identities.web2.twitter) {
+                campaignData.points.accountsWithTwitterTotal +=
+                    user.points.totalPoints || 0
+                for (const twitterAccount of user.identities.web2.twitter) {
+                    twitterUsers.add(twitterAccount.userId)
+                    campaignData.users.withTwitter.followDemos += user.points
+                        .breakdown.demosFollow
+                        ? 1
+                        : 0
+                }
+            }
+
+            if (user.identities.xm["evm"]) {
+                for (const evmAccount of Object.keys(
+                    user.identities.xm["evm"],
+                )) {
+                    campaignData.evmAccounts++
+                }
+            }
+
+            if (user.identities.xm["solana"]) {
+                campaignData.solanaAccounts++
+            }
+
+            if (user.referralInfo && user.referralInfo.referredBy) {
+                campaignData.users.fromReferral++
+            }
+        }
+
+        campaignData.users.withTwitter.total = twitterUsers.size
+        campaignData.points.demTotal = campaignData.points.total * 30
+        campaignData.points.accountsWithTwitterDemTotal =
+            campaignData.points.accountsWithTwitterTotal * 30
+
+        return campaignData
+    }
+
+    /**
+     * @param twitterUsernames List of twitter usernames to award points to
+     * @returns Array of usernames that were successfully awarded points
+     */
+    static async awardPoints(
+        twitterUsernames: string[],
+    ): Promise<Record<string, string>[]> {
+        if (!twitterUsernames || twitterUsernames.length === 0) {
+            console.log("No Twitter usernames provided")
+            return []
+        }
+
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+        // Query accounts that have Twitter identities with usernames in the provided array
+        const accounts = await gcrMainRepository
+            .createQueryBuilder("gcr")
+            .where(
+                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'username' = ANY(:usernames))",
+                { usernames: twitterUsernames },
+            )
+            .getMany()
+
+        let awardedCount = 0
+        let skippedCount = 0
+        const awardedAccounts: Record<string, string>[] = []
+
+        for (const account of accounts) {
+            // Check if the account has zero Twitter points (means Twitter was already connected elsewhere)
+            if (account.points?.breakdown?.socialAccounts?.twitter === 0) {
+                console.log(
+                    `Skipping account ${account.pubkey} - Twitter already connected to another account`,
+                )
+                skippedCount++
+                continue
+            }
+
+            // Initialize weeklyChallenge if it doesn't exist
+            if (!account.points.breakdown.weeklyChallenge) {
+                account.points.breakdown.weeklyChallenge = []
+            }
+
+            // Add the weekly challenge point
+            const challengeEntry = {
+                date: new Date().toISOString(),
+                points: 1,
+            }
+
+            account.points.breakdown.weeklyChallenge.push(challengeEntry)
+            account.points.totalPoints = (account.points.totalPoints || 0) + 1
+            account.points.lastUpdated = new Date()
+
+            // Get Twitter username that matches the provided list
+            const twitterIdentity = account.identities.web2?.twitter?.find(
+                (twitter: any) => twitterUsernames.includes(twitter.username),
+            )
+
+            // Save the account
+            await gcrMainRepository.save(account)
+            awardedCount++
+
+            // Add to successful usernames list
+            if (twitterIdentity?.username) {
+                awardedAccounts.push({
+                    username: twitterIdentity.username,
+                    pubkey: account.pubkey,
+                })
+            }
+        }
+
+        return awardedAccounts
+    }
+
+    // static async getFlaggedAccounts(start: number, end: number) {
+    //     const db = await Datasource.getInstance()
+    //     const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+    //     const flaggedAccounts = await gcrMainRepository.find({
+    //         where: { flagged: true },
+    //         order: { pubkey: "ASC" },
+    //         skip: start,
+    //         take: end - start,
+    //     })
+
+    //     return flaggedAccounts
+    // }
+
+    // static async removeAccount(address: string) {
+    //     const db = await Datasource.getInstance()
+    //     const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+    //     return await gcrMainRepository.delete({ pubkey: address })
+    // }
+
+    // static async unflagAccount(address: string) {
+    //     const db = await Datasource.getInstance()
+    //     const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+    //     return await gcrMainRepository.update(
+    //         { pubkey: address },
+    //         { flagged: false, flaggedReason: "", reviewed: true },
+    //     )
+    // }
 
     // TODO Build objects for tokens and nfts and write setters for them
 

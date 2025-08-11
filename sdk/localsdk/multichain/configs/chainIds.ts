@@ -6,6 +6,10 @@ export const chainIds = {
         goerli: 5,
         sepolia: 11155111,
         holesky: 17000,
+        arbitrumOne: 42161,
+        arbitrumNova: 42170,
+        base: 8453,
+        polygon: 137,
     },
     arbitrum: {
         mainnet: 42161,

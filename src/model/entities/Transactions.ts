@@ -1,3 +1,4 @@
+import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import { Column, Entity, Index, PrimaryGeneratedColumn } from "typeorm"
 
 @Entity("transactions")
@@ -28,7 +29,7 @@ export class Transactions {
     content: NonNullable<any>
 
     @Column("varchar", { name: "type" })
-    type: string
+    type: TransactionContent["type"]
 
     @Column("varchar", { name: "from" })
     from: string
