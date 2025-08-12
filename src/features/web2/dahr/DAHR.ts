@@ -65,6 +65,7 @@ export class DAHR {
         headers,
         payload,
         authorization,
+        url,
     }: IDAHRStartProxyParams): Promise<IWeb2Result> {
         // Make sure we have a web2Request at this point
         required(this._web2Request, "web2Request")
@@ -75,6 +76,7 @@ export class DAHR {
                 raw: {
                     ...this._web2Request.raw,
                     action: EnumWeb2Actions.START_PROXY,
+                    url,
                 },
             },
             targetMethod: method,
@@ -89,8 +91,8 @@ export class DAHR {
     /**
      * Stop the proxy.
      */
-    stopProxy(): void {
-        this._proxy.stopProxy()
+    async stopProxy(): Promise<void> {
+        await this._proxy.stopProxy()
     }
 
     /**
@@ -100,8 +102,6 @@ export class DAHR {
     toSerializable(): {
         sessionId: string
         web2Request: IWeb2Request
-        startProxy: string
-        stopProxy: string
     } {
         return {
             sessionId: this.sessionId,
@@ -111,8 +111,6 @@ export class DAHR {
                 hash: this.web2Request.hash,
                 signature: this.web2Request.signature,
             },
-            startProxy: "web2ProxyRequest",
-            stopProxy: "web2ProxyRequest",
         }
     }
 }
