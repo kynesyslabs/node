@@ -104,3 +104,11 @@ src/GTAGS
 output/*
 .env
 .vscode/settings.json
+
+# Solana/Anchor specific files
+.anchor
+**/*.rs.bk
+test-ledger
+.yarn
+src/features/bridges/SolanaTankProgram/solana_tank/target/
+src/features/bridges/SolanaTankProgram/solana_tank/node_modules/
