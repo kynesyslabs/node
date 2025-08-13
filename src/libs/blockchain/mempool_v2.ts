@@ -4,7 +4,7 @@ import Datasource from "@/model/datasource"
 import TxUtils from "./transaction"
 import log from "src/utilities/logger"
 import { MempoolTx } from "@/model/entities/Mempool"
-import { Transaction } from "@kynesyslabs/demosdk/types"
+import { Transaction, NativeBridgeTransaction } from "@kynesyslabs/demosdk/types"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import Chain from "./chain"
 
@@ -61,6 +61,25 @@ export default class Mempool {
 
     public static async checkTransactionByHash(hash: string) {
         return await this.repo.exists({ where: { hash: hash } })
+    }
+
+    /**
+     * Returns native bridge transactions for a specific block number
+     * 
+     * @param blockNumber - The block number to filter by
+     * @returns Array of native bridge transactions
+     */
+    public static async getNativeBridgeTransactions(blockNumber: number): Promise<NativeBridgeTransaction[]> {
+        // Use raw query to filter by JSON content field efficiently
+        const nativeBridgeTxs = await this.repo
+            .createQueryBuilder("tx")
+            .where("tx.blockNumber = :blockNumber", { blockNumber })
+            .andWhere("tx.content ->> 'type' = :type", { type: "nativeBridge" })
+            .orderBy("tx.timestamp", "ASC")
+            .addOrderBy("tx.hash", "ASC")
+            .getMany()
+
+        return nativeBridgeTxs as NativeBridgeTransaction[]
     }
 
     public static async addTransaction(
