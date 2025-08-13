@@ -1,3 +1,4 @@
+!Cargo.toml
 dist/
 architecture/
 *cache*.json
