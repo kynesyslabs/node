@@ -5,10 +5,10 @@ import { URL } from "url"
 import net from "net"
 import {
     IWeb2Request,
-    EnumWeb2Methods,
     IWeb2Result,
     IAuthorizationConfig,
     ISendHTTPRequestParams,
+    Web2Method,
 } from "@kynesyslabs/demosdk/types"
 import required from "src/utilities/required"
 import stream from "stream"
@@ -119,8 +119,8 @@ export class Proxy {
             })
 
             if (
-                targetMethod !== EnumWeb2Methods.GET &&
-                targetMethod !== EnumWeb2Methods.DELETE
+                targetMethod !== "GET" &&
+                targetMethod !== "DELETE"
             ) {
                 req.write(JSON.stringify(payload))
             }
@@ -293,7 +293,7 @@ export class Proxy {
     private isAuthorizedRequest(req: http.IncomingMessage): boolean {
         const sessionIdHeader = req.headers["x-dahr-session-id"]
         const url = req.url || ""
-        const method = req.method as EnumWeb2Methods
+        const method = req.method as Web2Method
 
         // Check if this URL/method combination is in exceptions
         const isExempt = this._authConfig.exceptions.some(
@@ -338,7 +338,7 @@ export class Proxy {
     private createHeaders(
         targetHostname: string,
         targetPort: number,
-        targetMethod: EnumWeb2Methods,
+        targetMethod: Web2Method,
         targetHeaders: IWeb2Request["raw"]["headers"],
         targetAuthorization: string,
         targetUrl: string,
@@ -362,9 +362,9 @@ export class Proxy {
         // Only set Content-Type if not provided by user
         if (
             [
-                EnumWeb2Methods.POST,
-                EnumWeb2Methods.PUT,
-                EnumWeb2Methods.PATCH,
+                "POST",
+                "PUT",
+                "PATCH",
             ].includes(targetMethod) &&
             !headers["Content-Type"]
         ) {
@@ -381,7 +381,7 @@ export class Proxy {
 
     private requiresAuthorization(
         url: string,
-        method: EnumWeb2Methods,
+        method: Web2Method,
     ): boolean {
         if (this._authConfig.requireAuthForAll) {
             for (const exception of this._authConfig.exceptions) {
