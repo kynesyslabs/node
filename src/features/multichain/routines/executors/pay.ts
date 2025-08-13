@@ -6,6 +6,7 @@ import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 import { TransactionResponse } from "sdk/localsdk/multichain/types/multichain"
 import checkSignedPayloads from "src/utilities/checkSignedPayloads"
 import validateIfUint8Array from "@/utilities/validateUint8Array"
+import handleAptosPayRest from "./aptos_pay_rest"
 
 /**
  * Executes a XM pay operation and returns
@@ -88,7 +89,8 @@ export default async function handlePayOperation(
             break
 
         case "aptos":
-            result = await genericJsonRpcPay(multichain.APTOS, rpcUrl, operation)
+            // result = await genericJsonRpcPay(multichain.APTOS, rpcUrl, operation)
+            result = await handleAptosPayRest(operation)
             break
 
         default:
