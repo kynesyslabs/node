@@ -40,6 +40,7 @@ const noAuthMethods = ["nodeCall"]
 const PROTECTED_ENDPOINTS = new Set([
     "rate-limit/unblock",
     "getCampaignData",
+    "awardPoints",
 ])
 
 export const emptyResponse: RPCResponse = {
@@ -148,7 +149,6 @@ async function processPayload(
     if (splits.length > 1) {
         sender = splits[1]
     }
-
 
     if (PROTECTED_ENDPOINTS.has(payload.method)) {
         if (sender !== getSharedState.SUDO_PUBKEY) {
@@ -282,6 +282,20 @@ async function processPayload(
             return {
                 result: 200,
                 response: await GCR.getCampaignData(),
+                require_reply: false,
+                extra: null,
+            }
+        }
+
+        case "awardPoints": {
+            const twitterUsernames = payload.params[0].message as string[]
+            const awardedAccounts = await GCR.awardPoints(twitterUsernames)
+
+            return {
+                result: 200,
+                response: {
+                    awardedAccounts,
+                },
                 require_reply: false,
                 extra: null,
             }

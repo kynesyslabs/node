@@ -536,7 +536,9 @@ export default class GCR {
         const allUsers = await gcrMainRepository.find({
             where: {
                 balance: LessThan(BigInt(1000000000000)),
-                flaggedReason: Not(In(["manualFlag", "referrerFlagged", "twitter_bot"])),
+                flaggedReason: Not(
+                    In(["manualFlag", "referrerFlagged", "twitter_bot"]),
+                ),
             },
         })
 
@@ -620,6 +622,80 @@ export default class GCR {
             campaignData.points.accountsWithTwitterTotal * 30
 
         return campaignData
+    }
+
+    /**
+     * @param twitterUsernames List of twitter usernames to award points to
+     * @returns Array of usernames that were successfully awarded points
+     */
+    static async awardPoints(
+        twitterUsernames: string[],
+    ): Promise<Record<string, string>[]> {
+        if (!twitterUsernames || twitterUsernames.length === 0) {
+            console.log("No Twitter usernames provided")
+            return []
+        }
+
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+        // Query accounts that have Twitter identities with usernames in the provided array
+        const accounts = await gcrMainRepository
+            .createQueryBuilder("gcr")
+            .where(
+                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'username' = ANY(:usernames))",
+                { usernames: twitterUsernames },
+            )
+            .getMany()
+
+        let awardedCount = 0
+        let skippedCount = 0
+        const awardedAccounts: Record<string, string>[] = []
+
+        for (const account of accounts) {
+            // Check if the account has zero Twitter points (means Twitter was already connected elsewhere)
+            if (account.points?.breakdown?.socialAccounts?.twitter === 0) {
+                console.log(
+                    `Skipping account ${account.pubkey} - Twitter already connected to another account`,
+                )
+                skippedCount++
+                continue
+            }
+
+            // Initialize weeklyChallenge if it doesn't exist
+            if (!account.points.breakdown.weeklyChallenge) {
+                account.points.breakdown.weeklyChallenge = []
+            }
+
+            // Add the weekly challenge point
+            const challengeEntry = {
+                date: new Date().toISOString(),
+                points: 1,
+            }
+
+            account.points.breakdown.weeklyChallenge.push(challengeEntry)
+            account.points.totalPoints = (account.points.totalPoints || 0) + 1
+            account.points.lastUpdated = new Date()
+
+            // Get Twitter username that matches the provided list
+            const twitterIdentity = account.identities.web2?.twitter?.find(
+                (twitter: any) => twitterUsernames.includes(twitter.username),
+            )
+
+            // Save the account
+            await gcrMainRepository.save(account)
+            awardedCount++
+
+            // Add to successful usernames list
+            if (twitterIdentity?.username) {
+                awardedAccounts.push({
+                    username: twitterIdentity.username,
+                    pubkey: account.pubkey,
+                })
+            }
+        }
+
+        return awardedAccounts
     }
 
     // static async getFlaggedAccounts(start: number, end: number) {

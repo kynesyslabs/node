@@ -93,16 +93,18 @@ export default class Chain {
         start = 0,
         limit = 100,
     ) {
-        const whereCondition: any = {
-            from: address,
-        }
+        const whereConditions: any[] = [
+            { from: address },
+            { to: address },
+        ]
 
         if (txtype !== "all") {
-            whereCondition.type = txtype
+            whereConditions[0].type = txtype
+            whereConditions[1].type = txtype
         }
 
         const transaction = await this.transactions.find({
-            where: whereCondition,
+            where: whereConditions,
             order: {
                 timestamp: "DESC",
             },
