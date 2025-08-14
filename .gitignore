@@ -1,3 +1,12 @@
+# Specific branches ignores
+*APTOS*.md
+*_TO_PORT.md
+*_SCHEMA.md
+*_PHASES.md
+target/
+bridges_docs/
+aptos_examples_ts/
+
 #Demos files
 /.demos_id*
 demos_peers
