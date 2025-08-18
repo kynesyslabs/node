@@ -703,7 +703,7 @@ export default class GCR {
                     isRollback: false,
                     operation: "add",
                     account: addresses[account.username],
-                    amount: account.points,
+                    amount: Number(account.points),
                     date: awardDate,
                     txhash: "",
                 })

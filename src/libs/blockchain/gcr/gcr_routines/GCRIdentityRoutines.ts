@@ -436,6 +436,10 @@ export default class GCRIdentityRoutines {
             points: amount,
         }
 
+        if (!account.points.breakdown.weeklyChallenge) {
+            account.points.breakdown.weeklyChallenge = []
+        }
+
         account.points.breakdown.weeklyChallenge.push(challengeEntry)
         account.points.totalPoints = (account.points.totalPoints || 0) + amount
         account.points.lastUpdated = new Date()
@@ -454,6 +458,10 @@ export default class GCRIdentityRoutines {
     ): Promise<GCRResult> {
         const { account: address, amount, date } = editOperation
         const account = await ensureGCRForUser(address)
+
+        if (!account.points.breakdown.weeklyChallenge) {
+            account.points.breakdown.weeklyChallenge = []
+        }
 
         account.points.breakdown.weeklyChallenge =
             account.points.breakdown.weeklyChallenge.filter(
