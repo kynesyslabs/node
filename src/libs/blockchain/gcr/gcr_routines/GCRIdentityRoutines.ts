@@ -423,6 +423,55 @@ export default class GCRIdentityRoutines {
         return { success: true, message: "PQC identities removed" }
     }
 
+    static async applyAwardPoints(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { account: address, amount, date } = editOperation
+        const account = await ensureGCRForUser(address)
+
+        const challengeEntry = {
+            date,
+            points: amount,
+        }
+
+        account.points.breakdown.weeklyChallenge.push(challengeEntry)
+        account.points.totalPoints = (account.points.totalPoints || 0) + amount
+        account.points.lastUpdated = new Date()
+
+        if (!simulate) {
+            await gcrMainRepository.save(account)
+        }
+
+        return { success: true, message: "Points awarded" }
+    }
+
+    static async applyAwardPointsRollback(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { account: address, amount, date } = editOperation
+        const account = await ensureGCRForUser(address)
+
+        account.points.breakdown.weeklyChallenge =
+            account.points.breakdown.weeklyChallenge.filter(
+                (entry: { date: string }) => entry.date !== date,
+            )
+
+        account.points.totalPoints =
+            (account.points.totalPoints || 0) - amount < 0
+                ? 0
+                : account.points.totalPoints - amount
+
+        if (!simulate) {
+            await gcrMainRepository.save(account)
+        }
+
+        return { success: true, message: "Points deducted" }
+    }
+
     static async apply(
         editOperation: GCREdit,
         gcrMainRepository: Repository<GCRMain>,
@@ -491,6 +540,20 @@ export default class GCRIdentityRoutines {
                 break
             case "pqcremove":
                 result = await this.applyPqcIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "pointsadd":
+                result = await this.applyAwardPoints(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "pointsremove":
+                result = await this.applyAwardPointsRollback(
                     identityEdit,
                     gcrMainRepository,
                     simulate,
