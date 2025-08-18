@@ -422,6 +422,11 @@ export class EVMSmartContractManagement {
             // This would need proper log parsing based on USDC transfer events
             // Simplified validation for now
             const tankAddress = tankConfig.address.toLowerCase()
+            // Error on 0x0000... address
+            if (tankAddress === "0x0000000000000000000000000000000000000000") {
+                log.error(`Invalid tank address for ${chainKey}: ${tankAddress}: is the contract deployed?`)
+                return { valid: false }
+            }
             const hasTransferToTank = receipt.logs.some((log: any) => 
                 log.address?.toLowerCase().includes("usdc") &&
                 log.topics?.some((topic: string) => topic.toLowerCase().includes(tankAddress.slice(2))),

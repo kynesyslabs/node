@@ -21,7 +21,7 @@ export const chainIds = {
     },
     polygon: {
         mainnet: 137,
-        mumbai: 80001,
+        amoy: 80002,
     },
     btc: {
         mainnet: 2203,

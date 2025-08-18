@@ -1,6 +1,6 @@
 {
     "evm.eth": {
-        "sepolia": "https://sepolia.infura.io/v3/YOUR_INFURA_PROJECT_ID",
+        "sepolia": "https://sepolia.infura.io",
         "mainnet": "https://sepolia.infura.io/v3/YOUR_INFURA_PROJECT_ID"
     },
     "evm.polygon": {

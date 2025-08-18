@@ -22,8 +22,8 @@ export const evmProviders = {
     },
     polygon: {
         mainnet: "https://polygon.blockpi.network/v1/rpc/public",
-        mumbai: "https://rpc.ankr.com/polygon_mumbai",
-        testnet: "https://rpc.ankr.com/polygon_mumbai",
+        amoy: "https://rpc-amoy.polygon.technology",
+        testnet: "https://rpc-amoy.polygon.technology",
     },
     base: {
         mainnet: "https://base.llamarpc.com",
