@@ -766,6 +766,19 @@ export default class GCR {
             }
         }
 
+        // INFO: Make sure each twitter username has valid points
+        for (const account of twitterUsernames) {
+            const points = Number(account.points)
+            if (isNaN(points) || points <= 0) {
+                return {
+                    success: false,
+                    message:
+                        "Failed: Invalid input. Point value must be a number greater than 0.",
+                    confirmationBlock: null,
+                }
+            }
+        }
+
         const tx = await this.createAwardPointsTransaction(twitterUsernames)
 
         const editResults = await HandleGCR.applyToTx(
