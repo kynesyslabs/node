@@ -22,6 +22,7 @@ console.log(result)
 ```
 
 ### Get campaign data
+
 Returns data related to the incentives campaign. eg. points and their distribution
 
 ```ts
@@ -34,8 +35,24 @@ console.log(result)
 The method call awards points to the accounts with the supplied list of twitter usernames. Only the first account to connect a twitter account is awarded points.
 
 ```ts
-const result = await demos.call("awardPoints", ["username1", "username2"])
+interface Response {
+    success: boolean
+    message: string
+    error?: string
+    txhash?: string
+    confirmationBlock: number
+}
+
+const result = await demos.call("awardPoints", [
+    {
+        username: "username1",
+        points: 1,
+    },
+    {
+        username: "username2",
+        points: 2,
+    },
+]) as Response;
+
 console.log(result)
 ```
-
-NOTE: This endpoint is configured to award a single point to each account.
