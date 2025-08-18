@@ -200,6 +200,7 @@ export async function consensusRoutine(): Promise<void> {
         // INFO: CONSENSUS ACTION 7: End the consensus routine
         await updateValidatorPhase(7)
     } catch (error) {
+        console.error(error)
         if (error instanceof NotInShardError) {
             log.info(
                 "[consensusRoutine] We are not in the shard, waiting for the block",
