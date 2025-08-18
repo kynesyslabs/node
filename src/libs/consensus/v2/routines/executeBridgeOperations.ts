@@ -140,6 +140,7 @@ export default async function executeBridgeOperations(
                 }
             } else {
                 // TODO SOLANA not implemented yet
+                // For now, just log and skip
                 log.info(`${fname} Solana destinations not yet supported`)
                 failed.push(bridgeTx.hash)
                 continue
