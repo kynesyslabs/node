@@ -1,3 +1,12 @@
+# Specific branches ignores
+*APTOS*.md
+*_TO_PORT.md
+*_SCHEMA.md
+*_PHASES.md
+target/
+bridges_docs/
+aptos_examples_ts/
+
 #Demos files
 bridges_docs/
 /.demos_id*
@@ -116,3 +125,4 @@ build/aptoswares
 src/features/multichain/chainwares/aptoswares/TECHNICAL_PROPOSAL_APTOS_INTEGRATION.md
 APTOS_INTEGRATION_PLAN.md
 aptos_examples_ts
+
