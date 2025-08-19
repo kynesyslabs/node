@@ -7,7 +7,15 @@ import {
     TelegramChallengeResponse,
     Transaction,
 } from "@kynesyslabs/demosdk/types"
-import { InferFromTelegramPayload } from "@kynesyslabs/demosdk/abstraction"
+// NOTE: The SDK currently has no exported InferFromTelegramPayload type (compile error showed only Twitter variant).
+// Define a minimal local interface mirroring expected web2 identity payload shape for Telegram.
+interface TelegramWeb2Payload {
+    context: 'telegram'
+    proof: string // bot attestation JSON string
+    username: string
+    userId: string
+}
+
 import { ucrypto, hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 
 /**
@@ -60,8 +68,27 @@ export default class Telegram {
                 log.error("Genesis block not found or has no content")
                 return []
             }
-
-            const genesisData = JSON.parse(genesisBlock.content)
+            // genesisBlock.content is a JSON object (typeorm column json), NOT a string.
+            // The original genesis data we need (balances) is embedded as string in content.extra.genesisData.
+            let genesisData: any
+            if (typeof genesisBlock.content === "string") {
+                // (unlikely) stored as string JSON
+                genesisData = JSON.parse(genesisBlock.content)
+            } else if (
+                typeof genesisBlock.content === "object" &&
+                genesisBlock.content?.extra?.genesisData
+            ) {
+                // extra.genesisData is a JSON string created in generateGenesisBlock
+                try {
+                    genesisData = JSON.parse(genesisBlock.content.extra.genesisData)
+                } catch (e) {
+                    log.error("Failed to parse embedded genesisData string:" + e)
+                    return []
+                }
+            } else {
+                // Fallback: maybe balances directly present
+                genesisData = genesisBlock.content
+            }
             
             // Extract addresses from balances array
             this.authorizedBots = genesisData.balances?.map((balance: [string, string]) => 
@@ -122,19 +149,21 @@ export default class Telegram {
         nonce: string
     } | null {
         const parts = challenge.split("_")
-        if (parts.length !== 5 || parts[0] !== "DEMOS" || parts[1] !== "TG" || parts[2] !== "BIND") {
+        // Expected format: DEMOS_TG_BIND_<demos_address>_<timestamp>_<nonce>
+        if (parts.length !== 6 || parts[0] !== "DEMOS" || parts[1] !== "TG" || parts[2] !== "BIND") {
             return null
         }
-        
+        const demosAddress = parts[3]
         const timestamp = parseInt(parts[4])
+        const nonce = parts[5]
         if (isNaN(timestamp)) {
             return null
         }
 
         return {
-            demosAddress: parts[3],
+            demosAddress,
             timestamp,
-            nonce: parts[5],
+            nonce,
         }
     }
 
@@ -142,7 +171,16 @@ export default class Telegram {
      * Verify a Telegram verification request from a bot
      * This includes both bot signature verification and user signature verification
      */
-    async verifyAttestation(request: TelegramVerificationRequest): Promise<TelegramVerificationResponse> {
+    /**
+     * Verify a Telegram attestation.
+     * mode = 'attest'  : interactive phase (bot hits /api/tg-verify). Challenge must exist & be unused; we then mark it used.
+     * mode = 'validate': on-chain validation phase (parser replays verification). We ALLOW reused / missing (expired GC) challenge
+     *                   while still verifying both signatures cryptographically. This prevents false negatives when broadcasting.
+     */
+    async verifyAttestation(
+        request: TelegramVerificationRequest,
+        mode: 'attest' | 'validate' = 'attest',
+    ): Promise<TelegramVerificationResponse> {
         try {
             // 1. Check if bot address is authorized (from genesis)
             if (!(await this.isAuthorizedBot(request.bot_address))) {
@@ -162,19 +200,20 @@ export default class Telegram {
                 }
             }
 
-            // 3. Check if challenge exists and is not expired/used
-            const storedChallenge = this.challenges.get(`DEMOS_TG_BIND_${challengeData.demosAddress}_${challengeData.timestamp}_${challengeData.nonce}`)
-            if (!storedChallenge) {
-                return { 
-                    success: false, 
-                    message: "Challenge not found or expired", 
+            // 3. Fetch stored challenge (in-memory). For 'validate' we tolerate absence or reuse.
+            const storedChallenge = this.challenges.get(
+                `DEMOS_TG_BIND_${challengeData.demosAddress}_${challengeData.timestamp}_${challengeData.nonce}`,
+            )
+            if (!storedChallenge && mode === 'attest') {
+                return {
+                    success: false,
+                    message: 'Challenge not found or expired',
                 }
             }
-
-            if (storedChallenge.used) {
-                return { 
-                    success: false, 
-                    message: "Challenge already used", 
+            if (storedChallenge?.used && mode === 'attest') {
+                return {
+                    success: false,
+                    message: 'Challenge already used',
                 }
             }
 
@@ -227,8 +266,10 @@ export default class Telegram {
                 }
             }
 
-            // 6. Mark challenge as used
-            storedChallenge.used = true
+            // 6. Mark challenge as used only during interactive attestation
+            if (storedChallenge && mode === 'attest') {
+                storedChallenge.used = true
+            }
 
             // 7. Create unsigned identity transaction following Twitter pattern
             const unsignedTransaction = this.createIdentityTransaction(
@@ -293,7 +334,7 @@ export default class Telegram {
         // REVIEW: Create transaction following the exact Twitter pattern
         // See DemosTransactions.empty() and Identities.inferWeb2Identity()
         
-        const telegramPayload: InferFromTelegramPayload = {
+        const telegramPayload: TelegramWeb2Payload = {
             context: "telegram",
             proof: proofData,  // Bot attestation containing all verification data
             username: username,
@@ -306,8 +347,10 @@ export default class Telegram {
             content: {
                 type: "identity",
                 from_ed25519_address: demosAddress,
+                from: demosAddress, // required by TransactionContent
                 to: demosAddress, // Identity transactions are self-directed
                 amount: 0, // No tokens transferred for identity binding
+                transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0 },
                 data: [
                     "identity", // Transaction data type identifier
                     {
@@ -321,6 +364,9 @@ export default class Telegram {
                 gcr_edits: [], // Will be generated during transaction validation
             },
             signature: null, // User must sign this
+            ed25519_signature: null as any,
+            status: "pending" as any,
+            blockNumber: 0,
         }
 
         log.info(`Created unsigned Telegram identity transaction for ${demosAddress} ↔ ${telegramId}`)

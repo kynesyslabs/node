@@ -55,7 +55,9 @@ export class TelegramProofParser extends Web2ProofParser {
             }
 
             // Verify the bot attestation first (this validates both signatures)
-            const verificationResult = await this.telegram.verifyAttestation(attestationData)
+            // IMPORTANT: use mode 'validate' here because interactive phase already marked challenge as used.
+            // We only need cryptographic verification now; reused/missing challenge should not fail.
+            const verificationResult = await this.telegram.verifyAttestation(attestationData, 'validate')
             
             if (!verificationResult.success) {
                 throw new Error(`Telegram verification failed: ${verificationResult.message}`)
