@@ -57,6 +57,8 @@ import {
 import { IdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
+import handleContractDeploy from "./routines/transactions/handleContractDeploy"
+import handleContractCall from "./routines/transactions/handleContractCall"
 /* // ! Note: this will be removed once demosWork is in place
 import {
     NativePayload,
@@ -384,6 +386,66 @@ export default class ServerHandlers {
                     }
                 }
                 result.response = nativeBridgeResult
+                break
+
+            case "contractDeploy":
+                try {
+                    payload = tx.content.data
+                    const contractDeployResult = await handleContractDeploy(
+                        payload[1],
+                        sender,
+                    )
+                    result.success = contractDeployResult.success
+                    result.response = {
+                        message: contractDeployResult.message,
+                        contractAddress: contractDeployResult.contractAddress,
+                        deploymentFee: contractDeployResult.deploymentFee?.toString(),
+                    }
+                    if (!contractDeployResult.success) {
+                        result.extra = {
+                            error: contractDeployResult.error,
+                        }
+                    }
+                } catch (e) {
+                    log.error("[handleExecuteTransaction] Error in contractDeploy: " + e)
+                    result.success = false
+                    result.response = {
+                        message: "Contract deployment failed",
+                    }
+                    result.extra = {
+                        error: e.toString(),
+                    }
+                }
+                break
+
+            case "contractCall":
+                try {
+                    payload = tx.content.data
+                    const contractCallResult = await handleContractCall(
+                        payload[1],
+                        sender,
+                    )
+                    result.success = contractCallResult.success
+                    result.response = {
+                        message: contractCallResult.message,
+                        result: contractCallResult.result,
+                        gasUsed: contractCallResult.gasUsed?.toString(),
+                    }
+                    if (!contractCallResult.success) {
+                        result.extra = {
+                            error: contractCallResult.error,
+                        }
+                    }
+                } catch (e) {
+                    log.error("[handleExecuteTransaction] Error in contractCall: " + e)
+                    result.success = false
+                    result.response = {
+                        message: "Contract call failed",
+                    }
+                    result.extra = {
+                        error: e.toString(),
+                    }
+                }
                 break
         }
 
