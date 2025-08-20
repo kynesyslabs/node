@@ -116,12 +116,12 @@ export function validateType(value: any, type: ContractType): boolean {
  */
 export function validateMethodArgs(
     args: any[], 
-    method: ABIMethod
+    method: ABIMethod,
 ): { valid: boolean; error?: string } {
     if (args.length !== method.inputs.length) {
         return { 
             valid: false, 
-            error: `Expected ${method.inputs.length} arguments, got ${args.length}` 
+            error: `Expected ${method.inputs.length} arguments, got ${args.length}`, 
         }
     }
 
@@ -132,7 +132,7 @@ export function validateMethodArgs(
         if (!validateType(arg, input.type)) {
             return {
                 valid: false,
-                error: `Argument ${input.name} at position ${i} expected type ${input.type}`
+                error: `Argument ${input.name} at position ${i} expected type ${input.type}`,
             }
         }
     }
@@ -146,7 +146,7 @@ export function validateMethodArgs(
  */
 export function generateTypeScriptInterface(
     contractName: string, 
-    abi: ContractABI
+    abi: ContractABI,
 ): string {
     let interface_ = `export interface ${contractName}Contract {\n`
     

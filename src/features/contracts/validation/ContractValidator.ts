@@ -49,7 +49,7 @@ export function validateContractSource(source: string): {
     if (sizeInBytes > MAX_CONTRACT_SIZE) {
         return {
             valid: false,
-            error: `Contract size ${sizeInBytes} bytes exceeds maximum ${MAX_CONTRACT_SIZE} bytes`
+            error: `Contract size ${sizeInBytes} bytes exceeds maximum ${MAX_CONTRACT_SIZE} bytes`,
         }
     }
 
@@ -58,7 +58,7 @@ export function validateContractSource(source: string): {
         if (source.includes(banned)) {
             return {
                 valid: false,
-                error: `Contract contains banned API: ${banned}`
+                error: `Contract contains banned API: ${banned}`,
             }
         }
     }
@@ -70,13 +70,13 @@ export function validateContractSource(source: string): {
         if (!source.includes("class") || !source.includes("extends DemosContract")) {
             return {
                 valid: false,
-                error: "Contract must extend DemosContract base class"
+                error: "Contract must extend DemosContract base class",
             }
         }
     } catch (e) {
         return {
             valid: false,
-            error: "Invalid TypeScript syntax"
+            error: "Invalid TypeScript syntax",
         }
     }
 
@@ -98,7 +98,7 @@ export function validateStorageSize(storage: Record<string, any>): {
         return {
             valid: false,
             error: `Storage size ${sizeInBytes} bytes exceeds maximum ${MAX_STORAGE_SIZE} bytes`,
-            sizeInBytes
+            sizeInBytes,
         }
     }
 
@@ -146,7 +146,7 @@ export function validateContractData(contract: ContractData): {
 
     return {
         valid: errors.length === 0,
-        errors
+        errors,
     }
 }
 
