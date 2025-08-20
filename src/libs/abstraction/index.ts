@@ -5,6 +5,7 @@ import { type Web2ProofParser } from "./web2/parsers"
 import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { Twitter } from "../identity/tools/twitter"
+import { Transaction } from "@kynesyslabs/demosdk/types"
 
 /**
  * Fetches the proof data using the appropriate parser and verifies the signature
@@ -27,6 +28,7 @@ import { Twitter } from "../identity/tools/twitter"
 export async function verifyWeb2Proof(
     payload: Web2CoreTargetIdentityPayload,
     sender: string,
+    transaction?: Transaction,
 ) {
     let parser: typeof TwitterProofParser | typeof GithubProofParser | typeof TelegramProofParser
 
@@ -75,6 +77,7 @@ export async function verifyWeb2Proof(
     try {
         const { message, type, signature } = await instance.readData(
             payload.proof,
+            payload.context === "telegram" ? transaction : undefined,
         )
         try {
             const verified = await ucrypto.verify({

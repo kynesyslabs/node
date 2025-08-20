@@ -81,6 +81,7 @@ export default async function handleIdentityRequest(
             return await verifyWeb2Proof(
                 payload.payload as Web2CoreTargetIdentityPayload,
                 sender,
+                tx, // Pass the transaction for Telegram challenge hash validation
             )
         case "xm_identity_remove":
         case "pqc_identity_remove":

@@ -7,7 +7,16 @@ import {
     TelegramChallengeResponse,
     Transaction,
 } from "@kynesyslabs/demosdk/types"
-import { InferFromTelegramPayload } from "@kynesyslabs/demosdk/abstraction"
+// NOTE: The SDK currently has no exported InferFromTelegramPayload type (compile error showed only Twitter variant).
+// Define a minimal local interface mirroring expected web2 identity payload shape for Telegram.
+interface TelegramWeb2Payload {
+    context: 'telegram'
+    proof: string // bot attestation JSON string
+    username: string
+    userId: string
+    attestation_id?: string // Challenge hash for replay attack prevention
+}
+
 import { ucrypto, hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 
 /**
@@ -60,8 +69,27 @@ export default class Telegram {
                 log.error("Genesis block not found or has no content")
                 return []
             }
-
-            const genesisData = JSON.parse(genesisBlock.content)
+            // genesisBlock.content is a JSON object (typeorm column json), NOT a string.
+            // The original genesis data we need (balances) is embedded as string in content.extra.genesisData.
+            let genesisData: any
+            if (typeof genesisBlock.content === "string") {
+                // (unlikely) stored as string JSON
+                genesisData = JSON.parse(genesisBlock.content)
+            } else if (
+                typeof genesisBlock.content === "object" &&
+                genesisBlock.content?.extra?.genesisData
+            ) {
+                // extra.genesisData is a JSON string created in generateGenesisBlock
+                try {
+                    genesisData = JSON.parse(genesisBlock.content.extra.genesisData)
+                } catch (e) {
+                    log.error("Failed to parse embedded genesisData string:" + e)
+                    return []
+                }
+            } else {
+                // Fallback: maybe balances directly present
+                genesisData = genesisBlock.content
+            }
             
             // Extract addresses from balances array
             this.authorizedBots = genesisData.balances?.map((balance: [string, string]) => 
@@ -122,19 +150,21 @@ export default class Telegram {
         nonce: string
     } | null {
         const parts = challenge.split("_")
-        if (parts.length !== 5 || parts[0] !== "DEMOS" || parts[1] !== "TG" || parts[2] !== "BIND") {
+        // Expected format: DEMOS_TG_BIND_<demos_address>_<timestamp>_<nonce>
+        if (parts.length !== 6 || parts[0] !== "DEMOS" || parts[1] !== "TG" || parts[2] !== "BIND") {
             return null
         }
-        
+        const demosAddress = parts[3]
         const timestamp = parseInt(parts[4])
+        const nonce = parts[5]
         if (isNaN(timestamp)) {
             return null
         }
 
         return {
-            demosAddress: parts[3],
+            demosAddress,
             timestamp,
-            nonce: parts[5],
+            nonce,
         }
     }
 
@@ -142,7 +172,17 @@ export default class Telegram {
      * Verify a Telegram verification request from a bot
      * This includes both bot signature verification and user signature verification
      */
-    async verifyAttestation(request: TelegramVerificationRequest): Promise<TelegramVerificationResponse> {
+    /**
+     * Verify a Telegram attestation.
+     * mode = 'attest'  : interactive phase (bot hits /api/tg-verify). Challenge must exist & be unused; we then mark it used.
+     * mode = 'validate': on-chain validation phase (parser replays verification). We verify challenge reuse protection
+     *                   by checking the challenge hash embedded in the transaction payload.
+     */
+    async verifyAttestation(
+        request: TelegramVerificationRequest,
+        mode: 'attest' | 'validate' = 'attest',
+        transactionChallengeHash?: string, // For validate mode: hash from transaction payload
+    ): Promise<TelegramVerificationResponse> {
         try {
             // 1. Check if bot address is authorized (from genesis)
             if (!(await this.isAuthorizedBot(request.bot_address))) {
@@ -154,7 +194,9 @@ export default class Telegram {
             }
 
             // 2. Parse the challenge from user's signed message
-            const challengeData = this.parseChallenge(request.signed_challenge.split(":")[0] || request.signed_challenge)
+            const challengeInput = request.signed_challenge.split(":")[0] || request.signed_challenge
+
+            const challengeData = this.parseChallenge(challengeInput)
             if (!challengeData) {
                 return { 
                     success: false, 
@@ -162,23 +204,46 @@ export default class Telegram {
                 }
             }
 
-            // 3. Check if challenge exists and is not expired/used
-            const storedChallenge = this.challenges.get(`DEMOS_TG_BIND_${challengeData.demosAddress}_${challengeData.timestamp}_${challengeData.nonce}`)
-            if (!storedChallenge) {
-                return { 
-                    success: false, 
-                    message: "Challenge not found or expired", 
+            // 3. Calculate challenge hash for replay protection
+            const originalChallenge = `DEMOS_TG_BIND_${challengeData.demosAddress}_${challengeData.timestamp}_${challengeData.nonce}`
+            const challengeHash = crypto.createHash('sha256').update(originalChallenge).digest('hex')
+
+            // 4. Validate challenge reuse protection based on mode
+            const storedChallenge = this.challenges.get(originalChallenge)
+            
+            if (mode === 'attest') {
+                // Interactive mode: strict challenge validation
+                if (!storedChallenge) {
+                    return {
+                        success: false,
+                        message: 'Challenge not found or expired',
+                    }
+                }
+                if (storedChallenge.used) {
+                    return {
+                        success: false,
+                        message: 'Challenge already used',
+                    }
+                }
+            } else if (mode === 'validate') {        
+                // If no transaction challenge hash is provided, reject the validation (no legacy txs expected)
+                if (!transactionChallengeHash) {
+                    return {
+                        success: false,
+                        message: 'Transaction challenge hash missing - replay protection failed',
+                    }
+                } else {
+                    // Perform full replay protection validation
+                    if (challengeHash !== transactionChallengeHash) {
+                        return {
+                            success: false,
+                            message: 'Challenge hash mismatch - potential replay attack detected',
+                        }
+                    }
                 }
             }
 
-            if (storedChallenge.used) {
-                return { 
-                    success: false, 
-                    message: "Challenge already used", 
-                }
-            }
-
-            // 4. Verify bot signature
+            // 5. Verify bot signature
             const attestationData = {
                 telegram_id: request.telegram_id,
                 username: request.username,
@@ -203,8 +268,7 @@ export default class Telegram {
                 }
             }
 
-            // 5. Verify user signature against the original challenge
-            const originalChallenge = `DEMOS_TG_BIND_${challengeData.demosAddress}_${challengeData.timestamp}_${challengeData.nonce}`
+            // 6. Verify user signature against the original challenge
             const challengeMessage = new TextEncoder().encode(originalChallenge)
             
             // Extract signature from signed challenge (assuming format: "challenge:signature" or just signature)
@@ -227,10 +291,12 @@ export default class Telegram {
                 }
             }
 
-            // 6. Mark challenge as used
-            storedChallenge.used = true
+            // 7. Mark challenge as used only during interactive attestation
+            if (storedChallenge && mode === 'attest') {
+                storedChallenge.used = true
+            }
 
-            // 7. Create unsigned identity transaction following Twitter pattern
+            // 8. Create unsigned identity transaction with challenge hash for replay protection
             const unsignedTransaction = this.createIdentityTransaction(
                 challengeData.demosAddress,
                 request.telegram_id,
@@ -243,6 +309,7 @@ export default class Telegram {
                     bot_address: request.bot_address,
                     bot_signature: request.bot_signature,
                 }),
+                challengeHash, // Add challenge hash to prevent replay attacks
             )
 
             // 8. Return success with unsigned transaction for user to sign
@@ -277,11 +344,13 @@ export default class Telegram {
      * - Context: "web2" 
      * - Method: "web2_identity_assign"
      * - Payload contains Telegram identity data and bot attestation proof
+     * - Challenge hash embedded for replay attack prevention
      * 
      * @param demosAddress - User's Demos address
      * @param telegramId - Telegram user ID
      * @param username - Telegram username  
      * @param proofData - JSON string containing bot attestation
+     * @param challengeHash - SHA256 hash of the original challenge for replay protection
      * @returns Unsigned transaction ready for user signature
      */
     private createIdentityTransaction(
@@ -289,15 +358,14 @@ export default class Telegram {
         telegramId: string,
         username: string,
         proofData: string,
+        challengeHash: string,
     ): Transaction {
-        // REVIEW: Create transaction following the exact Twitter pattern
-        // See DemosTransactions.empty() and Identities.inferWeb2Identity()
-        
-        const telegramPayload: InferFromTelegramPayload = {
+        const telegramPayload: TelegramWeb2Payload = {
             context: "telegram",
             proof: proofData,  // Bot attestation containing all verification data
             username: username,
             userId: telegramId,
+            attestation_id: challengeHash, // Challenge hash for replay attack prevention
         }
 
         // Create transaction skeleton (same structure as Twitter identity transactions)
@@ -306,8 +374,10 @@ export default class Telegram {
             content: {
                 type: "identity",
                 from_ed25519_address: demosAddress,
+                from: demosAddress, // required by TransactionContent
                 to: demosAddress, // Identity transactions are self-directed
                 amount: 0, // No tokens transferred for identity binding
+                transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0 },
                 data: [
                     "identity", // Transaction data type identifier
                     {
@@ -321,10 +391,34 @@ export default class Telegram {
                 gcr_edits: [], // Will be generated during transaction validation
             },
             signature: null, // User must sign this
+            ed25519_signature: null as any,
+            status: "pending" as any,
+            blockNumber: 0,
         }
 
         log.info(`Created unsigned Telegram identity transaction for ${demosAddress} ↔ ${telegramId}`)
         return transaction
+    }
+
+    /**
+     * Extract challenge hash from a transaction payload
+     * Used during validation mode to verify replay protection
+     */
+    static extractChallengeHashFromTransaction(transaction: Transaction): string | null {
+        try {
+            if (
+                transaction &&
+                transaction.content &&
+                Array.isArray(transaction.content.data) &&
+                transaction.content.data[0] === "identity" &&
+                (transaction.content.data[1] as { payload?: TelegramWeb2Payload })?.payload?.attestation_id
+            ) {
+                return (transaction.content.data[1] as { payload: TelegramWeb2Payload }).payload.attestation_id || null;
+            }
+            return null;
+        } catch {
+            return null;
+        }
     }
 
     /**
