@@ -13,12 +13,12 @@ import log from "@/utilities/logger"
 
 // REVIEW: Temporary import from local SDK build to fix version mismatch
 import type {
-    BridgeOperation as NativeBridgeOperation,
-    BridgeOperationCompiled as NativeBridgeOperationCompiled,
+    NativeBridgeOperation,
+    NativeBridgeOperationCompiled,
     CompiledContent,
     EVMTankData,
     SolanaTankData,
-} from "../../../../sdks/build/bridge/nativeBridgeTypes" // FIXME Once we have a proper SDK build, use the correct import path
+} from "@kynesyslabs/demosdk/bridge" // FIXME Once we have a proper SDK build, use the correct import path
 
 // Global tank management singleton
 let tankManager: EVMSmartContractManagement | null = null
@@ -34,11 +34,12 @@ async function initializeTankManager(): Promise<void> {
     try {
         tankManager = EVMSmartContractManagement.getInstance()
         const tankAddresses = JsonConfig.getTankAddresses()
-        
+
         // Filter out undeployed tanks (address = 0x000...)
         const deployedTanks = Object.fromEntries(
-            Object.entries(tankAddresses).filter(([_, address]) => 
-                address !== "0x0000000000000000000000000000000000000000",
+            Object.entries(tankAddresses).filter(
+                ([_, address]) =>
+                    address !== "0x0000000000000000000000000000000000000000",
             ),
         )
 
@@ -48,7 +49,11 @@ async function initializeTankManager(): Promise<void> {
         }
 
         await tankManager.initialize(deployedTanks)
-        log.info(`Tank manager initialized with ${Object.keys(deployedTanks).length} tanks`)
+        log.info(
+            `Tank manager initialized with ${
+                Object.keys(deployedTanks).length
+            } tanks`,
+        )
     } catch (error) {
         log.error("Failed to initialize tank manager: " + error)
         throw error
@@ -135,7 +140,7 @@ async function parseOperation(
     operation: NativeBridgeOperation,
 ): Promise<CompiledContent> {
     const fromChainKey = `${operation.from.chain}.${operation.from.subchain}`
-    
+
     let tankData: SolanaTankData | EVMTankData = null
 
     if (operation.from.chain.startsWith("evm")) {
@@ -203,14 +208,16 @@ async function parseSolanaTankOperation(
     // REVIEW: For now using USDC program address until Solana treasury is implemented
     const usdcContracts = JsonConfig.getUsdcContracts()
     const solanaUsdcAddress = usdcContracts.solana?.[operation.from.subchain]
-    
+
     if (!solanaUsdcAddress) {
-        throw new Error(`No Solana USDC program found for subchain: ${operation.from.subchain}`)
+        throw new Error(
+            `No Solana USDC program found for subchain: ${operation.from.subchain}`,
+        )
     }
 
     // TODO: Replace with actual treasury program address once SolanaAddressManagement is implemented
     return {
-        type: "solana", 
+        type: "solana",
         address: solanaUsdcAddress, // Temporary - will be treasury program address
         amountExpected: operation.token.amount,
     }
