@@ -1,6 +1,6 @@
 import { Web2ProofParser } from "./parsers"
 import Telegram from "@/libs/identity/tools/telegram"
-import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import { SigningAlgorithm, Transaction } from "@kynesyslabs/demosdk/types"
 
 /**
  * TelegramProofParser - Parses and validates Telegram identity proofs
@@ -34,9 +34,10 @@ export class TelegramProofParser extends Web2ProofParser {
      * - Bot's signature of the attestation
      * 
      * @param proofData - JSON string containing bot attestation data
+     * @param transaction - The transaction containing this proof (for challenge hash extraction)
      * @returns Parsed signature data for verification
      */
-    async readData(proofData: string): Promise<{
+    async readData(proofData: string, transaction?: Transaction): Promise<{
         message: string
         signature: string
         type: SigningAlgorithm
@@ -54,10 +55,19 @@ export class TelegramProofParser extends Web2ProofParser {
                 }
             }
 
+            // Extract challenge hash from transaction for replay protection validation
+            const transactionChallengeHash = transaction 
+                ? Telegram.extractChallengeHashFromTransaction(transaction)
+                : null
+
             // Verify the bot attestation first (this validates both signatures)
-            // IMPORTANT: use mode 'validate' here because interactive phase already marked challenge as used.
-            // We only need cryptographic verification now; reused/missing challenge should not fail.
-            const verificationResult = await this.telegram.verifyAttestation(attestationData, 'validate')
+            // IMPORTANT: Use 'validate' mode for on-chain validation
+            // This mode performs cryptographic verification and replay protection when transaction hash is available
+            const verificationResult = await this.telegram.verifyAttestation(
+                attestationData, 
+                'validate',
+                transactionChallengeHash
+            )
             
             if (!verificationResult.success) {
                 throw new Error(`Telegram verification failed: ${verificationResult.message}`)
