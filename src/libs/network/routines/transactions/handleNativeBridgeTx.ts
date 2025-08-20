@@ -1,6 +1,6 @@
 import { bridge } from "@kynesyslabs/demosdk"
 import { NativeBridgeTransaction } from "@kynesyslabs/demosdk/types"
-import { NativeBridgeMethods } from "../../../../../../sdks/src/bridge" // FIXME: Once is published, use the package import
+import { NativeBridgeMethods } from "@kynesyslabs/demosdk/bridge" // FIXME: Once is published, use the package import
 import TxUtils from "../../../blockchain/transaction"
 import Chain from "../../../blockchain/chain"
 import log from "src/utilities/logger"
