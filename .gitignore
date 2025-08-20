@@ -8,6 +8,7 @@ bridges_docs/
 aptos_examples_ts/
 
 #Demos files
+bridges_docs/
 /.demos_id*
 demos_peers
 demos_peerlist*
@@ -118,3 +119,10 @@ architecture
 blocked_ips.json
 SMART_CONTRACTS_*.md 
 .gitbook*
+# Aptos stuff
+aptoswares/build
+build/aptoswares
+src/features/multichain/chainwares/aptoswares/TECHNICAL_PROPOSAL_APTOS_INTEGRATION.md
+APTOS_INTEGRATION_PLAN.md
+aptos_examples_ts
+
