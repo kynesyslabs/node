@@ -19,8 +19,15 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const { chain, isEVM, subchain, targetAddress, signature, timestamp, signedData } =
-            editOperation.data
+        const {
+            chain,
+            isEVM,
+            subchain,
+            targetAddress,
+            signature,
+            timestamp,
+            signedData,
+        } = editOperation.data
 
         // REVIEW: Is there a better way to check this?
         if (
@@ -91,6 +98,7 @@ export default class GCRIdentityRoutines {
                     accountGCR.pubkey,
                     normalizedAddress,
                     chain,
+                    editOperation.referralCode,
                 )
             }
         }
@@ -220,7 +228,11 @@ export default class GCRIdentityRoutines {
                     editOperation.account,
                 )
                 if (isFirst) {
-                    await IncentiveManager.twitterLinked(editOperation.account)
+                    await IncentiveManager.twitterLinked(
+                        editOperation.account,
+                        data.userId,
+                        editOperation.referralCode,
+                    )
                 }
             } else if (context === "github") {
                 // Future implementation for GitHub
@@ -411,6 +423,63 @@ export default class GCRIdentityRoutines {
         return { success: true, message: "PQC identities removed" }
     }
 
+    static async applyAwardPoints(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { account: address, amount, date } = editOperation
+        const account = await ensureGCRForUser(address)
+
+        const challengeEntry = {
+            date,
+            points: amount,
+        }
+
+        if (!account.points.breakdown.weeklyChallenge) {
+            account.points.breakdown.weeklyChallenge = []
+        }
+
+        account.points.breakdown.weeklyChallenge.push(challengeEntry)
+        account.points.totalPoints = (account.points.totalPoints || 0) + amount
+        account.points.lastUpdated = new Date()
+
+        if (!simulate) {
+            await gcrMainRepository.save(account)
+        }
+
+        return { success: true, message: "Points awarded" }
+    }
+
+    static async applyAwardPointsRollback(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { account: address, amount, date } = editOperation
+        const account = await ensureGCRForUser(address)
+
+        if (!account.points.breakdown.weeklyChallenge) {
+            account.points.breakdown.weeklyChallenge = []
+        }
+
+        account.points.breakdown.weeklyChallenge =
+            account.points.breakdown.weeklyChallenge.filter(
+                (entry: { date: string }) => entry.date !== date,
+            )
+
+        account.points.totalPoints =
+            (account.points.totalPoints || 0) - amount < 0
+                ? 0
+                : account.points.totalPoints - amount
+
+        if (!simulate) {
+            await gcrMainRepository.save(account)
+        }
+
+        return { success: true, message: "Points deducted" }
+    }
+
     static async apply(
         editOperation: GCREdit,
         gcrMainRepository: Repository<GCRMain>,
@@ -484,6 +553,20 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
+            case "pointsadd":
+                result = await this.applyAwardPoints(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "pointsremove":
+                result = await this.applyAwardPointsRollback(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
             default:
                 result = {
                     success: false,
@@ -511,9 +594,12 @@ export default class GCRIdentityRoutines {
              */
             const result = await gcrMainRepository
                 .createQueryBuilder("gcr")
-                .where("EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'userId' = :userId)", {
-                    userId: data.userId,
-                })
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'userId' = :userId)",
+                    {
+                        userId: data.userId,
+                    },
+                )
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()
 
@@ -530,11 +616,14 @@ export default class GCRIdentityRoutines {
 
             const result = await gcrMainRepository
                 .createQueryBuilder("gcr")
-                .where("EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)", {
-                    chain: data.chain,
-                    subchain: data.subchain,
-                    address: addressToCheck,
-                })
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)",
+                    {
+                        chain: data.chain,
+                        subchain: data.subchain,
+                        address: addressToCheck,
+                    },
+                )
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()
 

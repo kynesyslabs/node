@@ -7,6 +7,9 @@ import { verifyWeb2Proof } from "@/libs/abstraction"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import { PqcIdentityAssignPayload } from "@kynesyslabs/demosdk/abstraction"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
+import { Referrals } from "@/features/incentive/referrals"
+import log from "@/utilities/logger"
+import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
 
 interface IdentityResponse {
     success: boolean
@@ -23,8 +26,40 @@ interface IdentityResponse {
 export default async function handleIdentityRequest(
     tx: Transaction,
     sender: string,
-) : Promise<IdentityResponse> {
-    const payload = tx.content.data[1] as IdentityPayload
+): Promise<IdentityResponse> {
+    const payload = tx.content.data[1] as IdentityPayload & {
+        payload: {
+            referralCode?: string
+        }
+    }
+    const referralCode = payload.payload.referralCode
+
+    if (referralCode) {
+        const referrerAccount = await Referrals.findAccountByReferralCode(
+            referralCode,
+        )
+
+        if (!referrerAccount) {
+            return {
+                success: false,
+                message: "Error: Referrer account not found",
+            }
+        }
+
+        if (referrerAccount.pubkey === tx.content.from_ed25519_address) {
+            return {
+                success: false,
+                message: "Error: Referrer and new user are the same",
+            }
+        }
+    }
+
+    if (tx.content.from_ed25519_address !== sender) {
+        return {
+            success: false,
+            message: "Error: Tx sender and request sender address do not match",
+        }
+    }
 
     switch (payload.method) {
         case "xm_identity_assign":
@@ -33,6 +68,7 @@ export default async function handleIdentityRequest(
             // The sender address here will be the message to verify using the signature in the payload.
             return await IdentityManager.verifyPayload(
                 payload.payload as InferFromSignaturePayload,
+                sender,
             )
         case "pqc_identity_assign":
             // NOTE: Sender here should be the ed25519 address coming from the request headers

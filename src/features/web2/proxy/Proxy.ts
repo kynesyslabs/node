@@ -5,14 +5,14 @@ import { URL } from "url"
 import net from "net"
 import {
     IWeb2Request,
-    EnumWeb2Methods,
     IWeb2Result,
     IAuthorizationConfig,
     ISendHTTPRequestParams,
+    Web2Method,
 } from "@kynesyslabs/demosdk/types"
 import required from "src/utilities/required"
-import stream from "stream"
 import SharedState from "@/utilities/sharedState"
+import Hashing from "src/libs/crypto/hashing"
 
 /**
  * A proxy server class that handles HTTP/HTTPS requests by creating a local proxy server.
@@ -23,6 +23,7 @@ export class Proxy {
     private _server: http.Server | https.Server | null = null
     private _proxyPort = 0
     private _isInitialized = false
+    private _currentTargetUrl = ""
 
     constructor(
         private readonly _dahrSessionId: string,
@@ -30,6 +31,11 @@ export class Proxy {
         private readonly _authConfig: IAuthorizationConfig = {
             requireAuthForAll: SharedState.getInstance().PROD,
             exceptions: [],
+        },
+        private readonly _sslConfig: {
+            verifyCertificates: boolean
+        } = {
+            verifyCertificates: SharedState.getInstance().PROD, // Enable in production, disable in dev
         },
     ) {
         required(this._dahrSessionId, "Missing dahr session Id")
@@ -50,15 +56,15 @@ export class Proxy {
             payload,
             targetAuthorization,
         } = params
+        const targetUrl = web2Request.raw.url
         required(web2Request.raw, "web2Request.raw")
 
-        const targetUrl = web2Request.raw.url || ""
-
-        // Only initialize the proxy server if it's not already running
-        if (!this._isInitialized) {
+        // Only initialize the proxy server if it's not already running or the target URL has changed
+        if (!this._isInitialized || this._currentTargetUrl !== targetUrl) {
             try {
                 await this.startProxyServer(targetUrl)
                 this._isInitialized = true
+                this._currentTargetUrl = targetUrl
             } catch (error) {
                 console.error("[Web2API] Error starting proxy server:", error)
                 throw error
@@ -66,11 +72,7 @@ export class Proxy {
         }
 
         return new Promise((resolve, reject) => {
-            const { targetProtocol, targetHostname, targetPort } =
-                this.parseUrl(targetUrl)
             const headers = this.createHeaders(
-                targetHostname,
-                targetPort,
                 targetMethod,
                 targetHeaders,
                 targetAuthorization,
@@ -101,11 +103,20 @@ export class Proxy {
 
                 res.on("end", () => {
                     const data = Buffer.concat(chunks).toString()
+
+                    // Create a hash of the data and headers to store in the blockchain.
+                    const dataHash = Hashing.sha256(data)
+                    const headersHash = Hashing.sha256(
+                        JSON.stringify(responseHeaders),
+                    )
+
                     resolve({
                         status: statusCode,
                         statusText: statusMessage,
                         headers: responseHeaders,
                         data: data,
+                        dataHash: dataHash,
+                        headersHash: headersHash,
                     })
                 })
             })
@@ -114,11 +125,16 @@ export class Proxy {
                 reject(error)
             })
 
-            if (
-                targetMethod !== EnumWeb2Methods.GET &&
-                targetMethod !== EnumWeb2Methods.DELETE
-            ) {
-                req.write(JSON.stringify(payload))
+            if (payload != null && !["GET", "DELETE"].includes(targetMethod)) {
+                const body =
+                    typeof payload === "string"
+                        ? payload
+                        : JSON.stringify(payload)
+                ;(req as any).setHeader(
+                    "Content-Length",
+                    Buffer.byteLength(body),
+                )
+                req.write(body)
             }
 
             req.end()
@@ -131,74 +147,102 @@ export class Proxy {
      * It stops the proxy server and closes any open connections.
      * @returns void
      */
-    stopProxy(): void {
-        if (this._server) {
-            this._server.close(() => {
-                this._isInitialized = false
-                this._server = null
+    async stopProxy(): Promise<void> {
+        const srv = this._server
+        if (!srv) {
+            this._isInitialized = false
+            return
+        }
+        await new Promise<void>(resolve => {
+            srv.close(() => {
+                // Only clear if we're still closing the same server
+                if (this._server === srv) {
+                    this._server = null
+                    this._isInitialized = false
+                }
+                resolve()
             })
-
-            // Force close any hanging connections
-            this._server.closeAllConnections()
-        }
-    }
-
-    /**
-     * Gets the URL of the proxy server.
-     * @returns The URL of the proxy server.
-     */
-    get proxyUrl(): string {
-        if (!this._server) {
-            throw new Error("Proxy server is not running")
-        }
-        const address = this._server.address()
-        if (typeof address === "object" && address !== null) {
-            return `http://${address.address}:${address.port}`
-        }
-        throw new Error("Unable to determine proxy server address")
-    }
-
-    private startProxyServer(targetUrl: string): Promise<void> {
-        // Don't create a new server if one is already running
-        if (this._server) {
-            return Promise.resolve()
-        }
-
-        return new Promise((resolve, reject) => {
-            this.createNewServer(targetUrl).then(resolve).catch(reject)
         })
     }
 
-    private createNewServer(targetUrl: string): Promise<void> {
-        return new Promise((resolve, reject) => {
-            const { targetProtocol, targetHostname, targetPort } =
-                this.parseUrl(targetUrl)
+    private async startProxyServer(targetUrl: string): Promise<void> {
+        if (this._isInitialized) {
+            await this.stopProxy()
+        }
+        await this.createNewServer(targetUrl)
+    }
 
-            // Create the proxy server
+    private async createNewServer(targetUrl: string): Promise<void> {
+        return new Promise<void>((resolve, reject) => {
+            const { targetProtocol } = this.parseUrl(targetUrl)
+
+            // Create the proxy server (defaults; per-request options are supplied in proxyServer.web)
             const proxyServer = httpProxy.createProxyServer({
                 target: targetUrl,
                 changeOrigin: true,
-                secure: false, // TODO: Enable SSL certificate verification before production
+                secure:
+                    targetProtocol === "https:"
+                        ? this._sslConfig.verifyCertificates
+                        : false,
                 ssl:
                     targetProtocol === "https:"
-                        ? { rejectUnauthorized: false }
-                        : undefined, // TODO: Properly handle SSL certificate verification in production
+                        ? {
+                              rejectUnauthorized:
+                                  this._sslConfig.verifyCertificates,
+                          }
+                        : undefined,
             })
 
             // Handle proxy errors
-            proxyServer.on("error", (err, req, res) => {
-                console.error("[Web2API] Proxy server error:", err)
+            proxyServer.on("error", (err: any, _req, res) => {
+                // Handle SSL certificate errors specifically
+                if (
+                    err.code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" ||
+                    err.code === "CERT_HAS_EXPIRED" ||
+                    err.code === "DEPTH_ZERO_SELF_SIGNED_CERT"
+                ) {
+                    if (res instanceof http.ServerResponse) {
+                        res.writeHead(502, {
+                            "Content-Type": "application/json",
+                        })
+                        res.end(
+                            JSON.stringify({
+                                error: "SSL Certificate verification failed",
+                                message: err.message,
+                                code: err.code,
+                            }),
+                        )
+                    }
+                    return
+                }
+
+                // Handle other proxy errors
                 if (res instanceof http.ServerResponse) {
                     res.writeHead(500, {
-                        "Content-Type": "text/plain",
+                        "Content-Type": "application/json",
                     })
-                    res.end("Something went wrong with the proxy.")
+                    res.end(
+                        JSON.stringify({
+                            error: "Proxy error",
+                            message: err.message,
+                        }),
+                    )
                 } else if (res instanceof net.Socket) {
                     console.error("[Web2API] Socket error:", err)
                     res.end(
-                        "HTTP/1.1 500 Internal Server Error\r\n\r\nSomething went wrong with the proxy.",
+                        "HTTP/1.1 500 Internal Server Error\r\n\r\n" +
+                            JSON.stringify({
+                                error: "Proxy error",
+                                message: err.message,
+                            }),
                     )
                 }
+            })
+
+            // Listen for proxy responses to set the correct status code
+            proxyServer.on("proxyRes", (proxyRes, _req, res) => {
+                // Set the status code and headers from the target API
+                res.writeHead(proxyRes.statusCode || 500, proxyRes.headers)
             })
 
             // Create the main HTTP server
@@ -209,10 +253,20 @@ export class Proxy {
                     return
                 }
 
+                const { targetPathname, targetSearch, targetOrigin } =
+                    this.parseUrl(targetUrl)
+                const outgoingPath = targetPathname + targetSearch
+
+                // Overwrite req.url with the correct path/query before proxying
+                req.url = outgoingPath
+
                 proxyServer.web(req, res, {
-                    target: targetUrl,
+                    target: targetOrigin,
                     changeOrigin: true,
-                    secure: false,
+                    secure:
+                        targetProtocol === "https:"
+                            ? this._sslConfig.verifyCertificates
+                            : false,
                 })
             })
 
@@ -238,7 +292,7 @@ export class Proxy {
     private isAuthorizedRequest(req: http.IncomingMessage): boolean {
         const sessionIdHeader = req.headers["x-dahr-session-id"]
         const url = req.url || ""
-        const method = req.method as EnumWeb2Methods
+        const method = req.method as Web2Method
 
         // Check if this URL/method combination is in exceptions
         const isExempt = this._authConfig.exceptions.some(
@@ -266,6 +320,10 @@ export class Proxy {
         return {
             targetProtocol: parsedUrl.protocol,
             targetHostname: parsedUrl.hostname,
+            targetPathname: parsedUrl.pathname,
+            targetSearch: parsedUrl.search,
+            targetFullPath: parsedUrl.pathname + parsedUrl.search,
+            targetOrigin: parsedUrl.origin,
             targetPort: parsedUrl.port
                 ? Number(parsedUrl.port)
                 : parsedUrl.protocol === "https:"
@@ -277,18 +335,14 @@ export class Proxy {
     }
 
     private createHeaders(
-        targetHostname: string,
-        targetPort: number,
-        targetMethod: EnumWeb2Methods,
+        targetMethod: Web2Method,
         targetHeaders: IWeb2Request["raw"]["headers"],
         targetAuthorization: string,
         targetUrl: string,
     ): IWeb2Request["raw"]["headers"] {
-        // Base headers
+        // Base headers - only essential ones
         const headers: IWeb2Request["raw"]["headers"] = {
-            Host: `${targetHostname}:${targetPort}`,
             "x-dahr-session-id": this._dahrSessionId,
-            Connection: "keep-alive",
         }
 
         // Convert all targetHeaders values to strings
@@ -302,11 +356,7 @@ export class Proxy {
 
         // Only set Content-Type if not provided by user
         if (
-            [
-                EnumWeb2Methods.POST,
-                EnumWeb2Methods.PUT,
-                EnumWeb2Methods.PATCH,
-            ].includes(targetMethod) &&
+            ["POST", "PUT", "PATCH"].includes(targetMethod) &&
             !headers["Content-Type"]
         ) {
             headers["Content-Type"] = "application/json"
@@ -320,10 +370,7 @@ export class Proxy {
         return headers
     }
 
-    private requiresAuthorization(
-        url: string,
-        method: EnumWeb2Methods,
-    ): boolean {
+    private requiresAuthorization(url: string, method: Web2Method): boolean {
         if (this._authConfig.requireAuthForAll) {
             for (const exception of this._authConfig.exceptions) {
                 if (
@@ -336,19 +383,5 @@ export class Proxy {
             return true
         }
         return false
-    }
-
-    // Helper function to safely close a socket
-    private safelyCloseSocket(socket: net.Socket | stream.Duplex): void {
-        try {
-            if (!socket.destroyed) {
-                if (socket.writable) {
-                    socket.end()
-                }
-                socket.destroy()
-            }
-        } catch (error) {
-            console.error("[Web2API] Error while safely closing socket:", error)
-        }
     }
 }

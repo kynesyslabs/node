@@ -10,42 +10,43 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import Datasource from "src/model/datasource"
-import { Blocks } from "src/model/entities/Blocks"
-import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
-import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
-import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
-import { Transactions } from "src/model/entities/Transactions"
-import { MoreThan, ILike, In, LessThan, FindManyOptions } from "typeorm"
-
 import {
-    AddressInfo,
-    Operation,
-    StatusNative as StatusNativeType,
-    StatusProperties as StatusPropertiesType,
-} from "@kynesyslabs/demosdk/types"
-import type { TransactionContent } from "@kynesyslabs/demosdk/types"
-import Hashing from "../crypto/hashing"
+    MoreThan,
+    ILike,
+    In,
+    LessThan,
+    FindManyOptions,
+    Repository,
+} from "typeorm"
 
 import Block from "./block"
-import manageNative from "./gcr/gcr_routines/manageNative"
-import Transaction from "./transaction"
 import { Peer } from "../peer"
 import Mempool from "./mempool_v2"
 import log from "src/utilities/logger"
+import Transaction from "./transaction"
+import Hashing from "../crypto/hashing"
+import Datasource from "src/model/datasource"
+import { Blocks } from "src/model/entities/Blocks"
+import { Operation } from "@kynesyslabs/demosdk/types"
+import manageNative from "./gcr/gcr_routines/manageNative"
 import { getSharedState } from "src/utilities/sharedState"
+import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
+import { Transactions } from "src/model/entities/Transactions"
+import type { TransactionContent } from "@kynesyslabs/demosdk/types"
+import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
+import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorSeed"
-
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+import HandleGCR from "./gcr/handleGCR"
 
 export default class Chain {
-    private static instance: Chain
+    static blocks: Repository<Blocks>
+    static transactions: Repository<Transactions>
 
-    static getInstance(): Chain {
-        if (!this.instance) {
-            this.instance = new Chain()
-        }
-        return this.instance
+    static async setup() {
+        const db = await Datasource.getInstance()
+        this.blocks = db.getDataSource().getRepository(Blocks)
+        this.transactions = db.getDataSource().getRepository(Transactions)
+        // TODO: Refactor methods to use this.blocks and this.transactions
     }
 
     static async read(sqlQuery: string): Promise<any> {
@@ -73,13 +74,9 @@ export default class Chain {
 
     // INFO Returns a transaction by its hash
     static async getTxByHash(hash: string): Promise<Transaction> {
-        const db = await Datasource.getInstance()
-        const transactionRepository = db
-            .getDataSource()
-            .getRepository(Transactions)
         try {
             return Transaction.fromRawTransaction(
-                await transactionRepository.findOneBy({
+                await this.transactions.findOneBy({
                     hash: ILike(hash),
                 }),
             )
@@ -90,40 +87,52 @@ export default class Chain {
         }
     }
 
+    static async getTransactionHistory(
+        address: string,
+        txtype: TransactionContent["type"] | "all",
+        start = 0,
+        limit = 100,
+    ) {
+        const whereConditions: any[] = [
+            { from: address },
+            { to: address },
+        ]
+
+        if (txtype !== "all") {
+            whereConditions[0].type = txtype
+            whereConditions[1].type = txtype
+        }
+
+        const transaction = await this.transactions.find({
+            where: whereConditions,
+            order: {
+                timestamp: "DESC",
+            },
+            take: limit,
+            skip: start,
+        })
+
+        return transaction.map(tx => Transaction.fromRawTransaction(tx))
+    }
+
     // INFO Get the last block number
     static async getLastBlockNumber(): Promise<number> {
-        log.debug("[getLastBlockNumber] Enter getLastBlockNumber")
-        const db = await Datasource.getInstance()
-        log.debug("[getLastBlockNumber] Get the block repository")
-        const blockRepository = db.getDataSource().getRepository(Blocks)
-        log.debug("[getLastBlockNumber] Get the last block")
-        const lastBlock = await blockRepository
-            .createQueryBuilder("block")
-            .orderBy("block.number", "DESC")
-            .getOne()
-        log.debug(
-            "[getLastBlockNumber] Returning the last block number: " +
-                lastBlock?.number,
-        )
-        return lastBlock ? lastBlock.number : 0
+        if (!getSharedState.lastBlockNumber) {
+            const lastBlock = await this.getLastBlock()
+            return lastBlock ? lastBlock.number : 0
+        }
+
+        return getSharedState.lastBlockNumber
     }
 
     // INFO Get the last block hash
     static async getLastBlockHash() {
-        log.debug("[getLastBlockHash] Enter getLastBlockHash")
-        const db = await Datasource.getInstance()
-        log.debug("[getLastBlockHash] Get the block repository")
-        const blockRepository = db.getDataSource().getRepository(Blocks)
-        log.debug("[getLastBlockHash] Get the last block")
-        const lastBlock = await blockRepository
-            .createQueryBuilder("block")
-            .orderBy("block.number", "DESC")
-            .getOne()
-        log.debug(
-            "[getLastBlockHash] Returning the last block hash: " +
-                lastBlock.hash,
-        )
-        return lastBlock?.hash
+        if (!getSharedState.lastBlockHash) {
+            const lastBlock = await this.getLastBlock()
+            return lastBlock ? lastBlock.hash : null
+        }
+
+        return getSharedState.lastBlockHash
     }
 
     // INFO returns all blocks by the given range, default from end of the table.
@@ -140,8 +149,6 @@ export default class Chain {
     ): Promise<Blocks[]> {
         const maxLimit = 50
         const calculatedLimit = Math.min(limit, maxLimit)
-        const db = await Datasource.getInstance()
-        const blockRepository = db.getDataSource().getRepository(Blocks)
 
         let options: FindManyOptions<Blocks> = {
             order: { number: "DESC" },
@@ -152,71 +159,27 @@ export default class Chain {
             options = { ...options, where: { number: LessThan(start + 1) } }
         }
 
-        return await blockRepository.find(options)
+        return await this.blocks.find(options)
     }
 
     // INFO Get any block by its number
     static async getBlockByNumber(number: number): Promise<Blocks> {
-        const db = await Datasource.getInstance()
-        const blockRepository = db.getDataSource().getRepository(Blocks)
-        return await blockRepository.findOneBy({ number })
+        return await this.blocks.findOneBy({ number })
     }
+
     // INFO Get any block by its hash
     static async getBlockByHash(hash: string): Promise<Blocks> {
-        const db = await Datasource.getInstance()
-        const blockRepository = db.getDataSource().getRepository(Blocks)
-        return await blockRepository.findOneBy({ hash: ILike(hash) })
-    }
-    // INFO Get a group of blocks by their status
-    static async getBlockNumbersByStatus(status: string): Promise<number[]> {
-        const db = await Datasource.getInstance()
-        const blockRepository = db.getDataSource().getRepository(Blocks)
-
-        const blocks = await blockRepository.findBy({ status })
-        return blocks.map(block => block.number)
-    }
-
-    // INFO Get a group of blocks by their proposer
-    static async getBlockNumbersByProposer(
-        proposer: string,
-    ): Promise<number[]> {
-        const db = await Datasource.getInstance()
-        const blockRepository = db.getDataSource().getRepository(Blocks)
-        const blocks = await blockRepository.findBy({ proposer })
-        return blocks.map(block => block.number)
+        return await this.blocks.findOneBy({ hash: ILike(hash) })
     }
 
     static async getGenesisBlock(): Promise<Blocks> {
-        console.log("get genesis block")
-        const db = await Datasource.getInstance()
-        const blockRepository = db.getDataSource().getRepository(Blocks)
-
-        const genBlock = await blockRepository.findOneBy({ number: 0 })
-        console.log("[getGenesisBlock] genesis Block retrieved")
-        //console.log(genBlock)
-        return genBlock
-    }
-
-    // INFO Get the current pending transactions pool
-    static async getPendingPool(): Promise<Transaction[]> {
-        const db = await Datasource.getInstance()
-        const transactionRepository = db
-            .getDataSource()
-            .getRepository(Transactions)
-        const txList = await transactionRepository.findBy({
-            status: "pending",
-        })
-        return txList.map(rawTx => Transaction.fromRawTransaction(rawTx))
+        return await this.getBlockByNumber(0)
     }
 
     // ANCHOR Transactions
     static async getTransactionFromHash(hash: string): Promise<Transaction> {
-        const db = await Datasource.getInstance()
-        const transactionRepository = db
-            .getDataSource()
-            .getRepository(Transactions)
         return Transaction.fromRawTransaction(
-            await transactionRepository.findOneBy({ hash: ILike(hash) }),
+            await this.transactions.findOneBy({ hash: ILike(hash) }),
         )
     }
 
@@ -224,12 +187,7 @@ export default class Chain {
     static async getTransactionsFromHashes(
         hashes: string[],
     ): Promise<Transaction[]> {
-        const db = await Datasource.getInstance()
-        const transactionRepository = db
-            .getDataSource()
-            .getRepository(Transactions)
-
-        const rawTransactions = await transactionRepository.find({
+        const rawTransactions = await this.transactions.find({
             where: { hash: In(hashes) },
         })
 
@@ -252,10 +210,6 @@ export default class Chain {
     ): Promise<Transactions[]> {
         const maxLimit = 100
         const calculatedLimit = Math.min(limit, maxLimit)
-        const db = await Datasource.getInstance()
-        const transactionRepository = db
-            .getDataSource()
-            .getRepository(Transactions)
 
         let options: FindManyOptions<Transactions> = {
             order: { id: "DESC" },
@@ -266,43 +220,14 @@ export default class Chain {
             options = { ...options, where: { id: LessThan(start + 1) } }
         }
 
-        return await transactionRepository.find(options)
+        return await this.transactions.find(options)
     }
 
     static async checkTxExists(hash: string): Promise<boolean> {
-        const db = await Datasource.getInstance()
-        const transactionRepository = db
-            .getDataSource()
-            .getRepository(Transactions)
-        return await transactionRepository.exists({ where: { hash: hash } })
+        return await this.transactions.exists({ where: { hash: hash } })
     }
 
     // REVIEW Giving back all the properties of an address
-
-    static async getAddressInfo(
-        address: string,
-    ): Promise<{ native: GlobalChangeRegistry }> {
-        const db = await Datasource.getInstance()
-        const gcrRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-        // REVIEW If not found, return an empty address object with default values (aka a GlobalChangeRegistry object with empty details and extended properties)
-        try {
-            const gcrSearch = (await gcrRepository.findOneBy({
-                publicKey: ILike(address),
-            })) as GlobalChangeRegistry
-
-            return {
-                native: gcrSearch,
-            }
-        } catch (error) {
-            const emptyGCR = new GlobalChangeRegistry()
-            emptyGCR.publicKey = address
-            return {
-                native: emptyGCR,
-            }
-        }
-    }
 
     static isGenesis(block: Block): boolean {
         // Check if there are any ordered transactions
@@ -312,14 +237,15 @@ export default class Chain {
     }
 
     static async getLastBlock(): Promise<Blocks> {
-        const db = await Datasource.getInstance()
-        const blockRepository = db.getDataSource().getRepository(Blocks)
-        const lastBlock = await blockRepository
-            .createQueryBuilder("block")
-            .orderBy("block.number", "DESC")
-            .getOne()
+        if (!getSharedState.lastBlockNumber) {
+            return await this.blocks
+                .createQueryBuilder("block")
+                .orderBy("block.number", "DESC")
+                .limit(1)
+                .getOne()
+        }
 
-        return lastBlock
+        return await this.getBlockByNumber(getSharedState.lastBlockNumber)
     }
 
     // ! FIXME Rewrite this to return a peer list
@@ -376,14 +302,6 @@ export default class Chain {
         }
     }
 
-    static async getAllTxs(): Promise<Transactions[]> {
-        const db = await Datasource.getInstance()
-        const transactionRepository = db
-            .getDataSource()
-            .getRepository(Transactions)
-        return await transactionRepository.find()
-    }
-
     // !SECTION Getters
 
     // SECTION  Setters
@@ -395,50 +313,20 @@ export default class Chain {
         operations: Operation[] = [],
         position?: number,
         cleanMempool = true,
-    ): Promise<any> {
-        const db = await Datasource.getInstance()
-        const blockRepository = db.getDataSource().getRepository(Blocks)
-        // const transactionRepository = db
-        //     .getDataSource()
-        //     .getRepository(Transactions)
-
+    ): Promise<Blocks> {
         log.info(
             "[insertBlock] Attempting to insert a block with hash: " +
                 block.hash,
         )
-        log.info("[insertBlock] Block to be inserted: ")
-        log.info(JSON.stringify(block))
         // Convert the transactions strings back to Transaction objects
         log.info("[insertBlock] Extracting transactions from block")
         // ! FIXME The below fails when a tx like a web2Request is inserted
         const orderedTransactionsHashes = block.content.ordered_transactions
         log.info(JSON.stringify(orderedTransactionsHashes))
         // Fetch transaction entities from the repository based on ordered transaction hashes
-        // const mempoolData = await Mempool.getMempool()
         const transactionEntities = await Mempool.getTransactionsByHashes(
             orderedTransactionsHashes,
         )
-
-        // let transactionEntities = await Promise.all(
-        //     orderedTransactionsHashes.map(async txHash => {
-        //         log.info(
-        //             "[insertBlock] Fetching transaction with hash: " + txHash,
-        //         )
-        //         /*
-        //         // Why do we look into the transactions repository? Shouldn't be in the mempool yet?
-        //         const rawTransaction = await transactionRepository.findOneBy({
-        //             hash: txHash,
-        //         }) // This returns null
-        //         log.info("[insertBlock] Transaction fetched: ")
-        //         log.info(rawTransaction)
-        //         return Transaction.fromRawTransaction(rawTransaction) */
-        //         const tx = mempoolData.transactions.find(
-        //             tx => tx.hash === txHash,
-        //         )
-        //         return tx
-        //     }),
-        // )
-        // transactionEntities = transactionEntities.filter(tx => tx !== undefined)
 
         const newBlock = new Blocks()
         log.info("[CHAIN] reading hash")
@@ -466,7 +354,7 @@ export default class Chain {
         )
         if (position) {
             log.info("Block has a position passed as arg")
-            existingBlock = await blockRepository.findOneBy({
+            existingBlock = await this.blocks.findOneBy({
                 hash: ILike(block.hash),
             })
         } else {
@@ -489,14 +377,14 @@ export default class Chain {
             existingBlock.proposer = block.proposer
             existingBlock.validation_data = block.validation_data
             log.info("about to save block")
-            return await blockRepository.save(existingBlock)
+            return await this.blocks.save(existingBlock)
         } else {
             log.info(
                 "[ChainDB] [ INFO ]: Block with position " +
                     position +
                     " does not exist: inserting a new block",
             )
-            const result = await blockRepository.save(newBlock)
+            const result = await this.blocks.save(newBlock)
             getSharedState.lastBlockNumber = block.number
             getSharedState.lastBlockHash = block.hash
 
@@ -559,14 +447,17 @@ export default class Chain {
         genesisTx.content.transaction_fee.additional_fee = 0
 
         genesisTx.hash = Hashing.sha256(JSON.stringify(genesisTx.content))
-        console.log(genesisTx)
 
         // Build a block containing the genesis tx
         genesisBlock.content.timestamp = genesisTx.content.timestamp
         genesisBlock.content.ordered_transactions.push(genesisTx.hash)
         genesisBlock.content.previousHash = "0x0"
+        genesisBlock.content["extra"] = {
+            genesisData: JSON.stringify(genesisData),
+        }
         genesisBlock.status = "confirmed"
         genesisBlock.proposer = "0x000000000000000000000000"
+        genesisBlock.content.encrypted_transactions_hashes = new Map()
         genesisBlock.validation_data = {
             signatures: {
                 "0x000000000000000000000000": "0x0",
@@ -597,30 +488,63 @@ export default class Chain {
         // Insert the genesis block into the database
         //console.log(genesis_block)
         console.log("[GENESIS] Block generated, ready to insert it")
-        console.log(genesisBlock)
+        // console.log(genesisBlock)
         console.log("[GENESIS] inserting transaction into the mempool")
-        console.log(genesisTx)
+        // console.log(genesisTx)
         //await this.insertTransaction(genesis_tx)
         await Mempool.addTransaction({ ...genesisTx, reference_block: 0 }) // ! FIXME This fails
         console.log("[GENESIS] inserted transaction")
-        const result = await this.insertBlock(genesisBlock, [genesisOp], 0)
 
-        // REVIEW Maybe this should be done prior to inserting the block
-        // NOTE Assigning balances from the genesis block
-        const allBalances = genesisData.balances
-        for (let i = 0; i < allBalances.length; i++) {
-            const individualBalance = allBalances[i]
-            const address = individualBalance[0]
-            const balance = BigInt(individualBalance[1])
-            const balanceSuccess = await manageNative.balance.setBalance(
-                address,
-                balance,
+        // SECTION: Restoring account data
+        const users = {}
+
+        // INFO: Create genesis users
+        for (const balance of genesisData.balances) {
+            const user = {
+                pubkey: balance[0],
+                balance: balance[1],
+            }
+            users[user.pubkey] = user
+        }
+
+        // INFO: Update genesis users with existing balances
+        for (const user of genesisData?.users || []) {
+            // If the user is already indexed, use existing balance
+            const balance = users[user.pubkey]?.balance || 0n
+
+            users[user.pubkey] = {
+                ...user,
+                balance: balance,
+            }
+        }
+
+        const userAccounts: Record<string, any>[] = Object.values(users)
+        console.log("total users: " + userAccounts.length)
+
+        // INFO: Create all users in parallel batches
+        const batchSize = 100
+        for (let i = 0; i < userAccounts.length; i += batchSize) {
+            const batch = userAccounts.slice(i, i + batchSize)
+            log.info(
+                `[GENESIS] Processing batch ${
+                    Math.floor(i / batchSize) + 1
+                }/${Math.ceil(userAccounts.length / batchSize)} (${
+                    batch.length
+                } accounts)`,
+            )
+
+            // Process all accounts in the current batch concurrently
+            await Promise.all(
+                batch.map(async user => {
+                    await HandleGCR.createAccount(user.pubkey, user)
+                }),
             )
         }
 
-        // Adding an empty encrypted transactions list
-        genesisBlock.content.encrypted_transactions_hashes = new Map()
-        return await genesisBlock
+        // !SECTION Restoring account data
+
+        await this.insertBlock(genesisBlock, [genesisOp], 0)
+        return genesisBlock
     }
 
     // INFO Generates multiple genesis blocks from an array of genesis configurations and inserts them into the chain
@@ -646,12 +570,8 @@ export default class Chain {
         const rawTransaction = Transaction.toRawTransaction(transaction, status)
         console.log("[insertTransaction] Raw transaction: ")
         console.log(rawTransaction)
-        const db = await Datasource.getInstance()
-        const transactionRepository = db
-            .getDataSource()
-            .getRepository(Transactions)
         try {
-            await transactionRepository.save(rawTransaction)
+            await this.transactions.save(rawTransaction)
             return true
         } catch (e) {
             log.error(
@@ -719,33 +639,24 @@ export default class Chain {
     // !SECTION Maintennance operations
 
     static async pruneBlocksToGenesisBlock(): Promise<void> {
-        const db = await Datasource.getInstance()
-        const blockRepository = db.getDataSource().getRepository(Blocks)
-
-        await blockRepository.delete({ number: MoreThan(0) })
+        await this.blocks.delete({ number: MoreThan(0) })
         console.log("Pruned all blocks except the genesis block.")
     }
 
     static async nukeGenesis(): Promise<void> {
-        const db = await Datasource.getInstance()
-        const blockRepository = db.getDataSource().getRepository(Blocks)
-
-        await blockRepository.delete({ number: 0 })
+        await this.blocks.delete({ number: 0 })
         console.log("Deleted the genesis block.")
     }
 
     static async updateGenesisTimestamp(newTimestamp: number): Promise<void> {
-        const db = await Datasource.getInstance()
-        const blockRepository = db.getDataSource().getRepository(Blocks)
-
-        const genesisBlock = await blockRepository.findOneBy({ number: 0 })
+        const genesisBlock = await this.blocks.findOneBy({ number: 0 })
         if (genesisBlock) {
             // Update the timestamp in the content field
             genesisBlock.content = {
                 ...genesisBlock.content,
                 timestamp: newTimestamp,
             }
-            await blockRepository.save(genesisBlock)
+            await this.blocks.save(genesisBlock)
             console.log("Updated the timestamp of the genesis block.")
         }
     }

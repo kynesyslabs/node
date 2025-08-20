@@ -28,9 +28,20 @@ import { signedObject } from "@kynesyslabs/demosdk/types"
 import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import { bridge } from "@kynesyslabs/demosdk"
 import { manageNativeBridge } from "./manageNativeBridge"
+import Chain from "../blockchain/chain"
+import { RateLimiter } from "./middleware/rateLimiter"
+import GCR from "../blockchain/gcr/gcr"
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
+
+// INFO: Protected endpoints
+// eslint-disable-next-line @typescript-eslint/naming-convention
+const PROTECTED_ENDPOINTS = new Set([
+    "rate-limit/unblock",
+    "getCampaignData",
+    "awardPoints",
+])
 
 export const emptyResponse: RPCResponse = {
     result: 0,
@@ -138,6 +149,18 @@ async function processPayload(
     if (splits.length > 1) {
         sender = splits[1]
     }
+
+    if (PROTECTED_ENDPOINTS.has(payload.method)) {
+        if (sender !== getSharedState.SUDO_PUBKEY) {
+            return {
+                result: 401,
+                response: "Unauthorized sender",
+                require_reply: false,
+                extra: null,
+            }
+        }
+    }
+
     // Payloads management
     switch (payload.method) {
         case "ping":
@@ -187,8 +210,21 @@ async function processPayload(
         case "auth":
             return await manageAuth(payload.params[0] as AuthMessage)
         // NOTE Communications not requiring authentication
-        case "nodeCall":
-            return await manageNodeCall(payload.params[0] as NodeCall)
+        case "nodeCall": {
+            try {
+                return await manageNodeCall(payload.params[0] as NodeCall)
+            } catch (error) {
+                log.error("[RPC Call] Error in nodeCall: " + error)
+                return {
+                    result: 500,
+                    response: "Error in nodeCall: ",
+                    require_reply: false,
+                    extra: {
+                        error: error.toString(),
+                    },
+                }
+            }
+        }
 
         // ! When things are working, we should remove the login_request and login_response methods and use a "login" method with params
         case "login_request":
@@ -218,6 +254,54 @@ async function processPayload(
             return await handleWeb2ProxyRequest(params)
         }
 
+        case "rate-limit/unblock": {
+            const ips = payload.params
+
+            if (!Array.isArray(ips)) {
+                return {
+                    result: 400,
+                    response: "Invalid input. Expected an array of strings.",
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+
+            const results = RateLimiter.getInstance().unblockIP(ips)
+
+            return {
+                result: 200,
+                response: {
+                    message: "Rate limit unblock processed",
+                    results,
+                },
+                require_reply: false,
+                extra: null,
+            }
+        }
+
+        case "getCampaignData": {
+            return {
+                result: 200,
+                response: await GCR.getCampaignData(),
+                require_reply: false,
+                extra: null,
+            }
+        }
+
+        case "awardPoints": {
+            const twitterUsernames = payload.params[0].message as string[]
+            const awardedAccounts = await GCR.awardPoints(twitterUsernames)
+
+            return {
+                result: 200,
+                response: {
+                    awardedAccounts,
+                },
+                require_reply: false,
+                extra: null,
+            }
+        }
+
         default:
             log.warning(
                 "[RPC Call] [Received] Method not found: " + payload.method,
@@ -240,8 +324,12 @@ export async function serverRpcBun() {
     const port = getSharedState.serverPort
     const server = new BunServer(port)
 
+    // Initialize rate limiter with configuration from shared state
+    const rateLimiter = RateLimiter.getInstance()
+
     // Apply middlewares
     server.use(cors())
+    server.use(rateLimiter.createMiddleware())
     server.use(json())
 
     // GET endpoints
@@ -273,12 +361,50 @@ export async function serverRpcBun() {
 
     server.get("/diagnostics", () => jsonResponse(log.getDiagnostics()))
 
+    server.get("/mcp", () => {
+        return jsonResponse({
+            enabled: getSharedState.isMCPServerStarted,
+            transport: "sse",
+            status: getSharedState.isMCPServerStarted ? "running" : "stopped",
+        })
+    })
+
+    server.get("/genesis", async () => {
+        const genesisBlock = await Chain.getGenesisBlock()
+        let genesisData = genesisBlock.content.extra?.genesisData || null
+
+        if (typeof genesisData === "string") {
+            genesisData = JSON.parse(genesisData)
+        }
+
+        return jsonResponse(genesisData)
+    })
+
+    server.get("/rate-limit/stats", () => {
+        return jsonResponse(rateLimiter.getStats())
+    })
+
     // Main RPC endpoint
     server.post("/", async req => {
-        console.log("req", req)
-
         try {
+            const ip = server.server?.requestIP(req)
+
+            if (!ip || !ip.address) {
+                return jsonResponse({ error: "IP address not found" }, 400)
+            }
+
             const payload = await req.json()
+
+            const rateLimitResponse = handleIdentityTxRateLimit(
+                ip.address,
+                payload,
+                rateLimiter,
+            )
+
+            if (rateLimitResponse) {
+                return rateLimitResponse
+            }
+
             if (!isRPCRequest(payload)) {
                 return jsonResponse({ error: "Invalid request format" }, 400)
             }
@@ -320,4 +446,67 @@ export async function serverRpcBun() {
 
     log.info("[RPC Call] Server is running on 0.0.0.0:" + port, true)
     return server.start()
+}
+
+/**
+ * Rate limit identity transaction per IP address per block
+ *
+ * @param ip IP address of the client
+ * @param payload RPC request payload
+ * @param rateLimiter Rate limiter instance
+ * @returns Response if rate limit is exceeded, otherwise null
+ */
+function handleIdentityTxRateLimit(
+    ip: string,
+    payload: RPCRequest,
+    rateLimiter: RateLimiter,
+) {
+    if (rateLimiter.config.whitelistedIPs.includes(ip)) {
+        return null
+    }
+
+    const ipData = rateLimiter.ipRequests.get(ip)
+    if (!ipData) {
+        return new Response(
+            JSON.stringify({
+                error: "Rate limiter: IP address not resolved",
+            }),
+            { status: 400 },
+        )
+    }
+
+    if (payload.method !== "execute") {
+        return null
+    }
+
+    if (payload.params[0].extra !== "confirmTx") {
+        return null
+    }
+
+    // INFO: Exit if not an identity tx
+    if (payload.params[0].data.content.data[0] !== "identity") {
+        return null
+    }
+
+    if (ipData.lastSeenBlockNumber === getSharedState.lastBlockNumber) {
+        ipData.lastSeenWithinBlockCount++
+    } else {
+        ipData.lastSeenWithinBlockCount = 1
+        ipData.lastSeenBlockNumber = getSharedState.lastBlockNumber
+    }
+
+    if (ipData.lastSeenWithinBlockCount >= rateLimiter.config.txPerBlock) {
+        ipData.blocked = true
+        rateLimiter.ipRequests.set(ip, ipData)
+
+        return new Response(
+            JSON.stringify({
+                error: "Rate limit exceeded",
+                retryAfter: null,
+            }),
+            { status: 429 },
+        )
+    }
+
+    return null
 }

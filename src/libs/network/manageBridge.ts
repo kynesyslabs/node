@@ -17,33 +17,15 @@ export default async function manageBridges(
     const response = _.cloneDeep(emptyResponse)
     response.result = 200
 
-    const { method, chain, params } = payload
-    const rubicService = new RubicService(sender, chain)
-    await rubicService.waitForInitialization()
+    const { method, params } = payload
 
     switch (method) {
         case "get_trade":
-            response.response = await rubicService.getTrade(params[0])
+            response.response = await RubicService.getQuoteFromApi(params[0])
             break
 
         case "execute_trade": {
-            const trade = await rubicService.getTrade(params[0])
-
-            if (trade instanceof Error) {
-                console.error("Trade error:", trade)
-                response.response = false
-                break
-            }
-
-            response.response = await rubicService.executeTrade(trade)
-            break
-        }
-
-        case "execute_mock_trade": {
-            const mockTrade = params[0] as WrappedCrossChainTrade
-            ;(mockTrade.trade.swap = async () => "0x1234567890abcdef"),
-                (mockTrade.trade.needApprove = async () => false),
-                (response.response = await rubicService.executeTrade(mockTrade))
+            response.response = await RubicService.getSwapDataFromApi(params[0])
             break
         }
 

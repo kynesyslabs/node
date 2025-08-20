@@ -1,217 +1,24 @@
-import Web3, { HttpProvider } from "web3"
+import Web3 from "web3"
 import {
-    SDK,
-    Configuration,
     BLOCKCHAIN_NAME,
-    CHAIN_TYPE,
     WrappedCrossChainTrade,
-    CrossChainTrade,
-    SwapTransactionOptions,
     RubicSdkError,
-    BasicTransactionOptions,
 } from "rubic-sdk"
-import { BridgeTradePayload, SupportedTokens, ChainProviders } from "@kynesyslabs/demosdk/types"
-import { BlockchainName, BRIDGE_PROTOCOLS, ExtendedCrossChainManagerCalculationOptions } from "./bridgeUtils"
-
-class CustomEVMProvider {
-    private httpProvider: HttpProvider
-    private eventHandlers: Record<string, Function[]> = {}
-    private signer: any
-
-    constructor(httpProvider: HttpProvider, signer: any) {
-        this.httpProvider = httpProvider
-        this.signer = signer
-    }
-
-    send(
-        payload: any,
-        callback: (error: Error | null, result?: any) => void,
-    ): void {
-        if (payload.method === "eth_sendTransaction") {
-            const txParams = payload.params[0]
-
-            const minPriorityFee = Web3.utils.toWei("25", "gwei")
-            if (
-                !txParams.maxPriorityFeePerGas ||
-                BigInt(txParams.maxPriorityFeePerGas) < BigInt(minPriorityFee)
-            ) {
-                txParams.maxPriorityFeePerGas = minPriorityFee
-            }
-
-            if (
-                !txParams.maxFeePerGas ||
-                BigInt(txParams.maxFeePerGas) <
-                    BigInt(txParams.maxPriorityFeePerGas)
-            ) {
-                txParams.maxFeePerGas = Web3.utils.toWei("100", "gwei")
-            }
-
-            this.signer
-                .signTransaction(txParams)
-                .then((signedTx: any) => {
-                    const newPayload = {
-                        jsonrpc: payload.jsonrpc,
-                        id: payload.id,
-                        method: "eth_sendRawTransaction",
-                        params: [signedTx.rawTransaction],
-                    }
-                    this.httpProvider.send(newPayload, callback)
-                })
-                .catch(callback)
-        } else {
-            this.httpProvider.send(payload, callback)
-        }
-    }
-
-    disconnect(): void {
-        // No-op implementation - HTTP providers don't need disconnection
-        console.log("Disconnect called (no-op for HTTP provider)")
-    }
-
-    // Event emitter methods
-    on(type: string, callback: Function): void {
-        if (!this.eventHandlers[type]) {
-            this.eventHandlers[type] = []
-        }
-        this.eventHandlers[type].push(callback)
-        console.log(`Registered event handler for ${type}`)
-    }
-
-    removeListener(type: string, callback: Function): void {
-        if (!this.eventHandlers[type]) return
-        this.eventHandlers[type] = this.eventHandlers[type].filter(
-            handler => handler !== callback,
-        )
-        console.log(`Removed event handler for ${type}`)
-    }
-
-    sendAsync(
-        payload: any,
-        callback: (error: Error | null, result?: any) => void,
-    ): void {
-        this.send(payload, callback)
-    }
-
-    request(args: any): Promise<any> {
-        return new Promise((resolve, reject) => {
-            this.send(
-                {
-                    jsonrpc: "2.0",
-                    id: Date.now(),
-                    method: args.method,
-                    params: args.params,
-                },
-                (error, response) => {
-                    if (error) {
-                        reject(error)
-                    } else if (
-                        !response ||
-                        typeof response.result === "undefined"
-                    ) {
-                        reject(
-                            new Error(
-                                `Invalid response for ${
-                                    args.method
-                                }: ${JSON.stringify(response)}`,
-                            ),
-                        )
-                    } else {
-                        resolve(response.result)
-                    }
-                },
-            )
-        })
-    }
-}
+import {
+    BridgeTradePayload,
+    SupportedTokens,
+    ChainProviders,
+} from "@kynesyslabs/demosdk/types"
+import {
+    BlockchainName,
+    RUBIC_API_INTEGRATOR_ADDRESS,
+    RUBIC_API_REFERRER_ADDRESS,
+    RUBIC_API_V2_ROUTES,
+} from "./bridgeUtils"
+import { Connection } from "@solana/web3.js"
 
 export default class RubicService {
-    private sdk: SDK | null = null
-    private customEVMProvider: CustomEVMProvider
-    private signer: any
-    private initPromise: Promise<void> | null = null
-
-    constructor(privateKey: string, chain: string) {
-        const web3Instance = new Web3(ChainProviders[`${chain}`].mainnet)
-
-        const httpProvider =
-            web3Instance.currentProvider as unknown as HttpProvider
-
-        const formattedKey = privateKey.startsWith("0x")
-            ? privateKey
-            : `0x${privateKey}`
-
-        this.signer =
-            web3Instance.eth.accounts.privateKeyToAccount(formattedKey)
-        web3Instance.eth.accounts.wallet.add(this.signer)
-        this.customEVMProvider = new CustomEVMProvider(
-            httpProvider,
-            this.signer,
-        )
-
-        this.initPromise = this.initializeSDK()
-    }
-
-    private async initializeSDK(): Promise<void> {
-        try {
-            const walletAddress = this.signer.address
-
-            const configuration: Configuration = {
-                rpcProviders: {
-                    [BLOCKCHAIN_NAME.ETHEREUM]: {
-                        rpcList: [ChainProviders.ETH.mainnet],
-                    },
-                    [BLOCKCHAIN_NAME.POLYGON]: {
-                        rpcList: [ChainProviders.POLYGON.mainnet],
-                    },
-                    [BLOCKCHAIN_NAME.BINANCE_SMART_CHAIN]: {
-                        rpcList: [ChainProviders.BSC.mainnet],
-                    },
-                    [BLOCKCHAIN_NAME.AVALANCHE]: {
-                        rpcList: [ChainProviders.AVALANCHE.mainnet],
-                    },
-                    [BLOCKCHAIN_NAME.OPTIMISM]: {
-                        rpcList: [ChainProviders.OPTIMISM.mainnet],
-                    },
-                    [BLOCKCHAIN_NAME.ARBITRUM]: {
-                        rpcList: [ChainProviders.ARBITRUM.mainnet],
-                    },
-                    [BLOCKCHAIN_NAME.LINEA]: {
-                        rpcList: [ChainProviders.LINEA.mainnet],
-                    },
-                    [BLOCKCHAIN_NAME.BASE]: {
-                        rpcList: [ChainProviders.BASE.mainnet],
-                    },
-                    [BLOCKCHAIN_NAME.SOLANA]: {
-                        rpcList: [ChainProviders.SOLANA.mainnet],
-                    },
-                },
-                providerAddress: {
-                    [CHAIN_TYPE.EVM]: {
-                        crossChain: walletAddress,
-                        onChain: walletAddress,
-                    },
-                },
-                walletProvider: {
-                    [CHAIN_TYPE.EVM]: {
-                        core: this.customEVMProvider,
-                        address: walletAddress,
-                    },
-                },
-            }
-
-            this.sdk = await SDK.createSDK(configuration)
-            console.log("SDK initialized successfully")
-        } catch (error) {
-            console.error("Error initializing SDK:", error)
-            throw error
-        }
-    }
-
-    public async waitForInitialization(): Promise<void> {
-        return this.initPromise || Promise.resolve()
-    }
-
-    public getTokenAddress(
+    public static getTokenAddress(
         chainId: number,
         symbol: "NATIVE" | "USDC" | "USDT",
     ): string {
@@ -219,128 +26,165 @@ export default class RubicService {
         return SupportedTokens[blockchain][symbol]
     }
 
-    async getTrade(
+    /**
+     * Gets a trade quote by calling the Rubic API v2.
+     * This is the first step for a client-side signing flow.
+     * @param payload - The trade details.
+     * @returns The raw JSON response from the Rubic API containing quote data.
+     */
+    public static async getQuoteFromApi(
         payload: BridgeTradePayload,
     ): Promise<WrappedCrossChainTrade | RubicSdkError> {
-        await this.waitForInitialization()
+        const { fromChainId, toChainId, fromToken, toToken, amount } = payload
 
-        if (!this.sdk) {
-            const error = new Error("SDK not initialized") as RubicSdkError
+        const fromBlockchain = RubicService.getBlockchainName(fromChainId)
+        const toBlockchain = RubicService.getBlockchainName(toChainId)
 
-            return error
+        const fromTokenAddress = RubicService.getTokenAddress(
+            fromChainId,
+            fromToken,
+        )
+        const toTokenAddress = RubicService.getTokenAddress(toChainId, toToken)
+
+        const quoteParams = {
+            srcTokenBlockchain: fromBlockchain,
+            srcTokenAddress: fromTokenAddress,
+            srcTokenAmount: amount.toString(),
+            dstTokenBlockchain: toBlockchain,
+            dstTokenAddress: toTokenAddress,
+            referrer: RUBIC_API_REFERRER_ADDRESS,
+            integratorAddress: RUBIC_API_INTEGRATOR_ADDRESS,
         }
 
         try {
-            const fromTokenAddress = this.getTokenAddress(
-                payload.fromChainId,
-                payload.fromToken,
-            )
-            const toTokenAddress = this.getTokenAddress(payload.toChainId, payload.toToken)
+            const quoteResponse = await fetch(RUBIC_API_V2_ROUTES.QUOTE_BEST, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(quoteParams),
+            })
 
-            const trades = await this.sdk.crossChainManager.calculateTrade(
-                {
-                    address: fromTokenAddress,
-                    blockchain: this.getBlockchainName(payload.fromChainId),
-                },
-                payload.amount,
-                {
-                    address: toTokenAddress,
-                    blockchain: this.getBlockchainName(payload.toChainId),
-                },
-                {
-                    fromAddress: this.signer.address,
-                    bridgeTypes: Object.values(BRIDGE_PROTOCOLS)
-                        .filter(p => p !== "all")
-                        .map(p => p.toLowerCase()),
-                    gasCalculation: "enabled",
-                } as ExtendedCrossChainManagerCalculationOptions,
-            )
-
-            console.log(`Received ${trades.length} trade options`)
-
-            if (trades.length === 0) {
-                const error = new Error("No trades found") as RubicSdkError
-
-                return error
-            }
-
-            const filteredTrades = trades.filter(
-                trade => trade !== undefined && trade !== null && !trade.error,
-            )
-
-            const bestTrade = filteredTrades[0]
-            
-            return bestTrade
-        } catch (error: any) {
-            console.error("Error getting trade:", error)
-
-            return error as RubicSdkError
-        }
-    }
-
-    async executeTrade(wrappedTrade: WrappedCrossChainTrade) {
-        if (!this.sdk) throw new Error("SDK not initialized")
-
-        if (!wrappedTrade) throw new Error("Trade object is null or undefined")
-
-        if (wrappedTrade.error) {
-            console.error("Trade contains an error:", wrappedTrade.error)
-            throw wrappedTrade.error
-        }
-
-        const trade = wrappedTrade.trade as unknown as CrossChainTrade
-
-        if (!trade) throw new Error("Invalid trade object: trade is null")
-            
-        try {
-            const signerAddress = this.signer.address
-            this.sdk.updateWalletAddress(CHAIN_TYPE.EVM, signerAddress)
-
-            const swapOptions: SwapTransactionOptions = {
-                onConfirm: (hash: string) => {
-                    console.log("Swap transaction confirmed:", hash)
-                },
-                onApprove: (hash: string | null) => {
-                    console.log("Approval transaction:", hash)
-                },
-                receiverAddress: signerAddress,
-                skipAmountCheck: false,
-                useCacheData: false,
-                testMode: false,
-                useEip155: true,
-                refundAddress: signerAddress,
-            }
-
-            const basicTransactionOptions: BasicTransactionOptions = {
-                onTransactionHash: (hash: string) => {
-                    console.log("Transaction hash:", hash)
-                },
-            }
-
-            const needsApproval = await trade.needApprove()
-
-            if (needsApproval) {
-                console.log("Approving...")
-                const approve = await trade.approve(
-                    basicTransactionOptions,
-                    true,
-                    "infinity",
+            if (!quoteResponse.ok) {
+                const errorText = await quoteResponse.text()
+                throw new Error(
+                    `Rubic API v2 (quoteBest) error: ${quoteResponse.status} ${errorText}`,
                 )
-                console.log("approve", approve)
-            } else {
-                console.log("Skipping approval, allowance is sufficient.")
             }
 
-            const receipt = await trade.swap(swapOptions)
-
-            return receipt
+            return await quoteResponse.json()
         } catch (error) {
-            console.error("Error executing trade:", error)
+            console.error("Error fetching quote from Rubic API v2:", error)
             throw error
         }
     }
 
-    getBlockchainName(chainId: number): BlockchainName {
+    /**
+     * Gets the final swap transaction data using a quote ID from `getQuoteFromApi`.
+     * This is the second step for a client-side signing flow.
+     * @param payload - The trade details, user addresses, and the quote ID.
+     * @returns The raw JSON response from the Rubic API containing the transaction to be signed.
+     */
+    public static async getSwapDataFromApi(
+        payload: BridgeTradePayload & {
+            fromAddress: string
+            toAddress?: string
+            quoteId: string
+        },
+    ) {
+        const {
+            fromChainId,
+            toChainId,
+            fromToken,
+            toToken,
+            amount,
+            fromAddress,
+            quoteId,
+        } = payload
+        const toAddress = payload.toAddress || fromAddress
+
+        const fromBlockchain = RubicService.getBlockchainName(fromChainId)
+        const toBlockchain = RubicService.getBlockchainName(toChainId)
+
+        const fromTokenAddress = RubicService.getTokenAddress(
+            fromChainId,
+            fromToken,
+        )
+        const toTokenAddress = RubicService.getTokenAddress(toChainId, toToken)
+
+        const quoteParams = {
+            srcTokenBlockchain: fromBlockchain,
+            srcTokenAddress: fromTokenAddress,
+            srcTokenAmount: amount.toString(),
+            dstTokenBlockchain: toBlockchain,
+            dstTokenAddress: toTokenAddress,
+        }
+
+        const swapParams = {
+            ...quoteParams,
+            id: quoteId,
+            fromAddress: fromAddress,
+            integratorAddress: RUBIC_API_INTEGRATOR_ADDRESS,
+            referrer: RUBIC_API_REFERRER_ADDRESS,
+            receiver: toAddress,
+        }
+
+        try {
+            const swapResponse = await fetch(RUBIC_API_V2_ROUTES.SWAP, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(swapParams),
+            })
+
+            if (!swapResponse.ok) {
+                const errorText = await swapResponse.text()
+                throw new Error(
+                    `Rubic API v2 (swap) error: ${swapResponse.status} ${errorText}`,
+                )
+            }
+
+            return await swapResponse.json()
+        } catch (error) {
+            console.error("Error fetching swap data from Rubic API v2:", error)
+            throw error
+        }
+    }
+
+    /**
+     * Executes a raw signed transaction on the specified blockchain.
+     * @param rawTx The raw signed transaction, as a hex string for EVM or base64 for Solana.
+     * @param chainId The ID of the chain to execute on.
+     * @returns The transaction hash.
+     */
+    public static async sendRawTransaction(
+        rawTx: string,
+        chainId: number,
+    ): Promise<string> {
+        const blockchainName = RubicService.getBlockchainName(chainId)
+
+        if (blockchainName === BLOCKCHAIN_NAME.SOLANA) {
+            const connection = new Connection(
+                ChainProviders.SOLANA.mainnet,
+                "confirmed",
+            )
+            // Assuming rawTx is base64 encoded for Solana
+            const txId = await connection.sendRawTransaction(
+                Buffer.from(rawTx, "base64"),
+            )
+            await connection.confirmTransaction(txId, "confirmed")
+            return txId
+        } else {
+            const providerKey = blockchainName as keyof typeof ChainProviders
+
+            const rpcUrl = ChainProviders[providerKey]?.mainnet
+            if (!rpcUrl) {
+                throw new Error(`No RPC provider found for ${blockchainName}`)
+            }
+            const web3 = new Web3(rpcUrl)
+            const receipt = await web3.eth.sendSignedTransaction(rawTx)
+            return receipt.transactionHash.toString()
+        }
+    }
+
+    public static getBlockchainName(chainId: number): BlockchainName {
         switch (chainId) {
             case 1:
                 return BLOCKCHAIN_NAME.ETHEREUM

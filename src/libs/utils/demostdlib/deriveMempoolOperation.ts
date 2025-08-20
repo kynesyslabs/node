@@ -1,7 +1,6 @@
 import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 
-import Mempool from "../../blockchain/mempool"
 import { Operation } from "@kynesyslabs/demosdk/types"
 /* eslint-disable no-unused-vars */
 import Transaction from "../../blockchain/transaction"
@@ -50,7 +49,7 @@ export async function deriveMempoolOperation(
     //console.log(derivedOperation)
     if (insert) {
         // ANCHOR Inserting the operation in the next mempool session with the proper data
-        Mempool.addTransaction(derivedTx)
+        // Mempool.addTransaction(derivedTx)
         // ANCHOR And we do the same for the derived operation, inserting it in the GCR
         // NOTE Deprecated in favor of the GCREdit system
         //GCR.getInstance().operations.push(derivedOperation)
