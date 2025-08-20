@@ -2,36 +2,7 @@
  * Contract-related type definitions for Demos smart contracts
  */
 
-/**
- * Contract ABI definition for SDK interaction
- */
-export interface ContractABI {
-    methods: Array<{
-        name: string
-        inputs: Array<{
-            name: string
-            type: string
-        }>
-        outputs: Array<{
-            type: string
-        }>
-        stateMutability: "view" | "nonpayable" | "payable"
-    }>
-    events: Array<{
-        name: string
-        inputs: Array<{
-            name: string
-            type: string
-            indexed?: boolean
-        }>
-    }>
-    constructor?: {
-        inputs: Array<{
-            name: string
-            type: string
-        }>
-    }
-}
+import type { ContractABI } from "./ContractABI"
 
 /**
  * Contract metadata information
