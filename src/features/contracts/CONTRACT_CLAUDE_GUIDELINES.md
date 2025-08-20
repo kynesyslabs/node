@@ -68,3 +68,52 @@ feat(contracts): Phase X - Brief description
 - Use todo list to track sub-tasks within phases
 - Report completion of each major step
 - Maintain clear communication about blockers or questions
+
+## Current Status (Last Updated: 2025-01-31)
+
+### ✅ COMPLETED PHASES:
+- **Phase 1**: Database Foundation - Added contract column to GCR_Main entity
+- **Phase 2**: Contract Types and Validation - Created ContractTypes, ContractABI, ContractValidator
+- **Phase 3a**: SDK Cleanup - Removed old implementation, created new ContractDeploy/CallTransaction types  
+- **Phase 3b**: Node Transaction Handling - Created handleContractDeploy/Call handlers, integrated with endpointHandlers
+
+### 🎯 NEXT PHASE: Phase 4 - Basic Execution Environment
+**Goal**: Create sandboxed execution for contracts using Bun Workers
+
+**Tasks**:
+1. Create `src/features/contracts/execution/Sandbox.ts` using Bun Workers
+2. Implement execution context injection
+3. Add function call counting for fees
+4. Implement 60-second timeout protection  
+5. Test sandbox isolation and limits
+
+### 📁 Key Files Created/Modified:
+- `src/model/entities/GCRv2/GCR_Main.ts` - Added contract column
+- `src/features/contracts/types/ContractTypes.ts` - Core contract interfaces
+- `src/features/contracts/types/ContractABI.ts` - ABI type definitions
+- `src/features/contracts/validation/ContractValidator.ts` - Contract validation utilities
+- `../sdks/src/types/blockchain/TransactionSubtypes/ContractDeployTransaction.ts` - SDK deploy type
+- `../sdks/src/types/blockchain/TransactionSubtypes/ContractCallTransaction.ts` - SDK call type
+- `src/libs/network/routines/transactions/handleContractDeploy.ts` - Deploy handler
+- `src/libs/network/routines/transactions/handleContractCall.ts` - Call handler
+- `src/libs/network/endpointHandlers.ts` - Transaction routing integration
+
+### 🧠 Key Technical Decisions Made:
+- Smart contracts stored as JSONB in existing GCR_Main entity (no separate table)
+- Deterministic addressing: hash(creatorPubkey + nonce + sourceCodeHash)
+- Fee structure: 1 DEM per 32KB deployment, 1 DEM per function call
+- Contract size limits: 256KB source, 64KB storage
+- Security: Banned APIs (fs, network, process, eval), sandboxed execution
+- TypeScript contracts executed directly by Bun (no compilation to JS)
+
+### 🔗 Integration Points:
+- Transaction system: Added contractDeploy/contractCall to main switch statement
+- GCR system: Contracts are accounts with contract column filled
+- SDK system: New transaction types properly integrated with existing patterns
+- Validation: Reuses existing transaction validation flow with contract-specific handlers
+
+### ⚠️ Important Notes for Phase 4:
+- handleContractCall has placeholder execution (returns null) - needs actual Bun Worker execution
+- Contract ABI is minimal placeholder - needs TypeScript AST analysis for method extraction
+- Execution context injection pattern needs to be established for contract base class
+- State management integration with GCR updates needed
