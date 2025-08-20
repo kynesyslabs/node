@@ -7,6 +7,7 @@ import {
     PrimaryColumn,
 } from "typeorm"
 import type { StoredIdentities } from "../types/IdentityTypes"
+import type { ContractData } from "@/features/contracts/types/ContractTypes"
 // Define the shape of your JSON data
 
 @Entity("gcr_main")
@@ -66,6 +67,8 @@ export class GCRMain {
         | ""
     @Column({ type: "boolean", name: "reviewed", default: false })
     reviewed: boolean
+    @Column({ type: "jsonb", name: "contract", nullable: true })
+    contract?: ContractData
     @CreateDateColumn({ type: "timestamp", name: "createdAt" })
     createdAt: Date
     @UpdateDateColumn({ type: "timestamp", name: "updatedAt" })
