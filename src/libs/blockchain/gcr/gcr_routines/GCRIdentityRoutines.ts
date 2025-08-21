@@ -235,10 +235,19 @@ export default class GCRIdentityRoutines {
                     )
                 }
             } else if (context === "github") {
-                // Future implementation for GitHub
-                log.info(
-                    `GitHub linking for ${data.username}, no incentive handler yet`,
+                const isFirst = await this.isFirstConnection(
+                    "github",
+                    { userId: data.userId },
+                    gcrMainRepository,
+                    editOperation.account,
                 )
+                if (isFirst) {
+                    await IncentiveManager.githubLinked(
+                        editOperation.account,
+                        data.userId,
+                        editOperation.referralCode,
+                    )
+                }
             } else {
                 log.info(`Web2 identity linked: ${context}/${data.username}`)
             }
@@ -578,9 +587,9 @@ export default class GCRIdentityRoutines {
     }
 
     private static async isFirstConnection(
-        type: "twitter" | "web3",
+        type: "twitter" | "github" | "web3",
         data: {
-            userId?: string // for twitter
+            userId?: string // for twitter/github
             chain?: string // for web3
             subchain?: string // for web3
             address?: string // for web3
@@ -596,6 +605,25 @@ export default class GCRIdentityRoutines {
                 .createQueryBuilder("gcr")
                 .where(
                     "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'userId' = :userId)",
+                    {
+                        userId: data.userId,
+                    },
+                )
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
+
+            /**
+             * Return true if no account has this userId
+             */
+            return !result
+        } else if (type === "github") {
+            /**
+             * Check if this GitHub userId exists anywhere
+             */
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'github') as github_id WHERE github_id->>'userId' = :userId)",
                     {
                         userId: data.userId,
                     },
