@@ -80,8 +80,8 @@ export class IncentiveManager {
     /**
      * Hook to be called after GitHub unlinking
      */
-    static async githubUnlinked(userId: string): Promise<RPCResponse> {
-        return await this.pointSystem.deductGithubPoints(userId)
+    static async githubUnlinked(userId: string, githubUserId: string): Promise<RPCResponse> {
+        return await this.pointSystem.deductGithubPoints(userId, githubUserId)
     }
 
     /**

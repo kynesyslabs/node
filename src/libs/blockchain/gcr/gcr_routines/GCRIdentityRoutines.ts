@@ -279,6 +279,14 @@ export default class GCRIdentityRoutines {
             return { success: false, message: "Identity not found" }
         }
 
+        // Store the identity being removed for GitHub unlinking (need userId)
+        let removedIdentity: Web2GCRData["data"] | null = null
+        if (context === "github") {
+            removedIdentity = accountGCR.identities.web2[context].find(
+                (id: Web2GCRData["data"]) => id.username === username,
+            ) || null
+        }
+
         accountGCR.identities.web2[context] = accountGCR.identities.web2[
             context
         ].filter((id: Web2GCRData["data"]) => id.username !== username)
@@ -291,6 +299,11 @@ export default class GCRIdentityRoutines {
              */
             if (context === "twitter") {
                 await IncentiveManager.twitterUnlinked(editOperation.account)
+            } else if (context === "github" && removedIdentity && removedIdentity.userId) {
+                await IncentiveManager.githubUnlinked(
+                    editOperation.account,
+                    removedIdentity.userId,
+                )
             }
         }
 

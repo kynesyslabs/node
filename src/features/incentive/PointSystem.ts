@@ -431,6 +431,26 @@ export class PointSystem {
         referralCode?: string,
     ): Promise<RPCResponse> {
         try {
+            // Get user's account data from GCR to verify GitHub ownership
+            const account = await ensureGCRForUser(userId)
+
+            // Verify the GitHub account is actually linked to this user
+            const githubIdentities = account.identities.web2?.github || []
+            const isOwner = githubIdentities.some((gh: any) => gh.userId === githubUserId)
+
+            if (!isOwner) {
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: account.points.totalPoints || 0,
+                        message: "Error: GitHub account not linked to this user",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
             const userPointsWithIdentities = await this.getUserPointsInternal(
                 userId,
             )
@@ -593,10 +613,31 @@ export class PointSystem {
     /**
      * Deduct points for unlinking a GitHub account
      * @param userId The user's Demos address
+     * @param githubUserId The GitHub user ID to verify ownership
      * @returns RPCResponse
      */
-    async deductGithubPoints(userId: string): Promise<RPCResponse> {
+    async deductGithubPoints(userId: string, githubUserId: string): Promise<RPCResponse> {
         try {
+            // Get user's account data from GCR to verify GitHub ownership
+            const account = await ensureGCRForUser(userId)
+
+            // Verify the GitHub account is actually linked to this user
+            const githubIdentities = account.identities.web2?.github || []
+            const isOwner = githubIdentities.some((gh: any) => gh.userId === githubUserId)
+
+            if (!isOwner) {
+                return {
+                    result: 400,
+                    response: {
+                        pointsDeducted: 0,
+                        totalPoints: account.points.totalPoints || 0,
+                        message: "Error: GitHub account not linked to this user",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
             const userPointsWithIdentities = await this.getUserPointsInternal(
                 userId,
             )
