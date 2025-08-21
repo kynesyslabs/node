@@ -1,11 +1,10 @@
 import { EVM } from "@kynesyslabs/demosdk/xm-localsdk"
-import { Contract } from "ethers"
+import { Contract, WebSocketProvider } from "ethers"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 import { JsonConfig } from "@/utilities/JsonConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
-import { ethers } from "ethers"
 
 // ABI for LiquidityTank contract - key functions only
 const liquidityTankABI = [
@@ -124,42 +123,49 @@ export class EVMSmartContractManagement {
             throw new Error(`Unsupported chain configuration: ${chainKey}`)
         }
 
-        try {
-            // Create EVM instance
-            const evmInstance = EVM.createInstance(chainId, rpcUrl)
-            await evmInstance.connect(chainId)
-
-            // Create contract instance
-            const contract = await evmInstance.getContractInstance(
-                tankAddress,
-                JSON.stringify(liquidityTankABI),
-            )
-
-            // Verify contract is initialized
-            const isContractInitialized = await contract.initialized()
-            if (!isContractInitialized) {
-                log.warning(
-                    `Tank contract at ${tankAddress} on ${chainKey} is not initialized`,
-                )
-            }
-
-            // Store tank configuration
-            this.tanks.set(chainKey, {
-                address: tankAddress,
-                evmInstance,
-                contract,
-                chainName,
-                subchain,
-            })
-
-            // Set up event listeners for this tank
-            await this.setupEventListeners(chainKey)
-
-            log.info(`Tank initialized: ${chainKey} at ${tankAddress}`)
-        } catch (error) {
-            log.error(`Failed to initialize tank for ${chainKey}:` + error)
-            throw error
+        const bridgePrivateKey = JsonConfig.getBridgePrivateKey(chainKey)
+        if (!bridgePrivateKey) {
+            log.error(`Bridge private key not found for ${chainKey}`)
+            process.exit(1)
+            throw new Error(`Bridge private key not found for ${chainKey}`)
         }
+
+        // Create EVM instance
+        const evmInstance = new EVM(rpcUrl, chainId)
+        await evmInstance.connect()
+        await evmInstance.connectWallet(bridgePrivateKey)
+
+        log.info(
+            `Connected to ${chainKey} with address ${evmInstance.wallet.address}`,
+        )
+
+        // Create contract instance
+        const contract = await evmInstance.getContractInstance(
+            tankAddress,
+            JSON.stringify(liquidityTankABI),
+        )
+
+        // Verify contract is initialized
+        const isContractInitialized = await contract.initialized()
+        if (!isContractInitialized) {
+            log.warning(
+                `Tank contract at ${tankAddress} on ${chainKey} is not initialized`,
+            )
+        }
+
+        // Store tank configuration
+        this.tanks.set(chainKey, {
+            address: tankAddress,
+            evmInstance,
+            contract,
+            chainName,
+            subchain,
+        })
+
+        // Set up event listeners for this tank
+        await this.setupEventListeners(chainKey)
+
+        log.info(`Tank initialized: ${chainKey} at ${tankAddress}`)
     }
 
     /**
@@ -182,14 +188,8 @@ export class EVMSmartContractManagement {
             "evm.polygon.amoy": "wss://polygon-amoy-bor-rpc.publicnode.com",
         }
         const tankABI = JsonConfig.getTankAbi(chainKey)
-        const provider = new ethers.providers.WebSocketProvider(
-            providers[chainKey],
-        )
-        const contract = new ethers.Contract(
-            tankConfig.address,
-            tankABI,
-            provider,
-        )
+        const provider = new WebSocketProvider(providers[chainKey])
+        const contract = new Contract(tankConfig.address, tankABI, provider)
         contract.on("OwnersRotated", async data =>
             // TODO: Release the Consensus step in Waiter class once received!
             console.log("OwnersRotated", data),
@@ -419,17 +419,21 @@ export class EVMSmartContractManagement {
 
             // Generate proposal ID
             const proposalId = `0x${Date.now().toString(16).padStart(64, "0")}`
+            await tankConfig.evmInstance.writeToContract(
+                tankConfig.contract,
+                "multisigTransfer",
+                [proposalId, usdcAddress, recipient, amount],
+            )
 
             // Each signer approves the withdrawal
-            for (const privateKey of signerPrivateKeys) {
-                await tankConfig.evmInstance.connectWallet(privateKey)
-
-                await tankConfig.evmInstance.writeToContract(
-                    tankConfig.contract,
-                    "multisigTransfer",
-                    [proposalId, usdcAddress, recipient, amount],
-                )
-            }
+            // for (const privateKey of signerPrivateKeys) {
+            //     await tankConfig.evmInstance.connectWallet(privateKey)
+            //     await tankConfig.evmInstance.writeToContract(
+            //         tankConfig.contract,
+            //         "multisigTransfer",
+            //         [proposalId, usdcAddress, recipient, amount],
+            //     )
+            // }
 
             log.info(
                 `USDC withdrawal executed: ${amount} to ${recipient} on ${chainKey}`,

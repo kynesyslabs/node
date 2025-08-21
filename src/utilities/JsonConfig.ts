@@ -6,6 +6,7 @@ export class JsonConfig {
     static readonly PROVIDER_URLS_PATH = "config/providerUrls.json"
     static readonly TANK_ADDRESSES_PATH = "config/tankAddresses.json"
     static readonly TANK_ABIS_PATH = "config/abis/"
+    static readonly BRIDGE_KEYS_PATH = "config/bridgeKeys.json"
 
     /**
      * Reads JSON data from a file given the path
@@ -77,5 +78,26 @@ export class JsonConfig {
             process.exit(1)
             return null
         }
+    }
+
+    /**
+     * Returns an object of chain keys mapped to their corresponding bridge keys
+     *
+     * @returns Bridge keys configuration object
+     */
+    static getBridgePrivateKey(chainKey: string): string | null {
+        if (!fs.existsSync(this.BRIDGE_KEYS_PATH)) {
+            log.error(
+                `The bridge private key file ${this.BRIDGE_KEYS_PATH} does not exist`,
+            )
+            process.exit(1)
+        }
+
+        const bridgeKeys = this.readJsonFromFile(this.BRIDGE_KEYS_PATH)
+        if (!bridgeKeys[chainKey]) {
+            return null
+        }
+
+        return bridgeKeys[chainKey]
     }
 }

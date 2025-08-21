@@ -142,3 +142,4 @@ src/features/multichain/chainwares/aptoswares/TECHNICAL_PROPOSAL_APTOS_INTEGRATI
 APTOS_INTEGRATION_PLAN.md
 aptos_examples_ts
 
+config/bridgePrivateKeys.json
