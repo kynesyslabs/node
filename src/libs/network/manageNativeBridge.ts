@@ -26,7 +26,7 @@ let tankManager: EVMSmartContractManagement | null = null
 /**
  * Initialize tank management system with deployed addresses
  */
-async function initializeTankManager(): Promise<void> {
+export async function initializeTankManager(): Promise<void> {
     if (tankManager && tankManager.isReady()) {
         return // Already initialized
     }
@@ -39,9 +39,11 @@ async function initializeTankManager(): Promise<void> {
         const deployedTanks = Object.fromEntries(
             Object.entries(tankAddresses).filter(
                 ([_, address]) =>
-                    address !== "0x0000000000000000000000000000000000000000",
+                    !address.includes("000000000000000"),
             ),
         )
+
+        console.log("deployedTanks", deployedTanks)
 
         if (Object.keys(deployedTanks).length === 0) {
             log.warning("No deployed tank addresses found in configuration")
@@ -70,8 +72,9 @@ export async function manageNativeBridge(
     operation: NativeBridgeOperation,
     signature: ISignature,
 ): Promise<RPCResponse> {
-    // Initialize tank manager if needed
-    await initializeTankManager()
+    // // Initialize tank manager if needed
+    // NOW done on node startup
+    // await initializeTankManager()
 
     // Prepare the response
     // eslint-disable-next-line prefer-const

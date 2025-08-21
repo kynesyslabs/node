@@ -35,6 +35,7 @@ import { SignalingServer } from "./features/InstantMessagingProtocol/signalingSe
 import { serverRpcBun } from "./libs/network/server_rpc"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import Chain from "./libs/blockchain/chain"
+import { initializeTankManager } from "./libs/network/manageNativeBridge"
 
 const term = terminalkit.terminal
 
@@ -306,6 +307,8 @@ async function preMainLoop() {
     const lastBlock = await Chain.getLastBlock()
     getSharedState.lastBlockNumber = lastBlock.number
     getSharedState.lastBlockHash = lastBlock.hash
+
+    await initializeTankManager()
 }
 
 // ANCHOR Entry point
@@ -381,7 +384,7 @@ async function main() {
         }
         term.yellow("[MAIN] ✅ Starting the background loop\n")
         // ANCHOR Starting the main loop
-        mainLoop() // Is an async function so running without waiting send that to the background
+        // mainLoop() // Is an async function so running without waiting send that to the background
     }
 }
 

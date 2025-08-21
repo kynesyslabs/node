@@ -370,17 +370,25 @@ export default class ServerHandlers {
                 }
                 break
 
-            case "nativeBridge":
-                var nativeBridgeResult = await handleNativeBridgeTx(tx as NativeBridgeTransaction)
-                if (nativeBridgeResult === null) {
+            case "nativeBridge": {
+                const { success, error, message } = await handleNativeBridgeTx(
+                    tx as NativeBridgeTransaction,
+                )
+                result.success = success
+
+                if (!success) {
                     result.success = false
-                    result.response = false
-                    result.extra = {
-                        error: "Failed to handle native bridge transaction",
+                    result.response = {
+                        message: "Failed to validate native bridge transaction",
                     }
+                    result.extra = {
+                        error: error,
+                    }
+                } else {
+                    result.response = { message }
                 }
-                result.response = nativeBridgeResult
                 break
+            }
         }
 
         // Only if the transaction is valid we add it to the mempool

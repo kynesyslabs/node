@@ -1,3 +1,505 @@
 {
-    "eth.sepolia": [{"inputs":[],"stateMutability":"nonpayable","type":"constructor"},{"inputs":[],"name":"AlreadyApproved","type":"error"},{"inputs":[],"name":"AlreadyExecuted","type":"error"},{"inputs":[],"name":"AlreadyInitialized","type":"error"},{"inputs":[],"name":"ContractPausedError","type":"error"},{"inputs":[],"name":"CurrentOwnerCannotBeNewOwner","type":"error"},{"inputs":[],"name":"DeployerCannotBeAuthorized","type":"error"},{"inputs":[],"name":"DuplicateAddress","type":"error"},{"inputs":[],"name":"EmergencyTimeoutNotReached","type":"error"},{"inputs":[],"name":"InsufficientAddresses","type":"error"},{"inputs":[],"name":"InsufficientBalance","type":"error"},{"inputs":[],"name":"InvalidAction","type":"error"},{"inputs":[],"name":"InvalidAddress","type":"error"},{"inputs":[],"name":"InvalidAmount","type":"error"},{"inputs":[],"name":"NotAuthorized","type":"error"},{"inputs":[],"name":"NotDeployer","type":"error"},{"inputs":[],"name":"NotInitialized","type":"error"},{"inputs":[],"name":"ProposalDataMismatch","type":"error"},{"inputs":[],"name":"ProposalExpired","type":"error"},{"inputs":[],"name":"TooManyAddresses","type":"error"},{"inputs":[],"name":"TransferFailed","type":"error"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"by","type":"address"}],"name":"ContractPaused","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"by","type":"address"}],"name":"ContractUnpaused","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"deployer","type":"address"},{"indexed":false,"internalType":"address[]","name":"newOwners","type":"address[]"}],"name":"EmergencyRecoveryTriggered","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"token","type":"address"},{"indexed":true,"internalType":"address","name":"to","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"EmergencyWithdrawal","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address[]","name":"oldOwners","type":"address[]"},{"indexed":false,"internalType":"address[]","name":"newOwners","type":"address[]"}],"name":"OwnersRotated","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"bytes32","name":"proposalId","type":"bytes32"},{"indexed":true,"internalType":"address","name":"approver","type":"address"},{"indexed":false,"internalType":"uint8","name":"approvalCount","type":"uint8"}],"name":"ProposalApproved","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"bytes32","name":"proposalId","type":"bytes32"},{"indexed":true,"internalType":"address","name":"creator","type":"address"},{"indexed":false,"internalType":"uint40","name":"deadline","type":"uint40"}],"name":"ProposalCreated","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"bytes32","name":"proposalId","type":"bytes32"}],"name":"ProposalExecuted","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"token","type":"address"},{"indexed":true,"internalType":"address","name":"to","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"TransferExecuted","type":"event"},{"stateMutability":"payable","type":"fallback"},{"inputs":[],"name":"EMERGENCY_TIMEOUT","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"TIMEOUT_SECONDS","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"authorizedAddresses","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"authorizedCount","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes32","name":"proposalId","type":"bytes32"}],"name":"checkProposalStatus","outputs":[{"internalType":"uint8","name":"approvalCount","type":"uint8"},{"internalType":"uint40","name":"deadline","type":"uint40"},{"internalType":"bool","name":"executed","type":"bool"},{"internalType":"bool","name":"expired","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"deployer","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address[]","name":"_addresses","type":"address[]"}],"name":"emergencyResetOwners","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes32","name":"proposalId","type":"bytes32"},{"internalType":"address","name":"token","type":"address"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"emergencyWithdraw","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"generateProposalId","outputs":[{"internalType":"bytes32","name":"proposalId","type":"bytes32"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"token","type":"address"}],"name":"getBalance","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getRequiredApprovals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes32","name":"proposalId","type":"bytes32"},{"internalType":"address","name":"addr","type":"address"}],"name":"hasApproved","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"initialized","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"isAuthorized","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"lastOwnershipRotation","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes32","name":"proposalId","type":"bytes32"},{"internalType":"address","name":"token","type":"address"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"multisigTransfer","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"pause","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"paused","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"proposalNonce","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes32","name":"","type":"bytes32"}],"name":"proposals","outputs":[{"internalType":"uint8","name":"approvalCount","type":"uint8"},{"internalType":"uint40","name":"deadline","type":"uint40"},{"internalType":"bool","name":"executed","type":"bool"},{"internalType":"bytes","name":"data","type":"bytes"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes32","name":"proposalId","type":"bytes32"},{"internalType":"address[]","name":"newOwners","type":"address[]"}],"name":"proposeNextOwners","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address[]","name":"_addresses","type":"address[]"}],"name":"setAuthorizedAddresses","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"unpause","outputs":[],"stateMutability":"nonpayable","type":"function"},{"stateMutability":"payable","type":"receive"}]
+    "eth.sepolia": [
+        {
+            "inputs": [],
+            "stateMutability": "nonpayable",
+            "type": "constructor"
+        },
+        { "inputs": [], "name": "AlreadyApproved", "type": "error" },
+        { "inputs": [], "name": "AlreadyExecuted", "type": "error" },
+        { "inputs": [], "name": "AlreadyInitialized", "type": "error" },
+        { "inputs": [], "name": "ContractPausedError", "type": "error" },
+        {
+            "inputs": [],
+            "name": "CurrentOwnerCannotBeNewOwner",
+            "type": "error"
+        },
+        { "inputs": [], "name": "DeployerCannotBeAuthorized", "type": "error" },
+        { "inputs": [], "name": "DuplicateAddress", "type": "error" },
+        { "inputs": [], "name": "EmergencyTimeoutNotReached", "type": "error" },
+        { "inputs": [], "name": "InsufficientAddresses", "type": "error" },
+        { "inputs": [], "name": "InsufficientBalance", "type": "error" },
+        { "inputs": [], "name": "InvalidAction", "type": "error" },
+        { "inputs": [], "name": "InvalidAddress", "type": "error" },
+        { "inputs": [], "name": "InvalidAmount", "type": "error" },
+        { "inputs": [], "name": "NotAuthorized", "type": "error" },
+        { "inputs": [], "name": "NotDeployer", "type": "error" },
+        { "inputs": [], "name": "NotInitialized", "type": "error" },
+        { "inputs": [], "name": "ProposalDataMismatch", "type": "error" },
+        { "inputs": [], "name": "ProposalExpired", "type": "error" },
+        { "inputs": [], "name": "TooManyAddresses", "type": "error" },
+        { "inputs": [], "name": "TransferFailed", "type": "error" },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "by",
+                    "type": "address"
+                }
+            ],
+            "name": "ContractPaused",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "by",
+                    "type": "address"
+                }
+            ],
+            "name": "ContractUnpaused",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "deployer",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "address[]",
+                    "name": "newOwners",
+                    "type": "address[]"
+                }
+            ],
+            "name": "EmergencyRecoveryTriggered",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                },
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "to",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "amount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "EmergencyWithdrawal",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": false,
+                    "internalType": "address[]",
+                    "name": "oldOwners",
+                    "type": "address[]"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "address[]",
+                    "name": "newOwners",
+                    "type": "address[]"
+                }
+            ],
+            "name": "OwnersRotated",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "bytes32",
+                    "name": "proposalId",
+                    "type": "bytes32"
+                },
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "approver",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint8",
+                    "name": "approvalCount",
+                    "type": "uint8"
+                }
+            ],
+            "name": "ProposalApproved",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "bytes32",
+                    "name": "proposalId",
+                    "type": "bytes32"
+                },
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "creator",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint40",
+                    "name": "deadline",
+                    "type": "uint40"
+                }
+            ],
+            "name": "ProposalCreated",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "bytes32",
+                    "name": "proposalId",
+                    "type": "bytes32"
+                }
+            ],
+            "name": "ProposalExecuted",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                },
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "to",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "amount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "TransferExecuted",
+            "type": "event"
+        },
+        { "stateMutability": "payable", "type": "fallback" },
+        {
+            "inputs": [],
+            "name": "EMERGENCY_TIMEOUT",
+            "outputs": [
+                { "internalType": "uint256", "name": "", "type": "uint256" }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "TIMEOUT_SECONDS",
+            "outputs": [
+                { "internalType": "uint256", "name": "", "type": "uint256" }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                { "internalType": "uint256", "name": "", "type": "uint256" }
+            ],
+            "name": "authorizedAddresses",
+            "outputs": [
+                { "internalType": "address", "name": "", "type": "address" }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "authorizedCount",
+            "outputs": [
+                { "internalType": "uint8", "name": "", "type": "uint8" }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "bytes32",
+                    "name": "proposalId",
+                    "type": "bytes32"
+                }
+            ],
+            "name": "checkProposalStatus",
+            "outputs": [
+                {
+                    "internalType": "uint8",
+                    "name": "approvalCount",
+                    "type": "uint8"
+                },
+                {
+                    "internalType": "uint40",
+                    "name": "deadline",
+                    "type": "uint40"
+                },
+                { "internalType": "bool", "name": "executed", "type": "bool" },
+                { "internalType": "bool", "name": "expired", "type": "bool" }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "deployer",
+            "outputs": [
+                { "internalType": "address", "name": "", "type": "address" }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address[]",
+                    "name": "_addresses",
+                    "type": "address[]"
+                }
+            ],
+            "name": "emergencyResetOwners",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "bytes32",
+                    "name": "proposalId",
+                    "type": "bytes32"
+                },
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                },
+                { "internalType": "address", "name": "to", "type": "address" },
+                {
+                    "internalType": "uint256",
+                    "name": "amount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "emergencyWithdraw",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "generateProposalId",
+            "outputs": [
+                {
+                    "internalType": "bytes32",
+                    "name": "proposalId",
+                    "type": "bytes32"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                }
+            ],
+            "name": "getBalance",
+            "outputs": [
+                { "internalType": "uint256", "name": "", "type": "uint256" }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getRequiredApprovals",
+            "outputs": [
+                { "internalType": "uint8", "name": "", "type": "uint8" }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "bytes32",
+                    "name": "proposalId",
+                    "type": "bytes32"
+                },
+                { "internalType": "address", "name": "addr", "type": "address" }
+            ],
+            "name": "hasApproved",
+            "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "initialized",
+            "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                { "internalType": "address", "name": "", "type": "address" }
+            ],
+            "name": "isAuthorized",
+            "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "lastOwnershipRotation",
+            "outputs": [
+                { "internalType": "uint256", "name": "", "type": "uint256" }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "bytes32",
+                    "name": "proposalId",
+                    "type": "bytes32"
+                },
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                },
+                { "internalType": "address", "name": "to", "type": "address" },
+                {
+                    "internalType": "uint256",
+                    "name": "amount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "multisigTransfer",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "pause",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "paused",
+            "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "proposalNonce",
+            "outputs": [
+                { "internalType": "uint256", "name": "", "type": "uint256" }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                { "internalType": "bytes32", "name": "", "type": "bytes32" }
+            ],
+            "name": "proposals",
+            "outputs": [
+                {
+                    "internalType": "uint8",
+                    "name": "approvalCount",
+                    "type": "uint8"
+                },
+                {
+                    "internalType": "uint40",
+                    "name": "deadline",
+                    "type": "uint40"
+                },
+                { "internalType": "bool", "name": "executed", "type": "bool" },
+                { "internalType": "bytes", "name": "data", "type": "bytes" }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "bytes32",
+                    "name": "proposalId",
+                    "type": "bytes32"
+                },
+                {
+                    "internalType": "address[]",
+                    "name": "newOwners",
+                    "type": "address[]"
+                }
+            ],
+            "name": "proposeNextOwners",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address[]",
+                    "name": "_addresses",
+                    "type": "address[]"
+                }
+            ],
+            "name": "setAuthorizedAddresses",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "unpause",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        { "stateMutability": "payable", "type": "receive" }
+    ]
 }
