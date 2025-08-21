@@ -53,6 +53,14 @@ TelegramVerificationRequest {
   bot_signature: string     // Bot's signature over attestation data
 }
 
+TelegramWeb2Payload {
+  context: string           // "telegram"
+  proof: string            // Bot attestation JSON string
+  username: string         // Telegram username
+  userId: string          // Telegram user ID
+  attestation_id: string  // SHA256 hash of challenge for replay protection
+}
+
 TelegramVerificationResponse {
   success: boolean
   message: string
@@ -89,13 +97,16 @@ TelegramVerificationResponse {
 │  2. Challenge Validation ✓                                 │
 │     └── Format + Expiry + Usage check                      │
 │                                                             │
-│  3. Bot Signature Verification ✓                           │
+│  3. Challenge Hash Anti-Replay Protection ✓                │
+│     └── SHA256(challenge) embedded in transaction          │
+│                                                             │
+│  4. Bot Signature Verification ✓                           │
 │     └── Ed25519 verify(attestation_data, bot_signature)    │
 │                                                             │
-│  4. User Signature Verification ✓                          │
+│  5. User Signature Verification ✓                          │
 │     └── Ed25519 verify(challenge, user_signature)          │
 │                                                             │
-│  5. Identity Transaction Creation                           │
+│  6. Identity Transaction Creation                           │
 │     └── Unsigned transaction for blockchain submission     │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -168,9 +179,12 @@ This code implements a **Telegram identity verification system** for the Demos b
 
 - **Genesis-based Authorization**: Only pre-approved bots can verify identities
 - **Challenge Uniqueness**: Cryptographic nonces prevent replay attacks  
+- **Challenge Hash Binding**: SHA256 challenge hash embedded in transactions
+- **Anti-Replay Protection**: Transaction validation requires matching challenge hash
 - **Dual Verification**: Both user and bot must provide valid signatures
 - **Time Limits**: Challenges expire after 15 minutes
 - **Single Use**: Each challenge can only be used once
+- **Validate Mode Security**: On-chain validation prevents replay of old attestations
 
 ### Integration Flow
 
@@ -180,7 +194,9 @@ This code implements a **Telegram identity verification system** for the Demos b
 4. Bot verifies user's Telegram identity and signs attestation
 5. Bot sends verification request to backend
 6. Backend validates both signatures and bot authorization
-7. Backend returns unsigned identity transaction
-8. User signs and submits transaction to blockchain
+7. Backend generates challenge hash (SHA256) for replay protection
+8. Backend returns unsigned identity transaction with embedded challenge hash
+9. User signs and submits transaction to blockchain
+10. On-chain validation verifies challenge hash matches transaction payload
 
-This creates a trustless bridge between Telegram identities and Demos blockchain addresses, enabling Web2-to-Web3 identity verification.
+This creates a trustless bridge between Telegram identities and Demos blockchain addresses, with cryptographic protection against replay attacks.

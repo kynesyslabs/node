@@ -3,6 +3,12 @@
 
 This document outlines how the **dApp** and **Bot** teams should work together to implement seamless Telegram identity verification using the Demos node APIs.
 
+## 🔒 **Security Update: Anti-Replay Protection**
+**NEW**: The system now includes enhanced security features to prevent replay attacks:
+- **Challenge Hash Embedding**: SHA256 hash of challenges embedded in transactions
+- **Validation Mode Security**: On-chain validation requires matching challenge hash
+- **Replay Attack Prevention**: Old attestations cannot be reused even with valid bot signatures
+
 ## 🎯 **Goal: Seamless User Experience**
 
 Instead of users manually copying/pasting messages, we want:
@@ -200,6 +206,7 @@ bot = telegram.Bot(token=BOT_TOKEN)
 async def handle_verification_request(telegram_user_id, telegram_username, signed_challenge):
     """
     Handle verification request from dApp
+    Enhanced with anti-replay protection via challenge hash embedding
     """
     # Create attestation payload
     attestation = {
@@ -213,7 +220,7 @@ async def handle_verification_request(telegram_user_id, telegram_username, signe
     attestation_json = json.dumps(attestation, sort_keys=True)
     bot_signature = sign_message(attestation_json, GENESIS_PRIVATE_KEY)
     
-    # Submit to node
+    # Submit to node (node will generate challenge hash automatically)
     payload = {
         **attestation,
         'bot_address': GENESIS_ADDRESS,
@@ -224,6 +231,7 @@ async def handle_verification_request(telegram_user_id, telegram_username, signe
     
     if response.status_code == 200:
         data = response.json()
+        # Transaction now includes embedded challenge hash for replay protection
         return data.get('unsignedTransaction')
     else:
         raise Exception(f"Node verification failed: {response.text}")
@@ -281,15 +289,34 @@ function verifyTelegramAuth(authData: TelegramAuthData, botToken: string): boole
 }
 ```
 
-### **2. Session Management**
+### **2. Anti-Replay Protection**
+```typescript
+// Challenge hash generation for replay protection
+function generateChallengeHash(challenge: string): string {
+  return crypto.createHash('sha256').update(challenge).digest('hex')
+}
+
+// Transaction payload must include challenge hash
+interface TelegramTransactionPayload {
+  context: 'telegram'
+  proof: string
+  username: string
+  userId: string
+  attestation_id: string  // SHA256 hash of original challenge
+}
+```
+
+### **3. Session Management**
 - **Unique session IDs** for each verification attempt
 - **Expiration**: 15 minutes max per session
 - **Rate limiting**: Max 5 attempts per user per hour
 - **CSRF protection**: Validate origin and referrer
 
-### **3. Bot Security**
+### **4. Bot Security**
 - **Genesis address validation**: Bot must own genesis private key
 - **Signature verification**: All attestations cryptographically signed
+- **Challenge hash embedding**: All transactions include SHA256 challenge hash
+- **Replay attack prevention**: On-chain validation requires matching challenge hash
 - **IP allowlisting**: Only accept requests from known dApp servers
 - **Webhook authentication**: Verify requests from dApp
 
@@ -404,8 +431,9 @@ DAPP_ALLOWED_ORIGINS=https://app.demos.network,https://demos.network
 |-------|-------|----------|
 | "Invalid Telegram auth" | Hash verification failed | Check bot token, verify hash calculation |
 | "Challenge expired" | >15 minutes elapsed | Generate fresh challenge |
+| "Challenge hash mismatch" | Replay attack detected | Ensure transaction includes correct challenge hash |
 | "Unauthorized bot" | Bot not using genesis key | Verify genesis private key |
-| "Transaction failed" | Invalid transaction format | Check transaction structure |
+| "Transaction failed" | Invalid transaction format | Check transaction structure and attestation_id |
 | "Wallet won't sign" | Wrong network/format | Verify wallet connection |
 
 ### **Debug Tools**:
@@ -415,8 +443,11 @@ const DEBUG_MODE = process.env.NODE_ENV === 'development'
 
 if (DEBUG_MODE) {
   console.log('Challenge:', challenge)
+  console.log('Challenge Hash:', generateChallengeHash(challenge))
   console.log('Signed challenge:', signedChallenge)  
   console.log('Unsigned transaction:', unsignedTransaction)
+  console.log('Transaction attestation_id:', unsignedTransaction.content.data[1].attestation_id)
+}
 }
 ```
 
