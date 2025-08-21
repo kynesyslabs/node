@@ -1,20 +1,12 @@
-import {
-    Transaction,
-    NativeBridgeTransaction,
-} from "@kynesyslabs/demosdk/types"
+import { Transaction } from "@kynesyslabs/demosdk/types"
 import log from "@/utilities/logger"
-import Mempool from "../../../blockchain/mempool_v2"
 import SecretaryManager from "../types/secretaryManager"
-import {
-    BridgeOperation,
-    BridgeOperationCompiled,
-} from "node_modules/@kynesyslabs/demosdk/build/bridge/nativeBridgeTypes"
+import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import { EVMSmartContractManagement } from "@/features/bridges/native/EVMSmartContractManagement"
-import { JsonConfig } from "@/utilities/JsonConfig"
 import { getSharedState } from "@/utilities/sharedState"
 
 export default async function executeBridgeOperations(
-    mempool: Transaction[],
+    bridgeTxs: Transaction[],
 ): Promise<[string[], string[]]> {
     const fname = "[executeBridgeOperations]"
     log.info(`${fname} Processing bridge operations for consensus...`)
@@ -29,162 +21,48 @@ export default async function executeBridgeOperations(
     }
 
     // Efficiently get native bridge transactions from database
-    const nativeBridgeOperations: NativeBridgeTransaction[] =
-        await Mempool.getNativeBridgeTransactions(blockNumber)
+    // const nativeBridgeOperations: NativeBridgeTransaction[] =
+    //     await Mempool.getNativeBridgeTransactions(blockNumber)
 
     log.info(
-        `${fname} Found ${nativeBridgeOperations.length} native bridge transactions in block ${blockNumber}`,
+        `${fname} Found ${bridgeTxs.length} native bridge transactions in block ${blockNumber}`,
     )
 
-    if (nativeBridgeOperations.length > 0) {
+    if (bridgeTxs.length > 0) {
         log.debug(
             `${fname} Native bridge operations:` +
-                JSON.stringify(nativeBridgeOperations, null, 2),
+                JSON.stringify(bridgeTxs, null, 2),
         )
     }
 
     // Initialize EVM tank management system
     const evmTankManager = EVMSmartContractManagement.getInstance()
     if (!evmTankManager.isReady()) {
-        const tankAddresses = JsonConfig.getTankAddresses()
-        await evmTankManager.initialize(tankAddresses)
-        log.info(`${fname} Initialized EVM tank management system`)
+        log.error(`${fname} EVM tank management system not initialized`)
+        process.exit(1)
+        // const tankAddresses = JsonConfig.getTankAddresses()
+        // await evmTankManager.initialize(tankAddresses)
+        // log.info(`${fname} Initialized EVM tank management system`)
     }
 
     // Process each native bridge operation
     const successful: string[] = []
     const failed: string[] = []
 
-    for (const bridgeTx of nativeBridgeOperations) {
-        try {
-            // Extract BridgeOperationCompiled from transaction
-            const compiled = bridgeTx.content.data[1] as BridgeOperationCompiled
-            const operation = compiled.content.operation
+    // for (const bridgeTx of bridgeTxs) {
+    //     await processBridgeTx(bridgeTx)
+    // }
+    const results = await Promise.all(
+        bridgeTxs.map(async bridgeTx => {
+            return await processBridgeTx(bridgeTx)
+        }),
+    )
 
-            log.debug(
-                `${fname} Processing bridge operation: ${operation.originChain} -> ${operation.destinationChain}`,
-            )
-
-            // Step 1 - Verify deposit on source chain
-            let depositVerified = false
-            if (operation.originChainType === "EVM") {
-                // Map chain name to chain key (e.g., "eth" -> "eth.sepolia")
-                const originChainKey = getChainKeyFromName(
-                    operation.originChain,
-                )
-                if (!originChainKey) {
-                    throw new Error(
-                        `Unsupported origin chain: ${operation.originChain}`,
-                    )
-                }
-
-                // Verify deposit using existing tank management
-                const depositResult = await evmTankManager.verifyDeposit(
-                    originChainKey,
-                    operation.txHash,
-                    operation.amount.toString(),
-                    operation.originAddress,
-                )
-
-                if (depositResult.valid) {
-                    depositVerified = true
-                    log.info(
-                        `${fname} Deposit verified on ${originChainKey}: ${operation.amount}`,
-                    )
-                } else {
-                    log.warning(
-                        `${fname} Deposit verification failed on ${originChainKey}`,
-                    )
-                }
-            } else {
-                // SOLANA not implemented yet - skip for now
-                log.info(
-                    `${fname} Solana operations not yet supported, skipping`,
-                )
-                failed.push(bridgeTx.hash)
-                continue
-            }
-
-            if (!depositVerified) {
-                failed.push(bridgeTx.hash)
-                continue
-            }
-
-            // Step 2 - Check tank liquidity on destination
-            let sufficientLiquidity = false
-            if (operation.destinationChainType === "EVM") {
-                const destinationChainKey = getChainKeyFromName(
-                    operation.destinationChain,
-                )
-                if (!destinationChainKey) {
-                    throw new Error(
-                        `Unsupported destination chain: ${operation.destinationChain}`,
-                    )
-                }
-
-                const balance = await evmTankManager.getUSDCBalance(
-                    destinationChainKey,
-                )
-                const balanceNum = parseInt(balance)
-                const requiredAmount = parseInt(operation.amount.toString())
-
-                if (balanceNum >= requiredAmount) {
-                    sufficientLiquidity = true
-                    log.info(
-                        `${fname} Sufficient liquidity on ${destinationChainKey}: ${balance} >= ${requiredAmount}`,
-                    )
-                } else {
-                    log.warning(
-                        `${fname} Insufficient liquidity on ${destinationChainKey}: ${balance} < ${requiredAmount}`,
-                    )
-                }
-            } else {
-                // TODO SOLANA not implemented yet
-                // For now, just log and skip
-                log.info(`${fname} Solana destinations not yet supported`)
-                failed.push(bridgeTx.hash)
-                continue
-            }
-
-            if (!sufficientLiquidity) {
-                failed.push(bridgeTx.hash)
-                continue
-            }
-
-            // Step 3 - Execute withdrawal on destination chain
-            if (operation.destinationChainType === "EVM") {
-                const destinationChainKey = getChainKeyFromName(
-                    operation.destinationChain,
-                )
-
-                // TODO: Get actual shard signing keys from SecretaryManager
-                // For now, using placeholder - this needs proper key management
-                const shardSigningKeys = getShardSigningKeys()
-
-                if (shardSigningKeys.length === 0) {
-                    throw new Error(
-                        "No shard signing keys available for withdrawal execution",
-                    )
-                }
-
-                // Execute withdrawal using existing tank management
-                const proposalId = await evmTankManager.executeWithdrawal(
-                    destinationChainKey,
-                    operation.destinationAddress,
-                    operation.amount.toString(),
-                    shardSigningKeys,
-                )
-
-                log.info(
-                    `${fname} Withdrawal executed on ${destinationChainKey}: ${proposalId}`,
-                )
-                successful.push(bridgeTx.hash)
-            }
-        } catch (error) {
-            log.error(
-                `${fname} Failed to process bridge operation ${bridgeTx.hash}: ${error}`,
-            )
-            failed.push(bridgeTx.hash)
+    for (const result of results) {
+        if (result.success) {
+            successful.push(result.txHash)
+        } else {
+            failed.push(result.txHash)
         }
     }
 
@@ -194,6 +72,7 @@ export default async function executeBridgeOperations(
             `${fname} Successfully executed ${successful.length} bridge operations`,
         )
     }
+
     if (failed.length > 0) {
         log.warning(
             `${fname} Failed to execute ${failed.length} bridge operations`,
@@ -201,6 +80,126 @@ export default async function executeBridgeOperations(
     }
 
     return [successful, failed]
+}
+
+async function processBridgeTx(bridgeTx: Transaction): Promise<{
+    txHash: string
+    success: boolean
+    error?: string
+    proposalId?: string
+}> {
+    const fname = "[processBridgeTx]"
+    const evmTankManager = EVMSmartContractManagement.getInstance()
+
+    // Extract BridgeOperationCompiled from transaction
+    const compiled = bridgeTx.content.data[1] as NativeBridgeOperationCompiled
+    const operation = compiled.content.operation
+    const txHash = compiled.content.txHash
+    const destination = `${operation.from.chain}.${operation.from.subchain}`
+
+    log.debug(
+        `${fname} Processing bridge operation: ${operation.from.chain} -> ${operation.to.chain}`,
+    )
+
+    const result = {
+        txHash: bridgeTx.hash,
+        success: false,
+    }
+
+    // Step 1 - Verify deposit on source chain
+    // let depositVerified = false
+    if (operation.from.chain.startsWith("evm")) {
+        // Verify deposit using existing tank management
+        const depositResult = await evmTankManager.verifyDeposit(
+            destination,
+            txHash,
+            operation.token.amount,
+            operation.from.address,
+        )
+
+        if (!depositResult.valid) {
+            log.warning(
+                `${fname} Deposit verification failed on ${operation.from.chain}.${operation.from.subchain}`,
+            )
+            return {
+                ...result,
+                error: "Deposit verification failed",
+            }
+        }
+    } else {
+        // SOLANA not implemented yet - skip for now
+        log.info(`${fname} Solana operations not yet supported, skipping`)
+        return {
+            ...result,
+            error: "Solana operations not yet supported",
+        }
+    }
+
+    // Step 2 - Check tank liquidity on destination
+    if (operation.to.chain.startsWith("evm")) {
+        if (!evmTankManager.getTankConfig(destination)) {
+            log.error(`${fname} Unsupported destination chain: ${destination}`)
+            process.exit(1)
+        }
+
+        const balance = await evmTankManager.getUSDCBalance(destination)
+        const balanceNum = parseInt(balance)
+        const requiredAmount = parseInt(operation.token.amount.toString())
+
+        if (balanceNum >= requiredAmount) {
+            log.error(
+                `${fname} Insufficient liquidity on ${destination}: ${balance} < ${requiredAmount}`,
+            )
+            process.exit(1)
+            return {
+                ...result,
+                error: "Insufficient liquidity on destination chain",
+            }
+        }
+    } else {
+        // TODO SOLANA not implemented yet
+        // For now, just log and skip
+        log.info(`${fname} Solana destinations not yet supported`)
+        return {
+            ...result,
+            error: "Solana destinations not yet supported",
+        }
+    }
+
+    // Step 3 - Execute withdrawal on destination chain
+    if (operation.to.chain.startsWith("evm")) {
+        // TODO: Get actual shard signing keys from SecretaryManager
+        // For now, using placeholder - this needs proper key management
+        const shardSigningKeys = getShardSigningKeys()
+
+        if (shardSigningKeys.length === 0) {
+            throw new Error(
+                "No shard signing keys available for withdrawal execution",
+            )
+        }
+
+        // Execute withdrawal using existing tank management
+        const proposalId = await evmTankManager.executeWithdrawal(
+            destination,
+            operation.to.address,
+            operation.token.amount.toString(),
+            shardSigningKeys,
+        )
+
+        log.info(
+            `${fname} Withdrawal executed on ${destination}: ${proposalId}`,
+        )
+        return {
+            ...result,
+            success: true,
+            proposalId: proposalId,
+        }
+    }
+
+    return {
+        ...result,
+        error: "Unsupported chain type",
+    }
 }
 
 /**

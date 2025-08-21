@@ -102,7 +102,14 @@ export async function consensusRoutine(): Promise<void> {
             manager.shard.members,
             manager.shard.blockRef,
         )
-        log.debug("MErged mempool: " + JSON.stringify(mempool.map((tx) => tx.hash), null, 2))
+        log.debug(
+            "MErged mempool: " +
+                JSON.stringify(
+                    mempool.map(tx => tx.hash),
+                    null,
+                    2,
+                ),
+        )
 
         log.info(
             "[consensusRoutine] mempool merged (aka ordered transactions)",
@@ -116,10 +123,19 @@ export async function consensusRoutine(): Promise<void> {
         // INFO: CONSENSUS ACTION 4: Apply the GCR operations to the state before forging the block
 
         // SUB ACTION 1: Execute the native bridge operations
+        const bridgeTxs: Transaction[] = []
+        for (const tx of mempool) {
+            if (tx.content.type == "nativeBridge") {
+                bridgeTxs.push(tx)
+            }
+        }
+
         log.info("[consensusRoutine] Executing the native bridge operations")
-        const [successfulBridgeOperations, failedBridgeOperations] = await executeBridgeOperations(mempool)
-        successfulTxs = successfulTxs.concat(successfulBridgeOperations)
-        failedTxs = failedTxs.concat(failedBridgeOperations)
+        const [okBidgeTxs, notOkBidgeTxs] = await executeBridgeOperations(
+            bridgeTxs,
+        )
+        successfulTxs = successfulTxs.concat(okBidgeTxs)
+        failedTxs = failedTxs.concat(notOkBidgeTxs)
 
         // SUB ACTION 2: Apply the GCR operations to the state before forging the block
         /**
@@ -152,8 +168,7 @@ export async function consensusRoutine(): Promise<void> {
         // const mempool = await mergeAndOrderMempools(manager.shard.members)
 
         log.info(
-            "[consensusRoutine] mempool: " +
-                JSON.stringify(mempool, null, 2),
+            "[consensusRoutine] mempool: " + JSON.stringify(mempool, null, 2),
             true,
         )
 
@@ -208,8 +223,6 @@ export async function consensusRoutine(): Promise<void> {
         // INFO: CONSENSUS ACTION 7: End the consensus routine
         await updateValidatorPhase(7)
     } catch (error) {
-        console.error(error)
-        process.exit(1)
         if (error instanceof NotInShardError) {
             log.info(
                 "[consensusRoutine] We are not in the shard, waiting for the block",
@@ -241,6 +254,10 @@ export async function consensusRoutine(): Promise<void> {
 
             return
         }
+
+        // INFO: If unknown error, quit node!
+        console.error(error)
+        process.exit(1)
     } finally {
         manager.endConsensusRoutine()
         // Cleanup the consensus state

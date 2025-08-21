@@ -461,49 +461,39 @@ export class EVMSmartContractManagement {
     }> {
         const tankConfig = this.tanks.get(chainKey)
         if (!tankConfig) {
+            log.error(`Tank not found for chain: ${chainKey}`)
+            process.exit(1)
             throw new Error(`Tank not found for chain: ${chainKey}`)
         }
 
-        try {
-            // Get transaction receipt
-            const receipt = await tankConfig.evmInstance.waitForReceipt(txHash)
+        // Get transaction receipt
+        const receipt = await tankConfig.evmInstance.waitForReceipt(txHash)
 
-            if (!receipt || !receipt.logs) {
-                return { valid: false }
-            }
-
-            // Parse logs for USDC transfer to tank
-            // This would need proper log parsing based on USDC transfer events
-            // Simplified validation for now
-            const tankAddress = tankConfig.address.toLowerCase()
-            // Error on 0x0000... address
-            if (tankAddress === "0x0000000000000000000000000000000000000000") {
-                log.error(
-                    `Invalid tank address for ${chainKey}: ${tankAddress}: is the contract deployed?`,
-                )
-                return { valid: false }
-            }
-            const hasTransferToTank = receipt.logs.some(
-                (log: any) =>
-                    log.address?.toLowerCase().includes("usdc") &&
-                    log.topics?.some((topic: string) =>
-                        topic.toLowerCase().includes(tankAddress.slice(2)),
-                    ),
-            )
-
-            if (hasTransferToTank) {
-                return {
-                    valid: true,
-                    actualAmount: expectedAmount, // Would extract from logs
-                    actualSender: expectedSender, // Would extract from logs
-                }
-            }
-
-            return { valid: false }
-        } catch (error) {
-            log.error(`Failed to verify deposit for ${chainKey}:` + error)
+        if (!receipt || !receipt.logs) {
             return { valid: false }
         }
+
+        // Parse logs for USDC transfer to tank
+        // This would need proper log parsing based on USDC transfer events
+        // Simplified validation for now
+        const tankAddress = tankConfig.address.toLowerCase()
+        const hasTransferToTank = receipt.logs.some(
+            (log: any) =>
+                log.address?.toLowerCase().includes("usdc") &&
+                log.topics?.some((topic: string) =>
+                    topic.toLowerCase().includes(tankAddress.slice(2)),
+                ),
+        )
+
+        if (hasTransferToTank) {
+            return {
+                valid: true,
+                actualAmount: expectedAmount, // Would extract from logs
+                actualSender: expectedSender, // Would extract from logs
+            }
+        }
+
+        return { valid: false }
     }
 
     /**

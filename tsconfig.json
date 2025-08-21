@@ -15,7 +15,8 @@
         "outDir": "./dist",
         "baseUrl": "./",
         "paths": {
-            "@/*": ["src/*"]
+            "@/*": ["src/*"],
+            "@kynesyslabs/demosdk/*": ["../sdks/src/*"]
         },
         "types": ["jest", "node", "bun"],
         "incremental": true,
@@ -26,6 +27,7 @@
         "skipLibCheck": true,
         "strict": true,
         "noFallthroughCasesInSwitch": true,
-        "forceConsistentCasingInFileNames": true
-    }
+        "forceConsistentCasingInFileNames": true,
+    },
+    "references": [{ "path": "../sdks" }]
 }
