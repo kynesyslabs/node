@@ -102,7 +102,14 @@ export async function consensusRoutine(): Promise<void> {
             manager.shard.members,
             manager.shard.blockRef,
         )
-        log.debug("MErged mempool: " + JSON.stringify(tempMempool.map((tx) => tx.hash), null, 2))
+        log.debug(
+            "MErged mempool: " +
+                JSON.stringify(
+                    tempMempool.map(tx => tx.hash),
+                    null,
+                    2,
+                ),
+        )
 
         log.info(
             "[consensusRoutine] mempool merged (aka ordered transactions)",
@@ -200,8 +207,6 @@ export async function consensusRoutine(): Promise<void> {
         // INFO: CONSENSUS ACTION 7: End the consensus routine
         await updateValidatorPhase(7)
     } catch (error) {
-        console.error(error)
-        process.exit(1)
         if (error instanceof NotInShardError) {
             log.info(
                 "[consensusRoutine] We are not in the shard, waiting for the block",
@@ -233,6 +238,9 @@ export async function consensusRoutine(): Promise<void> {
 
             return
         }
+
+        console.error(error)
+        process.exit(1)
     } finally {
         manager.endConsensusRoutine()
         // Cleanup the consensus state
