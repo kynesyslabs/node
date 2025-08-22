@@ -3,7 +3,7 @@ import { PointSystem } from "@/features/incentive/PointSystem"
 
 /**
  * This class is used to manage the incentives for the user.
- * It is used to award points to the user for linking their wallet and Twitter account.
+ * It is used to award points to the user for linking their wallet, Twitter account, and GitHub account.
  * It is also used to get the points for the user.
  */
 export class IncentiveManager {
@@ -60,6 +60,28 @@ export class IncentiveManager {
      */
     static async twitterUnlinked(userId: string): Promise<RPCResponse> {
         return await this.pointSystem.deductTwitterPoints(userId)
+    }
+
+    /**
+     * Hook to be called after GitHub linking
+     */
+    static async githubLinked(
+        userId: string,
+        githubUserId: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.awardGithubPoints(
+            userId,
+            githubUserId,
+            referralCode,
+        )
+    }
+
+    /**
+     * Hook to be called after GitHub unlinking
+     */
+    static async githubUnlinked(userId: string, githubUserId: string): Promise<RPCResponse> {
+        return await this.pointSystem.deductGithubPoints(userId, githubUserId)
     }
 
     /**
