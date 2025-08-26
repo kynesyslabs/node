@@ -16,7 +16,7 @@ contract GaslessBridgeTest is Test {
     
     // Test accounts
     address public deployer = address(this);
-    address public user1 = makeAddr("user1");
+    address public user1 = 0x2e988A386a799F506693793c6A5AF6B54dfAaBfB; // Address for our test private key
     address public user2 = makeAddr("user2");
     address public user3 = makeAddr("user3");
     address public bridgeRecipient = makeAddr("bridgeRecipient");
@@ -38,7 +38,7 @@ contract GaslessBridgeTest is Test {
     event TransferExecuted(address indexed token, address indexed recipient, uint256 expectedAmount, uint256 actualAmount);
     
     function setUp() public {
-        console.log("🔧 Setting up Gasless Bridge Test Environment");
+        console.log("Setting up Gasless Bridge Test Environment");
         
         // Deploy contracts
         tank = new LiquidityTank();
@@ -61,7 +61,7 @@ contract GaslessBridgeTest is Test {
         // Fund tank with USDC for bridge operations
         usdc.mint(address(tank), 100000e6);
         
-        console.log("✅ Setup complete - Ready for gasless bridge testing");
+        console.log("PASS Setup complete - Ready for gasless bridge testing");
     }
     
     /*//////////////////////////////////////////////////////////////
@@ -69,7 +69,7 @@ contract GaslessBridgeTest is Test {
     //////////////////////////////////////////////////////////////*/
     
     function test_GaslessDeposit_Success() public {
-        console.log("🧪 Testing gasless deposit functionality");
+        console.log("Testing gasless deposit functionality");
         
         uint256 nonce = 1;
         bytes memory userSignature = _generateMockSignature(user1, nonce, "DEPOSIT");
@@ -95,11 +95,11 @@ contract GaslessBridgeTest is Test {
         // Verify gas was consumed from subsidy pool
         assertLt(tank.gasSubsidyPool(), initialGasPool, "Gas should be consumed from subsidy pool");
         
-        console.log("✅ Gasless deposit test passed");
+        console.log("PASS Gasless deposit test passed");
     }
     
     function test_GaslessDeposit_InsufficientApproval() public {
-        console.log("🧪 Testing gasless deposit with insufficient approval");
+        console.log("Testing gasless deposit with insufficient approval");
         
         uint256 nonce = 2;
         bytes memory userSignature = _generateMockSignature(user1, nonce, "DEPOSIT");
@@ -108,7 +108,7 @@ contract GaslessBridgeTest is Test {
         vm.expectRevert("ERC20: insufficient allowance");
         tank.depositUSDCToTank(user1, userSignature, nonce, address(usdc), BRIDGE_AMOUNT);
         
-        console.log("✅ Insufficient approval test passed");
+        console.log("PASS Insufficient approval test passed");
     }
     
     /*//////////////////////////////////////////////////////////////
@@ -116,7 +116,7 @@ contract GaslessBridgeTest is Test {
     //////////////////////////////////////////////////////////////*/
     
     function test_GaslessBridgeInitiation_Success() public {
-        console.log("🧪 Testing gasless bridge initiation");
+        console.log("Testing gasless bridge initiation");
         
         uint256 nonce = 100;
         bytes memory userSignature = _generateMockSignature(user1, nonce, "BRIDGE");
@@ -131,12 +131,12 @@ contract GaslessBridgeTest is Test {
         vm.expectEmit(true, true, true, true);
         emit GaslessBridgeInitiated(user1, address(usdc), BRIDGE_AMOUNT, nonce, address(this));
         
-        tank.initiateBridgeOperation(user1, userSignature, nonce, address(usdc), BRIDGE_AMOUNT);
+        tank.initiateBridgeOperation(user1, userSignature, nonce, "ethereum", "polygon", address(usdc), bridgeRecipient, BRIDGE_AMOUNT, 50);
         
         // Verify gas was consumed
         assertLt(tank.gasSubsidyPool(), initialGasPool, "Gas should be consumed for bridge initiation");
         
-        console.log("✅ Gasless bridge initiation test passed");
+        console.log("PASS Gasless bridge initiation test passed");
     }
     
     /*//////////////////////////////////////////////////////////////
@@ -144,15 +144,15 @@ contract GaslessBridgeTest is Test {
     //////////////////////////////////////////////////////////////*/
     
     function test_MultisigGaslessExecution_Complete() public {
-        console.log("🧪 Testing complete multisig gasless execution");
+        console.log("Testing complete multisig gasless execution");
         
-        uint256 transferNonce = tank.generateNextNonce();
+        uint256 transferNonce = 2001 + block.number;  // Use unique nonce for each test
         uint256 slippageBps = 50; // 0.5% slippage tolerance
         
         uint256 initialRecipientBalance = usdc.balanceOf(bridgeRecipient);
         uint256 initialTankBalance = usdc.balanceOf(address(tank));
         
-        console.log("   💡 Starting multisig approval process");
+        console.log("   INSIGHT Starting multisig approval process");
         
         // First approval (should create proposal)
         vm.prank(user1);
@@ -172,13 +172,13 @@ contract GaslessBridgeTest is Test {
         assertEq(usdc.balanceOf(bridgeRecipient), initialRecipientBalance + BRIDGE_AMOUNT, "Recipient should receive tokens");
         assertEq(usdc.balanceOf(address(tank)), initialTankBalance - BRIDGE_AMOUNT, "Tank balance should decrease");
         
-        console.log("✅ Complete multisig gasless execution test passed");
+        console.log("PASS Complete multisig gasless execution test passed");
     }
     
     function test_MultisigGaslessExecution_PreventDoubleApproval() public {
-        console.log("🧪 Testing prevention of double approval in multisig");
+        console.log("Testing prevention of double approval in multisig");
         
-        uint256 transferNonce = tank.generateNextNonce();
+        uint256 transferNonce = 2001 + block.number;  // Use unique nonce for each test
         
         // First approval
         vm.prank(user1);
@@ -186,10 +186,10 @@ contract GaslessBridgeTest is Test {
         
         // Try to approve again with same user - should fail
         vm.prank(user1);
-        vm.expectRevert(LiquidityTank.AlreadyApproved.selector);
+        vm.expectRevert(AlreadyApproved.selector);
         tank.multisigTransfer(transferNonce, address(usdc), bridgeRecipient, BRIDGE_AMOUNT, 50);
         
-        console.log("✅ Double approval prevention test passed");
+        console.log("PASS Double approval prevention test passed");
     }
     
     /*//////////////////////////////////////////////////////////////
@@ -197,7 +197,7 @@ contract GaslessBridgeTest is Test {
     //////////////////////////////////////////////////////////////*/
     
     function test_GasSubsidySystem_Configuration() public {
-        console.log("🧪 Testing gas subsidy system configuration");
+        console.log("Testing gas subsidy system configuration");
         
         // Test initial state
         assertTrue(tank.gasSubsidyEnabled(), "Gas subsidy should be enabled");
@@ -210,18 +210,18 @@ contract GaslessBridgeTest is Test {
         assertFalse(tank.gasSubsidyEnabled(), "Gas subsidy should be disabled");
         assertEq(tank.maxGasSubsidy(), 0.02 ether, "Max subsidy should be updated");
         
-        console.log("✅ Gas subsidy configuration test passed");
+        console.log("PASS Gas subsidy configuration test passed");
     }
     
     function test_GasSubsidySystem_Unauthorized() public {
-        console.log("🧪 Testing unauthorized access to gas subsidy configuration");
+        console.log("Testing unauthorized access to gas subsidy configuration");
         
         // Non-deployer should not be able to configure
         vm.prank(user1);
-        vm.expectRevert(LiquidityTank.NotDeployer.selector);
+        vm.expectRevert(NotDeployer.selector);
         tank.configureGasSubsidy(false, 0, 0);
         
-        console.log("✅ Unauthorized gas subsidy access prevention test passed");
+        console.log("PASS Unauthorized gas subsidy access prevention test passed");
     }
     
     /*//////////////////////////////////////////////////////////////
@@ -229,10 +229,10 @@ contract GaslessBridgeTest is Test {
     //////////////////////////////////////////////////////////////*/
     
     function test_CompleteGaslessBridgeFlow() public {
-        console.log("🌉 Testing complete gasless bridge flow");
+        console.log("BRIDGE Testing complete gasless bridge flow");
         
         // Step 1: User deposits to tank (gasless)
-        console.log("   📥 Step 1: Gasless deposit to tank");
+        console.log("   Step 1: Gasless deposit to tank");
         uint256 depositNonce = 1;
         bytes memory depositSignature = _generateMockSignature(user1, depositNonce, "DEPOSIT");
         
@@ -242,15 +242,15 @@ contract GaslessBridgeTest is Test {
         tank.depositUSDCToTank(user1, depositSignature, depositNonce, address(usdc), BRIDGE_AMOUNT);
         
         // Step 2: Initiate bridge operation (gasless)
-        console.log("   🚀 Step 2: Gasless bridge initiation");
+        console.log("   LAUNCH Step 2: Gasless bridge initiation");
         uint256 bridgeNonce = 2;
         bytes memory bridgeSignature = _generateMockSignature(user1, bridgeNonce, "BRIDGE");
         
-        tank.initiateBridgeOperation(user1, bridgeSignature, bridgeNonce, address(usdc), BRIDGE_AMOUNT);
+        tank.initiateBridgeOperation(user1, bridgeSignature, bridgeNonce, "ethereum", "polygon", address(usdc), bridgeRecipient, BRIDGE_AMOUNT, 50);
         
         // Step 3: Multisig consensus execution
-        console.log("   🔐 Step 3: Multisig consensus execution");
-        uint256 transferNonce = tank.generateNextNonce();
+        console.log("   SECURE Step 3: Multisig consensus execution");
+        uint256 transferNonce = 3001;  // Use a specific nonce for the complete flow test
         
         // First multisig approval
         vm.prank(user1);
@@ -266,7 +266,7 @@ contract GaslessBridgeTest is Test {
         assertEq(usdc.balanceOf(bridgeRecipient), initialRecipientBalance + BRIDGE_AMOUNT, "Bridge should complete successfully");
         assertLt(tank.gasSubsidyPool(), GAS_SUBSIDY_POOL, "Gas should have been consumed throughout the process");
         
-        console.log("✅ Complete gasless bridge flow test passed - SUCCESS!");
+        console.log("PASS Complete gasless bridge flow test passed - SUCCESS!");
     }
     
     /*//////////////////////////////////////////////////////////////
@@ -274,7 +274,7 @@ contract GaslessBridgeTest is Test {
     //////////////////////////////////////////////////////////////*/
     
     function test_GasConsumption_Analysis() public {
-        console.log("⚡ Analyzing gas consumption for gasless operations");
+        console.log("PERFORMANCE Analyzing gas consumption for gasless operations");
         
         uint256 nonce = 500;
         bytes memory signature = _generateMockSignature(user1, nonce, "DEPOSIT");
@@ -287,12 +287,12 @@ contract GaslessBridgeTest is Test {
         tank.depositUSDCToTank(user1, signature, nonce, address(usdc), BRIDGE_AMOUNT);
         uint256 gasUsed = gasBefore - gasleft();
         
-        console.log("   💰 Gas used for gasless deposit: %d", gasUsed);
+        console.log("   GAS Gas used for gasless deposit: %d", gasUsed);
         
         // Should be reasonable (under 200k gas)
         assertLt(gasUsed, 200000, "Gas consumption should be optimized");
         
-        console.log("✅ Gas consumption analysis completed");
+        console.log("PASS Gas consumption analysis completed");
     }
     
     /*//////////////////////////////////////////////////////////////
@@ -300,7 +300,7 @@ contract GaslessBridgeTest is Test {
     //////////////////////////////////////////////////////////////*/
     
     function test_ErrorHandling_InsufficientGasPool() public {
-        console.log("🚨 Testing error handling for insufficient gas pool");
+        console.log("CRITICAL Testing error handling for insufficient gas pool");
         
         // Disable gas subsidy
         tank.configureGasSubsidy(false, 0, 0);
@@ -314,9 +314,9 @@ contract GaslessBridgeTest is Test {
         // Should handle gracefully when gas subsidy is disabled
         // Note: In a real implementation, this might revert or require traditional gas payment
         try tank.depositUSDCToTank(user1, signature, nonce, address(usdc), BRIDGE_AMOUNT) {
-            console.log("   ⚠️  Operation succeeded without gas subsidy (implementation dependent)");
+            console.log("   WARN  Operation succeeded without gas subsidy (implementation dependent)");
         } catch {
-            console.log("   ✅ Operation correctly failed without gas subsidy");
+            console.log("   PASS Operation correctly failed without gas subsidy");
         }
     }
     
@@ -324,14 +324,49 @@ contract GaslessBridgeTest is Test {
                             HELPER FUNCTIONS
     //////////////////////////////////////////////////////////////*/
     
-    function _generateMockSignature(address user, uint256 nonce, string memory action) internal pure returns (bytes memory) {
-        // Create a simple mock signature for testing
-        // In production, this would be a proper EIP-712 or ed25519 signature
-        return abi.encodePacked(
-            bytes32(keccak256(abi.encodePacked(user, nonce, action))),  // r
-            bytes32(keccak256(abi.encodePacked(action, nonce, user))),  // s
-            uint8(27) // v
-        );
+    function _generateMockSignature(address user, uint256 nonce, string memory action) internal view returns (bytes memory) {
+        // Use a fixed private key for testing - in production this would be the user's actual key
+        uint256 privateKey = 0x1234567890123456789012345678901234567890123456789012345678901234;
+        
+        // Create message hash that matches the contract's expected format
+        bytes32 messageHash;
+        
+        if (keccak256(bytes(action)) == keccak256("DEPOSIT")) {
+            messageHash = keccak256(abi.encodePacked(
+                "LIQUIDITY_TANK_DEPOSIT",
+                user,
+                nonce,
+                address(usdc),
+                BRIDGE_AMOUNT,
+                block.chainid,
+                address(tank)
+            ));
+        } else if (keccak256(bytes(action)) == keccak256("BRIDGE")) {
+            messageHash = keccak256(abi.encodePacked(
+                "LIQUIDITY_TANK_BRIDGE",
+                user,
+                nonce,
+                "ethereum",
+                "polygon",
+                address(usdc),
+                bridgeRecipient,
+                BRIDGE_AMOUNT,
+                uint256(50),
+                block.chainid,
+                address(tank)
+            ));
+        } else {
+            // Fallback for other actions
+            messageHash = keccak256(abi.encodePacked(user, nonce, action));
+        }
+        
+        // Add Ethereum signed message prefix
+        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
+        
+        // Sign with the private key using vm.sign
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, ethSignedHash);
+        
+        return abi.encodePacked(r, s, v);
     }
 }
 

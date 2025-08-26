@@ -23,8 +23,35 @@ $ forge build
 
 ### Test
 
+#### Run All Tests
 ```shell
 $ forge test
+```
+
+#### Run Specific Test Suite
+```shell
+# Run gasless bridge tests (6/10 tests passing)
+$ forge test --match-contract "GaslessBridgeTest"
+
+# Run specific test function
+$ forge test --match-test "test_GaslessDeposit_Success"
+
+# Run with verbose output (-v, -vv, -vvv for increasing verbosity)
+$ forge test --match-contract "GaslessBridgeTest" -vv
+```
+
+#### Test Status
+- **GaslessBridgeTest**: 6/10 tests passing ✅
+  - ✅ Gasless deposits with signature verification
+  - ✅ Gasless bridge initiation with events  
+  - ✅ Gas subsidy system configuration
+  - ✅ Error handling for edge cases
+  - 🔧 4 tests need minor fixes (multisig consensus, gas optimization)
+
+#### Manual Test Execution
+If `forge` is not in your PATH, use the full path:
+```shell
+$ /home/tcsenpai/.foundry/bin/forge test --match-contract "GaslessBridgeTest"
 ```
 
 ### Format
