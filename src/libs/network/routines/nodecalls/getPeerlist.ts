@@ -1,8 +1,8 @@
 import { Peer } from "src/libs/peer"
-
+import log from "src/utilities/logger"
 import PeerManager from "../../../peer/PeerManager"
 import { getSharedState } from "src/utilities/sharedState"
-import log from "src/utilities/logger"
+import { ContractManager } from "src/features/bridges/native/ContractManager"
 
 export default async function getPeerlist(): Promise<Peer[]> {
     console.log("[SERVER] Executing getPeerlist")
@@ -15,17 +15,20 @@ export default async function getPeerlist(): Promise<Peer[]> {
         // peer.connection.socket = null // ? What is this
         response.push(peer)
 
-        if (
-            peer.identity === getSharedState.publicKeyHex &&
-            peer.connection.string.startsWith("http://127.0.0.1")
-        ) {
-            log.debug("Was returning local connection string")
-            log.debug(JSON.stringify(peer, null, 2))
-            log.debug("getSharedState.exposedUrl: " + getSharedState.exposedUrl)
+        if (peer.identity === getSharedState.publicKeyHex) {
+            if (peer.connection.string.startsWith("http://127.0.0.1")) {
+                log.debug("Was returning local connection string")
+                log.debug(JSON.stringify(peer, null, 2))
+                log.debug(
+                    "getSharedState.exposedUrl: " + getSharedState.exposedUrl,
+                )
 
-            peer.connection.string = getSharedState.exposedUrl
-            log.debug(JSON.stringify(peer, null, 2))
-            // process.exit(0)
+                peer.connection.string = getSharedState.exposedUrl
+                log.debug(JSON.stringify(peer, null, 2))
+            }
+
+            // INFO: Add tankAddresses
+            peer.tankSigners = ContractManager.getAllTankSigners()
         }
     }
 

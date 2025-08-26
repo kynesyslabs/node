@@ -1,10 +1,11 @@
-import { EVM } from "@kynesyslabs/demosdk/xm-localsdk"
-import { Contract, WebSocketProvider } from "ethers"
-import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
-import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
-import { JsonConfig } from "@/utilities/JsonConfig"
-import { getSharedState } from "@/utilities/sharedState"
+import { Contract, Transaction, WebSocketProvider } from "ethers"
+
 import log from "@/utilities/logger"
+import { Waiter } from "src/utilities/waiter"
+import { JsonConfig } from "@/utilities/JsonConfig"
+import { EVM } from "@kynesyslabs/demosdk/xm-localsdk"
+import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
+import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 
 // ABI for LiquidityTank contract - key functions only
 const liquidityTankABI = [
@@ -73,6 +74,7 @@ export class EVMSmartContractManagement {
 
     /**
      * Initialize the tank management system with existing deployed contracts
+     *
      * @param tankAddresses Map of chainKey -> tank contract address
      */
     public async initialize(tankAddresses: {
@@ -176,44 +178,36 @@ export class EVMSmartContractManagement {
         const tankConfig = this.tanks.get(chainKey)
         if (!tankConfig) return
 
-        // Listen for transfer events (deposits/withdrawals)
-        // await tankConfig.evmInstance.listenForEvent(
-        //     "TransferExecuted",
-        //     tankConfig.address,
-        //     liquidityTankABI,
-        //     async data => console.log("TransferExecuted", data),
-        // )
         const providers = {
             "evm.eth.sepolia": "wss://ethereum-sepolia-rpc.publicnode.com",
             "evm.polygon.amoy": "wss://polygon-amoy-bor-rpc.publicnode.com",
         }
+
+        // TODO: Move these into a config file
         const tankABI = JsonConfig.getTankAbi(chainKey)
         const provider = new WebSocketProvider(providers[chainKey])
         const contract = new Contract(tankConfig.address, tankABI, provider)
-        contract.on("OwnersRotated", async data =>
-            // TODO: Release the Consensus step in Waiter class once received!
-            console.log("OwnersRotated", data),
-        )
 
-        // // Listen for ownership rotation events
-        // await tankConfig.evmInstance.listenForEvent(
-        //     "OwnersRotated",
-        //     tankConfig.address,
-        //     liquidityTankABI,
-        //     async data => console.log("OwnersRotated", data),
-        // )
+        // INFO: Listen and handle the OwnersRotated event
+        contract.on(
+            "OwnersRotated",
+            async (oldOwners: string[], newOwners: string[]) => {
+                log.debug(
+                    `OwnersRotated for ${chainKey}: ${JSON.stringify(
+                        oldOwners,
+                    )} -> ${JSON.stringify(newOwners)}`,
+                )
+
+                // INFO: Release the Consensus step in Waiter class once received!
+                if (Waiter.isWaiting(Waiter.keys.TANK_SIGNER_ROTATION)) {
+                    Waiter.resolve(Waiter.keys.TANK_SIGNER_ROTATION)
+                }
+            },
+        )
 
         contract.on("ProposalExecuted", async data =>
             console.log("ProposalExecuted", data),
         )
-
-        // // Listen for proposal events
-        // await tankConfig.evmInstance.listenForEvent(
-        //     "ProposalExecuted",
-        //     tankConfig.address,
-        //     liquidityTankABI,
-        //     async data => console.log("ProposalExecuted", data),
-        // )
 
         contract.on("ProposalCreated", async data =>
             console.log("ProposalCreated", data),
@@ -290,54 +284,78 @@ export class EVMSmartContractManagement {
     public async initiateShardRotation(
         chainKey: string,
         newSigners: string[],
-        currentSignerPrivateKey: string,
-    ): Promise<string> {
+    ): Promise<{
+        chainKey: string
+        proposalId: string
+    }> {
         const tankConfig = this.tanks.get(chainKey)
         if (!tankConfig) {
-            throw new Error(`Tank not found for chain: ${chainKey}`)
+            log.error(`Tank not found for chain: ${chainKey}`)
+            process.exit(1)
         }
 
-        try {
-            // Connect wallet with current signer key
-            await tankConfig.evmInstance.connectWallet(currentSignerPrivateKey)
+        // Generate unique proposal ID
+        log.debug("Generating proposal ID")
+        // const proposalIdTx = await tankConfig.contract.generateProposalId()
+        const balance = await tankConfig.evmInstance.getBalance(
+            tankConfig.evmInstance.wallet.address,
+        )
+        log.debug("Balance: " + balance)
+        const proposalIdTx = await tankConfig.evmInstance.writeToContract(
+            tankConfig.contract,
+            "generateProposalId",
+            [],
+            {
+                gasLimit: 22000,
+                value: "0",
+            },
+        )
 
-            // Generate unique proposal ID
-            const proposalIdTx = await tankConfig.contract.generateProposalId()
-            const receipt = await tankConfig.evmInstance.waitForReceipt(
-                proposalIdTx.hash,
+        const tx = Transaction.from(proposalIdTx)
+        log.debug("Tx: " + JSON.stringify(tx, null, 2))
+
+        const response =
+            await tankConfig.evmInstance.provider.broadcastTransaction(
+                proposalIdTx,
             )
+        log.debug("Proposal ID: " + JSON.stringify(response, null, 2))
+        process.exit(1)
 
-            // Extract proposal ID from events (simplified - would need proper event parsing)
-            const proposalId =
-                receipt.logs[0]?.topics[1] ||
-                `0x${Date.now().toString(16).padStart(64, "0")}`
+        const receipt = await tankConfig.evmInstance.waitForReceipt(
+            proposalIdTx.hash,
+        )
 
-            // Propose new owners
-            await tankConfig.evmInstance.writeToContract(
-                tankConfig.contract,
-                "proposeNextOwners",
-                [proposalId, newSigners],
-            )
+        log.debug("Receipt: " + JSON.stringify(receipt, null, 2))
 
-            // Track rotation proposal
-            this.rotationProposals.set(chainKey, {
-                proposalId,
-                newSigners,
-                requiredApprovals:
-                    await tankConfig.contract.getRequiredApprovals(),
-                currentApprovals: 1, // First approval from caller
-                executed: false,
-            })
+        // Extract proposal ID from events (simplified - would need proper event parsing)
+        const proposalId =
+            receipt.logs[0]?.topics[1] ||
+            `0x${Date.now().toString(16).padStart(64, "0")}`
 
-            log.info(
-                `Shard rotation initiated for ${chainKey}, proposal: ${proposalId}`,
-            )
-            return proposalId
-        } catch (error) {
-            log.error(
-                `Failed to initiate shard rotation for ${chainKey}:` + error,
-            )
-            throw error
+        // Propose new owners
+        const txResponse = await tankConfig.evmInstance.writeToContract(
+            tankConfig.contract,
+            "proposeNextOwners",
+            [proposalId, newSigners],
+        )
+        // TODO: Confirm the tx was succcessfully received by the contract
+
+        // Track rotation proposal
+        // REVIEW: Do we need to track these?
+        this.rotationProposals.set(chainKey, {
+            proposalId,
+            newSigners,
+            requiredApprovals: await tankConfig.contract.getRequiredApprovals(),
+            currentApprovals: 1, // First approval from caller
+            executed: false,
+        })
+
+        log.info(
+            `Shard rotation initiated for ${chainKey}, proposal: ${proposalId}`,
+        )
+        return {
+            chainKey,
+            proposalId,
         }
     }
 
@@ -507,6 +525,19 @@ export class EVMSmartContractManagement {
      */
     public getTankConfig(chainKey: string): TankConfig | null {
         return this.tanks.get(chainKey) || null
+    }
+
+    /**
+     * Returns a map of chainKey -> wallet address for all initialized tanks
+     */
+    public getTankWalletAddresses(): Record<string, string> {
+        const map: Record<string, string> = {}
+
+        for (const [chainKey, tankConfig] of this.tanks) {
+            map[chainKey] = tankConfig.evmInstance.wallet.address
+        }
+
+        return map
     }
 
     /**

@@ -10,6 +10,7 @@ import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { TimeoutError, AbortError, NotInShardError } from "src/exceptions"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
+import { EVMSmartContractManagement } from "src/features/bridges/native"
 
 // ANCHOR SecretaryManager
 export default class SecretaryManager {
@@ -903,5 +904,74 @@ export default class SecretaryManager {
                 res.result,
         )
         return null
+    }
+
+    /**
+     * Proposes new tank contract signers and waits for approval
+     * before ending the consensus routine.
+     *
+     * @returns The result of the rotation
+     */
+    async rotateTankSigners() {
+        // INFO: Get the next shard members
+        const { commonValidatorSeed } = await getCommonValidatorSeed()
+        const nextShard = await getShard(commonValidatorSeed)
+
+        // INFO: This is a map of chainKey -> tank owner addresses
+        type Addresses = string[]
+        interface TankSigners {
+            [chainKey: string]: Addresses
+        }
+        const nextShardTankSigners: TankSigners = {}
+
+        // INFO: Collect all the tank owner addresses
+        for (const member of nextShard) {
+            const tankSigners = member.tankSigners
+
+            for (const chainKey in tankSigners) {
+                if (!nextShardTankSigners[chainKey]) {
+                    nextShardTankSigners[chainKey] = []
+                }
+
+                nextShardTankSigners[chainKey].push(tankSigners[chainKey])
+            }
+        }
+
+        log.debug(
+            "Next shard tank addresses: " +
+                JSON.stringify(nextShardTankSigners, null, 2),
+        )
+
+        const evm = EVMSmartContractManagement.getInstance()
+
+        // INFO: Submit the proposals for all tanks
+        const proposals: Promise<{
+            chainKey: string
+            proposalId: string
+        }>[] = []
+
+        for (const chainKey in nextShardTankSigners) {
+            if (chainKey.startsWith("evm")) {
+                const newSigners = nextShardTankSigners[chainKey]
+                const proposal = evm.initiateShardRotation(chainKey, newSigners)
+                proposals.push(proposal)
+                continue
+            }
+
+            if (chainKey.startsWith("solana")) {
+                // TODO: Implement solana tank rotation
+                continue
+            }
+
+            log.error("Attempting to rotate an unknown chain key: " + chainKey)
+            process.exit(1)
+        }
+
+        // INFO: Wait for all the proposals to be sent out
+        const results = await Promise.all(proposals)
+        log.debug("Proposals: " + JSON.stringify(results, null, 2))
+
+        // INFO: Wait for proposal approvals
+        return await Waiter.wait(Waiter.keys.TANK_SIGNER_ROTATION)
     }
 }

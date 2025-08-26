@@ -16,7 +16,6 @@ import * as dotenv from "dotenv"
 import * as fs from "fs"
 
 import { getSharedState } from "./utilities/sharedState"
-import { server_rpc } from "./libs/network" // NOTE This is started in warmup
 import terminalkit from "terminal-kit"
 
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
@@ -24,8 +23,6 @@ import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { PeerManager } from "./libs/peer"
 // import commandLine from "./utilities/commandLine"
 import peerBootstrap from "./libs/peer/routines/peerBootstrap"
-import groundControl from "./libs/utils/demostdlib/groundControl"
-import mainLoop from "./utilities/mainLoop"
 import log from "src/utilities/logger"
 import { Peer } from "./libs/peer"
 import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
@@ -33,9 +30,10 @@ import getTimestampCorrection from "./libs/utils/calibrateTime"
 import net from "net"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import { serverRpcBun } from "./libs/network/server_rpc"
-import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import Chain from "./libs/blockchain/chain"
 import { initializeTankManager } from "./libs/network/manageNativeBridge"
+import mainLoop from "./utilities/mainLoop"
 
 const term = terminalkit.terminal
 
@@ -384,7 +382,7 @@ async function main() {
         }
         term.yellow("[MAIN] ✅ Starting the background loop\n")
         // ANCHOR Starting the main loop
-        // mainLoop() // Is an async function so running without waiting send that to the background
+        mainLoop() // Is an async function so running without waiting send that to the background
     }
 }
 
