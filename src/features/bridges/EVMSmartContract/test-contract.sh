@@ -1,8 +1,7 @@
 #!/bin/bash
 
-# LiquidityTank Contract Testing Script
-# This script provides comprehensive testing for the LiquidityTank smart contract
-# with gas profiling and optimization verification.
+# Phase 7: Testing & Validation - Comprehensive Foundry Test Suite
+# This script implements the final testing phase for gasless bridge operations
 
 set -e
 
@@ -11,6 +10,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
 NC='\033[0m' # No Color
 
 # Get script directory FIRST, before any directory changes
@@ -19,8 +19,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Ensure Foundry is in PATH
 export PATH="$PATH:/home/tcsenpai/.foundry/bin"
 
-echo -e "${BLUE}🔧 LiquidityTank Smart Contract Testing Suite${NC}"
-echo -e "${BLUE}=============================================${NC}\n"
+echo -e "${PURPLE}🚀 Phase 7: Testing & Validation${NC}"
+echo -e "${PURPLE}Gasless Bridge Operations - Comprehensive Test Suite${NC}"
+echo -e "${BLUE}====================================================${NC}\n"
 
 # Check if Foundry is installed
 if ! command -v forge &> /dev/null; then

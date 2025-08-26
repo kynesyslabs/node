@@ -1,69 +1,66 @@
-# LiquidityTank Smart Contract
+## Foundry
 
-A secure, gasless-enabled multisig liquidity management contract for the Demos Network bridge system.
+**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
 
-## 🔐 Security Features
+Foundry consists of:
 
-- **Front-running Protection**: Internal proposal ID generation with cryptographic entropy
-- **Fee-on-Transfer Token Support**: Dual-balance slippage protection
-- **Gasless Transactions**: Contract-sponsored gas payments for zero-cost user experience
-- **Multisig Governance**: 2/3 majority approval for all operations
-- **Emergency Controls**: Pause/unpause and ownership rotation capabilities
+- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
+- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
+- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
+- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
 
-## 📋 Core Functions
+## Documentation
 
-### Initialization
-```solidity
-setAuthorizedAddresses(address[] _addresses)
+https://book.getfoundry.sh/
+
+## Usage
+
+### Build
+
+```shell
+$ forge build
 ```
-One-time setup of multisig owners (minimum 3 required).
 
-### Multisig Operations
-```solidity
-multisigTransfer(uint256 nonce, address token, address to, uint256 amount, uint256 slippageBps)
+### Test
+
+```shell
+$ forge test
 ```
-Transfer ETH or ERC20 tokens with 2/3 approval requirement.
 
-```solidity
-proposeNextOwners(uint256 nonce, address[] newOwners)
+### Format
+
+```shell
+$ forge fmt
 ```
-Rotate multisig ownership with proposal system.
 
-### Gasless System
-```solidity
-depositGasSubsidy() payable
-configureGasSubsidy(bool enabled, uint256 maxSubsidy, uint256 dailyLimit)
-reimburseGas(address user) payable
+### Gas Snapshots
+
+```shell
+$ forge snapshot
 ```
-Manage the contract-sponsored gas payment system.
 
-### Meta-Transactions
-```solidity
-executeMetaTransaction(address user, bytes signature, uint256 nonce, address token, address to, uint256 amount, uint256 slippageBps)
+### Anvil
+
+```shell
+$ anvil
 ```
-Execute transactions on behalf of users without requiring ETH for gas.
 
-### Emergency Controls
-```solidity
-pause() / unpause()
+### Deploy
+
+```shell
+$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
 ```
-Emergency stop/resume functionality (deployer only).
 
-## 📁 Documentation
+### Cast
 
-- [Usage Guide](./USAGE.md) - Integration with ethers.js and @kynesyslabs/demosdk
-- [Gasless System](./GASLESS.md) - How contract-sponsored transactions work
-- [Testing](./TESTING.md) - Test suite explanation and coverage
+```shell
+$ cast <subcommand>
+```
 
-## 🚀 Quick Start
+### Help
 
-1. Deploy contract
-2. Call `setAuthorizedAddresses([owner1, owner2, owner3])`
-3. Fund contract with ETH for operations
-4. Optional: Setup gasless system with `depositGasSubsidy()` and `configureGasSubsidy()`
-
-## 📊 Gas Costs
-
-- First approval: ~254k gas
-- Second approval + execution: ~221k gas
-- Gasless transactions: Contract pays automatically
+```shell
+$ forge --help
+$ anvil --help
+$ cast --help
+```
