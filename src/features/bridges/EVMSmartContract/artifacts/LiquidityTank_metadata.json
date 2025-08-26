@@ -1,0 +1,1562 @@
+{
+	"compiler": {
+		"version": "0.8.30+commit.73712a01"
+	},
+	"language": "Solidity",
+	"output": {
+		"abi": [
+			{
+				"inputs": [],
+				"stateMutability": "nonpayable",
+				"type": "constructor"
+			},
+			{
+				"inputs": [],
+				"name": "AlreadyApproved",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "AlreadyExecuted",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "AlreadyInitialized",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "CannotCancelExecuted",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "ContractPausedError",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "CurrentOwnerCannotBeNewOwner",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "DeployerCannotBeAuthorized",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "DuplicateAddress",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "EmergencyTimeoutNotReached",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "InsufficientAddresses",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "InsufficientBalance",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "InvalidAction",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "InvalidAddress",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "InvalidAmount",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "InvalidSignature",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "InvalidSlippageBps",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "InvalidTokenContract",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "NotAuthorized",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "NotDeployer",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "NotInitialized",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "OnlyProposerCanCancel",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "ProposalDataMismatch",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "ProposalExpired",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "ReentrancyGuard",
+				"type": "error"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "token",
+						"type": "address"
+					}
+				],
+				"name": "SafeERC20FailedOperation",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "SlippageExceeded",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "TooManyAddresses",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "TransferFailed",
+				"type": "error"
+			},
+			{
+				"inputs": [],
+				"name": "ZeroAddressForwarder",
+				"type": "error"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "account",
+						"type": "address"
+					},
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "grantor",
+						"type": "address"
+					}
+				],
+				"name": "AuthorizationGranted",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "account",
+						"type": "address"
+					},
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "revoker",
+						"type": "address"
+					}
+				],
+				"name": "AuthorizationRevoked",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "by",
+						"type": "address"
+					}
+				],
+				"name": "ContractPaused",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "by",
+						"type": "address"
+					}
+				],
+				"name": "ContractUnpaused",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "depositor",
+						"type": "address"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "amount",
+						"type": "uint256"
+					}
+				],
+				"name": "ETHDeposited",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "deployer",
+						"type": "address"
+					},
+					{
+						"indexed": false,
+						"internalType": "address[]",
+						"name": "newOwners",
+						"type": "address[]"
+					}
+				],
+				"name": "EmergencyRecoveryTriggered",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "token",
+						"type": "address"
+					},
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "to",
+						"type": "address"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "amount",
+						"type": "uint256"
+					}
+				],
+				"name": "EmergencyWithdrawal",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": false,
+						"internalType": "bool",
+						"name": "enabled",
+						"type": "bool"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "maxSubsidy",
+						"type": "uint256"
+					}
+				],
+				"name": "GasSubsidyConfigured",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "amount",
+						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "newTotal",
+						"type": "uint256"
+					}
+				],
+				"name": "GasSubsidyDeposited",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "user",
+						"type": "address"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "gasCost",
+						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "totalUsed",
+						"type": "uint256"
+					}
+				],
+				"name": "GasSubsidyUsed",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "amount",
+						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "remaining",
+						"type": "uint256"
+					}
+				],
+				"name": "GasSubsidyWithdrawn",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": false,
+						"internalType": "address[]",
+						"name": "oldOwners",
+						"type": "address[]"
+					},
+					{
+						"indexed": false,
+						"internalType": "address[]",
+						"name": "newOwners",
+						"type": "address[]"
+					}
+				],
+				"name": "OwnersRotated",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "bytes32",
+						"name": "proposalId",
+						"type": "bytes32"
+					},
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "approver",
+						"type": "address"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint8",
+						"name": "approvalCount",
+						"type": "uint8"
+					}
+				],
+				"name": "ProposalApproved",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "bytes32",
+						"name": "proposalId",
+						"type": "bytes32"
+					},
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "canceller",
+						"type": "address"
+					}
+				],
+				"name": "ProposalCancelled",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "bytes32",
+						"name": "proposalId",
+						"type": "bytes32"
+					},
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "creator",
+						"type": "address"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint40",
+						"name": "deadline",
+						"type": "uint40"
+					}
+				],
+				"name": "ProposalCreated",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "bytes32",
+						"name": "proposalId",
+						"type": "bytes32"
+					}
+				],
+				"name": "ProposalExecuted",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "bytes32",
+						"name": "proposalId",
+						"type": "bytes32"
+					},
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "generator",
+						"type": "address"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "nonce",
+						"type": "uint256"
+					}
+				],
+				"name": "ProposalIdGenerated",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "token",
+						"type": "address"
+					},
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "to",
+						"type": "address"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "expectedAmount",
+						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "actualAmount",
+						"type": "uint256"
+					}
+				],
+				"name": "TransferExecuted",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "oldForwarder",
+						"type": "address"
+					},
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "newForwarder",
+						"type": "address"
+					}
+				],
+				"name": "TrustedForwarderUpdated",
+				"type": "event"
+			},
+			{
+				"stateMutability": "payable",
+				"type": "fallback"
+			},
+			{
+				"inputs": [],
+				"name": "EMERGENCY_TIMEOUT",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "MAX_AUTHORIZED_ADDRESSES",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "MAX_DAILY_USER_SUBSIDY",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "MAX_SLIPPAGE_BPS",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "TIMEOUT_SECONDS",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"name": "authorizedAddresses",
+				"outputs": [
+					{
+						"internalType": "address",
+						"name": "",
+						"type": "address"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "authorizedCount",
+				"outputs": [
+					{
+						"internalType": "uint8",
+						"name": "",
+						"type": "uint8"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "bytes32",
+						"name": "proposalId",
+						"type": "bytes32"
+					}
+				],
+				"name": "cancelProposal",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "bytes32",
+						"name": "proposalId",
+						"type": "bytes32"
+					}
+				],
+				"name": "checkProposalStatus",
+				"outputs": [
+					{
+						"internalType": "uint8",
+						"name": "approvalCount",
+						"type": "uint8"
+					},
+					{
+						"internalType": "uint40",
+						"name": "deadline",
+						"type": "uint40"
+					},
+					{
+						"internalType": "bool",
+						"name": "executed",
+						"type": "bool"
+					},
+					{
+						"internalType": "bool",
+						"name": "expired",
+						"type": "bool"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "bool",
+						"name": "enabled",
+						"type": "bool"
+					},
+					{
+						"internalType": "uint256",
+						"name": "maxSubsidy",
+						"type": "uint256"
+					},
+					{
+						"internalType": "uint256",
+						"name": "dailyLimit",
+						"type": "uint256"
+					}
+				],
+				"name": "configureGasSubsidy",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "dailySubsidyLimit",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"name": "dailyTotalUsage",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "",
+						"type": "address"
+					},
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"name": "dailyUserUsage",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "deployer",
+				"outputs": [
+					{
+						"internalType": "address",
+						"name": "",
+						"type": "address"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "depositGasSubsidy",
+				"outputs": [],
+				"stateMutability": "payable",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address[]",
+						"name": "_addresses",
+						"type": "address[]"
+					}
+				],
+				"name": "emergencyResetOwners",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "bytes32",
+						"name": "proposalId",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "address",
+						"name": "token",
+						"type": "address"
+					},
+					{
+						"internalType": "address",
+						"name": "to",
+						"type": "address"
+					},
+					{
+						"internalType": "uint256",
+						"name": "amount",
+						"type": "uint256"
+					}
+				],
+				"name": "emergencyWithdraw",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "user",
+						"type": "address"
+					},
+					{
+						"internalType": "bytes",
+						"name": "signature",
+						"type": "bytes"
+					},
+					{
+						"internalType": "uint256",
+						"name": "nonce",
+						"type": "uint256"
+					},
+					{
+						"internalType": "address",
+						"name": "token",
+						"type": "address"
+					},
+					{
+						"internalType": "address",
+						"name": "to",
+						"type": "address"
+					},
+					{
+						"internalType": "uint256",
+						"name": "amount",
+						"type": "uint256"
+					},
+					{
+						"internalType": "uint256",
+						"name": "slippageBps",
+						"type": "uint256"
+					}
+				],
+				"name": "executeMetaTransaction",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "gasSubsidyEnabled",
+				"outputs": [
+					{
+						"internalType": "bool",
+						"name": "",
+						"type": "bool"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "gasSubsidyPool",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "",
+						"type": "address"
+					}
+				],
+				"name": "gasSubsidyUsed",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "token",
+						"type": "address"
+					}
+				],
+				"name": "getBalance",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "getRequiredApprovals",
+				"outputs": [
+					{
+						"internalType": "uint8",
+						"name": "",
+						"type": "uint8"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "bytes32",
+						"name": "proposalId",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "address",
+						"name": "addr",
+						"type": "address"
+					}
+				],
+				"name": "hasApproved",
+				"outputs": [
+					{
+						"internalType": "bool",
+						"name": "",
+						"type": "bool"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "initialized",
+				"outputs": [
+					{
+						"internalType": "bool",
+						"name": "",
+						"type": "bool"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "",
+						"type": "address"
+					}
+				],
+				"name": "isAuthorized",
+				"outputs": [
+					{
+						"internalType": "bool",
+						"name": "",
+						"type": "bool"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "lastOwnershipRotation",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "maxGasSubsidy",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "uint256",
+						"name": "nonce",
+						"type": "uint256"
+					},
+					{
+						"internalType": "address",
+						"name": "token",
+						"type": "address"
+					},
+					{
+						"internalType": "address",
+						"name": "to",
+						"type": "address"
+					},
+					{
+						"internalType": "uint256",
+						"name": "amount",
+						"type": "uint256"
+					},
+					{
+						"internalType": "uint256",
+						"name": "slippageBps",
+						"type": "uint256"
+					}
+				],
+				"name": "multisigTransfer",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "pause",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "paused",
+				"outputs": [
+					{
+						"internalType": "bool",
+						"name": "",
+						"type": "bool"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "proposalNonce",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "bytes32",
+						"name": "",
+						"type": "bytes32"
+					}
+				],
+				"name": "proposals",
+				"outputs": [
+					{
+						"internalType": "uint8",
+						"name": "approvalCount",
+						"type": "uint8"
+					},
+					{
+						"internalType": "uint40",
+						"name": "deadline",
+						"type": "uint40"
+					},
+					{
+						"internalType": "bool",
+						"name": "executed",
+						"type": "bool"
+					},
+					{
+						"internalType": "bool",
+						"name": "cancelled",
+						"type": "bool"
+					},
+					{
+						"internalType": "address",
+						"name": "proposer",
+						"type": "address"
+					},
+					{
+						"internalType": "bytes",
+						"name": "data",
+						"type": "bytes"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "uint256",
+						"name": "nonce",
+						"type": "uint256"
+					},
+					{
+						"internalType": "address[]",
+						"name": "newOwners",
+						"type": "address[]"
+					}
+				],
+				"name": "proposeNextOwners",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address[]",
+						"name": "_addresses",
+						"type": "address[]"
+					}
+				],
+				"name": "setAuthorizedAddresses",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "forwarder",
+						"type": "address"
+					}
+				],
+				"name": "setTrustedForwarder",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "trustedForwarder",
+				"outputs": [
+					{
+						"internalType": "address",
+						"name": "",
+						"type": "address"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "unpause",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "uint256",
+						"name": "amount",
+						"type": "uint256"
+					}
+				],
+				"name": "withdrawGasSubsidy",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"stateMutability": "payable",
+				"type": "receive"
+			}
+		],
+		"devdoc": {
+			"errors": {
+				"NotAuthorized()": [
+					{
+						"details": "Custom errors for gas efficiency (saves ~2k gas per revert vs strings)"
+					}
+				],
+				"SafeERC20FailedOperation(address)": [
+					{
+						"details": "An operation with an ERC-20 token failed."
+					}
+				]
+			},
+			"events": {
+				"AuthorizationGranted(address,address)": {
+					"details": "Events for role management tracking"
+				},
+				"GasSubsidyDeposited(uint256,uint256)": {
+					"details": "Events for gas subsidy tracking"
+				},
+				"ProposalIdGenerated(bytes32,address,uint256)": {
+					"details": "Events for proposal lifecycle tracking"
+				},
+				"TransferExecuted(address,address,uint256,uint256)": {
+					"details": "Events for liquidity tank operations"
+				},
+				"TrustedForwarderUpdated(address,address)": {
+					"details": "Events for meta-transaction support"
+				}
+			},
+			"kind": "dev",
+			"methods": {
+				"cancelProposal(bytes32)": {
+					"details": "Allows proposer to cancel proposals that are no longer needed",
+					"params": {
+						"proposalId": "The proposal to cancel"
+					}
+				},
+				"checkProposalStatus(bytes32)": {
+					"params": {
+						"proposalId": "The proposal to check"
+					},
+					"returns": {
+						"approvalCount": "Current number of approvals",
+						"deadline": "Unix timestamp when proposal expires",
+						"executed": "Whether proposal has been executed",
+						"expired": "Whether proposal has expired"
+					}
+				},
+				"configureGasSubsidy(bool,uint256,uint256)": {
+					"details": "Only deployer can configure subsidy settings",
+					"params": {
+						"dailyLimit": "Maximum total gas subsidies per day (in wei)",
+						"enabled": "Whether contract should sponsor gas costs",
+						"maxSubsidy": "Maximum gas cost to subsidize per transaction (in wei)"
+					}
+				},
+				"constructor": {
+					"details": "Sets deployer for emergency recovery and initializes rotation timer"
+				},
+				"depositGasSubsidy()": {
+					"details": "Anyone can deposit to sponsor user gas costs (likely protocol or treasury)"
+				},
+				"emergencyResetOwners(address[])": {
+					"details": "Can only be called by deployer if 15+ days have passed since last ownership rotation",
+					"params": {
+						"_addresses": "New authorized addresses to set"
+					}
+				},
+				"emergencyWithdraw(bytes32,address,address,uint256)": {
+					"params": {
+						"amount": "Amount to withdraw",
+						"proposalId": "Unique identifier for emergency withdrawal",
+						"to": "Emergency recipient address",
+						"token": "Token to withdraw (address(0) for ETH)"
+					}
+				},
+				"executeMetaTransaction(address,bytes,uint256,address,address,uint256,uint256)": {
+					"details": "Contract pays all gas costs from its pool - user pays nothing",
+					"params": {
+						"amount": "Amount to transfer",
+						"nonce": "Nonce for replay protection",
+						"signature": "User's signature authorizing the transaction",
+						"slippageBps": "Slippage tolerance in basis points",
+						"to": "Recipient address",
+						"token": "Token address (address(0) for ETH)",
+						"user": "Original user who signed the transaction"
+					}
+				},
+				"getBalance(address)": {
+					"params": {
+						"token": "Token address (address(0) for ETH)"
+					},
+					"returns": {
+						"_0": "Current balance"
+					}
+				},
+				"getRequiredApprovals()": {
+					"returns": {
+						"_0": "Number of approvals needed for execution"
+					}
+				},
+				"hasApproved(bytes32,address)": {
+					"params": {
+						"addr": "The address to check",
+						"proposalId": "The proposal to check"
+					},
+					"returns": {
+						"_0": "Whether the address has approved the proposal"
+					}
+				},
+				"multisigTransfer(uint256,address,address,uint256,uint256)": {
+					"details": "Each authorized address must call this function with the same nonce to approve the transfer.      Proposal ID is generated internally to prevent front-running attacks.      Supports native ETH and any ERC20 token with slippage protection for fee-on-transfer tokens.",
+					"params": {
+						"amount": "Amount to transfer",
+						"nonce": "User-provided nonce for proposal uniqueness (prevents front-running)",
+						"slippageBps": "Maximum acceptable slippage in basis points (0-1000, 10000 = 100%)",
+						"to": "Recipient address",
+						"token": "Token contract address (address(0) for ETH)"
+					}
+				},
+				"pause()": {
+					"details": "Only deployer can pause contract in emergency situations"
+				},
+				"proposeNextOwners(uint256,address[])": {
+					"details": "Each current authorized address must call this function with the same nonce to approve the rotation.      Proposal ID is generated internally to prevent front-running attacks.      Current owners CANNOT set themselves as new owners - enforces true rotation.      Automatically handled by external blockchain systems.",
+					"params": {
+						"newOwners": "Array of new authorized addresses",
+						"nonce": "User-provided nonce for proposal uniqueness (prevents front-running)"
+					}
+				},
+				"setAuthorizedAddresses(address[])": {
+					"details": "Can only be called once by the deployer for initial setup",
+					"params": {
+						"_addresses": "Array of addresses to authorize (minimum 3 required)"
+					}
+				},
+				"setTrustedForwarder(address)": {
+					"details": "Only deployer can set the trusted forwarder for security",
+					"params": {
+						"forwarder": "Address of the trusted forwarder contract"
+					}
+				},
+				"unpause()": {
+					"details": "Only deployer can unpause contract"
+				},
+				"withdrawGasSubsidy(uint256)": {
+					"details": "Only deployer can withdraw unused subsidy funds",
+					"params": {
+						"amount": "Amount to withdraw from subsidy pool"
+					}
+				}
+			},
+			"stateVariables": {
+				"EMERGENCY_TIMEOUT": {
+					"details": "Emergency recovery timeout (15 days)"
+				},
+				"MAX_AUTHORIZED_ADDRESSES": {
+					"details": "Maximum number of authorized addresses to prevent gas limit issues"
+				},
+				"MAX_SLIPPAGE_BPS": {
+					"details": "Maximum slippage in basis points (10000 = 100%)"
+				},
+				"TIMEOUT_SECONDS": {
+					"details": "Default timeout in seconds for proposals (1 hour)"
+				},
+				"authorizedAddresses": {
+					"details": "Array of authorized addresses that can approve proposals"
+				},
+				"authorizedCount": {
+					"details": "Packed storage for gas efficiency - all fit in one slot"
+				},
+				"deployer": {
+					"details": "Contract deployer for emergency recovery"
+				},
+				"gasSubsidyPool": {
+					"details": "Gas sponsorship settings"
+				},
+				"isAuthorized": {
+					"details": "Mapping for O(1) authorization checks"
+				},
+				"lastOwnershipRotation": {
+					"details": "Timestamp of last ownership rotation for emergency recovery"
+				},
+				"proposalNonce": {
+					"details": "Nonce for generating unique proposal IDs"
+				},
+				"proposals": {
+					"details": "Mapping to store all multisig proposals by their unique ID"
+				},
+				"trustedForwarder": {
+					"details": "Trusted forwarder for meta-transactions (EIP-2771)"
+				}
+			},
+			"version": 1
+		},
+		"userdoc": {
+			"kind": "user",
+			"methods": {
+				"cancelProposal(bytes32)": {
+					"notice": "Cancel a pending proposal (only proposer can cancel)"
+				},
+				"checkProposalStatus(bytes32)": {
+					"notice": "Get the status of a proposal"
+				},
+				"configureGasSubsidy(bool,uint256,uint256)": {
+					"notice": "Configure gas subsidy parameters"
+				},
+				"constructor": {
+					"notice": "Initialize the contract with deployer and set initial timestamp"
+				},
+				"depositGasSubsidy()": {
+					"notice": "Deposit ETH into gas subsidy pool for sponsoring user transactions"
+				},
+				"emergencyResetOwners(address[])": {
+					"notice": "Emergency recovery function for when multisig becomes inactive"
+				},
+				"emergencyWithdraw(bytes32,address,address,uint256)": {
+					"notice": "Emergency withdrawal function (requires multisig)"
+				},
+				"executeMetaTransaction(address,bytes,uint256,address,address,uint256,uint256)": {
+					"notice": "Execute meta-transaction on behalf of user (gasless for user)"
+				},
+				"getBalance(address)": {
+					"notice": "Get contract balances"
+				},
+				"getRequiredApprovals()": {
+					"notice": "Get the number of required approvals for current configuration"
+				},
+				"hasApproved(bytes32,address)": {
+					"notice": "Check if an address has approved a specific proposal"
+				},
+				"multisigTransfer(uint256,address,address,uint256,uint256)": {
+					"notice": "Universal transfer function for ETH and any ERC20 token (requires multisig approval)"
+				},
+				"pause()": {
+					"notice": "Pause contract operations (emergency only)"
+				},
+				"proposeNextOwners(uint256,address[])": {
+					"notice": "Propose new owners for rotating co-ownership (requires multisig approval)"
+				},
+				"setAuthorizedAddresses(address[])": {
+					"notice": "Set the authorized addresses that can approve proposals (one-time setup by deployer)"
+				},
+				"setTrustedForwarder(address)": {
+					"notice": "Set trusted forwarder for meta-transactions (EIP-2771)"
+				},
+				"unpause()": {
+					"notice": "Unpause contract operations  "
+				},
+				"withdrawGasSubsidy(uint256)": {
+					"notice": "Withdraw excess gas subsidy funds"
+				}
+			},
+			"version": 1
+		}
+	},
+	"settings": {
+		"compilationTarget": {
+			"liquidityTank.sol": "LiquidityTank"
+		},
+		"evmVersion": "prague",
+		"libraries": {},
+		"metadata": {
+			"bytecodeHash": "ipfs"
+		},
+		"optimizer": {
+			"enabled": true,
+			"runs": 200
+		},
+		"remappings": []
+	},
+	"sources": {
+		"@openzeppelin/contracts/interfaces/IERC1363.sol": {
+			"keccak256": "0xd5ea07362ab630a6a3dee4285a74cf2377044ca2e4be472755ad64d7c5d4b69d",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://da5e832b40fc5c3145d3781e2e5fa60ac2052c9d08af7e300dc8ab80c4343100",
+				"dweb:/ipfs/QmTzf7N5ZUdh5raqtzbM11yexiUoLC9z3Ws632MCuycq1d"
+			]
+		},
+		"@openzeppelin/contracts/interfaces/IERC165.sol": {
+			"keccak256": "0x0afcb7e740d1537b252cb2676f600465ce6938398569f09ba1b9ca240dde2dfc",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://1c299900ac4ec268d4570ecef0d697a3013cd11a6eb74e295ee3fbc945056037",
+				"dweb:/ipfs/Qmab9owJoxcA7vJT5XNayCMaUR1qxqj1NDzzisduwaJMcZ"
+			]
+		},
+		"@openzeppelin/contracts/interfaces/IERC20.sol": {
+			"keccak256": "0x1a6221315ce0307746c2c4827c125d821ee796c74a676787762f4778671d4f44",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://1bb2332a7ee26dd0b0de9b7fe266749f54820c99ab6a3bcb6f7e6b751d47ee2d",
+				"dweb:/ipfs/QmcRWpaBeCYkhy68PR3B4AgD7asuQk7PwkWxrvJbZcikLF"
+			]
+		},
+		"@openzeppelin/contracts/token/ERC20/IERC20.sol": {
+			"keccak256": "0x74ed01eb66b923d0d0cfe3be84604ac04b76482a55f9dd655e1ef4d367f95bc2",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://5282825a626cfe924e504274b864a652b0023591fa66f06a067b25b51ba9b303",
+				"dweb:/ipfs/QmeCfPykghhMc81VJTrHTC7sF6CRvaA1FXVq2pJhwYp1dV"
+			]
+		},
+		"@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol": {
+			"keccak256": "0x982c5cb790ab941d1e04f807120a71709d4c313ba0bfc16006447ffbd27fbbd5",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://8150ceb4ac947e8a442b2a9c017e01e880b2be2dd958f1fa9bc405f4c5a86508",
+				"dweb:/ipfs/QmbcBmFX66AY6Kbhnd5gx7zpkgqnUafo43XnmayAM7zVdB"
+			]
+		},
+		"@openzeppelin/contracts/utils/introspection/IERC165.sol": {
+			"keccak256": "0x8891738ffe910f0cf2da09566928589bf5d63f4524dd734fd9cedbac3274dd5c",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://971f954442df5c2ef5b5ebf1eb245d7105d9fbacc7386ee5c796df1d45b21617",
+				"dweb:/ipfs/QmadRjHbkicwqwwh61raUEapaVEtaLMcYbQZWs9gUkgj3u"
+			]
+		},
+		"liquidityTank.sol": {
+			"keccak256": "0x0be51931ed51f527ca84494fb53662e371ac952506413759edecd041db6e9392",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://2831d765f23af4020d35e5c506091c00cce2cc0242e398a55f5e38a61f83f782",
+				"dweb:/ipfs/QmZbNaKndP89jMwNQPJvLHW6iPMj7pezdUxFAvYzbeeFTn"
+			]
+		}
+	},
+	"version": 1
+}
