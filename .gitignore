@@ -144,3 +144,26 @@ APTOS_INTEGRATION_PLAN.md
 aptos_examples_ts
 
 config/bridgePrivateKeys.json
+# Foundry build outputs (regenerated on build)
+src/features/bridges/EVMSmartContract/out/
+src/features/bridges/EVMSmartContract/cache/
+src/features/bridges/EVMSmartContract/broadcast/
+
+# Foundry dependencies (reinstalled via forge install)
+src/features/bridges/EVMSmartContract/lib/
+
+# Test artifacts and temporary files
+src/features/bridges/EVMSmartContract/test/*.backup
+src/features/bridges/EVMSmartContract/test/*_backup/
+src/features/bridges/EVMSmartContract/test/temp/
+
+# Lock files (regenerated)
+src/features/bridges/EVMSmartContract/foundry.lock
+
+# Keep these files for users to run tests:
+!src/features/bridges/EVMSmartContract/test/
+!src/features/bridges/EVMSmartContract/foundry.toml  
+!src/features/bridges/EVMSmartContract/remappings.txt
+!src/features/bridges/EVMSmartContract/liquidityTank.sol
+!src/features/bridges/EVMSmartContract/README.md
+!src/features/bridges/EVMSmartContract/TESTING.md

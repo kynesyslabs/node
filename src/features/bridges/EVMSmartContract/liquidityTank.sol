@@ -360,18 +360,16 @@ contract LiquidityTank {
     /// @param nonce User-provided nonce for proposal uniqueness
     /// @param proposer Address of the proposal creator  
     /// @return proposalId Unique bytes32 identifier for proposals
-    function _generateProposalId(uint256 nonce, address proposer) internal returns (bytes32 proposalId) {
-        uint256 currentNonce = proposalNonce++;
-        
-        // Simple but secure proposal ID generation
+    function _generateProposalId(uint256 nonce, address proposer) internal view returns (bytes32 proposalId) {
+        // Generate deterministic proposal ID based on nonce only
+        // This allows multiple users to approve the same proposal
         proposalId = keccak256(abi.encodePacked(
-            proposer,
+            "MULTISIG_PROPOSAL",
             nonce,
-            currentNonce,
-            block.timestamp
+            address(this) // Include contract address for uniqueness across contracts
         ));
         
-        emit ProposalIdGenerated(proposalId, proposer, nonce);
+        // Note: Event is emitted in calling function
     }
     
     
@@ -402,6 +400,8 @@ contract LiquidityTank {
         // Generate proposal ID internally to prevent front-running
         address proposer = _msgSender();
         bytes32 proposalId = _generateProposalId(nonce, proposer);
+        
+        emit ProposalIdGenerated(proposalId, proposer, nonce);
         
         // Encode transfer parameters for proposal data
         bytes memory data = abi.encode("TRANSFER", token, to, amount, slippageBps);
@@ -477,6 +477,8 @@ contract LiquidityTank {
         // Generate proposal ID internally to prevent front-running
         address proposer = _msgSender();
         bytes32 proposalId = _generateProposalId(nonce, proposer);
+        
+        emit ProposalIdGenerated(proposalId, proposer, nonce);
         
         // Encode ownership change parameters
         bytes memory data = abi.encode("ROTATE_OWNERS", newOwners);
