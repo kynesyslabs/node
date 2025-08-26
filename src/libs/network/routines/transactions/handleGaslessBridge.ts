@@ -79,20 +79,29 @@ export async function handleInitiateGaslessBridge(params: {
             }
         }
 
-        // Generate operation ID for tracking
-        const operationId = Hashing.sha256(JSON.stringify({
-            user: params.user,
-            nonce: params.nonce,
-            timestamp: Date.now()
-        }))
+        // Execute gasless bridge initiation using EVMSmartContractManagement
+        const operationTxHash = await evmTankManager.initiateGaslessBridgeOperation(
+            chainKey,
+            {
+                user: params.user,
+                nonce: params.nonce,
+                originChain: params.originChain,
+                destChain: params.destChain,
+                token: params.token,
+                recipient: params.recipient,
+                amount: params.amount,
+                bridgeFeeBps: params.bridgeFeeBps
+            },
+            params.signature
+        )
 
-        log.info(`${fname} ✅ Gasless bridge operation prepared: ${operationId}`)
+        log.info(`${fname} ✅ Gasless bridge operation initiated: ${operationTxHash}`)
 
         return {
             success: true,
             tankAddress: tankConfig.address,
-            operationId: operationId,
-            message: "Gasless bridge operation prepared successfully"
+            operationId: operationTxHash, // Use tx hash as operation ID
+            message: "Gasless bridge operation initiated successfully"
         }
 
     } catch (error) {
@@ -161,14 +170,21 @@ export async function handleExecuteGaslessDeposit(params: {
             }
         }
 
-        // Execute gasless deposit (this will be implemented in Phase 3)
-        // For now, just validate and return success
-        log.info(`${fname} ✅ Gasless deposit validated for user: ${params.user}`)
+        // Execute gasless deposit using EVMSmartContractManagement
+        const txHash = await evmTankManager.executeGaslessDeposit(
+            params.chainKey,
+            params.user,
+            params.amount,
+            params.signature,
+            params.nonce
+        )
+
+        log.info(`${fname} ✅ Gasless deposit executed for user: ${params.user}`)
 
         return {
             success: true,
-            message: "Gasless deposit validated successfully",
-            // txHash will be provided once executeGaslessDeposit is implemented in Phase 3
+            message: "Gasless deposit executed successfully",
+            txHash: txHash
         }
 
     } catch (error) {
