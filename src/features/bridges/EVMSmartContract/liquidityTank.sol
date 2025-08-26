@@ -358,7 +358,6 @@ contract LiquidityTank {
     
     /// @notice Internal function to generate unique proposal IDs
     /// @param nonce User-provided nonce for proposal uniqueness
-    /// @param proposer Address of the proposal creator  
     /// @return proposalId Unique bytes32 identifier for proposals
     function _generateProposalId(uint256 nonce, address /* proposer */) internal view returns (bytes32 proposalId) {
         // Generate deterministic proposal ID based on nonce only
