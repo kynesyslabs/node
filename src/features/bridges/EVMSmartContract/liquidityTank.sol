@@ -43,16 +43,7 @@ error ContractPausedError();
 error ReentrancyGuard();
 error SlippageExceeded();
 error InvalidSlippageBps();
-error TrustedForwarderOnly();
-error GasSubsidyExhausted();
-error GasSubsidyDisabled();
-error ExcessiveGasCost();
-error DailyUserLimitExceeded();
-error DailyTotalLimitExceeded();
 error InvalidTokenContract();
-error ZeroAddressForwarder();
-error CannotCancelExecuted();
-error OnlyProposerCanCancel();
 error InvalidSignature();
 error InvalidNonce();
 
@@ -114,24 +105,14 @@ contract LiquidityTank {
     /// @dev Maximum slippage in basis points (10000 = 100%)
     uint256 public constant MAX_SLIPPAGE_BPS = 500; // 5% max slippage (reduced from 10% for safety)
     
-    /// @dev Trusted forwarder for meta-transactions (EIP-2771)
-    address public trustedForwarder;
-    
     /// @dev Gas sponsorship settings
     uint256 public gasSubsidyPool;           // ETH available for sponsoring transactions
     uint256 public maxGasSubsidy;            // Maximum gas cost to subsidize per transaction  
     bool public gasSubsidyEnabled;           // Whether contract sponsors gas costs
     uint256 public dailySubsidyLimit;        // Maximum total subsidies per day
     
-    // Usage tracking
-    mapping(address => uint256) public gasSubsidyUsed;        // Total usage per user
-    mapping(address => mapping(uint256 => uint256)) public dailyUserUsage;  // Daily usage per user (day => amount)
-    mapping(uint256 => uint256) public dailyTotalUsage;       // Total daily usage (day => amount)
-    
-    // User nonce tracking for meta-transactions
+    // User nonce tracking for gasless operations
     mapping(address => uint256) public userNonces;            // Nonce per user for replay protection
-    
-    uint256 public constant MAX_DAILY_USER_SUBSIDY = 0.05 ether; // Max 0.05 ETH per user per day
     
     /// @dev Events for proposal lifecycle tracking
     event ProposalIdGenerated(bytes32 indexed proposalId, address indexed generator, uint256 nonce);
@@ -147,9 +128,6 @@ contract LiquidityTank {
     event EmergencyRecoveryTriggered(address indexed deployer, address[] newOwners);
     event ContractPaused(address indexed by);
     event ContractUnpaused(address indexed by);
-    
-    /// @dev Events for meta-transaction support
-    event TrustedForwarderUpdated(address indexed oldForwarder, address indexed newForwarder);
     
     /// @dev Events for gas subsidy tracking
     event GasSubsidyDeposited(uint256 amount, uint256 newTotal);
@@ -215,12 +193,6 @@ contract LiquidityTank {
         lastOwnershipRotation = block.timestamp;
     }
     
-    /// @notice Check if an address is the trusted forwarder for meta-transactions
-    /// @param forwarder Address to check
-    /// @return bool True if the address is the trusted forwarder
-    function isTrustedForwarder(address forwarder) public view returns (bool) {
-        return forwarder == trustedForwarder;
-    }
     
     /// @notice Set the authorized addresses that can approve proposals (one-time setup by deployer)
     /// @param _addresses Array of addresses to authorize (minimum 3 required)
@@ -381,32 +353,19 @@ contract LiquidityTank {
         emit ContractUnpaused(_msgSender());
     }
     
-    /// @notice Internal function to generate unique proposal IDs using commit-reveal scheme
+    /// @notice Internal function to generate unique proposal IDs
     /// @param nonce User-provided nonce for proposal uniqueness
     /// @param proposer Address of the proposal creator  
     /// @return proposalId Unique bytes32 identifier for proposals
-    /// @dev Uses commit-reveal pattern with hash chain for cryptographic security
-    ///      Combines multiple unpredictable sources to prevent manipulation
     function _generateProposalId(uint256 nonce, address proposer) internal returns (bytes32 proposalId) {
         uint256 currentNonce = proposalNonce++;
         
-        // Create hash chain using multiple unpredictable sources
-        bytes32 seed = keccak256(abi.encodePacked(
-            blockhash(block.number - 1),  // Previous block hash (unpredictable)
-            block.timestamp,              // Temporal component
-            block.prevrandao,             // Network randomness (prevrandao)
-            proposer,                     // Proposer identity
-            nonce,                        // User-provided entropy
-            currentNonce,                 // Contract monotonic nonce
-            address(this),                // Contract address
-            gasleft()                     // Remaining gas (varies by execution)
-        ));
-        
-        // Apply additional hash round for commit-reveal security
+        // Simple but secure proposal ID generation
         proposalId = keccak256(abi.encodePacked(
-            seed,
+            proposer,
+            nonce,
             currentNonce,
-            "LIQUIDITY_TANK_PROPOSAL"     // Domain separator
+            block.timestamp
         ));
         
         emit ProposalIdGenerated(proposalId, proposer, nonce);
@@ -699,15 +658,6 @@ contract LiquidityTank {
         emit ETHDeposited(_msgSender(), msg.value);
     }
     
-    /// @notice Set trusted forwarder for meta-transactions (EIP-2771)
-    /// @param forwarder Address of the trusted forwarder contract
-    /// @dev Only deployer can set the trusted forwarder for security
-    function setTrustedForwarder(address forwarder) external onlyDeployer {
-        if (forwarder == address(0)) revert ZeroAddressForwarder();
-        address oldForwarder = trustedForwarder;
-        trustedForwarder = forwarder;
-        emit TrustedForwarderUpdated(oldForwarder, forwarder);
-    }
     
     /// @notice Deposit ETH into gas subsidy pool for sponsoring user transactions
     /// @dev Anyone can deposit to sponsor user gas costs (likely protocol or treasury)
@@ -741,78 +691,7 @@ contract LiquidityTank {
         emit GasSubsidyWithdrawn(amount, gasSubsidyPool);
     }
     
-    /// @notice Reimburse gas costs for a user from the subsidy pool
-    /// @param user Address of user to reimburse gas costs for
-    /// @dev Calculates gas cost and reimburses from the subsidy pool
-    function reimburseGas(address user) external payable nonReentrant {
-        if (!gasSubsidyEnabled) revert("Gas subsidy not enabled");
-        if (user == address(0)) revert InvalidAddress();
-        
-        uint256 gasCost = msg.value; // Amount being sent to reimburse
-        
-        // Check daily limits
-        uint256 today = block.timestamp / 86400;
-        if (dailyUserUsage[user][today] + gasCost > maxGasSubsidy) revert("Daily user limit exceeded");
-        if (dailyTotalUsage[today] + gasCost > dailySubsidyLimit) revert("Daily total limit exceeded");
-        
-        // Check pool has sufficient funds
-        if (gasSubsidyPool < gasCost) revert("Insufficient subsidy pool");
-        
-        // Update usage tracking
-        dailyUserUsage[user][today] += gasCost;
-        dailyTotalUsage[today] += gasCost;
-        gasSubsidyPool -= gasCost;
-        
-        // Reimburse the user
-        (bool success, ) = payable(user).call{value: gasCost}("");
-        require(success, "Gas reimbursement failed");
-        
-        emit GasSubsidyUsed(user, gasCost, dailyUserUsage[user][today]);
-    }
     
-    /// @notice Execute meta-transaction on behalf of user (gasless for user)
-    /// @param user Original user who signed the transaction
-    /// @param signature User's signature authorizing the transaction
-    /// @param nonce Nonce for replay protection
-    /// @param token Token address (address(0) for ETH)
-    /// @param to Recipient address
-    /// @param amount Amount to transfer
-    /// @param slippageBps Slippage tolerance in basis points
-    /// @dev Contract pays all gas costs from its pool - user pays nothing
-    function executeMetaTransaction(
-        address user,
-        bytes calldata signature,
-        uint256 nonce,
-        address token,
-        address to,
-        uint256 amount,
-        uint256 slippageBps
-    ) external nonReentrant whenNotPaused {
-        // Verify user signature
-        bytes32 messageHash = keccak256(abi.encodePacked(
-            "LIQUIDITY_TANK_META_TX",
-            user,
-            nonce,
-            token,
-            to,
-            amount,
-            slippageBps,
-            block.chainid,
-            address(this)
-        ));
-        
-        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
-        address signer = _recoverSigner(ethSignedHash, signature);
-        
-        if (signer != user) revert InvalidSignature();
-        if (!isAuthorized[user]) revert NotAuthorized();
-        
-        // Execute the transfer on behalf of user
-        _executeMetaMultisigTransfer(user, nonce, token, to, amount, slippageBps);
-        
-        // Contract automatically pays gas from its pool
-        _payGasFromPool(tx.origin); // Reimburse whoever submitted the transaction
-    }
     
     /// @notice Internal function to pay gas from contract pool
     /// @param gasPayee Address that should be reimbursed for gas costs
@@ -851,59 +730,13 @@ contract LiquidityTank {
         return ecrecover(hash, v, r, s);
     }
     
-    /// @notice Internal helper to verify user signature and nonce for gasless operations
-    function _verifyUserSignature(
+    /// @notice Internal helper to verify signature and update nonce
+    function _verifySignature(
         address user,
         bytes calldata signature,
         uint256 nonce,
-        string memory action,
-        address tokenAddress,
-        uint256 amount
+        bytes32 messageHash
     ) internal {
-        bytes32 messageHash = keccak256(abi.encodePacked(
-            action,
-            user,
-            nonce,
-            tokenAddress,
-            amount,
-            block.chainid,
-            address(this)
-        ));
-        
-        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
-        
-        if (_recoverSigner(ethSignedHash, signature) != user) revert InvalidSignature();
-        if (userNonces[user] >= nonce) revert InvalidNonce();
-        
-        userNonces[user] = nonce;
-    }
-    
-    /// @notice Internal helper to verify bridge operation signature and nonce
-    function _verifyBridgeSignature(
-        address user,
-        bytes calldata signature,
-        uint256 nonce,
-        string calldata originChain,
-        string calldata destChain,
-        address token,
-        address recipient,
-        uint256 amount,
-        uint256 bridgeFeeBps
-    ) internal {
-        bytes32 messageHash = keccak256(abi.encodePacked(
-            "LIQUIDITY_TANK_BRIDGE",
-            user,
-            nonce,
-            originChain,
-            destChain,
-            token,
-            recipient,
-            amount,
-            bridgeFeeBps,
-            block.chainid,
-            address(this)
-        ));
-        
         bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
         
         if (_recoverSigner(ethSignedHash, signature) != user) revert InvalidSignature();
@@ -926,8 +759,17 @@ contract LiquidityTank {
         address usdcAddress,
         uint256 amount
     ) external nonReentrant whenNotPaused {
-        // Verify user signature for deposit authorization
-        _verifyUserSignature(user, signature, nonce, "LIQUIDITY_TANK_DEPOSIT", usdcAddress, amount);
+        // Create message hash and verify signature
+        bytes32 messageHash = keccak256(abi.encodePacked(
+            "LIQUIDITY_TANK_DEPOSIT",
+            user,
+            nonce,
+            usdcAddress,
+            amount,
+            block.chainid,
+            address(this)
+        ));
+        _verifySignature(user, signature, nonce, messageHash);
         
         // Validate USDC contract
         _validateERC20Contract(usdcAddress);
@@ -973,8 +815,21 @@ contract LiquidityTank {
         uint256 amount,
         uint256 bridgeFeeBps
     ) external nonReentrant whenNotPaused {
-        // Verify user signature for bridge authorization
-        _verifyBridgeSignature(user, signature, nonce, originChain, destChain, token, recipient, amount, bridgeFeeBps);
+        // Create message hash and verify signature
+        bytes32 messageHash = keccak256(abi.encodePacked(
+            "LIQUIDITY_TANK_BRIDGE",
+            user,
+            nonce,
+            originChain,
+            destChain,
+            token,
+            recipient,
+            amount,
+            bridgeFeeBps,
+            block.chainid,
+            address(this)
+        ));
+        _verifySignature(user, signature, nonce, messageHash);
         
         // Validate token balance
         uint256 balance = token == address(0) ? 
@@ -1005,55 +860,6 @@ contract LiquidityTank {
         _payGasFromPool(tx.origin);
     }
     
-    /// @notice Execute multisig transfer via meta-transaction
-    function _executeMetaMultisigTransfer(
-        address user,
-        uint256 nonce,
-        address token,
-        address to,
-        uint256 amount,
-        uint256 slippageBps
-    ) internal {
-        // Same logic as regular multisigTransfer but using 'user' as the proposer
-        if (to == address(0)) revert InvalidAddress();
-        if (amount == 0) revert InvalidAmount();
-        if (slippageBps > MAX_SLIPPAGE_BPS) revert InvalidSlippageBps();
-        
-        bytes32 proposalId = _generateProposalId(nonce, user);
-        bytes memory data = abi.encode("TRANSFER", token, to, amount, slippageBps);
-        
-        MultisigProposal storage proposal = proposals[proposalId];
-        
-        // Initialize or validate proposal
-        if (proposal.deadline == 0) {
-            proposal.deadline = uint40(block.timestamp + TIMEOUT_SECONDS);
-            proposal.proposer = user;
-            proposal.data = data;
-            emit ProposalCreated(proposalId, user, proposal.deadline);
-        } else {
-            if (keccak256(proposal.data) != keccak256(data)) revert ProposalDataMismatch();
-        }
-        
-        // Standard multisig validation
-        if (block.timestamp > proposal.deadline) revert ProposalExpired();
-        if (proposal.executed) revert AlreadyExecuted();
-        if (proposal.cancelled) revert ProposalExpired();
-        if (proposal.approvals[user]) revert AlreadyApproved();
-        
-        // Record approval
-        proposal.approvals[user] = true;
-        uint8 newApprovalCount = ++proposal.approvalCount;
-        
-        emit ProposalApproved(proposalId, user, newApprovalCount);
-        
-        // Execute if threshold reached
-        uint8 requiredApprovals = _calculateRequiredApprovals();
-        if (newApprovalCount >= requiredApprovals) {
-            proposal.executed = true;
-            _executeTransfer(proposal.data);
-            emit ProposalExecuted(proposalId);
-        }
-    }
 
     /// @notice Fallback for ETH deposits
     fallback() external payable {}
