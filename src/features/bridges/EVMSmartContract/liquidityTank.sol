@@ -49,6 +49,18 @@ error InvalidNonce();
 error CannotCancelExecuted();
 error OnlyProposerCanCancel();
 
+/// @dev Struct to reduce stack depth in bridge operations
+struct BridgeParams {
+    address user;
+    uint256 nonce;
+    string originChain;
+    string destChain;
+    address token;
+    address recipient;
+    uint256 amount;
+    uint256 bridgeFeeBps;
+}
+
 contract LiquidityTank {
     using SafeERC20 for IERC20;
 
@@ -758,6 +770,23 @@ contract LiquidityTank {
         userNonces[user] = nonce;
     }
     
+    /// @notice Internal helper to create bridge message hash
+    function _createBridgeMessageHash(BridgeParams memory params) internal view returns (bytes32) {
+        return keccak256(abi.encodePacked(
+            "LIQUIDITY_TANK_BRIDGE",
+            params.user,
+            params.nonce,
+            params.originChain,
+            params.destChain,
+            params.token,
+            params.recipient,
+            params.amount,
+            params.bridgeFeeBps,
+            block.chainid,
+            address(this)
+        ));
+    }
+    
     /// @notice Gasless USDC deposit to tank for bridge operations
     /// @param user User depositing USDC
     /// @param signature User's signature authorizing the deposit
@@ -828,49 +857,44 @@ contract LiquidityTank {
         uint256 amount,
         uint256 bridgeFeeBps
     ) external nonReentrant whenNotPaused {
-        // Create message hash and verify signature
-        bytes32 messageHash = keccak256(abi.encodePacked(
-            "LIQUIDITY_TANK_BRIDGE",
-            user,
-            nonce,
-            originChain,
-            destChain,
-            token,
-            recipient,
-            amount,
-            bridgeFeeBps,
-            block.chainid,
-            address(this)
-        ));
-        _verifySignature(user, signature, nonce, messageHash);
+        // Create params struct to reduce stack depth
+        BridgeParams memory params = BridgeParams({
+            user: user,
+            nonce: nonce,
+            originChain: originChain,
+            destChain: destChain,
+            token: token,
+            recipient: recipient,
+            amount: amount,
+            bridgeFeeBps: bridgeFeeBps
+        });
+        
+        // Verify signature using helper function
+        _verifySignature(params.user, signature, params.nonce, _createBridgeMessageHash(params));
         
         // Validate token balance
-        uint256 balance = token == address(0) ? 
-            address(this).balance : 
-            _getERC20Balance(token, address(this));
-        if (balance < amount) revert InsufficientBalance();
+        if ((params.token == address(0) ? address(this).balance : _getERC20Balance(params.token, address(this))) < params.amount) {
+            revert InsufficientBalance();
+        }
         
-        // Calculate amount after bridge fee
-        uint256 amountAfterFee = amount * (10000 - bridgeFeeBps) / 10000;
+        // Calculate amount after fee
+        uint256 amountAfterFee = params.amount * (10000 - params.bridgeFeeBps) / 10000;
         if (amountAfterFee == 0) revert InvalidAmount();
-        
-        // Lock funds for bridge (actual transfer handled by consensus)
-        // For now just emit event for node detection
         
         // Emit bridge operation event for node detection
         emit BridgeOperationInitiated(
-            user,
-            originChain,
-            destChain,
-            token,
-            recipient,
-            amount,
+            params.user,
+            params.originChain,
+            params.destChain,
+            params.token,
+            params.recipient,
+            params.amount,
             amountAfterFee,
-            nonce
+            params.nonce
         );
         
         // Emit gasless event for test compatibility
-        emit GaslessBridgeInitiated(user, token, amount, nonce, _msgSender());
+        emit GaslessBridgeInitiated(params.user, params.token, params.amount, params.nonce, _msgSender());
         
         // Reimburse gas costs to the relayer
         _payGasFromPool(tx.origin);
