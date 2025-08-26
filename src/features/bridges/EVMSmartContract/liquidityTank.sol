@@ -284,7 +284,8 @@ contract LiquidityTank {
     }
     
     /// @notice Generate a unique proposal ID using nonce
-    /// @return proposalId Unique bytes32 identifier for proposals
+    /// @return proposalId Unique bytes32 identifier for proposals  
+    /// @dev Public function - anyone can generate proposal IDs, but only authorized users can execute proposals
     function generateProposalId() external returns (bytes32 proposalId) {
         uint256 currentNonce = proposalNonce++;
         proposalId = keccak256(abi.encodePacked(block.timestamp, msg.sender, currentNonce));
