@@ -360,7 +360,7 @@ contract LiquidityTank {
     /// @param nonce User-provided nonce for proposal uniqueness
     /// @param proposer Address of the proposal creator  
     /// @return proposalId Unique bytes32 identifier for proposals
-    function _generateProposalId(uint256 nonce, address proposer) internal view returns (bytes32 proposalId) {
+    function _generateProposalId(uint256 nonce, address /* proposer */) internal view returns (bytes32 proposalId) {
         // Generate deterministic proposal ID based on nonce only
         // This allows multiple users to approve the same proposal
         proposalId = keccak256(abi.encodePacked(
