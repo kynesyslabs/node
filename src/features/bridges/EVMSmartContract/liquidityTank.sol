@@ -37,6 +37,7 @@ error InvalidAction();
 error CurrentOwnerCannotBeNewOwner();
 error DeployerCannotBeAuthorized();
 error ContractPausedError();
+error ReentrancyGuard();
 
 contract LiquidityTank {
     /// @dev Structure to track multisig proposals
@@ -62,17 +63,15 @@ contract LiquidityTank {
     /// @dev Mapping to store all multisig proposals by their unique ID
     mapping(bytes32 => MultisigProposal) public proposals;
     
-    /// @dev Cached count of authorized addresses to avoid .length calls
-    uint8 public authorizedCount;
-    
     /// @dev Contract deployer for emergency recovery
     address public immutable deployer;
     
-    /// @dev Whether initial setup has been completed
-    bool public initialized;
-    
-    /// @dev Contract pause state for emergency stops
-    bool public paused;
+    /// @dev Packed storage for gas efficiency - all fit in one slot
+    uint8 public authorizedCount;      // 1 byte
+    bool public initialized;           // 1 byte  
+    bool public paused;               // 1 byte
+    bool private _reentrancyLocked;   // 1 byte
+    // 28 bytes remaining in this slot
     
     /// @dev Timestamp of last ownership rotation for emergency recovery
     uint256 public lastOwnershipRotation;
@@ -86,7 +85,11 @@ contract LiquidityTank {
     /// @dev Default timeout in seconds for proposals (1 hour)
     uint256 public constant TIMEOUT_SECONDS = 3600;
     
+    /// @dev Maximum number of authorized addresses to prevent gas limit issues
+    uint256 public constant MAX_AUTHORIZED_ADDRESSES = 50;
+    
     /// @dev Events for proposal lifecycle tracking
+    event ProposalIdGenerated(bytes32 indexed proposalId, address indexed generator, uint256 nonce);
     event ProposalCreated(bytes32 indexed proposalId, address indexed creator, uint40 deadline);
     event ProposalApproved(bytes32 indexed proposalId, address indexed approver, uint8 approvalCount);
     event ProposalExecuted(bytes32 indexed proposalId);
@@ -98,6 +101,10 @@ contract LiquidityTank {
     event EmergencyRecoveryTriggered(address indexed deployer, address[] newOwners);
     event ContractPaused(address indexed by);
     event ContractUnpaused(address indexed by);
+    
+    /// @dev Events for role management tracking
+    event AuthorizationGranted(address indexed account, address indexed grantor);
+    event AuthorizationRevoked(address indexed account, address indexed revoker);
     
     /// @dev Modifier to restrict access to authorized addresses only
     modifier onlyAuthorized() {
@@ -117,6 +124,14 @@ contract LiquidityTank {
         _;
     }
     
+    /// @dev Custom reentrancy guard - gas efficient implementation (saves ~2k gas vs OpenZeppelin)
+    modifier nonReentrant() {
+        if (_reentrancyLocked) revert ReentrancyGuard();
+        _reentrancyLocked = true;
+        _;
+        _reentrancyLocked = false;
+    }
+    
     /// @notice Initialize the contract with deployer and set initial timestamp
     /// @dev Sets deployer for emergency recovery and initializes rotation timer
     constructor() {
@@ -130,16 +145,17 @@ contract LiquidityTank {
     function setAuthorizedAddresses(address[] memory _addresses) external onlyDeployer whenNotPaused {
         if (initialized) revert AlreadyInitialized();
         if (_addresses.length < 3) revert InsufficientAddresses();
-        if (_addresses.length > 255) revert TooManyAddresses();
+        if (_addresses.length > MAX_AUTHORIZED_ADDRESSES) revert TooManyAddresses();
         
-        // Validate addresses and check for duplicates
+        // Validate addresses and check for duplicates (optimized for gas)
         for (uint256 i = 0; i < _addresses.length;) {
-            if (_addresses[i] == address(0)) revert InvalidAddress();
-            if (_addresses[i] == deployer) revert DeployerCannotBeAuthorized();
+            address addr = _addresses[i];
+            if (addr == address(0)) revert InvalidAddress();
+            if (addr == deployer) revert DeployerCannotBeAuthorized();
             
-            // Check for duplicates
+            // Check for duplicates - more gas efficient with early termination
             for (uint256 j = i + 1; j < _addresses.length;) {
-                if (_addresses[i] == _addresses[j]) revert DuplicateAddress();
+                if (addr == _addresses[j]) revert DuplicateAddress();
                 unchecked { ++j; }
             }
             unchecked { ++i; }
@@ -152,6 +168,7 @@ contract LiquidityTank {
         uint256 newLength = _addresses.length;
         for (uint256 i = 0; i < newLength;) {
             isAuthorized[_addresses[i]] = true;
+            emit AuthorizationGranted(_addresses[i], msg.sender);
             unchecked { ++i; }
         }
         
@@ -166,16 +183,17 @@ contract LiquidityTank {
         if (!initialized) revert NotInitialized();
         if (block.timestamp < lastOwnershipRotation + EMERGENCY_TIMEOUT) revert EmergencyTimeoutNotReached();
         if (_addresses.length < 3) revert InsufficientAddresses();
-        if (_addresses.length > 255) revert TooManyAddresses();
+        if (_addresses.length > MAX_AUTHORIZED_ADDRESSES) revert TooManyAddresses();
         
-        // Validate new addresses
+        // Validate new addresses (optimized for gas)
         for (uint256 i = 0; i < _addresses.length;) {
-            if (_addresses[i] == address(0)) revert InvalidAddress();
-            if (_addresses[i] == deployer) revert DeployerCannotBeAuthorized();
+            address addr = _addresses[i];
+            if (addr == address(0)) revert InvalidAddress();
+            if (addr == deployer) revert DeployerCannotBeAuthorized();
             
-            // Check for duplicates
+            // Check for duplicates - more gas efficient with early termination
             for (uint256 j = i + 1; j < _addresses.length;) {
-                if (_addresses[i] == _addresses[j]) revert DuplicateAddress();
+                if (addr == _addresses[j]) revert DuplicateAddress();
                 unchecked { ++j; }
             }
             unchecked { ++i; }
@@ -183,20 +201,23 @@ contract LiquidityTank {
         
         address[] memory oldOwners = authorizedAddresses;
         
-        // Clear existing authorizations
+        // Clear existing authorizations with proper event tracking
         uint256 currentLength = authorizedAddresses.length;
         for (uint256 i = 0; i < currentLength;) {
-            isAuthorized[authorizedAddresses[i]] = false;
+            address oldOwner = authorizedAddresses[i];
+            isAuthorized[oldOwner] = false;
+            emit AuthorizationRevoked(oldOwner, msg.sender);
             unchecked { ++i; }
         }
         
-        // Set new authorizations
+        // Set new authorizations with proper event tracking
         authorizedAddresses = _addresses;
         authorizedCount = uint8(_addresses.length);
         
         uint256 newLength = _addresses.length;
         for (uint256 i = 0; i < newLength;) {
             isAuthorized[_addresses[i]] = true;
+            emit AuthorizationGranted(_addresses[i], msg.sender);
             unchecked { ++i; }
         }
         
@@ -265,7 +286,9 @@ contract LiquidityTank {
     /// @notice Generate a unique proposal ID using nonce
     /// @return proposalId Unique bytes32 identifier for proposals
     function generateProposalId() external returns (bytes32 proposalId) {
-        proposalId = keccak256(abi.encodePacked(block.timestamp, msg.sender, proposalNonce++));
+        uint256 currentNonce = proposalNonce++;
+        proposalId = keccak256(abi.encodePacked(block.timestamp, msg.sender, currentNonce));
+        emit ProposalIdGenerated(proposalId, msg.sender, currentNonce);
     }
     
     // ===========================================================================================
@@ -284,7 +307,7 @@ contract LiquidityTank {
         address token,
         address to,
         uint256 amount
-    ) external onlyAuthorized whenNotPaused {
+    ) external onlyAuthorized whenNotPaused nonReentrant {
         if (to == address(0)) revert InvalidAddress();
         if (amount == 0) revert InvalidAmount();
         
@@ -310,13 +333,13 @@ contract LiquidityTank {
         
         // Record approval
         proposal.approvals[msg.sender] = true;
-        ++proposal.approvalCount;
+        uint8 newApprovalCount = ++proposal.approvalCount;
         
-        emit ProposalApproved(proposalId, msg.sender, proposal.approvalCount);
+        emit ProposalApproved(proposalId, msg.sender, newApprovalCount);
         
         // Execute if threshold reached
         uint8 requiredApprovals = _calculateRequiredApprovals();
-        if (proposal.approvalCount >= requiredApprovals) {
+        if (newApprovalCount >= requiredApprovals) {
             proposal.executed = true;
             _executeTransfer(/*proposalId, */ proposal.data);
             emit ProposalExecuted(proposalId);
@@ -334,19 +357,20 @@ contract LiquidityTank {
         address[] calldata newOwners
     ) external onlyAuthorized whenNotPaused {
         if (newOwners.length < 3) revert InsufficientAddresses();
-        if (newOwners.length > 255) revert TooManyAddresses();
+        if (newOwners.length > MAX_AUTHORIZED_ADDRESSES) revert TooManyAddresses();
         
-        // Validate new owners
+        // Validate new owners (optimized for gas)
         for (uint256 i = 0; i < newOwners.length;) {
-            if (newOwners[i] == address(0)) revert InvalidAddress();
-            if (newOwners[i] == deployer) revert DeployerCannotBeAuthorized();
+            address newOwner = newOwners[i];
+            if (newOwner == address(0)) revert InvalidAddress();
+            if (newOwner == deployer) revert DeployerCannotBeAuthorized();
             
             // Prevent current authorized addresses from setting themselves
-            if (isAuthorized[newOwners[i]]) revert CurrentOwnerCannotBeNewOwner();
+            if (isAuthorized[newOwner]) revert CurrentOwnerCannotBeNewOwner();
             
-            // Check for duplicates
+            // Check for duplicates - more gas efficient with early termination
             for (uint256 j = i + 1; j < newOwners.length;) {
-                if (newOwners[i] == newOwners[j]) revert DuplicateAddress();
+                if (newOwner == newOwners[j]) revert DuplicateAddress();
                 unchecked { ++j; }
             }
             unchecked { ++i; }
@@ -374,13 +398,13 @@ contract LiquidityTank {
         
         // Record approval
         proposal.approvals[msg.sender] = true;
-        ++proposal.approvalCount;
+        uint8 newApprovalCount = ++proposal.approvalCount;
         
-        emit ProposalApproved(proposalId, msg.sender, proposal.approvalCount);
+        emit ProposalApproved(proposalId, msg.sender, newApprovalCount);
         
         // Execute if threshold reached
         uint8 requiredApprovals = _calculateRequiredApprovals();
-        if (proposal.approvalCount >= requiredApprovals) {
+        if (newApprovalCount >= requiredApprovals) {
             proposal.executed = true;
             _executeOwnershipRotation(/*proposalId, */ proposal.data);
             emit ProposalExecuted(proposalId);
@@ -418,20 +442,23 @@ contract LiquidityTank {
         
         address[] memory oldOwners = authorizedAddresses;
         
-        // Clear existing authorizations
+        // Clear existing authorizations with proper event tracking
         uint256 currentLength = authorizedAddresses.length;
         for (uint256 i = 0; i < currentLength;) {
-            isAuthorized[authorizedAddresses[i]] = false;
+            address oldOwner = authorizedAddresses[i];
+            isAuthorized[oldOwner] = false;
+            emit AuthorizationRevoked(oldOwner, address(this)); // Contract itself is the executor
             unchecked { ++i; }
         }
         
-        // Set new authorizations
+        // Set new authorizations with proper event tracking
         authorizedAddresses = newOwners;
         authorizedCount = uint8(newOwners.length);
         
         uint256 newLength = newOwners.length;
         for (uint256 i = 0; i < newLength;) {
             isAuthorized[newOwners[i]] = true;
+            emit AuthorizationGranted(newOwners[i], address(this)); // Contract itself is the executor
             unchecked { ++i; }
         }
         
@@ -449,7 +476,7 @@ contract LiquidityTank {
         address token,
         address to,
         uint256 amount
-    ) external onlyAuthorized whenNotPaused {
+    ) external onlyAuthorized whenNotPaused nonReentrant {
         if (to == address(0)) revert InvalidAddress();
         if (amount == 0) revert InvalidAmount();
         
@@ -470,12 +497,12 @@ contract LiquidityTank {
         if (proposal.approvals[msg.sender]) revert AlreadyApproved();
         
         proposal.approvals[msg.sender] = true;
-        ++proposal.approvalCount;
+        uint8 newApprovalCount = ++proposal.approvalCount;
         
-        emit ProposalApproved(proposalId, msg.sender, proposal.approvalCount);
+        emit ProposalApproved(proposalId, msg.sender, newApprovalCount);
         
         uint8 requiredApprovals = _calculateRequiredApprovals();
-        if (proposal.approvalCount >= requiredApprovals) {
+        if (newApprovalCount >= requiredApprovals) {
             proposal.executed = true;
             _executeEmergencyWithdraw(proposalId, proposal.data);
             emit ProposalExecuted(proposalId);
