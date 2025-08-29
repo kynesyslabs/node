@@ -333,7 +333,13 @@ export async function serverRpcBun() {
 
     // GET endpoints
     // eslint-disable-next-line quotes
-    server.get("/", () => new Response('{"message": "Hello, World!"}'))
+    server.get("/", (req) => {
+        const clientIP = rateLimiter.getClientIP(req, server.server)
+        return new Response(JSON.stringify({
+            message: "Hello, World!",
+            yourIP: clientIP
+        }))
+    })
 
     server.get("/info", async () => {
         const info = await sharedState.getInstance().getInfo()
@@ -386,16 +392,16 @@ export async function serverRpcBun() {
     // Main RPC endpoint
     server.post("/", async req => {
         try {
-            const ip = server.server?.requestIP(req)
+            const clientIP = rateLimiter.getClientIP(req, server.server)
 
-            if (!ip || !ip.address) {
+            if (!clientIP || clientIP === "unknown") {
                 return jsonResponse({ error: "IP address not found" }, 400)
             }
 
             const payload = await req.json()
 
             const rateLimitResponse = handleIdentityTxRateLimit(
-                ip.address,
+                clientIP,
                 payload,
                 rateLimiter,
             )
