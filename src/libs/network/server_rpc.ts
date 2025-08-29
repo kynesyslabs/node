@@ -394,9 +394,9 @@ export async function serverRpcBun() {
         try {
             const clientIP = rateLimiter.getClientIP(req, server.server)
 
-            if (!clientIP || clientIP === "unknown") {
-                return jsonResponse({ error: "IP address not found" }, 400)
-            }
+            // if (!clientIP || clientIP === "unknown") {
+            //     return jsonResponse({ error: "IP address not found" }, 400)
+            // }
 
             const payload = await req.json()
 
