@@ -244,9 +244,13 @@ export class RateLimiter {
             }
 
             const clientIP = this.getClientIP(req, server)
+            log.debug(`[Rate Limiter] Client IP: ${clientIP}`)
 
             // Skip rate limiting for whitelisted IPs
             if (this.config.whitelistedIPs.includes(clientIP)) {
+                log.debug(
+                    `[Rate Limiter] Whitelisted IP: ${clientIP}, skipping rate limiting`,
+                )
                 return await next()
             }
 
