@@ -212,7 +212,7 @@ export default class SharedState {
     // SECTION Rate limiting configuration
     rateLimitConfig = {
         enabled: true,
-        defaultLimit: { maxRequests: 200, windowMs: 60000 },
+        defaultLimit: { maxRequests: 2000, windowMs: 60000 },
         blockDurationMs: undefined,
         // INFO: localhost is always whitelisted
         whitelistedIPs: [
@@ -221,7 +221,7 @@ export default class SharedState {
                 []),
         ],
         methodLimits: {
-            POST: { maxRequests: 200, windowMs: 86400000 },
+            POST: { maxRequests: 2000, windowMs: 86400000 },
             // INFO: POST method limits per IP address
             // "nodeCall": { maxRequests: 200, windowMs: 60000 },
             // "execute": { maxRequests: 1, windowMs: 86400000 },
