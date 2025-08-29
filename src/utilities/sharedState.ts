@@ -221,7 +221,8 @@ export default class SharedState {
                 []),
         ],
         methodLimits: {
-            POST: { maxRequests: 2000, windowMs: 86400000 },
+            // REVIEW: Do we need this?
+            POST: { maxRequests: 200000, windowMs: 86400000 },
             // INFO: POST method limits per IP address
             // "nodeCall": { maxRequests: 200, windowMs: 60000 },
             // "execute": { maxRequests: 1, windowMs: 86400000 },

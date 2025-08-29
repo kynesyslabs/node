@@ -142,7 +142,7 @@ export class RateLimiter {
 
         // INFO: Fallback to direct connection IP
         const ip = server.requestIP(req)
-        if (ip?.address && ip.address !== "127.0.0.1") {
+        if (ip?.address) {
             return ip.address
         }
 
