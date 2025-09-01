@@ -91,6 +91,7 @@ export class Proxy {
             let responseHeaders: http.IncomingHttpHeaders = {}
             let statusCode = 500
             let statusMessage = "Unknown"
+            let requestHash: string | undefined
 
             req.on("response", res => {
                 statusCode = res.statusCode || 500
@@ -102,12 +103,15 @@ export class Proxy {
                 })
 
                 res.on("end", () => {
-                    const data = Buffer.concat(chunks).toString()
+                    const dataBuffer = Buffer.concat(chunks)
+                    const data = dataBuffer.toString()
 
-                    // Create a hash of the data and headers to store in the blockchain.
-                    const dataHash = Hashing.sha256(data)
-                    const headersHash = Hashing.sha256(
-                        JSON.stringify(responseHeaders),
+                    // Create a hash over the exact UTF-8 bytes of the returned string data
+                    const responseHash = Hashing.sha256Bytes(
+                        Buffer.from(data, "utf8"),
+                    )
+                    const responseHeadersHash = Hashing.sha256(
+                        this.canonicalizeHeaders(responseHeaders),
                     )
 
                     resolve({
@@ -115,8 +119,10 @@ export class Proxy {
                         statusText: statusMessage,
                         headers: responseHeaders,
                         data: data,
-                        dataHash: dataHash,
-                        headersHash: headersHash,
+                        responseHash: responseHash,
+                        responseHeadersHash: responseHeadersHash,
+                        // Optional: include requestHash when a body was sent
+                        ...(requestHash ? { requestHash } : {}),
                     })
                 })
             })
@@ -130,6 +136,8 @@ export class Proxy {
                     typeof payload === "string"
                         ? payload
                         : JSON.stringify(payload)
+                // Compute hash over the exact bytes we are about to transmit
+                requestHash = Hashing.sha256Bytes(Buffer.from(body, "utf8"))
                 ;(req as any).setHeader(
                     "Content-Length",
                     Buffer.byteLength(body),
@@ -362,12 +370,63 @@ export class Proxy {
             headers["Content-Type"] = "application/json"
         }
 
+        // Default to identity encoding for deterministic response bytes if not set by caller
+        const hasAcceptEncoding = Object.keys(headers).some(
+            k => k.toLowerCase() === "accept-encoding",
+        )
+        if (!hasAcceptEncoding) {
+            headers["Accept-Encoding"] = "identity"
+        }
+
         // Add Authorization if required
         if (this.requiresAuthorization(targetUrl, targetMethod)) {
             headers["Authorization"] = `Bearer ${targetAuthorization}`
         }
 
         return headers
+    }
+
+    /**
+     * Canonicalize headers for deterministic hashing:
+     * - Lowercase keys
+     * - Omit volatile headers (date, set-cookie)
+     * - Join array values with ", "
+     * - Trim whitespace
+     * - Sort by key
+     */
+    private canonicalizeHeaders(headers: http.IncomingHttpHeaders): string {
+        const volatile = new Set([
+            "date",
+            "set-cookie",
+            "connection",
+            "keep-alive",
+            "transfer-encoding",
+            "upgrade",
+            "proxy-authenticate",
+            "proxy-authorization",
+            "te",
+            "trailer",
+            "via",
+            "warning",
+            "server",
+            // Optional: content-length can vary across intermediaries
+            "content-length",
+        ]) // omit volatile/hop-by-hop headers
+        const entries: Array<{ key: string; value: string }> = []
+        for (const [rawKey, rawVal] of Object.entries(headers)) {
+            const key = rawKey.toLowerCase()
+            if (volatile.has(key)) continue
+            if (rawVal == null) continue
+            let value: string
+            if (Array.isArray(rawVal)) {
+                value = rawVal.join(", ")
+            } else {
+                value = String(rawVal)
+            }
+            entries.push({ key, value: value.trim() })
+        }
+        entries.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+        return entries.map(e => `${e.key}:${e.value}`).join("\n")
     }
 
     private requiresAuthorization(url: string, method: Web2Method): boolean {
