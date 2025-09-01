@@ -106,8 +106,10 @@ export class Proxy {
                     const dataBuffer = Buffer.concat(chunks)
                     const data = dataBuffer.toString()
 
-                    // Create a hash of the data and headers to store in the blockchain.
-                    const responseHash = Hashing.sha256Bytes(dataBuffer)
+                    // Create a hash over the exact UTF-8 bytes of the returned string data
+                    const responseHash = Hashing.sha256Bytes(
+                        Buffer.from(data, "utf8"),
+                    )
                     const responseHeadersHash = Hashing.sha256(
                         this.canonicalizeHeaders(responseHeaders),
                     )
@@ -393,7 +395,23 @@ export class Proxy {
      * - Sort by key
      */
     private canonicalizeHeaders(headers: http.IncomingHttpHeaders): string {
-        const volatile = new Set(["date", "set-cookie"]) // omit volatile headers
+        const volatile = new Set([
+            "date",
+            "set-cookie",
+            "connection",
+            "keep-alive",
+            "transfer-encoding",
+            "upgrade",
+            "proxy-authenticate",
+            "proxy-authorization",
+            "te",
+            "trailer",
+            "via",
+            "warning",
+            "server",
+            // Optional: content-length can vary across intermediaries
+            "content-length",
+        ]) // omit volatile/hop-by-hop headers
         const entries: Array<{ key: string; value: string }> = []
         for (const [rawKey, rawVal] of Object.entries(headers)) {
             const key = rawKey.toLowerCase()
