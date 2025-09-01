@@ -416,7 +416,7 @@ export class EVMSmartContractManagement {
             chainKey,
             recipient,
             amount,
-            signerPrivateKeys
+            signerPrivateKeys,
         )
     }
 
@@ -562,7 +562,7 @@ export class EVMSmartContractManagement {
         userAddress: string,
         amount: string,
         userSignature: string,
-        nonce: number
+        nonce: number,
     ): Promise<string> {
         const fname = "[executeGaslessDeposit]"
         log.info(`${fname} Executing gasless deposit for user ${userAddress} on ${chainKey}`)
@@ -582,7 +582,7 @@ export class EVMSmartContractManagement {
                 userSignature,
                 nonce,
                 usdcAddress,
-                amount
+                amount,
             )
 
             log.info(`${fname} ✅ Gasless deposit executed: ${tx.hash}`)
@@ -613,7 +613,7 @@ export class EVMSmartContractManagement {
             amount: string
             bridgeFeeBps: number
         },
-        userSignature: string
+        userSignature: string,
     ): Promise<string> {
         const fname = "[initiateGaslessBridgeOperation]"
         log.info(`${fname} Initiating gasless bridge from ${operation.originChain} to ${operation.destChain}`)
@@ -634,7 +634,7 @@ export class EVMSmartContractManagement {
                 operation.token,
                 operation.recipient,
                 operation.amount,
-                operation.bridgeFeeBps
+                operation.bridgeFeeBps,
             )
 
             log.info(`${fname} ✅ Gasless bridge operation initiated: ${tx.hash}`)
@@ -658,7 +658,7 @@ export class EVMSmartContractManagement {
         chainKey: string,
         recipient: string,
         amount: string,
-        signerPrivateKeys: string[]
+        signerPrivateKeys: string[],
     ): Promise<string> {
         const fname = "[executeGaslessWithdrawal]"
         log.info(`${fname} Executing gasless withdrawal on ${chainKey} to ${recipient}`)
@@ -681,7 +681,7 @@ export class EVMSmartContractManagement {
                 const nonce = nonces[i]
                 
                 // Create signature for this shard (simplified - would use proper signing)
-                const dummySignature = `0x${'00'.repeat(65)}` // TODO: Implement proper shard signature
+                const dummySignature = `0x${"00".repeat(65)}` // TODO: Implement proper shard signature
                 
                 // Execute meta-transaction for this shard approval
                 const tx = await tankConfig.contract.executeMetaTransaction(
@@ -691,7 +691,7 @@ export class EVMSmartContractManagement {
                     usdcAddress, // USDC token address
                     recipient,
                     amount,
-                    100 // 1% slippage
+                    100, // 1% slippage
                 )
                 
                 txHashes.push(tx.hash)
