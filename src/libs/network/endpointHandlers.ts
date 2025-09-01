@@ -49,6 +49,7 @@ import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
+import { handleInitiateGaslessBridge, handleExecuteGaslessDeposit } from "./routines/transactions/handleGaslessBridge"
 import {
     hexToUint8Array,
     ucrypto,
@@ -602,6 +603,37 @@ export default class ServerHandlers {
                 response.extra = "Mempool received"
                 //console.log("[SERVERHANDLER] Received mempool")
                 return response
+
+            case "initiateGaslessBridge": {
+                const result = await handleInitiateGaslessBridge(request.data)
+                response.success = result.success
+                response.result = result.success ? 200 : 400
+                response.require_reply = false
+                response.response = result.success ? {
+                    tankAddress: result.tankAddress,
+                    operationId: result.operationId,
+                    message: result.message
+                } : {
+                    error: result.error
+                }
+                response.extra = result.success ? "Gasless bridge initiated" : "Failed to initiate gasless bridge"
+                return response
+            }
+
+            case "executeGaslessDeposit": {
+                const result = await handleExecuteGaslessDeposit(request.data)
+                response.success = result.success
+                response.result = result.success ? 200 : 400
+                response.require_reply = false
+                response.response = result.success ? {
+                    txHash: result.txHash,
+                    message: result.message
+                } : {
+                    error: result.error
+                }
+                response.extra = result.success ? "Gasless deposit executed" : "Failed to execute gasless deposit"
+                return response
+            }
 
             default:
                 log.error("[endpointHandlers] Unknown message")

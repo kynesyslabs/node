@@ -1,0 +1,3 @@
+[submodule "src/features/bridges/EVMSmartContract/lib/openzeppelin-contracts"]
+	path = src/features/bridges/EVMSmartContract/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

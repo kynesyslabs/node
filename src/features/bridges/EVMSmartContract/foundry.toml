@@ -1,0 +1,21 @@
+[profile.default]
+src = "."
+out = "out"
+libs = ["lib"]
+test = "test"
+optimizer = true
+optimizer_runs = 200
+solc = "0.8.30"
+
+# Exclude certora verification files from compilation
+ignored_error_codes = [1878]
+ignored_warnings_from = ["lib/openzeppelin-contracts/certora/**/*"]
+
+[rpc_endpoints]
+mainnet = "https://eth-mainnet.g.alchemy.com/v2/..."
+
+[fmt]
+line_length = 100
+tab_width = 4
+bracket_spacing = true
+
