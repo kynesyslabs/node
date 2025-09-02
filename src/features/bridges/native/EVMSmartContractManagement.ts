@@ -363,8 +363,6 @@ export class EVMSmartContractManagement {
                 // 1,
             )
         log.debug("Receipt: " + JSON.stringify(receipt, null, 2))
-        return
-
         // Extract proposal ID from events (simplified - would need proper event parsing)
         const proposalId =
             receipt.logs[0]?.topics[1] ||
