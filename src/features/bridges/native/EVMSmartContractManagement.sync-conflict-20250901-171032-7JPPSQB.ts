@@ -6,7 +6,7 @@ import { JsonConfig } from "@/utilities/JsonConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 
-// ABI for LiquidityTank contract - updated for new combined methods
+// ABI for LiquidityTank contract - key functions only
 const liquidityTankABI = [
     // View functions
     "function getBalance(address token) view returns (uint256)",
@@ -18,20 +18,15 @@ const liquidityTankABI = [
     "function hasApproved(bytes32, address) view returns (bool)",
     "function initialized() view returns (bool)",
     "function paused() view returns (bool)",
-    "function getTokenByName(string tokenName) view returns (address)",
-    "function tokenNameMap(string) view returns (address)",
 
     // Management functions
     "function setAuthorizedAddresses(address[] addresses)",
     "function proposeNextOwners(bytes32 proposalId, address[] newOwners)",
     "function multisigTransfer(bytes32 proposalId, address token, address to, uint256 amount)",
     "function generateProposalId() returns (bytes32)",
-    "function setTokenNameMapping(string tokenName, address tokenAddress)",
 
-    // Gasless functions - NEW COMBINED METHOD (RECOMMENDED)
-    "function depositAndBridge(address user, bytes signature, uint256 nonce, string tokenName, uint256 depositAmount, string destChain, address recipient, uint256 bridgeFeeBps) payable",
-    
-    // Gasless functions - DEPRECATED (kept for backward compatibility)
+    // Gasless functions
+    "function executeMetaTransaction(address user, bytes signature, uint256 nonce, address token, address to, uint256 amount, uint256 slippageBps)",
     "function depositUSDCToTank(address user, bytes signature, uint256 nonce, address usdcAddress, uint256 amount)",
     "function initiateBridgeOperation(address user, bytes signature, uint256 nonce, string originChain, string destChain, address token, address recipient, uint256 amount, uint256 bridgeFeeBps)",
 
@@ -41,8 +36,6 @@ const liquidityTankABI = [
     "event ProposalCreated(bytes32 indexed proposalId, address indexed creator, uint40 deadline)",
     "event ProposalApproved(bytes32 indexed proposalId, address indexed approver, uint8 approvalCount)",
     "event ProposalExecuted(bytes32 indexed proposalId)",
-    "event DepositAndBridgeExecuted(address indexed user, address indexed token, uint256 depositAmount, uint256 bridgeAmount, string destChain, address recipient, uint256 nonce, address indexed relayer)",
-    "event TokenNameMapped(string tokenName, address indexed tokenAddress)",
 ]
 
 interface TankConfig {
@@ -676,152 +669,41 @@ export class EVMSmartContractManagement {
         }
 
         try {
-            // REVIEW: Updated to use multisig pattern instead of non-existent executeMetaTransaction
-            // Generate unique proposal ID for this withdrawal
-            const proposalId = `0x${Date.now().toString(16).padStart(64, "0")}`
+            // Generate nonces for each shard signature
+            const nonces = signerPrivateKeys.map((_, index) => Date.now() + index)
             
-            // Execute multisig transfer using existing multisig functionality
+            // Execute gasless multisig transfers for each required signature
             const usdcAddress = this.getUSDCAddress(chainKey)
-            const nonce = Date.now()
-            
-            // First signer initiates the multisig transfer
-            await tankConfig.evmInstance.connectWallet(signerPrivateKeys[0])
-            await tankConfig.contract.multisigTransfer(
-                proposalId,
-                usdcAddress,
-                recipient,
-                amount,
-            )
-            
-            // Additional signers approve the transfer (2/3 majority needed)
-            for (let i = 1; i < Math.min(2, signerPrivateKeys.length); i++) {
-                await tankConfig.evmInstance.connectWallet(signerPrivateKeys[i])
-                await tankConfig.contract.multisigTransfer(
-                    proposalId,
-                    usdcAddress,
+            const txHashes: string[] = []
+
+            for (let i = 0; i < signerPrivateKeys.length; i++) {
+                const privateKey = signerPrivateKeys[i]
+                const nonce = nonces[i]
+                
+                // Create signature for this shard (simplified - would use proper signing)
+                const dummySignature = `0x${"00".repeat(65)}` // TODO: Implement proper shard signature
+                
+                // Execute meta-transaction for this shard approval
+                const tx = await tankConfig.contract.executeMetaTransaction(
+                    recipient, // user (authorized shard in this case)
+                    dummySignature,
+                    nonce,
+                    usdcAddress, // USDC token address
                     recipient,
                     amount,
+                    100, // 1% slippage
                 )
+                
+                txHashes.push(tx.hash)
+                log.info(`${fname} Shard ${i + 1} gasless approval: ${tx.hash}`)
             }
 
-            log.info(`${fname} ✅ Gasless withdrawal completed with proposal: ${proposalId}`)
-            return proposalId
+            log.info(`${fname} ✅ Gasless withdrawal completed with ${txHashes.length} transactions`)
+            return txHashes[0] // Return first tx hash as proposal ID
 
         } catch (error) {
             log.error(`${fname} Failed to execute gasless withdrawal: ${error}`)
             throw new Error(`Failed to execute gasless withdrawal: ${error.toString()}`)
-        }
-    }
-
-    /**
-     * Execute atomic gasless deposit and bridge operation using the new combined method
-     * @param chainKey Chain identifier (e.g., "eth.sepolia")
-     * @param userAddress User's wallet address
-     * @param tokenName Human-readable token name (e.g., "usdc", "eth")
-     * @param amount Amount to deposit and bridge (must be equal)
-     * @param destChain Destination chain name (e.g., "polygon")
-     * @param recipient Recipient address on destination chain
-     * @param bridgeFeeBps Bridge fee in basis points (e.g., 25 for 0.25%)
-     * @param userSignature User's signature authorizing the combined operation
-     * @param nonce Nonce for replay protection
-     * @returns Transaction hash
-     */
-    public async executeAtomicDepositAndBridge(
-        chainKey: string,
-        userAddress: string,
-        tokenName: string,
-        amount: string,
-        destChain: string,
-        recipient: string,
-        bridgeFeeBps: number,
-        userSignature: string,
-        nonce: number,
-    ): Promise<string> {
-        const fname = "[executeAtomicDepositAndBridge]"
-        log.info(`${fname} Executing atomic deposit and bridge for user ${userAddress} on ${chainKey}`)
-
-        const tankConfig = this.tanks.get(chainKey)
-        if (!tankConfig) {
-            throw new Error(`Tank not found for chain: ${chainKey}`)
-        }
-
-        try {
-            // REVIEW: Using new depositAndBridge method for atomic operation
-            const tx = await tankConfig.contract.depositAndBridge(
-                userAddress,
-                userSignature,
-                nonce,
-                tokenName,     // Human-readable token name
-                amount,        // Amount to deposit and bridge (equal values)
-                destChain,     // Destination chain
-                recipient,     // Recipient on destination chain
-                bridgeFeeBps,  // Bridge fee in basis points
-                { value: tokenName === "eth" ? amount : 0 }, // Send ETH if bridging ETH
-            )
-
-            log.info(`${fname} ✅ Atomic deposit and bridge executed: ${tx.hash}`)
-            return tx.hash
-
-        } catch (error) {
-            log.error(`${fname} Failed to execute atomic deposit and bridge: ${error}`)
-            throw new Error(`Failed to execute atomic deposit and bridge: ${error.toString()}`)
-        }
-    }
-
-    /**
-     * Configure token name mapping (deployer/owner only)
-     * @param chainKey Chain identifier
-     * @param tokenName Human-readable token name (e.g., "usdc", "eth")
-     * @param tokenAddress Token contract address (use ethers.ZeroAddress for ETH)
-     * @returns Transaction hash
-     */
-    public async setTokenNameMapping(
-        chainKey: string,
-        tokenName: string,
-        tokenAddress: string,
-    ): Promise<string> {
-        const fname = "[setTokenNameMapping]"
-        log.info(`${fname} Setting token mapping: ${tokenName} -> ${tokenAddress} on ${chainKey}`)
-
-        const tankConfig = this.tanks.get(chainKey)
-        if (!tankConfig) {
-            throw new Error(`Tank not found for chain: ${chainKey}`)
-        }
-
-        try {
-            // REVIEW: Configure token name mapping for user convenience
-            const tx = await tankConfig.contract.setTokenNameMapping(tokenName, tokenAddress)
-
-            log.info(`${fname} ✅ Token mapping configured: ${tx.hash}`)
-            return tx.hash
-
-        } catch (error) {
-            log.error(`${fname} Failed to set token mapping: ${error}`)
-            throw new Error(`Failed to set token mapping: ${error.toString()}`)
-        }
-    }
-
-    /**
-     * Get token address by human-readable name
-     * @param chainKey Chain identifier
-     * @param tokenName Token name (e.g., "usdc", "eth")
-     * @returns Token contract address
-     */
-    public async getTokenByName(
-        chainKey: string,
-        tokenName: string,
-    ): Promise<string> {
-        const tankConfig = this.tanks.get(chainKey)
-        if (!tankConfig) {
-            throw new Error(`Tank not found for chain: ${chainKey}`)
-        }
-
-        try {
-            const tokenAddress = await tankConfig.contract.getTokenByName(tokenName)
-            return tokenAddress
-        } catch (error) {
-            log.error(`Failed to get token address for ${tokenName} on ${chainKey}: ${error}`)
-            throw error
         }
     }
 

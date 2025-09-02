@@ -128,6 +128,9 @@ contract LiquidityTank {
     // User nonce tracking for gasless operations
     mapping(address => uint256) public userNonces;            // Nonce per user for replay protection
     
+    // Token name mapping for user convenience
+    mapping(string => address) public tokenNameMap;           // Maps token names (e.g., "usdc") to addresses
+    
     /// @dev Events for proposal lifecycle tracking
     event ProposalIdGenerated(bytes32 indexed proposalId, address indexed generator, uint256 nonce);
     event ProposalCreated(bytes32 indexed proposalId, address indexed creator, uint40 deadline);
@@ -164,6 +167,21 @@ contract LiquidityTank {
         uint256 amountAfterFee,
         uint256 nonce
     );
+    
+    /// @dev Events for combined deposit and bridge operations
+    event DepositAndBridgeExecuted(
+        address indexed user,
+        address indexed token,
+        uint256 depositAmount,
+        uint256 bridgeAmount,
+        string destChain,
+        address recipient,
+        uint256 nonce,
+        address indexed relayer
+    );
+    
+    /// @dev Events for token name mapping
+    event TokenNameMapped(string tokenName, address indexed tokenAddress);
     
     /// @dev Events for role management tracking
     event AuthorizationGranted(address indexed account, address indexed grantor);
@@ -707,6 +725,22 @@ contract LiquidityTank {
         emit GasSubsidyWithdrawn(amount, gasSubsidyPool);
     }
     
+    /// @notice Set token name mapping for user convenience
+    /// @param tokenName Human-readable token name (e.g., "usdc", "eth")
+    /// @param tokenAddress Contract address for the token (address(0) for ETH)
+    /// @dev Only deployer can manage token name mappings
+    function setTokenNameMapping(string calldata tokenName, address tokenAddress) external onlyDeployer {
+        tokenNameMap[tokenName] = tokenAddress;
+        emit TokenNameMapped(tokenName, tokenAddress);
+    }
+    
+    /// @notice Get token address by name
+    /// @param tokenName Token name to lookup
+    /// @return tokenAddress Contract address for the token
+    function getTokenByName(string calldata tokenName) external view returns (address) {
+        return tokenNameMap[tokenName];
+    }
+    
     
     
     /// @notice Internal function to pay gas from contract pool
@@ -900,6 +934,128 @@ contract LiquidityTank {
         _payGasFromPool(tx.origin);
     }
     
+    /// @notice Combined gasless deposit and bridge operation (RECOMMENDED)
+    /// @param user User depositing and bridging tokens
+    /// @param signature User's signature authorizing both operations
+    /// @param nonce Nonce for replay protection (single nonce for both operations)
+    /// @param tokenName Human-readable token name (e.g., "usdc") - mapped to address
+    /// @param depositAmount Amount of tokens to deposit (must equal bridgeAmount)
+    /// @param destChain Destination chain identifier
+    /// @param recipient Recipient address on destination chain
+    /// @param bridgeFeeBps Bridge fee in basis points
+    /// @dev Atomically performs deposit and bridge initiation - prevents race conditions
+    ///      Users cannot deposit more than they bridge (depositAmount must equal bridgeAmount)
+    ///      Origin chain is automatically set to current block.chainid
+    ///      Emits both individual events plus combined event for comprehensive tracking
+    function depositAndBridge(
+        address user,
+        bytes calldata signature,
+        uint256 nonce,
+        string calldata tokenName,
+        uint256 depositAmount,
+        string calldata destChain,
+        address recipient,
+        uint256 bridgeFeeBps
+    ) external payable nonReentrant whenNotPaused {
+        // Resolve token address from name
+        address tokenAddress = tokenNameMap[tokenName];
+        if (tokenAddress == address(0) && keccak256(bytes(tokenName)) != keccak256("eth")) {
+            revert InvalidTokenContract();
+        }
+        
+        // For ETH, use address(0)
+        if (keccak256(bytes(tokenName)) == keccak256("eth")) {
+            tokenAddress = address(0);
+        }
+        
+        // Get current chain ID as string for origin chain
+        string memory originChain = _uint256ToString(block.chainid);
+        
+        // Create combined message hash for both deposit and bridge
+        bytes32 messageHash = keccak256(abi.encodePacked(
+            "LIQUIDITY_TANK_DEPOSIT_AND_BRIDGE",
+            user,
+            nonce,
+            tokenName,
+            depositAmount,
+            originChain,
+            destChain,
+            recipient,
+            bridgeFeeBps,
+            block.chainid,
+            address(this)
+        ));
+        
+        // Verify signature and update nonce (single nonce for atomic operation)
+        _verifySignature(user, signature, nonce, messageHash);
+        
+        // DEPOSIT PHASE: Transfer tokens to contract
+        if (tokenAddress == address(0)) {
+            // For ETH deposits, user must send ETH with the transaction
+            if (msg.value != depositAmount) revert InvalidAmount();
+        } else {
+            // Validate ERC20 contract
+            _validateERC20Contract(tokenAddress);
+            
+            // Transfer ERC20 from user to tank (user must have approved first)
+            uint256 balanceBefore = _getERC20Balance(tokenAddress, address(this));
+            
+            // Use SafeERC20 to handle the transfer
+            SafeERC20.safeTransferFrom(IERC20(tokenAddress), user, address(this), depositAmount);
+            
+            uint256 balanceAfter = _getERC20Balance(tokenAddress, address(this));
+            uint256 actualDeposited = balanceAfter - balanceBefore;
+            
+            // Check for fee-on-transfer tokens
+            if (actualDeposited < depositAmount * 9900 / 10000) revert SlippageExceeded();
+            
+            // Update depositAmount to actual deposited amount
+            depositAmount = actualDeposited;
+        }
+        
+        // BRIDGE PHASE: Validate balance and initiate bridge
+        uint256 currentBalance = (tokenAddress == address(0) ? 
+            address(this).balance : 
+            _getERC20Balance(tokenAddress, address(this))
+        );
+        
+        if (currentBalance < depositAmount) revert InsufficientBalance();
+        
+        // Calculate amount after fee
+        uint256 amountAfterFee = depositAmount * (10000 - bridgeFeeBps) / 10000;
+        if (amountAfterFee == 0) revert InvalidAmount();
+        
+        // Emit individual events for backwards compatibility
+        emit TokenDeposited(tokenAddress, user, depositAmount);
+        emit GaslessDepositExecuted(user, tokenAddress, depositAmount, nonce, _msgSender());
+        
+        emit BridgeOperationInitiated(
+            user,
+            originChain,
+            destChain,
+            tokenAddress,
+            recipient,
+            depositAmount,
+            amountAfterFee,
+            nonce
+        );
+        emit GaslessBridgeInitiated(user, tokenAddress, depositAmount, nonce, _msgSender());
+        
+        // Emit new combined event
+        emit DepositAndBridgeExecuted(
+            user,
+            tokenAddress,
+            depositAmount,
+            depositAmount, // bridgeAmount equals depositAmount
+            destChain,
+            recipient,
+            nonce,
+            _msgSender()
+        );
+        
+        // Reimburse gas costs to the relayer
+        _payGasFromPool(tx.origin);
+    }
 
     /// @notice Fallback for ETH deposits
     fallback() external payable {}
@@ -1010,5 +1166,28 @@ contract LiquidityTank {
         
         // Contract must support basic ERC20 functions
         if (!transferSuccess && !balanceSuccess) revert InvalidTokenContract();
+    }
+    
+    /// @notice Convert uint256 to string
+    /// @param value Number to convert
+    /// @return String representation of the number
+    /// @dev Helper function for converting chain ID to string
+    function _uint256ToString(uint256 value) internal pure returns (string memory) {
+        if (value == 0) {
+            return "0";
+        }
+        uint256 temp = value;
+        uint256 digits;
+        while (temp != 0) {
+            digits++;
+            temp /= 10;
+        }
+        bytes memory buffer = new bytes(digits);
+        while (value != 0) {
+            digits -= 1;
+            buffer[digits] = bytes1(uint8(48 + uint256(value % 10)));
+            value /= 10;
+        }
+        return string(buffer);
     }
 }
