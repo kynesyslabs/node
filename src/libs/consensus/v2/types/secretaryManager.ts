@@ -970,8 +970,9 @@ export default class SecretaryManager {
         // INFO: Wait for all the proposals to be sent out
         const results = await Promise.all(proposals)
         log.debug("Proposals: " + JSON.stringify(results, null, 2))
+        // process.exit(0)
 
         // INFO: Wait for proposal approvals
-        return await Waiter.wait(Waiter.keys.TANK_SIGNER_ROTATION)
+        // return await Waiter.wait(Waiter.keys.TANK_SIGNER_ROTATION)
     }
 }

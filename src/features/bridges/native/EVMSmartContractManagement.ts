@@ -197,6 +197,8 @@ export class EVMSmartContractManagement {
         contract.on(
             "OwnersRotated",
             async (oldOwners: string[], newOwners: string[]) => {
+                const waiterKey = Waiter.keys.TANK_SIGNER_ROTATION + chainKey
+
                 log.debug(
                     `OwnersRotated for ${chainKey}: ${JSON.stringify(
                         oldOwners,
@@ -204,19 +206,42 @@ export class EVMSmartContractManagement {
                 )
 
                 // INFO: Release the Consensus step in Waiter class once received!
-                if (Waiter.isWaiting(Waiter.keys.TANK_SIGNER_ROTATION)) {
-                    Waiter.resolve(Waiter.keys.TANK_SIGNER_ROTATION)
+                if (Waiter.isWaiting(waiterKey)) {
+                    Waiter.resolve(waiterKey)
                 }
             },
         )
 
-        contract.on("ProposalExecuted", async data =>
-            console.log("ProposalExecuted", data),
+        contract.on(
+            "ProposalCreated",
+            async ({ proposalId, creator, deadline }) => {
+                const waiterKey = Waiter.keys.PROPOSAL_CREATED + chainKey
+
+                log.debug(
+                    "ProposalExecuted" +
+                        chainKey +
+                        " " +
+                        JSON.stringify(
+                            { proposalId, creator, deadline },
+                            null,
+                            2,
+                        ),
+                )
+                process.exit(1)
+
+                if (Waiter.isWaiting(waiterKey)) {
+                    Waiter.resolve(waiterKey, {
+                        proposalId,
+                        creator,
+                        deadline,
+                    })
+                }
+            },
         )
 
-        contract.on("ProposalCreated", async data =>
-            console.log("ProposalCreated", data),
-        )
+        // contract.on("ProposalCreated", async data =>
+        //     console.log("ProposalCreated", data),
+        // )
 
         log.debug(`Event listeners set up for ${chainKey}`)
     }
@@ -306,31 +331,32 @@ export class EVMSmartContractManagement {
             tankConfig.evmInstance.wallet.address,
         )
         log.debug("Balance: " + balance)
+        const gasData = await tankConfig.evmInstance.provider.getFeeData()
+        log.debug("Gas data: " + JSON.stringify(gasData, null, 2))
         const proposalIdTx = await tankConfig.evmInstance.writeToContract(
             tankConfig.contract,
             "generateProposalId",
             [],
-            {
-                gasLimit: 22000,
-                value: "0",
-            },
         )
-
-        const tx = Transaction.from(proposalIdTx)
-        log.debug("Tx: " + JSON.stringify(tx, null, 2))
+        // const tx = Transaction.from(proposalIdTx)
+        // log.debug("Tx: " + JSON.stringify(tx, null, 2))
 
         const response =
             await tankConfig.evmInstance.provider.broadcastTransaction(
                 proposalIdTx,
             )
-        log.debug("Proposal ID: " + JSON.stringify(response, null, 2))
-        process.exit(1)
+        log.debug("Broadcast response: " + JSON.stringify(response, null, 2))
+        log.debug("Broadcast response hash: " + response.hash)
+        // process.exit(1)
 
-        const receipt = await tankConfig.evmInstance.waitForReceipt(
-            proposalIdTx.hash,
-        )
-
+        // INFO: wait for tx to get 1 confirmation
+        const receipt =
+            await tankConfig.evmInstance.provider.waitForTransaction(
+                response.hash,
+                // 1,
+            )
         log.debug("Receipt: " + JSON.stringify(receipt, null, 2))
+        return
 
         // Extract proposal ID from events (simplified - would need proper event parsing)
         const proposalId =

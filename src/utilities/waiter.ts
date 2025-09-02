@@ -30,6 +30,7 @@ export class Waiter {
         SET_WAIT_STATUS: "setWaitStatus",
         WAIT_FOR_SECRETARY_ROUTINE: "waitForSecretaryRoutine",
         TANK_SIGNER_ROTATION: "tankSignerRotation",
+        PROPOSAL_CREATED: "proposalCreated",
         // etc
     }
 
