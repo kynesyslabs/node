@@ -244,7 +244,6 @@ export default class GCRIdentityRoutines {
                 if (isFirst) {
                     await IncentiveManager.telegramLinked(
                         editOperation.account,
-                        data.userId,
                         editOperation.referralCode,
                     )
                 }
@@ -523,9 +522,9 @@ export default class GCRIdentityRoutines {
     }
 
     private static async isFirstConnection(
-        type: "twitter" | "web3",
+        type: "twitter" | "web3" | "telegram",
         data: {
-            userId?: string // for twitter
+            userId?: string // for twitter and telegram
             chain?: string // for web3
             subchain?: string // for web3
             address?: string // for web3
@@ -541,6 +540,25 @@ export default class GCRIdentityRoutines {
                 .createQueryBuilder("gcr")
                 .where(
                     "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'userId' = :userId)",
+                    {
+                        userId: data.userId,
+                    },
+                )
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
+
+            /**
+             * Return true if no account has this userId
+             */
+            return !result
+        } else if (type === "telegram") {
+            /**
+             * Check if this Telegram userId exists anywhere
+             */
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'telegram') as telegram_id WHERE telegram_id->>'userId' = :userId)",
                     {
                         userId: data.userId,
                     },

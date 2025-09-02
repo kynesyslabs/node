@@ -67,12 +67,10 @@ export class IncentiveManager {
      */
     static async telegramLinked(
         userId: string,
-        telegramUserId: string,
         referralCode?: string,
     ): Promise<RPCResponse> {
         return await this.pointSystem.awardTelegramPoints(
             userId,
-            telegramUserId,
             referralCode,
         )
     }
