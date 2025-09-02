@@ -40,9 +40,6 @@ export default async function executeBridgeOperations(
     if (!evmTankManager.isReady()) {
         log.error(`${fname} EVM tank management system not initialized`)
         process.exit(1)
-        // const tankAddresses = JsonConfig.getTankAddresses()
-        // await evmTankManager.initialize(tankAddresses)
-        // log.info(`${fname} Initialized EVM tank management system`)
     }
 
     // Process each native bridge operation

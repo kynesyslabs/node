@@ -117,7 +117,7 @@ async function peersGossipProcess(
                 peerInstance.verification = peer.verification
                 peerInstance.sync = peer.sync
                 peerInstance.status = peer.status
-
+                peerInstance.tankSigners = peer.tankSigners
                 return peerInstance
             })
         })
@@ -193,11 +193,7 @@ function selectPeersForGossip(peers: Peer[]): Peer[] {
         return peers
     }
 
-    log.custom(
-        "peerGossip",
-        `Selecting ${maxGossipPeers} random peers`,
-        false,
-    )
+    log.custom("peerGossip", `Selecting ${maxGossipPeers} random peers`, false)
     return shuffleArray(peers).slice(0, maxGossipPeers)
 }
 

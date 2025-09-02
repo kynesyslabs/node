@@ -5,7 +5,10 @@ import Chain from "../../../blockchain/chain"
 import log from "src/utilities/logger"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import Hashing from "../../../crypto/hashing"
-import { validateChain } from "@kynesyslabs/demosdk/bridge"
+import {
+    NativeBridgeTxPayload,
+    validateChain,
+} from "@kynesyslabs/demosdk/bridge"
 
 /**
  * Handles the native bridge transaction (called by the endpoint handler)
@@ -34,8 +37,8 @@ export default async function handleNativeBridgeTx(
             }
         }
 
-        const compiledOperation = tx.content
-            .data[1] as bridge.NativeBridgeOperationCompiled
+        const { operation: compiledOperation, txHash } = tx.content
+            .data[1] as NativeBridgeTxPayload
         if (!compiledOperation?.content?.operation) {
             log.error(
                 `${fname} Invalid compiled operation: missing operation data`,
@@ -43,6 +46,17 @@ export default async function handleNativeBridgeTx(
             return {
                 success: false,
                 message: "Invalid compiled operation: missing operation data",
+            }
+        }
+
+        if (!txHash) {
+            log.error(
+                `${fname} Missing txHash: Transaction hash for the crosschain deposit to tank is required`,
+            )
+            return {
+                success: false,
+                message:
+                    "Missing txHash: Transaction hash for the crosschain deposit to tank is required",
             }
         }
 

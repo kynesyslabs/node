@@ -1,9 +1,8 @@
-import log from "src/utilities/logger"
-import { IPeer, RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import axios from "axios"
-import { getSharedState } from "src/utilities/sharedState"
-import Cryptography from "../crypto/cryptography"
+import log from "src/utilities/logger"
 import { NodeCall } from "../network/manageNodeCall"
+import { getSharedState } from "src/utilities/sharedState"
+import { IPeer, RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
 export interface SyncData {
@@ -37,6 +36,10 @@ export default class Peer {
         ready: boolean // is the peer ready to be used (aka 1. synced, 2. verified, 3. online, 4. not in an error state)  // TODO Implement
     }
 
+    public tankSigners: {
+        [chainKey: string]: string
+    }
+
     get isLocalNode(): boolean {
         return (
             this.identity ===
@@ -65,6 +68,7 @@ export default class Peer {
             timestamp: null,
             ready: false,
         }
+        this.tankSigners = {}
     }
 
     // Importing a peer from an IPeer

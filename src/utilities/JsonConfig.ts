@@ -6,7 +6,7 @@ export class JsonConfig {
     static readonly PROVIDER_URLS_PATH = "config/providerUrls.json"
     static readonly TANK_ADDRESSES_PATH = "config/tankAddresses.json"
     static readonly TANK_ABIS_PATH = "config/abis/"
-    static readonly BRIDGE_KEYS_PATH = "config/bridgeKeys.json"
+    static readonly BRIDGE_KEYS_PATH = "config/bridgePrivateKeys.json"
 
     /**
      * Reads JSON data from a file given the path
