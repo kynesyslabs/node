@@ -105,7 +105,7 @@ class XMParser {
         /* SECTION Write tasks */
         switch (operation.task?.type) {
             case "pay":
-                // eslint-disable-next-line no-var
+                 
                 var result = await handlePayOperation(operation, chainID)
 
                 // INFO: Adding chain info for debugging

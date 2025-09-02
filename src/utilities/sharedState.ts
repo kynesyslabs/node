@@ -5,7 +5,7 @@ import * as forge from "node-forge"
 import Block from "src/libs/blockchain/block"
 import chain from "src/libs/blockchain/chain"
 import { Identity } from "src/libs/identity"
-// eslint-disable-next-line no-unused-vars
+ 
 import * as ntpClient from "ntp-client"
 import { Peer, PeerManager } from "src/libs/peer"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"

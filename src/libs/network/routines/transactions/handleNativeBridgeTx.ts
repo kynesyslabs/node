@@ -127,7 +127,7 @@ export default async function handleNativeBridgeTx(
                 log.error(`${fname} Gasless operation validation failed: ${gaslessValidation.error}`)
                 return {
                     success: false,
-                    error: gaslessValidation.error
+                    error: gaslessValidation.error,
                 }
             }
             log.info(`${fname} ✅ Gasless operation validated successfully`)
@@ -203,7 +203,7 @@ export default async function handleNativeBridgeTx(
  */
 async function detectGaslessOperation(
     compiledOperation: bridge.NativeBridgeOperationCompiled,
-    tx: NativeBridgeTransaction
+    tx: NativeBridgeTransaction,
 ): Promise<boolean> {
     const fname = "[detectGaslessOperation]"
     
@@ -241,7 +241,7 @@ async function detectGaslessOperation(
  */
 async function validateGaslessOperation(
     compiledOperation: bridge.NativeBridgeOperationCompiled,
-    tx: NativeBridgeTransaction
+    tx: NativeBridgeTransaction,
 ): Promise<{ valid: boolean; error?: string }> {
     const fname = "[validateGaslessOperation]"
     
@@ -258,14 +258,14 @@ async function validateGaslessOperation(
         if (!userSignature) {
             return {
                 valid: false,
-                error: "Missing user signature for gasless operation"
+                error: "Missing user signature for gasless operation",
             }
         }
         
         if (userNonce === undefined || userNonce === null) {
             return {
                 valid: false,
-                error: "Missing user nonce for gasless operation"
+                error: "Missing user nonce for gasless operation",
             }
         }
         
@@ -279,20 +279,20 @@ async function validateGaslessOperation(
             token: operation.token.address,
             recipient: operation.to.address,
             amount: operation.token.amount,
-            bridgeFeeBps: gaslessData.bridgeFeeBps || 0
+            bridgeFeeBps: gaslessData.bridgeFeeBps || 0,
         }))
         
         const signatureValid = await ucrypto.verify({
             algorithm: "ed25519", // TODO: Support secp256k1 as well
             message: new TextEncoder().encode(messageToSign),
             publicKey: hexToUint8Array(userAddress), // Assuming user address is their public key
-            signature: hexToUint8Array(userSignature)
+            signature: hexToUint8Array(userSignature),
         })
         
         if (!signatureValid) {
             return {
                 valid: false,
-                error: `Invalid user signature for gasless operation from: ${userAddress}`
+                error: `Invalid user signature for gasless operation from: ${userAddress}`,
             }
         }
         
@@ -305,7 +305,7 @@ async function validateGaslessOperation(
     } catch (error) {
         return {
             valid: false,
-            error: `Error validating gasless operation: ${error.toString()}`
+            error: `Error validating gasless operation: ${error.toString()}`,
         }
     }
 }

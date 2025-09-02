@@ -1,4 +1,4 @@
-/* eslint-disable no-unused-vars */
+ 
 // INFO Entry point for multichain requests
 
 import XMParser from "./routines/XMParser"
@@ -37,7 +37,7 @@ export default class MultichainDispatcher {
         // REVIEW Execute
         const result = await MultichainDispatcher.execute(data)
         // TODO Implement a response schema
-        // eslint-disable-next-line @typescript-eslint/naming-convention
+         
         return JSON.stringify(result, (_, v) =>
             typeof v === "bigint" ? v.toString() : v,
         ) // await multichainDispatcher.execute(data)

@@ -2,7 +2,7 @@ import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 
 import { Operation } from "@kynesyslabs/demosdk/types"
-/* eslint-disable no-unused-vars */
+ 
 import Transaction from "../../blockchain/transaction"
 import { ucrypto } from "@kynesyslabs/demosdk/encryption"
 
@@ -28,7 +28,7 @@ export async function deriveMempoolOperation(
     // Sanity check
     if (typeof data.data !== "string") {
         try {
-            // eslint-disable-next-line @typescript-eslint/naming-convention
+             
             data.data = JSON.stringify(data.data, (_, v) =>
                 typeof v === "bigint" ? v.toString() : v,
             )

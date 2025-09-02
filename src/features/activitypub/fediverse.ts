@@ -7,7 +7,7 @@ const app = express()
 let connected = false
 let database: ActivityPubStorage
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+ 
 require("dotenv").config()
 
 // Middleware to parse JSON bodies

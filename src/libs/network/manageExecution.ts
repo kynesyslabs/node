@@ -40,7 +40,7 @@ export async function manageExecution(
         // Then we send the validation data to the client that can use it to execute the tx
         case "confirmTx":
             term.yellow.bold("[SERVER] Received confirmTx\n")
-            // eslint-disable-next-line no-var
+             
             var validityData = await ServerHandlers.handleValidateTransaction(
                 content.data as Transaction,
                 sender,

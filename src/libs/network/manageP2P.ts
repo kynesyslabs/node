@@ -1,4 +1,4 @@
-/* eslint-disable no-dupe-class-members */
+ 
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"

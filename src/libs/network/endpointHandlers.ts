@@ -1,4 +1,4 @@
-/* eslint-disable no-unused-vars */
+ 
 /* LICENSE
 
 © 2023 by KyneSys Labs, licensed under CC BY-NC-ND 4.0
@@ -612,9 +612,9 @@ export default class ServerHandlers {
                 response.response = result.success ? {
                     tankAddress: result.tankAddress,
                     operationId: result.operationId,
-                    message: result.message
+                    message: result.message,
                 } : {
-                    error: result.error
+                    error: result.error,
                 }
                 response.extra = result.success ? "Gasless bridge initiated" : "Failed to initiate gasless bridge"
                 return response
@@ -627,9 +627,9 @@ export default class ServerHandlers {
                 response.require_reply = false
                 response.response = result.success ? {
                     txHash: result.txHash,
-                    message: result.message
+                    message: result.message,
                 } : {
-                    error: result.error
+                    error: result.error,
                 }
                 response.extra = result.success ? "Gasless deposit executed" : "Failed to execute gasless deposit"
                 return response

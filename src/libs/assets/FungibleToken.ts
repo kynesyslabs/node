@@ -51,7 +51,7 @@ export default class FungibleToken {
     }
 
     // Injection support here
-    // eslint-disable-next-line @typescript-eslint/ban-types
+     
     private _transfer: Function = null
 
 
@@ -59,7 +59,7 @@ export default class FungibleToken {
 
     // INFO Calling this method is the right way to decide your transfer logic.
     // Implement anything as _transfer and it will be executed prior to the actual transfer.
-    // eslint-disable-next-line @typescript-eslint/naming-convention, @typescript-eslint/ban-types
+     
     hookTransfer(transfer: Function) {
         this._transfer = transfer
     }

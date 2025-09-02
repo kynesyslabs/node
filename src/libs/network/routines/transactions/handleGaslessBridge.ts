@@ -39,21 +39,21 @@ export async function handleInitiateGaslessBridge(params: {
             token: params.token,
             recipient: params.recipient,
             amount: params.amount,
-            bridgeFeeBps: params.bridgeFeeBps
+            bridgeFeeBps: params.bridgeFeeBps,
         }))
 
         const signatureValid = await ucrypto.verify({
             algorithm: "ed25519", // TODO: Support secp256k1 as well
             message: new TextEncoder().encode(messageHash),
             publicKey: hexToUint8Array(params.user), // Assuming user is their public key
-            signature: hexToUint8Array(params.signature)
+            signature: hexToUint8Array(params.signature),
         })
 
         if (!signatureValid) {
             log.error(`${fname} Invalid signature from user: ${params.user}`)
             return {
                 success: false,
-                error: "Invalid signature for gasless bridge operation"
+                error: "Invalid signature for gasless bridge operation",
             }
         }
 
@@ -63,19 +63,19 @@ export async function handleInitiateGaslessBridge(params: {
             log.error(`${fname} EVM tank management system not initialized`)
             return {
                 success: false,
-                error: "Bridge system not ready"
+                error: "Bridge system not ready",
             }
         }
 
         // Get tank address for the origin chain
-        const chainKey = `${params.originChain.toLowerCase()}.${process.env.NODE_ENV === 'production' ? 'mainnet' : 'sepolia'}`
+        const chainKey = `${params.originChain.toLowerCase()}.${process.env.NODE_ENV === "production" ? "mainnet" : "sepolia"}`
         const tankConfig = evmTankManager.getTankConfig(chainKey)
         
         if (!tankConfig) {
             log.error(`${fname} No tank configuration found for chain: ${chainKey}`)
             return {
                 success: false,
-                error: `Unsupported chain: ${params.originChain}`
+                error: `Unsupported chain: ${params.originChain}`,
             }
         }
 
@@ -90,9 +90,9 @@ export async function handleInitiateGaslessBridge(params: {
                 token: params.token,
                 recipient: params.recipient,
                 amount: params.amount,
-                bridgeFeeBps: params.bridgeFeeBps
+                bridgeFeeBps: params.bridgeFeeBps,
             },
-            params.signature
+            params.signature,
         )
 
         log.info(`${fname} ✅ Gasless bridge operation initiated: ${operationTxHash}`)
@@ -101,14 +101,14 @@ export async function handleInitiateGaslessBridge(params: {
             success: true,
             tankAddress: tankConfig.address,
             operationId: operationTxHash, // Use tx hash as operation ID
-            message: "Gasless bridge operation initiated successfully"
+            message: "Gasless bridge operation initiated successfully",
         }
 
     } catch (error) {
         log.error(`${fname} Error processing gasless bridge initiation: ${error}`)
         return {
             success: false,
-            error: `Error processing gasless bridge initiation: ${error.toString()}`
+            error: `Error processing gasless bridge initiation: ${error.toString()}`,
         }
     }
 }
@@ -142,21 +142,21 @@ export async function handleExecuteGaslessDeposit(params: {
             nonce: params.nonce,
             usdcAddress: params.usdcAddress,
             amount: params.amount,
-            chainKey: params.chainKey
+            chainKey: params.chainKey,
         }))
 
         const signatureValid = await ucrypto.verify({
             algorithm: "ed25519", // TODO: Support secp256k1 as well
             message: new TextEncoder().encode(messageHash),
             publicKey: hexToUint8Array(params.user), // Assuming user is their public key
-            signature: hexToUint8Array(params.signature)
+            signature: hexToUint8Array(params.signature),
         })
 
         if (!signatureValid) {
             log.error(`${fname} Invalid signature from user: ${params.user}`)
             return {
                 success: false,
-                error: "Invalid signature for gasless deposit"
+                error: "Invalid signature for gasless deposit",
             }
         }
 
@@ -166,7 +166,7 @@ export async function handleExecuteGaslessDeposit(params: {
             log.error(`${fname} EVM tank management system not initialized`)
             return {
                 success: false,
-                error: "Bridge system not ready"
+                error: "Bridge system not ready",
             }
         }
 
@@ -176,7 +176,7 @@ export async function handleExecuteGaslessDeposit(params: {
             params.user,
             params.amount,
             params.signature,
-            params.nonce
+            params.nonce,
         )
 
         log.info(`${fname} ✅ Gasless deposit executed for user: ${params.user}`)
@@ -184,14 +184,14 @@ export async function handleExecuteGaslessDeposit(params: {
         return {
             success: true,
             message: "Gasless deposit executed successfully",
-            txHash: txHash
+            txHash: txHash,
         }
 
     } catch (error) {
         log.error(`${fname} Error processing gasless deposit: ${error}`)
         return {
             success: false,
-            error: `Error processing gasless deposit: ${error.toString()}`
+            error: `Error processing gasless deposit: ${error.toString()}`,
         }
     }
 }

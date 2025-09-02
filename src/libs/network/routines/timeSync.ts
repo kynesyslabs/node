@@ -3,7 +3,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import { promisify } from "util"
 
 import Transmission from "../../communications/transmission"
-/* eslint-disable indent */
+ 
 import * as stat from "./timeSyncUtils"
 import { NodeCall } from "../manageNodeCall"
 

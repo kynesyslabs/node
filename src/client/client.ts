@@ -15,7 +15,7 @@ const rl = readline.createInterface({
 
 // INFO Easy async based readline method
 async function ask(message: string): Promise<string> {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     return new Promise((resolve, reject) => {
         rl.question(message, answer => {
             rl.close()

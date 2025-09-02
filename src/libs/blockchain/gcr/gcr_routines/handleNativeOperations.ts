@@ -17,7 +17,7 @@ export class HandleNativeOperations {
         switch (nativePayload.nativeOperation) {
             // Balance operations for the send native method
             case "send":
-                // eslint-disable-next-line no-var
+                 
                 var [to, amount] = nativePayload.args
                 // First, remove the amount from the sender's balance
                 console.log("to: ", to)

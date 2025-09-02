@@ -77,7 +77,7 @@ export async function manageNativeBridge(
     // await initializeTankManager()
 
     // Prepare the response
-    // eslint-disable-next-line prefer-const
+     
     let response: RPCResponse = {
         result: null,
         response: null,

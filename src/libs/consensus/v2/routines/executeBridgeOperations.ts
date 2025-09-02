@@ -194,7 +194,7 @@ async function processBridgeTx(bridgeTx: Transaction): Promise<{
                 log.error(`${fname} Insufficient gas subsidy balance on ${destination}: ${subsidyBalance.balance}`)
                 return {
                     ...result,
-                    error: `Insufficient gas subsidy balance: ${subsidyBalance.balance}`
+                    error: `Insufficient gas subsidy balance: ${subsidyBalance.balance}`,
                 }
             }
 
@@ -204,7 +204,7 @@ async function processBridgeTx(bridgeTx: Transaction): Promise<{
                 operation.token.amount.toString(),
                 shardSigningKeys,
                 gaslessData.userSignature,
-                gaslessData.userNonce
+                gaslessData.userNonce,
             )
 
             // Track gas subsidy usage
@@ -298,7 +298,7 @@ function getShardSigningKeys(): string[] {
  */
 function detectGaslessOperation(
     compiled: NativeBridgeOperationCompiled,
-    bridgeTx: Transaction
+    bridgeTx: Transaction,
 ): boolean {
     const fname = "[detectGaslessOperation]"
     
@@ -336,7 +336,7 @@ function detectGaslessOperation(
  */
 function extractGaslessData(
     compiled: NativeBridgeOperationCompiled,
-    bridgeTx: Transaction
+    bridgeTx: Transaction,
 ): {
     userSignature: string
     userNonce: number
@@ -361,7 +361,7 @@ function extractGaslessData(
         return {
             userSignature,
             userNonce,
-            bridgeFeeBps
+            bridgeFeeBps,
         }
     } catch (error) {
         log.error(`${fname} Error extracting gasless data: ${error}`)
@@ -403,14 +403,14 @@ async function checkGasSubsidyBalance(chainKey: string): Promise<{
         return {
             sufficient,
             balance,
-            threshold
+            threshold,
         }
     } catch (error) {
         log.error(`${fname} Error checking gas subsidy balance: ${error}`)
         return {
             sufficient: false,
             balance: "0",
-            threshold: "100000000000000000"
+            threshold: "100000000000000000",
         }
     }
 }
@@ -424,7 +424,7 @@ async function checkGasSubsidyBalance(chainKey: string): Promise<{
 async function trackGasSubsidyUsage(
     chainKey: string,
     proposalId: string,
-    operationType: string
+    operationType: string,
 ): Promise<void> {
     const fname = "[trackGasSubsidyUsage]"
     

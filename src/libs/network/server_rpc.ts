@@ -36,7 +36,7 @@ import GCR from "../blockchain/gcr/gcr"
 const noAuthMethods = ["nodeCall"]
 
 // INFO: Protected endpoints
-// eslint-disable-next-line @typescript-eslint/naming-convention
+ 
 const PROTECTED_ENDPOINTS = new Set([
     "rate-limit/unblock",
     "getCampaignData",

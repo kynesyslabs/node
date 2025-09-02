@@ -17,7 +17,7 @@ type IHandleWeb2ProxyRequestStepParams = Pick<
  * Handles the web2 proxy request.
  * @returns {Promise<RPCResponse>} The RPC response.
  */
-// eslint-disable-next-line no-redeclare
+ 
 export async function handleWeb2ProxyRequest({
     web2Request,
     sessionId,

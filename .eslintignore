@@ -1,8 +1,0 @@
-node_modules
-diagrams
-data
-dist
-.github
-.vscode
-.env
-postgres_*
