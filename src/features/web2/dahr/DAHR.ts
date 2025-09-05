@@ -70,6 +70,18 @@ export class DAHR {
         // Make sure we have a web2Request at this point
         required(this._web2Request, "web2Request")
 
+        // Validate URL scheme to prevent transport crashes
+        try {
+            const parsed = new URL(url)
+            if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+                throw new Error(
+                    `Invalid URL scheme: ${parsed.protocol}. Only http(s) are allowed.`,
+                )
+            }
+        } catch (e: any) {
+            throw new Error(`Invalid URL format: ${url}. ${e?.message || ""}`)
+        }
+
         const web2Response = await this._proxy.sendHTTPRequest({
             web2Request: {
                 ...this._web2Request,

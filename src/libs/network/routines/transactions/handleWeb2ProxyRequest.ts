@@ -57,6 +57,27 @@ export async function handleWeb2ProxyRequest({
                     )
                 }
 
+                // Validate URL scheme: only http(s) are allowed
+                try {
+                    const parsed = new URL(web2Request.raw.url)
+                    if (
+                        parsed.protocol !== "http:" &&
+                        parsed.protocol !== "https:"
+                    ) {
+                        return createRPCResponse(
+                            400,
+                            null,
+                            `Invalid URL scheme: ${parsed.protocol}. Only http(s) are allowed.`,
+                        )
+                    }
+                } catch {
+                    return createRPCResponse(
+                        400,
+                        null,
+                        `Invalid URL format: ${web2Request.raw.url}`,
+                    )
+                }
+
                 dahr.web2Request.raw = {
                     ...dahr.web2Request.raw,
                     url: web2Request.raw.url,
