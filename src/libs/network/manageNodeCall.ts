@@ -1,7 +1,6 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
 import Chain from "../blockchain/chain"
-import GCR from "../blockchain/gcr/gcr"
 import eggs from "./routines/eggs"
 import { getSharedState } from "src/utilities/sharedState"
 import _ from "lodash"
@@ -19,16 +18,12 @@ import getTransactions from "./routines/nodecalls/getTransactions"
 import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
-import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import {
-    hexToUint8Array,
-    ucrypto,
-    uint8ArrayToHex,
-} from "@kynesyslabs/demosdk/encryption"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { Twitter } from "../identity/tools/twitter"
 import { Tweet } from "@kynesyslabs/demosdk/types"
 import Mempool from "../blockchain/mempool_v2"
 import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
+import { Discord, DiscordMessage } from "../identity/tools/discord"
 
 export interface NodeCall {
     message: string
@@ -264,6 +259,91 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = {
                     success: false,
                     error: "Failed to get tweet",
+                }
+            }
+            break
+        }
+
+        case "getDiscordMessage": {
+            if (!data.discordUrl) {
+                response.result = 400
+                response.response = "No Discord URL specified"
+                break
+            }
+
+            const discord = Discord.getInstance()
+            let message: DiscordMessage | null = null
+
+            try {
+                message = await discord.getMessageByUrl(data.discordUrl)
+            } catch (error) {
+                response.result = 400
+                response.response = {
+                    success: false,
+                    error: "Failed to get Discord message",
+                }
+                break
+            }
+
+            response.result = message ? 200 : 400
+            if (message) {
+                let guildIdFromUrl: string | undefined
+                let channelIdFromUrl: string | undefined
+                let messageIdFromUrl: string | undefined
+
+                try {
+                    const details = discord.extractMessageDetails(
+                        data.discordUrl,
+                    )
+                    guildIdFromUrl = details.guildId
+                    channelIdFromUrl = details.channelId
+                    messageIdFromUrl = details.messageId
+                } catch {
+                    // non-fatal, e.g. if URL format was unexpected
+                }
+
+                const payload = {
+                    id: message.id,
+                    content: message.content,
+                    timestamp: message.timestamp,
+                    edited_timestamp: message.edited_timestamp ?? null,
+
+                    authorUsername: message.author?.username ?? null,
+                    authorGlobalName: message.author?.global_name ?? null,
+                    authorId: message.author?.id ?? null,
+                    authorIsBot: !!message.author?.bot,
+
+                    channelId: message.channel_id ?? channelIdFromUrl ?? null,
+                    guildId:
+                        (message as any).guild_id ?? guildIdFromUrl ?? null,
+
+                    attachments: (message.attachments || []).map(a => ({
+                        id: a.id,
+                        filename: a.filename,
+                        size: a.size,
+                        url: a.url,
+                        proxy_url: a.proxy_url,
+                        content_type: a.content_type ?? null,
+                    })),
+                    embedsCount: Array.isArray(message.embeds)
+                        ? message.embeds.length
+                        : 0,
+                    mentions: (message.mentions || []).map(m => ({
+                        id: m.id,
+                        username: m.username,
+                    })),
+                    replyToId: message.referenced_message?.id ?? null,
+                    originalMessageIdFromUrl: messageIdFromUrl ?? null,
+                }
+
+                response.response = {
+                    message: payload,
+                    success: true,
+                }
+            } else {
+                response.response = {
+                    success: false,
+                    error: "Failed to get Discord message",
                 }
             }
             break
