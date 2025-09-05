@@ -8,6 +8,7 @@ import { ProxyFactory } from "src/features/web2/proxy/ProxyFactory"
 import required from "src/utilities/required"
 import { generateUniqueId } from "src/utilities/generateUniqueId"
 import { EnumWeb2Actions } from "@kynesyslabs/demosdk/types"
+import { validateAndNormalizeHttpUrl } from "src/features/web2/validator"
 
 /**
  * DAHR - Data Agnostic HTTPS Relay, class that handles the Web2 request and proxy process.
@@ -70,16 +71,10 @@ export class DAHR {
         // Make sure we have a web2Request at this point
         required(this._web2Request, "web2Request")
 
-        // Validate URL scheme to prevent transport crashes
-        try {
-            const parsed = new URL(url)
-            if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-                throw new Error(
-                    `Invalid URL scheme: ${parsed.protocol}. Only http(s) are allowed.`,
-                )
-            }
-        } catch (e: any) {
-            throw new Error(`Invalid URL format: ${url}. ${e?.message || ""}`)
+        // Validate and normalize URL without echoing sensitive details
+        const validation = validateAndNormalizeHttpUrl(url)
+        if (!validation.ok) {
+            throw new Error(validation.message)
         }
 
         const web2Response = await this._proxy.sendHTTPRequest({
@@ -88,7 +83,7 @@ export class DAHR {
                 raw: {
                     ...this._web2Request.raw,
                     action: EnumWeb2Actions.START_PROXY,
-                    url,
+                    url: validation.normalizedUrl,
                 },
             },
             targetMethod: method,

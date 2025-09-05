@@ -6,6 +6,7 @@ import {
 } from "@kynesyslabs/demosdk/types"
 import { handleWeb2 } from "src/features/web2/handleWeb2"
 import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
+import { validateAndNormalizeHttpUrl } from "src/features/web2/validator"
 
 type IHandleWeb2ProxyRequestStepParams = Pick<
     IWeb2Payload["message"],
@@ -57,30 +58,16 @@ export async function handleWeb2ProxyRequest({
                     )
                 }
 
-                // Validate URL scheme: only http(s) are allowed
-                try {
-                    const parsed = new URL(web2Request.raw.url)
-                    if (
-                        parsed.protocol !== "http:" &&
-                        parsed.protocol !== "https:"
-                    ) {
-                        return createRPCResponse(
-                            400,
-                            null,
-                            `Invalid URL scheme: ${parsed.protocol}. Only http(s) are allowed.`,
-                        )
-                    }
-                } catch {
-                    return createRPCResponse(
-                        400,
-                        null,
-                        `Invalid URL format: ${web2Request.raw.url}`,
-                    )
+                const validation = validateAndNormalizeHttpUrl(
+                    web2Request.raw.url,
+                )
+                if (!validation.ok) {
+                    return createRPCResponse(400, null, validation.message)
                 }
 
                 dahr.web2Request.raw = {
                     ...dahr.web2Request.raw,
-                    url: web2Request.raw.url,
+                    url: validation.normalizedUrl,
                 }
 
                 const { method, headers } = web2Request.raw
@@ -90,7 +77,7 @@ export async function handleWeb2ProxyRequest({
                     headers,
                     payload,
                     authorization,
-                    url: web2Request.raw.url,
+                    url: validation.normalizedUrl,
                 })
 
                 return createRPCResponse(200, response)
