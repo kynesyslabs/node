@@ -168,4 +168,3 @@ src/features/bridges/EVMSmartContract/foundry.lock
 !src/features/bridges/EVMSmartContract/README.md
 !src/features/bridges/EVMSmartContract/TESTING.md
 src/features/bridges/EVMSmartContract/artifacts
-.claude
