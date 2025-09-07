@@ -74,7 +74,9 @@ export class DAHR {
         // Validate and normalize URL without echoing sensitive details
         const validation = validateAndNormalizeHttpUrl(url)
         if (!validation.ok) {
-            throw new Error(validation.message)
+            const err = new Error(validation.message)
+            ;(err as any).status = validation.status
+            throw err
         }
 
         const web2Response = await this._proxy.sendHTTPRequest({

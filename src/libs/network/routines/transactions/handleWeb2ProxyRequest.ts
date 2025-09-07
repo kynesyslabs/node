@@ -62,7 +62,11 @@ export async function handleWeb2ProxyRequest({
                     web2Request.raw.url,
                 )
                 if (!validation.ok) {
-                    return createRPCResponse(400, null, validation.message)
+                    return createRPCResponse(
+                        validation.status,
+                        null,
+                        validation.message,
+                    )
                 }
 
                 dahr.web2Request.raw = {
