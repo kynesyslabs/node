@@ -1,8 +1,12 @@
-node_modules
-diagrams
-data
-dist
-.github
-.vscode
-.env
-postgres_*
+# External examples from other repos
+aptos_examples_ts/
+
+# Node modules
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Generated files
+*.d.ts

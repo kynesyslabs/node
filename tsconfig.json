@@ -17,7 +17,9 @@
         "paths": {
             "@/*": ["src/*"]
         },
-        "types": ["jest", "node", "bun"],
+        "types": ["bun-types"],
+        "lib": ["ES2022", "DOM"],
+        "allowImportingTsExtensions": false,
         "incremental": true,
         "strictNullChecks": false,
         "noImplicitAny": false,

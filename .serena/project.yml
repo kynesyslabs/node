@@ -7,7 +7,7 @@ language: typescript
 
 # whether to use the project's gitignore file to ignore files
 # Added on 2025-04-07
-ignore_all_files_in_gitignore: true
+ignore_all_files_in_gitignore: false 
 # list of additional paths to ignore
 # same syntax as gitignore, so you can use * and **
 # Was previously called `ignored_dirs`, please update your config if you are using that.

@@ -2,10 +2,13 @@
  * Contract call transaction handler
  */
 
-import { ContractCallPayload } from "@kynesyslabs/demosdk/types"
+import { ContractCallPayload } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/TransactionSubtypes" // TODO Fix this by exporting when possible
 import type { ContractData } from "@/features/contracts/types/ContractTypes"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import Datasource from "@/model/datasource"
+import Sandbox from "@/features/contracts/execution/Sandbox"
+import { createExecutionContext } from "@/features/contracts/execution/ExecutionContext"
+import Chain from "@/libs/blockchain/chain"
 
 /**
  * Handles contract call transactions
@@ -22,15 +25,15 @@ export default async function handleContractCall(
 }> {
     try {
         // REVIEW: Contract call handler for executing contract methods
-        
+
         // 1. Validate contract exists
         const db = await Datasource.getInstance()
         const gcrRepo = db.getDataSource().getRepository(GCRMain)
-        
-        const contractAccount = await gcrRepo.findOne({ 
-            where: { pubkey: payload.contractAddress }, 
+
+        const contractAccount = await gcrRepo.findOne({
+            where: { pubkey: payload.contractAddress },
         })
-        
+
         if (!contractAccount) {
             return {
                 success: false,
@@ -65,7 +68,9 @@ export default async function handleContractCall(
         }
 
         // 3. Validate sender account exists
-        const senderAccount = await gcrRepo.findOne({ where: { pubkey: sender } })
+        const senderAccount = await gcrRepo.findOne({
+            where: { pubkey: sender },
+        })
         if (!senderAccount) {
             return {
                 success: false,
@@ -86,8 +91,10 @@ export default async function handleContractCall(
 
         // 5. Validate method exists in contract ABI (basic check for now)
         const contractABI = contractAccount.contract.code.abi
-        const methodExists = contractABI.methods.some(method => method.name === payload.method)
-        
+        const methodExists = contractABI.methods.some(
+            method => method.name === payload.method,
+        )
+
         // For Phase 3b, we just validate the method exists or allow any method if ABI is empty (basic contracts)
         if (contractABI.methods.length > 0 && !methodExists) {
             return {
@@ -97,17 +104,60 @@ export default async function handleContractCall(
             }
         }
 
-        // 6. For now, we just prepare the execution context (actual execution in Phase 4)
-        // This is a placeholder that will be replaced with actual contract execution
+        // 6. Execute contract method in sandboxed environment
+        // REVIEW: Phase 4 - Real contract execution using Bun Workers
+        const currentBlockHeight = await Chain.getLastBlockNumber()
+        const executionContext = createExecutionContext({
+            sender,
+            contractAddress: payload.contractAddress,
+            blockHeight: currentBlockHeight,
+            value: payload.value || 0n,
+        })
+
+        const sandbox = new Sandbox()
+        const sandboxResult = await sandbox.execute({
+            contractSource: contractAccount.contract.code.source,
+            methodName: payload.method,
+            arguments: payload.args,
+            executionContext,
+            contractState: contractAccount.contract.state.storage,
+        })
+
+        if (!sandboxResult.success) {
+            return {
+                success: false,
+                message: "Contract execution failed",
+                error: sandboxResult.error || "Unknown execution error",
+                gasUsed: sandboxResult.gasUsed,
+            }
+        }
+
+        // Update contract state with changes from execution
+        contractAccount.contract.state.storage = {
+            ...contractAccount.contract.state.storage,
+            ...sandboxResult.stateChanges,
+        }
+
+        // Add events to contract
+        if (sandboxResult.events && sandboxResult.events.length > 0) {
+            const newEvents = sandboxResult.events.map(event => ({
+                ...event,
+                blockHeight: currentBlockHeight,
+                transactionHash: "", // Will be set later in transaction processing
+            }))
+            contractAccount.contract.events.push(...newEvents)
+        }
+
         const executionResult = {
-            returnValue: null,
-            gasUsed: callFee, // For now, gas used equals the call fee
+            returnValue: sandboxResult.returnValue,
+            gasUsed: sandboxResult.gasUsed,
             success: true,
         }
 
-        // 7. Update contract stats
-        contractAccount.contract.stats.callCount += 1
+        // 7. Update contract stats with actual execution data
+        contractAccount.contract.stats.callCount += sandboxResult.callCount
         contractAccount.contract.stats.gasUsed += executionResult.gasUsed
+        contractAccount.contract.stats.lastExecuted = new Date()
 
         // 8. Update contract metadata
         contractAccount.contract.metadata.updatedAt = new Date()
@@ -117,11 +167,10 @@ export default async function handleContractCall(
 
         return {
             success: true,
-            message: "Contract call prepared successfully",
+            message: "Contract call executed successfully",
             result: executionResult.returnValue,
             gasUsed: executionResult.gasUsed,
         }
-
     } catch (error) {
         console.error("[handleContractCall] Error:", error)
         return {
