@@ -187,35 +187,46 @@ export class Proxy {
 
             // SSRF hardening: resolve DNS and block private/link-local/loopback destinations
             const isDisallowedAddress = (addr: string): boolean => {
-                const ipVersion = net.isIP(addr)
                 const lower = addr.toLowerCase()
-                if (ipVersion === 6) {
-                    if (lower === "::1") return true
-                    // fc00::/7 (ULA) and fe80::/10 (link-local)
-                    if (
-                        lower.startsWith("fc") ||
-                        lower.startsWith("fd") ||
-                        lower.startsWith("fe80:")
-                    )
-                        return true
-                    // IPv4-mapped loopback (::ffff:127.x.x.x)
-                    if (lower.startsWith("::ffff:127.")) return true
-                    return false
-                }
-                if (ipVersion === 4) {
-                    if (/^127(?:\.\d{1,3}){3}$/.test(lower)) return true
-                    if (/^10\./.test(lower)) return true
-                    const m = lower.match(/^172\.(\d{1,3})\./)
+                const ipVersion = net.isIP(lower)
+
+                // Helper for IPv4 space
+                const isDisallowedV4 = (v4: string): boolean => {
+                    if (/^127(?:\.\d{1,3}){3}$/.test(v4)) return true // loopback
+                    if (/^10\./.test(v4)) return true // private
+                    const m = v4.match(/^172\.(\d{1,3})\./)
                     if (m) {
                         const o = Number(m[1])
                         if (o >= 16 && o <= 31) return true
                     }
-                    if (/^192\.168\./.test(lower)) return true
-                    if (/^169\.254\./.test(lower)) return true
-                    if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(lower))
-                        return true
-                    if (/^0\./.test(lower)) return true
+                    if (/^192\.168\./.test(v4)) return true // private
+                    if (/^169\.254\./.test(v4)) return true // link-local
+                    if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(v4))
+                        return true // CGNAT 100.64/10
+                    if (/^0\./.test(v4)) return true // this network
+                    if (/^(?:22[4-9]|23\d)\./.test(v4)) return true // multicast 224/4
+                    if (/^(?:24\d|25[0-5])\./.test(v4)) return true // reserved 240/4 incl 255.255.255.255
                     return false
+                }
+
+                if (ipVersion === 6) {
+                    if (lower === "::" || lower === "::1") return true // unspecified/loopback
+                    if (lower.startsWith("ff")) return true // multicast ff00::/8
+                    // ULA fc00::/7
+                    if (lower.startsWith("fc") || lower.startsWith("fd"))
+                        return true
+                    // Link-local fe80::/10 → fe8x, fe9x, feax, febx
+                    if (/^fe[89ab][0-9a-f]*:/i.test(lower)) return true
+                    // IPv4-mapped IPv6 ::ffff:a.b.c.d → re-check mapped v4
+                    const v4map = lower.match(
+                        /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/,
+                    )
+                    if (v4map && isDisallowedV4(v4map[1])) return true
+                    return false
+                }
+
+                if (ipVersion === 4) {
+                    return isDisallowedV4(lower)
                 }
                 return false
             }
