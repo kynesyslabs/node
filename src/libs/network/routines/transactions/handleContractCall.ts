@@ -9,6 +9,7 @@ import Datasource from "@/model/datasource"
 import Sandbox from "@/features/contracts/execution/Sandbox"
 import { createExecutionContext } from "@/features/contracts/execution/ExecutionContext"
 import Chain from "@/libs/blockchain/chain"
+import StateManager from "@/features/contracts/execution/StateManager"
 
 /**
  * Handles contract call transactions
@@ -27,8 +28,8 @@ export default async function handleContractCall(
         // REVIEW: Contract call handler for executing contract methods
 
         // 1. Validate contract exists
-        const db = await Datasource.getInstance()
-        const gcrRepo = db.getDataSource().getRepository(GCRMain)
+        var db = await Datasource.getInstance()
+        var gcrRepo = db.getDataSource().getRepository(GCRMain)
 
         const contractAccount = await gcrRepo.findOne({
             where: { pubkey: payload.contractAddress },
@@ -104,7 +105,17 @@ export default async function handleContractCall(
             }
         }
 
-        // 6. Execute contract method in sandboxed environment
+        // 6. Create state backup before execution (for rollback on errors)
+        const stateBackup = await StateManager.createStateBackup(payload.contractAddress)
+        if (!stateBackup.success) {
+            return {
+                success: false,
+                message: "Failed to create state backup",
+                error: stateBackup.error,
+            }
+        }
+
+        // 7. Execute contract method in sandboxed environment
         // REVIEW: Phase 4 - Real contract execution using Bun Workers
         const currentBlockHeight = await Chain.getLastBlockNumber()
         const executionContext = createExecutionContext({
@@ -124,6 +135,12 @@ export default async function handleContractCall(
         })
 
         if (!sandboxResult.success) {
+            // Rollback state on execution failure
+            console.log("[handleContractCall] Contract execution failed, rolling back state")
+            if (stateBackup.backup) {
+                await StateManager.rollbackState(stateBackup.backup)
+            }
+            
             return {
                 success: false,
                 message: "Contract execution failed",
@@ -132,20 +149,55 @@ export default async function handleContractCall(
             }
         }
 
-        // Update contract state with changes from execution
-        contractAccount.contract.state.storage = {
-            ...contractAccount.contract.state.storage,
-            ...sandboxResult.stateChanges,
+        // 8. Apply state changes using StateManager with validation
+        const stateResult = await StateManager.applyStateChanges(
+            payload.contractAddress,
+            sandboxResult.stateChanges || {},
+        )
+
+        if (!stateResult.success) {
+            // Rollback state on state application failure
+            console.log("[handleContractCall] State application failed, rolling back state")
+            if (stateBackup.backup) {
+                await StateManager.rollbackState(stateBackup.backup)
+            }
+            
+            return {
+                success: false,
+                message: stateResult.message,
+                error: stateResult.error,
+                gasUsed: sandboxResult.gasUsed,
+            }
         }
 
-        // Add events to contract
-        if (sandboxResult.events && sandboxResult.events.length > 0) {
-            const newEvents = sandboxResult.events.map(event => ({
-                ...event,
-                blockHeight: currentBlockHeight,
-                transactionHash: "", // Will be set later in transaction processing
-            }))
-            contractAccount.contract.events.push(...newEvents)
+        // 9. Add events to contract (requires separate GCR update)
+        var db = await Datasource.getInstance()
+        var gcrRepo = db.getDataSource().getRepository(GCRMain)
+        const updatedContractAccount = await gcrRepo.findOne({
+            where: { pubkey: payload.contractAddress },
+        })
+
+        if (updatedContractAccount && updatedContractAccount.contract) {
+            // Add events to contract
+            if (sandboxResult.events && sandboxResult.events.length > 0) {
+                const newEvents = sandboxResult.events.map(event => ({
+                    ...event,
+                    blockHeight: currentBlockHeight,
+                    transactionHash: "", // Will be set later in transaction processing
+                }))
+                updatedContractAccount.contract.events.push(...newEvents)
+            }
+
+            // Update contract stats with actual execution data
+            updatedContractAccount.contract.stats.callCount += sandboxResult.callCount
+            updatedContractAccount.contract.stats.gasUsed += sandboxResult.gasUsed
+            updatedContractAccount.contract.stats.lastExecuted = new Date()
+
+            // Update contract metadata
+            updatedContractAccount.contract.metadata.updatedAt = new Date()
+
+            // Save updated contract data (events and stats)
+            await gcrRepo.save(updatedContractAccount)
         }
 
         const executionResult = {
@@ -153,17 +205,6 @@ export default async function handleContractCall(
             gasUsed: sandboxResult.gasUsed,
             success: true,
         }
-
-        // 7. Update contract stats with actual execution data
-        contractAccount.contract.stats.callCount += sandboxResult.callCount
-        contractAccount.contract.stats.gasUsed += executionResult.gasUsed
-        contractAccount.contract.stats.lastExecuted = new Date()
-
-        // 8. Update contract metadata
-        contractAccount.contract.metadata.updatedAt = new Date()
-
-        // 9. Save updated contract data
-        await gcrRepo.save(contractAccount)
 
         return {
             success: true,
