@@ -3,6 +3,7 @@ import http from "http"
 import httpProxy from "http-proxy"
 import { URL } from "url"
 import net from "net"
+import dns from "node:dns/promises"
 import {
     IWeb2Request,
     IWeb2Result,
@@ -182,7 +183,80 @@ export class Proxy {
 
     private async createNewServer(targetUrl: string): Promise<void> {
         return new Promise<void>((resolve, reject) => {
-            const { targetProtocol } = this.parseUrl(targetUrl)
+            const { targetProtocol, targetHostname } = this.parseUrl(targetUrl)
+
+            // SSRF hardening: resolve DNS and block private/link-local/loopback destinations
+            const isDisallowedAddress = (addr: string): boolean => {
+                const lower = addr.toLowerCase()
+                const ipVersion = net.isIP(lower)
+
+                // Helper for IPv4 space
+                const isDisallowedV4 = (v4: string): boolean => {
+                    if (/^127(?:\.\d{1,3}){3}$/.test(v4)) return true // loopback
+                    if (/^10\./.test(v4)) return true // private
+                    const m = v4.match(/^172\.(\d{1,3})\./)
+                    if (m) {
+                        const o = Number(m[1])
+                        if (o >= 16 && o <= 31) return true
+                    }
+                    if (/^192\.168\./.test(v4)) return true // private
+                    if (/^169\.254\./.test(v4)) return true // link-local
+                    if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(v4))
+                        return true // CGNAT 100.64/10
+                    if (/^0\./.test(v4)) return true // this network
+                    if (/^(?:22[4-9]|23\d)\./.test(v4)) return true // multicast 224/4
+                    if (/^(?:24\d|25[0-5])\./.test(v4)) return true // reserved 240/4 incl 255.255.255.255
+                    return false
+                }
+
+                if (ipVersion === 6) {
+                    if (lower === "::" || lower === "::1") return true // unspecified/loopback
+                    if (lower.startsWith("ff")) return true // multicast ff00::/8
+                    // ULA fc00::/7
+                    if (lower.startsWith("fc") || lower.startsWith("fd"))
+                        return true
+                    // Link-local fe80::/10 → fe8x, fe9x, feax, febx
+                    if (/^fe[89ab][0-9a-f]*:/i.test(lower)) return true
+                    // IPv4-mapped IPv6 ::ffff:a.b.c.d → re-check mapped v4
+                    const v4map = lower.match(
+                        /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/,
+                    )
+                    if (v4map && isDisallowedV4(v4map[1])) return true
+                    return false
+                }
+
+                if (ipVersion === 4) {
+                    return isDisallowedV4(lower)
+                }
+                return false
+            }
+
+            const preflight = async () => {
+                try {
+                    // If hostname is already an IP, just check it; otherwise resolve all
+                    const ipVersion = net.isIP(targetHostname)
+                    if (ipVersion) {
+                        if (isDisallowedAddress(targetHostname)) {
+                            throw new Error(
+                                "Target resolves to a private/link-local/loopback address",
+                            )
+                        }
+                    } else {
+                        const answers = await dns.lookup(targetHostname, {
+                            all: true,
+                        })
+                        if (answers.some(a => isDisallowedAddress(a.address))) {
+                            throw new Error(
+                                "Target resolves to a private/link-local/loopback address",
+                            )
+                        }
+                    }
+                } catch (e) {
+                    reject(e)
+                    return false
+                }
+                return true
+            }
 
             // Create the proxy server (defaults; per-request options are supplied in proxyServer.web)
             const proxyServer = httpProxy.createProxyServer({
@@ -254,10 +328,18 @@ export class Proxy {
             })
 
             // Create the main HTTP server
-            this._server = http.createServer((req, res) => {
+            this._server = http.createServer(async (req, res) => {
                 if (!this.isAuthorizedRequest(req)) {
                     res.writeHead(403)
                     res.end("Unauthorized")
+                    return
+                }
+
+                // Ensure target is still safe at request time (DNS may have changed)
+                const ok = await preflight()
+                if (!ok) {
+                    res.writeHead(400)
+                    res.end("Invalid target host")
                     return
                 }
 
