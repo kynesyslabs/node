@@ -126,3 +126,14 @@ src/features/multichain/chainwares/aptoswares/TECHNICAL_PROPOSAL_APTOS_INTEGRATI
 APTOS_INTEGRATION_PLAN.md
 aptos_examples_ts
 
+.claude
+.serena
+dist
+src/features/bridges/EVMSmartContract/artifacts
+src/features/bridges/EVMSmartContract/cache
+src/features/bridges/EVMSmartContract/lib
+src/features/bridges/EVMSmartContract/out
+src/features/bridges/EVMSmartContract/test
+src/features/bridges/EVMSmartContract/GASLESS_BRIDGE_FLOW_DIAGRAM.md
+src/features/bridges/EVMSmartContract/USAGE.md
+CLAUDE.sync-conflict-20250901-171031-7JPPSQB.md
