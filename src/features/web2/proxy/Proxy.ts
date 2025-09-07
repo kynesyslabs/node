@@ -3,6 +3,7 @@ import http from "http"
 import httpProxy from "http-proxy"
 import { URL } from "url"
 import net from "net"
+import dns from "node:dns/promises"
 import {
     IWeb2Request,
     IWeb2Result,
@@ -182,7 +183,69 @@ export class Proxy {
 
     private async createNewServer(targetUrl: string): Promise<void> {
         return new Promise<void>((resolve, reject) => {
-            const { targetProtocol } = this.parseUrl(targetUrl)
+            const { targetProtocol, targetHostname } = this.parseUrl(targetUrl)
+
+            // SSRF hardening: resolve DNS and block private/link-local/loopback destinations
+            const isDisallowedAddress = (addr: string): boolean => {
+                const ipVersion = net.isIP(addr)
+                const lower = addr.toLowerCase()
+                if (ipVersion === 6) {
+                    if (lower === "::1") return true
+                    // fc00::/7 (ULA) and fe80::/10 (link-local)
+                    if (
+                        lower.startsWith("fc") ||
+                        lower.startsWith("fd") ||
+                        lower.startsWith("fe80:")
+                    )
+                        return true
+                    // IPv4-mapped loopback (::ffff:127.x.x.x)
+                    if (lower.startsWith("::ffff:127.")) return true
+                    return false
+                }
+                if (ipVersion === 4) {
+                    if (/^127(?:\.\d{1,3}){3}$/.test(lower)) return true
+                    if (/^10\./.test(lower)) return true
+                    const m = lower.match(/^172\.(\d{1,3})\./)
+                    if (m) {
+                        const o = Number(m[1])
+                        if (o >= 16 && o <= 31) return true
+                    }
+                    if (/^192\.168\./.test(lower)) return true
+                    if (/^169\.254\./.test(lower)) return true
+                    if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(lower))
+                        return true
+                    if (/^0\./.test(lower)) return true
+                    return false
+                }
+                return false
+            }
+
+            const preflight = async () => {
+                try {
+                    // If hostname is already an IP, just check it; otherwise resolve all
+                    const ipVersion = net.isIP(targetHostname)
+                    if (ipVersion) {
+                        if (isDisallowedAddress(targetHostname)) {
+                            throw new Error(
+                                "Target resolves to a private/link-local/loopback address",
+                            )
+                        }
+                    } else {
+                        const answers = await dns.lookup(targetHostname, {
+                            all: true,
+                        })
+                        if (answers.some(a => isDisallowedAddress(a.address))) {
+                            throw new Error(
+                                "Target resolves to a private/link-local/loopback address",
+                            )
+                        }
+                    }
+                } catch (e) {
+                    reject(e)
+                    return false
+                }
+                return true
+            }
 
             // Create the proxy server (defaults; per-request options are supplied in proxyServer.web)
             const proxyServer = httpProxy.createProxyServer({
@@ -254,10 +317,18 @@ export class Proxy {
             })
 
             // Create the main HTTP server
-            this._server = http.createServer((req, res) => {
+            this._server = http.createServer(async (req, res) => {
                 if (!this.isAuthorizedRequest(req)) {
                     res.writeHead(403)
                     res.end("Unauthorized")
+                    return
+                }
+
+                // Ensure target is still safe at request time (DNS may have changed)
+                const ok = await preflight()
+                if (!ok) {
+                    res.writeHead(400)
+                    res.end("Invalid target host")
                     return
                 }
 
