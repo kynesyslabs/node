@@ -6,45 +6,7 @@ import { JsonConfig } from "@/utilities/JsonConfig"
 import { EVM } from "@kynesyslabs/demosdk/xm-localsdk"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
-
-// ABI for LiquidityTank contract - updated for new combined methods
-const liquidityTankABI = [
-    // View functions
-    "function getBalance(address token) view returns (uint256)",
-    "function authorizedAddresses(uint256) view returns (address)",
-    "function authorizedCount() view returns (uint8)",
-    "function isAuthorized(address) view returns (bool)",
-    "function getRequiredApprovals() view returns (uint8)",
-    "function checkProposalStatus(bytes32) view returns (uint8, uint40, bool, bool)",
-    "function hasApproved(bytes32, address) view returns (bool)",
-    "function initialized() view returns (bool)",
-    "function paused() view returns (bool)",
-    "function getTokenByName(string tokenName) view returns (address)",
-    "function tokenNameMap(string) view returns (address)",
-
-    // Management functions
-    "function setAuthorizedAddresses(address[] addresses)",
-    "function proposeNextOwners(bytes32 proposalId, address[] newOwners)",
-    "function multisigTransfer(bytes32 proposalId, address token, address to, uint256 amount)",
-    "function generateProposalId() returns (bytes32)",
-    "function setTokenNameMapping(string tokenName, address tokenAddress)",
-
-    // Gasless functions - NEW COMBINED METHOD (RECOMMENDED)
-    "function depositAndBridge(address user, bytes signature, uint256 nonce, string tokenName, uint256 depositAmount, string destChain, address recipient, uint256 bridgeFeeBps) payable",
-    
-    // Gasless functions - DEPRECATED (kept for backward compatibility)
-    "function depositUSDCToTank(address user, bytes signature, uint256 nonce, address usdcAddress, uint256 amount)",
-    "function initiateBridgeOperation(address user, bytes signature, uint256 nonce, string originChain, string destChain, address token, address recipient, uint256 amount, uint256 bridgeFeeBps)",
-
-    // Events
-    "event TransferExecuted(address indexed token, address indexed to, uint256 amount)",
-    "event OwnersRotated(address[] oldOwners, address[] newOwners)",
-    "event ProposalCreated(bytes32 indexed proposalId, address indexed creator, uint40 deadline)",
-    "event ProposalApproved(bytes32 indexed proposalId, address indexed approver, uint8 approvalCount)",
-    "event ProposalExecuted(bytes32 indexed proposalId)",
-    "event DepositAndBridgeExecuted(address indexed user, address indexed token, uint256 depositAmount, uint256 bridgeAmount, string destChain, address recipient, uint256 nonce, address indexed relayer)",
-    "event TokenNameMapped(string tokenName, address indexed tokenAddress)",
-]
+import Chain from "@/libs/blockchain/chain"
 
 interface TankConfig {
     address: string
@@ -154,9 +116,10 @@ export class EVMSmartContractManagement {
         )
 
         // Create contract instance
+        const tankABI = JsonConfig.getTankAbi(chainKey)
         const contract = await evmInstance.getContractInstance(
             tankAddress,
-            JSON.stringify(liquidityTankABI),
+            JSON.stringify(tankABI),
         )
 
         // Verify contract is initialized
@@ -202,7 +165,7 @@ export class EVMSmartContractManagement {
 
         // INFO: Listen and handle the OwnersRotated event
         contract.on(
-            "OwnersRotated",
+            "ProposalApproved",
             async (oldOwners: string[], newOwners: string[]) => {
                 const waiterKey = Waiter.keys.TANK_SIGNER_ROTATION + chainKey
 
@@ -219,32 +182,32 @@ export class EVMSmartContractManagement {
             },
         )
 
-        contract.on(
-            "ProposalCreated",
-            async ({ proposalId, creator, deadline }) => {
-                const waiterKey = Waiter.keys.PROPOSAL_CREATED + chainKey
+        // contract.on(
+        //     "ProposalCreated",
+        //     async ({ proposalId, creator, deadline }) => {
+        //         const waiterKey = Waiter.keys.PROPOSAL_CREATED + chainKey
 
-                log.debug(
-                    "ProposalExecuted" +
-                        chainKey +
-                        " " +
-                        JSON.stringify(
-                            { proposalId, creator, deadline },
-                            null,
-                            2,
-                        ),
-                )
-                process.exit(1)
+        //         log.debug(
+        //             "ProposalExecuted" +
+        //                 chainKey +
+        //                 " " +
+        //                 JSON.stringify(
+        //                     { proposalId, creator, deadline },
+        //                     null,
+        //                     2,
+        //                 ),
+        //         )
+        //         process.exit(1)
 
-                if (Waiter.isWaiting(waiterKey)) {
-                    Waiter.resolve(waiterKey, {
-                        proposalId,
-                        creator,
-                        deadline,
-                    })
-                }
-            },
-        )
+        //         if (Waiter.isWaiting(waiterKey)) {
+        //             Waiter.resolve(waiterKey, {
+        //                 proposalId,
+        //                 creator,
+        //                 deadline,
+        //             })
+        //         }
+        //     },
+        // )
 
         // contract.on("ProposalCreated", async data =>
         //     console.log("ProposalCreated", data),
@@ -325,6 +288,13 @@ export class EVMSmartContractManagement {
         chainKey: string
         proposalId: string
     }> {
+        const waiterKey = Waiter.keys.TANK_SIGNER_ROTATION + chainKey
+        const nonce = BigInt(await Chain.getLastBlockNumber())
+        newSigners = [
+            "0x72d2E3625Aa2f18C1538E32F1D526D209A0Ac5e6",
+            "0xe28DA0644524D4F7928Fc2b46ecf903DB51A8D46",
+            "0xfC1be565bfAe9f21a0663d2b0dC272239a1609f2",
+        ]
         const tankConfig = this.tanks.get(chainKey)
         if (!tankConfig) {
             log.error(`Tank not found for chain: ${chainKey}`)
@@ -340,59 +310,61 @@ export class EVMSmartContractManagement {
         log.debug("Balance: " + balance)
         const gasData = await tankConfig.evmInstance.provider.getFeeData()
         log.debug("Gas data: " + JSON.stringify(gasData, null, 2))
-        const proposalIdTx = await tankConfig.evmInstance.writeToContract(
-            tankConfig.contract,
-            "generateProposalId",
-            [],
+        log.debug(
+            "Contract ABI: " + JSON.stringify(tankConfig.contract.abi, null, 2),
         )
+        const rotateSignersTx = await tankConfig.evmInstance.writeToContract(
+            tankConfig.contract,
+            "proposeNextOwners",
+            [nonce, newSigners],
+        )
+        // log contract abi being used by contract instance
         // const tx = Transaction.from(proposalIdTx)
         // log.debug("Tx: " + JSON.stringify(tx, null, 2))
 
         const response =
             await tankConfig.evmInstance.provider.broadcastTransaction(
-                proposalIdTx,
+                rotateSignersTx,
             )
         log.debug("Broadcast response: " + JSON.stringify(response, null, 2))
         log.debug("Broadcast response hash: " + response.hash)
         // process.exit(1)
 
         // INFO: wait for tx to get 1 confirmation
-        const receipt =
-            await tankConfig.evmInstance.provider.waitForTransaction(
-                response.hash,
-                // 1,
-            )
-        log.debug("Receipt: " + JSON.stringify(receipt, null, 2))
-        // Extract proposal ID from events (simplified - would need proper event parsing)
-        const proposalId =
-            receipt.logs[0]?.topics[1] ||
-            `0x${Date.now().toString(16).padStart(64, "0")}`
+        // const receipt =
+        //     await tankConfig.evmInstance.provider.waitForTransaction(
+        //         response.hash,
+        //         1,
+        //     )
+
+        // log.debug("Receipt: " + JSON.stringify(receipt, null, 2))
+        return await Waiter.wait(waiterKey)
 
         // Propose new owners
-        const txResponse = await tankConfig.evmInstance.writeToContract(
-            tankConfig.contract,
-            "proposeNextOwners",
-            [proposalId, newSigners],
-        )
+        // const txResponse = await tankConfig.evmInstance.writeToContract(
+        //     tankConfig.contract,
+        //     "proposeNextOwners",
+        //     [nonce, newSigners],
+        // )
         // TODO: Confirm the tx was succcessfully received by the contract
 
         // Track rotation proposal
         // REVIEW: Do we need to track these?
-        this.rotationProposals.set(chainKey, {
-            proposalId,
-            newSigners,
-            requiredApprovals: await tankConfig.contract.getRequiredApprovals(),
-            currentApprovals: 1, // First approval from caller
-            executed: false,
-        })
+        // this.rotationProposals.set(chainKey, {
+        //     nonce,
+        //     newSigners,
+        //     requiredApprovals: await tankConfig.contract.getRequiredApprovals(),
+        //     currentApprovals: 1, // First approval from caller
+        //     executed: false,
+        // })
 
-        log.info(
-            `Shard rotation initiated for ${chainKey}, proposal: ${proposalId}`,
-        )
-        return {
-            chainKey,
-            proposalId,
-        }
+        // log.info(
+        //     `Shard rotation initiated for ${chainKey}, proposal: ${proposalId}`,
+        // )
+        // return {
+        //     chainKey,
+        //     proposalId,
+        // }
     }
 
     /**
@@ -458,7 +430,9 @@ export class EVMSmartContractManagement {
         signerPrivateKeys: string[],
     ): Promise<string> {
         const fname = "[executeWithdrawal]"
-        log.info(`${fname} Executing withdrawal (now gasless) on ${chainKey} to ${recipient}`)
+        log.info(
+            `${fname} Executing withdrawal (now gasless) on ${chainKey} to ${recipient}`,
+        )
 
         // Use the new gasless withdrawal method
         return await this.executeGaslessWithdrawal(
@@ -627,7 +601,9 @@ export class EVMSmartContractManagement {
         nonce: number,
     ): Promise<string> {
         const fname = "[executeGaslessDeposit]"
-        log.info(`${fname} Executing gasless deposit for user ${userAddress} on ${chainKey}`)
+        log.info(
+            `${fname} Executing gasless deposit for user ${userAddress} on ${chainKey}`,
+        )
 
         const tankConfig = this.tanks.get(chainKey)
         if (!tankConfig) {
@@ -637,7 +613,7 @@ export class EVMSmartContractManagement {
         try {
             // Get USDC address for this chain (TODO: make this configurable)
             const usdcAddress = this.getUSDCAddress(chainKey)
-            
+
             // Execute gasless deposit via contract
             const tx = await tankConfig.contract.depositUSDCToTank(
                 userAddress,
@@ -649,10 +625,11 @@ export class EVMSmartContractManagement {
 
             log.info(`${fname} ✅ Gasless deposit executed: ${tx.hash}`)
             return tx.hash
-
         } catch (error) {
             log.error(`${fname} Failed to execute gasless deposit: ${error}`)
-            throw new Error(`Failed to execute gasless deposit: ${error.toString()}`)
+            throw new Error(
+                `Failed to execute gasless deposit: ${error.toString()}`,
+            )
         }
     }
 
@@ -678,7 +655,9 @@ export class EVMSmartContractManagement {
         userSignature: string,
     ): Promise<string> {
         const fname = "[initiateGaslessBridgeOperation]"
-        log.info(`${fname} Initiating gasless bridge from ${operation.originChain} to ${operation.destChain}`)
+        log.info(
+            `${fname} Initiating gasless bridge from ${operation.originChain} to ${operation.destChain}`,
+        )
 
         const tankConfig = this.tanks.get(chainKey)
         if (!tankConfig) {
@@ -699,18 +678,21 @@ export class EVMSmartContractManagement {
                 operation.bridgeFeeBps,
             )
 
-            log.info(`${fname} ✅ Gasless bridge operation initiated: ${tx.hash}`)
+            log.info(
+                `${fname} ✅ Gasless bridge operation initiated: ${tx.hash}`,
+            )
             return tx.hash
-
         } catch (error) {
             log.error(`${fname} Failed to initiate gasless bridge: ${error}`)
-            throw new Error(`Failed to initiate gasless bridge: ${error.toString()}`)
+            throw new Error(
+                `Failed to initiate gasless bridge: ${error.toString()}`,
+            )
         }
     }
 
     /**
      * Execute gasless withdrawal using meta-transaction pattern
-     * @param chainKey Chain identifier  
+     * @param chainKey Chain identifier
      * @param recipient Withdrawal recipient address
      * @param amount Amount to withdraw
      * @param signerPrivateKeys Shard private keys for multisig
@@ -723,7 +705,9 @@ export class EVMSmartContractManagement {
         signerPrivateKeys: string[],
     ): Promise<string> {
         const fname = "[executeGaslessWithdrawal]"
-        log.info(`${fname} Executing gasless withdrawal on ${chainKey} to ${recipient}`)
+        log.info(
+            `${fname} Executing gasless withdrawal on ${chainKey} to ${recipient}`,
+        )
 
         const tankConfig = this.tanks.get(chainKey)
         if (!tankConfig) {
@@ -734,11 +718,11 @@ export class EVMSmartContractManagement {
             // REVIEW: Updated to use multisig pattern instead of non-existent executeMetaTransaction
             // Generate unique proposal ID for this withdrawal
             const proposalId = `0x${Date.now().toString(16).padStart(64, "0")}`
-            
+
             // Execute multisig transfer using existing multisig functionality
             const usdcAddress = this.getUSDCAddress(chainKey)
             const nonce = Date.now()
-            
+
             // First signer initiates the multisig transfer
             await tankConfig.evmInstance.connectWallet(signerPrivateKeys[0])
             await tankConfig.contract.multisigTransfer(
@@ -747,7 +731,7 @@ export class EVMSmartContractManagement {
                 recipient,
                 amount,
             )
-            
+
             // Additional signers approve the transfer (2/3 majority needed)
             for (let i = 1; i < Math.min(2, signerPrivateKeys.length); i++) {
                 await tankConfig.evmInstance.connectWallet(signerPrivateKeys[i])
@@ -759,12 +743,15 @@ export class EVMSmartContractManagement {
                 )
             }
 
-            log.info(`${fname} ✅ Gasless withdrawal completed with proposal: ${proposalId}`)
+            log.info(
+                `${fname} ✅ Gasless withdrawal completed with proposal: ${proposalId}`,
+            )
             return proposalId
-
         } catch (error) {
             log.error(`${fname} Failed to execute gasless withdrawal: ${error}`)
-            throw new Error(`Failed to execute gasless withdrawal: ${error.toString()}`)
+            throw new Error(
+                `Failed to execute gasless withdrawal: ${error.toString()}`,
+            )
         }
     }
 
@@ -793,7 +780,9 @@ export class EVMSmartContractManagement {
         nonce: number,
     ): Promise<string> {
         const fname = "[executeAtomicDepositAndBridge]"
-        log.info(`${fname} Executing atomic deposit and bridge for user ${userAddress} on ${chainKey}`)
+        log.info(
+            `${fname} Executing atomic deposit and bridge for user ${userAddress} on ${chainKey}`,
+        )
 
         const tankConfig = this.tanks.get(chainKey)
         if (!tankConfig) {
@@ -806,20 +795,25 @@ export class EVMSmartContractManagement {
                 userAddress,
                 userSignature,
                 nonce,
-                tokenName,     // Human-readable token name
-                amount,        // Amount to deposit and bridge (equal values)
-                destChain,     // Destination chain
-                recipient,     // Recipient on destination chain
-                bridgeFeeBps,  // Bridge fee in basis points
+                tokenName, // Human-readable token name
+                amount, // Amount to deposit and bridge (equal values)
+                destChain, // Destination chain
+                recipient, // Recipient on destination chain
+                bridgeFeeBps, // Bridge fee in basis points
                 { value: tokenName === "eth" ? amount : 0 }, // Send ETH if bridging ETH
             )
 
-            log.info(`${fname} ✅ Atomic deposit and bridge executed: ${tx.hash}`)
+            log.info(
+                `${fname} ✅ Atomic deposit and bridge executed: ${tx.hash}`,
+            )
             return tx.hash
-
         } catch (error) {
-            log.error(`${fname} Failed to execute atomic deposit and bridge: ${error}`)
-            throw new Error(`Failed to execute atomic deposit and bridge: ${error.toString()}`)
+            log.error(
+                `${fname} Failed to execute atomic deposit and bridge: ${error}`,
+            )
+            throw new Error(
+                `Failed to execute atomic deposit and bridge: ${error.toString()}`,
+            )
         }
     }
 
@@ -836,7 +830,9 @@ export class EVMSmartContractManagement {
         tokenAddress: string,
     ): Promise<string> {
         const fname = "[setTokenNameMapping]"
-        log.info(`${fname} Setting token mapping: ${tokenName} -> ${tokenAddress} on ${chainKey}`)
+        log.info(
+            `${fname} Setting token mapping: ${tokenName} -> ${tokenAddress} on ${chainKey}`,
+        )
 
         const tankConfig = this.tanks.get(chainKey)
         if (!tankConfig) {
@@ -845,11 +841,13 @@ export class EVMSmartContractManagement {
 
         try {
             // REVIEW: Configure token name mapping for user convenience
-            const tx = await tankConfig.contract.setTokenNameMapping(tokenName, tokenAddress)
+            const tx = await tankConfig.contract.setTokenNameMapping(
+                tokenName,
+                tokenAddress,
+            )
 
             log.info(`${fname} ✅ Token mapping configured: ${tx.hash}`)
             return tx.hash
-
         } catch (error) {
             log.error(`${fname} Failed to set token mapping: ${error}`)
             throw new Error(`Failed to set token mapping: ${error.toString()}`)
@@ -872,10 +870,14 @@ export class EVMSmartContractManagement {
         }
 
         try {
-            const tokenAddress = await tankConfig.contract.getTokenByName(tokenName)
+            const tokenAddress = await tankConfig.contract.getTokenByName(
+                tokenName,
+            )
             return tokenAddress
         } catch (error) {
-            log.error(`Failed to get token address for ${tokenName} on ${chainKey}: ${error}`)
+            log.error(
+                `Failed to get token address for ${tokenName} on ${chainKey}: ${error}`,
+            )
             throw error
         }
     }
@@ -896,7 +898,9 @@ export class EVMSmartContractManagement {
 
         const address = usdcAddresses[chainKey]
         if (!address) {
-            throw new Error(`USDC address not configured for chain: ${chainKey}`)
+            throw new Error(
+                `USDC address not configured for chain: ${chainKey}`,
+            )
         }
 
         return address
