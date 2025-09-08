@@ -25,9 +25,11 @@ export default async function handleContractWrite(
     operation: IOperation,
     chainID: number,
 ) {
+    if (operation.is_evm) {
+        return await handleEVMContractWrite(operation, chainID)
+    }
+
     switch (operation.chain) {
-        case "eth":
-            return await handleEVMContractWrite(operation, chainID)
         case "aptos":
             return await handleAptosContractWrite(operation)
         default:
