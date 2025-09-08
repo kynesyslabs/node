@@ -22,7 +22,7 @@
         "upgrade_deps:force": "ncu -u && yarn",
         "keygen": "tsx -r tsconfig-paths/register src/libs/utils/keyMaker.ts",
         "test:chains": "jest --testMatch '**/tests/**/*.ts' --testPathIgnorePatterns src/* tests/utils/* tests/**/_template*  --verbose",
-        "test:contracts": "bun test src/features/contracts/tests/simple-contract.test.ts",
+        "test:contracts": "env PATH=$(echo $PATH | tr ':' '\n' | grep -v node_modules | tr '\n' ':') bun test src/features/contracts/tests/contract-syntax.test.ts",
         "test:contracts:all": "bun test src/features/contracts/tests/",
         "test:examples": "bun test src/features/contracts/tests/examples-validation.test.ts",
         "test:typescript": "bun test src/features/contracts/tests/typescript-validation.test.ts",
