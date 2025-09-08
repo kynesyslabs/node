@@ -1,132 +1,241 @@
 /* eslint-disable @typescript-eslint/naming-convention */
 /**
- * Base class for all Demos smart contracts
- * Provides execution context and utility methods to contract implementations
+ * Base class for all Demos Network smart contracts
+ * Provides state management, event emission, and execution context access
  */
 
-import type { ExecutionContext, CallCounter } from "./ExecutionContext"
+import type { ExecutionContext } from "./ExecutionContext"
+
+export interface ContractEvent {
+    name: string
+    args: Record<string, any>
+    blockHeight: number
+    timestamp: Date
+    txHash?: string
+}
 
 export abstract class DemosContract {
-    // Injected context (set by sandbox before execution)
-    protected _context?: ExecutionContext
-    protected _callCounter?: CallCounter
-    protected _state?: Record<string, any>
-    protected _events: Array<{
-        name: string
-        args: Record<string, any>
-        timestamp: Date
-    }> = []
+    // Execution context injected by sandbox
+    protected context!: ExecutionContext
+
+    // Original state from database
+    private _originalState: Record<string, any> = {}
+
+    // Tracked state changes during execution
+    private _stateChanges: Record<string, any> = {}
+
+    // Events emitted during execution
+    private _events: ContractEvent[] = []
+
+    // Call counter for nested calls
+    private _callCount = 0
 
     /**
-     * Initialize contract with execution context
-     * Called by the sandbox before method execution
+     * Initialize contract with context and state
+     * Called by sandbox before method execution
      */
-    _initialize(
+    public __initialize(
         context: ExecutionContext,
-        callCounter: CallCounter,
         state: Record<string, any>,
-    ) {
-        this._context = context
-        this._callCounter = callCounter
-        this._state = state || {}
+    ): void {
+        this.context = context
+        this._originalState = state || {}
+        this._stateChanges = {}
+        this._events = []
+        this._callCount = 0
     }
 
     /**
-     * Get the sender of the current transaction
+     * State management interface
+     */
+    protected state = {
+        /**
+         * Get a value from contract state
+         * Checks pending changes first, then original state
+         */
+        get: <T = any>(key: string): T | undefined => {
+            // Check pending changes first
+            if (key in this._stateChanges) {
+                return this._stateChanges[key] as T
+            }
+            // Fall back to original state
+            return this._originalState[key] as T
+        },
+
+        /**
+         * Set a value in contract state
+         * Changes are buffered until execution completes
+         */
+        set: (key: string, value: any): void => {
+            if (value === undefined) {
+                // Setting undefined means deletion
+                this._stateChanges[key] = null
+            } else {
+                this._stateChanges[key] = value
+            }
+        },
+
+        /**
+         * Delete a key from contract state
+         */
+        delete: (key: string): void => {
+            this._stateChanges[key] = null
+        },
+
+        /**
+         * Check if a key exists in state
+         */
+        has: (key: string): boolean => {
+            if (key in this._stateChanges) {
+                return this._stateChanges[key] !== null
+            }
+            return key in this._originalState
+        },
+
+        /**
+         * Get all keys in state
+         */
+        keys: (): string[] => {
+            const keys = new Set<string>()
+
+            // Add original keys
+            Object.keys(this._originalState).forEach(key => keys.add(key))
+
+            // Add/remove based on changes
+            Object.entries(this._stateChanges).forEach(([key, value]) => {
+                if (value === null) {
+                    keys.delete(key)
+                } else {
+                    keys.add(key)
+                }
+            })
+
+            return Array.from(keys)
+        },
+    }
+
+    /**
+     * Emit an event during contract execution
+     */
+    protected emit(name: string, args: Record<string, any>): void {
+        this._events.push({
+            name,
+            args,
+            blockHeight: this.context.blockHeight,
+            timestamp: this.context.timestamp,
+        })
+    }
+
+    /**
+     * Access control helpers
+     */
+
+    /**
+     * Require that the sender matches a specific address
+     */
+    protected requireSender(
+        address: string,
+        message = "Unauthorized sender",
+    ): void {
+        if (this.context.sender !== address) {
+            throw new Error(message)
+        }
+    }
+
+    /**
+     * Require that a condition is true
+     */
+    protected require(
+        condition: boolean,
+        message = "Requirement failed",
+    ): void {
+        if (!condition) {
+            throw new Error(message)
+        }
+    }
+
+    /**
+     * Revert execution with an error message
+     */
+    protected revert(message: string): never {
+        throw new Error(`Execution reverted: ${message}`)
+    }
+
+    /**
+     * Utility methods
+     */
+
+    /**
+     * Get the current block height
+     */
+    protected get blockHeight(): number {
+        return this.context.blockHeight
+    }
+
+    /**
+     * Get the current timestamp
+     */
+    protected get timestamp(): Date {
+        return this.context.timestamp
+    }
+
+    /**
+     * Get the message sender address
      */
     protected get sender(): string {
-        if (!this._context) {
-            throw new Error("Contract not initialized - context not available")
-        }
-        return this._context.sender
+        return this.context.sender
     }
 
     /**
      * Get the contract's own address
      */
     protected get address(): string {
-        if (!this._context) {
-            throw new Error("Contract not initialized - context not available")
-        }
-        return this._context.contractAddress
+        return this.context.contractAddress
     }
 
     /**
-     * Get the current block height
-     */
-    protected get blockHeight(): number {
-        if (!this._context) {
-            throw new Error("Contract not initialized - context not available")
-        }
-        return this._context.blockHeight
-    }
-
-    /**
-     * Get the DEM value sent with this call
+     * Get the value sent with the transaction
      */
     protected get value(): bigint {
-        if (!this._context) {
-            throw new Error("Contract not initialized - context not available")
-        }
-        return this._context.value
+        return this.context.value
     }
 
     /**
-     * Get a value from contract storage
+     * Internal methods for sandbox use
      */
-    protected getState<T = any>(key: string): T | undefined {
-        if (!this._state) {
-            throw new Error("Contract not initialized - state not available")
-        }
-        return this._state[key] as T
+
+    /**
+     * Increment call counter (used by proxy)
+     */
+    public __incrementCallCount(): void {
+        this._callCount++
     }
 
     /**
-     * Set a value in contract storage
+     * Get current call count
      */
-    protected setState(key: string, value: any): void {
-        if (!this._state) {
-            throw new Error("Contract not initialized - state not available")
-        }
-        this._state[key] = value
+    public __getCallCount(): number {
+        return this._callCount
     }
 
     /**
-     * Emit an event
+     * Get state changes for persistence
      */
-    protected emit(eventName: string, args: Record<string, any> = {}): void {
-        this._events.push({
-            name: eventName,
-            args,
-            timestamp: new Date(),
-        })
+    public __getStateChanges(): Record<string, any> {
+        return this._stateChanges
     }
 
     /**
-     * Get all events emitted during execution
-     * Used by sandbox to collect events
+     * Get emitted events
      */
-    _getEvents(): Array<{
-        name: string
-        args: Record<string, any>
-        timestamp: Date
-    }> {
+    public __getEvents(): ContractEvent[] {
         return this._events
     }
 
     /**
-     * Get current state changes
-     * Used by sandbox to collect state updates
+     * Required constructor for all contracts
      */
-    _getStateChanges(): Record<string, any> {
-        return this._state || {}
-    }
-
-    /**
-     * Constructor - subclasses should call super(context)
-     * Will be called during contract deployment
-     */
-    constructor(context: ExecutionContext) {
-        this._context = context
+    constructor() {
+        // Context and state will be injected via __initialize
     }
 }

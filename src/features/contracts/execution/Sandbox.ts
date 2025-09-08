@@ -3,7 +3,7 @@
  * Provides isolated, secure execution environment for user contracts
  */
 
-import { Worker } from "bun"
+// Import Worker from Bun runtime
 import type { ExecutionRequest, ExecutionResult } from "./ExecutionContext"
 // Using Bun's built-in path utilities
 

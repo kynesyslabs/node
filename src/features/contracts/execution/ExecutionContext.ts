@@ -27,7 +27,9 @@ export interface ExecutionResult {
     events: Array<{         // Events emitted
         name: string
         args: Record<string, any>
+        blockHeight: number
         timestamp: Date
+        txHash?: string
     }>
     error?: string          // Error message if failed
 }

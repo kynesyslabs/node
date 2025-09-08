@@ -22,6 +22,8 @@
         "upgrade_deps:force": "ncu -u && yarn",
         "keygen": "tsx -r tsconfig-paths/register src/libs/utils/keyMaker.ts",
         "test:chains": "jest --testMatch '**/tests/**/*.ts' --testPathIgnorePatterns src/* tests/utils/* tests/**/_template*  --verbose",
+        "test:contracts": "bun test src/features/contracts/tests/simple-contract.test.ts",
+        "test:contracts:all": "bun test src/features/contracts/tests/",
         "restore": "bun run src/utilities/backupAndRestore.ts",
         "typeorm": "typeorm-ts-node-esm",
         "migration:run": "NODE_OPTIONS='--loader ts-node/esm' typeorm-ts-node-esm migration:run -d ./src/model/datasource.ts",

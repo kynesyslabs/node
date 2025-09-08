@@ -105,13 +105,14 @@ async function executeContract(
         const baseFee = 1000000000000000000n // 1 DEM in wei
         const gasUsed = baseFee + BigInt(callCounter.count) * baseFee
 
+        // Get state changes and events from DemosContract base class
         const result: ExecutionResult = {
             success: true,
             returnValue,
             callCount: callCounter.count,
             gasUsed,
-            stateChanges: (contractInstance as any)._getStateChanges(),
-            events: (contractInstance as any)._getEvents(),
+            stateChanges: contractInstance.__getStateChanges(),
+            events: contractInstance.__getEvents(),
         }
 
         console.log(
@@ -157,25 +158,57 @@ async function createContractInstance(
                 warn: (...args: any[]) => console.warn("[Contract]", ...args),
             },
             DemosContract,
-            // Add other safe globals as needed
+            // Safe built-in objects
+            Object,
+            Array,
+            String,
+            Number,
+            Boolean,
+            Date,
+            Math,
+            JSON,
+            BigInt,
+            Map,
+            Set,
+            Promise,
+            Error,
+            TypeError,
+            RangeError,
+            SyntaxError,
         }
 
         // 2. Create function wrapper for contract source
         // This allows us to inject DemosContract and other dependencies
         const wrappedSource = `
-            (function(DemosContract, console) {
+            (function(DemosContract, console, Object, Array, String, Number, Boolean, Date, Math, JSON, BigInt, Map, Set, Promise, Error, TypeError, RangeError, SyntaxError) {
                 ${source}
                 
                 // Find and return the contract class
-                // Assume the contract class is the first class that extends DemosContract
-                for (let key in this) {
-                    if (typeof this[key] === 'function' && 
-                        this[key].prototype instanceof DemosContract) {
-                        return this[key];
+                // Look for a class that extends DemosContract
+                const exports = {};
+                eval(\`\${source}\`);
+                
+                // Try to find exported contract or first class extending DemosContract
+                for (let key of Object.keys(this)) {
+                    const value = this[key];
+                    if (typeof value === 'function') {
+                        try {
+                            const testInstance = new value();
+                            if (testInstance instanceof DemosContract) {
+                                return value;
+                            }
+                        } catch (e) {
+                            // Not a valid constructor or requires arguments
+                        }
                     }
                 }
                 
-                // If no class found, throw error
+                // Try parsing for class declaration
+                const classMatch = source.match(/class\\s+(\\w+)\\s+extends\\s+DemosContract/);
+                if (classMatch && classMatch[1]) {
+                    return eval(classMatch[1]);
+                }
+                
                 throw new Error("No contract class found that extends DemosContract");
             })
         `
@@ -183,26 +216,43 @@ async function createContractInstance(
         // 3. Evaluate contract source safely
         console.log("[SandboxExecutor] Evaluating contract source code")
         const contractClassFactory = eval(wrappedSource)
-        const contractClass = contractClassFactory.call(
+        const ContractClass = contractClassFactory.call(
             {},
             safeGlobals.DemosContract,
             safeGlobals.console,
+            safeGlobals.Object,
+            safeGlobals.Array,
+            safeGlobals.String,
+            safeGlobals.Number,
+            safeGlobals.Boolean,
+            safeGlobals.Date,
+            safeGlobals.Math,
+            safeGlobals.JSON,
+            safeGlobals.BigInt,
+            safeGlobals.Map,
+            safeGlobals.Set,
+            safeGlobals.Promise,
+            safeGlobals.Error,
+            safeGlobals.TypeError,
+            safeGlobals.RangeError,
+            safeGlobals.SyntaxError,
         )
 
-        if (!contractClass) {
+        if (!ContractClass) {
             throw new Error("Contract evaluation returned null/undefined")
         }
 
         // 4. Create contract instance
         console.log("[SandboxExecutor] Creating contract instance")
-        const instance = new contractClass()
+        const instance = new ContractClass()
 
         if (!(instance instanceof DemosContract)) {
             throw new Error("Contract must extend DemosContract base class")
         }
 
-        // 5. Initialize contract with execution context
-        instance._initialize(executionContext, callCounter, contractState)
+        // 5. Initialize contract with execution context and state
+        // Use the __initialize method from DemosContract base class
+        instance.__initialize(executionContext, contractState)
 
         // 6. Wrap instance with call counting proxy
         const proxiedInstance = createCallCountingProxy(instance, callCounter)
