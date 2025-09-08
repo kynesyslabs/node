@@ -75,7 +75,11 @@ export default class GCRBalanceRoutines {
 
         // Saving the account GCR if not simulating
         if (!simulate) {
-            await gcrMainRepository.save(accountGCR)
+            try {
+                await gcrMainRepository.save(accountGCR)
+            } catch (error) {
+                return { success: false, message: "Failed to save account GCR" }
+            }
         }
 
         return { success: true, message: "Balance applied" }

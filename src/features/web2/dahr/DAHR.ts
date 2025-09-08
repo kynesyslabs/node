@@ -8,6 +8,7 @@ import { ProxyFactory } from "src/features/web2/proxy/ProxyFactory"
 import required from "src/utilities/required"
 import { generateUniqueId } from "src/utilities/generateUniqueId"
 import { EnumWeb2Actions } from "@kynesyslabs/demosdk/types"
+import { validateAndNormalizeHttpUrl } from "src/features/web2/validator"
 
 /**
  * DAHR - Data Agnostic HTTPS Relay, class that handles the Web2 request and proxy process.
@@ -65,9 +66,18 @@ export class DAHR {
         headers,
         payload,
         authorization,
+        url,
     }: IDAHRStartProxyParams): Promise<IWeb2Result> {
         // Make sure we have a web2Request at this point
         required(this._web2Request, "web2Request")
+
+        // Validate and normalize URL without echoing sensitive details
+        const validation = validateAndNormalizeHttpUrl(url)
+        if (!validation.ok) {
+            const err = new Error(validation.message)
+            ;(err as any).status = validation.status
+            throw err
+        }
 
         const web2Response = await this._proxy.sendHTTPRequest({
             web2Request: {
@@ -75,6 +85,7 @@ export class DAHR {
                 raw: {
                     ...this._web2Request.raw,
                     action: EnumWeb2Actions.START_PROXY,
+                    url: validation.normalizedUrl,
                 },
             },
             targetMethod: method,
@@ -89,8 +100,8 @@ export class DAHR {
     /**
      * Stop the proxy.
      */
-    stopProxy(): void {
-        this._proxy.stopProxy()
+    async stopProxy(): Promise<void> {
+        await this._proxy.stopProxy()
     }
 
     /**
@@ -100,8 +111,6 @@ export class DAHR {
     toSerializable(): {
         sessionId: string
         web2Request: IWeb2Request
-        startProxy: string
-        stopProxy: string
     } {
         return {
             sessionId: this.sessionId,
@@ -111,8 +120,6 @@ export class DAHR {
                 hash: this.web2Request.hash,
                 signature: this.web2Request.signature,
             },
-            startProxy: "web2ProxyRequest",
-            stopProxy: "web2ProxyRequest",
         }
     }
 }

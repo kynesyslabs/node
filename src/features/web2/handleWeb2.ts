@@ -1,6 +1,7 @@
 import { IWeb2Request } from "@kynesyslabs/demosdk/types"
 import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
 import { DAHR } from "./dahr/DAHR"
+import log from "src/utilities/logger"
 
 /**
  * Handles a Web2 request.
@@ -20,6 +21,7 @@ export async function handleWeb2(
     // TODO Remember that web2 could need to be signed and could need a fee
     console.log("[PAYLOAD FOR WEB2] [*] Received a Web2 Payload.")
     console.log("[PAYLOAD FOR WEB2] [*] Beginning sanitization checks...")
+    log.debug("[PAYLOAD FOR WEB2] [*] Web2 Request: " + JSON.stringify(web2Request, null, 2))
 
     console.log(
         "[REQUEST FOR WEB2] [+] Found and loaded payload.message as expected...",
@@ -27,7 +29,7 @@ export async function handleWeb2(
 
     try {
         const dahrFactoryInstance = DAHRFactory.instance
-        const dahr = dahrFactoryInstance.createDAHR(web2Request)
+        const dahr = await dahrFactoryInstance.createDAHR(web2Request)
 
         console.log("[handleWeb2] DAHR instance created.")
 

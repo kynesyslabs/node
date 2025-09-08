@@ -83,6 +83,28 @@ export class IncentiveManager {
     }
 
     /**
+     * Hook to be called after GitHub linking
+     */
+    static async githubLinked(
+        userId: string,
+        githubUserId: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.awardGithubPoints(
+            userId,
+            githubUserId,
+            referralCode,
+        )
+    }
+
+    /**
+     * Hook to be called after GitHub unlinking
+     */
+    static async githubUnlinked(userId: string, githubUserId: string): Promise<RPCResponse> {
+        return await this.pointSystem.deductGithubPoints(userId, githubUserId)
+    }
+
+    /**
      * Hook to get the points for a user
      */
     static async getPoints(address: string): Promise<RPCResponse> {

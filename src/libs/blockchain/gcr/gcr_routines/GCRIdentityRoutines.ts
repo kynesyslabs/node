@@ -248,10 +248,19 @@ export default class GCRIdentityRoutines {
                     )
                 }
             } else if (context === "github") {
-                // Future implementation for GitHub
-                log.info(
-                    `GitHub linking for ${data.username}, no incentive handler yet`,
+                const isFirst = await this.isFirstConnection(
+                    "github",
+                    { userId: data.userId },
+                    gcrMainRepository,
+                    editOperation.account,
                 )
+                if (isFirst) {
+                    await IncentiveManager.githubLinked(
+                        editOperation.account,
+                        data.userId,
+                        editOperation.referralCode,
+                    )
+                }
             } else {
                 log.info(`Web2 identity linked: ${context}/${data.username}`)
             }
@@ -283,6 +292,14 @@ export default class GCRIdentityRoutines {
             return { success: false, message: "Identity not found" }
         }
 
+        // Store the identity being removed for GitHub unlinking (need userId)
+        let removedIdentity: Web2GCRData["data"] | null = null
+        if (context === "github") {
+            removedIdentity = accountGCR.identities.web2[context].find(
+                (id: Web2GCRData["data"]) => id.username === username,
+            ) || null
+        }
+
         accountGCR.identities.web2[context] = accountGCR.identities.web2[
             context
         ].filter((id: Web2GCRData["data"]) => id.username !== username)
@@ -297,6 +314,11 @@ export default class GCRIdentityRoutines {
                 await IncentiveManager.twitterUnlinked(editOperation.account)
             } else if (context === "telegram") {
                 await IncentiveManager.telegramUnlinked(editOperation.account)
+            } else if (context === "github" && removedIdentity && removedIdentity.userId) {
+                await IncentiveManager.githubUnlinked(
+                    editOperation.account,
+                    removedIdentity.userId,
+                )
             }
         }
 
@@ -438,6 +460,63 @@ export default class GCRIdentityRoutines {
         return { success: true, message: "PQC identities removed" }
     }
 
+    static async applyAwardPoints(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { account: address, amount, date } = editOperation
+        const account = await ensureGCRForUser(address)
+
+        const challengeEntry = {
+            date,
+            points: amount,
+        }
+
+        if (!account.points.breakdown.weeklyChallenge) {
+            account.points.breakdown.weeklyChallenge = []
+        }
+
+        account.points.breakdown.weeklyChallenge.push(challengeEntry)
+        account.points.totalPoints = (account.points.totalPoints || 0) + amount
+        account.points.lastUpdated = new Date()
+
+        if (!simulate) {
+            await gcrMainRepository.save(account)
+        }
+
+        return { success: true, message: "Points awarded" }
+    }
+
+    static async applyAwardPointsRollback(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { account: address, amount, date } = editOperation
+        const account = await ensureGCRForUser(address)
+
+        if (!account.points.breakdown.weeklyChallenge) {
+            account.points.breakdown.weeklyChallenge = []
+        }
+
+        account.points.breakdown.weeklyChallenge =
+            account.points.breakdown.weeklyChallenge.filter(
+                (entry: { date: string }) => entry.date !== date,
+            )
+
+        account.points.totalPoints =
+            (account.points.totalPoints || 0) - amount < 0
+                ? 0
+                : account.points.totalPoints - amount
+
+        if (!simulate) {
+            await gcrMainRepository.save(account)
+        }
+
+        return { success: true, message: "Points deducted" }
+    }
+
     static async apply(
         editOperation: GCREdit,
         gcrMainRepository: Repository<GCRMain>,
@@ -511,6 +590,20 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
+            case "pointsadd":
+                result = await this.applyAwardPoints(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "pointsremove":
+                result = await this.applyAwardPointsRollback(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
             default:
                 result = {
                     success: false,
@@ -522,9 +615,9 @@ export default class GCRIdentityRoutines {
     }
 
     private static async isFirstConnection(
-        type: "twitter" | "web3" | "telegram",
+        type: "twitter" | "github" | "web3" | "telegram",
         data: {
-            userId?: string // for twitter and telegram
+            userId?: string // for twitter and telegram/github
             chain?: string // for web3
             subchain?: string // for web3
             address?: string // for web3
@@ -559,6 +652,25 @@ export default class GCRIdentityRoutines {
                 .createQueryBuilder("gcr")
                 .where(
                     "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'telegram') as telegram_id WHERE telegram_id->>'userId' = :userId)",
+                    {
+                        userId: data.userId,
+                    },
+                )
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
+
+            /**
+             * Return true if no account has this userId
+             */
+            return !result
+        } else if (type === "github") {
+            /**
+             * Check if this GitHub userId exists anywhere
+             */
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'github') as github_id WHERE github_id->>'userId' = :userId)",
                     {
                         userId: data.userId,
                     },

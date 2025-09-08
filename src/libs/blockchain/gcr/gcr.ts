@@ -66,6 +66,11 @@ import gcrStateSave from "./gcr_routines/gcrStateSaverHelper"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { Referrals } from "@/features/incentive/referrals"
 import log from "@/utilities/logger"
+import { skeletons } from "@kynesyslabs/demosdk/websdk"
+import { getSharedState } from "@/utilities/sharedState"
+import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import HandleGCR from "./handleGCR"
+import Mempool from "../mempool_v2"
 
 const term = terminalkit.terminal
 
@@ -530,13 +535,48 @@ export default class GCR {
         }
     }
 
+    static async getAccountByTwitterUsername(username: string) {
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+        // INFO: Find all accounts that have the twitter identity with the given username using a jsonb query
+        const accounts = await gcrMainRepository
+            .createQueryBuilder("gcr")
+            .where(
+                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'username' = :username)",
+                { username },
+            )
+            .getMany()
+
+        // If no accounts found, return null
+        if (accounts.length === 0) {
+            return null
+        }
+
+        // If only one account found, return it
+        if (accounts.length === 1) {
+            return accounts[0]
+        }
+
+        // If multiple accounts found, find the one that was awarded points
+        // (Twitter points > 0 means the account was awarded points)
+        const accountWithPoints = accounts.find(account => 
+            account.points?.breakdown?.socialAccounts?.twitter > 0
+        )
+
+        // Return the account with points if found, otherwise return the first account
+        return accountWithPoints || accounts[0]
+    }
+
     static async getCampaignData() {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
         const allUsers = await gcrMainRepository.find({
             where: {
                 balance: LessThan(BigInt(1000000000000)),
-                flaggedReason: Not(In(["manualFlag", "referrerFlagged", "twitter_bot"])),
+                flaggedReason: Not(
+                    In(["manualFlag", "referrerFlagged", "twitter_bot"]),
+                ),
             },
         })
 
@@ -620,6 +660,256 @@ export default class GCR {
             campaignData.points.accountsWithTwitterTotal * 30
 
         return campaignData
+    }
+
+    static async getAddressesByTwitterUsernames(twitterUsernames: string[]) {
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+        if (!twitterUsernames || twitterUsernames.length === 0) {
+            return {}
+        }
+
+        // Query accounts that have Twitter identities with usernames in the provided array
+        const accounts = await gcrMainRepository
+            .createQueryBuilder("gcr")
+            .where(
+                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'username' = ANY(:usernames))",
+                { usernames: twitterUsernames },
+            )
+            .getMany()
+
+        const usernameToAddressMap: Record<string, string> = {}
+
+        for (const account of accounts) {
+            // Check if the account has zero Twitter points (means Twitter was already connected elsewhere)
+            if (account.points?.breakdown?.socialAccounts?.twitter === 0) {
+                console.log(
+                    `Skipping account ${account.pubkey} - Twitter already connected to another account`,
+                )
+                continue
+            }
+
+            // Find Twitter identities that match the provided usernames
+            const twitterIdentities = account.identities.web2?.twitter || []
+
+            for (const twitterIdentity of twitterIdentities) {
+                if (twitterUsernames.includes(twitterIdentity.username)) {
+                    usernameToAddressMap[twitterIdentity.username] =
+                        account.pubkey
+                }
+            }
+        }
+
+        return usernameToAddressMap
+    }
+
+    /**
+     * Create a transaction to award points to the users
+     * @param twitterUsernames List of twitter usernames to award points to
+     *
+     */
+    static async createAwardPointsTransaction(
+        twitterUsernames: {
+            /**
+             * The username of the user to award points to
+             */
+            username: string
+            /**
+             * The amount of points to award
+             */
+            points: number
+        }[],
+    ) {
+        const awardDate = new Date().toISOString()
+        const addresses = await this.getAddressesByTwitterUsernames(
+            twitterUsernames.map(u => u.username),
+        )
+
+        const edits = []
+
+        for (const account of twitterUsernames as any) {
+            if (addresses[account.username]) {
+                edits.push({
+                    type: "identity",
+                    context: "points",
+                    isRollback: false,
+                    operation: "add",
+                    account: addresses[account.username],
+                    amount: Number(account.points),
+                    date: awardDate,
+                    txhash: "",
+                })
+                account.address = addresses[account.username]
+                account.comment = "Account found"
+            } else {
+                account.address = null
+                account.comment = "Account not found"
+            }
+        }
+
+        const tx = structuredClone(skeletons.transaction)
+        tx.content.type = "identity"
+        tx.content.from = getSharedState.publicKeyHex
+        tx.content.to = getSharedState.publicKeyHex
+        tx.content.from_ed25519_address = getSharedState.publicKeyHex
+        tx.content.gcr_edits = edits
+        tx.content.nonce = 1
+        tx.content.timestamp = Date.now()
+        tx.content.amount = 0
+        // @ts-expect-error This is a custom tx type
+        tx.content.data = ["awardPoints", twitterUsernames]
+        tx.hash = Hashing.sha256(JSON.stringify(tx.content))
+
+        const signature = await ucrypto.sign(
+            getSharedState.signingAlgorithm,
+            new TextEncoder().encode(tx.hash),
+        )
+        tx.signature = {
+            type: getSharedState.signingAlgorithm,
+            data: uint8ArrayToHex(signature.signature),
+        }
+
+        console.log("tx", JSON.stringify(tx, null, 2))
+        return tx
+    }
+
+    /**
+     * @param twitterUsernames List of twitter usernames to award points to
+     * @returns Array of usernames that were successfully awarded points
+     */
+    static async awardPoints(
+        twitterUsernames: {
+            username: string
+            points: number
+        }[],
+    ): Promise<{
+        success: boolean
+        error?: string
+        message: string
+        txhash?: string
+        confirmationBlock: number
+    }> {
+        if (!twitterUsernames || twitterUsernames.length === 0) {
+            console.log("No Twitter usernames provided")
+            return {
+                success: false,
+                message: "No Twitter usernames provided",
+                confirmationBlock: null,
+            }
+        }
+
+        // INFO: Make sure each twitter username has valid points
+        for (const account of twitterUsernames) {
+            const points = Number(account.points)
+            if (isNaN(points) || points <= 0) {
+                return {
+                    success: false,
+                    message:
+                        "Failed: Invalid input. Point value must be a number greater than 0.",
+                    confirmationBlock: null,
+                }
+            }
+        }
+
+        const tx = await this.createAwardPointsTransaction(twitterUsernames)
+
+        const editResults = await HandleGCR.applyToTx(
+            structuredClone(tx),
+            false,
+            true,
+        )
+
+        if (!editResults.success) {
+            console.log("Failed to apply GCREdit")
+            return {
+                success: false,
+                message: "Failed to apply transaction",
+                confirmationBlock: null,
+            }
+        }
+
+        const { confirmationBlock, error } = await Mempool.addTransaction({
+            ...tx,
+            reference_block: await Chain.getLastBlockNumber(),
+        })
+
+        if (error) {
+            console.log("Failed to add transaction to mempool")
+            return {
+                success: false,
+                message: "Failed to add transaction to mempool",
+                confirmationBlock: null,
+            }
+        }
+
+        return {
+            success: true,
+            message: "Points awarded",
+            txhash: tx.hash,
+            confirmationBlock,
+        }
+
+        // const db = await Datasource.getInstance()
+        // const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+        // // Query accounts that have Twitter identities with usernames in the provided array
+        // const accounts = await gcrMainRepository
+        //     .createQueryBuilder("gcr")
+        //     .where(
+        //         "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'username' = ANY(:usernames))",
+        //         { usernames: twitterUsernames },
+        //     )
+        //     .getMany()
+
+        // let awardedCount = 0
+        // let skippedCount = 0
+        // const awardedAccounts: Record<string, string>[] = []
+
+        // for (const account of accounts) {
+        //     // Check if the account has zero Twitter points (means Twitter was already connected elsewhere)
+        //     if (account.points?.breakdown?.socialAccounts?.twitter === 0) {
+        //         console.log(
+        //             `Skipping account ${account.pubkey} - Twitter already connected to another account`,
+        //         )
+        //         skippedCount++
+        //         continue
+        //     }
+
+        //     // Initialize weeklyChallenge if it doesn't exist
+        //     if (!account.points.breakdown.weeklyChallenge) {
+        //         account.points.breakdown.weeklyChallenge = []
+        //     }
+
+        //     // Add the weekly challenge point
+        //     const challengeEntry = {
+        //         date: new Date().toISOString(),
+        //         points: 1,
+        //     }
+
+        //     account.points.breakdown.weeklyChallenge.push(challengeEntry)
+        //     account.points.totalPoints = (account.points.totalPoints || 0) + 1
+        //     account.points.lastUpdated = new Date()
+
+        //     // Get Twitter username that matches the provided list
+        //     const twitterIdentity = account.identities.web2?.twitter?.find(
+        //         (twitter: any) => twitterUsernames.includes(twitter.username),
+        //     )
+
+        //     // Save the account
+        //     await gcrMainRepository.save(account)
+        //     awardedCount++
+
+        //     // Add to successful usernames list
+        //     if (twitterIdentity?.username) {
+        //         awardedAccounts.push({
+        //             username: twitterIdentity.username,
+        //             pubkey: account.pubkey,
+        //         })
+        //     }
+        // }
+
+        // return awardedAccounts
     }
 
     // static async getFlaggedAccounts(start: number, end: number) {

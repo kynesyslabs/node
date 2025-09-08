@@ -102,7 +102,14 @@ export async function consensusRoutine(): Promise<void> {
             manager.shard.members,
             manager.shard.blockRef,
         )
-        log.debug("MErged mempool: " + JSON.stringify(tempMempool.map((tx) => tx.hash), null, 2))
+        log.debug(
+            "MErged mempool: " +
+                JSON.stringify(
+                    tempMempool.map(tx => tx.hash),
+                    null,
+                    2,
+                ),
+        )
 
         log.info(
             "[consensusRoutine] mempool merged (aka ordered transactions)",
@@ -231,6 +238,9 @@ export async function consensusRoutine(): Promise<void> {
 
             return
         }
+
+        console.error(error)
+        process.exit(1)
     } finally {
         manager.endConsensusRoutine()
         // Cleanup the consensus state

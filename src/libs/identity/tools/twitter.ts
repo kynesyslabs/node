@@ -407,7 +407,7 @@ class TwitterBotDetector {
 export class Twitter {
     private static instance: Twitter
 
-    demos_twitter_username = "demosxyz"
+    demos_twitter_username = "demos_network"
     api_key = process.env.RAPID_API_KEY
     api_host = process.env.RAPID_API_HOST
     api_url = "https://" + this.api_host

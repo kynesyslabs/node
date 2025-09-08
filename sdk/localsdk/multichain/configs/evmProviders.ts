@@ -21,9 +21,9 @@ export const evmProviders = {
         testnet: "https://avalanche-fuji-c-chain.publicnode.com",
     },
     polygon: {
-        mainnet: "https://polygon.blockpi.network/v1/rpc/public",
+        mainnet: "https://polygon-rpc.com",
+        testnet: "https://polygon-amoy.drpc.org",
         mumbai: "https://rpc.ankr.com/polygon_mumbai",
-        testnet: "https://rpc.ankr.com/polygon_mumbai",
     },
     base: {
         mainnet: "https://base.llamarpc.com",

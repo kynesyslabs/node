@@ -35,6 +35,7 @@ export class RateLimiter {
     public config: RateLimitConfig
     public cleanupInterval: Timer
     private static instance: RateLimiter
+    private local_ips = ["127.0.0.1", "localhost"]
 
     constructor(config: RateLimitConfig) {
         this.config = config
@@ -122,48 +123,29 @@ export class RateLimiter {
         }
     }
 
-    private extractClientIP(req: Request, server?: Server): string {
-        if (server) {
-            try {
-                const socketInfo = server.requestIP(req)
-                if (socketInfo?.address) {
-                    log.info(
-                        `[Rate Limiter] Socket IP: ${socketInfo.address}:${socketInfo.port}`,
-                    )
+    public getClientIP(req: Request, server: Server): string {
+        const realIP = req.headers.get("x-real-ip")
+        const forwardedFor = req.headers.get("x-forwarded-for")
 
-                    // If we have a socket IP, check if it's from a trusted proxy
-                    const socketIP = socketInfo.address
-
-                    // If the socket IP is from a trusted proxy, look for forwarded headers
-                    if (this.isTrustedProxy(socketIP)) {
-                        const forwardedIP = this.extractForwardedIP(req)
-                        if (forwardedIP) {
-                            log.info(
-                                `[Rate Limiter] Using forwarded IP: ${forwardedIP} (from trusted proxy: ${socketIP})`,
-                            )
-                            return forwardedIP
-                        }
-                    }
-
-                    return socketIP
-                }
-            } catch (error) {
-                log.warning(`[Rate Limiter] Failed to get socket IP: ${error}`)
+        // INFO: Check for proxy headers first (common when behind reverse proxy)
+        if (forwardedFor) {
+            // INFO: x-forwarded-for can contain multiple IPs, take the first one
+            const firstIP = forwardedFor.split(",")[0].trim()
+            if (firstIP && !this.local_ips.includes(firstIP)) {
+                return firstIP
             }
         }
 
-        // Fallback: Parse headers (less reliable, can be spoofed)
-        const forwardedIP = this.extractForwardedIP(req)
-        if (forwardedIP) {
-            log.warning(
-                `[Rate Limiter] Using header-based IP (no server instance): ${forwardedIP}`,
-            )
-            return forwardedIP
+        if (realIP && !this.local_ips.includes(realIP)) {
+            return realIP
         }
 
-        log.warning(
-            "[Rate Limiter] Unable to determine client IP, using 'unknown'",
-        )
+        // INFO: Fallback to direct connection IP
+        const ip = server.requestIP(req)
+        if (ip?.address) {
+            return ip.address
+        }
+
         return "unknown"
     }
 
@@ -261,10 +243,14 @@ export class RateLimiter {
                 return await next()
             }
 
-            const clientIP = this.extractClientIP(req, server)
+            const clientIP = this.getClientIP(req, server)
+            log.debug(`[Rate Limiter] Client IP: ${clientIP}`)
 
             // Skip rate limiting for whitelisted IPs
             if (this.config.whitelistedIPs.includes(clientIP)) {
+                log.debug(
+                    `[Rate Limiter] Whitelisted IP: ${clientIP}, skipping rate limiting`,
+                )
                 return await next()
             }
 
