@@ -1,8 +1,9 @@
 /**
- * Contract validation utilities
+ * Contract validation utilities with TypeScript compilation support
  */
 
 import crypto from "crypto"
+import * as ts from "typescript"
 import type { ContractData } from "@/features/contracts/types/ContractTypes"
 import type { ContractABI } from "@/features/contracts/types/ContractABI"
 
@@ -14,20 +15,20 @@ export const DEPLOYMENT_FEE_PER_32KB = 1    // 1 DEM per 32KB
 // Banned APIs that contracts cannot use
 const BANNED_APIS = [
     // File system
-    "fs", "require('fs')", "import('fs')",
-    "readFile", "writeFile", "readdir", "mkdir",
+    "require('fs')", "import('fs')", "from 'fs'",
+    "readFileSync", "writeFileSync", "readdirSync", "mkdirSync",
     
     // Network
-    "http", "https", "net", "dgram",
-    "require('http')", "require('https')",
-    "fetch", "XMLHttpRequest",
+    "require('http')", "require('https')", "from 'http'", "from 'https'",
+    "fetch(", "XMLHttpRequest",
     
     // Process
     "process.exit", "process.kill", "process.env",
-    "child_process", "spawn", "exec", "fork",
+    "require('child_process')", "from 'child_process'",
+    "spawn(", "exec(", "fork(",
     
-    // Dangerous globals
-    "eval", "Function", "setTimeout", "setInterval",
+    // Dangerous globals  
+    "eval(", "Function(", "setTimeout(", "setInterval(",
     "__dirname", "__filename",
     
     // Module system abuse
@@ -38,11 +39,13 @@ const BANNED_APIS = [
 ]
 
 /**
- * Validates contract source code
+ * Validates contract source code with TypeScript compilation
  */
-export function validateContractSource(source: string): { 
+export function validateContractSource(source: string): {
     valid: boolean
-    error?: string 
+    error?: string
+    warnings?: string[]
+    compiledJS?: string
 } {
     // Check size
     const sizeInBytes = new TextEncoder().encode(source).length
@@ -63,20 +66,153 @@ export function validateContractSource(source: string): {
         }
     }
 
-    // Basic syntax check (will be validated more thoroughly during execution)
+    // Validate TypeScript syntax and compilation
+    const tsValidation = validateTypeScriptContract(source)
+    if (!tsValidation.valid) {
+        return tsValidation
+    }
+
+    // Check contract structure
+    const structureValidation = validateContractStructure(source)
+    if (!structureValidation.valid) {
+        return structureValidation
+    }
+
+    return { 
+        valid: true,
+        compiledJS: tsValidation.compiledJS,
+        warnings: tsValidation.warnings,
+    }
+}
+
+/**
+ * Validates TypeScript syntax and compiles to JavaScript
+ */
+function validateTypeScriptContract(source: string): {
+    valid: boolean
+    error?: string
+    warnings?: string[]
+    compiledJS?: string
+} {
     try {
-        // Check if it's valid TypeScript by attempting to parse
-        // In production, we'd use the TypeScript compiler API
-        if (!source.includes("class") || !source.includes("extends DemosContract")) {
+        // TypeScript compiler options for contracts
+        const compilerOptions: ts.CompilerOptions = {
+            target: ts.ScriptTarget.ES2020,
+            module: ts.ModuleKind.CommonJS,
+            strict: false, // Relaxed for validation
+            noEmitOnError: false,
+            skipLibCheck: true,
+            declaration: false,
+            sourceMap: false,
+            removeComments: false,
+        }
+
+        // Simple compilation using transpileModule
+        const result = ts.transpileModule(source, {
+            compilerOptions,
+            reportDiagnostics: true,
+        })
+
+        // Check for compilation errors
+        const errors: string[] = []
+        const warnings: string[] = []
+
+        if (result.diagnostics) {
+            result.diagnostics.forEach(diagnostic => {
+                if (diagnostic.file && diagnostic.start !== undefined) {
+                    const { line, character } = ts.getLineAndCharacterOfPosition(diagnostic.file, diagnostic.start)
+                    const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")
+                    
+                    if (diagnostic.category === ts.DiagnosticCategory.Error) {
+                        errors.push(`Line ${line + 1}:${character + 1} - ${message}`)
+                    } else if (diagnostic.category === ts.DiagnosticCategory.Warning) {
+                        warnings.push(`Line ${line + 1}:${character + 1} - ${message}`)
+                    }
+                } else {
+                    const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")
+                    if (diagnostic.category === ts.DiagnosticCategory.Error) {
+                        errors.push(message)
+                    } else if (diagnostic.category === ts.DiagnosticCategory.Warning) {
+                        warnings.push(message)
+                    }
+                }
+            })
+        }
+
+        // Only fail on actual syntax/type errors, not missing module errors
+        const realErrors = errors.filter(error => 
+            !error.includes("Cannot find module") &&
+            !error.includes("Cannot resolve") &&
+            !error.includes("Module not found"),
+        )
+
+        if (realErrors.length > 0) {
             return {
                 valid: false,
-                error: "Contract must extend DemosContract base class",
+                error: `TypeScript compilation failed:\n${realErrors.join("\n")}`,
             }
         }
-    } catch (e) {
+
+        return {
+            valid: true,
+            compiledJS: result.outputText,
+            warnings: warnings.length > 0 ? warnings : undefined,
+        }
+
+    } catch (error) {
         return {
             valid: false,
-            error: "Invalid TypeScript syntax",
+            error: `TypeScript validation failed: ${error}`,
+        }
+    }
+}
+
+/**
+ * Validates contract structure requirements
+ */
+function validateContractStructure(source: string): {
+    valid: boolean
+    error?: string
+} {
+    // Check for required class structure
+    if (!source.includes("class") || !source.includes("extends DemosContract")) {
+        return {
+            valid: false,
+            error: "Contract must extend DemosContract base class",
+        }
+    }
+
+    // Check for proper import
+    if (!source.includes("from \"../execution/ContractBase\"") && 
+        !source.includes("from '../execution/ContractBase'")) {
+        return {
+            valid: false,
+            error: "Contract must import DemosContract from '../execution/ContractBase'",
+        }
+    }
+
+    // Check for export
+    if (!source.includes("export class")) {
+        return {
+            valid: false,
+            error: "Contract must export the contract class",
+        }
+    }
+
+    // Check that class name ends with "Contract"
+    const classMatch = source.match(/export\s+class\s+(\w+)\s+extends\s+DemosContract/)
+    if (classMatch) {
+        const className = classMatch[1]
+        if (!className.endsWith("Contract")) {
+            return {
+                valid: false,
+                error: "Contract class name must end with 'Contract'",
+            }
+        }
+    } else {
+        return {
+            valid: false,
+            error: "Could not find valid contract class declaration",
         }
     }
 

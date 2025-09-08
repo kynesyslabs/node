@@ -177,11 +177,21 @@ async function createContractInstance(
             SyntaxError,
         }
 
-        // 2. Create function wrapper for contract source
+        // 2. Prepare TypeScript source for execution
+        let tsSource = source
+        
+        // If it's TypeScript, do basic preprocessing
+        if (source.includes("import") && source.includes("export")) {
+            tsSource = source
+                .replace(/import\s+.*?\s+from\s+['"'].*?['"];?\s*/g, "")
+                .replace(/export\s+/g, "")
+        }
+        
+        // 3. Create function wrapper for contract source
         // This allows us to inject DemosContract and other dependencies
         const wrappedSource = `
             (function(DemosContract, console, Object, Array, String, Number, Boolean, Date, Math, JSON, BigInt, Map, Set, Promise, Error, TypeError, RangeError, SyntaxError) {
-                ${source}
+                ${tsSource}
                 
                 // Find and return the contract class
                 // Look for a class that extends DemosContract

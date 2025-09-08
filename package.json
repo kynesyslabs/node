@@ -24,6 +24,8 @@
         "test:chains": "jest --testMatch '**/tests/**/*.ts' --testPathIgnorePatterns src/* tests/utils/* tests/**/_template*  --verbose",
         "test:contracts": "bun test src/features/contracts/tests/simple-contract.test.ts",
         "test:contracts:all": "bun test src/features/contracts/tests/",
+        "test:examples": "bun test src/features/contracts/tests/examples-validation.test.ts",
+        "test:typescript": "bun test src/features/contracts/tests/typescript-validation.test.ts",
         "restore": "bun run src/utilities/backupAndRestore.ts",
         "typeorm": "typeorm-ts-node-esm",
         "migration:run": "NODE_OPTIONS='--loader ts-node/esm' typeorm-ts-node-esm migration:run -d ./src/model/datasource.ts",
@@ -46,7 +48,7 @@
         "ts-jest": "^29.3.2",
         "ts-node": "^10.9.1",
         "ts-node-dev": "^2.0.0",
-        "typescript": "^5.8.3"
+        "typescript": "^5.9.2"
     },
     "dependencies": {
         "@cosmjs/encoding": "^0.33.1",

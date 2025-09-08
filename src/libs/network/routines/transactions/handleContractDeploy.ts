@@ -91,7 +91,7 @@ export default async function handleContractDeploy(
                 description: payload.metadata?.description,
             },
             code: {
-                source: payload.source,
+                source: payload.source, // Store original TypeScript source
                 abi: basicABI,
                 checksum: sourceHash,
             },
