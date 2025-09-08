@@ -535,6 +535,39 @@ export default class GCR {
         }
     }
 
+    static async getAccountByTwitterUsername(username: string) {
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+        // INFO: Find all accounts that have the twitter identity with the given username using a jsonb query
+        const accounts = await gcrMainRepository
+            .createQueryBuilder("gcr")
+            .where(
+                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'username' = :username)",
+                { username },
+            )
+            .getMany()
+
+        // If no accounts found, return null
+        if (accounts.length === 0) {
+            return null
+        }
+
+        // If only one account found, return it
+        if (accounts.length === 1) {
+            return accounts[0]
+        }
+
+        // If multiple accounts found, find the one that was awarded points
+        // (Twitter points > 0 means the account was awarded points)
+        const accountWithPoints = accounts.find(account => 
+            account.points?.breakdown?.socialAccounts?.twitter > 0
+        )
+
+        // Return the account with points if found, otherwise return the first account
+        return accountWithPoints || accounts[0]
+    }
+
     static async getCampaignData() {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)

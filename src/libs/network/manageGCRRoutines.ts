@@ -5,6 +5,7 @@ import { emptyResponse } from "./server_rpc"
 import { IncentiveManager } from "../blockchain/gcr/gcr_routines/IncentiveManager"
 import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Referrals } from "@/features/incentive/referrals"
+import GCR from "../blockchain/gcr/gcr"
 
 interface GCRRoutinePayload {
     method: string
@@ -65,6 +66,19 @@ export default async function manageGCRRoutines(
                     ? "Referral code is valid"
                     : "Referral code is invalid",
             }
+            break
+        }
+
+        case "getAccountByTwitterUsername": {
+            const username = params[0]
+
+            if (!username) {
+                response.result = 400
+                response.response = "No username specified"
+                break
+            }
+
+            response.response = await GCR.getAccountByTwitterUsername(username)
             break
         }
 
