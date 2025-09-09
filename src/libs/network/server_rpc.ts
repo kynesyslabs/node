@@ -301,6 +301,77 @@ async function processPayload(
             }
         }
 
+        // REVIEW Contract event query endpoints
+        case "getContractEvents": {
+            const { handleGetContractEvents } = await import(
+                "@/features/contracts/rpc/ContractEventHandlers"
+            )
+            const result = await handleGetContractEvents(payload.params[0])
+
+            return {
+                result: result.success ? 200 : 400,
+                response: result.data || result.error,
+                require_reply: false,
+                extra: result.success ? null : { error: result.error },
+            }
+        }
+
+        case "getEventsByName": {
+            const { handleGetEventsByName } = await import(
+                "@/features/contracts/rpc/ContractEventHandlers"
+            )
+            const result = await handleGetEventsByName(payload.params[0])
+
+            return {
+                result: result.success ? 200 : 400,
+                response: result.data || result.error,
+                require_reply: false,
+                extra: result.success ? null : { error: result.error },
+            }
+        }
+
+        case "getEventsInRange": {
+            const { handleGetEventsInRange } = await import(
+                "@/features/contracts/rpc/ContractEventHandlers"
+            )
+            const result = await handleGetEventsInRange(payload.params[0])
+
+            return {
+                result: result.success ? 200 : 400,
+                response: result.data || result.error,
+                require_reply: false,
+                extra: result.success ? null : { error: result.error },
+            }
+        }
+
+        case "getContractEventStats": {
+            const { handleGetContractEventStats } = await import(
+                "@/features/contracts/rpc/ContractEventHandlers"
+            )
+            const result = await handleGetContractEventStats(payload.params[0])
+
+            return {
+                result: result.success ? 200 : 400,
+                response: result.data || result.error,
+                require_reply: false,
+                extra: result.success ? null : { error: result.error },
+            }
+        }
+
+        case "batchEventQuery": {
+            const { handleBatchEventQuery } = await import(
+                "@/features/contracts/rpc/ContractEventHandlers"
+            )
+            const result = await handleBatchEventQuery(payload.params[0])
+
+            return {
+                result: result.success ? 200 : 400,
+                response: result.data || result.error,
+                require_reply: false,
+                extra: result.success ? null : { error: result.error },
+            }
+        }
+
         default:
             log.warning(
                 "[RPC Call] [Received] Method not found: " + payload.method,

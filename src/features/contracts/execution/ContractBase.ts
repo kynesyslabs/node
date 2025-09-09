@@ -5,14 +5,7 @@
  */
 
 import type { ExecutionContext } from "./ExecutionContext"
-
-export interface ContractEvent {
-    name: string
-    args: Record<string, any>
-    blockHeight: number
-    timestamp: Date
-    txHash?: string
-}
+import type { ContractEvent } from "../events/EventTypes"
 
 export abstract class DemosContract {
     // Execution context injected by sandbox
@@ -118,12 +111,69 @@ export abstract class DemosContract {
      * Emit an event during contract execution
      */
     protected emit(name: string, args: Record<string, any>): void {
-        this._events.push({
+        // Validate event name
+        if (!name || typeof name !== "string") {
+            throw new Error("Event name must be a non-empty string")
+        }
+
+        // Validate event name format (alphanumeric + underscore, starts with letter)
+        if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(name)) {
+            throw new Error(
+                "Event name must start with a letter and contain only alphanumeric characters and underscores",
+            )
+        }
+
+        // Validate event args
+        if (args && typeof args !== "object") {
+            throw new Error("Event args must be an object")
+        }
+
+        // Check event args size (limit to 10KB per event)
+        const eventArgsSize = JSON.stringify(args || {}).length
+        if (eventArgsSize > 10240) {
+            throw new Error("Event args too large (maximum 10KB per event)")
+        }
+
+        // Create event with enhanced metadata
+        const event = {
             name,
-            args,
+            args: args || {},
+            contractAddress: this.context.contractAddress,
             blockHeight: this.context.blockHeight,
-            timestamp: this.context.timestamp,
-        })
+            transactionHash: "", // Will be set by the transaction handler
+            timestamp: new Date(this.context.timestamp),
+            eventIndex: this._events.length, // Index within this execution
+        }
+
+        this._events.push(event)
+
+        // Limit total events per execution (prevent spam)
+        if (this._events.length > 100) {
+            throw new Error(
+                "Too many events emitted in single execution (maximum 100)",
+            )
+        }
+    }
+
+    /**
+     * Get all events emitted during this execution
+     */
+    public getEmittedEvents() {
+        return [...this._events] // Return copy to prevent modification
+    }
+
+    /**
+     * Check if an event with specific name was emitted
+     */
+    protected hasEmittedEvent(eventName: string): boolean {
+        return this._events.some(event => event.name === eventName)
+    }
+
+    /**
+     * Get events by name emitted during this execution
+     */
+    protected getEventsByName(eventName: string) {
+        return this._events.filter(event => event.name === eventName)
     }
 
     /**
