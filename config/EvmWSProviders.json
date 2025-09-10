@@ -1,0 +1,4 @@
+{
+    "evm.eth.sepolia": "wss://ethereum-sepolia-rpc.publicnode.com",
+    "evm.polygon.amoy": "wss://polygon-amoy-bor-rpc.publicnode.com"
+}
