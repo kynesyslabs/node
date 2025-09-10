@@ -14,6 +14,7 @@ const pointValues = {
     LINK_TWITTER: 2,
     LINK_GITHUB: 1,
     FOLLOW_DEMOS: 1,
+    LINK_DISCORD: 1,
 }
 
 export class PointSystem {
@@ -33,12 +34,16 @@ export class PointSystem {
      */
     private async getUserIdentitiesFromGCR(userId: string): Promise<{
         linkedWallets: string[]
-        linkedSocials: { twitter?: string }
+        linkedSocials: { twitter?: string; discord?: string }
     }> {
         const xmIdentities = await IdentityManager.getIdentities(userId)
         const twitterIdentities = await IdentityManager.getWeb2Identities(
             userId,
             "twitter",
+        )
+        const discordIdentities = await IdentityManager.getWeb2Identities(
+            userId,
+            "discord",
         )
 
         const linkedWallets: string[] = []
@@ -63,10 +68,14 @@ export class PointSystem {
             }
         }
 
-        const linkedSocials: { twitter?: string } = {}
+        const linkedSocials: { twitter?: string; discord?: string } = {}
 
         if (Array.isArray(twitterIdentities) && twitterIdentities.length > 0) {
             linkedSocials.twitter = twitterIdentities[0].username
+        }
+
+        if (Array.isArray(discordIdentities) && discordIdentities.length > 0) {
+            linkedSocials.discord = discordIdentities[0].username
         }
 
         return { linkedWallets, linkedSocials }
@@ -436,7 +445,9 @@ export class PointSystem {
 
             // Verify the GitHub account is actually linked to this user
             const githubIdentities = account.identities.web2?.github || []
-            const isOwner = githubIdentities.some((gh: any) => gh.userId === githubUserId)
+            const isOwner = githubIdentities.some(
+                (gh: any) => gh.userId === githubUserId,
+            )
 
             if (!isOwner) {
                 return {
@@ -444,7 +455,8 @@ export class PointSystem {
                     response: {
                         pointsAwarded: 0,
                         totalPoints: account.points.totalPoints || 0,
-                        message: "Error: GitHub account not linked to this user",
+                        message:
+                            "Error: GitHub account not linked to this user",
                     },
                     require_reply: false,
                     extra: {},
@@ -616,14 +628,19 @@ export class PointSystem {
      * @param githubUserId The GitHub user ID to verify ownership
      * @returns RPCResponse
      */
-    async deductGithubPoints(userId: string, githubUserId: string): Promise<RPCResponse> {
+    async deductGithubPoints(
+        userId: string,
+        githubUserId: string,
+    ): Promise<RPCResponse> {
         try {
             // Get user's account data from GCR to verify GitHub ownership
             const account = await ensureGCRForUser(userId)
 
             // Verify the GitHub account is actually linked to this user
             const githubIdentities = account.identities.web2?.github || []
-            const isOwner = githubIdentities.some((gh: any) => gh.userId === githubUserId)
+            const isOwner = githubIdentities.some(
+                (gh: any) => gh.userId === githubUserId,
+            )
 
             if (!isOwner) {
                 return {
@@ -631,7 +648,8 @@ export class PointSystem {
                     response: {
                         pointsDeducted: 0,
                         totalPoints: account.points.totalPoints || 0,
-                        message: "Error: GitHub account not linked to this user",
+                        message:
+                            "Error: GitHub account not linked to this user",
                     },
                     require_reply: false,
                     extra: {},
@@ -643,9 +661,7 @@ export class PointSystem {
             )
 
             // Check if user has GitHub points to deduct
-            if (
-                userPointsWithIdentities.breakdown.socialAccounts.github <= 0
-            ) {
+            if (userPointsWithIdentities.breakdown.socialAccounts.github <= 0) {
                 return {
                     result: 200,
                     response: {
@@ -673,6 +689,127 @@ export class PointSystem {
                     pointsDeducted: pointValues.LINK_GITHUB,
                     totalPoints: updatedPoints.totalPoints,
                     message: "Points deducted for unlinking GitHub",
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error deducting points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Award points for linking a Discord account
+     * @param userId The user's Demos address
+     * @param referralCode Optional referral code
+     * @returns RPCResponse
+     */
+    async awardDiscordPoints(
+        userId: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        try {
+            const userPointsWithIdentities = await this.getUserPointsInternal(
+                userId,
+            )
+
+            // Check if user already has Discord points specifically
+            if (userPointsWithIdentities.breakdown.socialAccounts.discord > 0) {
+                return {
+                    result: 200,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "Discord points already awarded",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            await this.addPointsToGCR(
+                userId,
+                pointValues.LINK_DISCORD,
+                "socialAccounts",
+                "discord",
+                referralCode,
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsAwarded: pointValues.LINK_DISCORD,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: "Points awarded for linking Discord",
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error awarding points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Deduct points for unlinking a Discord account
+     * @param userId The user's Demos address
+     * @returns RPCResponse
+     */
+    async deductDiscordPoints(userId: string): Promise<RPCResponse> {
+        try {
+            const userPointsWithIdentities = await this.getUserPointsInternal(
+                userId,
+            )
+
+            // Check if user has Discord points to deduct
+            if (
+                userPointsWithIdentities.breakdown.socialAccounts.discord <= 0
+            ) {
+                return {
+                    result: 200,
+                    response: {
+                        pointsDeducted: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "No Discord points to deduct",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            await this.addPointsToGCR(
+                userId,
+                -pointValues.LINK_DISCORD,
+                "socialAccounts",
+                "discord",
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsDeducted: pointValues.LINK_DISCORD,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: "Points deducted for unlinking Discord",
                 },
                 require_reply: false,
                 extra: {},

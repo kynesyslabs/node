@@ -80,7 +80,10 @@ export class IncentiveManager {
     /**
      * Hook to be called after GitHub unlinking
      */
-    static async githubUnlinked(userId: string, githubUserId: string): Promise<RPCResponse> {
+    static async githubUnlinked(
+        userId: string,
+        githubUserId: string,
+    ): Promise<RPCResponse> {
         return await this.pointSystem.deductGithubPoints(userId, githubUserId)
     }
 
@@ -89,5 +92,22 @@ export class IncentiveManager {
      */
     static async getPoints(address: string): Promise<RPCResponse> {
         return await this.pointSystem.getUserPoints(address)
+    }
+
+    /**
+     * Hook to be called after Discord linking
+     */
+    static async discordLinked(
+        userId: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.awardDiscordPoints(userId, referralCode)
+    }
+
+    /**
+     * Hook to be called after Discord unlinking
+     */
+    static async discordUnlinked(userId: string): Promise<RPCResponse> {
+        return await this.pointSystem.deductDiscordPoints(userId)
     }
 }

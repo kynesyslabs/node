@@ -248,6 +248,19 @@ export default class GCRIdentityRoutines {
                         editOperation.referralCode,
                     )
                 }
+            } else if (context === "discord") {
+                const isFirst = await this.isFirstConnection(
+                    "discord",
+                    { userId: data.userId },
+                    gcrMainRepository,
+                    editOperation.account,
+                )
+                if (isFirst) {
+                    await IncentiveManager.discordLinked(
+                        editOperation.account,
+                        data.userId,
+                    )
+                }
             } else {
                 log.info(`Web2 identity linked: ${context}/${data.username}`)
             }
@@ -281,10 +294,11 @@ export default class GCRIdentityRoutines {
 
         // Store the identity being removed for GitHub unlinking (need userId)
         let removedIdentity: Web2GCRData["data"] | null = null
-        if (context === "github") {
-            removedIdentity = accountGCR.identities.web2[context].find(
-                (id: Web2GCRData["data"]) => id.username === username,
-            ) || null
+        if (context === "github" || context === "discord") {
+            removedIdentity =
+                accountGCR.identities.web2[context].find(
+                    (id: Web2GCRData["data"]) => id.username === username,
+                ) || null
         }
 
         accountGCR.identities.web2[context] = accountGCR.identities.web2[
@@ -299,11 +313,21 @@ export default class GCRIdentityRoutines {
              */
             if (context === "twitter") {
                 await IncentiveManager.twitterUnlinked(editOperation.account)
-            } else if (context === "github" && removedIdentity && removedIdentity.userId) {
+            } else if (
+                context === "github" &&
+                removedIdentity &&
+                removedIdentity.userId
+            ) {
                 await IncentiveManager.githubUnlinked(
                     editOperation.account,
                     removedIdentity.userId,
                 )
+            } else if (
+                context === "discord" &&
+                removedIdentity &&
+                removedIdentity.userId
+            ) {
+                await IncentiveManager.discordUnlinked(editOperation.account)
             }
         }
 
@@ -600,9 +624,9 @@ export default class GCRIdentityRoutines {
     }
 
     private static async isFirstConnection(
-        type: "twitter" | "github" | "web3",
+        type: "twitter" | "github" | "web3" | "discord",
         data: {
-            userId?: string // for twitter/github
+            userId?: string // for twitter/github/discord
             chain?: string // for web3
             subchain?: string // for web3
             address?: string // for web3
@@ -637,6 +661,25 @@ export default class GCRIdentityRoutines {
                 .createQueryBuilder("gcr")
                 .where(
                     "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'github') as github_id WHERE github_id->>'userId' = :userId)",
+                    {
+                        userId: data.userId,
+                    },
+                )
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
+
+            /**
+             * Return true if no account has this userId
+             */
+            return !result
+        } else if (type === "discord") {
+            /**
+             * Check if this Discord userId exists anywhere
+             */
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'discord') as discord_id WHERE discord_id->>'userId' = :userId)",
                     {
                         userId: data.userId,
                     },
