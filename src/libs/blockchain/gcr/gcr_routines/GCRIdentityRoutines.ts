@@ -258,7 +258,7 @@ export default class GCRIdentityRoutines {
                 if (isFirst) {
                     await IncentiveManager.discordLinked(
                         editOperation.account,
-                        data.userId,
+                        editOperation.referralCode,
                     )
                 }
             } else {

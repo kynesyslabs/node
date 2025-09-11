@@ -32,12 +32,25 @@ export class Discord {
     private static instance: Discord
     private axios: AxiosInstance
 
-    api_url = process.env.DISCORD_API_URL ?? "https://discord.com/api/v10"
-    bot_token = process.env.DISCORD_BOT_TOKEN as string
+    readonly api_url = process.env.DISCORD_API_URL ?? "https://discord.com/api/v10"
+    readonly bot_token = process.env.DISCORD_BOT_TOKEN as string
 
     private constructor() {
         if (!this.bot_token) {
             throw new Error("Missing DISCORD_BOT_TOKEN env variable")
+        }
+
+        // Validate host to avoid accidental redirection to internal networks
+        const parsed = new URL(this.api_url)
+        const host = parsed.hostname.toLowerCase()
+        const isTrusted =
+            host === "localhost" ||
+            host.endsWith(".discord.com") ||
+            host === "discord.com" ||
+            host === "discordapp.com"
+
+        if (!isTrusted) {
+            throw new Error(`Untrusted DISCORD_API_URL host: ${host}`)
         }
 
         this.axios = axios.create({
@@ -88,7 +101,7 @@ export class Discord {
 
             return { guildId, channelId, messageId }
         } catch (err) {
-            console.error(`Failed to extract details from URL: ${messageUrl}`)
+            console.warn("Failed to extract details from Discord URL")
             throw new Error(
                 `Invalid Discord message URL: ${
                     err instanceof Error ? err.message : "Unknown error"

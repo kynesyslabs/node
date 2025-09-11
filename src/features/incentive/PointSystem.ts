@@ -717,6 +717,26 @@ export class PointSystem {
         referralCode?: string,
     ): Promise<RPCResponse> {
         try {
+            // Verify the Discord account is actually linked to this user
+            const account = await ensureGCRForUser(userId)
+            const discordIdentities = account.identities.web2?.discord || []
+
+            const hasDiscord =
+                Array.isArray(discordIdentities) && discordIdentities.length > 0
+            if (!hasDiscord) {
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: account.points.totalPoints || 0,
+                        message:
+                            "Error: Discord account not linked to this user",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
             const userPointsWithIdentities = await this.getUserPointsInternal(
                 userId,
             )

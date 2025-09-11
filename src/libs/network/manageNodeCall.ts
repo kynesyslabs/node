@@ -271,7 +271,18 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 break
             }
 
-            const discord = Discord.getInstance()
+            let discord: Discord
+            try {
+                discord = Discord.getInstance()
+            } catch (e) {
+                response.result = 500
+                response.response = {
+                    success: false,
+                    error: "Discord not configured",
+                }
+                break
+            }
+
             let message: DiscordMessage | null = null
 
             try {
@@ -304,36 +315,12 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
                 const payload = {
                     id: message.id,
-                    content: message.content,
                     timestamp: message.timestamp,
-                    edited_timestamp: message.edited_timestamp ?? null,
-
                     authorUsername: message.author?.username ?? null,
-                    authorGlobalName: message.author?.global_name ?? null,
                     authorId: message.author?.id ?? null,
-                    authorIsBot: !!message.author?.bot,
-
                     channelId: message.channel_id ?? channelIdFromUrl ?? null,
                     guildId:
                         (message as any).guild_id ?? guildIdFromUrl ?? null,
-
-                    attachments: (message.attachments || []).map(a => ({
-                        id: a.id,
-                        filename: a.filename,
-                        size: a.size,
-                        url: a.url,
-                        proxy_url: a.proxy_url,
-                        content_type: a.content_type ?? null,
-                    })),
-                    embedsCount: Array.isArray(message.embeds)
-                        ? message.embeds.length
-                        : 0,
-                    mentions: (message.mentions || []).map(m => ({
-                        id: m.id,
-                        username: m.username,
-                    })),
-                    replyToId: message.referenced_message?.id ?? null,
-                    originalMessageIdFromUrl: messageIdFromUrl ?? null,
                 }
 
                 response.response = {
