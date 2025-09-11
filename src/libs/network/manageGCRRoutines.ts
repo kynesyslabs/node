@@ -69,16 +69,17 @@ export default async function manageGCRRoutines(
             break
         }
 
-        case "getAccountByTwitterUsername": {
-            const username = params[0]
+        case "getAccountByIdentity": {
+            const identity = params[0]
 
-            if (!username) {
+            if (!identity) {
                 response.result = 400
-                response.response = "No username specified"
+                response.response = null
+                response.extra = { error: "No identity specified" }
                 break
             }
 
-            response.response = await GCR.getAccountByTwitterUsername(username)
+            response.response = await GCR.getAccountByIdentity(identity)
             break
         }
 

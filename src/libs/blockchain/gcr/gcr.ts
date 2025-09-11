@@ -535,37 +535,104 @@ export default class GCR {
         }
     }
 
-    static async getAccountByTwitterUsername(username: string) {
+    static async getAccountByIdentity(identity: {
+        type: "web2" | "xm"
+        // web2
+        context?: "twitter" | "telegram" | "github" | "discord"
+        username?: string
+        userId?: string
+        // xm
+        chain?: string // eg. "eth.mainnet" | "solana.mainnet", etc.
+        address?: string
+    }): Promise<GCRMain | null> {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
 
-        // INFO: Find all accounts that have the twitter identity with the given username using a jsonb query
-        const accounts = await gcrMainRepository
-            .createQueryBuilder("gcr")
-            .where(
-                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'username' = :username)",
-                { username },
-            )
-            .getMany()
-
-        // If no accounts found, return null
-        if (accounts.length === 0) {
+        if (!identity || !identity.type) {
             return null
         }
 
-        // If only one account found, return it
-        if (accounts.length === 1) {
-            return accounts[0]
+        if (identity.type === "web2") {
+            if (!identity.context || (!identity.username && !identity.userId)) {
+                return null
+            }
+
+            // Find accounts that have the specified web2 identity (by username or userId)
+            const accounts = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    identity.userId
+                        ? "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->:context) AS w2 WHERE w2->>'userId' = :userId)"
+                        : "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->:context) AS w2 WHERE w2->>'username' = :username)",
+                    identity.userId
+                        ? { context: identity.context, userId: identity.userId }
+                        : {
+                              context: identity.context,
+                              username: identity.username,
+                          },
+                )
+                .getMany()
+
+            if (accounts.length === 0) return null
+            if (accounts.length === 1) return accounts[0]
+
+            // Prefer the account that was awarded points for this social context
+            const contextKey =
+                identity.context as keyof GCRMain["points"]["breakdown"]["socialAccounts"]
+            const accountWithPoints = accounts.find(account => {
+                const social = account.points?.breakdown?.socialAccounts as any
+                const pointsForContext = social ? social[contextKey] : 0
+                return (
+                    typeof pointsForContext === "number" && pointsForContext > 0
+                )
+            })
+
+            return accountWithPoints || accounts[0]
         }
 
-        // If multiple accounts found, find the one that was awarded points
-        // (Twitter points > 0 means the account was awarded points)
-        const accountWithPoints = accounts.find(account => 
-            account.points?.breakdown?.socialAccounts?.twitter > 0
-        )
+        if (identity.type === "xm") {
+            if (!identity.chain || !identity.address) {
+                return null
+            }
 
-        // Return the account with points if found, otherwise return the first account
-        return accountWithPoints || accounts[0]
+            let [chain, subchain] = identity.chain.split(".")
+            if (!chain || !subchain) {
+                return null
+            }
+
+            // Replace "eth" with "evm"
+            if (chain === "eth") {
+                chain = "evm"
+            }
+
+            // Find accounts that have the specified web3 wallet address under the specific chain/subchain
+            const accounts = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'xm'->:chain->:subchain, '[]'::jsonb)) AS xm_id WHERE lower(xm_id->>'address') = lower(:address))",
+                    { chain, subchain, address: identity.address },
+                )
+                .getMany()
+
+            if (accounts.length === 0) return null
+            if (accounts.length === 1) return accounts[0]
+
+            // Prefer the account that was awarded web3 wallet points (either for this chain if present or any web3 points)
+            const accountWithPoints = accounts.find(account => {
+                const web3 = account.points?.breakdown?.web3Wallets || {}
+                const byChain = web3?.[identity.chain] || 0
+
+                if (typeof byChain === "number" && byChain > 0) {
+                    return true
+                }
+
+                return false
+            })
+
+            return accountWithPoints || accounts[0]
+        }
+
+        return null
     }
 
     static async getCampaignData() {
