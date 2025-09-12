@@ -294,7 +294,7 @@ export default class GCRIdentityRoutines {
 
         // Store the identity being removed for GitHub unlinking (need userId)
         let removedIdentity: Web2GCRData["data"] | null = null
-        if (context === "github" || context === "discord") {
+        if (context === "github") {
             removedIdentity =
                 accountGCR.identities.web2[context].find(
                     (id: Web2GCRData["data"]) => id.username === username,
@@ -322,11 +322,7 @@ export default class GCRIdentityRoutines {
                     editOperation.account,
                     removedIdentity.userId,
                 )
-            } else if (
-                context === "discord" &&
-                removedIdentity &&
-                removedIdentity.userId
-            ) {
+            } else if (context === "discord") {
                 await IncentiveManager.discordUnlinked(editOperation.account)
             }
         }
@@ -679,10 +675,8 @@ export default class GCRIdentityRoutines {
             const result = await gcrMainRepository
                 .createQueryBuilder("gcr")
                 .where(
-                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'discord') as discord_id WHERE discord_id->>'userId' = :userId)",
-                    {
-                        userId: data.userId,
-                    },
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'discord', '[]'::jsonb)) AS discord_id WHERE discord_id->>'userId' = :userId)",
+                    { userId: data.userId },
                 )
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()

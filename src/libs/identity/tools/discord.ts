@@ -32,7 +32,8 @@ export class Discord {
     private static instance: Discord
     private axios: AxiosInstance
 
-    readonly api_url = process.env.DISCORD_API_URL ?? "https://discord.com/api/v10"
+    readonly api_url =
+        process.env.DISCORD_API_URL ?? "https://discord.com/api/v10"
     readonly bot_token = process.env.DISCORD_BOT_TOKEN as string
 
     private constructor() {
@@ -59,6 +60,7 @@ export class Discord {
                 Authorization: `Bot ${this.bot_token}`,
                 "Content-Type": "application/json",
             },
+            timeout: 10000, // 10s
         })
     }
 
