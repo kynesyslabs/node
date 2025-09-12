@@ -45,10 +45,7 @@ export class Discord {
         const parsed = new URL(this.api_url)
         const host = parsed.hostname.toLowerCase()
         const isTrusted =
-            host === "localhost" ||
-            host.endsWith(".discord.com") ||
-            host === "discord.com" ||
-            host === "discordapp.com"
+            host.endsWith(".discord.com") || host === "discord.com"
 
         if (!isTrusted) {
             throw new Error(`Untrusted DISCORD_API_URL host: ${host}`)
@@ -73,13 +70,16 @@ export class Discord {
         try {
             const url = new URL(messageUrl)
 
-            // Normalize hosts like discordapp.com -> discord.com
-            if (
-                !/discord\.com$/i.test(url.host) &&
-                !/discordapp\.com$/i.test(url.host)
-            ) {
+            const host = url.hostname.toLowerCase()
+            const isDiscordHost =
+                host === "discord.com" ||
+                host.endsWith(".discord.com") ||
+                host === "discordapp.com" ||
+                host.endsWith(".discordapp.com")
+
+            if (!isDiscordHost) {
                 throw new Error(
-                    "URL host must be discord.com or discordapp.com",
+                    "URL host must be discord.com or discordapp.com (including ptb/canary).",
                 )
             }
 
