@@ -544,7 +544,7 @@ export default class GCR {
         // xm
         chain?: string // eg. "eth.mainnet" | "solana.mainnet", etc.
         address?: string
-    }): Promise<GCRMain | null> {
+    }): Promise<GCRMain[]> {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
 
@@ -562,8 +562,8 @@ export default class GCR {
                 .createQueryBuilder("gcr")
                 .where(
                     identity.userId
-                        ? "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->:context) AS w2 WHERE w2->>'userId' = :userId)"
-                        : "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->:context) AS w2 WHERE w2->>'username' = :username)",
+                        ? "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->:context, '[]'::jsonb)) AS w2 WHERE w2->>'userId' = :userId)"
+                        : "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->:context, '[]'::jsonb)) AS w2 WHERE w2->>'username' = :username)",
                     identity.userId
                         ? { context: identity.context, userId: identity.userId }
                         : {
@@ -573,21 +573,7 @@ export default class GCR {
                 )
                 .getMany()
 
-            if (accounts.length === 0) return null
-            if (accounts.length === 1) return accounts[0]
-
-            // Prefer the account that was awarded points for this social context
-            const contextKey =
-                identity.context as keyof GCRMain["points"]["breakdown"]["socialAccounts"]
-            const accountWithPoints = accounts.find(account => {
-                const social = account.points?.breakdown?.socialAccounts as any
-                const pointsForContext = social ? social[contextKey] : 0
-                return (
-                    typeof pointsForContext === "number" && pointsForContext > 0
-                )
-            })
-
-            return accountWithPoints || accounts[0]
+            return accounts
         }
 
         if (identity.type === "xm") {
@@ -614,22 +600,7 @@ export default class GCR {
                 )
                 .getMany()
 
-            if (accounts.length === 0) return null
-            if (accounts.length === 1) return accounts[0]
-
-            // Prefer the account that was awarded web3 wallet points (either for this chain if present or any web3 points)
-            const accountWithPoints = accounts.find(account => {
-                const web3 = account.points?.breakdown?.web3Wallets || {}
-                const byChain = web3?.[identity.chain] || 0
-
-                if (typeof byChain === "number" && byChain > 0) {
-                    return true
-                }
-
-                return false
-            })
-
-            return accountWithPoints || accounts[0]
+            return accounts
         }
 
         return null
