@@ -7,6 +7,7 @@ export class JsonConfig {
     static readonly TANK_ADDRESSES_PATH = "config/tankAddresses.json"
     static readonly TANK_ABIS_PATH = "config/abis/"
     static readonly BRIDGE_KEYS_PATH = "config/bridgePrivateKeys.json"
+    static readonly EVMWSPROVIDERS_PATH = "config/EvmWSProviders.json"
 
     /**
      * Reads JSON data from a file given the path
@@ -99,5 +100,21 @@ export class JsonConfig {
         }
 
         return bridgeKeys[chainKey]
+    }
+
+    /**
+     * Returns the WebSocket provider for a given chain key
+     *
+     * @param chainKey Chain key (e.g., "evm.eth.sepolia")
+     * @returns WebSocket provider URL
+     */
+    static getWebSocketProvider(chainKey: string): string {
+        const wsProviders = this.readJsonFromFile(this.EVMWSPROVIDERS_PATH)
+        if (!wsProviders[chainKey]) {
+            log.error(`WebSocket provider not found for chain: ${chainKey}`)
+            process.exit(1)
+        }
+
+        return wsProviders[chainKey]
     }
 }

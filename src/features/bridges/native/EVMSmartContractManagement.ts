@@ -153,19 +153,15 @@ export class EVMSmartContractManagement {
         const tankConfig = this.tanks.get(chainKey)
         if (!tankConfig) return
 
-        const providers = {
-            "evm.eth.sepolia": "wss://ethereum-sepolia-rpc.publicnode.com",
-            "evm.polygon.amoy": "wss://polygon-amoy-bor-rpc.publicnode.com",
-        }
-
-        // TODO: Move these into a config file
         const tankABI = JsonConfig.getTankAbi(chainKey)
-        const provider = new WebSocketProvider(providers[chainKey])
+        const providerUrl = JsonConfig.getWebSocketProvider(chainKey)
+
+        const provider = new WebSocketProvider(providerUrl)
         const contract = new Contract(tankConfig.address, tankABI, provider)
 
         // INFO: Listen and handle the OwnersRotated event
         contract.on(
-            "ProposalApproved",
+            "OwnersRotated",
             async (oldOwners: string[], newOwners: string[]) => {
                 const waiterKey = Waiter.keys.TANK_SIGNER_ROTATION + chainKey
 
@@ -290,11 +286,6 @@ export class EVMSmartContractManagement {
     }> {
         const waiterKey = Waiter.keys.TANK_SIGNER_ROTATION + chainKey
         const nonce = BigInt(await Chain.getLastBlockNumber())
-        newSigners = [
-            "0x72d2E3625Aa2f18C1538E32F1D526D209A0Ac5e6",
-            "0xe28DA0644524D4F7928Fc2b46ecf903DB51A8D46",
-            "0xfC1be565bfAe9f21a0663d2b0dC272239a1609f2",
-        ]
         const tankConfig = this.tanks.get(chainKey)
         if (!tankConfig) {
             log.error(`Tank not found for chain: ${chainKey}`)
@@ -338,7 +329,7 @@ export class EVMSmartContractManagement {
         //     )
 
         // log.debug("Receipt: " + JSON.stringify(receipt, null, 2))
-        return await Waiter.wait(waiterKey)
+        return await Waiter.wait(waiterKey, 30000)
 
         // Propose new owners
         // const txResponse = await tankConfig.evmInstance.writeToContract(
@@ -367,54 +358,54 @@ export class EVMSmartContractManagement {
         // }
     }
 
-    /**
-     * Approve a shard rotation proposal
-     * @param chainKey Chain identifier
-     * @param proposalId Proposal to approve
-     * @param signerPrivateKey Private key of approving shard member
-     */
-    public async approveShardRotation(
-        chainKey: string,
-        proposalId: string,
-        signerPrivateKey: string,
-    ): Promise<void> {
-        const tankConfig = this.tanks.get(chainKey)
-        const rotationData = this.rotationProposals.get(chainKey)
+    // /**
+    //  * Approve a shard rotation proposal
+    //  * @param chainKey Chain identifier
+    //  * @param proposalId Proposal to approve
+    //  * @param signerPrivateKey Private key of approving shard member
+    //  */
+    // public async approveShardRotation(
+    //     chainKey: string,
+    //     proposalId: string,
+    //     signerPrivateKey: string,
+    // ): Promise<void> {
+    //     const tankConfig = this.tanks.get(chainKey)
+    //     const rotationData = this.rotationProposals.get(chainKey)
 
-        if (!tankConfig || !rotationData) {
-            throw new Error(
-                `Tank or rotation data not found for chain: ${chainKey}`,
-            )
-        }
+    //     if (!tankConfig || !rotationData) {
+    //         throw new Error(
+    //             `Tank or rotation data not found for chain: ${chainKey}`,
+    //         )
+    //     }
 
-        try {
-            // Connect wallet with signer key
-            await tankConfig.evmInstance.connectWallet(signerPrivateKey)
+    //     try {
+    //         // Connect wallet with signer key
+    //         await tankConfig.evmInstance.connectWallet(signerPrivateKey)
 
-            // Approve the proposal
-            await tankConfig.evmInstance.writeToContract(
-                tankConfig.contract,
-                "proposeNextOwners",
-                [proposalId, rotationData.newSigners],
-            )
+    //         // Approve the proposal
+    //         await tankConfig.evmInstance.writeToContract(
+    //             tankConfig.contract,
+    //             "proposeNextOwners",
+    //             [proposalId, rotationData.newSigners],
+    //         )
 
-            // Update approval count
-            rotationData.currentApprovals++
+    //         // Update approval count
+    //         rotationData.currentApprovals++
 
-            // Check if rotation was executed
-            const [, , executed] =
-                await tankConfig.contract.checkProposalStatus(proposalId)
-            if (executed) {
-                rotationData.executed = true
-                log.info(`Shard rotation executed for ${chainKey}`)
-            }
-        } catch (error) {
-            log.error(
-                `Failed to approve shard rotation for ${chainKey}:` + error,
-            )
-            throw error
-        }
-    }
+    //         // Check if rotation was executed
+    //         const [, , executed] =
+    //             await tankConfig.contract.checkProposalStatus(proposalId)
+    //         if (executed) {
+    //             rotationData.executed = true
+    //             log.info(`Shard rotation executed for ${chainKey}`)
+    //         }
+    //     } catch (error) {
+    //         log.error(
+    //             `Failed to approve shard rotation for ${chainKey}:` + error,
+    //         )
+    //         throw error
+    //     }
+    // }
 
     /**
      * Execute USDC withdrawal from tank (called by consensus)
