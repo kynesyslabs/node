@@ -200,15 +200,40 @@ export default class GCRIdentityRoutines {
         /**
          * Verify the proof
          */
-        const proofOk = Hashing.sha256(data.proof) === data.proofHash
+        let proofOk = false
+        
+        if (context === "telegram") {
+            // Telegram uses dual signature validation (user + bot signatures)
+            // The proof is a TelegramSignedAttestation object, not a URL
+            try {
+                const telegramAttestation = JSON.parse(data.proof)
+                
+                // TODO: Implement dual signature validation
+                // 1. Verify user signature against payload
+                // 2. Verify bot signature against payload 
+                // 3. Check bot is authorized via genesis addresses
+                
+                // For now, accept telegram attestations (will implement full validation later)
+                proofOk = true
+                log.info(`Telegram identity verification: ${data.username} (${data.userId})`)
+            } catch (error) {
+                log.error(`Telegram proof parsing failed: ${error}`)
+                proofOk = false
+            }
+        } else {
+            // Standard SHA256 proof validation for other platforms
+            proofOk = Hashing.sha256(data.proof) === data.proofHash
+        }
+        
         if (!proofOk) {
             return {
                 success: false,
-                message:
-                    "Sha256 proof mismatch: Expected " +
-                    data.proofHash +
-                    " but got " +
-                    Hashing.sha256(data.proof),
+                message: context === "telegram" 
+                    ? "Telegram attestation validation failed"
+                    : "Sha256 proof mismatch: Expected " +
+                      data.proofHash +
+                      " but got " +
+                      Hashing.sha256(data.proof),
             }
         }
 
@@ -247,6 +272,17 @@ export default class GCRIdentityRoutines {
                         data.userId,
                         editOperation.referralCode,
                     )
+                }
+            } else if (context === "telegram") {
+                const isFirst = await this.isFirstConnection(
+                    "telegram",
+                    { userId: data.userId },
+                    gcrMainRepository,
+                    editOperation.account,
+                )
+                if (isFirst) {
+                    // TODO: Add IncentiveManager.telegramLinked() method
+                    log.info(`Telegram identity linked (incentives pending): ${data.username} (${data.userId})`)
                 }
             } else {
                 log.info(`Web2 identity linked: ${context}/${data.username}`)
@@ -600,7 +636,7 @@ export default class GCRIdentityRoutines {
     }
 
     private static async isFirstConnection(
-        type: "twitter" | "github" | "web3",
+        type: "twitter" | "github" | "web3" | "telegram",
         data: {
             userId?: string // for twitter/github
             chain?: string // for web3

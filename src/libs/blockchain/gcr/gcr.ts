@@ -561,7 +561,7 @@ export default class GCR {
         // If multiple accounts found, find the one that was awarded points
         // (Twitter points > 0 means the account was awarded points)
         const accountWithPoints = accounts.find(account => 
-            account.points?.breakdown?.socialAccounts?.twitter > 0
+            account.points?.breakdown?.socialAccounts?.twitter > 0,
         )
 
         // Return the account with points if found, otherwise return the first account
