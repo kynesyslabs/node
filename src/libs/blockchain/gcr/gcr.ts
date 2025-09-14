@@ -560,14 +560,54 @@ export default class GCR {
 
         // If multiple accounts found, find the one that was awarded points
         // (Twitter points > 0 means the account was awarded points)
-        const accountWithPoints = accounts.find(account => 
-            account.points?.breakdown?.socialAccounts?.twitter > 0,
+        const accountWithPoints = accounts.find(
+            account => account.points?.breakdown?.socialAccounts?.twitter > 0,
         )
 
         // Return the account with points if found, otherwise return the first account
         return accountWithPoints || accounts[0]
     }
+    static async getAccountByIdentity(identity: {
+        type: "web2" | "xm"
+        // web2
+        context?: "twitter" | "telegram" | "github" | "discord"
+        username?: string
+        userId?: string
+        // xm
+        chain?: string // eg. "eth.mainnet" | "solana.mainnet", etc.
+        address?: string
+    }): Promise<GCRMain[]> {
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
 
+        if (!identity || !identity.type) {
+            return null
+        }
+
+        if (identity.type === "web2") {
+            if (!identity.context || (!identity.username && !identity.userId)) {
+                return null
+            }
+
+            // Find accounts that have the specified web2 identity (by username or userId)
+            const accounts = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    identity.userId
+                        ? "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->:context, '[]'::jsonb)) AS w2 WHERE w2->>'userId' = :userId)"
+                        : "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->:context, '[]'::jsonb)) AS w2 WHERE w2->>'username' = :username)",
+                    identity.userId
+                        ? { context: identity.context, userId: identity.userId }
+                        : {
+                              context: identity.context,
+                              username: identity.username,
+                          },
+                )
+                .getMany()
+
+            return accounts
+        }
+    }
     static async getAccountByTelegramUsername(username: string) {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
@@ -593,8 +633,8 @@ export default class GCR {
 
         // If multiple accounts found, find the one that was awarded points
         // (Telegram points > 0 means the account was awarded points)
-        const accountWithPoints = accounts.find(account => 
-            account.points?.breakdown?.socialAccounts?.telegram > 0,
+        const accountWithPoints = accounts.find(
+            account => account.points?.breakdown?.socialAccounts?.telegram > 0,
         )
 
         // Return the account with points if found, otherwise return the first account
