@@ -607,7 +607,38 @@ export default class GCR {
 
             return accounts
         }
+
+        if (identity.type === "xm") {
+            if (!identity.chain || !identity.address) {
+                return null
+            }
+
+            // eslint-disable-next-line prefer-const
+            let [chain, subchain] = identity.chain.split(".")
+            if (!chain || !subchain) {
+                return null
+            }
+
+            // Replace "eth" with "evm"
+            if (chain === "eth") {
+                chain = "evm"
+            }
+
+            // Find accounts that have the specified web3 wallet address under the specific chain/subchain
+            const accounts = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'xm'->:chain->:subchain, '[]'::jsonb)) AS xm_id WHERE lower(xm_id->>'address') = lower(:address))",
+                    { chain, subchain, address: identity.address },
+                )
+                .getMany()
+
+            return accounts
+        }
+
+        return null
     }
+
     static async getAccountByTelegramUsername(username: string) {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
