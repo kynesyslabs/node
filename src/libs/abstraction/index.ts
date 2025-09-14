@@ -7,7 +7,7 @@ import { Twitter } from "../identity/tools/twitter"
 import {
     TelegramAttestationPayload,
     TelegramSignedAttestation,
-} from "node_modules/@kynesyslabs/demosdk/build/types/abstraction"
+} from "@kynesyslabs/demosdk/abstraction"
 
 /**
  * Verifies telegram dual signature attestation (user + bot signatures)
