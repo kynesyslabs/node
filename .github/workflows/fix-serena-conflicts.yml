@@ -1,77 +1,71 @@
-name: Fix Serena Memory Conflicts
+name: Preserve Branch-Specific Serena Files
 
 on:
   push:
-    branches: ['**']  # Triggers on ALL branches
+    branches: ['**']
 
 jobs:
-  fix-serena-conflicts:
+  preserve-serena:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2  # Need 2 commits to compare
+          fetch-depth: 2
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check if this was a merge commit
         id: check_merge
         run: |
-          # Check if the latest commit is a merge commit
           if git log -1 --pretty=format:"%P" | grep -q " "; then
             echo "is_merge=true" >> $GITHUB_OUTPUT
             echo "✅ Detected merge commit"
           else
             echo "is_merge=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ Regular commit, skipping"
+            exit 0
           fi
 
       - name: Check for .serena changes in merge
         if: steps.check_merge.outputs.is_merge == 'true'
         id: check_serena
         run: |
-          # Check if .serena files were affected in the merge
           if git log -1 --name-only | grep -q "^\.serena/"; then
             echo "serena_changed=true" >> $GITHUB_OUTPUT
-            echo "✅ .serena files were modified in merge"
+            echo "🚨 .serena files were modified in merge - will revert!"
           else
             echo "serena_changed=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ No .serena changes in this merge"
+            exit 0
           fi
 
-      - name: Auto-resolve .serena conflicts
+      - name: Revert .serena to pre-merge state
         if: steps.check_merge.outputs.is_merge == 'true' && steps.check_serena.outputs.serena_changed == 'true'
         run: |
           CURRENT_BRANCH=$(git branch --show-current)
-          echo "🔧 Checking for conflict markers in .serena/ on branch: $CURRENT_BRANCH"
+          echo "🔄 Reverting .serena/ to pre-merge state on $CURRENT_BRANCH"
           
-          # Find files with conflict markers
-          CONFLICT_FILES=$(find .serena -name "*.json" -o -name "*.md" -o -name "*" -type f | xargs grep -l "^<<<<<<< HEAD" 2>/dev/null || true)
+          # Get the first parent (target branch before merge)
+          MERGE_BASE=$(git log -1 --pretty=format:"%P" | cut -d' ' -f1)
           
-          if [ -n "$CONFLICT_FILES" ]; then
-            echo "🚨 Found .serena conflicts, auto-resolving..."
-            echo "Files with conflicts: $CONFLICT_FILES"
-            
-            # For each conflicted file, keep the current branch version (between HEAD and =======)
-            find .serena -type f -exec grep -l "^<<<<<<< HEAD" {} \; | while read -r file; do
-              echo "Fixing: $file"
-              # Keep everything between <<<<<<< HEAD and =======, remove rest
-              sed -i '/^<<<<<<< HEAD$/,/^=======$/{ /^<<<<<<< HEAD$/d; /^=======$/d; }; /^>>>>>>> /d' "$file"
-            done
-            
-            # Configure git user
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            
-            # Stage and commit the fixes
+          # Restore .serena from the target branch's state before merge
+          git checkout $MERGE_BASE -- .serena/ 2>/dev/null || echo "No .serena in base commit"
+          
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Commit the reversion
+          if git diff --staged --quiet; then
             git add .serena/
-            git commit -m "🤖 Auto-resolve .serena conflicts: keep $CURRENT_BRANCH version
+          fi
+          
+          if ! git diff --cached --quiet; then
+            git commit -m "🔒 Preserve branch-specific .serena files
 
-            [skip ci]"
+          Reverted .serena/ changes from merge to keep $CURRENT_BRANCH version intact.
+          [skip ci]"
             
             git push origin $CURRENT_BRANCH
-            
-            echo "✅ Successfully auto-resolved .serena conflicts"
+            echo "✅ Successfully preserved $CURRENT_BRANCH .serena files"
           else
-            echo "ℹ️ No conflict markers found in .serena files"
+            echo "ℹ️ No changes to revert"
           fi
