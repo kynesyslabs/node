@@ -111,11 +111,11 @@ export class PointSystem {
             totalPoints: account.points.totalPoints || 0,
             breakdown: {
                 web3Wallets: account.points.breakdown?.web3Wallets || {},
-                socialAccounts: account.points.breakdown?.socialAccounts || {
-                    twitter: 0,
-                    github: 0,
-                    telegram: 0,
-                    discord: 0,
+                socialAccounts: {
+                    twitter: account.points.breakdown?.socialAccounts?.twitter ?? 0,
+                    github: account.points.breakdown?.socialAccounts?.github ?? 0,
+                    telegram: account.points.breakdown?.socialAccounts?.telegram ?? 0,
+                    discord: account.points.breakdown?.socialAccounts?.discord ?? 0,
                 },
                 referrals: account.points.breakdown?.referrals || 0,
                 demosFollow: account.points.breakdown?.demosFollow || 0,
@@ -189,6 +189,14 @@ export class PointSystem {
         // } else {
         const isEligibleForReferral = Referrals.isEligibleForReferral(account)
 
+        // REVIEW: Ensure breakdown structure is properly initialized before assignment
+        account.points.breakdown = account.points.breakdown || {
+            web3Wallets: {},
+            socialAccounts: { twitter: 0, github: 0, telegram: 0, discord: 0 },
+            referrals: 0,
+            demosFollow: 0,
+        }
+
         const oldTotal = account.points.totalPoints || 0
         account.points.totalPoints = oldTotal + points
 
@@ -200,7 +208,7 @@ export class PointSystem {
                 platform === "discord")
         ) {
             const oldPlatformPoints =
-                account.points.breakdown?.socialAccounts?.[platform] || 0
+                account.points.breakdown.socialAccounts[platform] || 0
             account.points.breakdown.socialAccounts[platform] =
                 oldPlatformPoints + points
         } else if (type === "web3Wallets") {
@@ -566,9 +574,9 @@ export class PointSystem {
             )
 
             // Check if user has Twitter points to deduct
-            if (
-                userPointsWithIdentities.breakdown.socialAccounts.twitter <= 0
-            ) {
+            const currentTwitter =
+                userPointsWithIdentities.breakdown.socialAccounts?.twitter ?? 0
+            if (currentTwitter <= 0) {
                 return {
                     result: 200,
                     response: {
@@ -646,9 +654,9 @@ export class PointSystem {
             )
 
             // Check if user has GitHub points to deduct
-            if (
-                userPointsWithIdentities.breakdown.socialAccounts.github <= 0
-            ) {
+            const currentGithub =
+                userPointsWithIdentities.breakdown.socialAccounts?.github ?? 0
+            if (currentGithub <= 0) {
                 return {
                     result: 200,
                     response: {
@@ -810,9 +818,9 @@ export class PointSystem {
             )
 
             // Check if user has Telegram points to deduct
-            if (
-                userPointsWithIdentities.breakdown.socialAccounts.telegram <= 0
-            ) {
+            const currentTelegram =
+                userPointsWithIdentities.breakdown.socialAccounts?.telegram ?? 0
+            if (currentTelegram <= 0) {
                 return {
                     result: 200,
                     response: {
