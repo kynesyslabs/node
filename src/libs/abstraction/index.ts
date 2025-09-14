@@ -83,14 +83,42 @@ async function verifyTelegramProof(
             }
         }
 
-        // Verify the telegram_id and username match
-        if (
-            telegramAttestation.payload.telegram_id !== payload.userId ||
-            telegramAttestation.payload.username !== payload.username
-        ) {
+        // REVIEW: Enhanced input validation with type safety and normalization
+        // Validate attestation data types first (trusted source should have proper format)
+        if (typeof telegramAttestation.payload.telegram_id !== "number" && 
+            typeof telegramAttestation.payload.telegram_id !== "string") {
             return {
                 success: false,
-                message: "Telegram attestation data mismatch",
+                message: "Invalid telegram_id type in bot attestation",
+            }
+        }
+
+        if (typeof telegramAttestation.payload.username !== "string") {
+            return {
+                success: false,
+                message: "Invalid username type in bot attestation",
+            }
+        }
+
+        // Safe type conversion and normalization
+        const attestationId = telegramAttestation.payload.telegram_id.toString()
+        const payloadId = payload.userId?.toString() || ""
+        
+        const attestationUsername = telegramAttestation.payload.username.toLowerCase().trim()
+        const payloadUsername = payload.username?.toLowerCase()?.trim() || ""
+
+        // Verify the telegram_id and username match with normalized comparison
+        if (attestationId !== payloadId) {
+            return {
+                success: false,
+                message: `Telegram ID mismatch: expected ${payloadId}, got ${attestationId}`,
+            }
+        }
+
+        if (attestationUsername !== payloadUsername) {
+            return {
+                success: false,
+                message: `Telegram username mismatch: expected ${payloadUsername}, got ${attestationUsername}`,
             }
         }
 
