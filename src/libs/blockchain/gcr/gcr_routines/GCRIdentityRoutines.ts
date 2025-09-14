@@ -1,3 +1,5 @@
+// TODO GCREditIdentity but typed as any due to union type constraints <- we have a lot of editOperations marked as any. Why is that? Should we standardize the identity operation types?
+
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../handleGCR"
 import { GCREdit, Web2GCRData } from "@kynesyslabs/demosdk/types"
@@ -15,7 +17,7 @@ import { IncentiveManager } from "./IncentiveManager"
 export default class GCRIdentityRoutines {
     // SECTION XM Identity Routines
     static async applyXmIdentityAdd(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -107,7 +109,7 @@ export default class GCRIdentityRoutines {
     }
 
     static async applyXmIdentityRemove(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -178,7 +180,7 @@ export default class GCRIdentityRoutines {
 
     // SECTION Web2 Identity Routines
     static async applyWeb2IdentityAdd(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -201,39 +203,58 @@ export default class GCRIdentityRoutines {
          * Verify the proof
          */
         let proofOk = false
-        
+
         if (context === "telegram") {
             // Telegram uses dual signature validation (user + bot signatures)
             // The proof is a TelegramSignedAttestation object, not a URL
             try {
-                const telegramAttestation = JSON.parse(data.proof)
-                
-                // TODO: Implement dual signature validation
-                // 1. Verify user signature against payload
-                // 2. Verify bot signature against payload 
-                // 3. Check bot is authorized via genesis addresses
-                
-                // For now, accept telegram attestations (will implement full validation later)
-                proofOk = true
-                log.info(`Telegram identity verification: ${data.username} (${data.userId})`)
+                // Import verifyWeb2Proof which handles telegram verification
+                const { verifyWeb2Proof } = await import("@/libs/abstraction")
+
+                const verificationResult = await verifyWeb2Proof(
+                    {
+                        context: "telegram",
+                        username: data.username,
+                        userId: data.userId,
+                        proof: data.proof,
+                    },
+                    accountGCR.pubkey, // sender's ed25519 address
+                )
+
+                proofOk = verificationResult.success
+
+                if (!proofOk) {
+                    log.error(
+                        `Telegram verification failed: ${verificationResult.message}`,
+                    )
+                    return {
+                        success: false,
+                        message: verificationResult.message,
+                    }
+                }
+
+                log.info(
+                    `Telegram identity verified: ${data.username} (${data.userId})`,
+                )
             } catch (error) {
-                log.error(`Telegram proof parsing failed: ${error}`)
+                log.error(`Telegram proof verification failed: ${error}`)
                 proofOk = false
             }
         } else {
             // Standard SHA256 proof validation for other platforms
             proofOk = Hashing.sha256(data.proof) === data.proofHash
         }
-        
+
         if (!proofOk) {
             return {
                 success: false,
-                message: context === "telegram" 
-                    ? "Telegram attestation validation failed"
-                    : "Sha256 proof mismatch: Expected " +
-                      data.proofHash +
-                      " but got " +
-                      Hashing.sha256(data.proof),
+                message:
+                    context === "telegram"
+                        ? "Telegram attestation validation failed"
+                        : "Sha256 proof mismatch: Expected " +
+                          data.proofHash +
+                          " but got " +
+                          Hashing.sha256(data.proof),
             }
         }
 
@@ -281,8 +302,11 @@ export default class GCRIdentityRoutines {
                     editOperation.account,
                 )
                 if (isFirst) {
-                    // TODO: Add IncentiveManager.telegramLinked() method
-                    log.info(`Telegram identity linked (incentives pending): ${data.username} (${data.userId})`)
+                    await IncentiveManager.telegramLinked(
+                        editOperation.account,
+                        data.userId,
+                        editOperation.referralCode,
+                    )
                 }
             } else {
                 log.info(`Web2 identity linked: ${context}/${data.username}`)
@@ -293,7 +317,7 @@ export default class GCRIdentityRoutines {
     }
 
     static async applyWeb2IdentityRemove(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -315,12 +339,13 @@ export default class GCRIdentityRoutines {
             return { success: false, message: "Identity not found" }
         }
 
-        // Store the identity being removed for GitHub unlinking (need userId)
+        // Store the identity being removed for GitHub and Telegram unlinking (need userId)
         let removedIdentity: Web2GCRData["data"] | null = null
-        if (context === "github") {
-            removedIdentity = accountGCR.identities.web2[context].find(
-                (id: Web2GCRData["data"]) => id.username === username,
-            ) || null
+        if (context === "github" || context === "telegram") {
+            removedIdentity =
+                accountGCR.identities.web2[context].find(
+                    (id: Web2GCRData["data"]) => id.username === username,
+                ) || null
         }
 
         accountGCR.identities.web2[context] = accountGCR.identities.web2[
@@ -335,8 +360,21 @@ export default class GCRIdentityRoutines {
              */
             if (context === "twitter") {
                 await IncentiveManager.twitterUnlinked(editOperation.account)
-            } else if (context === "github" && removedIdentity && removedIdentity.userId) {
+            } else if (
+                context === "github" &&
+                removedIdentity &&
+                removedIdentity.userId
+            ) {
                 await IncentiveManager.githubUnlinked(
+                    editOperation.account,
+                    removedIdentity.userId,
+                )
+            } else if (
+                context === "telegram" &&
+                removedIdentity &&
+                removedIdentity.userId
+            ) {
+                await IncentiveManager.telegramUnlinked(
                     editOperation.account,
                     removedIdentity.userId,
                 )
@@ -348,7 +386,7 @@ export default class GCRIdentityRoutines {
 
     // SECTION PQC Identity Routines
     static async applyPqcIdentityAdd(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -405,7 +443,7 @@ export default class GCRIdentityRoutines {
     }
 
     static async applyPqcIdentityRemove(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -482,7 +520,7 @@ export default class GCRIdentityRoutines {
     }
 
     static async applyAwardPoints(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -510,7 +548,7 @@ export default class GCRIdentityRoutines {
     }
 
     static async applyAwardPointsRollback(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
