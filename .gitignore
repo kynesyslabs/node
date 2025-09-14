@@ -169,3 +169,4 @@ src/features/bridges/EVMSmartContract/foundry.lock
 !src/features/bridges/EVMSmartContract/TESTING.md
 src/features/bridges/EVMSmartContract/artifacts
 .serena-backup/cache/typescript
+PR_COMMENTS
