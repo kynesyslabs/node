@@ -3,11 +3,213 @@
 PG_PORT=5332
 GIT_PULL=true
 PEER_LIST_FILE="demos_peerlist.json"
+VERBOSE=false
+
+# Detect platform for cross-platform compatibility
+PLATFORM=$(uname -s)
+case $PLATFORM in
+    "Darwin")
+        PLATFORM_NAME="macOS"
+        ;;
+    "Linux")
+        PLATFORM_NAME="Linux"
+        ;;
+    *)
+        PLATFORM_NAME="Unknown"
+        ;;
+esac
 
 # trap ctrl-c and call ctrl_c()
 trap ctrl_c INT
 
 HAS_BEEN_INTERRUPTED=false
+
+# Verbose logging function
+log_verbose() {
+    if [ "$VERBOSE" = true ]; then
+        echo "[VERBOSE] $1"
+    fi
+}
+
+# Help documentation function
+show_help() {
+    cat << EOF
+🚀 Demos Network Node Runner
+
+USAGE:
+    ./run [OPTIONS]
+
+Welcome to Demos Network! This script helps you run your blockchain node easily.
+
+OPTIONS:
+    -p <port>       Node port (default: 53550)
+    -d <port>       PostgreSQL port (default: 5332)
+    -i <file>       Identity file path (default: .demos_identity)
+    -c              Clean database on startup
+    -n              Skip git pull (useful for custom branches)
+    -u <url>        Override EXPOSED_URL
+    -l <file>       Peer list file (default: demos_peerlist.json)
+    -r <runtime>    Force runtime (bun only - node deprecated)
+    -b <true/false> Restore from backup
+    -v              Verbose logging
+    -h              Show this help message
+
+EXAMPLES:
+    ./run                           # Start with default settings
+    ./run -p 53551 -d 5333         # Run on custom ports
+    ./run -c                       # Clean start (fresh database)
+    ./run -v                       # Verbose output for troubleshooting
+    ./run -n                       # Skip git update (for development)
+
+SYSTEM REQUIREMENTS:
+    - 8GB RAM minimum (12GB recommended)
+    - 4+ CPU cores
+    - Docker and Docker Compose
+    - Bun runtime
+    - Network: <200ms ping to 1.1.1.1 (<100ms recommended)
+    - Free ports: 5332 (PostgreSQL) and 53550 (Node)
+
+For support and documentation: https://demos.network
+EOF
+}
+
+# System requirements validation
+check_system_requirements() {
+    echo "🔍 Checking system requirements..."
+    log_verbose "Platform detected: $PLATFORM_NAME"
+    
+    local failed_requirements=0
+    local warnings=0
+    
+    # Check RAM
+    log_verbose "Checking RAM requirements"
+    if [ "$PLATFORM_NAME" = "macOS" ]; then
+        # macOS: Get RAM in bytes, convert to GB
+        ram_bytes=$(sysctl -n hw.memsize)
+        ram_gb=$((ram_bytes / 1024 / 1024 / 1024))
+    elif [ "$PLATFORM_NAME" = "Linux" ]; then
+        # Linux: Get RAM from /proc/meminfo in kB, convert to GB
+        ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+        ram_gb=$((ram_kb / 1024 / 1024))
+    else
+        echo "⚠️  Unknown platform - cannot check RAM"
+        ram_gb=0
+        warnings=$((warnings + 1))
+    fi
+    
+    if [ $ram_gb -lt 8 ]; then
+        echo "❌ Insufficient RAM: ${ram_gb}GB (minimum: 8GB)"
+        failed_requirements=$((failed_requirements + 1))
+    elif [ $ram_gb -lt 12 ]; then
+        echo "⚠️  RAM below recommended: ${ram_gb}GB (recommended: 12GB)"
+        warnings=$((warnings + 1))
+    else
+        echo "✅ RAM: ${ram_gb}GB"
+    fi
+    
+    # Check CPU cores
+    log_verbose "Checking CPU requirements"
+    if [ "$PLATFORM_NAME" = "macOS" ]; then
+        cpu_cores=$(sysctl -n hw.ncpu)
+    elif [ "$PLATFORM_NAME" = "Linux" ]; then
+        cpu_cores=$(nproc)
+    else
+        echo "⚠️  Unknown platform - cannot check CPU"
+        cpu_cores=0
+        warnings=$((warnings + 1))
+    fi
+    
+    if [ $cpu_cores -lt 4 ]; then
+        echo "❌ Insufficient CPU cores: ${cpu_cores} (minimum: 4)"
+        failed_requirements=$((failed_requirements + 1))
+    else
+        echo "✅ CPU cores: ${cpu_cores}"
+    fi
+    
+    # Check network connectivity (ping 1.1.1.1)
+    log_verbose "Checking network connectivity"
+    if command -v ping > /dev/null; then
+        if [ "$PLATFORM_NAME" = "macOS" ]; then
+            # macOS ping syntax
+            ping_result=$(ping -c 3 -t 5 1.1.1.1 2>/dev/null | tail -1 | awk -F'/' '{print $5}' | cut -d'.' -f1)
+        elif [ "$PLATFORM_NAME" = "Linux" ]; then
+            # Linux ping syntax
+            ping_result=$(ping -c 3 -W 5 1.1.1.1 2>/dev/null | tail -1 | awk -F'/' '{print $5}' | cut -d'.' -f1)
+        fi
+        
+        if [ -z "$ping_result" ]; then
+            echo "❌ Network connectivity failed - cannot reach 1.1.1.1"
+            failed_requirements=$((failed_requirements + 1))
+        elif [ "$ping_result" -gt 200 ]; then
+            echo "❌ Network latency too high: ${ping_result}ms (maximum: 200ms)"
+            failed_requirements=$((failed_requirements + 1))
+        elif [ "$ping_result" -gt 100 ]; then
+            echo "⚠️  Network latency above recommended: ${ping_result}ms (recommended: <100ms)"
+            warnings=$((warnings + 1))
+        else
+            echo "✅ Network latency: ${ping_result}ms"
+        fi
+    else
+        echo "⚠️  Cannot test network - ping command not available"
+        warnings=$((warnings + 1))
+    fi
+    
+    # Check port availability
+    log_verbose "Checking port availability"
+    if command -v lsof > /dev/null; then
+        if lsof -i :$PG_PORT > /dev/null 2>&1; then
+            echo "❌ PostgreSQL port $PG_PORT is already in use"
+            failed_requirements=$((failed_requirements + 1))
+        else
+            echo "✅ PostgreSQL port $PG_PORT is available"
+        fi
+        
+        if lsof -i :$PORT > /dev/null 2>&1; then
+            echo "❌ Node port $PORT is already in use"
+            failed_requirements=$((failed_requirements + 1))
+        else
+            echo "✅ Node port $PORT is available"
+        fi
+    elif command -v netstat > /dev/null; then
+        # Fallback to netstat if lsof is not available
+        if netstat -an | grep ":$PG_PORT " > /dev/null 2>&1; then
+            echo "❌ PostgreSQL port $PG_PORT is already in use"
+            failed_requirements=$((failed_requirements + 1))
+        else
+            echo "✅ PostgreSQL port $PG_PORT is available"
+        fi
+        
+        if netstat -an | grep ":$PORT " > /dev/null 2>&1; then
+            echo "❌ Node port $PORT is already in use"
+            failed_requirements=$((failed_requirements + 1))
+        else
+            echo "✅ Node port $PORT is available"
+        fi
+    else
+        echo "⚠️  Cannot check port availability - lsof and netstat not available"
+        warnings=$((warnings + 1))
+    fi
+    
+    # Summary
+    if [ $failed_requirements -gt 0 ]; then
+        echo ""
+        echo "❌ System requirements check FAILED!"
+        echo "   Failed requirements: $failed_requirements"
+        echo "   Please resolve the above issues before running the node."
+        echo ""
+        echo "💡 Need help? Visit: https://demos.network/support"
+        exit 1
+    elif [ $warnings -gt 0 ]; then
+        echo ""
+        echo "⚠️  System requirements check passed with $warnings warning(s)"
+        echo "   The node will run but performance may be limited."
+        echo ""
+    else
+        echo ""
+        echo "✅ All system requirements met!"
+        echo ""
+    fi
+}
 
 function ctrl_c() {
     HAS_BEEN_INTERRUPTED=true
@@ -35,11 +237,32 @@ if is_first_run; then
     fi
     echo "Ok, dependencies installed"
     # We need docker and docker compose to be installed
-    if ! docker compose version; then
-        echo "Error: Docker and docker compose are not installed: please refer to https://docs.docker.com/compose/install/"
+    echo "🔍 Checking Docker..."
+    if ! command -v docker &> /dev/null; then
+        echo "❌ Docker is not installed"
+        echo "💡 Install Docker from: https://docs.docker.com/get-docker/"
+        if [ "$PLATFORM_NAME" = "macOS" ]; then
+            echo "🍎 On macOS: Download Docker Desktop from https://docker.com/products/docker-desktop"
+        elif [ "$PLATFORM_NAME" = "Linux" ]; then
+            echo "🐧 On Linux: Use your package manager or install script"
+        fi
         exit 1
     fi
-    echo "Ok, docker compose installed"
+    
+    if ! docker compose version &> /dev/null; then
+        echo "❌ Docker Compose is not available"
+        echo "💡 Make sure Docker Desktop is running or install docker-compose-plugin"
+        exit 1
+    fi
+    
+    # Check if Docker daemon is running
+    if ! docker info &> /dev/null; then
+        echo "❌ Docker daemon is not running"
+        echo "💡 Start Docker Desktop or run: sudo systemctl start docker"
+        exit 1
+    fi
+    
+    echo "✅ Docker and Docker Compose are ready"
     # Check if Bun is installed
     if ! command -v bun &> /dev/null; then
         echo "Error: Bun is not installed and is required to run the node (since 0.9.5)"
@@ -58,7 +281,7 @@ CLEAN="false"
 PORT=53550
 
 # Getting arguments
-while getopts "p:d:c:i:n:u:l:r:b:" opt; do
+while getopts "p:d:c:i:n:u:l:r:b:vh" opt; do
     case $opt in
         p) PORT=$OPTARG;;
         d) PG_PORT=$OPTARG;;
@@ -69,7 +292,9 @@ while getopts "p:d:c:i:n:u:l:r:b:" opt; do
         u) EXPOSED_URL=$OPTARG;;
         r) RUNTIME=$OPTARG;;
         b) RESTORE=$OPTARG;;
-        #...
+        v) VERBOSE=true;;
+        h) show_help; exit 0;;
+        *) echo "Invalid option. Use -h for help."; exit 1;;
     esac
 done
 shift $((OPTIND -1))
@@ -79,45 +304,77 @@ if [ "$RESTORE" == "true" ]; then
     CLEAN="false"
 fi
 
+# Run system requirements check
+check_system_requirements
+
 # Perform git pull if GIT_PULL is true
 if [ "$GIT_PULL" = true ]; then
-    echo "Updating repository..."
-    git pull
+    echo "🔄 Updating repository..."
+    log_verbose "Running git pull to get latest changes"
+    if ! git pull; then
+        echo "⚠️  Warning: Git pull failed, continuing with current version"
+        log_verbose "Git pull failed but continuing - might be in development mode"
+    else
+        echo "✅ Repository updated successfully"
+    fi
 fi
 
 
-echo "PORT=$PORT"
-echo "PG_PORT=$PG_PORT"
-echo "IDENTITY_FILE=$IDENTITY_FILE"
-echo "EXPOSED_URL=$EXPOSED_URL"
-echo "PEER_LIST_FILE=$PEER_LIST_FILE"
-echo "RESTORE=$RESTORE"
+echo ""
+echo "🚀 Welcome to Demos Network!"
+echo "⚙️  Node Configuration:"
+echo "   🌐 Node Port: $PORT"
+echo "   🗄️  Database Port: $PG_PORT"
+if [ ! -z "$IDENTITY_FILE" ]; then
+    echo "   🔑 Identity File: $IDENTITY_FILE"
+fi
+if [ ! -z "$EXPOSED_URL" ]; then
+    echo "   📡 Exposed URL: $EXPOSED_URL"
+fi
+echo "   👥 Peer List: $PEER_LIST_FILE"
+if [ "$RESTORE" = "true" ]; then
+    echo "   📦 Mode: Restore from backup"
+elif [ "$CLEAN" = "true" ]; then
+    echo "   🧹 Mode: Clean start (fresh database)"
+else
+    echo "   ▶️  Mode: Normal start"
+fi
+log_verbose "Platform: $PLATFORM_NAME"
+log_verbose "Verbose logging enabled"
+echo ""
 
 # Check if runtime is forced via CLI argument
 if [ ! -z "$RUNTIME" ]; then
     case $RUNTIME in
         "node")
-            echo "Error: Node runtime requested but Bun is required to run the node (since 0.9.5)"
+            echo "❌ Error: Node runtime requested but Bun is required to run the node (since 0.9.5)"
             exit 1
             ;;
         "bun")
             if ! command -v bun &> /dev/null; then
-                echo "Error: Bun runtime requested but Bun is not installed"
+                echo "❌ Error: Bun runtime requested but Bun is not installed"
                 exit 1
             fi
-            START_COMMAND="bun start:bun" # REVIEW Consider using bun directly
+            START_COMMAND="bun run start:bun"
             ;;
         *)
-            echo "Error: Invalid runtime specified. Use 'node' or 'bun'"
+            echo "❌ Error: Invalid runtime specified. Use 'bun' only (node deprecated)"
             exit 1
             ;;
     esac
 else
     # Default behavior: Check if Bun is available and set the start command
     if command -v bun &> /dev/null; then
-        START_COMMAND="bun start:bun"  # REVIEW Consider using bun directly
+        START_COMMAND="bun run start:bun"
+        log_verbose "Using Bun runtime with command: $START_COMMAND"
     else
-        echo "Error: Bun is not installed and is required to run the node (since 0.9.5)"
+        echo "❌ Error: Bun is not installed and is required to run the node (since 0.9.5)"
+        echo "💡 Install Bun from: https://bun.sh/docs/installation"
+        if [ "$PLATFORM_NAME" = "macOS" ]; then
+            echo "🍎 On macOS: brew install oven-sh/bun/bun"
+        elif [ "$PLATFORM_NAME" = "Linux" ]; then
+            echo "🐧 On Linux: curl -fsSL https://bun.sh/install | bash"
+        fi
         exit 1
     fi
     # Temporary overriding
@@ -125,11 +382,13 @@ else
 fi
 
 
-echo "Starting the node with $START_COMMAND"
-sleep 2
+echo "🚀 Starting your Demos Network node..."
+log_verbose "Using command: $START_COMMAND"
+echo "💡 This may take a moment to initialize all services..."
+sleep 1
 
 
-# PG_PORT and IDENTITY_FILE are exported for both docker and yarn
+# PG_PORT and IDENTITY_FILE are exported for both docker and bun
 export PG_PORT=$PG_PORT
 export IDENTITY_FILE=$IDENTITY_FILE
 export EXPOSED_URL=$EXPOSED_URL
@@ -149,10 +408,12 @@ cd $PG_FOLDER
 
 # If we are cleaning, we need to remove the database
 if [ "$CLEAN" == "true" ]; then
-    echo "Cleaning the database"
+    echo "🧹 Cleaning the database..."
+    log_verbose "Removing existing database data for clean start"
     sleep 1
     rm -rf data_*
     mkdir data_${PG_PORT}
+    echo "✅ Database cleaned"
 fi
 
 # Suppressing errors if the database is not running
@@ -163,7 +424,14 @@ if [ "$CLEAN" == "true" ]; then
 fi
 
 # Finally starting the database
-docker compose up -d
+echo "🗄️  Starting PostgreSQL database..."
+log_verbose "Running docker compose up -d in $PG_FOLDER"
+if ! docker compose up -d; then
+    echo "❌ Failed to start PostgreSQL database"
+    echo "💡 Check Docker Desktop is running and try again"
+    exit 1
+fi
+echo "✅ PostgreSQL container started"
 cd ..
 
 function is_db_ready() {
@@ -174,58 +442,67 @@ function is_db_ready() {
 # Function to wait for database availability
 function wait_for_database() {
     local port=$1
-    local timeout=${2:-10}  # Default timeout of 10 seconds if not specified
+    local timeout=${2:-30}  # Increased timeout to 30 seconds
     
-    echo -n "Waiting for the database to be available"
+    echo "⏳ Waiting for PostgreSQL to be available on port $port..."
+    log_verbose "Checking database connectivity with timeout of ${timeout}s"
     local count=0
     while ! nc -z localhost $port; do
-        echo -n "."
+        if [ $((count % 5)) -eq 0 ]; then
+            echo "   Still waiting... (${count}s elapsed)"
+        fi
         count=$((count+1))
         if [ $count -gt $timeout ]; then
-            echo "Timeout waiting for the database to be available"
+            echo "❌ Timeout waiting for PostgreSQL to be available after ${timeout}s"
+            echo "💡 Try increasing resources or check Docker logs"
             return 1
         fi
         sleep 1
     done
-    echo  # Print newline after dots
+    echo "✅ PostgreSQL is accepting connections"
     return 0
 }
 
 function wait_for_database_ready() {
     local port=$1
-    local timeout=${2:-10}  # Default timeout of 10 seconds if not specified
-
-    echo -n "Waiting for the database to be ready to accept connections"
+    local timeout=${2:-20}  # Increased timeout to 20 seconds
+    
+    echo "⏳ Waiting for PostgreSQL to be ready for connections..."
+    log_verbose "Checking database readiness with pg_isready, timeout ${timeout}s"
     local count=0
     while ! is_db_ready; do   
-        echo -n "."
+        if [ $((count % 3)) -eq 0 ] && [ $count -gt 0 ]; then
+            echo "   Database initializing... (${count}s elapsed)"
+        fi
         count=$((count+1))
         if [ $count -gt $timeout ]; then
-            echo "Timeout waiting for the database to be ready to accept connections"
+            echo "❌ Timeout waiting for PostgreSQL to be ready after ${timeout}s"
+            echo "💡 Database may be still initializing - check Docker logs"
             return 1
         fi
         sleep 1
     done
-    echo  # Print newline after dots
+    echo "✅ PostgreSQL is ready for operations"
     return 0
 }
 
 # Replace the original wait code with function call
 if ! wait_for_database $PG_PORT; then
-    echo "Failed to connect to database"
+    echo "❌ Failed to connect to PostgreSQL database"
+    echo "💡 Try restarting Docker or check system resources"
     exit 1
 fi
 
 if [ "$RESTORE" == "true" ]; then
     if ! wait_for_database_ready $PG_PORT; then
-        echo "Failed to connect to database"
+        echo "❌ Failed to connect to PostgreSQL database"
+        echo "💡 Database may need more time to initialize"
         exit 1
     fi
-    echo "Database ready to accept connections"
 
-    echo "Restoring the node"
-    if ! bun restore; then
-        echo "Error: Failed to restore the node"
+    echo "🔄 Restoring the node"
+    if ! bun run restore; then
+        echo "❌ Error: Failed to restore the node"
         exit 1
     fi
     # sleep 20
@@ -257,24 +534,60 @@ fi
 # Ensuring the logs folder exists
 mkdir -p logs
 
+echo ""
+echo "🎉 All systems ready! Starting your Demos Network node..."
+echo "📝 Logs will be saved to: logs/"
+echo "🌐 Your node will be available on: http://localhost:$PORT"
+if [ ! -z "$EXPOSED_URL" ]; then
+    echo "🌍 External URL: $EXPOSED_URL"
+fi
+echo ""
+echo "💡 Press Ctrl+C to stop the node safely"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
 # Starting the node managing errors
+log_verbose "Starting node with environment: RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE"
 if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE $START_COMMAND; then
     if [ "$HAS_BEEN_INTERRUPTED" == "true" ]; then
-        echo "RPC exited successfully"
+        echo ""
+        echo "✅ Demos Network node stopped successfully"
     else
-        echo "Error: RPC failed to start or crashed"
+        echo "❌ Error: RPC failed to start or crashed"
         exit_code=$?
-        # Logging memory usage
-        echo "Memory usage:"
-        free -m
-        echo $(free -m) > last_crash_memory_usage.txt
+        # Logging memory usage (cross-platform)
+        echo "💾 Memory usage at crash:"
+        if [ "$PLATFORM_NAME" = "macOS" ]; then
+            vm_stat | head -10
+            vm_stat | head -10 > last_crash_memory_usage.txt
+        elif [ "$PLATFORM_NAME" = "Linux" ]; then
+            free -m
+            free -m > last_crash_memory_usage.txt
+        else
+            echo "Unknown platform - cannot collect memory info"
+            echo "Platform: $PLATFORM_NAME" > last_crash_memory_usage.txt
+        fi
     fi
 else
-    echo "RPC exited successfully"
+    echo ""
+    echo "✅ Demos Network node exited successfully"
     exit_code=0
 fi
 
 # Once exiting, stopping the database
+echo "🛑 Stopping PostgreSQL database..."
 cd postgres_${PG_PORT}
-docker compose down
+if docker compose down; then
+    echo "✅ PostgreSQL stopped successfully"
+else
+    echo "⚠️  Warning: Failed to stop PostgreSQL gracefully"
+fi
 cd ..
+
+echo ""
+echo "🏁 Demos Network node session completed"
+echo "💡 Thank you for running a Demos Network node!"
+echo "📚 For support: https://demos.network/support"
+echo ""
+
+log_verbose "Final exit code: $exit_code"

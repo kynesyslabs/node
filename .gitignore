@@ -127,6 +127,9 @@ APTOS_INTEGRATION_PLAN.md
 aptos_examples_ts
 
 .serena-backup
+.serena/cache/typescript
+.serena-backup
+PR_COMMENTS
 dist
 src/features/bridges/EVMSmartContract/artifacts
 src/features/bridges/EVMSmartContract/cache
@@ -137,5 +140,3 @@ src/features/bridges/EVMSmartContract/GASLESS_BRIDGE_FLOW_DIAGRAM.md
 src/features/bridges/EVMSmartContract/USAGE.md
 CLAUDE.sync-conflict-20250901-171031-7JPPSQB.md
 .serena/cache/typescript/document_symbols_cache_v23-06-25.pkl
-
-PR_COMMENTS/
