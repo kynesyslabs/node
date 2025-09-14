@@ -1,0 +1,38 @@
+name: Claude PR Warning
+
+on:
+  pull_request:
+    branches: ['**']
+    types: [opened, synchronize]
+
+jobs:
+  claude-warning:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for .claude changes
+        run: |
+          echo "🔍 Checking if PR touches .claude/ files..."
+          
+          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q "^\.claude/"; then
+            echo "⚠️  This PR modifies .claude/ files"
+            
+            COMMENT_BODY="⚠️ **Claude Memory Files Detected**
+
+            This PR modifies \`.claude/\` files. After merge, these changes will be **automatically reverted** to preserve branch-specific Claude conversation context.
+
+            **Files that will be reverted:**
+            $(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '^\.claude/' | sed 's/^/- /' | head -10)
+
+            This is expected behavior to keep Claude conversation context branch-specific. ✅"
+            
+            gh pr comment ${{ github.event.number }} --body "$COMMENT_BODY" || echo "Could not post comment"
+          else
+            echo "✅ No .claude files affected"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
