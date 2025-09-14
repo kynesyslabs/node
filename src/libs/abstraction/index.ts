@@ -4,10 +4,13 @@ import { type Web2ProofParser } from "./web2/parsers"
 import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { Twitter } from "../identity/tools/twitter"
+import type { GenesisBlock } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/blocks" // TODO Properly import from types
+
 import {
     TelegramAttestationPayload,
     TelegramSignedAttestation,
 } from "@kynesyslabs/demosdk/abstraction"
+import { toInteger } from "lodash"
 
 /**
  * Verifies telegram dual signature attestation (user + bot signatures)
@@ -21,41 +24,50 @@ import {
  * @param botAddress - The bot's address to check
  * @returns Promise<boolean> - true if bot is authorized (has balance in genesis), false otherwise
  */
+/**
+ * Check if a bot address is authorized by verifying it exists in genesis block balances
+ * @param botAddress - The bot's address to check
+ * @returns Promise<boolean> - true if bot is authorized (has balance in genesis), false otherwise
+ */
 async function checkBotAuthorization(botAddress: string): Promise<boolean> {
     try {
-        // Import Chain class to access genesis block
+        // Import Chain class and GenesisBlock type to access genesis block
         const chainModule = (await import("@/libs/blockchain/chain")).default
+        // Import type only for TypeScript
 
         // Get the genesis block (block number 0)
-        const genesisBlock = await chainModule.getGenesisBlock()
+        const genesisBlock =
+            (await chainModule.getGenesisBlock()) as GenesisBlock
 
         if (!genesisBlock || !genesisBlock.content) {
             console.error("Genesis block not found or has no content")
             return false
         }
 
-        // REVIEW It should be ok but if something goes wrong check if the genesis block returned structure is correct
-        // NOTE We might want to typize the genesis block return, in case
-        // Check if the bot address exists in genesis block balances
-        // Genesis block content should contain the initial address balances
-        const balances = genesisBlock.content.balances || genesisBlock.content
+        // REVIEW: Now properly typed - accessing genesis data from extra.genesisData
+        if (!genesisBlock.content.extra?.genesisData) {
+            console.error("Genesis block missing extra.genesisData")
+            return false
+        }
 
-        // Check if bot address exists in balances (array of [address, balance] tuples)
-        if (balances && Array.isArray(balances)) {
-            const normalizedBotAddress = botAddress.toLowerCase()
+        // Get balances from properly typed genesis data
+        const balances = genesisBlock.content.extra.genesisData.balances
 
-            // Check if address exists in balances array
-            for (const balanceEntry of balances) {
-                if (Array.isArray(balanceEntry) && balanceEntry.length >= 2) {
-                    const [address, balance] = balanceEntry
-                    if (
-                        typeof address === "string" &&
-                        address.toLowerCase() === normalizedBotAddress
-                    ) {
-                        // Bot found in genesis with non-zero balance - authorized
-                        return balance !== "0" && balance !== 0
-                    }
-                }
+        if (!balances || !Array.isArray(balances)) {
+            console.error("Genesis block balances not found or invalid format")
+            return false
+        }
+
+        const normalizedBotAddress = botAddress.toLowerCase()
+
+        // Check if bot address exists in balances array
+        for (const [address, balance] of balances) {
+            if (
+                typeof address === "string" &&
+                address.toLowerCase() === normalizedBotAddress
+            ) {
+                // Bot found in genesis with non-zero balance - authorized
+                return balance !== "0" && toInteger(balance) !== 0
             }
         }
 
@@ -85,8 +97,10 @@ async function verifyTelegramProof(
 
         // REVIEW: Enhanced input validation with type safety and normalization
         // Validate attestation data types first (trusted source should have proper format)
-        if (typeof telegramAttestation.payload.telegram_id !== "number" && 
-            typeof telegramAttestation.payload.telegram_id !== "string") {
+        if (
+            typeof telegramAttestation.payload.telegram_id !== "number" &&
+            typeof telegramAttestation.payload.telegram_id !== "string"
+        ) {
             return {
                 success: false,
                 message: "Invalid telegram_id type in bot attestation",
@@ -103,8 +117,10 @@ async function verifyTelegramProof(
         // Safe type conversion and normalization
         const attestationId = telegramAttestation.payload.telegram_id.toString()
         const payloadId = payload.userId?.toString() || ""
-        
-        const attestationUsername = telegramAttestation.payload.username.toLowerCase().trim()
+
+        const attestationUsername = telegramAttestation.payload.username
+            .toLowerCase()
+            .trim()
         const payloadUsername = payload.username?.toLowerCase()?.trim() || ""
 
         // Verify the telegram_id and username match with normalized comparison
