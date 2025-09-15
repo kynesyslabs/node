@@ -5,10 +5,8 @@ import Chain from "../../../blockchain/chain"
 import log from "src/utilities/logger"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import Hashing from "../../../crypto/hashing"
-import {
-    NativeBridgeTxPayload,
-    validateChain,
-} from "@kynesyslabs/demosdk/bridge"
+import { NativeBridgeTxPayload } from "@kynesyslabs/demosdk/bridge"// TODO Export it properly and build the sdk
+import { validateChain } from "@kynesyslabs/demosdk/bridge"
 
 /**
  * Handles the native bridge transaction (called by the endpoint handler)
@@ -37,7 +35,7 @@ export default async function handleNativeBridgeTx(
             }
         }
 
-        const { operation: compiledOperation, txHash } = tx.content
+        const { operation: compiledOperation, bridgeId } = tx.content
             .data[1] as NativeBridgeTxPayload
         if (!compiledOperation?.content?.operation) {
             log.error(
@@ -49,14 +47,26 @@ export default async function handleNativeBridgeTx(
             }
         }
 
-        if (!txHash) {
+        if (!bridgeId) {
             log.error(
-                `${fname} Missing txHash: Transaction hash for the crosschain deposit to tank is required`,
+                `${fname} Missing bridgeId: Bridge ID is required for operation tracking`,
             )
             return {
                 success: false,
                 message:
-                    "Missing txHash: Transaction hash for the crosschain deposit to tank is required",
+                    "Missing bridgeId: Bridge ID is required for operation tracking",
+            }
+        }
+
+        // Validate bridge ID matches the one in compiled operation
+        if (compiledOperation.content.bridgeId !== bridgeId) {
+            log.error(
+                `${fname} Bridge ID mismatch: transaction=${bridgeId}, compiled=${compiledOperation.content.bridgeId}`,
+            )
+            return {
+                success: false,
+                message:
+                    "Bridge ID mismatch between transaction and compiled operation",
             }
         }
 
@@ -67,7 +77,7 @@ export default async function handleNativeBridgeTx(
 
         // Validate origin chain
         try {
-            validateChain(operation.from.chain, true)
+            validateChain(operation.originChain, true)
         } catch (error) {
             log.error(`${fname} Invalid origin chain: ${error}`)
             return {
@@ -78,7 +88,7 @@ export default async function handleNativeBridgeTx(
 
         // Validate destination chain
         try {
-            validateChain(operation.to.chain, false)
+            validateChain(operation.destinationChain, false)
         } catch (error) {
             log.error(`${fname} Invalid destination chain: ${error}`)
             return {
@@ -132,13 +142,23 @@ export default async function handleNativeBridgeTx(
 
         // Step 6: Check for gasless bridge operation
         log.info(`${fname} Checking for gasless bridge operation...`)
-        const isGaslessOperation = await detectGaslessOperation(compiledOperation, tx)
+        const isGaslessOperation = await detectGaslessOperation(
+            compiledOperation,
+            tx,
+        )
 
         if (isGaslessOperation) {
-            log.info(`${fname} Detected gasless bridge operation, validating user signature...`)
-            const gaslessValidation = await validateGaslessOperation(compiledOperation, tx)
+            log.info(
+                `${fname} Detected gasless bridge operation, validating user signature...`,
+            )
+            const gaslessValidation = await validateGaslessOperation(
+                compiledOperation,
+                tx,
+            )
             if (!gaslessValidation.valid) {
-                log.error(`${fname} Gasless operation validation failed: ${gaslessValidation.error}`)
+                log.error(
+                    `${fname} Gasless operation validation failed: ${gaslessValidation.error}`,
+                )
                 return {
                     success: false,
                     error: gaslessValidation.error,
@@ -164,7 +184,7 @@ export default async function handleNativeBridgeTx(
                 JSON.stringify(compiledOperation.content),
             )
             const signatureValid = await ucrypto.verify({
-                algorithm: compiledOperation.signature.type,
+                algorithm: compiledOperation.signature.type as "falcon" | "ml-dsa" | "ed25519", // TODO Might be unsafe
                 message: new TextEncoder().encode(contentHash),
                 publicKey: hexToUint8Array(compiledOperation.rpcPublicKey),
                 signature: hexToUint8Array(compiledOperation.signature.data),
@@ -189,14 +209,16 @@ export default async function handleNativeBridgeTx(
             }
         }
 
-        log.info(`${fname} ✅ Native bridge transaction validation successful`)
+        log.info(
+            `${fname} ✅ Native bridge transaction validation successful for bridge ID: ${bridgeId}`,
+        )
 
         // NOTE: Mempool integration is handled by endpointHandlers.ts line 386-450
-        // If we return tx.hash (not null), the transaction will be added to mempool automatically
+        // Bridge ID flows through mempool with the transaction - no separate storage needed
 
         return {
             success: true,
-            message: "Native bridge transaction validation successful",
+            message: `Native bridge transaction validation successful for bridge ID: ${bridgeId}`,
         }
     } catch (error) {
         log.error(
@@ -220,26 +242,26 @@ async function detectGaslessOperation(
     tx: NativeBridgeTransaction,
 ): Promise<boolean> {
     const fname = "[detectGaslessOperation]"
-    
+
     try {
         // Check for gasless flag in compiled operation
         if ((compiledOperation.content as any).gasless === true) {
             log.info(`${fname} Gasless flag detected in compiled operation`)
             return true
         }
-        
+
         // Check for gasless user signature in transaction content
         if ((tx.content as any).userSignature) {
             log.info(`${fname} User signature detected in transaction content`)
             return true
         }
-        
+
         // Check for gasless specific data fields
         if ((compiledOperation.content as any).userNonce !== undefined) {
             log.info(`${fname} User nonce detected in compiled operation`)
             return true
         }
-        
+
         return false
     } catch (error) {
         log.warning(`${fname} Error detecting gasless operation: ${error}`)
@@ -258,64 +280,68 @@ async function validateGaslessOperation(
     tx: NativeBridgeTransaction,
 ): Promise<{ valid: boolean; error?: string }> {
     const fname = "[validateGaslessOperation]"
-    
+
     try {
         const operation = compiledOperation.content.operation
         const gaslessData = compiledOperation.content as any
         const txContent = tx.content as any
-        
+
         // Extract gasless operation data
-        const userSignature = txContent.userSignature || gaslessData.userSignature
+        const userSignature =
+            txContent.userSignature || gaslessData.userSignature
         const userNonce = gaslessData.userNonce
-        const userAddress = operation.from.address
-        
+        const userAddress = operation.demoAddress
+
         if (!userSignature) {
             return {
                 valid: false,
                 error: "Missing user signature for gasless operation",
             }
         }
-        
+
         if (userNonce === undefined || userNonce === null) {
             return {
                 valid: false,
                 error: "Missing user nonce for gasless operation",
             }
         }
-        
+
         // Validate user signature for bridge operation authorization
-        const messageToSign = Hashing.sha256(JSON.stringify({
-            action: "LIQUIDITY_TANK_BRIDGE",
-            user: userAddress,
-            nonce: userNonce,
-            originChain: operation.from.chain,
-            destChain: operation.to.chain,
-            token: operation.token.address,
-            recipient: operation.to.address,
-            amount: operation.token.amount,
-            bridgeFeeBps: gaslessData.bridgeFeeBps || 0,
-        }))
-        
+        const messageToSign = Hashing.sha256(
+            JSON.stringify({
+                action: "LIQUIDITY_TANK_BRIDGE",
+                user: userAddress,
+                nonce: userNonce,
+                originChain: operation.originChain,
+                destChain: operation.destinationChain,
+                token: operation.token,
+                recipient: operation.destinationAddress,
+                amount: operation.amount,
+                bridgeFeeBps: gaslessData.bridgeFeeBps || 0,
+            }),
+        )
+
         const signatureValid = await ucrypto.verify({
             algorithm: "ed25519", // TODO: Support secp256k1 as well
             message: new TextEncoder().encode(messageToSign),
             publicKey: hexToUint8Array(userAddress), // Assuming user address is their public key
             signature: hexToUint8Array(userSignature),
         })
-        
+
         if (!signatureValid) {
             return {
                 valid: false,
                 error: `Invalid user signature for gasless operation from: ${userAddress}`,
             }
         }
-        
+
         // Validate nonce to prevent replay attacks
         // TODO: Implement nonce checking against used nonces storage
-        log.info(`${fname} User signature validated for gasless operation - user: ${userAddress}, nonce: ${userNonce}`)
-        
+        log.info(
+            `${fname} User signature validated for gasless operation - user: ${userAddress}, nonce: ${userNonce}`,
+        )
+
         return { valid: true }
-        
     } catch (error) {
         return {
             valid: false,
