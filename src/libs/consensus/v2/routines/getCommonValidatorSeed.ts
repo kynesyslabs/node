@@ -90,13 +90,10 @@ export default async function getCommonValidatorSeed(
         }
     }
 
-    let genesisHash: string
+    let genesisHash = await Chain.getGenesisBlockHash()
     // Get genesis block for chain anchoring
-    const genesisBlock = await Chain.getGenesisBlock()
 
-    if (genesisBlock) {
-        genesisHash = genesisBlock.hash
-    } else {
+    if (!genesisHash) {
         // NOTE: Only happens when forging genesis block
         // INFO: check if genesis is lastBlock
         if (lastBlock.number === 0) {
