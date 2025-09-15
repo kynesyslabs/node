@@ -5,6 +5,7 @@ libs = ["lib"]
 test = "test"
 optimizer = true
 optimizer_runs = 200
+via_ir = true
 solc = "0.8.30"
 
 # Exclude certora verification files from compilation

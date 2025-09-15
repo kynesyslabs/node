@@ -2,29 +2,6 @@
 
 A secure liquidity tank with rotating co-ownership managed by multisig operations for the Demos Network Native Bridges.
 
-## Table of Contents
-
-- [Overview](#overview)
-- [Core Architecture](#core-architecture)
-- [How It Works](#how-it-works)
-- [Function Reference](#function-reference)
-  - [Initialization Functions](#initialization-functions)
-  - [Multisig Operations](#multisig-operations)
-  - [Gasless Bridge Operations](#gasless-bridge-operations)
-  - [Administrative Functions](#administrative-functions)
-  - [Query Functions](#query-functions)
-- [Security Features](#security-features)
-- [Gas Optimization](#gas-optimization)
-- [Token Support](#token-support)
-- [Events](#events)
-- [Integration with Demos Network](#integration-with-demos-network)
-- [Deployment Information](#deployment-information)
-- [Error Handling](#error-handling)
-- [Security Considerations](#security-considerations)
-- [Documentation](#documentation)
-
----
-
 ## Overview
 
 The LiquidityTank contract is a core component of the Demos Native Bridge architecture. It serves as a multisig-controlled treasury that holds liquidity across different EVM chains. The contract features rotating ownership, gasless operations, and comprehensive security mechanisms.
@@ -44,24 +21,6 @@ The LiquidityTank contract is a core component of the Demos Native Bridge archit
 - **Token Support**: Native ETH and any ERC20 token transfers
 
 ## How It Works
-
-### Bridge ID System
-
-The contract uses a **bridge ID system** for end-to-end operation tracking:
-
-1. **RPC Request**: User calls Demos Network RPC to initiate bridge
-2. **Bridge ID Generation**: RPC generates unique bridge ID and returns tank address + bridge parameters
-3. **Contract Call**: User includes bridge ID in contract function call
-4. **Event Emission**: Contract emits bridge ID in events for easy monitoring
-5. **Network Tracking**: Demos Network tracks operation using bridge ID (no complex correlation needed)
-
-**Bridge ID Format**: `bridge_a1b2c3d4e5f6g7h8` (16-character hash)
-
-**Benefits**:
-- ✅ **Simple tracking**: Single ID follows operation end-to-end
-- ✅ **No external storage**: Bridge ID flows through mempool with transaction
-- ✅ **Efficient monitoring**: Indexed events allow filtering by bridge ID
-- ✅ **Security**: Bridge ID included in signature hash prevents tampering
 
 ### 1. Initialization
 ```solidity
@@ -121,7 +80,6 @@ depositUSDCToTank(
 #### Combined Deposit + Bridge
 ```solidity
 depositAndBridge(
-    string calldata bridgeId,   // Unique bridge ID from Demos Network RPC
     address user,               // User initiating bridge
     bytes calldata signature,   // User's authorization signature
     uint256 nonce,             // Replay protection nonce
@@ -136,7 +94,6 @@ depositAndBridge(
 #### Permit-Enabled Bridge (Single Transaction)
 ```solidity
 depositAndBridgeWithPermit(
-    string calldata bridgeId,   // Unique bridge ID from Demos Network RPC
     address user,               // User depositing and bridging
     bytes calldata signature,   // User's authorization signature
     uint256 nonce,             // Replay protection nonce
@@ -149,48 +106,6 @@ depositAndBridgeWithPermit(
     uint8 v, bytes32 r, bytes32 s  // Permit signature components
 )
 ```
-
-## Function Reference
-
-### Initialization Functions
-| Function | Description | Documentation |
-|----------|-------------|---------------|
-| `constructor()` | Deploy contract with deployer as emergency authority | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#constructor) |
-| `setAuthorizedAddresses()` | One-time setup of multisig participants (min 3) | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#setAuthorizedAddresses) |
-
-### Multisig Operations
-| Function | Description | Documentation |
-|----------|-------------|---------------|
-| `multisigTransfer()` | Transfer tokens/ETH with 2/3 approval | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#multisigTransfer) |
-| `proposeNextOwners()` | Rotate tank ownership to new addresses | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#proposeNextOwners) |
-| `emergencyWithdrawMultisig()` | Emergency fund recovery via multisig | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#emergencyWithdrawMultisig) |
-
-### Gasless Bridge Operations
-| Function | Description | Documentation |
-|----------|-------------|---------------|
-| `depositUSDCToTank()` | Gasless USDC deposit with signature | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#depositUSDCToTank) |
-| `depositAndBridge()` | Combined deposit + bridge initiation | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#depositAndBridge) |
-| `depositAndBridgeWithPermit()` | Single-tx bridge with EIP-2612 permit | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#depositAndBridgeWithPermit) |
-
-### Administrative Functions
-| Function | Description | Documentation |
-|----------|-------------|---------------|
-| `pause()` / `unpause()` | Emergency contract suspension | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#pause) |
-| `configureGasSubsidy()` | Configure gas sponsorship settings | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#configureGasSubsidy) |
-| `depositGasSubsidy()` | Add ETH to gas sponsorship pool | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#depositGasSubsidy) |
-| `setTokenNameMapping()` | Map human names to token addresses | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#setTokenNameMapping) |
-| `emergencyReset()` | Deployer-only emergency ownership reset | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#emergencyReset) |
-
-### Query Functions
-| Function | Description | Documentation |
-|----------|-------------|---------------|
-| `getAuthorizedAddresses()` | Get current multisig participants | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#getAuthorizedAddresses) |
-| `getUSDCBalance()` | Get tank's USDC balance | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#getUSDCBalance) |
-| `getTokenBalance()` | Get balance for any ERC20 token | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#getTokenBalance) |
-| `hasUserSignedNonce()` | Check if user has used a nonce | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#hasUserSignedNonce) |
-| `getProposalStatus()` | Get multisig proposal details | [View Details](http://localhost:3001/liquidityTank.sol/contract.LiquidityTank.html#getProposalStatus) |
-
-> 📚 **Complete Reference**: All functions, events, errors, and structs are documented in the [Auto-Generated Documentation](http://localhost:3001)
 
 ## Security Features
 
@@ -271,7 +186,7 @@ depositAndBridge(..., "usdc", ...) // Resolves to USDC contract
 - `TransferExecuted`: Funds transferred with actual amounts
 - `OwnersRotated`: Ownership structure updated
 - `TokenDeposited`: User deposits tracked
-- `BridgeOperationInitiated`: Cross-chain bridge started (includes indexed bridge ID)
+- `BridgeOperationInitiated`: Cross-chain bridge started
 
 ### Administrative
 - `AuthorizationGranted`/`Revoked`: Access control changes
@@ -335,20 +250,6 @@ The contract uses custom errors for gas efficiency:
 - **Event Transparency**: Comprehensive operation logging
 - **Emergency Controls**: Pause/recovery mechanisms
 - **Gas DoS Protection**: Efficient loops and operations
-
-## Documentation
-
-### Quick Access
-- **📖 README** (this file): User-friendly overview with examples and integration guide
-- **📚 Auto-Generated Docs**: Complete function reference at [http://localhost:3001](http://localhost:3001)
-- **🚀 Start Documentation Server**: Run `./serve-docs.sh` for one-click access
-
-### Documentation Structure
-- **README.md**: Organized overview with function index and cross-references
-- **Foundry Docs**: Auto-generated NatSpec documentation with search functionality
-- **Function Tables**: Quick reference with direct links to detailed specs
-
-> 💡 **Tip**: Use the README for overview and examples, then click "View Details" links to jump to specific function documentation in the auto-generated reference.
 
 ## Version History
 

@@ -18,6 +18,7 @@ pragma solidity ^0.8.27;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 
 /// @dev Custom errors for gas efficiency (saves ~2k gas per revert vs strings)
 error NotAuthorized();
@@ -51,6 +52,7 @@ error OnlyProposerCanCancel();
 
 /// @dev Struct to reduce stack depth in bridge operations
 struct BridgeParams {
+    string bridgeId;
     address user;
     uint256 nonce;
     string originChain;
@@ -205,6 +207,7 @@ contract LiquidityTank {
         address indexed relayer
     );
     event BridgeOperationInitiated(
+        string indexed bridgeId,
         address indexed user,
         string originChain,
         string destChain,
@@ -1038,6 +1041,7 @@ contract LiquidityTank {
     /// @param bridgeFeeBps Bridge fee in basis points
     /// @dev Creates a bridge request that will be processed by consensus
     function initiateBridgeOperation(
+        string calldata bridgeId,
         address user,
         bytes calldata signature,
         uint256 nonce,
@@ -1050,6 +1054,7 @@ contract LiquidityTank {
     ) external nonReentrant whenNotPaused {
         // Create params struct to reduce stack depth
         BridgeParams memory params = BridgeParams({
+            bridgeId: bridgeId,
             user: user,
             nonce: nonce,
             originChain: originChain,
@@ -1086,6 +1091,7 @@ contract LiquidityTank {
 
         // Emit bridge operation event for node detection
         emit BridgeOperationInitiated(
+            params.bridgeId,
             params.user,
             params.originChain,
             params.destChain,
@@ -1110,6 +1116,7 @@ contract LiquidityTank {
     }
 
     /// @notice Combined gasless deposit and bridge operation (RECOMMENDED)
+    /// @param bridgeId Unique bridge identifier from Demos Network RPC
     /// @param user User depositing and bridging tokens
     /// @param signature User's signature authorizing both operations
     /// @param nonce Nonce for replay protection (single nonce for both operations)
@@ -1123,6 +1130,7 @@ contract LiquidityTank {
     ///      Origin chain is automatically set to current block.chainid
     ///      Emits both individual events plus combined event for comprehensive tracking
     function depositAndBridge(
+        string calldata bridgeId,
         address user,
         bytes calldata signature,
         uint256 nonce,
@@ -1153,6 +1161,7 @@ contract LiquidityTank {
         bytes32 messageHash = keccak256(
             abi.encodePacked(
                 "LIQUIDITY_TANK_DEPOSIT_AND_BRIDGE",
+                bridgeId,
                 user,
                 nonce,
                 tokenName,
@@ -1230,6 +1239,7 @@ contract LiquidityTank {
         );
 
         emit BridgeOperationInitiated(
+            bridgeId,
             user,
             originChain,
             destChain,
@@ -1248,6 +1258,165 @@ contract LiquidityTank {
         );
 
         // Emit new combined event
+        emit DepositAndBridgeExecuted(
+            user,
+            tokenAddress,
+            depositAmount,
+            depositAmount, // bridgeAmount equals depositAmount
+            destChain,
+            recipient,
+            nonce,
+            _msgSender()
+        );
+
+        // Reimburse gas costs to the relayer
+        _payGasFromPool(tx.origin);
+    }
+
+    /// @notice Combined gasless deposit and bridge operation with EIP-2612 permit (SINGLE TRANSACTION)
+    /// @param bridgeId Unique bridge identifier from Demos Network RPC
+    /// @param user User depositing and bridging tokens
+    /// @param signature User's signature authorizing both operations
+    /// @param nonce Nonce for replay protection (single nonce for both operations)
+    /// @param tokenAddress ERC20 token contract address (must support EIP-2612 permit)
+    /// @param depositAmount Amount of tokens to deposit and bridge
+    /// @param destChain Destination chain identifier
+    /// @param recipient Recipient address on destination chain
+    /// @param bridgeFeeBps Bridge fee in basis points
+    /// @param permitDeadline Permit signature deadline
+    /// @param v Permit signature v component
+    /// @param r Permit signature r component  
+    /// @param s Permit signature s component
+    /// @dev TRUE single-transaction bridge: permit + deposit + bridge in one tx
+    ///      User signs once, relayer executes, contract handles permit automatically
+    ///      Requires token to support EIP-2612 permit functionality
+    ///      Emits both individual events plus combined event for comprehensive tracking
+    function depositAndBridgeWithPermit(
+        string calldata bridgeId,
+        address user,
+        bytes calldata signature,
+        uint256 nonce,
+        address tokenAddress,
+        uint256 depositAmount,
+        string calldata destChain,
+        address recipient,
+        uint256 bridgeFeeBps,
+        uint256 permitDeadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant whenNotPaused {
+        // Validate inputs
+        if (tokenAddress == address(0)) revert InvalidTokenContract();
+        if (depositAmount == 0) revert InvalidAmount();
+        if (recipient == address(0)) revert InvalidAddress();
+        
+        // Validate ERC20 contract and permit support
+        _validateERC20Contract(tokenAddress);
+        
+        // Get current chain ID as string for origin chain
+        string memory originChain = _uint256ToString(block.chainid);
+
+        // Create combined message hash for permit + deposit + bridge
+        bytes32 messageHash = keccak256(
+            abi.encodePacked(
+                "LIQUIDITY_TANK_PERMIT_DEPOSIT_BRIDGE",
+                user,
+                nonce,
+                tokenAddress,
+                depositAmount,
+                originChain,
+                destChain,
+                recipient,
+                bridgeFeeBps,
+                permitDeadline,
+                block.chainid,
+                address(this)
+            )
+        );
+
+        // Verify signature and update nonce (single nonce for atomic operation)
+        _verifySignature(user, signature, nonce, messageHash);
+
+        // PERMIT PHASE: Execute gasless approval
+        try IERC20Permit(tokenAddress).permit(
+            user,
+            address(this),
+            depositAmount,
+            permitDeadline,
+            v,
+            r,
+            s
+        ) {
+            // Permit successful - continue with deposit
+        } catch {
+            // Permit failed - check if already approved (idempotent behavior)
+            uint256 currentAllowance = IERC20(tokenAddress).allowance(user, address(this));
+            if (currentAllowance < depositAmount) {
+                revert InvalidSignature(); // Permit failed and insufficient allowance
+            }
+            // Continue if sufficient allowance exists
+        }
+
+        // DEPOSIT PHASE: Transfer tokens to contract
+        uint256 balanceBefore = _getERC20Balance(tokenAddress, address(this));
+        
+        // Use SafeERC20 to handle the transfer
+        SafeERC20.safeTransferFrom(
+            IERC20(tokenAddress),
+            user,
+            address(this),
+            depositAmount
+        );
+
+        uint256 balanceAfter = _getERC20Balance(tokenAddress, address(this));
+        uint256 actualDeposited = balanceAfter - balanceBefore;
+
+        // Check for fee-on-transfer tokens
+        if (actualDeposited < (depositAmount * 9900) / 10000)
+            revert SlippageExceeded();
+
+        // Update depositAmount to actual deposited amount
+        depositAmount = actualDeposited;
+
+        // BRIDGE PHASE: Validate balance and initiate bridge
+        uint256 currentBalance = _getERC20Balance(tokenAddress, address(this));
+        if (currentBalance < depositAmount) revert InsufficientBalance();
+
+        // Calculate amount after fee
+        uint256 amountAfterFee = (depositAmount * (10000 - bridgeFeeBps)) / 10000;
+        if (amountAfterFee == 0) revert InvalidAmount();
+
+        // Emit individual events for backwards compatibility
+        emit TokenDeposited(tokenAddress, user, depositAmount);
+        emit GaslessDepositExecuted(
+            user,
+            tokenAddress,
+            depositAmount,
+            nonce,
+            _msgSender()
+        );
+
+        emit BridgeOperationInitiated(
+            bridgeId,
+            user,
+            originChain,
+            destChain,
+            tokenAddress,
+            recipient,
+            depositAmount,
+            amountAfterFee,
+            nonce
+        );
+        emit GaslessBridgeInitiated(
+            user,
+            tokenAddress,
+            depositAmount,
+            nonce,
+            _msgSender()
+        );
+
+        // Emit new combined event for permit-enabled operation
         emit DepositAndBridgeExecuted(
             user,
             tokenAddress,
