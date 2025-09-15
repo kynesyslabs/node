@@ -4,6 +4,7 @@ import {
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
+import { randomBytes } from "crypto"
 import { getSharedState } from "@/utilities/sharedState"
 import { ISignature, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { JsonConfig } from "@/utilities/JsonConfig"
@@ -38,8 +39,7 @@ export async function initializeTankManager(): Promise<void> {
         // Filter out undeployed tanks (address = 0x000...)
         const deployedTanks = Object.fromEntries(
             Object.entries(tankAddresses).filter(
-                ([_, address]) =>
-                    !address.includes("000000000000000"),
+                ([_, address]) => !address.includes("000000000000000"),
             ),
         )
 
@@ -77,7 +77,7 @@ export async function manageNativeBridge(
     // await initializeTankManager()
 
     // Prepare the response
-     
+
     let response: RPCResponse = {
         result: null,
         response: null,
@@ -86,7 +86,7 @@ export async function manageNativeBridge(
     }
 
     // First, verify the signature
-    const publicKey = operation.address
+    const publicKey = operation.demoAddress
     const opHash = Hashing.sha256(JSON.stringify(operation))
     const verified = ucrypto.verify({
         algorithm: signature.type,
@@ -104,8 +104,11 @@ export async function manageNativeBridge(
     }
 
     try {
+        // Generate unique bridge ID for this operation
+        const bridgeId = generateBridgeId(operation)
+
         // Parse the operation to get the right compiled operation content
-        const derivedContent = await parseOperation(operation)
+        const derivedContent = await parseOperation(operation, bridgeId)
 
         const hash = Hashing.sha256(JSON.stringify(derivedContent))
         const compiledSignature = await ucrypto.sign(
@@ -135,23 +138,43 @@ export async function manageNativeBridge(
 }
 
 /**
+ * Generate a unique bridge ID for tracking the operation
+ * @param operation Native bridge operation from client
+ * @returns Unique bridge ID string
+ */
+function generateBridgeId(operation: NativeBridgeOperation): string {
+    // Create deterministic but unique bridge ID using operation data + timestamp + random bytes
+    const operationData = `${operation.originChainType}.${operation.originChain}->${operation.destinationChainType}.${operation.destinationChain}:${operation.amount}:${operation.demoAddress}:${operation.destinationAddress}`
+    const timestamp = Date.now().toString()
+    const randomSuffix = randomBytes(8).toString("hex")
+
+    // Hash to create clean, fixed-length bridge ID
+    const bridgeData = `${operationData}:${timestamp}:${randomSuffix}`
+    return `bridge_${Hashing.sha256(bridgeData).substring(0, 16)}`
+}
+
+/**
  * Parses the operation to get the right compiled operation content using deployed tank addresses
  * @param operation Native bridge operation from client
- * @returns The compiled operation content with tank data
+ * @param bridgeId Unique bridge identifier for this operation
+ * @returns The compiled operation content with tank data and bridge ID
  */
 async function parseOperation(
     operation: NativeBridgeOperation,
+    bridgeId: string,
 ): Promise<CompiledContent> {
-    const fromChainKey = `${operation.from.chain}.${operation.from.subchain}`
+    const fromChainKey = `${operation.originChain}`
 
     let tankData: SolanaTankData | EVMTankData = null
 
-    if (operation.from.chain.startsWith("evm")) {
+    if (operation.originChainType.startsWith("EVM")) {
         tankData = await parseEVMTankOperation(fromChainKey, operation)
-    } else if (operation.from.chain === "solana") {
+    } else if (operation.originChainType === "SOLANA") {
         tankData = await parseSolanaTankOperation(fromChainKey, operation)
     } else {
-        throw new Error(`Unsupported source chain: ${operation.from.chain}`)
+        throw new Error(
+            `Unsupported source chain: ${operation.originChainType}`,
+        )
     }
 
     const lastBlockNumber = await Chain.getLastBlockNumber()
@@ -159,6 +182,7 @@ async function parseOperation(
     return {
         operation,
         tankData,
+        bridgeId,
         validUntil: lastBlockNumber + 3,
     }
 }
@@ -194,7 +218,7 @@ async function parseEVMTankOperation(
         type: "evm",
         abi: liquidityTankABI,
         address: tankConfig.address,
-        amountExpected: operation.token.amount,
+        amountExpected: parseInt(operation.amount), // REVIEW Might be unsafe
     }
 }
 
@@ -210,11 +234,11 @@ async function parseSolanaTankOperation(
 ): Promise<SolanaTankData> {
     // REVIEW: For now using USDC program address until Solana treasury is implemented
     const usdcContracts = JsonConfig.getUsdcContracts()
-    const solanaUsdcAddress = usdcContracts.solana?.[operation.from.subchain]
+    const solanaUsdcAddress = usdcContracts.solana?.[operation.originChain]
 
     if (!solanaUsdcAddress) {
         throw new Error(
-            `No Solana USDC program found for subchain: ${operation.from.subchain}`,
+            `No Solana USDC program found for subchain: ${operation.originChain}`,
         )
     }
 
@@ -222,6 +246,6 @@ async function parseSolanaTankOperation(
     return {
         type: "solana",
         address: solanaUsdcAddress, // Temporary - will be treasury program address
-        amountExpected: operation.token.amount,
+        amountExpected: parseInt(operation.amount), // REVIEW Might be unsafe
     }
 }
