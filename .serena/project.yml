@@ -12,7 +12,7 @@ ignore_all_files_in_gitignore: false
 # same syntax as gitignore, so you can use * and **
 # Was previously called `ignored_dirs`, please update your config if you are using that.
 # Added (renamed) on 2025-04-07
-ignored_paths: [node_modules, *.so, __pycache__, target, *.pyz, *.pyc]
+ignored_paths: [node_modules, __pycache__, target]
 
 # whether the project is in read-only mode
 # If set to true, all editing tools will be disabled and attempts to use them will result in an error
