@@ -96,7 +96,17 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Contributing
 
-Contributions to the Demos Network node implementation are welcome. Please ensure all contributions follow the established code quality standards and include appropriate tests.
+We welcome contributions to the Demos Network node implementation! Before contributing, please read our comprehensive [Contributing Guide](CONTRIBUTING.md) which covers:
+
+- Code style and naming conventions
+- Development workflow and best practices  
+- AI-assisted development guidelines
+- Pull request process and review requirements
+- Testing and quality standards
+
+For quick reference, also see:
+- [Coding Guidelines](GUIDELINES/CODING.md) - Detailed code style guide
+- [AI Development Guidelines](GUIDELINES/VIBES.md) - Essential for AI-assisted development
 
 ---
 
