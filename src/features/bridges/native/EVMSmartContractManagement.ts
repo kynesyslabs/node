@@ -225,8 +225,8 @@ export class EVMSmartContractManagement {
 
         try {
             // Get USDC contract address for this chain
-            const usdcContracts = JsonConfig.getUsdcContracts()
-            const usdcAddress = usdcContracts[chainKey.replace(".", ".")]
+            const usdcContracts = JsonConfig.getStableCoinContracts("usdc")
+            const usdcAddress = usdcContracts[chainKey]
 
             if (!usdcAddress) {
                 throw new Error(`USDC contract not configured for ${chainKey}`)

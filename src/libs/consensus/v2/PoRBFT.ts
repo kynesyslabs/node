@@ -220,11 +220,11 @@ export async function consensusRoutine(): Promise<void> {
             )
         }
 
-        // INFO: Report votedOnBlock
-        await updateValidatorPhase(6)
+        // // INFO: Report votedOnBlock
+        // await updateValidatorPhase(6)
 
-        // INFO: Rotate the tank signers
-        await manager.rotateTankSigners()
+        // // INFO: Rotate the tank signers
+        // await manager.rotateTankSigners()
 
         // INFO: CONSENSUS ACTION 7: End the consensus routine
         await updateValidatorPhase(7)

@@ -4,6 +4,7 @@ import SecretaryManager from "../types/secretaryManager"
 import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import { EVMSmartContractManagement } from "@/features/bridges/native/EVMSmartContractManagement"
 import { getSharedState } from "@/utilities/sharedState"
+import { NativeBridgeTransaction } from "@kynesyslabs/demosdk/types"
 
 export default async function executeBridgeOperations(
     bridgeTxs: Transaction[],
@@ -79,7 +80,7 @@ export default async function executeBridgeOperations(
     return [successful, failed]
 }
 
-async function processBridgeTx(bridgeTx: Transaction): Promise<{
+async function processBridgeTx(bridgeTx: NativeBridgeTransaction): Promise<{
     txHash: string
     success: boolean
     error?: string
@@ -89,14 +90,16 @@ async function processBridgeTx(bridgeTx: Transaction): Promise<{
     const evmTankManager = EVMSmartContractManagement.getInstance()
 
     // Extract BridgeOperationCompiled from transaction
-    const compiled = bridgeTx.content.data[1] as NativeBridgeOperationCompiled
+    const compiled = bridgeTx.content.data[1].operation
     const operation = compiled.content.operation
-    const txHash = compiled.content.txHash
-    const destination = `${operation.from.chain}.${operation.from.subchain}`
-    
+    const txHash = bridgeTx.content.data[1].txHash
+    const destination = operation.from.chain
+
     // Detect if this is a gasless operation
     const isGasless = detectGaslessOperation(compiled, bridgeTx)
-    const gaslessData = isGasless ? extractGaslessData(compiled, bridgeTx) : null
+    const gaslessData = isGasless
+        ? extractGaslessData(compiled, bridgeTx)
+        : null
 
     log.debug(
         `${fname} Processing bridge operation: ${operation.from.chain} -> ${operation.to.chain} (gasless: ${isGasless})`,
@@ -120,7 +123,7 @@ async function processBridgeTx(bridgeTx: Transaction): Promise<{
 
         if (!depositResult.valid) {
             log.warning(
-                `${fname} Deposit verification failed on ${operation.from.chain}.${operation.from.subchain}`,
+                `${fname} Deposit verification failed on ${operation.from.chain}`,
             )
             return {
                 ...result,
@@ -184,11 +187,13 @@ async function processBridgeTx(bridgeTx: Transaction): Promise<{
         if (isGasless && gaslessData) {
             // Execute gasless withdrawal using meta-transaction
             log.info(`${fname} Executing gasless withdrawal on ${destination}`)
-            
+
             // Check gas subsidy pool balance before executing
             const subsidyBalance = await checkGasSubsidyBalance(destination)
             if (!subsidyBalance.sufficient) {
-                log.error(`${fname} Insufficient gas subsidy balance on ${destination}: ${subsidyBalance.balance}`)
+                log.error(
+                    `${fname} Insufficient gas subsidy balance on ${destination}: ${subsidyBalance.balance}`,
+                )
                 return {
                     ...result,
                     error: `Insufficient gas subsidy balance: ${subsidyBalance.balance}`,
@@ -206,7 +211,9 @@ async function processBridgeTx(bridgeTx: Transaction): Promise<{
 
             // Track gas subsidy usage
             await trackGasSubsidyUsage(destination, proposalId, "withdrawal")
-            log.info(`${fname} ✅ Gasless withdrawal executed on ${destination}: ${proposalId}`)
+            log.info(
+                `${fname} ✅ Gasless withdrawal executed on ${destination}: ${proposalId}`,
+            )
         } else {
             // Execute regular withdrawal using multisig
             log.info(`${fname} Executing regular withdrawal on ${destination}`)
@@ -216,7 +223,9 @@ async function processBridgeTx(bridgeTx: Transaction): Promise<{
                 operation.token.amount.toString(),
                 shardSigningKeys,
             )
-            log.info(`${fname} ✅ Regular withdrawal executed on ${destination}: ${proposalId}`)
+            log.info(
+                `${fname} ✅ Regular withdrawal executed on ${destination}: ${proposalId}`,
+            )
         }
 
         return {
@@ -298,26 +307,26 @@ function detectGaslessOperation(
     bridgeTx: Transaction,
 ): boolean {
     const fname = "[detectGaslessOperation]"
-    
+
     try {
         // Check for gasless flag in compiled operation
         if ((compiled.content as any).gasless === true) {
             log.debug(`${fname} Gasless flag detected in compiled operation`)
             return true
         }
-        
+
         // Check for gasless user signature in transaction content
         if ((bridgeTx.content as any).userSignature) {
             log.debug(`${fname} User signature detected in transaction content`)
             return true
         }
-        
+
         // Check for gasless specific data fields
         if ((compiled.content as any).userNonce !== undefined) {
             log.debug(`${fname} User nonce detected in compiled operation`)
             return true
         }
-        
+
         return false
     } catch (error) {
         log.warning(`${fname} Error detecting gasless operation: ${error}`)
@@ -340,21 +349,24 @@ function extractGaslessData(
     bridgeFeeBps?: number
 } | null {
     const fname = "[extractGaslessData]"
-    
+
     try {
         const gaslessData = compiled.content as any
         const txContent = bridgeTx.content as any
-        
+
         // Extract user signature from transaction or compiled operation
-        const userSignature = txContent.userSignature || gaslessData.userSignature
+        const userSignature =
+            txContent.userSignature || gaslessData.userSignature
         const userNonce = gaslessData.userNonce
         const bridgeFeeBps = gaslessData.bridgeFeeBps
-        
+
         if (!userSignature || userNonce === undefined) {
-            log.error(`${fname} Missing required gasless data - signature: ${!!userSignature}, nonce: ${userNonce}`)
+            log.error(
+                `${fname} Missing required gasless data - signature: ${!!userSignature}, nonce: ${userNonce}`,
+            )
             return null
         }
-        
+
         return {
             userSignature,
             userNonce,
@@ -377,26 +389,30 @@ async function checkGasSubsidyBalance(chainKey: string): Promise<{
     threshold: string
 }> {
     const fname = "[checkGasSubsidyBalance]"
-    
+
     try {
         const evmTankManager = EVMSmartContractManagement.getInstance()
-        
+
         // Get current subsidy pool balance from tank contract
         // TODO: Implement getGasSubsidyBalance method in EVMSmartContractManagement
         // For now, assume sufficient balance - this needs proper implementation
         const balance = "1000000000000000000" // 1 ETH placeholder
         const threshold = "100000000000000000" // 0.1 ETH threshold
-        
+
         const balanceNum = BigInt(balance)
         const thresholdNum = BigInt(threshold)
         const sufficient = balanceNum >= thresholdNum
-        
+
         if (!sufficient) {
-            log.warning(`${fname} Gas subsidy pool running low on ${chainKey}: ${balance} < ${threshold}`)
+            log.warning(
+                `${fname} Gas subsidy pool running low on ${chainKey}: ${balance} < ${threshold}`,
+            )
         } else {
-            log.debug(`${fname} Gas subsidy pool balance sufficient on ${chainKey}: ${balance}`)
+            log.debug(
+                `${fname} Gas subsidy pool balance sufficient on ${chainKey}: ${balance}`,
+            )
         }
-        
+
         return {
             sufficient,
             balance,
@@ -424,25 +440,26 @@ async function trackGasSubsidyUsage(
     operationType: string,
 ): Promise<void> {
     const fname = "[trackGasSubsidyUsage]"
-    
+
     try {
         // TODO: Implement proper gas usage tracking
         // This should store usage in database or monitoring system
-        log.info(`${fname} Gas subsidy used - Chain: ${chainKey}, Proposal: ${proposalId}, Type: ${operationType}`)
-        
+        log.info(
+            `${fname} Gas subsidy used - Chain: ${chainKey}, Proposal: ${proposalId}, Type: ${operationType}`,
+        )
+
         // TODO: Implement the following:
         // 1. Calculate actual gas consumed from transaction receipt
         // 2. Store usage in database with timestamp
         // 3. Update daily/weekly usage statistics
         // 4. Trigger alerts if usage exceeds thresholds
-        
+
         // Example monitoring alert check:
         // const dailyUsage = await getDailyGasUsage(chainKey)
         // const dailyLimit = getGasUsageLimit(chainKey)
         // if (dailyUsage > dailyLimit * 0.8) {
         //     await sendGasUsageAlert(chainKey, dailyUsage, dailyLimit)
         // }
-        
     } catch (error) {
         log.error(`${fname} Error tracking gas subsidy usage: ${error}`)
         // Don't throw - tracking failure shouldn't stop the operation

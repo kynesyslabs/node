@@ -31,6 +31,7 @@ import { manageNativeBridge } from "./manageNativeBridge"
 import Chain from "../blockchain/chain"
 import { RateLimiter } from "./middleware/rateLimiter"
 import GCR from "../blockchain/gcr/gcr"
+import { ISignature } from "@kynesyslabs/demosdk/types"
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
@@ -182,7 +183,7 @@ async function processPayload(
              */
             return await manageNativeBridge(
                 payload.params[0] as bridge.NativeBridgeOperation,
-                payload.params[1] as string,
+                payload.params[1] as ISignature,
             )
         case "hello_peer": // As it is authenticated, we can use it to check if the peer is still alive and is in our peer list
             var helloPeerRequest = payload.params[0] as HelloPeerRequest
@@ -440,6 +441,7 @@ export async function serverRpcBun() {
             const response = await processPayload(payload, sender)
             return jsonResponse(response)
         } catch (e) {
+            console.error(e)
             return jsonResponse({ error: "Invalid request format" }, 400)
         }
     })

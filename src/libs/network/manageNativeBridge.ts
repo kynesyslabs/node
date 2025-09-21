@@ -1,16 +1,20 @@
+import log from "@/utilities/logger"
+import { randomBytes } from "crypto"
+import Chain from "../blockchain/chain"
 import {
     Hashing,
     hexToUint8Array,
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
-import { randomBytes } from "crypto"
+import { JsonConfig } from "@/utilities/JsonConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import { ISignature, RPCResponse } from "@kynesyslabs/demosdk/types"
-import { JsonConfig } from "@/utilities/JsonConfig"
-import Chain from "../blockchain/chain"
 import { EVMSmartContractManagement } from "@/features/bridges/native/EVMSmartContractManagement"
-import log from "@/utilities/logger"
+
+function parseAmount(amount: string, decimals: bigint): bigint {
+    return BigInt(amount) * 10n ** decimals
+}
 
 // REVIEW: Temporary import from local SDK build to fix version mismatch
 import type {
@@ -72,11 +76,12 @@ export async function manageNativeBridge(
     operation: NativeBridgeOperation,
     signature: ISignature,
 ): Promise<RPCResponse> {
-    // // Initialize tank manager if needed
-    // NOW done on node startup
-    // await initializeTankManager()
-
-    // Prepare the response
+    log.debug(
+        "[manageNativeBridge] Operation: " + JSON.stringify(operation, null, 2),
+    )
+    log.debug(
+        "[manageNativeBridge] Signature: " + JSON.stringify(signature, null, 2),
+    )
 
     let response: RPCResponse = {
         result: null,
@@ -86,7 +91,7 @@ export async function manageNativeBridge(
     }
 
     // First, verify the signature
-    const publicKey = operation.demoAddress
+    const publicKey = operation.address
     const opHash = Hashing.sha256(JSON.stringify(operation))
     const verified = ucrypto.verify({
         algorithm: signature.type,
@@ -144,7 +149,7 @@ export async function manageNativeBridge(
  */
 function generateBridgeId(operation: NativeBridgeOperation): string {
     // Create deterministic but unique bridge ID using operation data + timestamp + random bytes
-    const operationData = `${operation.originChainType}.${operation.originChain}->${operation.destinationChainType}.${operation.destinationChain}:${operation.amount}:${operation.demoAddress}:${operation.destinationAddress}`
+    const operationData = `${operation.from.chain}->${operation.to.chain}:${operation.token.amount}:${operation.address}:${operation.to.address}`
     const timestamp = Date.now().toString()
     const randomSuffix = randomBytes(8).toString("hex")
 
@@ -163,18 +168,19 @@ async function parseOperation(
     operation: NativeBridgeOperation,
     bridgeId: string,
 ): Promise<CompiledContent> {
-    const fromChainKey = `${operation.originChain}`
+    const fromChainKey = operation.from.chain
 
     let tankData: SolanaTankData | EVMTankData = null
 
-    if (operation.originChainType.startsWith("EVM")) {
+    if (
+        typeof operation.from.chain === "string" &&
+        operation.from.chain.startsWith("evm")
+    ) {
         tankData = await parseEVMTankOperation(fromChainKey, operation)
-    } else if (operation.originChainType === "SOLANA") {
+    } else if (operation.from.chain.startsWith("solana")) {
         tankData = await parseSolanaTankOperation(fromChainKey, operation)
     } else {
-        throw new Error(
-            `Unsupported source chain: ${operation.originChainType}`,
-        )
+        throw new Error(`Unsupported source chain: ${operation.from.chain}`)
     }
 
     const lastBlockNumber = await Chain.getLastBlockNumber()
@@ -189,6 +195,7 @@ async function parseOperation(
 
 /**
  * Parse EVM tank operation using deployed tank address
+ *
  * @param chainKey EVM chain key (e.g., "eth.sepolia")
  * @param operation Bridge operation
  * @returns EVM tank data with deployed contract address
@@ -206,19 +213,33 @@ async function parseEVMTankOperation(
         throw new Error(`No deployed tank found for chain: ${chainKey}`)
     }
 
-    // REVIEW: Get the liquidityTank ABI for the compiled operation
-    const liquidityTankABI = [
-        "function getBalance(address token) view returns (uint256)",
-        "function multisigTransfer(bytes32 proposalId, address token, address to, uint256 amount)",
-        "function proposeNextOwners(bytes32 proposalId, address[] newOwners)",
-        "event TransferExecuted(address indexed token, address indexed to, uint256 amount)",
-    ]
+    const contractAddress = JsonConfig.getContractAddress(
+        operation.token.name,
+        chainKey,
+    )
+    if (!contractAddress) {
+        throw new Error(`No deployed tank found for chain: ${chainKey}`)
+    }
 
+    // INFO: Make sure the token address matches the deployed tank address
+    if (operation.token.address != contractAddress) {
+        throw new Error(
+            `Stablecoin contract address mismatch for ${operation.token.name} on ${chainKey}`,
+        )
+    }
+
+    // REVIEW: Get the liquidityTank ABI for the compiled operation
+    const liquidityTankABI = JsonConfig.getTankAbi(chainKey)
     return {
         type: "evm",
+        tankAddress: tankConfig.address,
+        amountToDeposit: parseAmount(operation.token.amount, 6n),
+        breakdown: {
+            bridgeAmount: operation.token.amount,
+            bridgeFee: "0",
+        },
         abi: liquidityTankABI,
-        address: tankConfig.address,
-        amountExpected: parseInt(operation.amount), // REVIEW Might be unsafe
+        feeBps: 0,
     }
 }
 
@@ -232,20 +253,14 @@ async function parseSolanaTankOperation(
     chainKey: string,
     operation: NativeBridgeOperation,
 ): Promise<SolanaTankData> {
-    // REVIEW: For now using USDC program address until Solana treasury is implemented
-    const usdcContracts = JsonConfig.getUsdcContracts()
-    const solanaUsdcAddress = usdcContracts.solana?.[operation.originChain]
-
-    if (!solanaUsdcAddress) {
-        throw new Error(
-            `No Solana USDC program found for subchain: ${operation.originChain}`,
-        )
-    }
-
     // TODO: Replace with actual treasury program address once SolanaAddressManagement is implemented
     return {
         type: "solana",
-        address: solanaUsdcAddress, // Temporary - will be treasury program address
-        amountExpected: parseInt(operation.amount), // REVIEW Might be unsafe
+        tankAddress: "0x0000000000000000000000000000000000000000", // Temporary - will be treasury program address
+        amountToDeposit: parseAmount(operation.token.amount, 6n),
+        breakdown: {
+            bridgeAmount: operation.token.amount,
+            bridgeFee: "0",
+        },
     }
 }
