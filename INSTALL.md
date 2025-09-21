@@ -7,28 +7,32 @@ After installing the required Linux operating system on a bare metal or computer
 ## 📋 System Requirements
 
 ### Operating System
+
 Install a Debian-based Linux distro like Ubuntu: [https://ubuntu.com/download/desktop](https://ubuntu.com/download/desktop)
 
 Each computer’s hardware can behave differently during Ubuntu installation. This may require a bit of troubleshooting on your end, but is not covered by this guide, as the main focus of this guide is specific to Demos node installation.
 
 ### Hardware Minimum Requirements
-- 4GB RAM
-- 4 CPU cores (2GHz+)
-- Modern SSD
-- 200 Mbps internet connection
-- Ubuntu 22.04 LTS or newer (or compatible Linux distribution)
+
+-   4GB RAM
+-   4 CPU cores (2GHz+)
+-   Modern SSD
+-   200 Mbps internet connection
+-   Ubuntu 22.04 LTS or newer (or compatible Linux distribution)
 
 ### Hardware Recommended Specs
-- 8GB RAM
-- 6 CPU cores (2GHz+)
-- Modern SSD
-- 1 Gbps internet connection
+
+-   8GB RAM
+-   6 CPU cores (2GHz+)
+-   Modern SSD
+-   1 Gbps internet connection
 
 ## ⚡ Installation Steps - Short Version
 
 This is the abridged installation guide. If this works for your system and allows the node to operate, then you are done here. If this results in errors, proceed to the full installation guide, which walks you through additional steps. All steps will require the use of the terminal.
 
 ### 1. Install Prerequisites
+
 Open a terminal and enter:
 
 ```bash
@@ -37,13 +41,15 @@ sudo apt install -y curl git wget build-essential ca-certificates gnupg lsb-rele
 ```
 
 ### 2. Install the Following Packages
-- **Install Docker and docker-compose for non-root users**
-  - Docker: [https://docs.docker.com/get-started/get-docker/](https://docs.docker.com/get-started/get-docker/)
-  - Docker Compose: [https://docs.docker.com/compose/install/](https://docs.docker.com/compose/install/)
-- **Install Bun**
-  - We suggest managing bun with mise ([https://mise.jdx.dev/getting-started.html](https://mise.jdx.dev/getting-started.html) and `mise use -g bun@latest`) for convenience
+
+-   **Install Docker and docker-compose for non-root users**
+    -   Docker: [https://docs.docker.com/get-started/get-docker/](https://docs.docker.com/get-started/get-docker/)
+    -   Docker Compose: [https://docs.docker.com/compose/install/](https://docs.docker.com/compose/install/)
+-   **Install Bun**
+    -   We suggest managing bun with mise ([https://mise.jdx.dev/getting-started.html](https://mise.jdx.dev/getting-started.html) and `mise use -g bun@latest`) for convenience
 
 ### 3. Clone the Repository
+
 ```bash
 cd ~
 git clone https://github.com/kynesyslabs/node.git
@@ -54,12 +60,14 @@ cd node
 ```
 
 ### 4. Install Dependencies
+
 ```bash
 # Install all dependencies at once
 bun install && bun pm trust --all
 ```
 
 ### 5. Run Node and Generate Keys
+
 ```bash
 # Start both database and node for the first time, if successful, you will see your node’s private
 # and public keys along with the database loaded and the node will join the consensus process
@@ -69,6 +77,7 @@ Ctrl+C
 ```
 
 ### 6. Configure the Node
+
 Copy the example configuration files into working copies:
 
 ```bash
@@ -77,9 +86,10 @@ cp demos_peerlist.json.example demos_peerlist.json
 ```
 
 **Edit .env file:** The most important setting is `EXPOSED_URL`. Set it based on your setup:
-- Local testing: `http://localhost:53550`
-- Remote machine: `http://YOUR_PUBLIC_IP:53550`
-- Behind proxy: `https://demos.example.com`
+
+-   Local testing: `http://localhost:53550`
+-   Remote machine: `http://YOUR_PUBLIC_IP:53550`
+-   Behind proxy: `https://demos.example.com`
 
 **Edit demos_peerlist.json:** Add known peers in the format:
 
@@ -92,6 +102,7 @@ cp demos_peerlist.json.example demos_peerlist.json
 For local testing, you can use your own public key (found in the “publickey” file in your node directory after the first run).
 
 ### 7. Run Node
+
 ```bash
 # Start the node again if you would like to keep it running
 ./run
@@ -104,6 +115,7 @@ For local testing, you can use your own public key (found in the “publickey”
 Start by installing a Debian Linux distro like Ubuntu: [https://ubuntu.com/download/desktop](https://ubuntu.com/download/desktop)
 
 ### 1. Install Prerequisites
+
 Open a terminal and enter:
 
 ```bash
@@ -112,6 +124,7 @@ sudo apt install -y curl git wget build-essential ca-certificates gnupg lsb-rele
 ```
 
 ### 2. Install Docker
+
 ```bash
 # Remove old Docker versions
 sudo apt remove docker docker-engine docker.io containerd runc
@@ -147,6 +160,7 @@ docker compose version
 ```
 
 ### 3. Install Bun using Mise
+
 ```bash
 # Install Mise
 curl https://mise.run | sh
@@ -161,6 +175,7 @@ bun -v
 ### Demos Node Installation
 
 #### 1. Clone Repository
+
 ```bash
 cd ~
 git clone -b testnet https://github.com/kynesyslabs/node.git
@@ -171,6 +186,7 @@ cd node
 ```
 
 #### 2. Install Dependencies
+
 ```bash
 # Install All dependencies
 bun install && bun pm trust --all
@@ -179,21 +195,47 @@ bun install && bun pm trust --all
 ## 🎯 Starting and Configuring the Node
 
 ### 1. Start the Node
+
+You can start the node using the `run` script shown below. 
+
 ```bash
-# Start the node and database for the first time with this command, if successful, you will see
-# your node’s private and public keys along with the database loaded and node joining the
-# consensus process. Your public key is stored in the “publickey” file and your private key is in the
-# “.demos.identity” file, both should be inside your node directory
 ./run
 ```
 
-This will:
-1. Start PostgreSQL database in Docker
-2. Generate your public key and private key - KEEP YOUR PRIVATE KEY PRIVATE
-3. Wait for database to be ready
-4. Start the Demos node
+Running the node the first time will generate a private key for your node and store it in the `.demos_identity` file by default. The public key for your node is printed on the terminal when the node runs and is also saved in a `publickey_*` file in the same directory.
+
+### Run script usage
+```
+🚀 Demos Network Node Runner
+
+USAGE:
+    ./run [OPTIONS]
+
+Welcome to Demos Network! This script helps you run your blockchain node easily.
+
+OPTIONS:
+    -p <port>                      Node port (default: 53550)
+    -d <port>                      PostgreSQL port (default: 5332)
+    -i <path>                      Identity file path (default: .demos_identity)
+    -c <true/false>                Clean database on startup
+    -n <true/false>                Skip git pull (useful for custom branches)
+    -u <url>                       Override EXPOSED_URL
+    -l <path>                      Peer list file (default: demos_peerlist.json)
+    -r <runtime>                   Force runtime (bun only - node deprecated)
+    -b <true/false>                Restore from backup
+    -v                             Verbose logging
+    -h                             Show this help message
+
+EXAMPLES:
+    ./run                          # Start with default settings
+    ./run -p 53551 -d 5333         # Run on custom ports
+    ./run -c                       # Clean start (fresh database)
+    ./run -v                       # Verbose output for troubleshooting
+    ./run -n                       # Skip git update (for development)
+```
 
 #### Custom Ports (Optional)
+
 ```bash
 # Use different ports if defaults are busy
 ./run -p 53551 -d 5333
@@ -202,6 +244,7 @@ This will:
 ```
 
 ### 2. Check Node Status
+
 In a new terminal window:
 
 ```bash
@@ -219,45 +262,49 @@ docker ps
 Ctrl+C
 ```
 
-### 3. Setup Configuration Files
+### 3. Further configuration
+
+The `.env` and `demos_peerlist.json` files are used to configure the demos node. Copy the templates using the command below:
+
 ```bash
-# Copy example configuration files into working copies
 cp env.example .env
 cp demos_peerlist.json.example demos_peerlist.json
 ```
 
 ### 4. Edit Configuration Files
+
 ```bash
 nano .env
 ```
 
 Set the following variable:
-- **EXPOSED_URL:** Your node's public URL
-  - Local testing: `http://localhost:53550`
-  - Remote server: `http://YOUR_PUBLIC_IP:53550`
-  - Behind proxy: `https://your-domain.com`
+
+-   **EXPOSED_URL:** Your node's public URL
+    -   Local testing: `http://localhost:53550`
+    -   Remote server: `http://YOUR_PUBLIC_IP:53550`
+    -   Behind proxy: `https://your-domain.com`
 
 ### 5. Node Identity - Public and Private Keys
-After running the node for the first time your public and private keys will be generated. You should find the “publickey” and “.demos_identity” files inside the node directory.
 
-The publickey file contains your public key, this can be shared and utilized in your node
+After running the node for the first time your keypair will be generated. You should find the `publickey_*` and `.demos_identity` files inside the node directory.
 
-The “.demos_identity” is your private key, KEEP THIS PRIVATE.
+The public key file contains your public key, this can be shared and utilized in your node. The `.demos_identity` is your private key, **KEEP THIS PRIVATE**. Back up both public and private keys.
 
-Back up both public and private keys.
+### 6. Joining a network
 
-### 6. Setting Peers
-Edit demos_peerlist.json: Add known peers in the format:
+To join a network, you can edit the `demos_peerlist.json` file to add known peers in the format:
 
-```json
+```jsonc
 {
-  "publickey": "connectionstring" # Example: “YourGeneratedPublicKey”:”http://localhost:53550”
+    "publickey": "connectionstring" //  Example: "0xd0b2be2cb6d...": "http://otherpeer.localhost"
 }
 ```
 
-For local testing, you can use your own public key (found in the “publickey” file in your node directory after the first run).
+> [!IMPORTANT]
+> When joining a network, please make sure your node's exposed URL is accessible by the other nodes. If they can't access it, your node won't be able to participate in the consensus.
 
 ### 7. Start the Node Again
+
 ```bash
 # Restart the node again with your new settings if you’d like to keep it running
 ./run
@@ -266,6 +313,7 @@ For local testing, you can use your own public key (found in the “publickey”
 ## ✅ Verification
 
 ### Check Node Status
+
 In a new terminal:
 
 ```bash
@@ -286,13 +334,16 @@ docker ps
 ```
 
 ### View Logs
+
 The node will output logs showing:
-- Database connection status
-- RPC server initialization
-- Your node's public key
-- Peer connection attempts
+
+-   Database connection status
+-   RPC server initialization
+-   Your node's public key
+-   Peer connection attempts
 
 ### Stopping the Node
+
 ```bash
 # Press Ctrl+C in the terminal running the node
 
@@ -304,6 +355,7 @@ cd postgres_5332
 ## 🛠️ Troubleshooting
 
 ### Port Already in Use
+
 ```bash
 # Check what's using the port
 sudo lsof -i :5332
@@ -313,12 +365,14 @@ sudo lsof -i :5332
 ```
 
 ### Docker Permission Issues
+
 ```bash
 sudo usermod -aG docker $USER
 newgrp docker
 ```
 
 ### Database Connection Timeout
+
 ```bash
 # Restart Docker
 sudo systemctl restart docker
@@ -330,6 +384,7 @@ cd postgres_5332
 ```
 
 ### Missing Dependencies
+
 ```bash
 rm -rf node_modules bun.lockb
 bun install
@@ -338,25 +393,29 @@ bun install
 ## 🔒 Security Notes
 
 1. **Backup your identity files:**
-   - `.demos_identity` (private key - KEEP SECRET)
-   - `public.key` (public identifier)
+
+    - `.demos_identity` (private key - KEEP SECRET)
+    - `public.key` (public identifier)
 
 2. **Set proper permissions:**
-   ```bash
-   chmod 600 .demos_identity
-   ```
+
+    ```bash
+    chmod 600 .demos_identity
+    ```
 
 3. **Never share your private key**
 
 ## 🌐 Network Information
-- Default node port: 53550
-- Default database port: 5332
-- Logs directory: `logs_53550_demos_identity/`
-- Configuration: `.env` and `demos_peerlist.json`
+
+-   Default node port: 53550
+-   Default database port: 5332
+-   Logs directory: `logs_53550_demos_identity/`
+-   Configuration: `.env` and `demos_peerlist.json`
 
 ## ➡️ Next Steps
 
 Once your node is running:
+
 1. Note your public key from the console output
 2. Share your connection string with other node operators to form a network
 3. Monitor the logs for successful peer connections
