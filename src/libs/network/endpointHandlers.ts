@@ -293,7 +293,11 @@ export default class ServerHandlers {
                     payload[1] as XMScript,
                 )
                 // TODO Add result.success handling
-                result.response = xmResult
+                result.success = xmResult.success
+                result.response = {
+                    message: xmResult.message,
+                    results: xmResult.results,
+                }
                 break
 
             case "subnet":
@@ -468,10 +472,8 @@ export default class ServerHandlers {
     }
 
     // INFO Handling XM Transaction
-    static async handleXMChainOperation(
-        xmscript: XMScript,
-    ): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
+    static async handleXMChainOperation(xmscript: XMScript) {
+        // let response: RPCResponse = _.cloneDeep(emptyResponse)
         /* NOTE This workflow goeas as:
          * The XM Operation is validated, executed and verified
          * when applicable.
@@ -484,9 +486,7 @@ export default class ServerHandlers {
         // REVIEW Remember that crosschain operations can be in chainscript syntax
         // INFO Use the src/features/multichain/chainscript/chainscript.chs for the specs
         //console.log(content.data)
-        response = await multichainDispatcher.digest(xmscript)
-        // TODO
-        return response
+        return await multichainDispatcher.digest(xmscript)
     }
 
     // INFO This method is used to allow signed data exchanges between peers and clients
