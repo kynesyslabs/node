@@ -356,10 +356,9 @@ export default class GCRIdentityRoutines {
         let removedIdentity: Web2GCRData["data"] | null = null
         if (context === "github" || context === "telegram") {
             removedIdentity =
-               
                 accountGCR.identities.web2[context].find(
-                        (id: Web2GCRData["data"]) => id.username === username,
-                    ) || null
+                    (id: Web2GCRData["data"]) => id.username === username,
+                ) || null
         }
 
         accountGCR.identities.web2[context] = accountGCR.identities.web2[
@@ -700,85 +699,99 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         currentAccount?: string,
     ): Promise<boolean> {
-        if (type === "twitter") {
-            /**
-             * Check if this Twitter userId exists anywhere
-             */
-            const result = await gcrMainRepository
-                .createQueryBuilder("gcr")
-                .where(
-                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'userId' = :userId)",
-                    {
-                        userId: data.userId,
-                    },
-                )
-                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
-                .getOne()
-
-            /**
-             * Return true if no account has this userId
-             */
-            return !result
-        } else if (type === "github") {
-            /**
-             * Check if this GitHub userId exists anywhere
-             */
-            const result = await gcrMainRepository
-                .createQueryBuilder("gcr")
-                .where(
-                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'github') as github_id WHERE github_id->>'userId' = :userId)",
-                    {
-                        userId: data.userId,
-                    },
-                )
-                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
-                .getOne()
-
-            /**
-             * Return true if no account has this userId
-             */
-            return !result
-        } else if (type === "discord") {
-            /**
-             * Check if this Discord userId exists anywhere
-             */
-            const result = await gcrMainRepository
-                .createQueryBuilder("gcr")
-                .where(
-                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'discord', '[]'::jsonb)) AS discord_id WHERE discord_id->>'userId' = :userId)",
-                    { userId: data.userId },
-                )
-                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
-                .getOne()
-
-            /**
-             * Return true if no account has this userId
-             */
-            return !result
-        } else {
-            /**
-             * For web3 wallets, check if this address exists in any account for this chain/subchain
-             */
-            const addressToCheck =
-                data.chain === "evm" ? data.address.toLowerCase() : data.address
+        if (type !== "web3") {
+            const queryTemplate = `
+            EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'${type}', '[]'::jsonb)) as ${type}_id WHERE ${type}_id->>'userId' = :userId)
+        `
 
             const result = await gcrMainRepository
                 .createQueryBuilder("gcr")
-                .where(
-                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)",
-                    {
-                        chain: data.chain,
-                        subchain: data.subchain,
-                        address: addressToCheck,
-                    },
-                )
+                .where(queryTemplate, { userId: data.userId })
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()
 
-            /**
-             * Return true if this is the first connection
-             */
             return !result
         }
+
+        // if (type === "twitter") {
+        //     /**
+        //      * Check if this Twitter userId exists anywhere
+        //      */
+        //     const result = await gcrMainRepository
+        //         .createQueryBuilder("gcr")
+        //         .where(
+        //             "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'userId' = :userId)",
+        //             {
+        //                 userId: data.userId,
+        //             },
+        //         )
+        //         .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+        //         .getOne()
+
+        //     /**
+        //      * Return true if no account has this userId
+        //      */
+        //     return !result
+        // } else if (type === "github") {
+        //     /**
+        //      * Check if this GitHub userId exists anywhere
+        //      */
+        //     const result = await gcrMainRepository
+        //         .createQueryBuilder("gcr")
+        //         .where(
+        //             "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'github') as github_id WHERE github_id->>'userId' = :userId)",
+        //             {
+        //                 userId: data.userId,
+        //             },
+        //         )
+        //         .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+        //         .getOne()
+
+        //     /**
+        //      * Return true if no account has this userId
+        //      */
+        //     return !result
+        // } else if (type === "discord") {
+        //     /**
+        //      * Check if this Discord userId exists anywhere
+        //      */
+        //     const result = await gcrMainRepository
+        //         .createQueryBuilder("gcr")
+        //         .where(
+        //             "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'discord', '[]'::jsonb)) AS discord_id WHERE discord_id->>'userId' = :userId)",
+        //             { userId: data.userId },
+        //         )
+        //         .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+        //         .getOne()
+
+        //     /**
+        //      * Return true if no account has this userId
+        //      */
+        //     return !result
+        // } else {
+        /**
+         * For web3 wallets, check if this address exists in any account for this chain/subchain
+         */
+        const addressToCheck =
+            data.chain === "evm" ? data.address.toLowerCase() : data.address
+
+        const result = await gcrMainRepository
+            .createQueryBuilder("gcr")
+            .where(
+                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)",
+                {
+                    chain: data.chain,
+                    subchain: data.subchain,
+                    address: addressToCheck,
+                },
+            )
+            .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+            .getOne()
+
+        /**
+         * Return true if this is the first connection
+         */
+        return !result
+        // }
     }
 }

@@ -83,18 +83,18 @@ export default async function manageGCRRoutines(
             break
         }
 
-        case "getAccountByTelegramUsername": {
-            const username = params[0]
+        // case "getAccountByTelegramUsername": {
+        //     const username = params[0]
 
-            if (!username) {
-                response.result = 400
-                response.response = "No username specified"
-                break
-            }
+        //     if (!username) {
+        //         response.result = 400
+        //         response.response = "No username specified"
+        //         break
+        //     }
 
-            response.response = await GCR.getAccountByTelegramUsername(username)
-            break
-        }
+        //     response.response = await GCR.getAccountByTelegramUsername(username)
+        //     break
+        // }
 
         // SECTION Web2 Identity Management
 

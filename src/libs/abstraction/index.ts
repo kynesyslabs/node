@@ -6,12 +6,15 @@ import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { Twitter } from "../identity/tools/twitter"
 import type { GenesisBlock } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/blocks" // TODO Properly import from types
-
+import log from "src/utilities/logger"
 import {
     TelegramAttestationPayload,
     TelegramSignedAttestation,
 } from "@kynesyslabs/demosdk/abstraction"
 import { toInteger } from "lodash"
+import Chain from "../blockchain/chain"
+import fs from "fs"
+import { getSharedState } from "@/utilities/sharedState"
 
 /**
  * Verifies telegram dual signature attestation (user + bot signatures)
@@ -31,53 +34,11 @@ import { toInteger } from "lodash"
  * @returns Promise<boolean> - true if bot is authorized (has balance in genesis), false otherwise
  */
 async function checkBotAuthorization(botAddress: string): Promise<boolean> {
-    try {
-        // Import Chain class and GenesisBlock type to access genesis block
-        const chainModule = (await import("@/libs/blockchain/chain")).default
-        // Import type only for TypeScript
-
-        // Get the genesis block (block number 0)
-        const genesisBlock =
-            (await chainModule.getGenesisBlock()) as GenesisBlock
-
-        if (!genesisBlock || !genesisBlock.content) {
-            console.error("Genesis block not found or has no content")
-            return false
-        }
-
-        // REVIEW: Now properly typed - accessing genesis data from extra.genesisData
-        if (!genesisBlock.content.extra?.genesisData) {
-            console.error("Genesis block missing extra.genesisData")
-            return false
-        }
-
-        // Get balances from properly typed genesis data
-        const balances = genesisBlock.content.extra.genesisData.balances
-
-        if (!balances || !Array.isArray(balances)) {
-            console.error("Genesis block balances not found or invalid format")
-            return false
-        }
-
-        const normalizedBotAddress = botAddress.toLowerCase()
-
-        // Check if bot address exists in balances array
-        for (const [address, balance] of balances) {
-            if (
-                typeof address === "string" &&
-                address.toLowerCase() === normalizedBotAddress
-            ) {
-                // Bot found in genesis with non-zero balance - authorized
-                return balance !== "0" && toInteger(balance) !== 0
-            }
-        }
-
-        // Bot address not found in genesis balances - unauthorized
-        return false
-    } catch (error) {
-        console.error(`Bot authorization check failed: ${error}`)
-        return false
+    if (getSharedState.genesisIdentities.has(botAddress)) {
+        return true
     }
+
+    return false
 }
 
 async function verifyTelegramProof(
@@ -87,6 +48,10 @@ async function verifyTelegramProof(
     try {
         // Parse the telegram attestation from proof field
         const telegramAttestation = payload.proof as TelegramSignedAttestation
+        log.info(
+            "telegramAttestation" +
+                JSON.stringify(telegramAttestation, null, 2),
+        )
 
         // Validate attestation structure
         if (!telegramAttestation.payload || !telegramAttestation.signature) {
@@ -99,8 +64,8 @@ async function verifyTelegramProof(
         // REVIEW: Enhanced input validation with type safety and normalization
         // Validate attestation data types first (trusted source should have proper format)
         if (
-            typeof telegramAttestation.payload.telegram_id !== "number" &&
-            typeof telegramAttestation.payload.telegram_id !== "string"
+            typeof telegramAttestation.payload.telegram_user_id !== "number" &&
+            typeof telegramAttestation.payload.telegram_user_id !== "string"
         ) {
             return {
                 success: false,
@@ -116,7 +81,8 @@ async function verifyTelegramProof(
         }
 
         // Safe type conversion and normalization
-        const attestationId = telegramAttestation.payload.telegram_id.toString()
+        const attestationId =
+            telegramAttestation.payload.telegram_user_id.toString()
         const payloadId = payload.userId?.toString() || ""
 
         const attestationUsername = telegramAttestation.payload.username
@@ -141,16 +107,20 @@ async function verifyTelegramProof(
 
         // Extract the attestation components
         const { payload: attestationPayload, signature } = telegramAttestation
-        const { public_key: userPublicKey, bot_address: botAddress } =
-            attestationPayload
+        const { bot_address: botAddress } = attestationPayload
 
-        // Verify that the user's public key matches the sender
-        // This ensures the transaction sender owns the telegram identity
-        if (userPublicKey.toLowerCase() !== sender.toLowerCase()) {
+        // INFO: Verify user signature
+        const userSignatureValid = await ucrypto.verify({
+            algorithm: "ed25519",
+            message: new TextEncoder().encode(attestationPayload.challenge),
+            publicKey: hexToUint8Array(attestationPayload.public_key),
+            signature: hexToUint8Array(attestationPayload.signature),
+        })
+
+        if (!userSignatureValid) {
             return {
                 success: false,
-                message:
-                    "Telegram attestation public key does not match transaction sender",
+                message: "User challenge signature verification failed",
             }
         }
 
