@@ -1,5 +1,6 @@
 import { GithubProofParser } from "./web2/github"
 import { TwitterProofParser } from "./web2/twitter"
+import { DiscordProofParser } from "./web2/discord"
 import { type Web2ProofParser } from "./web2/parsers"
 import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
@@ -203,7 +204,10 @@ export async function verifyWeb2Proof(
     payload: Web2CoreTargetIdentityPayload,
     sender: string,
 ) {
-    let parser: typeof TwitterProofParser | typeof GithubProofParser
+    let parser:
+        | typeof TwitterProofParser
+        | typeof GithubProofParser
+        | typeof DiscordProofParser
 
     switch (payload.context) {
         case "twitter":
@@ -215,6 +219,9 @@ export async function verifyWeb2Proof(
         case "telegram":
             // Telegram uses dual signature validation, handle separately
             return await verifyTelegramProof(payload, sender)
+        case "discord":
+            parser = DiscordProofParser
+            break
         default:
             return {
                 success: false,

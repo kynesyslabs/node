@@ -42,20 +42,20 @@ USAGE:
 Welcome to Demos Network! This script helps you run your blockchain node easily.
 
 OPTIONS:
-    -p <port>       Node port (default: 53550)
-    -d <port>       PostgreSQL port (default: 5332)
-    -i <file>       Identity file path (default: .demos_identity)
-    -c              Clean database on startup
-    -n              Skip git pull (useful for custom branches)
-    -u <url>        Override EXPOSED_URL
-    -l <file>       Peer list file (default: demos_peerlist.json)
-    -r <runtime>    Force runtime (bun only - node deprecated)
-    -b <true/false> Restore from backup
-    -v              Verbose logging
-    -h              Show this help message
+    -p <port>                      Node port (default: 53550)
+    -d <port>                      PostgreSQL port (default: 5332)
+    -i <path>                      Identity file path (default: .demos_identity)
+    -c <true/false>                Clean database on startup
+    -n <true/false>                Skip git pull (useful for custom branches)
+    -u <url>                       Override EXPOSED_URL
+    -l <path>                      Peer list file (default: demos_peerlist.json)
+    -r <runtime>                   Force runtime (bun only - node deprecated)
+    -b <true/false>                Restore from backup
+    -v                             Verbose logging
+    -h                             Show this help message
 
 EXAMPLES:
-    ./run                           # Start with default settings
+    ./run                          # Start with default settings
     ./run -p 53551 -d 5333         # Run on custom ports
     ./run -c                       # Clean start (fresh database)
     ./run -v                       # Verbose output for troubleshooting

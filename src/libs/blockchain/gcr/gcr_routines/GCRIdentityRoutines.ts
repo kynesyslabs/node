@@ -308,6 +308,19 @@ export default class GCRIdentityRoutines {
                         editOperation.referralCode,
                     )
                 }
+            } else if (context === "discord") {
+                const isFirst = await this.isFirstConnection(
+                    "discord",
+                    { userId: data.userId },
+                    gcrMainRepository,
+                    editOperation.account,
+                )
+                if (isFirst) {
+                    await IncentiveManager.discordLinked(
+                        editOperation.account,
+                        editOperation.referralCode,
+                    )
+                }
             } else {
                 log.info(`Web2 identity linked: ${context}/${data.username}`)
             }
@@ -343,9 +356,10 @@ export default class GCRIdentityRoutines {
         let removedIdentity: Web2GCRData["data"] | null = null
         if (context === "github" || context === "telegram") {
             removedIdentity =
+               
                 accountGCR.identities.web2[context].find(
-                    (id: Web2GCRData["data"]) => id.username === username,
-                ) || null
+                        (id: Web2GCRData["data"]) => id.username === username,
+                    ) || null
         }
 
         accountGCR.identities.web2[context] = accountGCR.identities.web2[
@@ -378,6 +392,8 @@ export default class GCRIdentityRoutines {
                     editOperation.account,
                     removedIdentity.userId,
                 )
+            } else if (context === "discord") {
+                await IncentiveManager.discordUnlinked(editOperation.account)
             }
         }
 
@@ -674,9 +690,9 @@ export default class GCRIdentityRoutines {
     }
 
     private static async isFirstConnection(
-        type: "twitter" | "github" | "web3" | "telegram",
+        type: "twitter" | "github" | "web3" | "telegram" | "discord",
         data: {
-            userId?: string // for twitter/github
+            userId?: string // for twitter/github/discord
             chain?: string // for web3
             subchain?: string // for web3
             address?: string // for web3
@@ -714,6 +730,23 @@ export default class GCRIdentityRoutines {
                     {
                         userId: data.userId,
                     },
+                )
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
+
+            /**
+             * Return true if no account has this userId
+             */
+            return !result
+        } else if (type === "discord") {
+            /**
+             * Check if this Discord userId exists anywhere
+             */
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'discord', '[]'::jsonb)) AS discord_id WHERE discord_id->>'userId' = :userId)",
+                    { userId: data.userId },
                 )
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()

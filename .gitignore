@@ -140,3 +140,8 @@ src/features/bridges/EVMSmartContract/GASLESS_BRIDGE_FLOW_DIAGRAM.md
 src/features/bridges/EVMSmartContract/USAGE.md
 CLAUDE.sync-conflict-20250901-171031-7JPPSQB.md
 .serena/cache/typescript/document_symbols_cache_v23-06-25.pkl
+docs/src/.deps/npm/@openzeppelin/contracts
+docs/src/lib
+docs/src
+src/features/bridges/EVMSmartContract/docs
+src/features/bridges/LiquidityTank_UserGuide.md

@@ -10,35 +10,28 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import "reflect-metadata"
-
-import * as dotenv from "dotenv"
+import net from "net"
 import * as fs from "fs"
-
-import { getSharedState } from "./utilities/sharedState"
-import { server_rpc } from "./libs/network" // NOTE This is started in warmup
+import "reflect-metadata"
+import * as dotenv from "dotenv"
 import terminalkit from "terminal-kit"
 
-import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
-// import * as eiows from 'eiows';
-import { PeerManager } from "./libs/peer"
-// import commandLine from "./utilities/commandLine"
-import peerBootstrap from "./libs/peer/routines/peerBootstrap"
-import groundControl from "./libs/utils/demostdlib/groundControl"
-import mainLoop from "./utilities/mainLoop"
-import log from "src/utilities/logger"
 import { Peer } from "./libs/peer"
+import { PeerManager } from "./libs/peer"
+import log from "src/utilities/logger"
+import Chain from "./libs/blockchain/chain"
+import mainLoop from "./utilities/mainLoop"
+import { serverRpcBun } from "./libs/network/server_rpc"
+import { getSharedState } from "./utilities/sharedState"
+import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
-import net from "net"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
-import { serverRpcBun } from "./libs/network/server_rpc"
-import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-import Chain from "./libs/blockchain/chain"
-
-const term = terminalkit.terminal
 
 dotenv.config()
+const term = terminalkit.terminal
 
 // NOTE This is a global variable that will be used to store the warmup routine and the index needed variables
 const indexState: {
@@ -161,11 +154,6 @@ async function warmup() {
     log.info("[MAIN] Starting the node")
 
     indexState.enough_peers = true // ? Review this
-    // INFO Loading the known peers
-    if (!fs.existsSync("./demos_peerlist.json")) {
-        indexState.enough_peers = false
-        console.log("No peers found, listening for peers...")
-    }
 
     // ANCHOR Overrides
     indexState.OVERRIDE_PORT = null
@@ -301,7 +289,6 @@ async function preMainLoop() {
             indexState.peerManager.getPeers().length +
             ")\n",
     )
-
     // INFO: Set initial last block data
     const lastBlock = await Chain.getLastBlock()
     getSharedState.lastBlockNumber = lastBlock.number
