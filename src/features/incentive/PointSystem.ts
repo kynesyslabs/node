@@ -13,7 +13,7 @@ const pointValues = {
     LINK_WEB3_WALLET: 0.5,
     LINK_TWITTER: 2,
     LINK_GITHUB: 1,
-    LINK_TELEGRAM: 2,
+    LINK_TELEGRAM: 1,
     FOLLOW_DEMOS: 1,
     LINK_DISCORD: 1,
 }
