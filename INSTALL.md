@@ -179,10 +179,10 @@ bun -v
 ```bash
 cd ~
 git clone -b testnet https://github.com/kynesyslabs/node.git
-# Double check that you are on testnet
-git branch
 # switch to your node directory
 cd node
+# Double check that you are on testnet
+git branch
 ```
 
 #### 2. Install Dependencies
