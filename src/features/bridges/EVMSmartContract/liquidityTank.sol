@@ -940,7 +940,7 @@ contract LiquidityTank {
 
         if (_recoverSigner(ethSignedHash, signature) != user)
             revert InvalidSignature();
-        if (userNonces[user] >= nonce) revert InvalidNonce();
+        // if (userNonces[user] >= nonce) revert InvalidNonce();
 
         userNonces[user] = nonce;
     }
@@ -1330,7 +1330,7 @@ contract LiquidityTank {
                 recipient,
                 bridgeFeeBps,
                 permitDeadline,
-                block.chainid,
+                // block.chainid,
                 address(this)
             )
         );
@@ -1353,14 +1353,14 @@ contract LiquidityTank {
             // Permit failed - check if already approved (idempotent behavior)
             uint256 currentAllowance = IERC20(tokenAddress).allowance(user, address(this));
             if (currentAllowance < depositAmount) {
-                revert InvalidSignature(); // Permit failed and insufficient allowance
+                revert InsufficientBalance(); // Permit failed and insufficient allowance
             }
             // Continue if sufficient allowance exists
         }
 
         // DEPOSIT PHASE: Transfer tokens to contract
         uint256 balanceBefore = _getERC20Balance(tokenAddress, address(this));
-        
+
         // Use SafeERC20 to handle the transfer
         SafeERC20.safeTransferFrom(
             IERC20(tokenAddress),
