@@ -7,7 +7,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { NativeBridgeTransaction } from "@kynesyslabs/demosdk/types"
 
 export default async function executeBridgeOperations(
-    bridgeTxs: Transaction[],
+    bridgeTxs: NativeBridgeTransaction[],
 ): Promise<[string[], string[]]> {
     const fname = "[executeBridgeOperations]"
     log.info(`${fname} Processing bridge operations for consensus...`)
@@ -37,11 +37,11 @@ export default async function executeBridgeOperations(
     }
 
     // Initialize EVM tank management system
-    const evmTankManager = EVMSmartContractManagement.getInstance()
-    if (!evmTankManager.isReady()) {
-        log.error(`${fname} EVM tank management system not initialized`)
-        process.exit(1)
-    }
+    // const evmTankManager = EVMSmartContractManagement.getInstance()
+    // if (!evmTankManager.isReady()) {
+    //     log.error(`${fname} EVM tank management system not initialized`)
+    //     process.exit(1)
+    // }
 
     // Process each native bridge operation
     const successful: string[] = []
@@ -96,14 +96,14 @@ async function processBridgeTx(bridgeTx: NativeBridgeTransaction): Promise<{
     const destination = operation.from.chain
 
     // Detect if this is a gasless operation
-    const isGasless = detectGaslessOperation(compiled, bridgeTx)
-    const gaslessData = isGasless
-        ? extractGaslessData(compiled, bridgeTx)
-        : null
+    // const isGasless = detectGaslessOperation(compiled, bridgeTx)
+    // const gaslessData = isGasless
+    //     ? extractGaslessData(compiled, bridgeTx)
+    //     : null
 
-    log.debug(
-        `${fname} Processing bridge operation: ${operation.from.chain} -> ${operation.to.chain} (gasless: ${isGasless})`,
-    )
+    // log.debug(
+    //     `${fname} Processing bridge operation: ${operation.from.chain} -> ${operation.to.chain} (gasless: ${isGasless})`,
+    // )
 
     const result = {
         txHash: bridgeTx.hash,
@@ -115,10 +115,8 @@ async function processBridgeTx(bridgeTx: NativeBridgeTransaction): Promise<{
     if (operation.from.chain.startsWith("evm")) {
         // Verify deposit using existing tank management
         const depositResult = await evmTankManager.verifyDeposit(
-            destination,
             txHash,
-            operation.token.amount,
-            operation.from.address,
+            compiled,
         )
 
         if (!depositResult.valid) {
@@ -142,15 +140,19 @@ async function processBridgeTx(bridgeTx: NativeBridgeTransaction): Promise<{
     // Step 2 - Check tank liquidity on destination
     if (operation.to.chain.startsWith("evm")) {
         if (!evmTankManager.getTankConfig(destination)) {
+            // INFO: This should never happen as it's protected by the
+            // bridge methods before the consensus.
             log.error(`${fname} Unsupported destination chain: ${destination}`)
             process.exit(1)
         }
 
         const balance = await evmTankManager.getUSDCBalance(destination)
-        const balanceNum = parseInt(balance)
-        const requiredAmount = parseInt(operation.token.amount.toString())
+        const requiredAmount = BigInt(operation.token.amount)
 
-        if (balanceNum >= requiredAmount) {
+        // INFO: balance should be greater than requiredAmount
+        if (balance <= requiredAmount) {
+            // INFO: This should never happen as user should not be allowed
+            // to deposit if the tank doesn't have enough liquidity.
             log.error(
                 `${fname} Insufficient liquidity on ${destination}: ${balance} < ${requiredAmount}`,
             )
@@ -174,59 +176,60 @@ async function processBridgeTx(bridgeTx: NativeBridgeTransaction): Promise<{
     if (operation.to.chain.startsWith("evm")) {
         // TODO: Get actual shard signing keys from SecretaryManager
         // For now, using placeholder - this needs proper key management
-        const shardSigningKeys = getShardSigningKeys()
+        // const shardSigningKeys = getShardSigningKeys()
 
-        if (shardSigningKeys.length === 0) {
-            throw new Error(
-                "No shard signing keys available for withdrawal execution",
-            )
-        }
+        // if (shardSigningKeys.length === 0) {
+        //     throw new Error(
+        //         "No shard signing keys available for withdrawal execution",
+        //     )
+        // }
 
-        let proposalId: string
+        // let proposalId: string
 
-        if (isGasless && gaslessData) {
-            // Execute gasless withdrawal using meta-transaction
-            log.info(`${fname} Executing gasless withdrawal on ${destination}`)
+        // if (isGasless && gaslessData) {
+        //     // Execute gasless withdrawal using meta-transaction
+        //     log.info(`${fname} Executing gasless withdrawal on ${destination}`)
 
-            // Check gas subsidy pool balance before executing
-            const subsidyBalance = await checkGasSubsidyBalance(destination)
-            if (!subsidyBalance.sufficient) {
-                log.error(
-                    `${fname} Insufficient gas subsidy balance on ${destination}: ${subsidyBalance.balance}`,
-                )
-                return {
-                    ...result,
-                    error: `Insufficient gas subsidy balance: ${subsidyBalance.balance}`,
-                }
-            }
+        //     // Check gas subsidy pool balance before executing
+        //     const subsidyBalance = await checkGasSubsidyBalance(destination)
+        //     if (!subsidyBalance.sufficient) {
+        //         log.error(
+        //             `${fname} Insufficient gas subsidy balance on ${destination}: ${subsidyBalance.balance}`,
+        //         )
+        //         return {
+        //             ...result,
+        //             error: `Insufficient gas subsidy balance: ${subsidyBalance.balance}`,
+        //         }
+        //     }
 
-            proposalId = await evmTankManager.executeGaslessWithdrawal(
-                destination,
-                operation.to.address,
-                operation.token.amount.toString(),
-                shardSigningKeys,
-                gaslessData.userSignature,
-                gaslessData.userNonce,
-            )
+        //     proposalId = await evmTankManager.executeGaslessWithdrawal(
+        //         destination,
+        //         operation.to.address,
+        //         operation.token.amount.toString(),
+        //         shardSigningKeys,
+        //         gaslessData.userSignature,
+        //         gaslessData.userNonce,
+        //     )
 
-            // Track gas subsidy usage
-            await trackGasSubsidyUsage(destination, proposalId, "withdrawal")
-            log.info(
-                `${fname} ✅ Gasless withdrawal executed on ${destination}: ${proposalId}`,
-            )
-        } else {
-            // Execute regular withdrawal using multisig
-            log.info(`${fname} Executing regular withdrawal on ${destination}`)
-            proposalId = await evmTankManager.executeWithdrawal(
-                destination,
-                operation.to.address,
-                operation.token.amount.toString(),
-                shardSigningKeys,
-            )
-            log.info(
-                `${fname} ✅ Regular withdrawal executed on ${destination}: ${proposalId}`,
-            )
-        }
+        //     // Track gas subsidy usage
+        //     await trackGasSubsidyUsage(destination, proposalId, "withdrawal")
+        //     log.info(
+        //         `${fname} ✅ Gasless withdrawal executed on ${destination}: ${proposalId}`,
+        //     )
+        // } else {
+        // Execute regular withdrawal using multisig
+        log.info(`${fname} Executing regular withdrawal on ${destination}`)
+        const proposalId = await evmTankManager.executeWithdrawal(
+            compiled.content.bridgeId,
+            destination,
+            operation.to.address,
+            operation.token.name,
+            compiled.content.tankData.amountToDeposit,
+        )
+        log.info(
+            `${fname} ✅ Regular withdrawal executed on ${destination}: ${proposalId}`,
+        )
+        // }
 
         return {
             ...result,

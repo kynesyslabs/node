@@ -128,7 +128,7 @@ contract LiquidityTank {
     uint256 public dailySubsidyLimit; // Maximum total subsidies per day
 
     // User nonce tracking for gasless operations
-    mapping(address => uint256) public userNonces; // Nonce per user for replay protection
+    // mapping(address => uint256) public userNonces; // Nonce per user for replay protection
 
     // Token name mapping for user convenience
     mapping(string => address) public tokenNameMap; // Maps token names (e.g., "usdc") to addresses
@@ -137,7 +137,7 @@ contract LiquidityTank {
     event ProposalIdGenerated(
         bytes32 indexed proposalId,
         address indexed generator,
-        uint256 nonce
+        string operationId
     );
     event ProposalCreated(
         bytes32 indexed proposalId,
@@ -196,14 +196,12 @@ contract LiquidityTank {
         address indexed user,
         address indexed token,
         uint256 amount,
-        uint256 nonce,
         address indexed relayer
     );
     event GaslessBridgeInitiated(
         address indexed user,
         address indexed token,
         uint256 amount,
-        uint256 nonce,
         address indexed relayer
     );
     event BridgeOperationInitiated(
@@ -214,8 +212,7 @@ contract LiquidityTank {
         address token,
         address recipient,
         uint256 amount,
-        uint256 amountAfterFee,
-        uint256 nonce
+        uint256 amountAfterFee
     );
 
     /// @dev Events for combined deposit and bridge operations
@@ -226,7 +223,6 @@ contract LiquidityTank {
         uint256 bridgeAmount,
         string destChain,
         address recipient,
-        uint256 nonce,
         address indexed relayer
     );
 
@@ -473,10 +469,10 @@ contract LiquidityTank {
     }
 
     /// @notice Internal function to generate unique proposal IDs
-    /// @param nonce User-provided nonce for proposal uniqueness
+    /// @param bridgeId User-provided nonce for proposal uniqueness
     /// @return proposalId Unique bytes32 identifier for proposals
     function _generateProposalId(
-        uint256 nonce,
+        string calldata bridgeId,
         address /* proposer */
     ) internal view returns (bytes32 proposalId) {
         // Generate deterministic proposal ID based on nonce only
@@ -484,7 +480,7 @@ contract LiquidityTank {
         proposalId = keccak256(
             abi.encodePacked(
                 "MULTISIG_PROPOSAL",
-                nonce,
+                bridgeId,
                 address(this) // Include contract address for uniqueness across contracts
             )
         );
@@ -497,7 +493,7 @@ contract LiquidityTank {
     // ===========================================================================================
 
     /// @notice Universal transfer function for ETH and any ERC20 token (requires multisig approval)
-    /// @param nonce User-provided nonce for proposal uniqueness (prevents front-running)
+    /// @param bridgeId User-provided nonce for proposal uniqueness (prevents front-running)
     /// @param token Token contract address (address(0) for ETH)
     /// @param to Recipient address
     /// @param amount Amount to transfer
@@ -506,7 +502,7 @@ contract LiquidityTank {
     ///      Proposal ID is generated internally to prevent front-running attacks.
     ///      Supports native ETH and any ERC20 token with slippage protection for fee-on-transfer tokens.
     function multisigTransfer(
-        uint256 nonce,
+        string calldata bridgeId,
         address token,
         address to,
         uint256 amount,
@@ -518,9 +514,9 @@ contract LiquidityTank {
 
         // Generate proposal ID internally to prevent front-running
         address proposer = _msgSender();
-        bytes32 proposalId = _generateProposalId(nonce, proposer);
+        bytes32 proposalId = _generateProposalId(bridgeId, proposer);
 
-        emit ProposalIdGenerated(proposalId, proposer, nonce);
+        emit ProposalIdGenerated(proposalId, proposer, bridgeId);
 
         // Encode transfer parameters for proposal data
         bytes memory data = abi.encode(
@@ -570,14 +566,14 @@ contract LiquidityTank {
     }
 
     /// @notice Propose new owners for rotating co-ownership (requires multisig approval)
-    /// @param nonce User-provided nonce for proposal uniqueness (prevents front-running)
+    /// @param operationId User-provided nonce for proposal uniqueness (prevents front-running)
     /// @param newOwners Array of new authorized addresses
     /// @dev Each current authorized address must call this function with the same nonce to approve the rotation.
     ///      Proposal ID is generated internally to prevent front-running attacks.
     ///      Current owners CANNOT set themselves as new owners - enforces true rotation.
     ///      Automatically handled by external blockchain systems.
     function proposeNextOwners(
-        uint256 nonce,
+        string calldata operationId,
         address[] calldata newOwners
     ) external onlyAuthorized whenNotPaused {
         if (newOwners.length < 1) revert InsufficientAddresses();
@@ -607,9 +603,8 @@ contract LiquidityTank {
 
         // Generate proposal ID internally to prevent front-running
         address proposer = _msgSender();
-        bytes32 proposalId = _generateProposalId(nonce, proposer);
-
-        emit ProposalIdGenerated(proposalId, proposer, nonce);
+        bytes32 proposalId = _generateProposalId(operationId, proposer);
+        emit ProposalIdGenerated(proposalId, proposer, operationId);
 
         // Encode ownership change parameters
         bytes memory data = abi.encode("ROTATE_OWNERS", newOwners);
@@ -931,18 +926,14 @@ contract LiquidityTank {
     function _verifySignature(
         address user,
         bytes calldata signature,
-        uint256 nonce,
         bytes32 messageHash
-    ) internal {
+    ) internal pure {
         bytes32 ethSignedHash = keccak256(
             abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash)
         );
 
         if (_recoverSigner(ethSignedHash, signature) != user)
             revert InvalidSignature();
-        // if (userNonces[user] >= nonce) revert InvalidNonce();
-
-        userNonces[user] = nonce;
     }
 
     /// @notice Internal helper to create bridge message hash
@@ -970,14 +961,14 @@ contract LiquidityTank {
     /// @notice Gasless USDC deposit to tank for bridge operations
     /// @param user User depositing USDC
     /// @param signature User's signature authorizing the deposit
-    /// @param nonce Nonce for replay protection
+    /// @param bridgeId Nonce for replay protection
     /// @param usdcAddress USDC contract address on this chain
     /// @param amount Amount of USDC to deposit (in smallest units)
     /// @dev User must have approved USDC spending first, but this tx is gasless
     function depositUSDCToTank(
         address user,
         bytes calldata signature,
-        uint256 nonce,
+        string calldata bridgeId,
         address usdcAddress,
         uint256 amount
     ) external nonReentrant whenNotPaused {
@@ -986,14 +977,14 @@ contract LiquidityTank {
             abi.encodePacked(
                 "LIQUIDITY_TANK_DEPOSIT",
                 user,
-                nonce,
+                bridgeId,
                 usdcAddress,
                 amount,
                 block.chainid,
                 address(this)
             )
         );
-        _verifySignature(user, signature, nonce, messageHash);
+        _verifySignature(user, signature, messageHash);
 
         // Validate USDC contract
         _validateERC20Contract(usdcAddress);
@@ -1024,7 +1015,6 @@ contract LiquidityTank {
             user,
             usdcAddress,
             actualDeposited,
-            nonce,
             _msgSender()
         );
     }
@@ -1069,7 +1059,6 @@ contract LiquidityTank {
         _verifySignature(
             params.user,
             signature,
-            params.nonce,
             _createBridgeMessageHash(params)
         );
 
@@ -1098,8 +1087,7 @@ contract LiquidityTank {
             params.token,
             params.recipient,
             params.amount,
-            amountAfterFee,
-            params.nonce
+            amountAfterFee
         );
 
         // Emit gasless event for test compatibility
@@ -1107,7 +1095,6 @@ contract LiquidityTank {
             params.user,
             params.token,
             params.amount,
-            params.nonce,
             _msgSender()
         );
 
@@ -1176,7 +1163,7 @@ contract LiquidityTank {
         );
 
         // Verify signature and update nonce (single nonce for atomic operation)
-        _verifySignature(user, signature, nonce, messageHash);
+        _verifySignature(user, signature, messageHash);
 
         // DEPOSIT PHASE: Transfer tokens to contract
         if (tokenAddress == address(0)) {
@@ -1234,7 +1221,6 @@ contract LiquidityTank {
             user,
             tokenAddress,
             depositAmount,
-            nonce,
             _msgSender()
         );
 
@@ -1246,14 +1232,12 @@ contract LiquidityTank {
             tokenAddress,
             recipient,
             depositAmount,
-            amountAfterFee,
-            nonce
+            amountAfterFee
         );
         emit GaslessBridgeInitiated(
             user,
             tokenAddress,
             depositAmount,
-            nonce,
             _msgSender()
         );
 
@@ -1265,7 +1249,6 @@ contract LiquidityTank {
             depositAmount, // bridgeAmount equals depositAmount
             destChain,
             recipient,
-            nonce,
             _msgSender()
         );
 
@@ -1277,7 +1260,6 @@ contract LiquidityTank {
     /// @param bridgeId Unique bridge identifier from Demos Network RPC
     /// @param user User depositing and bridging tokens
     /// @param signature User's signature authorizing both operations
-    /// @param nonce Nonce for replay protection (single nonce for both operations)
     /// @param tokenAddress ERC20 token contract address (must support EIP-2612 permit)
     /// @param depositAmount Amount of tokens to deposit and bridge
     /// @param destChain Destination chain identifier
@@ -1295,7 +1277,7 @@ contract LiquidityTank {
         string calldata bridgeId,
         address user,
         bytes calldata signature,
-        uint256 nonce,
+        // uint256 nonce,
         address tokenAddress,
         uint256 depositAmount,
         string calldata destChain,
@@ -1322,7 +1304,7 @@ contract LiquidityTank {
             abi.encodePacked(
                 "LIQUIDITY_TANK_PERMIT_DEPOSIT_BRIDGE",
                 user,
-                nonce,
+                bridgeId,
                 tokenAddress,
                 depositAmount,
                 originChain,
@@ -1336,7 +1318,7 @@ contract LiquidityTank {
         );
 
         // Verify signature and update nonce (single nonce for atomic operation)
-        _verifySignature(user, signature, nonce, messageHash);
+        _verifySignature(user, signature, messageHash);
 
         // PERMIT PHASE: Execute gasless approval
         try IERC20Permit(tokenAddress).permit(
@@ -1383,6 +1365,8 @@ contract LiquidityTank {
         uint256 currentBalance = _getERC20Balance(tokenAddress, address(this));
         if (currentBalance < depositAmount) revert InsufficientBalance();
 
+        emit CurrentBalance(tokenAddress, currentBalance);
+
         // Calculate amount after fee
         uint256 amountAfterFee = (depositAmount * (10000 - bridgeFeeBps)) / 10000;
         if (amountAfterFee == 0) revert InvalidAmount();
@@ -1393,7 +1377,6 @@ contract LiquidityTank {
             user,
             tokenAddress,
             depositAmount,
-            nonce,
             _msgSender()
         );
 
@@ -1405,14 +1388,12 @@ contract LiquidityTank {
             tokenAddress,
             recipient,
             depositAmount,
-            amountAfterFee,
-            nonce
+            amountAfterFee
         );
         emit GaslessBridgeInitiated(
             user,
             tokenAddress,
             depositAmount,
-            nonce,
             _msgSender()
         );
 
@@ -1424,7 +1405,6 @@ contract LiquidityTank {
             depositAmount, // bridgeAmount equals depositAmount
             destChain,
             recipient,
-            nonce,
             _msgSender()
         );
 

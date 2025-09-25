@@ -80,12 +80,9 @@ export class JsonConfig {
      *
      * @returns Provider URLs configuration object
      */
-    static getProviderUrls(): {
-        [key: string]: {
-            [key: string]: string
-        }
-    } {
-        return this.readJsonFromFile(this.PROVIDER_URLS_PATH)
+    static getProviderUrl(chainKey: string): string {
+        const providerUrls = this.readJsonFromFile(this.PROVIDER_URLS_PATH)
+        return providerUrls[chainKey] || null
     }
 
     /**

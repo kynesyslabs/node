@@ -7,6 +7,11 @@ import { EVM } from "@kynesyslabs/demosdk/xm-localsdk"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 import Chain from "@/libs/blockchain/chain"
+import {
+    NativeBridge,
+    NativeBridgeOperationCompiled,
+    NativeBridgeSupportedStablecoin,
+} from "@kynesyslabs/demosdk/bridge"
 
 interface TankConfig {
     address: string
@@ -217,7 +222,7 @@ export class EVMSmartContractManagement {
      * @param chainKey Chain identifier (e.g., "eth.sepolia")
      * @returns USDC balance as string
      */
-    public async getUSDCBalance(chainKey: string): Promise<string> {
+    public async getUSDCBalance(chainKey: string): Promise<bigint> {
         const tankConfig = this.tanks.get(chainKey)
         if (!tankConfig) {
             throw new Error(`Tank not found for chain: ${chainKey}`)
@@ -233,8 +238,7 @@ export class EVMSmartContractManagement {
             }
 
             // Get balance from tank contract
-            const balance = await tankConfig.contract.getBalance(usdcAddress)
-            return balance.toString()
+            return await tankConfig.contract.getBalance(usdcAddress)
         } catch (error) {
             log.error(`Failed to get USDC balance for ${chainKey}:` + error)
             throw error
@@ -409,16 +413,18 @@ export class EVMSmartContractManagement {
 
     /**
      * Execute USDC withdrawal from tank (called by consensus)
+     * @param bridgeId Bridge ID
      * @param chainKey Chain identifier
      * @param recipient Recipient address
+     * @param tokenName Token name
      * @param amount Amount in USDC smallest units
-     * @param signerPrivateKeys Array of shard member private keys
      */
     public async executeWithdrawal(
+        bridgeId: string,
         chainKey: string,
         recipient: string,
-        amount: string,
-        signerPrivateKeys: string[],
+        tokenName: NativeBridgeSupportedStablecoin,
+        amount: bigint,
     ): Promise<string> {
         const fname = "[executeWithdrawal]"
         log.info(
@@ -427,10 +433,11 @@ export class EVMSmartContractManagement {
 
         // Use the new gasless withdrawal method
         return await this.executeGaslessWithdrawal(
+            bridgeId,
             chainKey,
             recipient,
+            tokenName,
             amount,
-            signerPrivateKeys,
         )
     }
 
@@ -443,15 +450,13 @@ export class EVMSmartContractManagement {
      * @returns Validation result
      */
     public async verifyDeposit(
-        chainKey: string,
         txHash: string,
-        expectedAmount: string,
-        expectedSender: string,
+        compiled: NativeBridgeOperationCompiled,
     ): Promise<{
         valid: boolean
-        actualAmount?: string
-        actualSender?: string
     }> {
+        const chainKey = compiled.content.operation.from.chain
+
         const tankConfig = this.tanks.get(chainKey)
         if (!tankConfig) {
             log.error(`Tank not found for chain: ${chainKey}`)
@@ -466,27 +471,42 @@ export class EVMSmartContractManagement {
             return { valid: false }
         }
 
+        const bridge = new NativeBridge(null, tankConfig.evmInstance as any)
+
+        // NOTE: This should never throw an error
+        // because this same method is called during the broadcast step
+        try {
+            return bridge.verifyDepositTx(
+                receipt as any,
+                { response: compiled } as any,
+            )
+        } catch (error) {
+            // INFO: In case of error, die for debugging!
+            console.error(error)
+            process.exit(1)
+        }
+
         // Parse logs for USDC transfer to tank
         // This would need proper log parsing based on USDC transfer events
         // Simplified validation for now
-        const tankAddress = tankConfig.address.toLowerCase()
-        const hasTransferToTank = receipt.logs.some(
-            (log: any) =>
-                log.address?.toLowerCase().includes("usdc") &&
-                log.topics?.some((topic: string) =>
-                    topic.toLowerCase().includes(tankAddress.slice(2)),
-                ),
-        )
+        // const tankAddress = tankConfig.address.toLowerCase()
+        // const hasTransferToTank = receipt.logs.some(
+        //     (log: any) =>
+        //         log.address?.toLowerCase().includes("usdc") &&
+        //         log.topics?.some((topic: string) =>
+        //             topic.toLowerCase().includes(tankAddress.slice(2)),
+        //         ),
+        // )
 
-        if (hasTransferToTank) {
-            return {
-                valid: true,
-                actualAmount: expectedAmount, // Would extract from logs
-                actualSender: expectedSender, // Would extract from logs
-            }
-        }
+        // if (hasTransferToTank) {
+        //     return {
+        //         valid: true,
+        //         actualAmount: expectedAmount, // Would extract from logs
+        //         actualSender: expectedSender, // Would extract from logs
+        //     }
+        // }
 
-        return { valid: false }
+        // return { valid: false }
     }
 
     /**
@@ -603,7 +623,7 @@ export class EVMSmartContractManagement {
 
         try {
             // Get USDC address for this chain (TODO: make this configurable)
-            const usdcAddress = this.getUSDCAddress(chainKey)
+            const usdcAddress = JsonConfig.getStableCoinContracts(chainKey)
 
             // Execute gasless deposit via contract
             const tx = await tankConfig.contract.depositUSDCToTank(
@@ -683,17 +703,18 @@ export class EVMSmartContractManagement {
 
     /**
      * Execute gasless withdrawal using meta-transaction pattern
+     * @param bridgeId Bridge ID
      * @param chainKey Chain identifier
      * @param recipient Withdrawal recipient address
      * @param amount Amount to withdraw
-     * @param signerPrivateKeys Shard private keys for multisig
      * @returns Proposal ID for tracking
      */
     public async executeGaslessWithdrawal(
+        bridgeId: string,
         chainKey: string,
         recipient: string,
-        amount: string,
-        signerPrivateKeys: string[],
+        tokenName: NativeBridgeSupportedStablecoin,
+        amount: bigint,
     ): Promise<string> {
         const fname = "[executeGaslessWithdrawal]"
         log.info(
@@ -701,8 +722,10 @@ export class EVMSmartContractManagement {
         )
 
         const tankConfig = this.tanks.get(chainKey)
+        const { contract, evmInstance } = tankConfig
         if (!tankConfig) {
-            throw new Error(`Tank not found for chain: ${chainKey}`)
+            log.error(`Tank not found for chain: ${chainKey}`)
+            process.exit(1)
         }
 
         try {
@@ -711,34 +734,34 @@ export class EVMSmartContractManagement {
             const proposalId = `0x${Date.now().toString(16).padStart(64, "0")}`
 
             // Execute multisig transfer using existing multisig functionality
-            const usdcAddress = this.getUSDCAddress(chainKey)
-            const nonce = Date.now()
-
-            // First signer initiates the multisig transfer
-            await tankConfig.evmInstance.connectWallet(signerPrivateKeys[0])
-            await tankConfig.contract.multisigTransfer(
-                proposalId,
-                usdcAddress,
-                recipient,
-                amount,
+            const usdcAddress = JsonConfig.getContractAddress(
+                tokenName,
+                chainKey,
             )
 
-            // Additional signers approve the transfer (2/3 majority needed)
-            for (let i = 1; i < Math.min(2, signerPrivateKeys.length); i++) {
-                await tankConfig.evmInstance.connectWallet(signerPrivateKeys[i])
-                await tankConfig.contract.multisigTransfer(
-                    proposalId,
-                    usdcAddress,
-                    recipient,
-                    amount,
-                )
-            }
+            const tx = await evmInstance.writeToContract(
+                contract,
+                "multisigTransfer",
+                [bridgeId, usdcAddress, recipient, amount, 0],
+                {
+                    gasLimit: 400_000,
+                    gasPrice: 1.8,
+                    maxFeePerGas: 1.8,
+                    maxPriorityFeePerGas: 1.8,
+                },
+            )
 
+            const { hash } = await evmInstance.sendSignedTransaction(tx)
             log.info(
                 `${fname} ✅ Gasless withdrawal completed with proposal: ${proposalId}`,
             )
+            log.debug("Multisig transfer tx: " + hash)
+            process.exit(0)
             return proposalId
         } catch (error) {
+            console.error(error)
+            process.exit(1)
+
             log.error(`${fname} Failed to execute gasless withdrawal: ${error}`)
             throw new Error(
                 `Failed to execute gasless withdrawal: ${error.toString()}`,
@@ -871,29 +894,5 @@ export class EVMSmartContractManagement {
             )
             throw error
         }
-    }
-
-    /**
-     * Get USDC contract address for a given chain
-     * @param chainKey Chain identifier
-     * @returns USDC contract address
-     */
-    private getUSDCAddress(chainKey: string): string {
-        // TODO: Make this configurable via JsonConfig
-        const usdcAddresses: { [key: string]: string } = {
-            "eth.sepolia": "0xA0b86a33E6417A8B6C8Ac3a0E9e0c4A27A4E0F2c", // Mock USDC on Sepolia
-            "eth.mainnet": "0xA0b86a33E6417A8B6C8Ac3a0E9e0c4A27A4E0F2c", // Real USDC on Ethereum
-            "polygon.amoy": "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582", // Mock USDC on Polygon Amoy
-            "polygon.mainnet": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174", // Real USDC on Polygon
-        }
-
-        const address = usdcAddresses[chainKey]
-        if (!address) {
-            throw new Error(
-                `USDC address not configured for chain: ${chainKey}`,
-            )
-        }
-
-        return address
     }
 }

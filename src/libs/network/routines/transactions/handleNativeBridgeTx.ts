@@ -1,9 +1,12 @@
 import log from "src/utilities/logger"
 import Hashing from "@/libs/crypto/hashing"
 import Chain from "@/libs/blockchain/chain"
-import { validateChain } from "@kynesyslabs/demosdk/bridge"
+import { EVM } from "@kynesyslabs/demosdk/xmcore"
+import { JsonConfig } from "@/utilities/JsonConfig"
 import { NativeBridgeTransaction } from "@kynesyslabs/demosdk/types"
+import { NativeBridge, validateChain } from "@kynesyslabs/demosdk/bridge"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { EVMSmartContractManagement } from "@/features/bridges/native"
 
 /**
  * Handles the native bridge transaction (called by the endpoint handler)
@@ -55,6 +58,31 @@ export default async function handleNativeBridgeTx(
                     "Missing bridgeId: Bridge ID is required for operation tracking",
             }
         }
+
+        // SECTION: Verify the deposit transaction
+        const tankMan = EVMSmartContractManagement.getInstance()
+        const evm = tankMan.getTankConfig(
+            compiledOperation.content.operation.from.chain,
+        ).evmInstance
+
+        // INFO: Get the deposit tx receipt
+        const depositReceipt = await evm.provider.getTransactionReceipt(txHash)
+
+        if (!depositReceipt) {
+            log.error(
+                `${fname} Deposit receipt not found for txHash: ${txHash}`,
+            )
+            return {
+                success: false,
+                error: "Deposit receipt not found",
+            }
+        }
+
+        // INFO: Verify the deposit transaction (again)
+        const bridge = new NativeBridge(null, evm as any)
+        bridge.verifyDepositTx(depositReceipt as any, {
+            response: compiledOperation,
+        } as any)
 
         // // Validate bridge ID matches the one in compiled operation
         // if (compiledOperation.content.bridgeId !== bridgeId) {

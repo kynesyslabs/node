@@ -1,6 +1,6 @@
 {
-    "evm.eth.sepolia": "https://sepolia.infura.io",
-    "evm.eth.mainnet": "https://sepolia.infura.io/v3/YOUR_INFURA_PROJECT_ID",
+    "evm.eth.sepolia": "https://ethereum-sepolia-rpc.publicnode.com",
+    "evm.eth.mainnet": "https://ethereum-rpc.publicnode.com",
     "evm.polygon.mumbai": "https://polygon-mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID",
     "evm.polygon.mainnet": "https://polygon-mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID",
     "evm.bsc.testnet": "https://bsc-dataseed.binance.org/",

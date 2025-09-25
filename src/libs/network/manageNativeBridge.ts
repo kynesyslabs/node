@@ -258,6 +258,7 @@ async function parseSolanaTankOperation(
         type: "solana",
         tankAddress: "0x0000000000000000000000000000000000000000", // Temporary - will be treasury program address
         amountToDeposit: parseAmount(operation.token.amount, 6n),
+        feeBps: 0,
         breakdown: {
             bridgeAmount: operation.token.amount,
             bridgeFee: "0",
