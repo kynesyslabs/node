@@ -29,6 +29,7 @@ export default class SharedState {
     lastTimestamp = 0
     lastShardSeed = ""
     referenceBlockRoom = 1
+    shardSize = parseInt(process.env.SHARD_SIZE) || 4
 
     // NOTE See calibrateTime.ts for this value
     timestampCorrection = 0
