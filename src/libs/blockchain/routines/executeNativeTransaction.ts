@@ -17,6 +17,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 import GCR from "../gcr/gcr"
 import Transaction from "../transaction"
 import { Operation } from "@kynesyslabs/demosdk/types"
+import { PointSystem } from "@/features/incentive/PointSystem"
+import log from "@/utilities/logger"
 
 /* NOTE 
 
@@ -28,6 +30,66 @@ as Operation objects in the GCR.
 Each block, the nodes execute the Operation objects ordering them by their timestamp and nonce (see GCR).
 
 */
+
+async function hasAlreadyReceivedFirstTransactionReward(
+    address: string,
+): Promise<boolean> {
+    try {
+        const pointSystem = PointSystem.getInstance()
+
+        const response = await pointSystem.getUserPoints(address)
+
+        if (response.result === 200 && response.response) {
+            return response.response.breakdown.firstWalletTransaction > 0
+        }
+
+        return false
+    } catch (error) {
+        return false
+    }
+}
+
+async function checkAndAwardFirstTransactionRewards(
+    sender: string,
+    receiver: string,
+    txHash: string,
+): Promise<void> {
+    const pointSystem = PointSystem.getInstance()
+
+    try {
+        if (!(await hasAlreadyReceivedFirstTransactionReward(sender))) {
+            log.info(
+                `[FirstTransactionReward] Awarding points to sender: ${sender} for tx: ${txHash}`,
+            )
+
+            try {
+                await pointSystem.awardFirstTransactionReward(sender, txHash)
+            } catch (error) {
+                log.error(
+                    `[FirstTransactionReward] Failed to award points to sender ${sender}: ${error}`,
+                )
+            }
+        }
+
+        if (!(await hasAlreadyReceivedFirstTransactionReward(receiver))) {
+            log.info(
+                `[FirstTransactionReward] Awarding points to receiver: ${receiver} for tx: ${txHash}`,
+            )
+
+            try {
+                await pointSystem.awardFirstTransactionReward(receiver, txHash)
+            } catch (error) {
+                log.error(
+                    `[FirstTransactionReward] Failed to award points to receiver ${receiver}: ${error}`,
+                )
+            }
+        }
+    } catch (error) {
+        log.error(
+            `[FirstTransactionReward] Error checking first transaction rewards: ${error}`,
+        )
+    }
+}
 
 // INFO Given a transaction, use GCR to see if it is executable and return a result
 export default async function executeNativeTransaction(
@@ -78,6 +140,17 @@ export default async function executeNativeTransaction(
         operations.push(operation)
         success = true
         message = "Transaction successful"
+
+        checkAndAwardFirstTransactionRewards(
+            sender,
+            receiver,
+            transaction.hash,
+        ).catch(error => {
+            log.error(
+                `[FirstTransactionReward] Background reward processing failed: ${error}`,
+            )
+        })
+
         return [success, message, operations]
     }
 
