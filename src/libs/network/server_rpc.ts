@@ -31,6 +31,7 @@ import { manageNativeBridge } from "./manageNativeBridge"
 import Chain from "../blockchain/chain"
 import { RateLimiter } from "./middleware/rateLimiter"
 import GCR from "../blockchain/gcr/gcr"
+import { PointSystem } from "@/features/incentive/PointSystem"
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
@@ -301,6 +302,39 @@ async function processPayload(
             }
         }
 
+        case "awardFirstTransactionReward": {
+            const pointSystem = PointSystem.getInstance()
+
+            const params = payload.params[0]
+            const { publicKey, transactionType } = params
+
+            if (!publicKey) {
+                return {
+                    result: 400,
+                    response: "Missing required parameter: publicKey",
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+
+            if (transactionType !== "first_wallet_transaction") {
+                return {
+                    result: 400,
+                    response:
+                        "Invalid transaction type. Expected 'first_wallet_transaction'",
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+
+            const result = await pointSystem.awardFirstTransactionReward(
+                publicKey,
+                params.transactionHash,
+            )
+
+            return result
+        }
+
         default:
             log.warning(
                 "[RPC Call] [Received] Method not found: " + payload.method,
@@ -333,12 +367,14 @@ export async function serverRpcBun() {
 
     // GET endpoints
     // eslint-disable-next-line quotes
-    server.get("/", (req) => {
+    server.get("/", req => {
         const clientIP = rateLimiter.getClientIP(req, server.server)
-        return new Response(JSON.stringify({
-            message: "Hello, World!",
-            yourIP: clientIP
-        }))
+        return new Response(
+            JSON.stringify({
+                message: "Hello, World!",
+                yourIP: clientIP,
+            }),
+        )
     })
 
     server.get("/info", async () => {

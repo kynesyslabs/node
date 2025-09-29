@@ -15,6 +15,7 @@ const pointValues = {
     LINK_GITHUB: 1,
     FOLLOW_DEMOS: 1,
     LINK_DISCORD: 1,
+    FIRST_WALLET_TRANSACTION: 2,
 }
 
 export class PointSystem {
@@ -126,6 +127,8 @@ export class PointSystem {
                 },
                 referrals: account.points.breakdown?.referrals || 0,
                 demosFollow: account.points.breakdown?.demosFollow || 0,
+                firstWalletTransaction:
+                    account.points.breakdown?.firstWalletTransaction || 0,
             },
             linkedWallets,
             linkedSocials,
@@ -141,7 +144,7 @@ export class PointSystem {
     private async addPointsToGCR(
         userId: string,
         points: number,
-        type: "web3Wallets" | "socialAccounts",
+        type: "web3Wallets" | "socialAccounts" | "firstWalletTransaction",
         platform: string,
         referralCode?: string,
         twitterUserId?: string,
@@ -216,6 +219,11 @@ export class PointSystem {
                 account.points.breakdown.web3Wallets[platform] || 0
             account.points.breakdown.web3Wallets[platform] =
                 oldChainPoints + points
+        } else if (type === "firstWalletTransaction") {
+            const oldFirstTransactionPoints =
+                account.points.breakdown?.firstWalletTransaction || 0
+            account.points.breakdown.firstWalletTransaction =
+                oldFirstTransactionPoints + points
         }
         account.points.lastUpdated = new Date()
 
@@ -842,6 +850,77 @@ export class PointSystem {
                 extra: {
                     error:
                         error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Award points for first wallet transaction
+     * @param userId The user's Demos address
+     * @param transactionHash The transaction hash (for logging)
+     * @returns RPCResponse
+     */
+    async awardFirstTransactionReward(
+        userId: string,
+        transactionHash: string,
+    ): Promise<RPCResponse> {
+        try {
+            const userPointsWithIdentities = await this.getUserPointsInternal(
+                userId,
+            )
+
+            if (userPointsWithIdentities.breakdown.firstWalletTransaction > 0) {
+                return {
+                    result: 200,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "First transaction reward already awarded",
+                        alreadyAwarded: true,
+                    },
+                    require_reply: false,
+                    extra: { transactionHash },
+                }
+            }
+
+            await this.addPointsToGCR(
+                userId,
+                pointValues.FIRST_WALLET_TRANSACTION,
+                "firstWalletTransaction",
+                "",
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            log.info(
+                `[PointSystem] First transaction reward awarded to ${userId}. Hash: ${transactionHash}`,
+            )
+
+            return {
+                result: 200,
+                response: {
+                    pointsAwarded: pointValues.FIRST_WALLET_TRANSACTION,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: "Points awarded for first wallet transaction",
+                    alreadyAwarded: false,
+                },
+                require_reply: false,
+                extra: { transactionHash },
+            }
+        } catch (error) {
+            log.error(
+                `[PointSystem] Error awarding first transaction reward to ${userId}: ${error}`,
+            )
+
+            return {
+                result: 500,
+                response: "Error awarding first transaction reward",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                    transactionHash,
                 },
             }
         }

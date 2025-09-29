@@ -34,6 +34,7 @@ export class GCRMain {
             }
             referrals: number
             demosFollow: number
+            firstWalletTransaction: number
             weeklyChallenge?: Array<{
                 date: string
                 points: number
