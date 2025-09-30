@@ -74,7 +74,7 @@ export default async function manageConsensusRoutines(
 
     // Also refuses the routine if we are not in the shard
     const { commonValidatorSeed } = await getCommonValidatorSeed()
-    const shard = await getShard(commonValidatorSeed)
+    const shard = await getShard(commonValidatorSeed, true)
     const ourId = getSharedState.publicKeyHex
     let isInShard = false
 
