@@ -123,9 +123,9 @@ export default async function getCommonValidatorSeed(
 
     // NOTE The common validator seed is set in the sharedState as soon as it is computed
     // NOTE: This should only happen when calculating the CVSA based on the last forged block (aka: when using this function's default parameters)
-    if (!lastBlock) {
-        getSharedState.currentValidatorSeed = commonValidatorSeed
-    }
+    // if (updateSharedState) {
+    //     getSharedState.currentValidatorSeed = commonValidatorSeed
+    // }
 
     logger(`Common validator seed: ${commonValidatorSeed}`)
     return { commonValidatorSeed, lastBlockNumber }

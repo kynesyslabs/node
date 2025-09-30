@@ -73,7 +73,8 @@ export default async function manageConsensusRoutines(
     }
 
     // Also refuses the routine if we are not in the shard
-    const shard = await getShard(getSharedState.currentValidatorSeed)
+    const { commonValidatorSeed } = await getCommonValidatorSeed()
+    const shard = await getShard(commonValidatorSeed)
     const ourId = getSharedState.publicKeyHex
     let isInShard = false
 
@@ -87,12 +88,27 @@ export default async function manageConsensusRoutines(
     if (!isInShard) {
         response.result = 400
         response.response =
-            "We are not in the shard(" + getSharedState.exposedUrl + "), cannot proceed with the routine"
+            "We are not in the shard(" +
+            getSharedState.exposedUrl +
+            "), cannot proceed with the routine"
 
         log.error("🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒")
-        log.error("We are not in the shard(" + getSharedState.exposedUrl + "), cannot proceed with the routine")
-        log.error("current validator seed: " + getSharedState.currentValidatorSeed)
-        log.error("calculated shard: " + JSON.stringify(shard.map(m => m.connection.string), null, 2))
+        log.error(
+            "We are not in the shard(" +
+                getSharedState.exposedUrl +
+                "), cannot proceed with the routine",
+        )
+        log.error(
+            "current validator seed: " + commonValidatorSeed,
+        )
+        log.error(
+            "calculated shard: " +
+                JSON.stringify(
+                    shard.map(m => m.connection.string),
+                    null,
+                    2,
+                ),
+        )
         const sharedStateLastShard = []
 
         for (const pubkey of getSharedState.lastShard) {
@@ -100,7 +116,10 @@ export default async function manageConsensusRoutines(
             sharedStateLastShard.push(peer.connection.string)
         }
 
-        log.error("shared state last shard: " + JSON.stringify(sharedStateLastShard, null, 2))
+        log.error(
+            "shared state last shard: " +
+                JSON.stringify(sharedStateLastShard, null, 2),
+        )
         log.error("last block number: " + getSharedState.lastBlockNumber)
         log.error("🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒")
         return response
@@ -168,7 +187,7 @@ export default async function manageConsensusRoutines(
         case "getCommonValidatorSeed":
             response.result = 200
             await getCommonValidatorSeed() // NOTE This is generated each time and stored in the shared state
-            response.response = getSharedState.currentValidatorSeed
+            response.response = commonValidatorSeed
             break
 
         // SECTION: New Secretary Manager class handlers
