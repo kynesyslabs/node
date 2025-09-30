@@ -16,7 +16,7 @@ export default async function manageGCRRoutines(
     sender: string,
     payload: GCRRoutinePayload,
 ): Promise<RPCResponse> {
-    const response = _.cloneDeep(emptyResponse)
+    let response = _.cloneDeep(emptyResponse)
     response.result = 200
     // Handle the payload
     const { method, params } = payload
@@ -51,6 +51,11 @@ export default async function manageGCRRoutines(
         case "getPoints":
             response.response = await IncentiveManager.getPoints(params[0])
             break
+
+        case "getTopAccountsByPoints":
+            response = await GCR.getTopAccountsByPoints()
+            break
+
         case "getReferralInfo": {
             const account = await ensureGCRForUser(params[0])
             response.response = account.referralInfo
