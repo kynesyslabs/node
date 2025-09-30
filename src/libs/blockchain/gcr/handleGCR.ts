@@ -49,6 +49,7 @@ import Chain from "../chain"
 import { Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { Referrals } from "@/features/incentive/referrals"
+import { PointSystem } from "@/features/incentive/PointSystem"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -370,6 +371,27 @@ export default class HandleGCR {
             }
         }
 
+        if (!simulate && !isRollback && this.isNativeTransaction(tx)) {
+            log.info(
+                `[FirstTransactionReward] Processing rewards for financial transaction (${tx.content.type}): ${tx.hash}`,
+            )
+
+            try {
+                const participants = this.getTransactionParticipants(tx)
+
+                for (const participant of participants) {
+                    await this.checkAndAwardFirstTransactionReward(
+                        participant,
+                        tx.hash,
+                    )
+                }
+            } catch (error) {
+                log.error(
+                    `[FirstTransactionReward] Background reward processing failed for tx ${tx.hash}: ${error}`,
+                )
+            }
+        }
+
         return { success: true, message: "" }
     }
 
@@ -510,9 +532,11 @@ export default class HandleGCR {
                     twitter: 0,
                     github: 0,
                     discord: 0,
+                    telegram: 0,
                 },
                 referrals: 0,
                 demosFollow: 0,
+                firstWalletTransaction: 0,
             },
             lastUpdated: new Date(),
         }
@@ -530,5 +554,83 @@ export default class HandleGCR {
         account.updatedAt = fillData["updatedAt"] || new Date()
 
         return await repository.save(account)
+    }
+
+    static async hasAlreadyReceivedFirstTransactionReward(
+        address: string,
+    ): Promise<boolean> {
+        try {
+            const pointSystem = PointSystem.getInstance()
+            const response = await pointSystem.getUserPoints(address)
+
+            if (response.result === 200 && response.response) {
+                return (
+                    (response.response.breakdown as any)
+                        .firstWalletTransaction > 0
+                )
+            }
+            return false
+        } catch (error) {
+            return false
+        }
+    }
+
+    static async checkAndAwardFirstTransactionReward(
+        address: string,
+        txHash: string,
+    ): Promise<void> {
+        const pointSystem = PointSystem.getInstance()
+
+        try {
+            if (
+                !(await this.hasAlreadyReceivedFirstTransactionReward(address))
+            ) {
+                log.info(
+                    `[FirstTransactionReward] Awarding points to ${address} for tx: ${txHash}`,
+                )
+
+                try {
+                    const result =
+                        await pointSystem.awardFirstTransactionReward(
+                            address,
+                            txHash,
+                        )
+                    log.info(
+                        `[FirstTransactionReward] Reward result for ${address}: ${JSON.stringify(
+                            result,
+                        )}`,
+                    )
+                } catch (error) {
+                    log.error(
+                        `[FirstTransactionReward] Failed to award points to ${address}: ${error}`,
+                    )
+                }
+            }
+        } catch (error) {
+            log.error(
+                `[FirstTransactionReward] Error checking first transaction reward for ${address}: ${error}`,
+            )
+        }
+    }
+
+    static isNativeTransaction(tx: Transaction): boolean {
+        const { type, amount } = tx.content
+
+        return type === "native" && amount > 0
+    }
+
+    static getTransactionParticipants(tx: Transaction): string[] {
+        const { from, to } = tx.content
+        const participants: Set<string> = new Set()
+
+        if (from) {
+            participants.add(from)
+        }
+
+        if (to && to !== from) {
+            participants.add(to)
+        }
+
+        return Array.from(participants).filter(addr => addr && addr.length > 0)
     }
 }

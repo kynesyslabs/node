@@ -31,6 +31,7 @@ export class GCRMain {
                 twitter: number
                 github: number
                 discord: number
+                telegram: number
             }
             referrals: number
             demosFollow: number

@@ -124,6 +124,7 @@ export class PointSystem {
                     twitter: 0,
                     github: 0,
                     discord: 0,
+                    telegram: 0,
                 },
                 referrals: account.points.breakdown?.referrals || 0,
                 demosFollow: account.points.breakdown?.demosFollow || 0,
@@ -198,6 +199,25 @@ export class PointSystem {
         //     await gcrMainRepository.save(newAccount)
         // } else {
         const isEligibleForReferral = Referrals.isEligibleForReferral(account)
+
+        if (!account.points.breakdown) {
+            account.points.breakdown = {
+                web3Wallets: {},
+                socialAccounts: {
+                    twitter: 0,
+                    github: 0,
+                    discord: 0,
+                    telegram: 0,
+                },
+                referrals: 0,
+                demosFollow: 0,
+                firstWalletTransaction: 0,
+            }
+        }
+
+        if (account.points.breakdown.firstWalletTransaction === undefined) {
+            account.points.breakdown.firstWalletTransaction = 0
+        }
 
         const oldTotal = account.points.totalPoints || 0
         account.points.totalPoints = oldTotal + points
