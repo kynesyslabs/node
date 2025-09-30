@@ -57,7 +57,7 @@ export default class SecretaryManager {
 
         log.only(
             "Shard members: " +
-                JSON.stringify(this.shard.members.map(m => m.identity)),
+                JSON.stringify(this.shard.members.map(m => m.connection.string)),
         )
 
         if (
@@ -71,7 +71,7 @@ export default class SecretaryManager {
 
         log.only("INITIALIZED SHARD:")
         log.only(
-            "SHARD: " + JSON.stringify(this.shard.members.map(m => m.identity)),
+            "SHARD: " + JSON.stringify(this.shard.members.map(m => m.connection.string)),
         )
         log.only("SECRETARY: " + this.secretary.identity)
 
@@ -85,7 +85,7 @@ export default class SecretaryManager {
 
         // INFO: Start the secretary routine
         if (this.checkIfWeAreSecretary()) {
-            log.only("We are the secretary. starting the secretary routine")
+            log.only("⬜️ We are the secretary ⬜️. starting the secretary routine")
             this.secretaryRoutine().then(() => {
                 log.only("[SECRETARY ROUTINE] Secretary routine finished 🎉")
             })
