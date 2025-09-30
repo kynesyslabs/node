@@ -15,6 +15,7 @@ import log from "src/utilities/logger"
 import Cryptography from "../crypto/cryptography"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { Waiter } from "src/utilities/waiter"
+import { PeerManager } from "../peer"
 
 export interface ConsensusMethod {
     method:
@@ -87,6 +88,21 @@ export default async function manageConsensusRoutines(
         response.result = 400
         response.response =
             "We are not in the shard(" + getSharedState.exposedUrl + "), cannot proceed with the routine"
+
+        log.error("🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒")
+        log.error("We are not in the shard(" + getSharedState.exposedUrl + "), cannot proceed with the routine")
+        log.error("current validator seed: " + getSharedState.currentValidatorSeed)
+        log.error("calculated shard: " + JSON.stringify(shard.map(m => m.connection.string), null, 2))
+        const sharedStateLastShard = []
+
+        for (const pubkey of getSharedState.lastShard) {
+            const peer = PeerManager.getInstance().getPeer(pubkey)
+            sharedStateLastShard.push(peer.connection.string)
+        }
+
+        log.error("shared state last shard: " + JSON.stringify(sharedStateLastShard, null, 2))
+        log.error("last block number: " + getSharedState.lastBlockNumber)
+        log.error("🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒")
         return response
     }
 
