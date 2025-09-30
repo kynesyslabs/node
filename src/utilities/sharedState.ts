@@ -201,8 +201,11 @@ export default class SharedState {
         return Number(process.env.CONSENSUS_CHECK_INTERVAL)
     }
 
+    /**
+     * @returns The block time in seconds
+     */
     public getConsensusTime(): number {
-        return Number(process.env.CONSENSUS_TIME)
+        return Number(process.env.CONSENSUS_TIME) || this.block_time
     }
 
     public async getConnectionString(): Promise<string> {

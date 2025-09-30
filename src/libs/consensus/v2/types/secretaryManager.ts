@@ -45,25 +45,35 @@ export default class SecretaryManager {
             secretaryKey: "",
             blockRef: lastBlockNumber + 1,
         }
+        log.only("🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢")
+        log.only("Initializing shard")
+        log.only("CVSA: " + cVSA)
+        log.only("Last block number: " + lastBlockNumber)
 
         // Reusing the method to create the members
         this.shard.members = await getShard(cVSA)
         // this.ourKey = getSharedState.identity.ed25519.publicKey.toString("hex")
         this.ourKey = getSharedState.publicKeyHex
 
+        log.only(
+            "Shard members: " +
+                JSON.stringify(this.shard.members.map(m => m.identity)),
+        )
+
         if (
             !this.shard.members.map(peer => peer.identity).includes(this.ourKey)
         ) {
+            log.error("We are not in the shard")
             throw new NotInShardError("We are not in the shard")
         }
         // Assigning the secretary and its key
         this.shard.secretaryKey = this.secretary.identity
 
-        log.debug("INITIALIZED SHARD:")
-        log.debug(
+        log.only("INITIALIZED SHARD:")
+        log.only(
             "SHARD: " + JSON.stringify(this.shard.members.map(m => m.identity)),
         )
-        log.debug("SECRETARY: " + this.secretary.identity)
+        log.only("SECRETARY: " + this.secretary.identity)
 
         // INFO: If some nodes crash, kill the node for debugging!
         // if (this.shard.members.length < 3 && this.shard.blockRef > 24000) {
@@ -75,8 +85,9 @@ export default class SecretaryManager {
 
         // INFO: Start the secretary routine
         if (this.checkIfWeAreSecretary()) {
+            log.only("We are the secretary. starting the secretary routine")
             this.secretaryRoutine().then(() => {
-                log.debug("[SECRETARY ROUTINE] Secretary routine finished 🎉")
+                log.only("[SECRETARY ROUTINE] Secretary routine finished 🎉")
             })
         }
 
