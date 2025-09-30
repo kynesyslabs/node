@@ -86,7 +86,7 @@ export default async function manageConsensusRoutines(
     if (!isInShard) {
         response.result = 400
         response.response =
-            "We are not in the shard, cannot proceed with the routine"
+            "We are not in the shard(" + getSharedState.connectionString + "), cannot proceed with the routine"
         return response
     }
 
