@@ -109,12 +109,7 @@ export default async function manageConsensusRoutines(
                     2,
                 ),
         )
-        const sharedStateLastShard = []
-
-        for (const pubkey of getSharedState.lastShard) {
-            const peer = PeerManager.getInstance().getPeer(pubkey)
-            sharedStateLastShard.push(peer.connection.string)
-        }
+        const sharedStateLastShard = shard.map(m => m.identity)
 
         log.error(
             "shared state last shard: " +

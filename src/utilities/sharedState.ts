@@ -77,7 +77,7 @@ export default class SharedState {
     peerRoutineRunning = 0
     // SECTION shared state variables
     shard: Peer[]
-    lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard
+    // lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard
     identity: Identity
     keypair: {
         publicKey:
