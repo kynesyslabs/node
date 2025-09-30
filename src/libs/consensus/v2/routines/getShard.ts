@@ -12,7 +12,7 @@ export default async function getShard(
     // ! we need to get the peers from the last 3 blocks too
     const allPeers = await PeerManager.getInstance().getOnlinePeers()
     if (debug) {
-        log.debug(
+        log.only(
             "peers: " +
                 JSON.stringify(
                     allPeers.map(peer => ({
@@ -26,7 +26,7 @@ export default async function getShard(
     }
     const peers = allPeers.filter(peer => peer.sync.status)
     if (debug) {
-        log.debug(
+        log.only(
             "peers: " +
                 JSON.stringify(
                     peers.map(peer => ({
@@ -80,15 +80,15 @@ export default async function getShard(
     console.log("[getShard] maxShardSize: ", maxShardSize)
     const shard: Peer[] = []
     log.custom("last_shard", "Shard seed is: " + seed)
-    getSharedState.lastShardSeed = seed
-    const random = Alea(seed)
+    // getSharedState.lastShardSeed = seed
+    const deterministicRandomness = Alea(seed)
     const availablePeers = [...peers]
 
     // REVIEW: sort available peers by .identity (which is a hex string)
     // before choosing the peers for a uniform sample across nodes
     availablePeers.sort((a, b) => a.identity.localeCompare(b.identity))
     if (debug) {
-        log.debug(
+        log.only(
             "availablePeers: " +
                 JSON.stringify(
                     availablePeers.map(peer => ({
@@ -100,16 +100,16 @@ export default async function getShard(
                 ),
         )
     }
-    log.debug("availablePeers: " + JSON.stringify(availablePeers, null, 2))
+    log.only("availablePeers: " + JSON.stringify(availablePeers.map(peer => peer.connection.string), null, 2))
     // REVIEW: check if this is the right way to do it
     // NOTE Choosing the secretary by randomly ordering the list: the first one is the secretary
     for (let i = 0; i < maxShardSize && availablePeers.length > 0; i++) {
-        const index = Math.floor(random() * availablePeers.length)
+        const index = Math.floor(deterministicRandomness() * availablePeers.length)
         shard.push(availablePeers[index])
         availablePeers.splice(index, 1)
     }
     if (debug) {
-        log.debug(
+        log.only(
             "shard: " +
                 JSON.stringify(
                     shard.map(peer => ({

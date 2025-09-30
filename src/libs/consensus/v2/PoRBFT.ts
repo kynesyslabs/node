@@ -179,7 +179,9 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         // INFO: CONSENSUS ACTION 5: Forge the block
+        log.only("Forging block 🏁")
         const block = await forgeBlock(tempMempool, peerlist) // NOTE The GCR hash is calculated here and added to the block
+        log.only("Block forged ✅")
         // REVIEW Set last consensus time to the current block timestamp
         getSharedState.lastConsensusTime = block.content.timestamp
 
@@ -205,7 +207,9 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         // INFO: CONSENSUS ACTION 7: End the consensus routine
+        log.only("Sending validator phase 7 to the secretary 🏁")
         await updateValidatorPhase(7)
+        log.only("Validator phase 7 sent to the secretary ✅")
     } catch (error) {
         if (error instanceof NotInShardError) {
             log.info(

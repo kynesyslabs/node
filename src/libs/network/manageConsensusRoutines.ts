@@ -16,6 +16,7 @@ import Cryptography from "../crypto/cryptography"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { Waiter } from "src/utilities/waiter"
 import { PeerManager } from "../peer"
+import Chain from "../blockchain/chain"
 
 export interface ConsensusMethod {
     method:
@@ -74,7 +75,7 @@ export default async function manageConsensusRoutines(
 
     // Also refuses the routine if we are not in the shard
     const { commonValidatorSeed } = await getCommonValidatorSeed()
-    const shard = await getShard(commonValidatorSeed, true)
+    const shard = await getShard(commonValidatorSeed)
     const ourId = getSharedState.publicKeyHex
     let isInShard = false
 
@@ -86,6 +87,23 @@ export default async function manageConsensusRoutines(
     }
 
     if (!isInShard) {
+        // INFO: If is a greenlight request, return 200
+        if (payload.method == "greenlight") {
+            response.result = 200
+            response.response = "Greenlight received too late, ignoring"
+            return response
+        }
+
+        if (payload.method == "setValidatorPhase") {
+            response.result = 200
+            response.response =
+                "Set validator phase received too late, ignoring"
+            response.extra = {
+                greenlight: true,
+            }
+            return response
+        }
+
         response.result = 400
         response.response =
             "We are not in the shard(" +
@@ -93,14 +111,13 @@ export default async function manageConsensusRoutines(
             "), cannot proceed with the routine"
 
         log.error("🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒")
+        log.error("Payload: " + JSON.stringify(payload, null, 2))
         log.error(
             "We are not in the shard(" +
                 getSharedState.exposedUrl +
                 "), cannot proceed with the routine",
         )
-        log.error(
-            "current validator seed: " + commonValidatorSeed,
-        )
+        log.error("current validator seed: " + commonValidatorSeed)
         log.error(
             "calculated shard: " +
                 JSON.stringify(
@@ -109,7 +126,7 @@ export default async function manageConsensusRoutines(
                     2,
                 ),
         )
-        const sharedStateLastShard = shard.map(m => m.identity)
+        const sharedStateLastShard = shard.map(m => m.connection.string)
 
         log.error(
             "shared state last shard: " +
@@ -117,6 +134,16 @@ export default async function manageConsensusRoutines(
         )
         log.error("last block number: " + getSharedState.lastBlockNumber)
         log.error("🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒")
+
+        // INFO: Check if seed is from past consensus round
+        // const lastBlockMinus1 = await Chain.getBlockByNumber(getSharedState.lastBlockNumber - 1)
+        // const { commonValidatorSeed: pastCommonValidatorSeed } = await getCommonValidatorSeed(lastBlockMinus1)
+        // if (pastCommonValidatorSeed == commonValidatorSeed) {
+        //     log.error("Seed is from past consensus round")
+        //     response.result = 400
+        //     response.response = "Seed is from past consensus round"
+        //     return response
+        // }
         return response
     }
 
