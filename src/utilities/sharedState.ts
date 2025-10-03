@@ -22,7 +22,7 @@ export default class SharedState {
     version_name = "Entangled Polymer"
     signingAlgorithm = "ed25519" as SigningAlgorithm
 
-    block_time = 20 // TODO Get it from the genesis (or see Consensus module)
+    block_time = 10 // TODO Get it from the genesis (or see Consensus module)
 
     currentTimestamp = 0
     currentUTCTime = 0
