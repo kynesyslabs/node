@@ -87,7 +87,7 @@ export class OperationsRegistry {
     }
 
     // INFO Adding an operation to the registry
-    add(operation: Operation) {
+    async add(operation: Operation) {
         this.operations.push({
             operation: operation,
             status: "pending",
@@ -97,7 +97,7 @@ export class OperationsRegistry {
             },
             timestamp: Date.now(),
         })
-        fs.writeFileSync(this.path, JSON.stringify(this.operations))
+        await fs.promises.writeFile(this.path, JSON.stringify(this.operations))
     }
 
     // INFO Getting the full list of operations currently in the registry

@@ -1,4 +1,4 @@
-import { FindManyOptions, In, QueryFailedError, Repository } from "typeorm"
+import { FindManyOptions, In, LessThanOrEqual, QueryFailedError, Repository } from "typeorm"
 import Datasource from "@/model/datasource"
 
 import TxUtils from "./transaction"
@@ -17,6 +17,7 @@ export default class Mempool {
 
     /**
      * Returns the mempool. If `blockNumber` is not provided, returns all transactions.
+     * When `blockNumber` is transaction past from a previous block number are included.
      *
      * @param blockNumber - The block number to filter by
      */
@@ -31,7 +32,7 @@ export default class Mempool {
 
         if (blockNumber) {
             options.where = {
-                blockNumber: blockNumber,
+                blockNumber: LessThanOrEqual(blockNumber),
             }
         }
 

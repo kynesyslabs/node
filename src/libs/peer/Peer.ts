@@ -162,7 +162,7 @@ export default class Peer {
                 ? `${request.method}.${request.params[0].method}`
                 : request.method
         log.error(
-            "[PEER] [LONG CALL] Max retries reached for method: " +
+            "[PEER] [LONG CALL] [" + this.connection.string + "] Max retries reached for method: " +
                 methodString +
                 " - " +
                 response,

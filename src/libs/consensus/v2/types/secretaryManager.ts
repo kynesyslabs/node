@@ -57,7 +57,9 @@ export default class SecretaryManager {
 
         log.only(
             "Shard members: " +
-                JSON.stringify(this.shard.members.map(m => m.connection.string)),
+                JSON.stringify(
+                    this.shard.members.map(m => m.connection.string),
+                ),
         )
 
         if (
@@ -71,7 +73,10 @@ export default class SecretaryManager {
 
         log.only("INITIALIZED SHARD:")
         log.only(
-            "SHARD: " + JSON.stringify(this.shard.members.map(m => m.connection.string)),
+            "SHARD: " +
+                JSON.stringify(
+                    this.shard.members.map(m => m.connection.string),
+                ),
         )
         log.only("SECRETARY: " + this.secretary.identity)
 
@@ -85,7 +90,9 @@ export default class SecretaryManager {
 
         // INFO: Start the secretary routine
         if (this.checkIfWeAreSecretary()) {
-            log.only("⬜️ We are the secretary ⬜️. starting the secretary routine")
+            log.only(
+                "⬜️ We are the secretary ⬜️. starting the secretary routine",
+            )
             this.secretaryRoutine().then(() => {
                 log.only("[SECRETARY ROUTINE] Secretary routine finished 🎉")
             })
@@ -620,13 +627,13 @@ export default class SecretaryManager {
             return false
         }
 
-        log.debug("Received green light for phase: " + validatorPhase)
-        log.debug("---- DIAGNOSTICS ----")
-        log.debug("Our phase: " + this.ourValidatorPhase.currentPhase)
-        log.debug("Our blockRef: " + this.shard.blockRef)
-        log.debug("Secretary timestamp: " + secretaryBlockTimestamp)
-        log.debug("Secretary: " + this.secretary.identity)
-        log.debug("---- END DIAGNOSTICS ----")
+        log.only("Received green light for phase: " + validatorPhase)
+        log.only("---- DIAGNOSTICS ----")
+        log.only("Our phase: " + this.ourValidatorPhase.currentPhase)
+        log.only("Our blockRef: " + this.shard.blockRef)
+        log.only("Secretary timestamp: " + secretaryBlockTimestamp)
+        log.only("Secretary: " + this.secretary.identity)
+        log.only("---- END DIAGNOSTICS ----")
 
         if (secretaryBlockTimestamp < this.blockTimestamp) {
             log.debug(
@@ -644,12 +651,35 @@ export default class SecretaryManager {
             this.blockTimestamp = secretaryBlockTimestamp
         }
 
-        const waiterKey = Waiter.keys.GREEN_LIGHT + validatorPhase
+        const waiterKey =
+            Waiter.keys.GREEN_LIGHT + this.shard.blockRef + validatorPhase
+        log.only("Waiter key: " + waiterKey)
 
-        if (this.ourValidatorPhase.currentPhase + 1 == validatorPhase) {
-            log.debug(`[SECRETARY ROUTINE] Pre-holding the key: ${waiterKey}`)
-            Waiter.preHold(waiterKey)
+        if (Waiter.isWaiting(waiterKey)) {
+            Waiter.resolve(waiterKey, secretaryBlockTimestamp)
+            this.ourValidatorPhase.waitStatus = false
+            return true
         }
+
+        if (this.ourValidatorPhase.currentPhase <= validatorPhase) {
+            log.only(`[SECRETARY ROUTINE] Pre-holding the key: ${waiterKey}`)
+            Waiter.preHold(waiterKey, secretaryBlockTimestamp)
+            return true
+        }
+
+        if (this.ourValidatorPhase.currentPhase > validatorPhase){
+            // INFO: Older greenlight received, ignoring it
+            return true
+        }
+
+        log.only("We don't know what to do with this green light")
+        log.only("Validator phase: " + validatorPhase)
+        log.only("Our phase: " + this.ourValidatorPhase.currentPhase)
+        log.only("Secretary block timestamp: " + secretaryBlockTimestamp)
+        log.only("Block timestamp: " + this.blockTimestamp)
+        process.exit(1)
+
+        return false
 
         // log.debug("Our phase: " + this.ourValidatorPhase.currentPhase)
         // if (validatorPhase > this.ourValidatorPhase.currentPhase) {
@@ -698,12 +728,19 @@ export default class SecretaryManager {
         //     // await this.simulateSecretaryGoingOffline()
         // }
 
+        log.only("Sending our validator phase to the secretary")
+        log.only("Our phase: " + this.ourValidatorPhase.currentPhase)
+        log.only("Shard block ref: " + this.shard.blockRef)
+
         const waiterKey =
-            Waiter.keys.GREEN_LIGHT + this.ourValidatorPhase.currentPhase
-        const greenlight: Promise<null> = Waiter.wait(
+            Waiter.keys.GREEN_LIGHT + this.shard.blockRef + this.ourValidatorPhase.currentPhase
+        const greenlight: Promise<number | null> = Waiter.wait(
             waiterKey,
             this._greenlight_timeout,
         )
+
+        log.only("Greenlight waiter created")
+        log.only("Waiter key: " + waiterKey)
 
         const sendStatus = async () => {
             const request: RPCRequest = {
@@ -846,25 +883,26 @@ export default class SecretaryManager {
     }
 
     public async endConsensusRoutine() {
+        log.only("Ending the consensus routine")
         SecretaryManager.instance.runSecretaryRoutine = false
         SecretaryManager.instance = null
-
+        
         // TODO: Abort all waiters
-
+        
         // INFO: Resolve all hanging waiters
         if (Waiter.isWaiting(Waiter.keys.GREEN_LIGHT)) {
-            log.debug(
-                "GREEN_LIGHT waiter found WHEN ENDING THE CONSENSUS ..., resolving it",
+            log.only(
+                "GREEN_LIGHT waiter found WHEN ENDING THE CONSENSUS ..., KILLING IT it",
             )
             Waiter.abort(Waiter.keys.GREEN_LIGHT)
         }
 
-        if (Waiter.isWaiting(Waiter.keys.SET_WAIT_STATUS)) {
-            log.debug(
-                "SET_WAIT_STATUS waiter found WHEN ENDING THE CONSENSUS ..., resolving it",
-            )
-            Waiter.abort(Waiter.keys.SET_WAIT_STATUS)
-        }
+        // if (Waiter.isWaiting(Waiter.keys.SET_WAIT_STATUS)) {
+        //     log.only(
+        //         "SET_WAIT_STATUS waiter found WHEN ENDING THE CONSENSUS ..., KILLING IT it",
+        //     )
+        //     Waiter.abort(Waiter.keys.SET_WAIT_STATUS)
+        // }
     }
 
     // SECTION Methods called by the shard members

@@ -56,9 +56,9 @@ export async function broadcastBlockHash(
                 const incomingSignatures: { [key: string]: string } =
                     response.extra["signatures"]
 
-                for (const [identity, signature] of Object.entries(
+                const signatureVerificationPromises = Object.entries(
                     incomingSignatures,
-                )) {
+                ).map(async ([identity, signature]) => {
                     const isValid = await ucrypto.verify({
                         algorithm: getSharedState.signingAlgorithm,
                         message: new TextEncoder().encode(block.hash),
@@ -71,7 +71,7 @@ export async function broadcastBlockHash(
                         log.debug(
                             `Signature ${signature} from ${identity} added to the candidate block`,
                         )
-                        continue
+                        return { identity, signature, isValid: true }
                     }
 
                     log.error(
@@ -82,7 +82,10 @@ export async function broadcastBlockHash(
                     log.error(
                         "Signature verification failed. Signature not added.",
                     )
-                }
+                    return { identity, signature, isValid: false }
+                })
+
+                await Promise.all(signatureVerificationPromises)
                 pro++
             } else {
                 log.error(

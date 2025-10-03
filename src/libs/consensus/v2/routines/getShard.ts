@@ -100,7 +100,6 @@ export default async function getShard(
                 ),
         )
     }
-    log.only("availablePeers: " + JSON.stringify(availablePeers.map(peer => peer.connection.string), null, 2))
     // REVIEW: check if this is the right way to do it
     // NOTE Choosing the secretary by randomly ordering the list: the first one is the secretary
     for (let i = 0; i < maxShardSize && availablePeers.length > 0; i++) {

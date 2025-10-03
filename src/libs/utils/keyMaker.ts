@@ -26,7 +26,7 @@ async function main() {
     const forceNew = process.argv.includes("-f")
 
     if (forceNew && fs.existsSync(".demos_identity")) {
-        fs.unlinkSync(".demos_identity")
+        await fs.promises.unlink(".demos_identity")
         console.log("Existing .demos_identity file deleted.")
     }
 
@@ -38,8 +38,8 @@ async function main() {
     console.log("Private Key:", privateKey)
     console.log("====\n\n")
     // Save to file
-    fs.writeFileSync("public.key", publicKey)
-    fs.writeFileSync(".demos_identity", "0x" + privateKey)
+    await fs.promises.writeFile("public.key", publicKey)
+    await fs.promises.writeFile(".demos_identity", "0x" + privateKey)
     // Logging
     console.log("Identity saved (or kept) to .demos_identity and public.key")
 }

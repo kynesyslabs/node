@@ -253,8 +253,8 @@ export async function consensusRoutine(): Promise<void> {
         // await Mempool.joinTemporaryMempool() // ? Is await ok here?
     }
 
-    log.debug("👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋")
-    log.debug("[consensusRoutine] CONSENSUS ROUTINE ENDED 🔥🔥🔥")
+    log.only("👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋")
+    log.only("[consensusRoutine] CONSENSUS ROUTINE ENDED 🔥🔥🔥")
 }
 
 // SECTION: Consensus functions!

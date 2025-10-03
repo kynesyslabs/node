@@ -38,6 +38,12 @@ export default async function manageConsensusRoutines(
     sender: string,
     payload: ConsensusMethod,
 ): Promise<RPCResponse> {
+    log.only("👍👍👍👍👍👍👍👍👍 RECEIVED CONSENSUS CALL 👍👍👍👍👍👍👍👍")
+    
+    const peer = PeerManager.getInstance().getPeer(sender)
+    log.only("Sender: " + peer.connection.string)
+    log.only("Payload: " + JSON.stringify(payload, null, 2))
+    log.only("-----------------------------")
     let response = _.cloneDeep(emptyResponse)
 
     /* REVIEW
@@ -53,6 +59,8 @@ export default async function manageConsensusRoutines(
     const isConsensusTime = await checkConsensusTime(true, 2)
     const isConsensusRunning = isConsensusAlreadyRunning()
     const inConsensus = isConsensusTime || isConsensusRunning
+
+    log.only("inConsensus: " + inConsensus)
 
     if (!inConsensus) {
         response.result = 400
@@ -86,22 +94,27 @@ export default async function manageConsensusRoutines(
         }
     }
 
-    if (!isInShard) {
+    log.only("isInShard: " + isInShard)
+
+    inShardCheck: if (!isInShard) {
         // INFO: If is a greenlight request, return 200
         if (payload.method == "greenlight") {
-            response.result = 200
-            response.response = "Greenlight received too late, ignoring"
-            return response
+            // response.result = 200
+            // response.response = "Greenlight received too late, ignoring"
+
+            // return response
+            break inShardCheck
         }
 
         if (payload.method == "setValidatorPhase") {
-            response.result = 200
-            response.response =
-                "Set validator phase received too late, ignoring"
-            response.extra = {
-                greenlight: true,
-            }
-            return response
+            // response.result = 200
+            // response.response =
+            //     "Set validator phase received too late, ignoring"
+            // response.extra = {
+            //     greenlight: true,
+            // }
+            // return response
+            break inShardCheck
         }
 
         response.result = 400

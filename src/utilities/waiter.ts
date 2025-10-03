@@ -23,7 +23,7 @@ type WaitEntry = {
 }
 
 export class Waiter {
-    static preHeld: Map<string, null> = new Map()
+    static preHeld: Map<string, any> = new Map()
     static waitList: Map<string, WaitEntry> = new Map()
     static keys = {
         GREEN_LIGHT: "greenLight",
@@ -39,18 +39,17 @@ export class Waiter {
      * @param timeout - The timeout for the event
      * @returns The data of the resolved event
      */
-    static async wait<T = any>(
-        id: string,
-        timeout = 10000,
-    ): Promise<T> {
+    static async wait<T = any>(id: string, timeout = 10000): Promise<T> {
         if (Waiter.waitList.has(id)) {
             throw new Error(`[WAITER] Already waiting for id: ${id}`)
         }
 
         if (Waiter.preHeld.has(id)) {
-            log.debug(`[WAITER] Found pre-held key: ${id}`)
+            log.only(`[WAITER] Found pre-held key: ${id} with value: ${Waiter.preHeld.get(id)}`)
+            const resolveValue = Waiter.preHeld.get(id)
             Waiter.preHeld.delete(id)
-            return null
+            log.only(`[WAITER] Resolved pre-held key: ${id} with data: ${resolveValue}`)
+            return resolveValue
         }
 
         const promise = new Promise<T>((resolve, reject) => {
@@ -102,8 +101,9 @@ export class Waiter {
         return data || null
     }
 
-    static preHold(id: string) {
-        Waiter.preHeld.set(id, null)
+    static preHold(id: string, data: any = null) {
+        log.only(`[WAITER] Pre-holding the key: ${id} with data: ${data}`)
+        Waiter.preHeld.set(id, data)
     }
 
     /**
@@ -112,6 +112,7 @@ export class Waiter {
      * @param id - The id of the event to abort
      */
     static abort(id: string) {
+        log.only(`[WAITER] Aborting the key: ${id}`)
         const entry = Waiter.waitList.get(id)
         if (!entry) {
             log.warning(`[WAITER] No wait entry found for ${id}`)
