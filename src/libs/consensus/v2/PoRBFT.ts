@@ -24,6 +24,7 @@ import {
 } from "src/exceptions"
 import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
 import { GCREdit } from "@kynesyslabs/demosdk/types"
+import { Waiter } from "@/utilities/waiter"
 
 /* INFO
 # Semaphore system
@@ -62,8 +63,11 @@ export async function consensusRoutine(): Promise<void> {
         )
         return
     }
-    log.debug("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
-    const manager = SecretaryManager.getInstance()
+    log.only("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
+    const manager = SecretaryManager.getInstance(
+        getSharedState.lastBlockNumber + 1,
+        true,
+    )
 
     // Defining the variables needed for rolling back the GCREdits
     let successfulTxs: string[] = []
@@ -255,6 +259,8 @@ export async function consensusRoutine(): Promise<void> {
 
     log.only("👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋")
     log.only("[consensusRoutine] CONSENSUS ROUTINE ENDED 🔥🔥🔥")
+    log.only("Waiters: " + JSON.stringify(Array.from(Waiter.waitList.keys()), null, 2))
+    log.only("Preheld keys: " + Array.from(Waiter.preHeld.keys()).length)
 }
 
 // SECTION: Consensus functions!
@@ -408,34 +414,34 @@ async function applyGCREditsFromMergedMempool(
     return [successfulTxs, failedTxs]
 }
 
-/**
- * Apply the GCR operations to the state
- *
- * @param mempool - The mempool
- * @returns The successful and failed GCR operations
- */
-async function applyGCRForNewBlock(
-    mempool: Transaction[],
-): Promise<[string[], string[]]> {
-    const successfulTxs: string[] = []
-    const failedTxs: string[] = []
-    for (const tx of mempool) {
-        const operation = await txToGCROperation(tx)
-        const success = await applyGCROperation(operation)
-        if (success) {
-            successfulTxs.push(tx.hash)
-        } else {
-            failedTxs.push(tx.hash)
-        }
-    }
+// /**
+//  * Apply the GCR operations to the state
+//  *
+//  * @param mempool - The mempool
+//  * @returns The successful and failed GCR operations
+//  */
+// async function applyGCRForNewBlock(
+//     mempool: Transaction[],
+// ): Promise<[string[], string[]]> {
+//     const successfulTxs: string[] = []
+//     const failedTxs: string[] = []
+//     for (const tx of mempool) {
+//         const operation = await txToGCROperation(tx)
+//         const success = await applyGCROperation(operation)
+//         if (success) {
+//             successfulTxs.push(tx.hash)
+//         } else {
+//             failedTxs.push(tx.hash)
+//         }
+//     }
 
-    log.info(`[consensusRoutine] Successful GCR operations: ${successfulTxs}`)
-    log.info(`[consensusRoutine] Failed GCR operations: ${failedTxs}`)
-    // await updateValidatorStatus("appliedGCR", true, false, true)
-    // Using the secretary to update the local statuses
-    await updateValidatorPhase(4)
-    return [successfulTxs, failedTxs]
-}
+//     log.info(`[consensusRoutine] Successful GCR operations: ${successfulTxs}`)
+//     log.info(`[consensusRoutine] Failed GCR operations: ${failedTxs}`)
+//     // await updateValidatorStatus("appliedGCR", true, false, true)
+//     // Using the secretary to update the local statuses
+//     await updateValidatorPhase(4)
+//     return [successfulTxs, failedTxs]
+// }
 
 /**
  * Merge the peerlist between the shard and the local node
@@ -540,8 +546,13 @@ async function finalizeBlock(block: Block, pro: number): Promise<void> {
     console.log(lastBlock)
 }
 
-function preventForgingEnded() {
-    const manager = SecretaryManager.getInstance()
+function preventForgingEnded(blockRef: number) {
+    const manager = SecretaryManager.getInstance(blockRef)
+    log.only("preventForgingEnded blockRef: " + blockRef)
+
+    if (!manager) {
+        throw new ForgingEndedError("Secretary manager not found")
+    }
 
     if (
         getSharedState.lastBlockNumber === manager.shard.blockRef &&
@@ -560,16 +571,21 @@ function preventForgingEnded() {
  * @returns The block timestamp returned by the secretary
  */
 async function updateValidatorPhase(phase: number): Promise<any> {
-    const manager = SecretaryManager.getInstance()
+    let blockRef = getSharedState.lastBlockNumber + 1
+    if (phase == 7) {
+        blockRef = SecretaryManager.lastBlockRef
+    }
+
+    const manager = SecretaryManager.getInstance(blockRef)
     await manager.setOurValidatorPhase(phase, true)
-    preventForgingEnded()
+    preventForgingEnded(blockRef)
 
     // INFO: If it's the first phase, the secretary might not have started the consensus routine yet,
     // Increase retry steps to 10 to wait for the secretary to start
     const retries = phase === 1 ? 10 : 3
     const res = await manager.sendOurValidatorPhaseToSecretary(retries)
 
-    preventForgingEnded()
+    preventForgingEnded(blockRef)
     log.debug(
         `[updateValidatorStatus 🎉] Validator phase ${phase} resolved with value: ${JSON.stringify(
             res,

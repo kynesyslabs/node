@@ -13,9 +13,18 @@ import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 
 // ANCHOR SecretaryManager
 export default class SecretaryManager {
-    private _greenlight_timeout = 30000 // 15 seconds
-    private _set_validator_phase_timeout = 15000 // 10 seconds
-    private static instance: SecretaryManager
+    private _greenlight_timeout = 30_000 // 15 seconds
+    private _set_validator_phase_timeout = 15_000 // 10 seconds
+
+    // A map of block numbers to SecretaryManager instances
+    private static instances: Map<number, SecretaryManager> = new Map()
+    static get lastBlockRef() {
+        return (
+            Array.from(SecretaryManager.instances.keys()).sort(
+                (a, b) => b - a,
+            )[0] || 0
+        )
+    }
 
     // Internal variables
     public shard: Shard
@@ -93,8 +102,8 @@ export default class SecretaryManager {
             log.only(
                 "⬜️ We are the secretary ⬜️. starting the secretary routine",
             )
-            this.secretaryRoutine().then(() => {
-                log.only("[SECRETARY ROUTINE] Secretary routine finished 🎉")
+            this.secretaryRoutine().finally(async () => {
+                log.debug("Secretary routine finished confetti confetti 🎊🎉")
             })
         }
 
@@ -553,7 +562,11 @@ export default class SecretaryManager {
                 params: [
                     {
                         method: "greenlight",
-                        params: [this.blockTimestamp, phase],
+                        params: [
+                            this.shard.blockRef,
+                            this.blockTimestamp,
+                            phase,
+                        ],
                     },
                 ],
             }
@@ -663,11 +676,16 @@ export default class SecretaryManager {
 
         if (this.ourValidatorPhase.currentPhase <= validatorPhase) {
             log.only(`[SECRETARY ROUTINE] Pre-holding the key: ${waiterKey}`)
+            log.only("Is Waiting for key: " + Waiter.isWaiting(waiterKey))
+            log.only(
+                "Waitlist keys: " +
+                    JSON.stringify(Array.from(Waiter.waitList.keys()), null, 2),
+            )
             Waiter.preHold(waiterKey, secretaryBlockTimestamp)
             return true
         }
 
-        if (this.ourValidatorPhase.currentPhase > validatorPhase){
+        if (this.ourValidatorPhase.currentPhase > validatorPhase) {
             // INFO: Older greenlight received, ignoring it
             return true
         }
@@ -733,7 +751,9 @@ export default class SecretaryManager {
         log.only("Shard block ref: " + this.shard.blockRef)
 
         const waiterKey =
-            Waiter.keys.GREEN_LIGHT + this.shard.blockRef + this.ourValidatorPhase.currentPhase
+            Waiter.keys.GREEN_LIGHT +
+            this.shard.blockRef +
+            this.ourValidatorPhase.currentPhase
         const greenlight: Promise<number | null> = Waiter.wait(
             waiterKey,
             this._greenlight_timeout,
@@ -884,18 +904,58 @@ export default class SecretaryManager {
 
     public async endConsensusRoutine() {
         log.only("Ending the consensus routine")
-        SecretaryManager.instance.runSecretaryRoutine = false
-        SecretaryManager.instance = null
-        
-        // TODO: Abort all waiters
-        
-        // INFO: Resolve all hanging waiters
-        if (Waiter.isWaiting(Waiter.keys.GREEN_LIGHT)) {
-            log.only(
-                "GREEN_LIGHT waiter found WHEN ENDING THE CONSENSUS ..., KILLING IT it",
-            )
-            Waiter.abort(Waiter.keys.GREEN_LIGHT)
+        const manager = SecretaryManager.instances.get(this.shard.blockRef)
+
+        if (manager) {
+            manager.runSecretaryRoutine = false
         }
+        const filter = (key: string) =>
+            key.includes("greenLight" + this.shard.blockRef)
+
+        const waiterKeys = Array.from(Waiter.waitList.keys()).filter(filter)
+        const waiters = waiterKeys.map(key => Waiter.wait(key))
+
+        log.only(
+            "💁💁💁💁💁💁💁💁 WAITING FOR HANGING GREENLIGHTS 💁💁💁💁💁💁💁💁💁💁",
+        )
+        log.only("Waiter keys: " + JSON.stringify(waiterKeys, null, 2))
+        try {
+            await Promise.all(waiters)
+        } catch (error) {
+            console.error(error)
+            process.exit(1)
+            log.error("Error waiting for hanging greenlights: " + error)
+        }
+
+        // INFO: Delete pre-held keys for ended consensus round
+        Waiter.preHeld
+            .keys()
+            .filter(filter)
+            .forEach(key => Waiter.preHeld.delete(key))
+
+        log.only(
+            "😎😎😎😎😎😎😎😎😎😎 HANGING GREENLIGHTS RESOLVED 😎😎😎😎😎😎😎😎😎😎",
+        )
+        log.only("[SECRETARY ROUTINE] Secretary routine finished 🎉")
+
+        if (SecretaryManager.getInstance(this.shard.blockRef) === this) {
+            log.only("deleting the instance")
+            SecretaryManager.instances.delete(this.shard.blockRef)
+        } else {
+            log.error("this instance is not doing that thing")
+            process.exit(1)
+        }
+
+        // SecretaryManager.instance = null
+        // TODO: Abort all waiters
+
+        // INFO: Resolve all hanging waiters
+        // if (Waiter.isWaiting(Waiter.keys.GREEN_LIGHT)) {
+        //     log.only(
+        //         "GREEN_LIGHT waiter found WHEN ENDING THE CONSENSUS ..., KILLING IT it",
+        //     )
+        //     Waiter.abort(Waiter.keys.GREEN_LIGHT)
+        // }
 
         // if (Waiter.isWaiting(Waiter.keys.SET_WAIT_STATUS)) {
         //     log.only(
@@ -915,18 +975,43 @@ export default class SecretaryManager {
     async setOurValidatorPhase(phase: number, status: boolean) {
         log.debug("[setOurValidatorPhase] Setting our phase to: " + phase)
         // INFO: Update the current phase and the status of the phase
+        log.only("setting our phase to: " + phase)
         this.ourValidatorPhase.currentPhase = phase
         this.ourValidatorPhase.phases[phase][1] = status
         this.ourValidatorPhase.waitStatus = true
     }
 
     // ANCHOR Singleton logic
-    public static getInstance(): SecretaryManager {
-        if (!SecretaryManager.instance) {
-            SecretaryManager.instance = new SecretaryManager()
+    public static getInstance(
+        blockRef?: number,
+        initialize = false,
+    ): SecretaryManager {
+        log.only("getting instance for block ref: " + blockRef)
+        // INFO: If blockRef is not provided, use the last block number + 1
+        // ie. assume we're using this instance for latest block
+        if (!blockRef) {
+            blockRef = getSharedState.lastBlockNumber + 1
         }
 
-        return SecretaryManager.instance
+        log.only("block ref: " + blockRef)
+        log.only(
+            "instance keys: " +
+                JSON.stringify(
+                    Array.from(SecretaryManager.instances.keys()),
+                    null,
+                    2,
+                ),
+        )
+
+        if (!SecretaryManager.instances.get(blockRef)) {
+            if (initialize) {
+                SecretaryManager.instances.set(blockRef, new SecretaryManager())
+            } else {
+                return null
+            }
+        }
+
+        return SecretaryManager.instances.get(blockRef)
     }
 
     /**

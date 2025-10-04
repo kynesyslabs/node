@@ -39,7 +39,7 @@ export default async function manageConsensusRoutines(
     payload: ConsensusMethod,
 ): Promise<RPCResponse> {
     log.only("👍👍👍👍👍👍👍👍👍 RECEIVED CONSENSUS CALL 👍👍👍👍👍👍👍👍")
-    
+
     const peer = PeerManager.getInstance().getPeer(sender)
     log.only("Sender: " + peer.connection.string)
     log.only("Payload: " + JSON.stringify(payload, null, 2))
@@ -160,6 +160,8 @@ export default async function manageConsensusRoutines(
         return response
     }
 
+    log.only("processing payload: " + JSON.stringify(payload, null, 2))
+
     // NOTE Each method has its own logic to be implemented
     switch (payload.method) {
         /*
@@ -229,7 +231,19 @@ export default async function manageConsensusRoutines(
         case "setValidatorPhase": {
             try {
                 const [phase, seed, blockRef] = payload.params
-                const manager = SecretaryManager.getInstance()
+                const manager = SecretaryManager.getInstance(blockRef)
+
+                //INFO: If the manager class for that block is not found, assume peer is behind on the consensus
+                // return a greenlight to unblock peer
+                if (!manager) {
+                    response.result = 200
+                    response.response = "Secretary manager not found"
+                    response.extra = {
+                        greenlight: true,
+                    }
+
+                    return response
+                }
 
                 // INFO: Seed check
                 if (
@@ -332,20 +346,26 @@ export default async function manageConsensusRoutines(
         case "greenlight": {
             // TODO: Check if the sender is the secretary (without verifying the signature
             // as we have already done that) in validateHeaders
-            const [timestamp, validatorPhase] = payload.params as [
-                number,
-                number,
+            const [blockRef, timestamp, validatorPhase] = payload.params as [
+                number, // blockRef
+                number, // timestamp
+                number, // validatorPhase
             ]
-            log.info(
-                "payload.params: " + JSON.stringify(payload.params, null, 2),
-            )
-            const manager = SecretaryManager.getInstance()
 
-            log.debug("Our secretary identity: " + manager.secretary.identity)
-            log.debug("shard: " + manager.shard.members.map(m => m.identity))
+            const manager = SecretaryManager.getInstance(blockRef)
+
+            // INFO: If the manager class for that block is not found, assume peer is behind on the consensus
+            // return a 200 to unblock peer
+            if (!manager) {
+                log.only("returning a fake 200")
+                response.result = 200
+                response.response = "Secretary manager not found"
+                return response
+            }
 
             // INFO: Check if the sender is the secretary
             if (sender !== manager.secretary.identity) {
+                log.only("returning a 401")
                 response.result = 401
                 response.response = "Greenlight not accepted"
                 response.extra = "Secretary identity mismatch"

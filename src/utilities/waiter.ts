@@ -41,14 +41,20 @@ export class Waiter {
      */
     static async wait<T = any>(id: string, timeout = 10000): Promise<T> {
         if (Waiter.waitList.has(id)) {
-            throw new Error(`[WAITER] Already waiting for id: ${id}`)
+            return Waiter.waitList.get(id).promise
         }
 
         if (Waiter.preHeld.has(id)) {
-            log.only(`[WAITER] Found pre-held key: ${id} with value: ${Waiter.preHeld.get(id)}`)
+            log.only(
+                `[WAITER] Found pre-held key: ${id} with value: ${Waiter.preHeld.get(
+                    id,
+                )}`,
+            )
             const resolveValue = Waiter.preHeld.get(id)
             Waiter.preHeld.delete(id)
-            log.only(`[WAITER] Resolved pre-held key: ${id} with data: ${resolveValue}`)
+            log.only(
+                `[WAITER] Resolved pre-held key: ${id} with data: ${resolveValue}`,
+            )
             return resolveValue
         }
 
@@ -72,7 +78,7 @@ export class Waiter {
                 promise: null,
             })
 
-            log.debug(`[WAITER] Created wait entry for ${id}`)
+            log.only(`[WAITER] 😒😒😒😒😒😒😒😒😒 Created wait entry for ${id}`)
         })
 
         Waiter.waitList.get(id).promise = promise
@@ -88,7 +94,7 @@ export class Waiter {
     static resolve<T = null>(id: string, data: T = null): T {
         const entry = Waiter.waitList.get(id)
         if (!entry) {
-            log.warning(`[WAITER] No wait entry found for ${id}`)
+            log.error(`[WAITER] No wait entry found for ${id}`)
             return null
         }
 
@@ -96,12 +102,17 @@ export class Waiter {
         Waiter.preHeld.delete(id)
         Waiter.waitList.delete(id)
         entry.resolve(data)
-        log.debug(`[WAITER] Resolved wait entry for ${id}`)
+        log.only(`[WAITER] Resolved wait entry for ${id}`)
 
         return data || null
     }
 
     static preHold(id: string, data: any = null) {
+        if (Waiter.waitList.has(id)) {
+            log.error(`[WAITER] Cannot pre-hold key: ${id} because it's already waiting`)
+            throw new Error(`[WAITER] Already waiting for id: ${id}`)
+        }
+
         log.only(`[WAITER] Pre-holding the key: ${id} with data: ${data}`)
         Waiter.preHeld.set(id, data)
     }

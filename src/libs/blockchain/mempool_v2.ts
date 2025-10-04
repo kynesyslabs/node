@@ -1,4 +1,10 @@
-import { FindManyOptions, In, LessThanOrEqual, QueryFailedError, Repository } from "typeorm"
+import {
+    FindManyOptions,
+    In,
+    LessThanOrEqual,
+    QueryFailedError,
+    Repository,
+} from "typeorm"
 import Datasource from "@/model/datasource"
 
 import TxUtils from "./transaction"
@@ -7,6 +13,7 @@ import { MempoolTx } from "@/model/entities/Mempool"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import Chain from "./chain"
+import { getSharedState } from "@/utilities/sharedState"
 
 export default class Mempool {
     public static repo: Repository<MempoolTx> = null
@@ -84,11 +91,10 @@ export default class Mempool {
         }
 
         let blockNumber: number
-        const manager = SecretaryManager.getInstance()
 
         // INFO: If we're in consensus, move tx to next block
-        if (manager.shard?.blockRef) {
-            blockNumber = manager.shard.blockRef + 1
+        if (getSharedState.inConsensusLoop) {
+            blockNumber = SecretaryManager.lastBlockRef + 1
         }
 
         if (!blockNumber) {
@@ -153,15 +159,13 @@ export default class Mempool {
             }
         }
 
-        const manager = SecretaryManager.getInstance()
-        const blockNumber = manager.shard?.blockRef
-
-        if (!blockNumber) {
+        if (!getSharedState.inConsensusLoop) {
             return {
                 success: false,
                 mempool: [],
             }
         }
+        const blockNumber = SecretaryManager.lastBlockRef
 
         const existingHashes = await this.getMempoolHashMap(blockNumber)
         const incomingSet = {}
