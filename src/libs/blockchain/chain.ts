@@ -93,10 +93,7 @@ export default class Chain {
         start = 0,
         limit = 100,
     ) {
-        const whereConditions: any[] = [
-            { from: address },
-            { to: address },
-        ]
+        const whereConditions: any[] = [{ from: address }, { to: address }]
 
         if (txtype !== "all") {
             whereConditions[0].type = txtype
@@ -174,6 +171,15 @@ export default class Chain {
 
     static async getGenesisBlock(): Promise<Blocks> {
         return await this.getBlockByNumber(0)
+    }
+
+    static async getGenesisBlockHash(): Promise<string> {
+        const genesisBlock = await this.blocks.findOne({
+            where: { number: 0 },
+            select: { hash: true },
+        })
+
+        return genesisBlock ? genesisBlock.hash : null
     }
 
     // ANCHOR Transactions

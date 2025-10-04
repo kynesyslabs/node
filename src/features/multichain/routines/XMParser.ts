@@ -21,6 +21,15 @@ multichain_operation: {
 }
 */
 
+/**
+ * JSON.stringify data with bigints converted to strings
+ */
+function stringify(data: any) {
+    return JSON.stringify(data, (_, v) =>
+        typeof v === "bigint" ? v.toString() : v,
+    )
+}
+
 class XMParser {
     // INFO Same as below but with file support
     static async loadFile(path: string): Promise<XMScript> {
@@ -51,7 +60,12 @@ class XMParser {
     }
 
     // INFO This returns the results of the execution of the XMScript
-    static async execute(fullscript: XMScript): Promise<any> {
+    static async execute(fullscript: XMScript): Promise<{
+        [operationId: string]: {
+            result: string
+            error?: string
+        }
+    }> {
         const results = {}
         let name: string, operation: IOperation
         // Iterating over the operations
@@ -65,13 +79,15 @@ class XMParser {
                 console.log(fullscript)
                 console.log("[XMParser]: partial operation")
                 console.log(operation)
-                results[name] = await XMParser.executeOperation(operation)
+                const result = await XMParser.executeOperation(operation)
+                results[name] = stringify(result)
                 console.log("[RESULT]: " + results[name])
             } catch (e) {
                 console.log("[XM EXECUTE] Error: " + e)
                 results[name] = { result: "error", error: e.toString() }
             }
         }
+
         return results // REVIEW Is the type ok?
     }
 

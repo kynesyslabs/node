@@ -6,7 +6,7 @@ import { XMScript } from "@kynesyslabs/demosdk/types"
 
 export default class MultichainDispatcher {
     // INFO Digesting the request from the server
-    static async digest(data: XMScript): Promise<any> {
+    static async digest(data: XMScript) {
         console.log("\n\n")
         console.log("[XM Script full digest]")
         console.log(data)
@@ -21,26 +21,16 @@ export default class MultichainDispatcher {
 
         console.log("\n===== ANALYSIS ===== \n")
         console.log("\n===== FUNCTIONS ===== \n")
-        for (
-            let i = 0;
-            i < Object.keys(data.operations).length;
-            i++
-        ) {
+        for (let i = 0; i < Object.keys(data.operations).length; i++) {
             // Named function
             console.log(
-                "[XMChain Digestion] Found: " +
-                    Object.keys(data.operations)[i],
+                "[XMChain Digestion] Found: " + Object.keys(data.operations)[i],
             )
         }
         console.log("\n===== END OF ANALYSIS ===== \n")
         console.log("[XMChain Digestion] Proceeding: execution phase")
         // REVIEW Execute
-        const result = await MultichainDispatcher.execute(data)
-        // TODO Implement a response schema
-        // eslint-disable-next-line @typescript-eslint/naming-convention
-        return JSON.stringify(result, (_, v) =>
-            typeof v === "bigint" ? v.toString() : v,
-        ) // await multichainDispatcher.execute(data)
+        return await MultichainDispatcher.execute(data)
     }
 
     // INFO Check syntax of xM Script
@@ -50,21 +40,31 @@ export default class MultichainDispatcher {
     }
 
     // INFO Executes a xM Script
-    static async execute(script: XMScript): Promise<any> {
-        let results = []
+    static async execute(script: XMScript) {
         console.log("[XM EXECUTE]: Script")
         console.log(JSON.stringify(script))
-        results = await XMParser.execute(script)
+        const results = await XMParser.execute(script)
         console.log("[XM EXECUTE] Successfully executed")
         console.log(results)
 
+        const totalOperations = Object.values(results).length
+        const failedOperations = Object.values(results).filter(
+            result => result.result === "error",
+        ).length
 
-        console.log("[XM EXECUTE] Derived Operation completed successfully")
-        //console.log(derivedOperation)
+        // INFO: If all operations failed, this demos tx won't be forged in the block
+        if (failedOperations === totalOperations) {
+            return {
+                success: false,
+                message: "all_ops_failed",
+                results: results,
+            }
+        }
 
-        console.log("[XM EXECUTE] Sending back the result")
-        console.log(results)
-
-        return results
+        return {
+            success: true,
+            message: failedOperations > 0 ? "partial_success" : "all_ops_ok",
+            results: results,
+        }
     }
 }
