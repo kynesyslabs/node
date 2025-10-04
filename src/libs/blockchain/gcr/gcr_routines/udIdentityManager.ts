@@ -2,6 +2,7 @@ import ensureGCRForUser from "./ensureGCRForUser"
 import log from "@/utilities/logger"
 import { UDIdentityAssignPayload } from "@kynesyslabs/demosdk/abstraction"
 import { ethers } from "ethers"
+import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
 
 /**
  * UDIdentityManager - Handles Unstoppable Domains identity verification and storage
@@ -162,7 +163,7 @@ export class UDIdentityManager {
      * @param address - The Demos address
      * @returns Array of saved UD identities
      */
-    static async getUdIdentities(address: string): Promise<any[]> {
+    static async getUdIdentities(address: string): Promise<SavedUdIdentity[]> {
         const gcr = await ensureGCRForUser(address)
         // REVIEW: Defensive initialization for backward compatibility
         return gcr.identities.ud || []

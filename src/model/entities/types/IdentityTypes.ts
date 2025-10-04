@@ -27,6 +27,19 @@ export interface PqcIdentityEdit extends SavedPqcIdentity {
     algorithm: string
 }
 
+/**
+ * The Unstoppable Domains identity saved in the GCR
+ */
+export interface SavedUdIdentity {
+    domain: string // e.g., "brad.crypto"
+    resolvedAddress: string // Ethereum address domain resolves to
+    signature: string // Signature from resolvedAddress
+    publicKey: string // Public key of resolvedAddress
+    timestamp: number
+    signedData: string // Challenge message that was signed
+    registryType: "UNS" | "CNS" // Which registry was used
+}
+
 export type StoredIdentities = {
     xm: {
         [chain: string]: {
@@ -41,4 +54,5 @@ export type StoredIdentities = {
         // eg. falcon: [{address: "pubkey1", signature: "signature1"}, {address: "pubkey2", signature: "signature2"}]
         [algorithm: string]: SavedPqcIdentity[]
     }
+    ud: SavedUdIdentity[] // Unstoppable Domains identities
 }
