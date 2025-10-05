@@ -389,14 +389,31 @@ export default async function manageConsensusRoutines(
         // NOTE: Ideally, we should never need to use these methods
         case "getValidatorPhase": {
             const manager = SecretaryManager.getInstance()
+
+            if (!manager) {
+                response.result = 400
+                response.response = [null]
+                response.extra = { error: "Consensus not in progress" }
+                return response
+            }
+
             response.result = 200
             response.response = [manager.ourValidatorPhase.currentPhase]
             break
         }
 
         case "getBlockTimestamp": {
+            const manager = SecretaryManager.getInstance()
+
+            if (!manager) {
+                response.result = 400
+                response.response = [null]
+                response.extra = { error: "Consensus not in progress" }
+                return response
+            }
+
             response.result = 200
-            response.response = [SecretaryManager.getInstance().blockTimestamp]
+            response.response = [manager.blockTimestamp]
             break
         }
     }

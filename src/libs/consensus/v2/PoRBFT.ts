@@ -64,10 +64,8 @@ export async function consensusRoutine(): Promise<void> {
         return
     }
     log.only("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
-    const manager = SecretaryManager.getInstance(
-        getSharedState.lastBlockNumber + 1,
-        true,
-    )
+    const blockRef = getSharedState.lastBlockNumber + 1
+    const manager = SecretaryManager.getInstance(blockRef, true)
 
     // Defining the variables needed for rolling back the GCREdits
     let successfulTxs: string[] = []
@@ -82,7 +80,7 @@ export async function consensusRoutine(): Promise<void> {
         // INFO: We won't use the shard returned by initializeShard
         // as it can change through the consensus routine
         // INFO: CONSENSUS ACTION 1: Initialize the shard
-        await initializeShard()
+        await initializeShard(blockRef)
         log.debug("Forgin block: " + manager.shard.blockRef)
         log.info("[consensusRoutine] We are in the shard, creating the block")
         log.info(
@@ -95,7 +93,7 @@ export async function consensusRoutine(): Promise<void> {
         )
 
         // INFO: Broadcast our validation phase to the secretary
-        await updateValidatorPhase(1)
+        await updateValidatorPhase(1, blockRef)
 
         // synchronize and average the time
         // NOTE: Instead of averaging the time, we'll use the secretary timestamp
@@ -212,7 +210,7 @@ export async function consensusRoutine(): Promise<void> {
 
         // INFO: CONSENSUS ACTION 7: End the consensus routine
         log.only("Sending validator phase 7 to the secretary 🏁")
-        await updateValidatorPhase(7)
+        await updateValidatorPhase(7, blockRef)
         log.only("Validator phase 7 sent to the secretary ✅")
     } catch (error) {
         if (error instanceof NotInShardError) {
@@ -259,7 +257,10 @@ export async function consensusRoutine(): Promise<void> {
 
     log.only("👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋")
     log.only("[consensusRoutine] CONSENSUS ROUTINE ENDED 🔥🔥🔥")
-    log.only("Waiters: " + JSON.stringify(Array.from(Waiter.waitList.keys()), null, 2))
+    log.only(
+        "Waiters: " +
+            JSON.stringify(Array.from(Waiter.waitList.keys()), null, 2),
+    )
     log.only("Preheld keys: " + Array.from(Waiter.preHeld.keys()).length)
 }
 
@@ -300,36 +301,36 @@ async function initializeConsensusState(): Promise<void> {
  *
  * @returns The shard members
  */
-async function initializeShard(): Promise<Peer[]> {
+async function initializeShard(blockRef: number): Promise<Peer[]> {
     const { commonValidatorSeed, lastBlockNumber } =
         await getCommonValidatorSeed()
     // return await getShard(commonValidatorSeed)
 
-    const manager = SecretaryManager.getInstance()
+    const manager = SecretaryManager.getInstance(blockRef)
     return await manager.initializeShard(commonValidatorSeed, lastBlockNumber)
 }
 
 // SECTION Routines
 
-/**
- * Synchronize and average the time between the shard and the local node
- *
- * @param shard - The shard members
- */
-async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
-    await fastSync(shard, "synchronizeAndAverageTime")
-    let averageTimestamp = await averageTimestamps(shard)
-    // Strip the decimal part
-    if (!Number.isInteger(averageTimestamp)) {
-        log.warning(
-            "[synchronizeAndAverageTime] Average timestamp is not an integer",
-        )
-        averageTimestamp = Math.round(averageTimestamp)
-    }
-    getSharedState.lastConsensusTime = averageTimestamp
-    // Using the secretary to update the local statuses
-    await updateValidatorPhase(2)
-}
+// /**
+//  * Synchronize and average the time between the shard and the local node
+//  *
+//  * @param shard - The shard members
+//  */
+// async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
+//     await fastSync(shard, "synchronizeAndAverageTime")
+//     let averageTimestamp = await averageTimestamps(shard)
+//     // Strip the decimal part
+//     if (!Number.isInteger(averageTimestamp)) {
+//         log.warning(
+//             "[synchronizeAndAverageTime] Average timestamp is not an integer",
+//         )
+//         averageTimestamp = Math.round(averageTimestamp)
+//     }
+//     getSharedState.lastConsensusTime = averageTimestamp
+//     // Using the secretary to update the local statuses
+//     await updateValidatorPhase(2)
+// }
 
 /**
  * Merge and order the mempools between the shard and the local node
@@ -339,18 +340,18 @@ async function synchronizeAndAverageTime(shard: Peer[]): Promise<void> {
  */
 async function mergeAndOrderMempools(
     shard: Peer[],
-    blockNumber: number,
+    blockRef: number,
 ): Promise<(Transaction & { reference_block: number })[]> {
-    const ourMempool = await Mempool.getMempool(blockNumber)
+    const ourMempool = await Mempool.getMempool(blockRef)
     console.log("[consensusRoutine] Our mempool:")
     console.log(ourMempool)
     log.info("[consensusRoutine] Our mempool has been retrieved")
 
     // NOTE: Transactions here should be ordered by timestamp
     await mergeMempools(ourMempool, shard)
-    await updateValidatorPhase(3)
+    await updateValidatorPhase(3, blockRef)
 
-    return await Mempool.getMempool(blockNumber)
+    return await Mempool.getMempool(blockRef)
 }
 
 /**
@@ -443,19 +444,19 @@ async function applyGCREditsFromMergedMempool(
 //     return [successfulTxs, failedTxs]
 // }
 
-/**
- * Merge the peerlist between the shard and the local node
- *
- * @param shard - The shard members
- * @returns The merged peerlist
- */
-async function mergePeerlistAndWait(shard: Peer[]): Promise<Peer[]> {
-    const mergedPeerList = await mergePeerlist(shard)
-    //await updateValidatorStatus("mergedPeerlist", true, false, true)
-    // Using the secretary to update the local statuses
-    await updateValidatorPhase(4)
-    return mergedPeerList
-}
+// /**
+//  * Merge the peerlist between the shard and the local node
+//  *
+//  * @param shard - The shard members
+//  * @returns The merged peerlist
+//  */
+// async function mergePeerlistAndWait(shard: Peer[]): Promise<Peer[]> {
+//     const mergedPeerList = await mergePeerlist(shard)
+//     //await updateValidatorStatus("mergedPeerlist", true, false, true)
+//     // Using the secretary to update the local statuses
+//     await updateValidatorPhase(4)
+//     return mergedPeerList
+// }
 
 /**
  * Forge the block from the ordered transactions
@@ -484,7 +485,7 @@ async function forgeBlock(
 
     // await updateValidatorStatus("forgedBlock", true, false, true)
     // Using the secretary to update the local statuses
-    await updateValidatorPhase(5)
+    await updateValidatorPhase(5, block.number)
     return block
 }
 
@@ -505,7 +506,7 @@ async function voteOnBlock(
     const [pro, con] = await broadcastBlockHash(block, shard)
     // await updateValidatorStatus("votedForBlock", true, false, true)
     // Using the secretary to update the local statuses
-    await updateValidatorPhase(6)
+    await updateValidatorPhase(6, block.number)
 
     log.info(
         `[consensusRoutine] Block hash broadcasted to the shard: ${block.hash}`,
@@ -570,13 +571,21 @@ function preventForgingEnded(blockRef: number) {
  * @param phase - Our cleared phase number
  * @returns The block timestamp returned by the secretary
  */
-async function updateValidatorPhase(phase: number): Promise<any> {
-    let blockRef = getSharedState.lastBlockNumber + 1
-    if (phase == 7) {
-        blockRef = SecretaryManager.lastBlockRef
+async function updateValidatorPhase(
+    phase: number,
+    blockRef: number,
+): Promise<any> {
+    const manager = SecretaryManager.getInstance(blockRef)
+
+    if (!manager) {
+        // INFO: This should never happen
+        log.only("Secretary manager not found")
+        log.only("Block ref: " + blockRef)
+        log.only("Last block number: " + (await Chain.getLastBlockNumber()))
+        log.only("Phase: " + phase)
+        process.exit(1)
     }
 
-    const manager = SecretaryManager.getInstance(blockRef)
     await manager.setOurValidatorPhase(phase, true)
     preventForgingEnded(blockRef)
 
