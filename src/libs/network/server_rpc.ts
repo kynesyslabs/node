@@ -337,7 +337,7 @@ export async function serverRpcBun() {
         const clientIP = rateLimiter.getClientIP(req, server.server)
         return new Response(JSON.stringify({
             message: "Hello, World!",
-            yourIP: clientIP
+            yourIP: clientIP,
         }))
     })
 
