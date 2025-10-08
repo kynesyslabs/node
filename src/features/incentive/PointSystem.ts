@@ -121,10 +121,14 @@ export class PointSystem {
             breakdown: {
                 web3Wallets: account.points.breakdown?.web3Wallets || {},
                 socialAccounts: {
-                    twitter: account.points.breakdown?.socialAccounts?.twitter ?? 0,
-                    github: account.points.breakdown?.socialAccounts?.github ?? 0,
-                    telegram: account.points.breakdown?.socialAccounts?.telegram ?? 0,
-                    discord: account.points.breakdown?.socialAccounts?.discord ?? 0,
+                    twitter:
+                        account.points.breakdown?.socialAccounts?.twitter ?? 0,
+                    github:
+                        account.points.breakdown?.socialAccounts?.github ?? 0,
+                    telegram:
+                        account.points.breakdown?.socialAccounts?.telegram ?? 0,
+                    discord:
+                        account.points.breakdown?.socialAccounts?.discord ?? 0,
                 },
                 referrals: account.points.breakdown?.referrals || 0,
                 demosFollow: account.points.breakdown?.demosFollow || 0,
@@ -151,51 +155,6 @@ export class PointSystem {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
         const account = await ensureGCRForUser(userId)
-
-        // const account = await gcrMainRepository.findOneBy({ pubkey: userId })
-        // if (!account) {
-        //     const newAccount = await HandleGCR.createAccount(userId)
-        //     newAccount.points.totalPoints = points
-
-        //     if (
-        //         type === "socialAccounts" &&
-        //         (platform === "twitter" ||
-        //             platform === "github" ||
-        //             platform === "discord")
-        //     ) {
-        //         newAccount.points.breakdown = {
-        //             web3Wallets: {},
-        //             socialAccounts: {
-        //                 twitter: platform === "twitter" ? points : 0,
-        //                 github: platform === "github" ? points : 0,
-        //                 discord: platform === "discord" ? points : 0,
-        //             },
-        //             referrals: 0,
-        //         }
-        //     } else {
-        //         newAccount.points.breakdown = {
-        //             web3Wallets: {},
-        //             socialAccounts: {
-        //                 twitter: 0,
-        //                 github: 0,
-        //                 discord: 0,
-        //             },
-        //             referrals: 0,
-        //         }
-        //     }
-        //     newAccount.points.lastUpdated = new Date()
-
-        //     // Process referral for new account
-        //     if (referralCode) {
-        //         await Referrals.processReferral(
-        //             newAccount,
-        //             referralCode,
-        //             gcrMainRepository,
-        //         )
-        //     }
-
-        //     await gcrMainRepository.save(newAccount)
-        // } else {
         const isEligibleForReferral = Referrals.isEligibleForReferral(account)
 
         // REVIEW: Ensure breakdown structure is properly initialized before assignment
@@ -644,29 +603,6 @@ export class PointSystem {
         githubUserId: string,
     ): Promise<RPCResponse> {
         try {
-            // Get user's account data from GCR to verify GitHub ownership
-            const account = await ensureGCRForUser(userId)
-
-            // Verify the GitHub account is actually linked to this user
-            const githubIdentities = account.identities.web2?.github || []
-            const isOwner = githubIdentities.some(
-                (gh: any) => gh.userId === githubUserId,
-            )
-
-            if (!isOwner) {
-                return {
-                    result: 400,
-                    response: {
-                        pointsDeducted: 0,
-                        totalPoints: account.points.totalPoints || 0,
-                        message:
-                            "Error: GitHub account not linked to this user",
-                    },
-                    require_reply: false,
-                    extra: {},
-                }
-            }
-
             const userPointsWithIdentities = await this.getUserPointsInternal(
                 userId,
             )
@@ -809,28 +745,8 @@ export class PointSystem {
      * @param telegramUserId The Telegram user ID to verify ownership
      * @returns RPCResponse
      */
-    async deductTelegramPoints(userId: string, telegramUserId: string): Promise<RPCResponse> {
+    async deductTelegramPoints(userId: string): Promise<RPCResponse> {
         try {
-            // Get user's account data from GCR to verify Telegram ownership
-            const account = await ensureGCRForUser(userId)
-
-            // Verify the Telegram account is actually linked to this user
-            const telegramIdentities = account.identities.web2?.telegram || []
-            const isOwner = telegramIdentities.some((tg: any) => tg.userId === telegramUserId)
-
-            if (!isOwner) {
-                return {
-                    result: 400,
-                    response: {
-                        pointsDeducted: 0,
-                        totalPoints: account.points.totalPoints || 0,
-                        message: "Error: Telegram account not linked to this user",
-                    },
-                    require_reply: false,
-                    extra: {},
-                }
-            }
-
             const userPointsWithIdentities = await this.getUserPointsInternal(
                 userId,
             )

@@ -105,8 +105,8 @@ export class IncentiveManager {
     /**
      * Hook to be called after Telegram unlinking
      */
-    static async telegramUnlinked(userId: string, telegramUserId: string): Promise<RPCResponse> {
-        return await this.pointSystem.deductTelegramPoints(userId, telegramUserId)
+    static async telegramUnlinked(userId: string): Promise<RPCResponse> {
+        return await this.pointSystem.deductTelegramPoints(userId)
     }
 
     /**

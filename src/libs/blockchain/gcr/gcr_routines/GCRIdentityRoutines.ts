@@ -387,10 +387,7 @@ export default class GCRIdentityRoutines {
                 removedIdentity &&
                 removedIdentity.userId
             ) {
-                await IncentiveManager.telegramUnlinked(
-                    editOperation.account,
-                    removedIdentity.userId,
-                )
+                await IncentiveManager.telegramUnlinked(editOperation.account)
             } else if (context === "discord") {
                 await IncentiveManager.discordUnlinked(editOperation.account)
             }

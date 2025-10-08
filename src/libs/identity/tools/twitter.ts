@@ -577,6 +577,11 @@ export class Twitter {
     static getInstance() {
         if (!Twitter.instance) {
             Twitter.instance = new Twitter()
+
+            // create the directory if it doesn't exist
+            if (!fs.existsSync("data/twitter")) {
+                fs.mkdirSync("data/twitter", { recursive: true })
+            }
         }
 
         return Twitter.instance
