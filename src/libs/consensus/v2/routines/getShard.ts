@@ -44,8 +44,8 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     // }
 
     // Select up to 10 peers from the list using the seed as a source of randomness
-    let maxShardSize = 10
-    if (peers.length < 10) {
+    let maxShardSize = getSharedState.shardSize
+    if (peers.length < maxShardSize) {
         maxShardSize = peers.length
     }
     console.log("[getShard] maxShardSize: ", maxShardSize)

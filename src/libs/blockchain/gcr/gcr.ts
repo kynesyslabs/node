@@ -58,6 +58,7 @@ import {
     Operation,
     OperationRegistrySlot,
     OperationResult,
+    RPCResponse,
 } from "@kynesyslabs/demosdk/types"
 
 import Chain from "../chain"
@@ -876,6 +877,81 @@ export default class GCR {
 
         console.log("tx", JSON.stringify(tx, null, 2))
         return tx
+    }
+
+    /**
+     * Get top accounts by points with their Web3 addresses
+     * @param limit Maximum number of accounts to return (default: 100)
+     * @returns RPCResponse with top accounts and their blockchain addresses
+     */
+    static async getTopAccountsByPoints(limit = 100): Promise<RPCResponse> {
+        try {
+            const db = await Datasource.getInstance()
+            const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+            // Query top accounts by points, excluding flagged accounts
+            const accounts = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where("gcr.flagged = :flagged", { flagged: false })
+                .orderBy(
+                    "(gcr.points->>'totalPoints')::numeric",
+                    "DESC",
+                    "NULLS LAST",
+                )
+                .limit(limit)
+                .getMany()
+
+            // Transform to simplified structure with only pubkey and Web3 addresses
+            const formattedAccounts = accounts.map((account, index) => {
+                // Extract Ethereum addresses from xm.evm.mainnet
+                const ethereumAddresses =
+                    account.identities?.xm?.evm?.mainnet?.map(
+                        identity => identity.address,
+                    ) || []
+
+                // Extract Solana addresses from xm.solana.mainnet
+                const solanaAddresses =
+                    account.identities?.xm?.solana?.mainnet?.map(
+                        identity => identity.address,
+                    ) || []
+
+                return {
+                    pubkey: account.pubkey,
+                    rank: index + 1,
+                    totalPoints: account.points?.totalPoints || 0,
+                    breakdown: account.points?.breakdown || {},
+                    ethereumAddresses,
+                    solanaAddresses,
+                }
+            })
+
+            return {
+                result: 200,
+                response: {
+                    success: true,
+                    accounts: formattedAccounts,
+                    count: formattedAccounts.length,
+                    limit,
+                },
+                extra: null,
+                require_reply: false,
+            }
+        } catch (error) {
+            log.error("Error fetching top accounts by points:" + error)
+            return {
+                result: 500,
+                response: {
+                    success: false,
+                    error: "Failed to fetch top accounts",
+                    message:
+                        error instanceof Error
+                            ? error.message
+                            : "Unknown error",
+                },
+                extra: null,
+                require_reply: false,
+            }
+        }
     }
 
     /**
