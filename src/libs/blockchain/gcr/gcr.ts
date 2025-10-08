@@ -536,6 +536,38 @@ export default class GCR {
         }
     }
 
+    static async getAccountByTwitterUsername(username: string) {
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+        // INFO: Find all accounts that have the twitter identity with the given username using a jsonb query
+        const accounts = await gcrMainRepository
+            .createQueryBuilder("gcr")
+            .where(
+                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'username' = :username)",
+                { username },
+            )
+            .getMany()
+
+        // If no accounts found, return null
+        if (accounts.length === 0) {
+            return null
+        }
+
+        // If only one account found, return it
+        if (accounts.length === 1) {
+            return accounts[0]
+        }
+
+        // If multiple accounts found, find the one that was awarded points
+        // (Twitter points > 0 means the account was awarded points)
+        const accountWithPoints = accounts.find(
+            account => account.points?.breakdown?.socialAccounts?.twitter > 0,
+        )
+
+        // Return the account with points if found, otherwise return the first account
+        return accountWithPoints || accounts[0]
+    }
     static async getAccountByIdentity(identity: {
         type: "web2" | "xm"
         // web2
@@ -582,6 +614,7 @@ export default class GCR {
                 return null
             }
 
+            // eslint-disable-next-line prefer-const
             let [chain, subchain] = identity.chain.split(".")
             if (!chain || !subchain) {
                 return null
@@ -606,6 +639,39 @@ export default class GCR {
 
         return null
     }
+
+    // static async getAccountByTelegramUsername(username: string) {
+    //     const db = await Datasource.getInstance()
+    //     const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+    //     // INFO: Find all accounts that have the telegram identity with the given username using a jsonb query
+    //     const accounts = await gcrMainRepository
+    //         .createQueryBuilder("gcr")
+    //         .where(
+    //             "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'telegram') as telegram_id WHERE telegram_id->>'username' = :username)",
+    //             { username },
+    //         )
+    //         .getMany()
+
+    //     // If no accounts found, return null
+    //     if (accounts.length === 0) {
+    //         return null
+    //     }
+
+    //     // If only one account found, return it
+    //     if (accounts.length === 1) {
+    //         return accounts[0]
+    //     }
+
+    //     // If multiple accounts found, find the one that was awarded points
+    //     // (Telegram points > 0 means the account was awarded points)
+    //     const accountWithPoints = accounts.find(
+    //         account => account.points?.breakdown?.socialAccounts?.telegram > 0,
+    //     )
+
+    //     // Return the account with points if found, otherwise return the first account
+    //     return accountWithPoints || accounts[0]
+    // }
 
     static async getCampaignData() {
         const db = await Datasource.getInstance()

@@ -38,7 +38,7 @@ module.exports = {
             "error",
             {
                 selector: "variableLike",
-                format: ["camelCase"],
+                format: ["camelCase", "UPPER_CASE"],
                 leadingUnderscore: "allow",
                 trailingUnderscore: "allow",
             },

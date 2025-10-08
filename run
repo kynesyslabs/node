@@ -377,6 +377,8 @@ else
         fi
         exit 1
     fi
+    # Temporary overriding
+    START_COMMAND="bun start:bun"  # REVIEW Consider using bun directly
 fi
 
 

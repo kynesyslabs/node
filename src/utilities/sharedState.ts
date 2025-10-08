@@ -111,6 +111,7 @@ export default class SharedState {
     candidateBlock: Block
     lastBlockNumber = 0
     _lastBlockHash = ""
+    genesisIdentities = new Set<string>()
 
     set lastBlockHash(value: string) {
         this._lastBlockHash = value
