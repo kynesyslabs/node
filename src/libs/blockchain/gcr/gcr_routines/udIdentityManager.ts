@@ -16,9 +16,13 @@ import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
  * Pattern: Follows XM signature-based verification (not web2 URL-based)
  */
 
-// REVIEW: UD Registry contracts on Ethereum Mainnet
-const unsRegistryAddress = "0x049aba7510f45BA5b64ea9E658E342F904DB358D" // Newer standard
-const cnsRegistryAddress = "0xD1E5b0FF1287aA9f9A268759062E4Ab08b9Dacbe" // Legacy
+// REVIEW: UD Registry contracts - Multi-chain support
+// Polygon L2 (primary - most new domains, cheaper gas)
+const polygonUnsRegistryAddress = "0xa9a6A3626993D487d2Dbda3173cf58cA1a9D9e9f"
+// Ethereum L1 UNS (fallback for legacy domains)
+const ethereumUnsRegistryAddress = "0x049aba7510f45BA5b64ea9E658E342F904DB358D"
+// Ethereum L1 CNS (oldest legacy domains)
+const ethereumCnsRegistryAddress = "0xD1E5b0FF1287aA9f9A268759062E4Ab08b9Dacbe"
 
 const registryAbi = [
     "function ownerOf(uint256 tokenId) external view returns (address)",
@@ -30,44 +34,77 @@ export class UDIdentityManager {
     /**
      * Resolve an Unstoppable Domain to its owner's Ethereum address
      *
+     * Multi-chain resolution strategy (per UD docs):
+     * 1. Try Polygon L2 UNS first (most new domains, cheaper gas)
+     * 2. Fallback to Ethereum L1 UNS (legacy domains)
+     * 3. Fallback to Ethereum L1 CNS (oldest legacy domains)
+     *
      * @param domain - The UD domain (e.g., "brad.crypto")
-     * @returns Object with owner address and registry type (UNS or CNS)
+     * @returns Object with owner address, network, and registry type
      */
     private static async resolveUDDomain(
         domain: string,
-    ): Promise<{ owner: string; registryType: "UNS" | "CNS" }> {
+    ): Promise<{
+        owner: string
+        network: "polygon" | "ethereum"
+        registryType: "UNS" | "CNS"
+    }> {
         try {
-            // REVIEW: Using public Ethereum RPC endpoint
-            // For production, consider using Demos node's own RPC or dedicated provider
-            const provider = new ethers.JsonRpcProvider(
-                "https://eth.llamarpc.com",
-            )
-
             // Convert domain to tokenId using namehash algorithm
             const tokenId = ethers.namehash(domain)
 
-            // Try UNS Registry first (newer standard)
+            // Try Polygon L2 UNS first (primary - most new domains)
             try {
-                const unsRegistry = new ethers.Contract(
-                    unsRegistryAddress,
+                const polygonProvider = new ethers.JsonRpcProvider(
+                    "https://polygon-rpc.com",
+                )
+                const polygonUnsRegistry = new ethers.Contract(
+                    polygonUnsRegistryAddress,
                     registryAbi,
-                    provider,
+                    polygonProvider,
                 )
 
-                const owner = await unsRegistry.ownerOf(tokenId)
-                log.debug(`Domain ${domain} owner (UNS): ${owner}`)
-                return { owner, registryType: "UNS" }
-            } catch (unsError) {
-                // If UNS fails, try CNS Registry (legacy)
-                const cnsRegistry = new ethers.Contract(
-                    cnsRegistryAddress,
-                    registryAbi,
-                    provider,
+                const owner = await polygonUnsRegistry.ownerOf(tokenId)
+                log.debug(`Domain ${domain} owner (Polygon UNS): ${owner}`)
+                return { owner, network: "polygon", registryType: "UNS" }
+            } catch (polygonError) {
+                log.debug(
+                    `Polygon UNS lookup failed for ${domain}, trying Ethereum`,
                 )
 
-                const owner = await cnsRegistry.ownerOf(tokenId)
-                log.debug(`Domain ${domain} owner (CNS): ${owner}`)
-                return { owner, registryType: "CNS" }
+                // Try Ethereum L1 UNS (fallback)
+                try {
+                    const ethereumProvider = new ethers.JsonRpcProvider(
+                        "https://eth.llamarpc.com",
+                    )
+                    const ethereumUnsRegistry = new ethers.Contract(
+                        ethereumUnsRegistryAddress,
+                        registryAbi,
+                        ethereumProvider,
+                    )
+
+                    const owner = await ethereumUnsRegistry.ownerOf(tokenId)
+                    log.debug(`Domain ${domain} owner (Ethereum UNS): ${owner}`)
+                    return { owner, network: "ethereum", registryType: "UNS" }
+                } catch (ethereumUnsError) {
+                    log.debug(
+                        `Ethereum UNS lookup failed for ${domain}, trying CNS`,
+                    )
+
+                    // Try Ethereum L1 CNS (legacy fallback)
+                    const ethereumProvider = new ethers.JsonRpcProvider(
+                        "https://eth.llamarpc.com",
+                    )
+                    const ethereumCnsRegistry = new ethers.Contract(
+                        ethereumCnsRegistryAddress,
+                        registryAbi,
+                        ethereumProvider,
+                    )
+
+                    const owner = await ethereumCnsRegistry.ownerOf(tokenId)
+                    log.debug(`Domain ${domain} owner (Ethereum CNS): ${owner}`)
+                    return { owner, network: "ethereum", registryType: "CNS" }
+                }
             }
         } catch (error) {
             log.error(`Error resolving UD domain ${domain}: ${error}`)
@@ -87,23 +124,36 @@ export class UDIdentityManager {
         sender: string,
     ): Promise<{ success: boolean; message: string }> {
         try {
-            const { domain, resolvedAddress, signature, signedData } =
+            const { domain, resolvedAddress, signature, signedData, network, registryType } =
                 payload.payload
 
-            // Step 1: Resolve domain to get actual owner address
-            const { owner: actualOwner, registryType } =
-                await this.resolveUDDomain(domain)
+            // Step 1: Resolve domain to get actual owner address and verify network
+            const resolution = await this.resolveUDDomain(domain)
 
             log.debug(
-                `Verifying UD domain ${domain}: resolved=${resolvedAddress}, actual=${actualOwner}`,
+                `Verifying UD domain ${domain}: resolved=${resolvedAddress}, actual=${resolution.owner}, network=${resolution.network}`,
             )
 
             // Step 2: Verify resolved address matches actual owner
-            if (actualOwner.toLowerCase() !== resolvedAddress.toLowerCase()) {
+            if (resolution.owner.toLowerCase() !== resolvedAddress.toLowerCase()) {
                 return {
                     success: false,
-                    message: `Domain ownership mismatch: domain ${domain} is owned by ${actualOwner}, not ${resolvedAddress}`,
+                    message: `Domain ownership mismatch: domain ${domain} is owned by ${resolution.owner}, not ${resolvedAddress}`,
                 }
+            }
+
+            // Step 2.5: Verify network matches (warn if mismatch but allow)
+            if (resolution.network !== network) {
+                log.warn(
+                    `Network mismatch for ${domain}: claimed=${network}, actual=${resolution.network}`,
+                )
+            }
+
+            // Step 2.6: Verify registry type matches (warn if mismatch but allow)
+            if (resolution.registryType !== registryType) {
+                log.warn(
+                    `Registry type mismatch for ${domain}: claimed=${registryType}, actual=${resolution.registryType}`,
+                )
             }
 
             // Step 3: Verify signature from resolved address
@@ -141,12 +191,12 @@ export class UDIdentityManager {
             }
 
             log.info(
-                `UD identity verified for domain ${domain} (${registryType} registry)`,
+                `UD identity verified for domain ${domain} (${resolution.network} ${resolution.registryType} registry)`,
             )
 
             return {
                 success: true,
-                message: `Verified ownership of ${domain} via ${registryType} registry`,
+                message: `Verified ownership of ${domain} via ${resolution.network} ${resolution.registryType} registry`,
             }
         } catch (error) {
             log.error(`Error verifying UD payload: ${error}`)

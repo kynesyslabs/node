@@ -29,6 +29,8 @@ export interface PqcIdentityEdit extends SavedPqcIdentity {
 
 /**
  * The Unstoppable Domains identity saved in the GCR
+ *
+ * Multi-chain support: Polygon L2 and Ethereum L1
  */
 export interface SavedUdIdentity {
     domain: string // e.g., "brad.crypto"
@@ -37,6 +39,7 @@ export interface SavedUdIdentity {
     publicKey: string // Public key of resolvedAddress
     timestamp: number
     signedData: string // Challenge message that was signed
+    network: "polygon" | "ethereum" // Network where domain is registered
     registryType: "UNS" | "CNS" // Which registry was used
 }
 
