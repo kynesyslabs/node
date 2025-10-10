@@ -1,9 +1,10 @@
-# Telegram Points Implementation Decision - Final
+# Telegram Points Implementation Decision - Final (CORRECTED)
 
 ## Decision: Architecture A - Bot-Attested Membership ✅
 
 **Date**: 2025-10-10
 **Decision Made**: Option A (Bot-Attested Membership) selected over Option B (Node-Verified)
+**SDK Version**: v2.4.18 implemented and deployed
 
 ## Rationale
 - **Reuses existing infrastructure**: Leverages dual-signature system already in place
@@ -15,53 +16,60 @@
 ## Implementation Approach
 
 ### Bot Side (External - Not in this repo)
-1. Bot checks group membership via Telegram API before signing attestation
-2. Extends `TelegramAttestationPayload` with `group_membership` field:
-   ```typescript
-   {
-     telegram_user_id: number | string
-     username: string
-     demos_address: string
-     timestamp: number
-     group_membership: {
-       group_id: string
-       is_member: boolean
-       checked_at: number
-     }
-   }
-   ```
-3. Bot signs complete attestation including membership status
+Bot checks group membership via Telegram API before signing attestation and sets boolean flag.
 
-### SDK Side (../sdks/ repo)
-1. Update `TelegramAttestationPayload` type definition
-2. Make `group_membership` optional for backwards compatibility
-3. Rebuild SDK and publish/link to node
+### SDK Side (../sdks/ repo) - ✅ COMPLETED v2.4.18
+Updated `TelegramAttestationPayload` type definition:
+```typescript
+export interface TelegramAttestationPayload {
+    telegram_user_id: string;
+    challenge: string;
+    signature: string;
+    username: string;
+    public_key: string;
+    timestamp: number;
+    bot_address: string;
+    group_membership: boolean;  // ← CORRECT: Direct boolean, not object
+}
+```
 
-### Node Side (THIS repo)
-1. **src/features/incentive/PointSystem.ts**:
-   - Modify `IncentiveManager.telegramLinked()` (if exists) or point award logic
-   - Check `attestation.payload.group_membership.is_member === true`
-   - Award 1 point ONLY if `is_member === true`
-   - Award 0 points if `is_member === false` or field missing
+### Node Side (THIS repo) - ✅ COMPLETED
+1. **src/libs/blockchain/gcr/gcr_routines/GCRIdentityRoutines.ts**:
+   - Pass `data.proof` (TelegramSignedAttestation) to IncentiveManager
 
-2. **src/libs/abstraction/index.ts** (Optional):
-   - Validate `group_membership` field structure if present
-   - No changes required if treating as opaque data
+2. **src/libs/blockchain/gcr/gcr_routines/IncentiveManager.ts**:
+   - Added optional `attestation?: any` parameter to `telegramLinked()`
+
+3. **src/features/incentive/PointSystem.ts**:
+   - Check `attestation?.payload?.group_membership === true`
+   - Award 1 point ONLY if `group_membership === true`
+   - Award 0 points if `false` or field missing
+
+## Actual Implementation Code
+```typescript
+// CORRECT implementation in PointSystem.ts
+const isGroupMember = attestation?.payload?.group_membership === true
+
+if (!isGroupMember) {
+    return {
+        pointsAwarded: 0,
+        message: "Telegram linked successfully, but you must join the required group to earn points"
+    }
+}
+```
 
 ## Edge Cases Handling
-- **Legacy attestations** (no group_membership field): Treat as 0 points or configurable default
-- **is_member = false**: Award 0 points, identity still linked
-- **Missing group_membership**: Award 0 points (fail-safe)
+- **Legacy attestations** (no group_membership field): `undefined === true` → false → 0 points
+- **group_membership = false**: 0 points, identity still linked
+- **Missing group_membership**: 0 points (fail-safe via optional chaining)
 
-## Next Steps
-1. Modify bot to include group membership check
-2. Update SDK type definitions
-3. Update node points logic to read `group_membership.is_member`
-4. Test with bot providing membership data
+## Security
+- `group_membership` is part of SIGNED attestation from authorized bot
+- Bot signature verified in `verifyTelegramProof()`
+- Users cannot forge membership without valid bot signature
 
-## Discarded Approach
-**Option B (Node-Verified)**: Rejected due to:
-- Requires TELEGRAM_BOT_TOKEN in each node's .env
-- Additional Telegram API calls from node
-- More complex infrastructure
-- Doesn't maximize code reuse
+## Breaking Change Risk: LOW
+- All parameters optional (backwards compatible)
+- Fail-safe defaults (optional chaining)
+- Only affects new Telegram linkages
+- Existing linked identities unaffected
