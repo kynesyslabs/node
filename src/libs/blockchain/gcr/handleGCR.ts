@@ -369,10 +369,10 @@ export default class HandleGCR {
                         reviewed: false,
                     })
                 } else {
-                    // Update existing account with new storage program
-                    account.data = {
-                        variables: context.data.variables,
-                        metadata: context.data.metadata,
+                    // A storage program with this address already exists.
+                    return {
+                        success: false,
+                        message: `Storage program already exists: ${target}`,
                     }
                 }
 
