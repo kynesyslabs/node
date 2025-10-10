@@ -94,11 +94,13 @@ export class IncentiveManager {
         userId: string,
         telegramUserId: string,
         referralCode?: string,
+        attestation?: any, // TelegramSignedAttestation from SDK
     ): Promise<RPCResponse> {
         return await this.pointSystem.awardTelegramPoints(
             userId,
             telegramUserId,
             referralCode,
+            attestation,
         )
     }
 
