@@ -24,6 +24,8 @@ import { Tweet } from "@kynesyslabs/demosdk/types"
 import Mempool from "../blockchain/mempool_v2"
 import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Discord, DiscordMessage } from "../identity/tools/discord"
+import Datasource from "@/model/datasource"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 
 export interface NodeCall {
     message: string
@@ -177,6 +179,53 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             nStat = await ensureGCRForUser(data.address)
             response.response = nStat.nonce
             break
+
+        // REVIEW: Storage Program query endpoint
+        case "getStorageProgram": {
+            const storageAddress = data.storageAddress
+            const key = data.key
+
+            if (!storageAddress) {
+                response.result = 400
+                response.response = { error: "Missing storageAddress parameter" }
+                break
+            }
+
+            try {
+                const db = await Datasource.getInstance()
+                const gcrRepo = db.getDataSource().getRepository(GCRMain)
+
+                const storageProgram = await gcrRepo.findOne({
+                    where: { address: storageAddress },
+                })
+
+                if (!storageProgram || !storageProgram.data || !storageProgram.data.metadata) {
+                    response.result = 404
+                    response.response = { error: "Storage program not found" }
+                    break
+                }
+
+                // Return specific key or all data
+                const data = key
+                    ? storageProgram.data.variables?.[key]
+                    : storageProgram.data
+
+                response.result = 200
+                response.response = {
+                    success: true,
+                    data,
+                    metadata: storageProgram.data.metadata,
+                }
+            } catch (error) {
+                response.result = 500
+                response.response = {
+                    error: "Internal server error",
+                    details: error instanceof Error ? error.message : String(error),
+                }
+            }
+            break
+        }
+
         case "getPeerTime":
             response.response = new Date().getTime()
             break
