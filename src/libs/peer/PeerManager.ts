@@ -41,7 +41,7 @@ export default class PeerManager {
 
     // Loading the peer list from the demos_peer.json
     loadPeerList() {
-        let rawPeerList: string = "{}"
+        let rawPeerList = "{}"
 
         try {
             rawPeerList = fs.readFileSync(getSharedState.peerListFile, "utf8")

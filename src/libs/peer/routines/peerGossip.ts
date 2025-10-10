@@ -129,50 +129,46 @@ async function peersGossipProcess(
     log.custom("peerGossip", "Peerlists merged", false)
 }
 
-/**
- * Merges multiple peer lists into a single, ordered, unique peer list.
- * @param {Peer[][]} peerlists - Array of peer lists to merge.
- * @returns {Promise<boolean>} - Returns true when merge is complete.
- */
 async function mergePeerlists(peerlists: Peer[][]): Promise<boolean> {
-    // let mergedPeerlist: Peer[] = []
     const peerMap = new Map<string, Peer>()
 
-    for (const peerlist of peerlists) {
-        for (const peer of peerlist) {
-            if (!peer) {
-                log.warning("[peerGossip] Peer is undefined, skipping")
-                continue
-            }
+    // Flatten and filter all peers at once, then process in batches
+    const allPeers = peerlists.flat().filter(peer => {
+        if (!peer) {
+            log.warning("[peerGossip] Peer is undefined, skipping")
+            return false
+        }
+        return true
+    })
 
-            if (peerMap.has(peer.identity)) {
-                const existingPeer = peerMap.get(peer.identity)
-                // INFO: Update the peer
+    // Process peers in batches to yield to event loop
+    const batchSize = 10
+    for (let i = 0; i < allPeers.length; i += batchSize) {
+        const batch = allPeers.slice(i, i + batchSize)
+
+        for (const peer of batch) {
+            const existingPeer = peerMap.get(peer.identity)
+
+            if (existingPeer) {
+                // Update existing peer if this one has higher block number
                 if (peer.sync.block > existingPeer.sync.block) {
                     existingPeer.sync.block = peer.sync.block
                     existingPeer.sync.block_hash = peer.sync.block_hash
                     existingPeer.sync.status = peer.sync.status
                 }
-                continue
+            } else {
+                // Add new peer
+                peerMap.set(peer.identity, peer)
             }
+        }
 
-            peerMap.set(peer.identity, peer)
-
-            // if (!mergedPeerlist.includes(peer)) {
-            //     mergedPeerlist.push(peer)
-            // }
+        // Yield to event loop every batch
+        if (i + batchSize < allPeers.length) {
+            await new Promise(resolve => setImmediate(resolve))
         }
     }
 
     const mergedPeerlist = Array.from(peerMap.values())
-
-    // for (let peer of mergedPeerlist) {
-    //     if (!peer.sync.block_hash) {
-    //         log.debug("found invalid sync status")
-    //         process.exit(0)
-    //     }
-    // }
-
     mergedPeerlist.sort((a, b) => a.identity.localeCompare(b.identity))
     PeerManager.getInstance().setPeers(mergedPeerlist)
     return true
@@ -193,11 +189,7 @@ function selectPeersForGossip(peers: Peer[]): Peer[] {
         return peers
     }
 
-    log.custom(
-        "peerGossip",
-        `Selecting ${maxGossipPeers} random peers`,
-        false,
-    )
+    log.custom("peerGossip", `Selecting ${maxGossipPeers} random peers`, false)
     return shuffleArray(peers).slice(0, maxGossipPeers)
 }
 

@@ -32,7 +32,7 @@ export default class Wallet {
         this.identity = forge.pki.ed25519.generateKeyPair()
     }
 
-    dispatch(dividedInput: any) {
+    async dispatch(dividedInput: any) {
         // We need the modes (2 to 3 arguments)
         if (dividedInput.length < 2 || dividedInput.length > 3) {
             console.log("Please specify a command")
@@ -81,7 +81,7 @@ export default class Wallet {
                 }
                 // Writing to file
                 try {
-                    this.save(filename)
+                    await this.save(filename)
                     console.log("Wallet saved successfully")
                 } catch (e) {
                     console.log(e["message"])
@@ -120,8 +120,8 @@ export default class Wallet {
         })
     }
 
-    save(filename: string) {
-        fs.writeFileSync(filename, this.identity.privateKey.toString("hex"))
+    async save(filename: string) {
+        await fs.promises.writeFile(filename, this.identity.privateKey.toString("hex"))
     }
 
     read(filename: string) {

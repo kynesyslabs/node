@@ -243,7 +243,7 @@ async function preMainLoop() {
     getSharedState.connectionString = ourselves
     log.info("Our connection string is: " + ourselves)
     // And saves the public key file
-    fs.writeFileSync(
+    await fs.promises.writeFile(
         "publickey_" + getSharedState.signingAlgorithm + "_" + publicKeyHex,
         publicKeyHex + "\n",
     )

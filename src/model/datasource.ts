@@ -43,7 +43,6 @@ export const dataSource = new DataSource({
         GlobalChangeRegistry,
         GCRTracker,
         GCRMain,
-        GCRTracker,
     ],
     synchronize: true,
     logging: false,

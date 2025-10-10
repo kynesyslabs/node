@@ -250,6 +250,7 @@ async function verifyLastBlockIntegrity(
 }
 
 async function downloadBlock(peer: Peer, blockToAsk: number) {
+    log.debug("Downloading block: " + blockToAsk)
     const blockRequest: RPCRequest = {
         method: "nodeCall",
         params: [
@@ -264,6 +265,7 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
     const blockResponse = await peer.longCall(blockRequest, false, 250, 3, [
         404,
     ])
+    log.debug("Block response: " + blockResponse.result)
 
     // INFO: Handle max retries reached
     if (blockResponse.result === 400) {
@@ -290,6 +292,8 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
 
         log.info("[downloadBlock] Block received: " + block.hash)
         await Chain.insertBlock(block, [], null, false)
+        log.debug("Block inserted successfully")
+        log.debug("Last block number: " + getSharedState.lastBlockNumber + " Last block hash: " + getSharedState.lastBlockHash)
         log.info(
             "[fastSync] Block inserted successfully at the head of the chain!",
         )
