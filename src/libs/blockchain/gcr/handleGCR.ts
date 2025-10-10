@@ -324,66 +324,59 @@ export default class HandleGCR {
             })
 
             // Handle CREATE operation
-            if (operation === "CREATE") {
-                if (!context.data || !context.data.variables || !context.data.metadata) {
+            // REVIEW: Create new account if it doesn't exist (using 'pubkey' not 'address')
+            if (!account) {
+                const initialSize = getDataSize(context.data.variables)
+                if (initialSize > STORAGE_LIMITS.MAX_SIZE_BYTES) {
                     return {
                         success: false,
-                        message: "CREATE operation missing data or metadata",
+                        message: `Initial data size ${initialSize} bytes exceeds limit of ${STORAGE_LIMITS.MAX_SIZE_BYTES} bytes (128KB)`,
                     }
                 }
 
-                // REVIEW: Create new account if it doesn't exist (using 'pubkey' not 'address')
-                if (!account) {
-                    account = repository.create({
-                        pubkey: target,
-                        balance: 0n,
-                        nonce: 0,
-                        assignedTxs: [],
-                        identities: { xm: {}, web2: {}, pqc: {} },
-                        points: {
-                            totalPoints: 0,
-                            breakdown: {
-                                web3Wallets: {},
-                                socialAccounts: {
-                                    twitter: 0,
-                                    github: 0,
-                                    discord: 0,
-                                    telegram: 0,
-                                },
-                                referrals: 0,
-                                demosFollow: 0,
+                account = repository.create({
+                    pubkey: target,
+                    balance: 0n,
+                    nonce: 0,
+                    assignedTxs: [],
+                    identities: { xm: {}, web2: {}, pqc: {} },
+                    points: {
+                        totalPoints: 0,
+                        breakdown: {
+                            web3Wallets: {},
+                            socialAccounts: {
+                                twitter: 0,
+                                github: 0,
+                                discord: 0,
+                                telegram: 0,
                             },
-                            lastUpdated: new Date(),
+                            referrals: 0,
+                            demosFollow: 0,
                         },
-                        referralInfo: {
-                            totalReferrals: 0,
-                            referralCode: "",
-                            referrals: [],
+                        lastUpdated: new Date(),
+                    },
+                    referralInfo: {
+                        totalReferrals: 0,
+                        referralCode: "",
+                        referrals: [],
+                    },
+                    data: {
+                        variables: context.data.variables,
+                        metadata: {
+                            ...context.data.metadata,
+                            size: initialSize,
+                            lastModified: context.data.metadata?.lastModified ?? Date.now(),
                         },
-                        data: {
-                            variables: context.data.variables,
-                            metadata: context.data.metadata,
-                        },
-                        flagged: false,
-                        flaggedReason: "",
-                        reviewed: false,
-                    })
-                } else {
-                    // A storage program with this address already exists.
-                    return {
-                        success: false,
-                        message: `Storage program already exists: ${target}`,
-                    }
-                }
-
-                if (!simulate) {
-                    await repository.save(account)
-                    log.info(`[StorageProgram] CREATE: ${target} by ${sender}`)
-                }
-
+                    },
+                    flagged: false,
+                    flaggedReason: "",
+                    reviewed: false,
+                })
+            } else {
+                // A storage program with this address already exists.
                 return {
-                    success: true,
-                    message: `Storage program created: ${target}`,
+                    success: false,
+                    message: `Storage program already exists: ${target}`,
                 }
             }
 
@@ -531,7 +524,8 @@ export default class HandleGCR {
                 message: `Unknown storage program operation: ${operation}`,
             }
         } catch (error) {
-            log.error("[StorageProgram] Error applying edit:", error)
+            log.error(`[StorageProgram] Error applying edit: ${error instanceof Error ? `${error.message}
+Stack: ${error.stack || "N/A"}` : String(error)}`)
             return {
                 success: false,
                 message: `Error: ${error instanceof Error ? error.message : String(error)}`,

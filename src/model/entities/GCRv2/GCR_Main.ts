@@ -55,7 +55,6 @@ export class GCRMain {
     }
     // REVIEW: Storage Programs data column for key-value storage with access control
     @Column({ type: "jsonb", name: "data", default: () => "'{}'" })
-    @Index("idx_gcr_main_data_gin")
     data: {
         /** Key-value storage for Storage Programs (max 128KB total) */
         variables?: Record<string, any>

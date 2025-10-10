@@ -71,7 +71,7 @@ export function validateStorageProgramAccess(
                 return { success: true }
             }
             // Only deployer can write
-            if (operation === "WRITE_STORAGE" || operation === "CREATE_STORAGE_PROGRAM") {
+            if (operation === "WRITE_STORAGE") {
                 if (!isDeployer) {
                     return {
                         success: false,

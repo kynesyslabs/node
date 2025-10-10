@@ -26,6 +26,7 @@ import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Discord, DiscordMessage } from "../identity/tools/discord"
 import Datasource from "@/model/datasource"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import { validateStorageProgramAccess } from "@/libs/blockchain/validators/validateStorageProgramAccess"
 
 export interface NodeCall {
     message: string
@@ -34,7 +35,7 @@ export interface NodeCall {
 }
 
 // REVIEW Is this module too big?
-export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
+export async function manageNodeCall(content: NodeCall, sender?: string): Promise<RPCResponse> {
     // Basic Node API handling logic
     // ...
     let result: any // Storage for the result
@@ -191,6 +192,13 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 break
             }
 
+            // REVIEW: Require caller address for access control
+            if (!sender) {
+                response.result = 401
+                response.response = { error: "Caller address required for storage access" }
+                break
+            }
+
             try {
                 const db = await Datasource.getInstance()
                 const gcrRepo = db.getDataSource().getRepository(GCRMain)
@@ -203,6 +211,19 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 if (!storageProgram || !storageProgram.data || !storageProgram.data.metadata) {
                     response.result = 404
                     response.response = { error: "Storage program not found" }
+                    break
+                }
+
+                // REVIEW: Enforce access control before returning data
+                const accessCheck = validateStorageProgramAccess(
+                    "READ_STORAGE",
+                    sender,
+                    storageProgram.data,
+                )
+
+                if (!accessCheck.success) {
+                    response.result = 403
+                    response.response = { error: accessCheck.error || "Access denied" }
                     break
                 }
 
