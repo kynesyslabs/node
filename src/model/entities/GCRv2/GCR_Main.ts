@@ -53,6 +53,30 @@ export class GCRMain {
             pointsAwarded: number
         }>
     }
+    // REVIEW: Storage Programs data column for key-value storage with access control
+    @Column({ type: "jsonb", name: "data", default: () => "'{}'" })
+    @Index("idx_gcr_main_data_gin")
+    data: {
+        /** Key-value storage for Storage Programs (max 128KB total) */
+        variables?: Record<string, any>
+        /** Storage Program metadata */
+        metadata?: {
+            /** Name of the storage program */
+            programName?: string
+            /** Address of the program deployer */
+            deployer?: string
+            /** Access control mode */
+            accessControl?: "private" | "public" | "restricted" | "deployer-only"
+            /** Allowed addresses for 'restricted' access control */
+            allowedAddresses?: string[]
+            /** Unix timestamp of program creation */
+            created?: number
+            /** Unix timestamp of last modification */
+            lastModified?: number
+            /** Current storage size in bytes */
+            size?: number
+        }
+    }
     @Column({ type: "boolean", name: "flagged", default: false })
     flagged: boolean
     @Column({ type: "text", name: "flaggedReason", default: "" })
