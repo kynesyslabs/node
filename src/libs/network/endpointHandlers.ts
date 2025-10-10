@@ -49,6 +49,8 @@ import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
+import handleStorageProgramTransaction from "./routines/transactions/handleStorageProgramTransaction"
+import { StorageProgramPayload } from "@kynesyslabs/demosdk/storage"
 import {
     hexToUint8Array,
     ucrypto,
@@ -389,6 +391,31 @@ export default class ServerHandlers {
                 }
                 result.response = nativeBridgeResult
                 break
+
+            case "storageProgram": {
+                // REVIEW: Storage Program transaction handling
+                payload = tx.content.data
+                console.log("[Included Storage Program Payload]")
+                console.log(payload[1])
+
+                const storageProgramResult = await handleStorageProgramTransaction(
+                    payload[1] as StorageProgramPayload,
+                    tx.content.from,
+                    tx.hash,
+                )
+
+                result.success = storageProgramResult.success
+                result.response = {
+                    message: storageProgramResult.message,
+                }
+
+                // If handler generated GCR edits, add them to transaction for HandleGCR to apply
+                if (storageProgramResult.gcrEdits && storageProgramResult.gcrEdits.length > 0) {
+                    tx.content.gcr_edits = storageProgramResult.gcrEdits
+                }
+
+                break
+            }
         }
 
         // Only if the transaction is valid we add it to the mempool
