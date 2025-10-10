@@ -79,7 +79,7 @@ async function mainLoopCycle() {
     log.info("[MAINLOOP]: about to check if its time for consensus")
 
     if (!isConsensusTimeReached) {
-        log.only("[MAINLOOP]: is not consensus time")
+        log.debug("[MAINLOOP]: is not consensus time")
         //await sendNodeOnlineTx()
     }
 
@@ -105,7 +105,7 @@ async function mainLoopCycle() {
     ) {
         // Set the startingConsensus flag to true to avoid conflicts with starting loops
         getSharedState.startingConsensus = true
-        log.only("[MAIN LOOP] Consensus time reached and sync status is true")
+        log.debug("[MAIN LOOP] Consensus time reached and sync status is true")
         // Wait for the peer routine to finish if it is still running
         let timer = 0
         while (getSharedState.peerRoutineRunning > 0) {

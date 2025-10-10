@@ -38,12 +38,12 @@ export default async function manageConsensusRoutines(
     sender: string,
     payload: ConsensusMethod,
 ): Promise<RPCResponse> {
-    log.only("👍👍👍👍👍👍👍👍👍 RECEIVED CONSENSUS CALL 👍👍👍👍👍👍👍👍")
+    log.debug("👍👍👍👍👍👍👍👍👍 RECEIVED CONSENSUS CALL 👍👍👍👍👍👍👍👍")
 
     const peer = PeerManager.getInstance().getPeer(sender)
-    log.only("Sender: " + peer.connection.string)
-    log.only("Payload: " + JSON.stringify(payload, null, 2))
-    log.only("-----------------------------")
+    log.debug("Sender: " + peer.connection.string)
+    log.debug("Payload: " + JSON.stringify(payload, null, 2))
+    log.debug("-----------------------------")
     let response = _.cloneDeep(emptyResponse)
 
     /* REVIEW
@@ -60,7 +60,7 @@ export default async function manageConsensusRoutines(
     const isConsensusRunning = isConsensusAlreadyRunning()
     const inConsensus = isConsensusTime || isConsensusRunning
 
-    log.only("inConsensus: " + inConsensus)
+    log.debug("inConsensus: " + inConsensus)
 
     if (!inConsensus) {
         response.result = 400
@@ -94,7 +94,7 @@ export default async function manageConsensusRoutines(
         }
     }
 
-    log.only("isInShard: " + isInShard)
+    log.debug("isInShard: " + isInShard)
 
     inShardCheck: if (!isInShard) {
         // INFO: If is a greenlight request, return 200
@@ -159,8 +159,6 @@ export default async function manageConsensusRoutines(
         // }
         return response
     }
-
-    log.only("processing payload: " + JSON.stringify(payload, null, 2))
 
     // NOTE Each method has its own logic to be implemented
     switch (payload.method) {
@@ -357,7 +355,7 @@ export default async function manageConsensusRoutines(
             // INFO: If the manager class for that block is not found, assume peer is behind on the consensus
             // return a 200 to unblock peer
             if (!manager) {
-                log.only("returning a fake 200")
+                log.debug("returning a fake 200")
                 response.result = 200
                 response.response = "Secretary manager not found"
                 return response
@@ -365,7 +363,7 @@ export default async function manageConsensusRoutines(
 
             // INFO: Check if the sender is the secretary
             if (sender !== manager.secretary.identity) {
-                log.only("returning a 401")
+                log.debug("returning a 401")
                 response.result = 401
                 response.response = "Greenlight not accepted"
                 response.extra = "Secretary identity mismatch"

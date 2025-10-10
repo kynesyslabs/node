@@ -32,7 +32,7 @@ export async function checkConsensusTime(
     const consensusIntervalTime = getSharedState.getConsensusTime()
     log.debug("[CONSENSUS TIME] lastTimestamp: " + lastTimestamp, true)
     log.debug("[CONSENSUS TIME] currentTimestamp: " + currentTimestamp, true)
-    log.only("[CONSENSUS TIME] delta: " + delta)
+    log.debug("[CONSENSUS TIME] delta: " + delta)
     log.debug(
         "[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime,
         true,

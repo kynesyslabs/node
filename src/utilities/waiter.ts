@@ -45,14 +45,14 @@ export class Waiter {
         }
 
         if (Waiter.preHeld.has(id)) {
-            log.only(
+            log.debug(
                 `[WAITER] Found pre-held key: ${id} with value: ${Waiter.preHeld.get(
                     id,
                 )}`,
             )
             const resolveValue = Waiter.preHeld.get(id)
             Waiter.preHeld.delete(id)
-            log.only(
+            log.debug(
                 `[WAITER] Resolved pre-held key: ${id} with data: ${resolveValue}`,
             )
             return resolveValue
@@ -78,7 +78,7 @@ export class Waiter {
                 promise: null,
             })
 
-            log.only(`[WAITER] 😒😒😒😒😒😒😒😒😒 Created wait entry for ${id}`)
+            log.debug(`[WAITER] 😒😒😒😒😒😒😒😒😒 Created wait entry for ${id}`)
         })
 
         Waiter.waitList.get(id).promise = promise
@@ -102,7 +102,7 @@ export class Waiter {
         Waiter.preHeld.delete(id)
         Waiter.waitList.delete(id)
         entry.resolve(data)
-        log.only(`[WAITER] Resolved wait entry for ${id}`)
+        log.debug(`[WAITER] Resolved wait entry for ${id}`)
 
         return data || null
     }
@@ -113,7 +113,7 @@ export class Waiter {
             throw new Error(`[WAITER] Already waiting for id: ${id}`)
         }
 
-        log.only(`[WAITER] Pre-holding the key: ${id} with data: ${data}`)
+        log.debug(`[WAITER] Pre-holding the key: ${id} with data: ${data}`)
         Waiter.preHeld.set(id, data)
     }
 
@@ -123,7 +123,7 @@ export class Waiter {
      * @param id - The id of the event to abort
      */
     static abort(id: string) {
-        log.only(`[WAITER] Aborting the key: ${id}`)
+        log.debug(`[WAITER] Aborting the key: ${id}`)
         const entry = Waiter.waitList.get(id)
         if (!entry) {
             log.warning(`[WAITER] No wait entry found for ${id}`)

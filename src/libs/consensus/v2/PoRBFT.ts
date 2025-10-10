@@ -63,7 +63,7 @@ export async function consensusRoutine(): Promise<void> {
         )
         return
     }
-    log.only("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
+    log.debug("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     const blockRef = getSharedState.lastBlockNumber + 1
     const manager = SecretaryManager.getInstance(blockRef, true)
 
@@ -181,9 +181,7 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         // INFO: CONSENSUS ACTION 5: Forge the block
-        log.only("Forging block 🏁")
         const block = await forgeBlock(tempMempool, peerlist) // NOTE The GCR hash is calculated here and added to the block
-        log.only("Block forged ✅")
         // REVIEW Set last consensus time to the current block timestamp
         getSharedState.lastConsensusTime = block.content.timestamp
 
@@ -209,9 +207,7 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         // INFO: CONSENSUS ACTION 7: End the consensus routine
-        log.only("Sending validator phase 7 to the secretary 🏁")
         await updateValidatorPhase(7, blockRef)
-        log.only("Validator phase 7 sent to the secretary ✅")
     } catch (error) {
         if (error instanceof NotInShardError) {
             log.info(
@@ -226,6 +222,7 @@ export async function consensusRoutine(): Promise<void> {
             )
             return
         }
+
         if (error instanceof BlockInvalidError) {
             log.info(
                 "[consensusRoutine] Block is invalid. Rolling back the GCREdits",
@@ -248,20 +245,9 @@ export async function consensusRoutine(): Promise<void> {
         console.error(error)
         process.exit(1)
     } finally {
-        manager.endConsensusRoutine()
-        // Cleanup the consensus state
         cleanupConsensusState()
-        // Joining the temporary mempool to the main one
-        // await Mempool.joinTemporaryMempool() // ? Is await ok here?
+        manager.endConsensusRoutine()
     }
-
-    log.only("👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋👋")
-    log.only("[consensusRoutine] CONSENSUS ROUTINE ENDED 🔥🔥🔥")
-    log.only(
-        "Waiters: " +
-            JSON.stringify(Array.from(Waiter.waitList.keys()), null, 2),
-    )
-    log.only("Preheld keys: " + Array.from(Waiter.preHeld.keys()).length)
 }
 
 // SECTION: Consensus functions!
@@ -549,7 +535,6 @@ async function finalizeBlock(block: Block, pro: number): Promise<void> {
 
 function preventForgingEnded(blockRef: number) {
     const manager = SecretaryManager.getInstance(blockRef)
-    log.only("preventForgingEnded blockRef: " + blockRef)
 
     if (!manager) {
         throw new ForgingEndedError("Secretary manager not found")
@@ -578,12 +563,7 @@ async function updateValidatorPhase(
     const manager = SecretaryManager.getInstance(blockRef)
 
     if (!manager) {
-        // INFO: This should never happen
-        log.only("Secretary manager not found")
-        log.only("Block ref: " + blockRef)
-        log.only("Last block number: " + (await Chain.getLastBlockNumber()))
-        log.only("Phase: " + phase)
-        process.exit(1)
+        throw new ForgingEndedError("Secretary Manager instance for this block has been deleted")
     }
 
     await manager.setOurValidatorPhase(phase, true)

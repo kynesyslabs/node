@@ -473,7 +473,7 @@ export class Twitter {
     async makeRequest<T>(url: string, delay = 0): Promise<AxiosResponse<T>> {
         if (delay > 0) {
             await new Promise(resolve => setTimeout(resolve, delay))
-            log.only(`☺️😔👀 Delayed request to ${url} for ${delay}ms`)
+            log.debug(`☺️😔👀 Delayed request to ${url} for ${delay}ms`)
         }
 
         return await axios.get<T>(url, {

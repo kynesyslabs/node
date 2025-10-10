@@ -54,22 +54,11 @@ export default class SecretaryManager {
             secretaryKey: "",
             blockRef: lastBlockNumber + 1,
         }
-        log.only("🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢")
-        log.only("Initializing shard")
-        log.only("CVSA: " + cVSA)
-        log.only("Last block number: " + lastBlockNumber)
 
         // Reusing the method to create the members
         this.shard.members = await getShard(cVSA)
         // this.ourKey = getSharedState.identity.ed25519.publicKey.toString("hex")
         this.ourKey = getSharedState.publicKeyHex
-
-        log.only(
-            "Shard members: " +
-                JSON.stringify(
-                    this.shard.members.map(m => m.connection.string),
-                ),
-        )
 
         if (
             !this.shard.members.map(peer => peer.identity).includes(this.ourKey)
@@ -80,14 +69,14 @@ export default class SecretaryManager {
         // Assigning the secretary and its key
         this.shard.secretaryKey = this.secretary.identity
 
-        log.only("INITIALIZED SHARD:")
-        log.only(
+        log.debug("INITIALIZED SHARD:")
+        log.debug(
             "SHARD: " +
                 JSON.stringify(
                     this.shard.members.map(m => m.connection.string),
                 ),
         )
-        log.only("SECRETARY: " + this.secretary.identity)
+        log.debug("SECRETARY: " + this.secretary.identity)
 
         // INFO: If some nodes crash, kill the node for debugging!
         // if (this.shard.members.length < 3 && this.shard.blockRef > 24000) {
@@ -99,7 +88,7 @@ export default class SecretaryManager {
 
         // INFO: Start the secretary routine
         if (this.checkIfWeAreSecretary()) {
-            log.only(
+            log.debug(
                 "⬜️ We are the secretary ⬜️. starting the secretary routine",
             )
             this.secretaryRoutine().finally(async () => {
@@ -640,13 +629,13 @@ export default class SecretaryManager {
             return false
         }
 
-        log.only("Received green light for phase: " + validatorPhase)
-        log.only("---- DIAGNOSTICS ----")
-        log.only("Our phase: " + this.ourValidatorPhase.currentPhase)
-        log.only("Our blockRef: " + this.shard.blockRef)
-        log.only("Secretary timestamp: " + secretaryBlockTimestamp)
-        log.only("Secretary: " + this.secretary.identity)
-        log.only("---- END DIAGNOSTICS ----")
+        log.debug("Received green light for phase: " + validatorPhase)
+        log.debug("---- DIAGNOSTICS ----")
+        log.debug("Our phase: " + this.ourValidatorPhase.currentPhase)
+        log.debug("Our blockRef: " + this.shard.blockRef)
+        log.debug("Secretary timestamp: " + secretaryBlockTimestamp)
+        log.debug("Secretary: " + this.secretary.identity)
+        log.debug("---- END DIAGNOSTICS ----")
 
         if (secretaryBlockTimestamp < this.blockTimestamp) {
             log.debug(
@@ -666,7 +655,7 @@ export default class SecretaryManager {
 
         const waiterKey =
             Waiter.keys.GREEN_LIGHT + this.shard.blockRef + validatorPhase
-        log.only("Waiter key: " + waiterKey)
+        log.debug("Waiter key: " + waiterKey)
 
         if (Waiter.isWaiting(waiterKey)) {
             Waiter.resolve(waiterKey, secretaryBlockTimestamp)
@@ -675,9 +664,9 @@ export default class SecretaryManager {
         }
 
         if (this.ourValidatorPhase.currentPhase <= validatorPhase) {
-            log.only(`[SECRETARY ROUTINE] Pre-holding the key: ${waiterKey}`)
-            log.only("Is Waiting for key: " + Waiter.isWaiting(waiterKey))
-            log.only(
+            log.debug(`[SECRETARY ROUTINE] Pre-holding the key: ${waiterKey}`)
+            log.debug("Is Waiting for key: " + Waiter.isWaiting(waiterKey))
+            log.debug(
                 "Waitlist keys: " +
                     JSON.stringify(Array.from(Waiter.waitList.keys()), null, 2),
             )
@@ -690,26 +679,12 @@ export default class SecretaryManager {
             return true
         }
 
-        log.only("We don't know what to do with this green light")
-        log.only("Validator phase: " + validatorPhase)
-        log.only("Our phase: " + this.ourValidatorPhase.currentPhase)
-        log.only("Secretary block timestamp: " + secretaryBlockTimestamp)
-        log.only("Block timestamp: " + this.blockTimestamp)
+        log.debug("We don't know what to do with this green light")
+        log.debug("Validator phase: " + validatorPhase)
+        log.debug("Our phase: " + this.ourValidatorPhase.currentPhase)
+        log.debug("Secretary block timestamp: " + secretaryBlockTimestamp)
+        log.debug("Block timestamp: " + this.blockTimestamp)
         process.exit(1)
-
-        return false
-
-        // log.debug("Our phase: " + this.ourValidatorPhase.currentPhase)
-        // if (validatorPhase > this.ourValidatorPhase.currentPhase) {
-        //     // INFO: This node has already timed out
-        //     log.debug("We are not in the same phase, stopping the node ...")
-        //     process.exit(1)
-        // }
-
-        // INFO: Resolve the waiter with the timestamp
-        Waiter.resolve(waiterKey, secretaryBlockTimestamp)
-        this.ourValidatorPhase.waitStatus = false
-        return true
     }
 
     /**
@@ -746,9 +721,9 @@ export default class SecretaryManager {
         //     // await this.simulateSecretaryGoingOffline()
         // }
 
-        log.only("Sending our validator phase to the secretary")
-        log.only("Our phase: " + this.ourValidatorPhase.currentPhase)
-        log.only("Shard block ref: " + this.shard.blockRef)
+        log.debug("Sending our validator phase to the secretary")
+        log.debug("Our phase: " + this.ourValidatorPhase.currentPhase)
+        log.debug("Shard block ref: " + this.shard.blockRef)
 
         const waiterKey =
             Waiter.keys.GREEN_LIGHT +
@@ -759,8 +734,8 @@ export default class SecretaryManager {
             this._greenlight_timeout,
         )
 
-        log.only("Greenlight waiter created")
-        log.only("Waiter key: " + waiterKey)
+        log.debug("Greenlight waiter created")
+        log.debug("Waiter key: " + waiterKey)
 
         const sendStatus = async () => {
             const request: RPCRequest = {
@@ -826,8 +801,8 @@ export default class SecretaryManager {
             }
 
             if (res.result == 401) {
-                log.only("received a 401")
-                log.only(JSON.stringify(res, null, 2))
+                log.debug("received a 401")
+                log.debug(JSON.stringify(res, null, 2))
                 process.exit(1)
             }
 
@@ -903,7 +878,7 @@ export default class SecretaryManager {
     }
 
     public async endConsensusRoutine() {
-        log.only("Ending the consensus routine")
+        log.debug("Ending the consensus routine")
         const manager = SecretaryManager.instances.get(this.shard.blockRef)
 
         if (manager) {
@@ -915,10 +890,10 @@ export default class SecretaryManager {
         const waiterKeys = Array.from(Waiter.waitList.keys()).filter(filter)
         const waiters = waiterKeys.map(key => Waiter.wait(key))
 
-        log.only(
+        log.debug(
             "💁💁💁💁💁💁💁💁 WAITING FOR HANGING GREENLIGHTS 💁💁💁💁💁💁💁💁💁💁",
         )
-        log.only("Waiter keys: " + JSON.stringify(waiterKeys, null, 2))
+        log.debug("Waiter keys: " + JSON.stringify(waiterKeys, null, 2))
         try {
             await Promise.all(waiters)
         } catch (error) {
@@ -933,13 +908,13 @@ export default class SecretaryManager {
             .filter(filter)
             .forEach(key => Waiter.preHeld.delete(key))
 
-        log.only(
+        log.debug(
             "😎😎😎😎😎😎😎😎😎😎 HANGING GREENLIGHTS RESOLVED 😎😎😎😎😎😎😎😎😎😎",
         )
-        log.only("[SECRETARY ROUTINE] Secretary routine finished 🎉")
+        log.debug("[SECRETARY ROUTINE] Secretary routine finished 🎉")
 
         if (SecretaryManager.getInstance(this.shard.blockRef) === this) {
-            log.only("deleting the instance")
+            log.debug("deleting the instance")
             SecretaryManager.instances.delete(this.shard.blockRef)
         } else {
             log.error("this instance is not doing that thing")
@@ -951,14 +926,14 @@ export default class SecretaryManager {
 
         // INFO: Resolve all hanging waiters
         // if (Waiter.isWaiting(Waiter.keys.GREEN_LIGHT)) {
-        //     log.only(
+        //     log.debug(
         //         "GREEN_LIGHT waiter found WHEN ENDING THE CONSENSUS ..., KILLING IT it",
         //     )
         //     Waiter.abort(Waiter.keys.GREEN_LIGHT)
         // }
 
         // if (Waiter.isWaiting(Waiter.keys.SET_WAIT_STATUS)) {
-        //     log.only(
+        //     log.debug(
         //         "SET_WAIT_STATUS waiter found WHEN ENDING THE CONSENSUS ..., KILLING IT it",
         //     )
         //     Waiter.abort(Waiter.keys.SET_WAIT_STATUS)
@@ -975,7 +950,6 @@ export default class SecretaryManager {
     async setOurValidatorPhase(phase: number, status: boolean) {
         log.debug("[setOurValidatorPhase] Setting our phase to: " + phase)
         // INFO: Update the current phase and the status of the phase
-        log.only("setting our phase to: " + phase)
         this.ourValidatorPhase.currentPhase = phase
         this.ourValidatorPhase.phases[phase][1] = status
         this.ourValidatorPhase.waitStatus = true
@@ -986,22 +960,11 @@ export default class SecretaryManager {
         blockRef?: number,
         initialize = false,
     ): SecretaryManager {
-        log.only("getting instance for block ref: " + blockRef)
         // INFO: If blockRef is not provided, use the last block number + 1
         // ie. assume we're using this instance for latest block
         if (!blockRef) {
             blockRef = getSharedState.lastBlockNumber + 1
         }
-
-        log.only("block ref: " + blockRef)
-        log.only(
-            "instance keys: " +
-                JSON.stringify(
-                    Array.from(SecretaryManager.instances.keys()),
-                    null,
-                    2,
-                ),
-        )
 
         if (!SecretaryManager.instances.get(blockRef)) {
             if (initialize) {
