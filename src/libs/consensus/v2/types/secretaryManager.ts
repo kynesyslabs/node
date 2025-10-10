@@ -13,9 +13,18 @@ import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 
 // ANCHOR SecretaryManager
 export default class SecretaryManager {
-    private _greenlight_timeout = 15000 // 15 seconds
-    private _set_validator_phase_timeout = 10000 // 10 seconds
-    private static instance: SecretaryManager
+    private _greenlight_timeout = 30_000 // 15 seconds
+    private _set_validator_phase_timeout = 15_000 // 10 seconds
+
+    // A map of block numbers to SecretaryManager instances
+    private static instances: Map<number, SecretaryManager> = new Map()
+    static get lastBlockRef() {
+        return (
+            Array.from(SecretaryManager.instances.keys()).sort(
+                (a, b) => b - a,
+            )[0] || 0
+        )
+    }
 
     // Internal variables
     public shard: Shard
@@ -54,6 +63,7 @@ export default class SecretaryManager {
         if (
             !this.shard.members.map(peer => peer.identity).includes(this.ourKey)
         ) {
+            log.error("We are not in the shard")
             throw new NotInShardError("We are not in the shard")
         }
         // Assigning the secretary and its key
@@ -61,7 +71,10 @@ export default class SecretaryManager {
 
         log.debug("INITIALIZED SHARD:")
         log.debug(
-            "SHARD: " + JSON.stringify(this.shard.members.map(m => m.identity)),
+            "SHARD: " +
+                JSON.stringify(
+                    this.shard.members.map(m => m.connection.string),
+                ),
         )
         log.debug("SECRETARY: " + this.secretary.identity)
 
@@ -75,8 +88,11 @@ export default class SecretaryManager {
 
         // INFO: Start the secretary routine
         if (this.checkIfWeAreSecretary()) {
-            this.secretaryRoutine().then(() => {
-                log.debug("[SECRETARY ROUTINE] Secretary routine finished 🎉")
+            log.debug(
+                "⬜️ We are the secretary ⬜️. starting the secretary routine",
+            )
+            this.secretaryRoutine().finally(async () => {
+                log.debug("Secretary routine finished confetti confetti 🎊🎉")
             })
         }
 
@@ -535,7 +551,11 @@ export default class SecretaryManager {
                 params: [
                     {
                         method: "greenlight",
-                        params: [this.blockTimestamp, phase],
+                        params: [
+                            this.shard.blockRef,
+                            this.blockTimestamp,
+                            phase,
+                        ],
                     },
                 ],
             }
@@ -633,24 +653,38 @@ export default class SecretaryManager {
             this.blockTimestamp = secretaryBlockTimestamp
         }
 
-        const waiterKey = Waiter.keys.GREEN_LIGHT + validatorPhase
+        const waiterKey =
+            Waiter.keys.GREEN_LIGHT + this.shard.blockRef + validatorPhase
+        log.debug("Waiter key: " + waiterKey)
 
-        if (this.ourValidatorPhase.currentPhase + 1 == validatorPhase) {
-            log.debug(`[SECRETARY ROUTINE] Pre-holding the key: ${waiterKey}`)
-            Waiter.preHold(waiterKey)
+        if (Waiter.isWaiting(waiterKey)) {
+            Waiter.resolve(waiterKey, secretaryBlockTimestamp)
+            this.ourValidatorPhase.waitStatus = false
+            return true
         }
 
-        // log.debug("Our phase: " + this.ourValidatorPhase.currentPhase)
-        // if (validatorPhase > this.ourValidatorPhase.currentPhase) {
-        //     // INFO: This node has already timed out
-        //     log.debug("We are not in the same phase, stopping the node ...")
-        //     process.exit(1)
-        // }
+        if (this.ourValidatorPhase.currentPhase <= validatorPhase) {
+            log.debug(`[SECRETARY ROUTINE] Pre-holding the key: ${waiterKey}`)
+            log.debug("Is Waiting for key: " + Waiter.isWaiting(waiterKey))
+            log.debug(
+                "Waitlist keys: " +
+                    JSON.stringify(Array.from(Waiter.waitList.keys()), null, 2),
+            )
+            Waiter.preHold(waiterKey, secretaryBlockTimestamp)
+            return true
+        }
 
-        // INFO: Resolve the waiter with the timestamp
-        Waiter.resolve(waiterKey, secretaryBlockTimestamp)
-        this.ourValidatorPhase.waitStatus = false
-        return true
+        if (this.ourValidatorPhase.currentPhase > validatorPhase) {
+            // INFO: Older greenlight received, ignoring it
+            return true
+        }
+
+        log.debug("We don't know what to do with this green light")
+        log.debug("Validator phase: " + validatorPhase)
+        log.debug("Our phase: " + this.ourValidatorPhase.currentPhase)
+        log.debug("Secretary block timestamp: " + secretaryBlockTimestamp)
+        log.debug("Block timestamp: " + this.blockTimestamp)
+        process.exit(1)
     }
 
     /**
@@ -687,12 +721,21 @@ export default class SecretaryManager {
         //     // await this.simulateSecretaryGoingOffline()
         // }
 
+        log.debug("Sending our validator phase to the secretary")
+        log.debug("Our phase: " + this.ourValidatorPhase.currentPhase)
+        log.debug("Shard block ref: " + this.shard.blockRef)
+
         const waiterKey =
-            Waiter.keys.GREEN_LIGHT + this.ourValidatorPhase.currentPhase
-        const greenlight: Promise<null> = Waiter.wait(
+            Waiter.keys.GREEN_LIGHT +
+            this.shard.blockRef +
+            this.ourValidatorPhase.currentPhase
+        const greenlight: Promise<number | null> = Waiter.wait(
             waiterKey,
             this._greenlight_timeout,
         )
+
+        log.debug("Greenlight waiter created")
+        log.debug("Waiter key: " + waiterKey)
 
         const sendStatus = async () => {
             const request: RPCRequest = {
@@ -758,8 +801,8 @@ export default class SecretaryManager {
             }
 
             if (res.result == 401) {
-                log.only("received a 401")
-                log.only(JSON.stringify(res, null, 2))
+                log.debug("received a 401")
+                log.debug(JSON.stringify(res, null, 2))
                 process.exit(1)
             }
 
@@ -835,25 +878,66 @@ export default class SecretaryManager {
     }
 
     public async endConsensusRoutine() {
-        SecretaryManager.instance.runSecretaryRoutine = false
-        SecretaryManager.instance = null
+        log.debug("Ending the consensus routine")
+        const manager = SecretaryManager.instances.get(this.shard.blockRef)
 
+        if (manager) {
+            manager.runSecretaryRoutine = false
+        }
+        const filter = (key: string) =>
+            key.includes("greenLight" + this.shard.blockRef)
+
+        const waiterKeys = Array.from(Waiter.waitList.keys()).filter(filter)
+        const waiters = waiterKeys.map(key => Waiter.wait(key))
+
+        log.debug(
+            "💁💁💁💁💁💁💁💁 WAITING FOR HANGING GREENLIGHTS 💁💁💁💁💁💁💁💁💁💁",
+        )
+        log.debug("Waiter keys: " + JSON.stringify(waiterKeys, null, 2))
+        try {
+            await Promise.all(waiters)
+        } catch (error) {
+            console.error(error)
+            process.exit(1)
+            log.error("Error waiting for hanging greenlights: " + error)
+        }
+
+        // INFO: Delete pre-held keys for ended consensus round
+        Waiter.preHeld
+            .keys()
+            .filter(filter)
+            .forEach(key => Waiter.preHeld.delete(key))
+
+        log.debug(
+            "😎😎😎😎😎😎😎😎😎😎 HANGING GREENLIGHTS RESOLVED 😎😎😎😎😎😎😎😎😎😎",
+        )
+        log.debug("[SECRETARY ROUTINE] Secretary routine finished 🎉")
+
+        if (SecretaryManager.getInstance(this.shard.blockRef) === this) {
+            log.debug("deleting the instance")
+            SecretaryManager.instances.delete(this.shard.blockRef)
+        } else {
+            log.error("this instance is not doing that thing")
+            process.exit(1)
+        }
+
+        // SecretaryManager.instance = null
         // TODO: Abort all waiters
 
         // INFO: Resolve all hanging waiters
-        if (Waiter.isWaiting(Waiter.keys.GREEN_LIGHT)) {
-            log.debug(
-                "GREEN_LIGHT waiter found WHEN ENDING THE CONSENSUS ..., resolving it",
-            )
-            Waiter.abort(Waiter.keys.GREEN_LIGHT)
-        }
+        // if (Waiter.isWaiting(Waiter.keys.GREEN_LIGHT)) {
+        //     log.debug(
+        //         "GREEN_LIGHT waiter found WHEN ENDING THE CONSENSUS ..., KILLING IT it",
+        //     )
+        //     Waiter.abort(Waiter.keys.GREEN_LIGHT)
+        // }
 
-        if (Waiter.isWaiting(Waiter.keys.SET_WAIT_STATUS)) {
-            log.debug(
-                "SET_WAIT_STATUS waiter found WHEN ENDING THE CONSENSUS ..., resolving it",
-            )
-            Waiter.abort(Waiter.keys.SET_WAIT_STATUS)
-        }
+        // if (Waiter.isWaiting(Waiter.keys.SET_WAIT_STATUS)) {
+        //     log.debug(
+        //         "SET_WAIT_STATUS waiter found WHEN ENDING THE CONSENSUS ..., KILLING IT it",
+        //     )
+        //     Waiter.abort(Waiter.keys.SET_WAIT_STATUS)
+        // }
     }
 
     // SECTION Methods called by the shard members
@@ -872,12 +956,25 @@ export default class SecretaryManager {
     }
 
     // ANCHOR Singleton logic
-    public static getInstance(): SecretaryManager {
-        if (!SecretaryManager.instance) {
-            SecretaryManager.instance = new SecretaryManager()
+    public static getInstance(
+        blockRef?: number,
+        initialize = false,
+    ): SecretaryManager {
+        // INFO: If blockRef is not provided, use the last block number + 1
+        // ie. assume we're using this instance for latest block
+        if (!blockRef) {
+            blockRef = getSharedState.lastBlockNumber + 1
         }
 
-        return SecretaryManager.instance
+        if (!SecretaryManager.instances.get(blockRef)) {
+            if (initialize) {
+                SecretaryManager.instances.set(blockRef, new SecretaryManager())
+            } else {
+                return null
+            }
+        }
+
+        return SecretaryManager.instances.get(blockRef)
     }
 
     /**

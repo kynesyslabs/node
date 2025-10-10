@@ -6,6 +6,9 @@ import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
 import ensureCandidateBlockFormed from "./ensureCandidateBlockFormed"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import PeerManager from "@/libs/peer/PeerManager"
+import getCommonValidatorSeed from "./getCommonValidatorSeed"
+import getShard from "./getShard"
 
 export default async function manageProposeBlockHash(
     blockHash: string,
@@ -18,11 +21,17 @@ export default async function manageProposeBlockHash(
     log.info("Validation Data: \n" + JSON.stringify(validationData, null, 2))
     log.info("Peer ID: " + peerId)
     // Checking if the validator that sent us the block hash is in the shard
-    const shard = getSharedState.lastShard
-    const validator = shard.find(validator => validator === peerId)
+    // const shard = getSharedState.lastShard
+    const { commonValidatorSeed } = await getCommonValidatorSeed()
+    const shard = await getShard(commonValidatorSeed)
+
+    const validator = shard.find(validator => validator.identity === peerId)
+    const peer = PeerManager.getInstance().getPeer(peerId)
     if (!validator) {
         log.error(
-            "[manageProposeBlockHash] Validator is not in the shard: refusing the block hash",
+            "[manageProposeBlockHash] Validator (" +
+                peer.connection.string +
+                ") is not in the shard: refusing the block hash",
         )
         response.result = 401
         response.response = getSharedState.publicKeyHex

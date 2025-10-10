@@ -144,7 +144,7 @@ export default class Identity {
             // INFO: If the identity file does not exist, create a new one
             const mnemonic = demos.newMnemonic()
             this.masterSeed = await this.mnemonicToSeed(mnemonic)
-            fs.writeFileSync(getSharedState.identityFile, mnemonic, {
+            await fs.promises.writeFile(getSharedState.identityFile, mnemonic, {
                 encoding: "utf8",
             })
         }
