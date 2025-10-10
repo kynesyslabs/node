@@ -7,9 +7,9 @@
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Message Format](#message-format)
-3. [Opcode Mapping](#opcode-mapping) *(pending)*
-4. [Peer Discovery](#peer-discovery) *(pending)*
+2. [Message Format](#message-format) ✅
+3. [Opcode Mapping](#opcode-mapping) ✅
+4. [Peer Discovery](#peer-discovery) ✅
 5. [Connection Management](#connection-management) *(pending)*
 6. [Security](#security) *(pending)*
 7. [Implementation Guide](#implementation-guide) *(pending)*
@@ -278,7 +278,100 @@ Complete opcode mapping for all Demos Network message types. See `02_OPCODE_MAPP
 
 ## Peer Discovery
 
-*(To be defined in Step 3)*
+Complete peer discovery and handshake specification. See `03_PEER_DISCOVERY.md` for detailed specifications.
+
+### Hello Peer Handshake (Opcode 0x01)
+
+**Request Payload:**
+- URL (length-prefixed UTF-8): Connection string
+- Algorithm (1 byte): Signature algorithm (0x01=ed25519, 0x02=falcon, 0x03=ml-dsa)
+- Signature (length-prefixed): Signs URL for endpoint verification
+- Sync Data: Status (1 byte) + Block Number (8 bytes) + Block Hash (length-prefixed)
+- Timestamp (8 bytes): Connection time tracking
+- Reserved (4 bytes): Future extensions
+
+**Response Payload:**
+- Status Code (2 bytes): 200=success, 401=invalid auth, 409=already connected
+- Sync Data: Responder's sync status (status + block + hash + timestamp)
+
+**Size Analysis:**
+- Request: ~265 bytes (60-70% reduction vs HTTP)
+- Response: ~65 bytes (85-90% reduction vs HTTP)
+
+### Get Peerlist (Opcode 0x04)
+
+**Request Payload:**
+- Max Peers (2 bytes): Limit response size (0 = no limit)
+- Reserved (2 bytes): Future filters
+
+**Response Payload:**
+- Status Code (2 bytes)
+- Peer Count (2 bytes)
+- Peer Entries (variable): Identity + URL + Sync Data per peer
+
+**Size Analysis:**
+- 10 peers: ~1 KB (70-80% reduction vs HTTP JSON)
+- 100 peers: ~10 KB
+
+### Ping (Opcode 0x00)
+
+**Request Payload:** Empty (0 bytes)
+**Response Payload:** Status Code (2 bytes) + Timestamp (8 bytes)
+
+**Size Analysis:**
+- Request: 12 bytes (header only)
+- Response: 22 bytes
+
+### TCP Connection Lifecycle
+
+**Strategy:** Hybrid connection management
+- **Active**: Recently used connections (< 10 minutes) remain open
+- **Idle Timeout**: 10 minutes of inactivity → graceful close
+- **Reconnection**: Automatic on next RPC call with hello_peer handshake
+- **TCP Options**: TCP_NODELAY enabled, SO_KEEPALIVE enabled
+
+**Connection States:**
+```
+CLOSED → CONNECTING → ACTIVE → IDLE → CLOSING → CLOSED
+```
+
+**Scalability:**
+- Active connections: ~50-100 (typical consensus shard)
+- Idle connections: Closed automatically
+- Memory per active: ~4-8 KB
+- **Total for 1000 peers: 200-800 KB active memory**
+
+### Health Check Mechanisms
+
+**Ping Strategy:** On-demand only (no periodic ping)
+- Rationale: TCP keepalive detects dead connections at OS level
+- RPC success/failure provides natural health signals
+
+**Dead Peer Detection:**
+- **Failure Threshold:** 3 consecutive RPC failures
+- **Action:** Move to offlinePeers registry, close TCP connection
+- **Retry:** Every 5 minutes with hello_peer
+- **TCP Close:** Immediate offline status (don't wait for failures)
+
+**Retry Mechanism:**
+- 3 retry attempts per RPC call
+- 250ms sleep between retries
+- Message ID tracked across retries
+- Implemented in Peer class (maintains existing API)
+
+### Security
+
+**Handshake Authentication:**
+- Signature verification required (Flags bit 0 = 1)
+- Signs URL to prove control of connection endpoint
+- Timestamp in auth block prevents replay (±5 min window)
+- Rate limit: Max 10 hello_peer per IP per minute
+
+**Connection Security:**
+- TLS/SSL support (optional)
+- IP whitelisting for trusted peers
+- Connection limit: Max 5 per IP
+- Identity continuity: Public key must match across reconnections
 
 ---
 
@@ -300,4 +393,6 @@ Complete opcode mapping for all Demos Network message types. See `02_OPCODE_MAPP
 
 ---
 
-**Document Status**: Work in Progress - Updated after Step 2 (Opcode Mapping)
+**Document Status**: Work in Progress - Updated after Step 3 (Peer Discovery & Handshake)
+
+**Progress:** 3 of 7 design steps complete (43%)
