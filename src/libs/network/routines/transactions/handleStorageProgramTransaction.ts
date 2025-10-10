@@ -64,7 +64,7 @@ export default async function handleStorageProgramTransaction(
                 }
         }
     } catch (error) {
-        log.error(`[StorageProgram] Error handling ${operation}:`, error)
+        log.error(`[StorageProgram] Error handling ${operation}: ${error instanceof Error ? error.message : String(error)}`)
         return {
             success: false,
             message: `Error: ${error instanceof Error ? error.message : String(error)}`,
