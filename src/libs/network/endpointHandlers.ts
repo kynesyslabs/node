@@ -412,6 +412,7 @@ export default class ServerHandlers {
                 // If handler generated GCR edits, add them to transaction for HandleGCR to apply
                 if (storageProgramResult.gcrEdits && storageProgramResult.gcrEdits.length > 0) {
                     tx.content.gcr_edits = storageProgramResult.gcrEdits
+                    queriedTx.content.gcr_edits = storageProgramResult.gcrEdits
                 }
 
                 break
