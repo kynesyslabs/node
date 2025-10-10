@@ -195,8 +195,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 const db = await Datasource.getInstance()
                 const gcrRepo = db.getDataSource().getRepository(GCRMain)
 
+                // REVIEW: Query by 'pubkey' not 'address' to match GCRMain entity
                 const storageProgram = await gcrRepo.findOne({
-                    where: { address: storageAddress },
+                    where: { pubkey: storageAddress },
                 })
 
                 if (!storageProgram || !storageProgram.data || !storageProgram.data.metadata) {
@@ -205,15 +206,15 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     break
                 }
 
-                // Return specific key or all data
-                const data = key
+                // REVIEW: Return specific key or all data
+                const responseData = key
                     ? storageProgram.data.variables?.[key]
                     : storageProgram.data
 
                 response.result = 200
                 response.response = {
                     success: true,
-                    data,
+                    data: responseData,
                     metadata: storageProgram.data.metadata,
                 }
             } catch (error) {
@@ -293,7 +294,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
             response.result = tweet ? 200 : 400
             if (tweet) {
-                const data = {
+                // REVIEW: Renamed to avoid shadowing outer 'data' variable
+                const tweetData = {
                     id: tweet.id,
                     created_at: tweet.created_at,
                     text: tweet.text,
@@ -301,7 +303,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     userId: tweet.author.rest_id,
                 }
                 response.response = {
-                    tweet: data,
+                    tweet: tweetData,
                     success: true,
                 }
             } else {

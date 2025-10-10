@@ -50,7 +50,7 @@ import { Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { Referrals } from "@/features/incentive/referrals"
 import { validateStorageProgramAccess } from "@/libs/blockchain/validators/validateStorageProgramAccess"
-import { getDataSize } from "@/libs/blockchain/validators/validateStorageProgramSize"
+import { getDataSize, STORAGE_LIMITS } from "@/libs/blockchain/validators/validateStorageProgramSize"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -318,9 +318,9 @@ export default class HandleGCR {
         const sender = context.sender as string
 
         try {
-            // Find or create the storage program account
+            // REVIEW: Find or create the storage program account (using 'pubkey' not 'address')
             let account = await repository.findOne({
-                where: { address: target },
+                where: { pubkey: target },
             })
 
             // Handle CREATE operation
@@ -332,16 +332,41 @@ export default class HandleGCR {
                     }
                 }
 
-                // Create new account if it doesn't exist
+                // REVIEW: Create new account if it doesn't exist (using 'pubkey' not 'address')
                 if (!account) {
                     account = repository.create({
-                        address: target,
-                        balance: "0",
+                        pubkey: target,
+                        balance: 0n,
                         nonce: 0,
+                        assignedTxs: [],
+                        identities: { xm: {}, web2: {}, pqc: {} },
+                        points: {
+                            totalPoints: 0,
+                            breakdown: {
+                                web3Wallets: {},
+                                socialAccounts: {
+                                    twitter: 0,
+                                    github: 0,
+                                    discord: 0,
+                                    telegram: 0,
+                                },
+                                referrals: 0,
+                                demosFollow: 0,
+                            },
+                            lastUpdated: new Date(),
+                        },
+                        referralInfo: {
+                            totalReferrals: 0,
+                            referralCode: "",
+                            referrals: [],
+                        },
                         data: {
                             variables: context.data.variables,
                             metadata: context.data.metadata,
                         },
+                        flagged: false,
+                        flaggedReason: "",
+                        reviewed: false,
                     })
                 } else {
                     // Update existing account with new storage program
@@ -394,14 +419,23 @@ export default class HandleGCR {
                 }
 
                 // Merge new variables with existing ones
-                account.data.variables = {
+                const mergedVariables = {
                     ...account.data.variables,
                     ...context.data.variables,
                 }
 
-                // Update metadata
+                // REVIEW: Validate merged size BEFORE saving to prevent size limit bypass
+                const mergedSize = getDataSize(mergedVariables)
+                if (mergedSize > STORAGE_LIMITS.MAX_SIZE_BYTES) {
+                    return {
+                        success: false,
+                        message: `Merged data size ${mergedSize} bytes exceeds limit of ${STORAGE_LIMITS.MAX_SIZE_BYTES} bytes (128KB)`,
+                    }
+                }
+
+                account.data.variables = mergedVariables
                 account.data.metadata.lastModified = context.data.metadata?.lastModified || Date.now()
-                account.data.metadata.size = getDataSize(account.data.variables)
+                account.data.metadata.size = mergedSize
 
                 if (!simulate) {
                     await repository.save(account)

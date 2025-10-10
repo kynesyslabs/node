@@ -55,10 +55,18 @@ export function validateNestingDepth(
     data: any,
     maxDepth: number = STORAGE_LIMITS.MAX_NESTING_DEPTH,
 ): { success: boolean; error?: string; depth?: number } {
+    const seen = new WeakSet() // Circular reference detection
+
     const getDepth = (obj: any, currentDepth = 1): number => {
         if (typeof obj !== "object" || obj === null) {
             return currentDepth
         }
+
+        // Detect circular references
+        if (seen.has(obj)) {
+            return currentDepth
+        }
+        seen.add(obj)
 
         const depths = Object.values(obj).map(value =>
             getDepth(value, currentDepth + 1),
