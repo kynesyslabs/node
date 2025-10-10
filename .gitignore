@@ -148,3 +148,4 @@ docs/src/lib
 docs/src
 src/features/bridges/EVMSmartContract/docs
 src/features/bridges/LiquidityTank_UserGuide.md
+local_tests

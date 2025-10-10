@@ -302,10 +302,12 @@ export default class GCRIdentityRoutines {
                     editOperation.account,
                 )
                 if (isFirst) {
+                    // REVIEW: Pass attestation to check group membership for conditional points
                     await IncentiveManager.telegramLinked(
                         editOperation.account,
                         data.userId,
                         editOperation.referralCode,
+                        data.proof, // TelegramSignedAttestation with group_membership field
                     )
                 }
             } else if (context === "discord") {

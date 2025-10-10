@@ -660,12 +660,14 @@ export class PointSystem {
      * @param userId The user's Demos address
      * @param telegramUserId The Telegram user ID
      * @param referralCode Optional referral code
+     * @param attestation Optional TelegramSignedAttestation with group_membership field
      * @returns RPCResponse
      */
     async awardTelegramPoints(
         userId: string,
         telegramUserId: string,
         referralCode?: string,
+        attestation?: any, // TelegramSignedAttestation from SDK
     ): Promise<RPCResponse> {
         try {
             // Get user's account data from GCR to verify Telegram ownership
@@ -700,6 +702,24 @@ export class PointSystem {
                         pointsAwarded: 0,
                         totalPoints: userPointsWithIdentities.totalPoints,
                         message: "Telegram points already awarded",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            // REVIEW: Check group membership from attestation (SDK v2.4.18+)
+            // Award points ONLY if user is member of required Telegram group
+            const isGroupMember = attestation?.payload?.group_membership === true
+
+            if (!isGroupMember) {
+                log.info(`Telegram linked but user not in required group: ${telegramUserId}`)
+                return {
+                    result: 200,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "Telegram linked successfully, but you must join the required group to earn points",
                     },
                     require_reply: false,
                     extra: {},
