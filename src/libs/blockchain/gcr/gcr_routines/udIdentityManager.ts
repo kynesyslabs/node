@@ -19,6 +19,10 @@ import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
 // REVIEW: UD Registry contracts - Multi-chain support
 // Polygon L2 (primary - most new domains, cheaper gas)
 const polygonUnsRegistryAddress = "0xa9a6A3626993D487d2Dbda3173cf58cA1a9D9e9f"
+// Base L2 UNS (new L2 option - growing adoption)
+const baseUnsRegistryAddress = "0xF6c1b83977DE3dEffC476f5048A0a84d3375d498"
+// Sonic UNS (emerging network support)
+const sonicUnsRegistryAddress = "0xDe1DAdcF11a7447C3D093e97FdbD513f488cE3b4"
 // Ethereum L1 UNS (fallback for legacy domains)
 const ethereumUnsRegistryAddress = "0x049aba7510f45BA5b64ea9E658E342F904DB358D"
 // Ethereum L1 CNS (oldest legacy domains)
@@ -36,8 +40,10 @@ export class UDIdentityManager {
      *
      * Multi-chain resolution strategy (per UD docs):
      * 1. Try Polygon L2 UNS first (most new domains, cheaper gas)
-     * 2. Fallback to Ethereum L1 UNS (legacy domains)
-     * 3. Fallback to Ethereum L1 CNS (oldest legacy domains)
+     * 2. Try Base L2 UNS (new L2 option - growing adoption)
+     * 3. Try Sonic (emerging network support)
+     * 4. Fallback to Ethereum L1 UNS (legacy domains)
+     * 5. Fallback to Ethereum L1 CNS (oldest legacy domains)
      *
      * @param domain - The UD domain (e.g., "brad.crypto")
      * @returns Object with owner address, network, and registry type
@@ -46,7 +52,7 @@ export class UDIdentityManager {
         domain: string,
     ): Promise<{
         owner: string
-        network: "polygon" | "ethereum"
+        network: "polygon" | "ethereum" | "base" | "sonic"
         registryType: "UNS" | "CNS"
     }> {
         try {
@@ -69,41 +75,81 @@ export class UDIdentityManager {
                 return { owner, network: "polygon", registryType: "UNS" }
             } catch (polygonError) {
                 log.debug(
-                    `Polygon UNS lookup failed for ${domain}, trying Ethereum`,
+                    `Polygon UNS lookup failed for ${domain}, trying Base`,
                 )
 
-                // Try Ethereum L1 UNS (fallback)
+                // Try Base L2 UNS (new L2 option)
                 try {
-                    const ethereumProvider = new ethers.JsonRpcProvider(
-                        "https://eth.llamarpc.com",
+                    const baseProvider = new ethers.JsonRpcProvider(
+                        "https://mainnet.base.org",
                     )
-                    const ethereumUnsRegistry = new ethers.Contract(
-                        ethereumUnsRegistryAddress,
+                    const baseUnsRegistry = new ethers.Contract(
+                        baseUnsRegistryAddress,
                         registryAbi,
-                        ethereumProvider,
+                        baseProvider,
                     )
 
-                    const owner = await ethereumUnsRegistry.ownerOf(tokenId)
-                    log.debug(`Domain ${domain} owner (Ethereum UNS): ${owner}`)
-                    return { owner, network: "ethereum", registryType: "UNS" }
-                } catch (ethereumUnsError) {
+                    const owner = await baseUnsRegistry.ownerOf(tokenId)
+                    log.debug(`Domain ${domain} owner (Base UNS): ${owner}`)
+                    return { owner, network: "base", registryType: "UNS" }
+                } catch (baseError) {
                     log.debug(
-                        `Ethereum UNS lookup failed for ${domain}, trying CNS`,
+                        `Base UNS lookup failed for ${domain}, trying Sonic`,
                     )
 
-                    // Try Ethereum L1 CNS (legacy fallback)
-                    const ethereumProvider = new ethers.JsonRpcProvider(
-                        "https://eth.llamarpc.com",
-                    )
-                    const ethereumCnsRegistry = new ethers.Contract(
-                        ethereumCnsRegistryAddress,
-                        registryAbi,
-                        ethereumProvider,
-                    )
+                    // Try Sonic (emerging network)
+                    try {
+                        const sonicProvider = new ethers.JsonRpcProvider(
+                            "https://rpc.soniclabs.com",
+                        )
+                        const sonicUnsRegistry = new ethers.Contract(
+                            sonicUnsRegistryAddress,
+                            registryAbi,
+                            sonicProvider,
+                        )
 
-                    const owner = await ethereumCnsRegistry.ownerOf(tokenId)
-                    log.debug(`Domain ${domain} owner (Ethereum CNS): ${owner}`)
-                    return { owner, network: "ethereum", registryType: "CNS" }
+                        const owner = await sonicUnsRegistry.ownerOf(tokenId)
+                        log.debug(`Domain ${domain} owner (Sonic UNS): ${owner}`)
+                        return { owner, network: "sonic", registryType: "UNS" }
+                    } catch (sonicError) {
+                        log.debug(
+                            `Sonic UNS lookup failed for ${domain}, trying Ethereum`,
+                        )
+
+                        // Try Ethereum L1 UNS (fallback)
+                        try {
+                            const ethereumProvider = new ethers.JsonRpcProvider(
+                                "https://eth.llamarpc.com",
+                            )
+                            const ethereumUnsRegistry = new ethers.Contract(
+                                ethereumUnsRegistryAddress,
+                                registryAbi,
+                                ethereumProvider,
+                            )
+
+                            const owner = await ethereumUnsRegistry.ownerOf(tokenId)
+                            log.debug(`Domain ${domain} owner (Ethereum UNS): ${owner}`)
+                            return { owner, network: "ethereum", registryType: "UNS" }
+                        } catch (ethereumUnsError) {
+                            log.debug(
+                                `Ethereum UNS lookup failed for ${domain}, trying CNS`,
+                            )
+
+                            // Try Ethereum L1 CNS (legacy fallback)
+                            const ethereumProvider = new ethers.JsonRpcProvider(
+                                "https://eth.llamarpc.com",
+                            )
+                            const ethereumCnsRegistry = new ethers.Contract(
+                                ethereumCnsRegistryAddress,
+                                registryAbi,
+                                ethereumProvider,
+                            )
+
+                            const owner = await ethereumCnsRegistry.ownerOf(tokenId)
+                            log.debug(`Domain ${domain} owner (Ethereum CNS): ${owner}`)
+                            return { owner, network: "ethereum", registryType: "CNS" }
+                        }
+                    }
                 }
             }
         } catch (error) {
