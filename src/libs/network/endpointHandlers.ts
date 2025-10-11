@@ -403,12 +403,22 @@ export default class ServerHandlers {
             case "storageProgram": {
                 // REVIEW: Storage Program transaction handling
                 payload = tx.content.data
+                if (!Array.isArray(payload) || payload.length < 2) {
+                    log.error("[handleExecuteTransaction] Invalid storageProgram payload structure")
+                    result.success = false
+                    result.response = { message: "Invalid payload structure" }
+                    result.extra = "Invalid storageProgram payload"
+                    break
+                }
+
+                const storagePayload = payload[1] as StorageProgramPayload
+
                 console.log("[Included Storage Program Payload]")
-                console.log(payload[1])
+                console.log(storagePayload)
 
                 try {
                     const storageProgramResult = await handleStorageProgramTransaction(
-                        payload[1] as StorageProgramPayload,
+                        storagePayload,
                         tx.content.from,
                         tx.hash,
                     )
