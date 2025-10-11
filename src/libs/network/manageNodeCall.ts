@@ -192,12 +192,8 @@ export async function manageNodeCall(content: NodeCall, sender?: string): Promis
                 break
             }
 
-            // REVIEW: Require caller address for access control
-            if (!sender) {
-                response.result = 401
-                response.response = { error: "Caller address required for storage access" }
-                break
-            }
+            // REVIEW: Allow no-auth requests (sender will be empty string for public storage programs)
+            // Access control validator will determine if anonymous access is permitted
 
             try {
                 const db = await Datasource.getInstance()
@@ -214,10 +210,10 @@ export async function manageNodeCall(content: NodeCall, sender?: string): Promis
                     break
                 }
 
-                // REVIEW: Enforce access control before returning data
+                // REVIEW: Enforce access control before returning data (sender may be empty for no-auth requests)
                 const accessCheck = validateStorageProgramAccess(
                     "READ_STORAGE",
-                    sender,
+                    sender || "",
                     storageProgram.data,
                 )
 

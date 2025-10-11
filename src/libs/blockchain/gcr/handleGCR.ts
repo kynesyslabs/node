@@ -321,13 +321,6 @@ export default class HandleGCR {
             }
         }
 
-        if (!context.data.variables) {
-            return {
-                success: false,
-                message: "Storage program edit missing data.variables",
-            }
-        }
-
         const operation = context.operation as string
         const sender = context.sender as string
         try {

@@ -288,6 +288,14 @@ export default class ServerHandlers {
             // NOTE This is to be removed once demosWork is in place, but is crucial for now
             case "crosschainOperation":
                 payload = tx.content.data
+                if (!Array.isArray(payload) || payload.length < 2) {
+                    log.error("[handleExecuteTransaction] Invalid storageProgram payload structure")
+                    result.success = false
+                    result.response = { message: "Invalid payload structure" }
+                    result.extra = "Invalid storageProgram payload"
+                    break
+                }
+                console.log("[Included Storage Program Payload]")
                 console.log("[Included XM Chainscript]")
                 console.log(payload[1])
                 // TODO Better types on answers
