@@ -398,21 +398,30 @@ export default class ServerHandlers {
                 console.log("[Included Storage Program Payload]")
                 console.log(payload[1])
 
-                const storageProgramResult = await handleStorageProgramTransaction(
-                    payload[1] as StorageProgramPayload,
-                    tx.content.from,
-                    tx.hash,
-                )
+                try {
+                    const storageProgramResult = await handleStorageProgramTransaction(
+                        payload[1] as StorageProgramPayload,
+                        tx.content.from,
+                        tx.hash,
+                    )
 
-                result.success = storageProgramResult.success
-                result.response = {
-                    message: storageProgramResult.message,
-                }
+                    result.success = storageProgramResult.success
+                    result.response = {
+                        message: storageProgramResult.message,
+                    }
 
-                // If handler generated GCR edits, add them to transaction for HandleGCR to apply
-                if (storageProgramResult.gcrEdits && storageProgramResult.gcrEdits.length > 0) {
-                    tx.content.gcr_edits = storageProgramResult.gcrEdits
-                    queriedTx.content.gcr_edits = storageProgramResult.gcrEdits
+                    // If handler generated GCR edits, add them to transaction for HandleGCR to apply
+                    if (storageProgramResult.gcrEdits && storageProgramResult.gcrEdits.length > 0) {
+                        tx.content.gcr_edits = storageProgramResult.gcrEdits
+                        queriedTx.content.gcr_edits = storageProgramResult.gcrEdits
+                    }
+                } catch (e) {
+                    log.error(
+                        "[handleExecuteTransaction] Error in storageProgram: " + e,
+                    )
+                    result.success = false
+                    result.response = e
+                    result.extra = "Error in storageProgram"
                 }
 
                 break
