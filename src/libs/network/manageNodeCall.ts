@@ -210,10 +210,12 @@ export async function manageNodeCall(content: NodeCall, sender?: string): Promis
                     break
                 }
 
-                // REVIEW: Enforce access control before returning data (sender may be empty for no-auth requests)
+                // REVIEW: Enforce access control before returning data
+                // Use empty string as sentinel value for unauthenticated requests
+                const UNAUTHENTICATED_SENDER = ""
                 const accessCheck = validateStorageProgramAccess(
                     "READ_STORAGE",
-                    sender || "",
+                    sender || UNAUTHENTICATED_SENDER,
                     storageProgram.data,
                 )
 

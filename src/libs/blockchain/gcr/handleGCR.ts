@@ -330,6 +330,7 @@ export default class HandleGCR {
             }
         }
 
+        // Safe type casting: context.operation and context.sender validated above
         const operation = context.operation as string
         const sender = context.sender as string
         try {
@@ -529,10 +530,10 @@ export default class HandleGCR {
                     }
                 }
 
-                // Clear storage program data
+                // Clear storage program data (null metadata signals deletion)
                 account.data = {
                     variables: {},
-                    metadata: null,
+                    metadata: null, // Null metadata indicates the storage program has been deleted
                 }
 
                 if (!simulate) {
