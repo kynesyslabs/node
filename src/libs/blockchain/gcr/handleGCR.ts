@@ -305,6 +305,14 @@ export default class HandleGCR {
         repository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
+        // Type narrowing for storage program edits
+        if (editOperation.type !== "storageProgram") {
+            return {
+                success: false,
+                message: "Invalid edit type for storage program handler",
+            }
+        }
+
         const { target, context } = editOperation
 
         if (!context || !context.operation) {
@@ -314,7 +322,8 @@ export default class HandleGCR {
             }
         }
 
-        if (!context.data) {
+        // DELETE operations don't require data field, only operation and sender
+        if (context.operation !== "DELETE" && !context.data) {
             return {
                 success: false,
                 message: "Storage program edit missing data context",

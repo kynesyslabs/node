@@ -1,5 +1,5 @@
 import type { StorageProgramPayload } from "@kynesyslabs/demosdk/storage"
-import { validateStorageProgramAccess, validateCreateAccess } from "@/libs/blockchain/validators/validateStorageProgramAccess"
+import { validateStorageProgramAccess } from "@/libs/blockchain/validators/validateStorageProgramAccess"
 import { validateStorageProgramData, getDataSize } from "@/libs/blockchain/validators/validateStorageProgramSize"
 import type { GCREdit } from "@kynesyslabs/demosdk/types"
 import log from "@/utilities/logger"
@@ -104,16 +104,10 @@ async function handleCreate(
         }
     }
 
-    // Validate access (sender must be deployer for CREATE)
-    const accessCheck = validateCreateAccess(sender, payload)
-    if (!accessCheck.success) {
-        return {
-            success: false,
-            message: accessCheck.error || "Access validation failed",
-        }
-    }
+    // CREATE is permissionless - any address can create a storage program
+    // The sender becomes the deployer and is recorded in metadata
 
-    // Validate data constraints
+// Validate data constraints
     const dataValidation = validateStorageProgramData(data)
     if (!dataValidation.success) {
         return {
@@ -129,8 +123,11 @@ async function handleCreate(
     const gcrEdit: GCREdit = {
         type: "storageProgram",
         target: storageAddress,
+        isRollback: false,
+        txhash: txHash,
         context: {
             operation: "CREATE",
+            sender,
             data: {
                 variables: data,
                 metadata: {
@@ -188,6 +185,8 @@ async function handleWrite(
     const gcrEdit: GCREdit = {
         type: "storageProgram",
         target: storageAddress,
+        isRollback: false,
+        txhash: txHash,
         context: {
             operation: "WRITE",
             data: {
@@ -233,9 +232,12 @@ async function handleUpdateAccessControl(
     const gcrEdit: GCREdit = {
         type: "storageProgram",
         target: storageAddress,
+        isRollback: false,
+        txhash: txHash,
         context: {
             operation: "UPDATE_ACCESS_CONTROL",
             data: {
+                variables: {}, // No variable changes in access control update
                 metadata: {
                     accessControl,
                     allowedAddresses: allowedAddresses || [],
@@ -271,6 +273,8 @@ async function handleDelete(
     const gcrEdit: GCREdit = {
         type: "storageProgram",
         target: storageAddress,
+        isRollback: false,
+        txhash: txHash,
         context: {
             operation: "DELETE",
             sender,
