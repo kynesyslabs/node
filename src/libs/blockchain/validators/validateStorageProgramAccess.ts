@@ -117,7 +117,7 @@ export function validateCreateAccess(
     requestingAddress: string,
     payload: StorageProgramPayload,
 ): { success: boolean; error?: string } {
-    // For CREATE, the requesting address must match the deployer
-    // (implicitly the deployer is the transaction sender)
+    // CREATE is permissionless - any address can create a storage program
+    // The sender becomes the deployer and is recorded in metadata for subsequent access control
     return { success: true }
 }

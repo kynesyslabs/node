@@ -314,18 +314,39 @@ export default class HandleGCR {
             }
         }
 
+        if (!context.data) {
+            return {
+                success: false,
+                message: "Storage program edit missing data context",
+            }
+        }
+
+        if (!context.data.variables) {
+            return {
+                success: false,
+                message: "Storage program edit missing data.variables",
+            }
+        }
+
         const operation = context.operation as string
         const sender = context.sender as string
-
         try {
-            // REVIEW: Find or create the storage program account (using 'pubkey' not 'address')
+            // REVIEW: Find the storage program account (using 'pubkey' not 'address')
             let account = await repository.findOne({
                 where: { pubkey: target },
             })
 
-            // Handle CREATE operation
-            // REVIEW: Create new account if it doesn't exist (using 'pubkey' not 'address')
-            if (!account) {
+            // REVIEW: Handle operation-specific account existence requirements
+            if (operation === "CREATE") {
+                // CREATE requires account to NOT exist
+                if (account) {
+                    return {
+                        success: false,
+                        message: `Storage program already exists: ${target}`,
+                    }
+                }
+
+                // Create new account for CREATE operation
                 const initialSize = getDataSize(context.data.variables)
                 if (initialSize > STORAGE_LIMITS.MAX_SIZE_BYTES) {
                     return {
@@ -372,15 +393,19 @@ export default class HandleGCR {
                     flaggedReason: "",
                     reviewed: false,
                 })
-            } else {
-                // A storage program with this address already exists.
+
+                if (!simulate) {
+                    await repository.save(account)
+                    log.info(`[StorageProgram] CREATE: ${target} by ${sender}`)
+                }
+
                 return {
-                    success: false,
-                    message: `Storage program already exists: ${target}`,
+                    success: true,
+                    message: `Storage program created: ${target}`,
                 }
             }
 
-            // For all other operations, storage program must exist
+            // For all other operations (WRITE, UPDATE_ACCESS_CONTROL, DELETE), account must exist
             if (!account || !account.data || !account.data.metadata) {
                 return {
                     success: false,
