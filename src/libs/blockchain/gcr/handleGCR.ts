@@ -456,6 +456,7 @@ export default class HandleGCR {
 
                 account.data.variables = mergedVariables
                 account.data.metadata.lastModified = context.data.metadata?.lastModified || Date.now()
+                // REVIEW: Recalculate size to reflect actual merged total (overrides delta from transaction handler)
                 account.data.metadata.size = mergedSize
 
                 if (!simulate) {

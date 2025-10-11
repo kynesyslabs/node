@@ -14,10 +14,17 @@ export const STORAGE_LIMITS = {
  *
  * @param data - The data object to measure
  * @returns Size in bytes
+ * @throws Error if data cannot be serialized (circular references, BigInt without serializer)
  */
 export function getDataSize(data: Record<string, any>): number {
-    const jsonString = JSON.stringify(data)
-    return new TextEncoder().encode(jsonString).length
+    try {
+        const jsonString = JSON.stringify(data)
+        return new TextEncoder().encode(jsonString).length
+    } catch (error) {
+        throw new Error(
+            `Cannot calculate data size: ${error instanceof Error ? error.message : String(error)}`,
+        )
+    }
 }
 
 /**
@@ -31,17 +38,24 @@ export function validateSize(data: Record<string, any>): {
     error?: string
     size?: number
 } {
-    const size = getDataSize(data)
+    try {
+        const size = getDataSize(data)
 
-    if (size > STORAGE_LIMITS.MAX_SIZE_BYTES) {
+        if (size > STORAGE_LIMITS.MAX_SIZE_BYTES) {
+            return {
+                success: false,
+                error: `Data size ${size} bytes exceeds limit of ${STORAGE_LIMITS.MAX_SIZE_BYTES} bytes (128KB)`,
+                size,
+            }
+        }
+
+        return { success: true, size }
+    } catch (error) {
         return {
             success: false,
-            error: `Data size ${size} bytes exceeds limit of ${STORAGE_LIMITS.MAX_SIZE_BYTES} bytes (128KB)`,
-            size,
+            error: `Failed to calculate data size: ${error instanceof Error ? error.message : String(error)}`,
         }
     }
-
-    return { success: true, size }
 }
 
 /**

@@ -182,6 +182,8 @@ async function handleWrite(
     }
 
     // Create GCR edit for write operation
+    // NOTE: metadata.size here represents the delta (incoming data only)
+    // The actual merged size will be calculated and updated in HandleGCR.applyStorageProgramEdit()
     const gcrEdit: GCREdit = {
         type: "storageProgram",
         target: storageAddress,
@@ -193,7 +195,7 @@ async function handleWrite(
                 variables: data,
                 metadata: {
                     lastModified: Date.now(),
-                    size: getDataSize(data),
+                    size: getDataSize(data), // Delta size only - will be recalculated after merge
                 },
             },
             sender, // Include sender for access control check in HandleGCR
