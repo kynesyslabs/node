@@ -12,6 +12,49 @@ import { getSharedState } from "@/utilities/sharedState"
 import { ISignature, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { EVMSmartContractManagement } from "@/features/bridges/native/EVMSmartContractManagement"
 
+const EvmLiquidityTankABI = [
+    {
+        inputs: [
+            { internalType: "string", name: "bridgeId", type: "string" },
+            { internalType: "address", name: "user", type: "address" },
+            { internalType: "bytes", name: "signature", type: "bytes" },
+            {
+                internalType: "address",
+                name: "tokenAddress",
+                type: "address",
+            },
+            {
+                internalType: "uint256",
+                name: "depositAmount",
+                type: "uint256",
+            },
+            { internalType: "string", name: "destChain", type: "string" },
+            {
+                internalType: "address",
+                name: "recipient",
+                type: "address",
+            },
+            {
+                internalType: "uint256",
+                name: "bridgeFeeBps",
+                type: "uint256",
+            },
+            {
+                internalType: "uint256",
+                name: "permitDeadline",
+                type: "uint256",
+            },
+            { internalType: "uint8", name: "v", type: "uint8" },
+            { internalType: "bytes32", name: "r", type: "bytes32" },
+            { internalType: "bytes32", name: "s", type: "bytes32" },
+        ],
+        name: "depositAndBridgeWithPermit",
+        outputs: [],
+        stateMutability: "nonpayable",
+        type: "function",
+    },
+]
+
 function parseAmount(amount: string, decimals: bigint): bigint {
     return BigInt(amount) * 10n ** decimals
 }
@@ -84,37 +127,59 @@ export async function manageNativeBridge(
     )
 
     let response: RPCResponse = {
-        result: null,
+        result: 200,
         response: null,
         require_reply: false,
         extra: {},
     }
 
-    // First, verify the signature
-    const publicKey = operation.address
-    const opHash = Hashing.sha256(JSON.stringify(operation))
-    const verified = ucrypto.verify({
-        algorithm: signature.type,
-        signature: hexToUint8Array(signature.data),
-        message: new TextEncoder().encode(opHash),
-        publicKey: hexToUint8Array(publicKey),
-    })
-
-    if (!verified) {
-        response.result = 400
-        response.response = {
-            error: "Invalid signature",
-        }
-        return response
-    }
-
     try {
+        // First, verify the signature
+        const publicKey = operation.address
+        const opHash = Hashing.sha256(JSON.stringify(operation))
+        const verified = ucrypto.verify({
+            algorithm: signature.type,
+            signature: hexToUint8Array(signature.data),
+            message: new TextEncoder().encode(opHash),
+            publicKey: hexToUint8Array(publicKey),
+        })
+
+        // INFO: Check liquidity on destination chain
+        if (operation.to.chain.startsWith("evm")) {
+            const tankManager = EVMSmartContractManagement.getInstance()
+            const tankConfig = tankManager.getTankConfig(operation.to.chain)
+
+            if (!tankConfig) {
+                throw new Error(
+                    `No deployed tank found for chain: ${operation.to.chain}`,
+                )
+            }
+
+            const balance = await tankManager.getUSDCBalance(operation.to.chain)
+            const requiredAmount = parseAmount(operation.token.amount, 6n)
+
+            if (balance < requiredAmount) {
+                throw new Error(
+                    `Insufficient liquidity on ${operation.to.chain}`,
+                )
+            }
+        } else {
+            throw new Error(`Unsupported chain: ${operation.to.chain}`)
+        }
+
+        if (!verified) {
+            response.result = 400
+            response.response = {
+                error: "Invalid signature",
+            }
+            return response
+        }
+
         // Generate unique bridge ID for this operation
         const bridgeId = generateBridgeId(operation)
 
         // Parse the operation to get the right compiled operation content
         const derivedContent = await parseOperation(operation, bridgeId)
-
         const hash = Hashing.sha256(JSON.stringify(derivedContent))
         const compiledSignature = await ucrypto.sign(
             getSharedState.signingAlgorithm,
@@ -189,7 +254,11 @@ async function parseOperation(
         operation,
         tankData,
         bridgeId,
-        validUntil: lastBlockNumber + 3,
+        // REVIEW: Approximate duration of the operation in blocks
+        // i.e. Current block number + duration of the operation in blocks
+        validUntil:
+            lastBlockNumber +
+            getSharedState.bridgeOperationExpiry / getSharedState.block_time,
     }
 }
 
@@ -228,8 +297,6 @@ async function parseEVMTankOperation(
         )
     }
 
-    // REVIEW: Get the liquidityTank ABI for the compiled operation
-    const liquidityTankABI = JsonConfig.getTankAbi(chainKey)
     return {
         type: "evm",
         tankAddress: tankConfig.address,
@@ -238,7 +305,7 @@ async function parseEVMTankOperation(
             bridgeAmount: operation.token.amount,
             bridgeFee: "0",
         },
-        abi: liquidityTankABI,
+        abi: JSON.stringify(EvmLiquidityTankABI),
         feeBps: 0,
     }
 }

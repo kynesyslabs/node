@@ -1,8 +1,6 @@
 import log from "src/utilities/logger"
 import Hashing from "@/libs/crypto/hashing"
 import Chain from "@/libs/blockchain/chain"
-import { EVM } from "@kynesyslabs/demosdk/xmcore"
-import { JsonConfig } from "@/utilities/JsonConfig"
 import { NativeBridgeTransaction } from "@kynesyslabs/demosdk/types"
 import { NativeBridge, validateChain } from "@kynesyslabs/demosdk/bridge"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
@@ -80,9 +78,12 @@ export default async function handleNativeBridgeTx(
 
         // INFO: Verify the deposit transaction (again)
         const bridge = new NativeBridge(null, evm as any)
-        bridge.verifyDepositTx(depositReceipt as any, {
-            response: compiledOperation,
-        } as any)
+        bridge.verifyDepositTx(
+            depositReceipt as any,
+            {
+                response: compiledOperation,
+            } as any,
+        )
 
         // // Validate bridge ID matches the one in compiled operation
         // if (compiledOperation.content.bridgeId !== bridgeId) {
@@ -156,6 +157,7 @@ export default async function handleNativeBridgeTx(
         // Step 5: Validate timing (validUntil block check)
         log.info(`${fname} Validating operation timing...`)
 
+        // REVIEW: With operations now happening linearly, do we still need this?
         const currentBlockNumber = await Chain.getLastBlockNumber()
         if (compiledOperation.content.validUntil <= currentBlockNumber) {
             log.error(
@@ -257,122 +259,3 @@ export default async function handleNativeBridgeTx(
         }
     }
 }
-
-// /**
-//  * Detect if this is a gasless bridge operation
-//  * @param compiledOperation Compiled bridge operation
-//  * @param tx Native bridge transaction
-//  * @returns True if gasless operation detected
-//  */
-// async function detectGaslessOperation(
-//     compiledOperation: bridge.NativeBridgeOperationCompiled,
-//     tx: NativeBridgeTransaction,
-// ): Promise<boolean> {
-//     const fname = "[detectGaslessOperation]"
-
-//     try {
-//         // Check for gasless flag in compiled operation
-//         if ((compiledOperation.content as any).gasless === true) {
-//             log.info(`${fname} Gasless flag detected in compiled operation`)
-//             return true
-//         }
-
-//         // Check for gasless user signature in transaction content
-//         if ((tx.content as any).userSignature) {
-//             log.info(`${fname} User signature detected in transaction content`)
-//             return true
-//         }
-
-//         // Check for gasless specific data fields
-//         if ((compiledOperation.content as any).userNonce !== undefined) {
-//             log.info(`${fname} User nonce detected in compiled operation`)
-//             return true
-//         }
-
-//         return false
-//     } catch (error) {
-//         log.warning(`${fname} Error detecting gasless operation: ${error}`)
-//         return false
-//     }
-// }
-
-// /**
-//  * Validate gasless bridge operation signatures and parameters
-//  * @param compiledOperation Compiled bridge operation
-//  * @param tx Native bridge transaction
-//  * @returns Validation result
-//  */
-// async function validateGaslessOperation(
-//     compiledOperation: bridge.NativeBridgeOperationCompiled,
-//     tx: NativeBridgeTransaction,
-// ): Promise<{ valid: boolean; error?: string }> {
-//     const fname = "[validateGaslessOperation]"
-
-//     try {
-//         const operation = compiledOperation.content.operation
-//         const gaslessData = compiledOperation.content as any
-//         const txContent = tx.content as any
-
-//         // Extract gasless operation data
-//         const userSignature =
-//             txContent.userSignature || gaslessData.userSignature
-//         const userNonce = gaslessData.userNonce
-//         const userAddress = operation.demoAddress
-
-//         if (!userSignature) {
-//             return {
-//                 valid: false,
-//                 error: "Missing user signature for gasless operation",
-//             }
-//         }
-
-//         if (userNonce === undefined || userNonce === null) {
-//             return {
-//                 valid: false,
-//                 error: "Missing user nonce for gasless operation",
-//             }
-//         }
-
-//         // Validate user signature for bridge operation authorization
-//         const messageToSign = Hashing.sha256(
-//             JSON.stringify({
-//                 action: "LIQUIDITY_TANK_BRIDGE",
-//                 user: userAddress,
-//                 nonce: userNonce,
-//                 originChain: operation.originChain,
-//                 destChain: operation.destinationChain,
-//                 token: operation.token,
-//                 recipient: operation.destinationAddress,
-//                 amount: operation.amount,
-//                 bridgeFeeBps: gaslessData.bridgeFeeBps || 0,
-//             }),
-//         )
-
-//         const signatureValid = await ucrypto.verify({
-//             algorithm: "ed25519", // TODO: Support secp256k1 as well
-//             message: new TextEncoder().encode(messageToSign),
-//             publicKey: hexToUint8Array(userAddress), // Assuming user address is their public key
-//             signature: hexToUint8Array(userSignature),
-//         })
-
-//         if (!signatureValid) {
-//             return {
-//                 valid: false,
-//                 error: `Invalid user signature for gasless operation from: ${userAddress}`,
-//             }
-//         }
-
-//         // Validate nonce to prevent replay attacks
-//         // TODO: Implement nonce checking against used nonces storage
-//         log.info(
-//             `${fname} User signature validated for gasless operation - user: ${userAddress}, nonce: ${userNonce}`,
-//         )
-
-//         return { valid: true }
-//     } catch (error) {
-//         return {
-//             valid: false,
-//             error: `Error validating gasless operation: ${error.toString()}`,
-//         }
-//     }
-// }

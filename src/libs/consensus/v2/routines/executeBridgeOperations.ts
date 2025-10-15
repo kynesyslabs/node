@@ -93,7 +93,7 @@ async function processBridgeTx(bridgeTx: NativeBridgeTransaction): Promise<{
     const compiled = bridgeTx.content.data[1].operation
     const operation = compiled.content.operation
     const txHash = bridgeTx.content.data[1].txHash
-    const destination = operation.from.chain
+    const destination = operation.to.chain
 
     // Detect if this is a gasless operation
     // const isGasless = detectGaslessOperation(compiled, bridgeTx)
@@ -210,7 +210,6 @@ async function processBridgeTx(bridgeTx: NativeBridgeTransaction): Promise<{
         //         gaslessData.userSignature,
         //         gaslessData.userNonce,
         //     )
-
         //     // Track gas subsidy usage
         //     await trackGasSubsidyUsage(destination, proposalId, "withdrawal")
         //     log.info(
@@ -219,7 +218,7 @@ async function processBridgeTx(bridgeTx: NativeBridgeTransaction): Promise<{
         // } else {
         // Execute regular withdrawal using multisig
         log.info(`${fname} Executing regular withdrawal on ${destination}`)
-        const proposalId = await evmTankManager.executeWithdrawal(
+        const txHash = await evmTankManager.executeWithdrawal(
             compiled.content.bridgeId,
             destination,
             operation.to.address,
@@ -227,14 +226,13 @@ async function processBridgeTx(bridgeTx: NativeBridgeTransaction): Promise<{
             compiled.content.tankData.amountToDeposit,
         )
         log.info(
-            `${fname} ✅ Regular withdrawal executed on ${destination}: ${proposalId}`,
+            `${fname} ✅ Regular withdrawal executed on ${destination}: txhash: ${txHash}`,
         )
-        // }
 
         return {
             ...result,
             success: true,
-            proposalId: proposalId,
+            txHash,
         }
     }
 

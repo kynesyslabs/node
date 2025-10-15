@@ -2,7 +2,7 @@
     "usdc": {
         "evm.eth.sepolia": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
         "evm.eth.mainnet": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-        "evm.polygon.mumbai": "0x0FA8781a83E46826621b3BC094Ea2A0212e71B23",
+        "evm.polygon.amoy": "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582",
         "evm.polygon.mainnet": "0x0FA8781a83E46826621b3BC094Ea2A0212e71B23",
         "evm.bsc.testnet": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
         "evm.bsc.mainnet": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",

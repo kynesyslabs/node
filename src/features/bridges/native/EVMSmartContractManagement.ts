@@ -1,17 +1,18 @@
 import { Contract, Transaction, WebSocketProvider } from "ethers"
 
-import log from "@/utilities/logger"
-import { Waiter } from "src/utilities/waiter"
-import { JsonConfig } from "@/utilities/JsonConfig"
-import { EVM } from "@kynesyslabs/demosdk/xm-localsdk"
-import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
-import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
-import Chain from "@/libs/blockchain/chain"
 import {
     NativeBridge,
     NativeBridgeOperationCompiled,
     NativeBridgeSupportedStablecoin,
 } from "@kynesyslabs/demosdk/bridge"
+import log from "@/utilities/logger"
+import Chain from "@/libs/blockchain/chain"
+import { Waiter } from "src/utilities/waiter"
+import { JsonConfig } from "@/utilities/JsonConfig"
+import { EVM } from "@kynesyslabs/demosdk/xm-localsdk"
+import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
+import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
+import { SupportedStablecoin } from "@kynesyslabs/demosdk/bridge/nativeBridgeTypes"
 
 interface TankConfig {
     address: string
@@ -418,6 +419,8 @@ export class EVMSmartContractManagement {
      * @param recipient Recipient address
      * @param tokenName Token name
      * @param amount Amount in USDC smallest units
+     *
+     * @returns Withdrawal transaction hash
      */
     public async executeWithdrawal(
         bridgeId: string,
@@ -605,7 +608,7 @@ export class EVMSmartContractManagement {
      * @returns Transaction hash
      */
     public async executeGaslessDeposit(
-        chainKey: string,
+        chainKey: SupportedStablecoin,
         userAddress: string,
         amount: string,
         userSignature: string,
@@ -707,7 +710,8 @@ export class EVMSmartContractManagement {
      * @param chainKey Chain identifier
      * @param recipient Withdrawal recipient address
      * @param amount Amount to withdraw
-     * @returns Proposal ID for tracking
+     *
+     * @returns Withdrawal transaction hash
      */
     public async executeGaslessWithdrawal(
         bridgeId: string,
@@ -731,7 +735,7 @@ export class EVMSmartContractManagement {
         try {
             // REVIEW: Updated to use multisig pattern instead of non-existent executeMetaTransaction
             // Generate unique proposal ID for this withdrawal
-            const proposalId = `0x${Date.now().toString(16).padStart(64, "0")}`
+            // const proposalId = `0x${Date.now().toString(16).padStart(64, "0")}`
 
             // Execute multisig transfer using existing multisig functionality
             const usdcAddress = JsonConfig.getContractAddress(
@@ -751,13 +755,25 @@ export class EVMSmartContractManagement {
                 },
             )
 
-            const { hash } = await evmInstance.sendSignedTransaction(tx)
-            log.info(
-                `${fname} ✅ Gasless withdrawal completed with proposal: ${proposalId}`,
+            const response = await evmInstance.sendSignedTransaction(tx)
+            if (response.result === "error") {
+                log.error(`${fname} Failed to execute gasless withdrawal`)
+                log.error("RESPONSE: " + JSON.stringify(response, null, 2))
+                process.exit(1)
+            }
+
+            log.debug("RESPONSE: " + JSON.stringify(response, null, 2))
+            const receipt = await evmInstance.provider.waitForTransaction(
+                response.hash,
             )
-            log.debug("Multisig transfer tx: " + hash)
-            process.exit(0)
-            return proposalId
+
+            if (!receipt || !receipt.logs || receipt.status !== 1) {
+                log.error("Failed to execute gasless withdrawal")
+                log.error("RECEIPT: " + JSON.stringify(receipt, null, 2))
+                process.exit(1)
+            }
+
+            return response.hash
         } catch (error) {
             console.error(error)
             process.exit(1)

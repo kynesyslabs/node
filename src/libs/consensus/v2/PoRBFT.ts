@@ -123,7 +123,7 @@ export async function consensusRoutine(): Promise<void> {
         // INFO: CONSENSUS ACTION 4: Apply the GCR operations to the state before forging the block
 
         // SUB ACTION 1: Execute the native bridge operations
-        const bridgeTxs: Transaction[] = []
+        const bridgeTxs = []
         for (const tx of mempool) {
             if (tx.content.type == "nativeBridge") {
                 bridgeTxs.push(tx)
@@ -134,6 +134,14 @@ export async function consensusRoutine(): Promise<void> {
         const [okBidgeTxs, notOkBidgeTxs] = await executeBridgeOperations(
             bridgeTxs,
         )
+
+        if (notOkBidgeTxs.length > 0) {
+            // INFO: (DEBUG) This should never happen. If it does, die for debugging!
+            log.error("[consensusRoutine] Failed native bridge operations")
+            log.error(JSON.stringify(notOkBidgeTxs, null, 2))
+            process.exit(1)
+        }
+
         successfulTxs = successfulTxs.concat(okBidgeTxs)
         failedTxs = failedTxs.concat(notOkBidgeTxs)
 
