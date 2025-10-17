@@ -1,4 +1,4 @@
-import { SignatureType } from "@kynesyslabs/demosdk"
+import { SignatureType } from "@kynesyslabs/demosdk/types"
 
 /**
  * SignatureDetector - Utility for detecting signature types from address formats
