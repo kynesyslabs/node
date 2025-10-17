@@ -1,4 +1,9 @@
-import { Contract, Transaction, WebSocketProvider } from "ethers"
+import {
+    Contract,
+    Transaction,
+    WebSocketProvider,
+    solidityPackedKeccak256,
+} from "ethers"
 
 import {
     NativeBridge,
@@ -12,7 +17,10 @@ import { JsonConfig } from "@/utilities/JsonConfig"
 import { EVM } from "@kynesyslabs/demosdk/xm-localsdk"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
-import { SupportedStablecoin } from "@kynesyslabs/demosdk/bridge/nativeBridgeTypes"
+import {
+    SupportedChain,
+    SupportedStablecoin,
+} from "@kynesyslabs/demosdk/bridge/nativeBridgeTypes"
 
 interface TankConfig {
     address: string
@@ -90,6 +98,9 @@ export class EVMSmartContractManagement {
         chainKey: string,
         tankAddress: string,
     ): Promise<void> {
+        log.debug(
+            "initializing tank: " + chainKey + " with tank: " + tankAddress,
+        )
         const [_chainType, chainName, subchain] = chainKey.split(".")
         if (!chainName || !subchain) {
             throw new Error(
@@ -106,6 +117,8 @@ export class EVMSmartContractManagement {
         }
 
         const bridgePrivateKey = JsonConfig.getBridgePrivateKey(chainKey)
+        log.debug("bridgePrivateKey: " + bridgePrivateKey)
+
         if (!bridgePrivateKey) {
             log.error(`Bridge private key not found for ${chainKey}`)
             process.exit(1)
@@ -116,6 +129,8 @@ export class EVMSmartContractManagement {
         const evmInstance = new EVM(rpcUrl, chainId)
         await evmInstance.connect()
         await evmInstance.connectWallet(bridgePrivateKey)
+
+        log.debug("public key: " + evmInstance.getAddress())
 
         log.info(
             `Connected to ${chainKey} with address ${evmInstance.wallet.address}`,
@@ -721,7 +736,7 @@ export class EVMSmartContractManagement {
         amount: bigint,
     ): Promise<string> {
         const fname = "[executeGaslessWithdrawal]"
-        log.info(
+        log.debug(
             `${fname} Executing gasless withdrawal on ${chainKey} to ${recipient}`,
         )
 
@@ -731,6 +746,13 @@ export class EVMSmartContractManagement {
             log.error(`Tank not found for chain: ${chainKey}`)
             process.exit(1)
         }
+
+        log.debug("bridgeId: " + bridgeId)
+        log.debug("tokenName: " + tokenName)
+        log.debug("amount: " + amount.toString())
+        log.debug("recipient: " + recipient)
+        log.debug("chainKey: " + chainKey)
+        log.debug("Multisig signer address: " + evmInstance.getAddress())
 
         try {
             // REVIEW: Updated to use multisig pattern instead of non-existent executeMetaTransaction
@@ -755,7 +777,12 @@ export class EVMSmartContractManagement {
                 },
             )
 
+            const txhash = Transaction.from(tx).hash
+            log.debug("Multisig txhash: " + txhash)
+
             const response = await evmInstance.sendSignedTransaction(tx)
+            log.debug("Multisig response: " + JSON.stringify(response, null, 2))
+
             if (response.result === "error") {
                 log.error(`${fname} Failed to execute gasless withdrawal`)
                 log.error("RESPONSE: " + JSON.stringify(response, null, 2))
@@ -763,15 +790,15 @@ export class EVMSmartContractManagement {
             }
 
             log.debug("RESPONSE: " + JSON.stringify(response, null, 2))
-            const receipt = await evmInstance.provider.waitForTransaction(
-                response.hash,
-            )
+            // const receipt = await evmInstance.provider.waitForTransaction(
+            //     response.hash,
+            // )
 
-            if (!receipt || !receipt.logs || receipt.status !== 1) {
-                log.error("Failed to execute gasless withdrawal")
-                log.error("RECEIPT: " + JSON.stringify(receipt, null, 2))
-                process.exit(1)
-            }
+            // if (!receipt || !receipt.logs || receipt.status !== 1) {
+            //     log.error("Failed to execute gasless withdrawal")
+            //     log.error("RECEIPT: " + JSON.stringify(receipt, null, 2))
+            //     process.exit(1)
+            // }
 
             return response.hash
         } catch (error) {
@@ -909,6 +936,56 @@ export class EVMSmartContractManagement {
                 `Failed to get token address for ${tokenName} on ${chainKey}: ${error}`,
             )
             throw error
+        }
+    }
+
+    public async validateBridgeId(
+        bridgeId: string,
+        chain: SupportedChain,
+    ): Promise<{
+        valid: boolean
+        message: string
+    }> {
+        const tankConfig = this.tanks.get(chain)
+
+        if (!tankConfig) {
+            return {
+                valid: false,
+                message: `Tank not found for chain: ${chain}`,
+            }
+        }
+
+        const contract = tankConfig.contract
+
+        // [approvalCount, deadline, executed, expired]
+        type ProposalStatus = [number, number, boolean, boolean]
+
+        // Derive bytes32 proposalId from bridgeId and contract address to match _generateProposalId
+        const contractAddress = await contract.getAddress()
+        const proposalId = solidityPackedKeccak256(
+            ["string", "string", "address"],
+            ["MULTISIG_PROPOSAL", "bridge_3c5aeee771e6d664", contractAddress],
+        )
+
+        const [approvalCount, deadline, executed, expired] =
+            (await contract.checkProposalStatus(proposalId)) as ProposalStatus
+        log.debug(
+            "status: " +
+                JSON.stringify([approvalCount, executed, expired, deadline]),
+        )
+
+        if (executed) {
+            return {
+                valid: false,
+                message: `Bridge operation: ${bridgeId} has already been executed. Status: ${
+                    executed ? "executed" : expired ? "expired" : "seen"
+                }`,
+            }
+        }
+
+        return {
+            valid: true,
+            message: `Bridge ID not found: ${bridgeId}`,
         }
     }
 }

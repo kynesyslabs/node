@@ -2,6 +2,7 @@ import * as fs from "fs"
 import log from "../utilities/logger"
 import { NativeBridgeSupportedStablecoin } from "@kynesyslabs/demosdk/bridge"
 import { SupportedChain } from "@kynesyslabs/demosdk/bridge/nativeBridgeTypes"
+import { getSharedState } from "./sharedState"
 
 export class JsonConfig {
     static readonly USDC_CONTRACTS_PATH = "config/usdcContracts.json"
@@ -128,11 +129,14 @@ export class JsonConfig {
         }
 
         const bridgeKeys = this.readJsonFromFile(this.BRIDGE_KEYS_PATH)
-        if (!bridgeKeys[chainKey]) {
-            return null
+        if (!bridgeKeys[getSharedState.publicKeyHex]) {
+            log.error(
+                `Bridge private key for ${getSharedState.exposedUrl} (${getSharedState.publicKeyHex}) not found`,
+            )
+            process.exit(1)
         }
 
-        return bridgeKeys[chainKey]
+        return bridgeKeys[getSharedState.publicKeyHex][chainKey] || null
     }
 
     /**

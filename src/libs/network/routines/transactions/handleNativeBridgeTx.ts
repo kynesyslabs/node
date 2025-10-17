@@ -33,8 +33,11 @@ export default async function handleNativeBridgeTx(
             }
         }
 
-        const { operation: compiledOperation, txHash } = tx.content.data[1]
-        const bridgeId = compiledOperation.content.bridgeId
+        const {
+            operation: compiledOperation,
+            txHash,
+            bridgeId,
+        } = tx.content.data[1]
 
         if (!compiledOperation?.content?.operation) {
             log.error(
@@ -57,8 +60,22 @@ export default async function handleNativeBridgeTx(
             }
         }
 
-        // SECTION: Verify the deposit transaction
         const tankMan = EVMSmartContractManagement.getInstance()
+
+        // INFO: Verify the bridgeId is not already executed
+        const bridgeStatus = await tankMan.validateBridgeId(
+            bridgeId,
+            compiledOperation.content.operation.to.chain,
+        )
+        if (!bridgeStatus.valid) {
+            log.error(`${fname} Bridge ID already executed: ${bridgeId}`)
+            return {
+                success: false,
+                error: bridgeStatus.message,
+            }
+        }
+
+        // SECTION: Verify the deposit transaction
         const evm = tankMan.getTankConfig(
             compiledOperation.content.operation.from.chain,
         ).evmInstance

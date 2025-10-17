@@ -176,10 +176,24 @@ export async function manageNativeBridge(
         }
 
         // Generate unique bridge ID for this operation
-        const bridgeId = generateBridgeId(operation)
+        // const bridgeId = generateBridgeId(operation)
+
+        // INFO: Check if bridgeId is already executed or expired
+        // const bridgeStatus = await tankManager.validateBridgeId(
+        //     bridgeId,
+        //     operation.to.chain,
+        // )
+
+        // if (!bridgeStatus.valid) {
+        //     response.result = 400
+        //     response.response = {
+        //         error: bridgeStatus.message,
+        //     }
+        //     return response
+        // }
 
         // Parse the operation to get the right compiled operation content
-        const derivedContent = await parseOperation(operation, bridgeId)
+        const derivedContent = await parseOperation(operation)
         const hash = Hashing.sha256(JSON.stringify(derivedContent))
         const compiledSignature = await ucrypto.sign(
             getSharedState.signingAlgorithm,
@@ -209,12 +223,14 @@ export async function manageNativeBridge(
 
 /**
  * Generate a unique bridge ID for tracking the operation
+ *
  * @param operation Native bridge operation from client
  * @returns Unique bridge ID string
  */
 function generateBridgeId(operation: NativeBridgeOperation): string {
     // Create deterministic but unique bridge ID using operation data + timestamp + random bytes
     const operationData = `${operation.from.chain}->${operation.to.chain}:${operation.token.amount}:${operation.address}:${operation.to.address}`
+
     const timestamp = Date.now().toString()
     const randomSuffix = randomBytes(8).toString("hex")
 
@@ -231,7 +247,6 @@ function generateBridgeId(operation: NativeBridgeOperation): string {
  */
 async function parseOperation(
     operation: NativeBridgeOperation,
-    bridgeId: string,
 ): Promise<CompiledContent> {
     const fromChainKey = operation.from.chain
 
@@ -253,7 +268,6 @@ async function parseOperation(
     return {
         operation,
         tankData,
-        bridgeId,
         // REVIEW: Approximate duration of the operation in blocks
         // i.e. Current block number + duration of the operation in blocks
         validUntil:
