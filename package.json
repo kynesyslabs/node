@@ -8,7 +8,7 @@
     "main": "src/index.ts",
     "scripts": {
         "lint": "prettier --plugin-search-dir . --check . && eslint .",
-        "lint:fix": "eslint . --fix --ext .ts",
+        "lint:fix": "eslint . --ignore-pattern 'local_tests' --ignore-pattern 'aptos_tests' --fix --ext .ts",
         "prettier-format": "prettier --config .prettierrc.json modules/**/*.ts --write",
         "format": "prettier --plugin-search-dir . --write .",
         "start": "tsx -r tsconfig-paths/register src/index.ts",
@@ -46,11 +46,12 @@
         "typescript": "^5.8.3"
     },
     "dependencies": {
+        "@coral-xyz/anchor": "^0.32.1",
         "@cosmjs/encoding": "^0.33.1",
         "@fastify/cors": "^9.0.1",
         "@fastify/swagger": "^8.15.0",
         "@fastify/swagger-ui": "^4.1.0",
-        "@kynesyslabs/demosdk": "^2.4.16",
+        "@kynesyslabs/demosdk": "^2.4.23",
         "@metaplex-foundation/js": "^0.20.1",
         "@modelcontextprotocol/sdk": "^1.13.3",
         "@octokit/core": "^6.1.5",
@@ -64,6 +65,7 @@
         "axios": "^1.6.5",
         "bun": "^1.2.10",
         "cli-progress": "^3.12.0",
+        "crypto": "^1.0.1",
         "dotenv": "^16.4.5",
         "express": "^4.19.2",
         "fastify": "^4.28.1",

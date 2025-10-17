@@ -1,6 +1,6 @@
 import ensureGCRForUser from "./ensureGCRForUser"
 import log from "@/utilities/logger"
-import { UDIdentityAssignPayload } from "@kynesyslabs/demosdk/abstraction"
+import { UDIdentityAssignPayload } from "node_modules/@kynesyslabs/demosdk/build/types/abstraction"
 import { ethers } from "ethers"
 import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
 
@@ -190,14 +190,14 @@ export class UDIdentityManager {
 
             // Step 2.5: Verify network matches (warn if mismatch but allow)
             if (resolution.network !== network) {
-                log.warn(
+                log.warning(
                     `Network mismatch for ${domain}: claimed=${network}, actual=${resolution.network}`,
                 )
             }
 
             // Step 2.6: Verify registry type matches (warn if mismatch but allow)
             if (resolution.registryType !== registryType) {
-                log.warn(
+                log.warning(
                     `Registry type mismatch for ${domain}: claimed=${registryType}, actual=${resolution.registryType}`,
                 )
             }
