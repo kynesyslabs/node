@@ -6,6 +6,9 @@
 - **ud_integration_complete** - Current status, dependencies, next steps
 - **ud_technical_reference** - Networks, contracts, record keys, test data
 - **ud_architecture_patterns** - Resolution flow, verification, storage patterns
+- **ud_security_patterns** - Ownership verification, security checkpoints, attack prevention
+- **session_ud_points_implementation_2025_01_31** - UD points system implementation session
+- **session_ud_ownership_verification_2025_10_21** - UD ownership verification security fixes
 
 ## Project Core
 - **project_purpose** - Demos Network node software overview
@@ -28,6 +31,8 @@ Each memory is atomic and self-contained. Reference specific memories based on d
 3. Use `ud_integration_complete` for current status and next steps
 4. Reference `ud_technical_reference` for configs/contracts
 5. Reference `ud_architecture_patterns` for implementation patterns
+6. Reference `ud_security_patterns` for security verification patterns
+7. Review recent sessions: `session_ud_ownership_verification_2025_10_21`
 
 **For general development**:
 - Project info: `project_purpose`, `tech_stack`, `codebase_structure`
