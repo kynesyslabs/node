@@ -10,7 +10,8 @@
 | Phase 2 | ✅ Complete | `7b9826d8` | EVM records fetching |
 | Phase 3 | ✅ Complete | `10460e41` | Solana integration + UnifiedDomainResolution |
 | Phase 4 | ✅ Complete | `10460e41` | Multi-signature verification (EVM + Solana) |
-| Phase 5 | ✅ Complete | (committed) | IdentityTypes updates (breaking changes) |
+| Phase 5 | ✅ Complete | `eff3af6c` | IdentityTypes updates (breaking changes) |
+| **Points** | ✅ Complete | `c833679d` | **UD domain points system implementation** |
 | Phase 6 | ⏸️ Pending | - | SDK client method updates |
 
 ---
@@ -137,7 +138,7 @@ const isValid = nacl.sign.detached.verify(
 
 ## Phase 5: Update IdentityTypes ✅
 
-**Status**: Committed  
+**Commit**: `eff3af6c`  
 **Files**: 
 - `src/model/entities/types/IdentityTypes.ts`
 - `src/libs/blockchain/gcr/gcr_routines/GCRIdentityRoutines.ts`
@@ -172,6 +173,160 @@ interface SavedUdIdentity {
 **Database Migration**: ✅ None needed (JSONB auto-updates)
 
 **Reference**: See `ud_phase5_complete` memory for complete Phase 5 details
+
+---
+
+## UD Points System Implementation ✅
+
+**Commit**: `c833679d`  
+**Date**: 2025-01-31  
+**Files**: 
+- `src/features/incentive/PointSystem.ts`
+- `src/model/entities/GCRv2/GCR_Main.ts`
+
+**Purpose**: Incentivize UD domain linking with TLD-based rewards
+
+### Point Values
+- `.demos` TLD domains: **3 points**
+- Other UD domains: **1 point**
+
+### Methods Implemented
+
+#### awardUdDomainPoints(userId, domain, referralCode?)
+**Location**: PointSystem.ts:866-934
+
+**Features**:
+- Automatic TLD detection (`domain.toLowerCase().endsWith(".demos")`)
+- Duplicate domain linking prevention
+- Referral code support
+- Integration with existing GCR points infrastructure
+- Returns `RPCResponse` with points awarded and updated total
+
+**Logic Flow**:
+```typescript
+1. Determine point value based on TLD
+2. Check for duplicate domain in GCR breakdown.udDomains
+3. Award points via addPointsToGCR()
+4. Return success response with points awarded
+```
+
+#### deductUdDomainPoints(userId, domain)
+**Location**: PointSystem.ts:942-1001
+
+**Features**:
+- TLD-based point calculation (matching award logic)
+- Domain-specific point tracking verification
+- Safe deduction (checks if points exist first)
+- Returns `RPCResponse` with points deducted and updated total
+
+**Logic Flow**:
+```typescript
+1. Determine point value based on TLD
+2. Verify domain exists in GCR breakdown.udDomains
+3. Deduct points via addPointsToGCR() with negative value
+4. Return success response with points deducted
+```
+
+### Infrastructure Updates
+
+#### GCR Entity Extensions (GCR_Main.ts)
+```typescript
+// Added to points.breakdown
+udDomains: { [domain: string]: number }  // Track points per domain
+telegram: number                          // Added to socialAccounts
+```
+
+#### PointSystem Type Updates
+```typescript
+// Extended addPointsToGCR() type parameter
+type: "web3Wallets" | "socialAccounts" | "udDomains"
+
+// Added udDomains handling in addPointsToGCR()
+if (type === "udDomains") {
+    account.points.breakdown.udDomains = 
+        account.points.breakdown.udDomains || {}
+    account.points.breakdown.udDomains[platform] = 
+        oldDomainPoints + points
+}
+```
+
+#### Local UserPoints Interface
+Created local interface matching GCR structure to avoid SDK circular dependencies:
+```typescript
+interface UserPoints {
+    // ... existing fields
+    breakdown: {
+        web3Wallets: { [chain: string]: number }
+        socialAccounts: {
+            twitter: number
+            github: number  
+            discord: number
+            telegram: number  // ✅ NEW
+        }
+        udDomains: { [domain: string]: number }  // ✅ NEW
+        referrals: number
+        demosFollow: number
+    }
+    // ...
+}
+```
+
+### Integration with IncentiveManager
+
+**Existing Hooks** (IncentiveManager.ts:117-137):
+```typescript
+static async udDomainLinked(
+    userId: string,
+    domain: string,
+    referralCode?: string,
+): Promise<RPCResponse> {
+    return await this.pointSystem.awardUdDomainPoints(
+        userId,
+        domain,
+        referralCode,
+    )
+}
+
+static async udDomainUnlinked(
+    userId: string,
+    domain: string,
+): Promise<RPCResponse> {
+    return await this.pointSystem.deductUdDomainPoints(userId, domain)
+}
+```
+
+These hooks are called automatically when UD identities are added/removed via `udIdentityManager`.
+
+### Testing & Validation
+- ✅ TypeScript compilation: All errors resolved
+- ✅ ESLint: All files pass linting
+- ✅ Pattern consistency: Matches web3Wallets/socialAccounts implementation
+- ✅ Type safety: Local interface matches GCR entity structure
+
+### Design Decisions
+
+**Why TLD-based rewards?**
+- `.demos` domains directly promote Demos Network branding
+- Higher reward incentivizes ecosystem adoption
+- Simple rule: easy for users to understand
+
+**Why local UserPoints interface?**
+- Avoid SDK circular dependencies during rapid iteration
+- Ensure type consistency with GCR entity structure
+- Enable development without rebuilding SDK
+- FIXME comment added for future SDK migration
+
+**Why domain-level tracking in breakdown?**
+- Prevents duplicate point awards for same domain
+- Enables accurate point deduction on unlink
+- Matches existing pattern (web3Wallets per chain, socialAccounts per platform)
+
+### Future Considerations
+
+1. **SDK Type Migration**: When SDK stabilizes, replace local UserPoints with SDK import
+2. **Multiple Domains**: Current implementation supports unlimited UD domains per user
+3. **Point Adjustments**: Easy to modify point values in `pointValues` constant
+4. **Analytics**: `breakdown.udDomains` enables detailed UD engagement metrics
 
 ---
 
@@ -293,15 +448,19 @@ async getUDSignableAddresses(
 **Phase 2 → Phase 3**: EVM records format informs unified format  
 **Phase 3 → Phase 4**: UnifiedDomainResolution provides authorizedAddresses  
 **Phase 4 → Phase 5**: Verification logic expects new type structure  
-**Phase 5 → Phase 6**: Node types must match SDK payload format  
+**Phase 5 → Points**: Identity storage structure enables points tracking  
+**Points → Phase 6**: SDK must match node implementation for client usage  
 
 ---
 
 ## Quick Reference
 
-**Current Status**: Phase 5 Complete, Phase 6 Pending  
+**Current Status**: Phase 5 Complete, Points Complete, Phase 6 Pending  
+**Latest Commit**: `c833679d` (UD points system)  
 **Next Action**: Update SDK client methods in `../sdks/` repository  
 **Breaking Changes**: Phases 4, 5, 6 all introduce breaking changes  
 **Testing**: End-to-end testing blocked until Phase 6 complete  
 
-For detailed Phase 5 implementation, see `ud_phase5_complete` memory.
+For detailed implementation sessions:
+- Phase 5 details: See `ud_phase5_complete` memory
+- Points implementation: See `session_ud_points_implementation_2025_01_31` memory
