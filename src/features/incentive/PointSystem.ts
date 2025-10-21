@@ -245,8 +245,10 @@ export class PointSystem {
             account.points.breakdown.web3Wallets[platform] =
                 oldChainPoints + points
         } else if (type === "udDomains") {
-            account.points.breakdown.udDomains =
-                account.points.breakdown.udDomains || {}
+            // Explicitly initialize udDomains if undefined
+            if (!account.points.breakdown.udDomains) {
+                account.points.breakdown.udDomains = {}
+            }
             const oldDomainPoints =
                 account.points.breakdown.udDomains[platform] || 0
             account.points.breakdown.udDomains[platform] =
