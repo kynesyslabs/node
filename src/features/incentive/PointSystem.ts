@@ -8,6 +8,7 @@ import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Twitter } from "@/libs/identity/tools/twitter"
 import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentityManager"
+import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
 
 // Local UserPoints interface matching GCR entity structure
 interface UserPoints {
