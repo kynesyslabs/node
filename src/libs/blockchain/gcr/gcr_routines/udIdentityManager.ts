@@ -174,6 +174,69 @@ export class UDIdentityManager {
     }
 
     /**
+     * Try resolving domain on a specific EVM network
+     *
+     * @param domain - The UD domain name
+     * @param tokenId - The namehash tokenId
+     * @param rpcUrl - RPC endpoint URL for the network
+     * @param registryAddress - UNS/CNS registry contract address
+     * @param networkName - Network name (polygon, base, sonic, ethereum)
+     * @param registryType - Registry type (UNS or CNS)
+     * @returns UnifiedDomainResolution on success, null on failure
+     */
+    private static async tryEvmNetwork(
+        domain: string,
+        tokenId: string,
+        rpcUrl: string,
+        registryAddress: string,
+        networkName: "polygon" | "base" | "sonic" | "ethereum",
+        registryType: "UNS" | "CNS",
+    ): Promise<UnifiedDomainResolution | null> {
+        try {
+            const provider = new ethers.JsonRpcProvider(rpcUrl)
+            const registry = new ethers.Contract(
+                registryAddress,
+                registryAbi,
+                provider,
+            )
+
+            const owner = await registry.ownerOf(tokenId)
+
+            // Fetch resolver address (may be registry itself or separate contract)
+            let resolverAddress: string
+            try {
+                resolverAddress = await registry.resolverOf(tokenId)
+            } catch {
+                resolverAddress = registryAddress
+            }
+
+            // Fetch all records from resolver
+            const resolver = new ethers.Contract(resolverAddress, resolverAbi, provider)
+            const records = await this.fetchDomainRecords(resolver, tokenId)
+
+            log.debug(
+                `Domain ${domain} resolved on ${networkName} ${registryType}: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`,
+            )
+
+            // Convert to unified format
+            const evmResolution: EVMDomainResolution = {
+                domain,
+                network: networkName,
+                tokenId,
+                owner,
+                resolver: resolverAddress,
+                records,
+            }
+            return this.evmToUnified(evmResolution)
+        } catch (error) {
+            log.debug(
+                `${networkName} ${registryType} lookup failed for ${domain}: ${error instanceof Error ? error.message : String(error)}`,
+            )
+            return null
+        }
+    }
+
+    /**
      * Resolve an Unstoppable Domain with full records (PHASE 3: Multi-chain unified resolution)
      *
      * Multi-chain resolution strategy:
@@ -196,200 +259,28 @@ export class UDIdentityManager {
             // Convert domain to tokenId using namehash algorithm
             const tokenId = ethers.namehash(domain)
 
-            // Try Polygon L2 UNS first (primary - most new domains)
-            try {
-                const polygonProvider = new ethers.JsonRpcProvider(
-                    "https://polygon-rpc.com",
-                )
-                const polygonUnsRegistry = new ethers.Contract(
-                    polygonUnsRegistryAddress,
-                    registryAbi,
-                    polygonProvider,
-                )
+            // REFACTORED: Try EVM networks in priority order
+            // Network priority: Polygon → Base → Sonic → Ethereum UNS → Ethereum CNS
+            const evmNetworks = [
+                { name: "polygon" as const, rpc: "https://polygon-rpc.com", registry: polygonUnsRegistryAddress, type: "UNS" as const },
+                { name: "base" as const, rpc: "https://mainnet.base.org", registry: baseUnsRegistryAddress, type: "UNS" as const },
+                { name: "sonic" as const, rpc: "https://rpc.soniclabs.com", registry: sonicUnsRegistryAddress, type: "UNS" as const },
+                { name: "ethereum" as const, rpc: "https://eth.llamarpc.com", registry: ethereumUnsRegistryAddress, type: "UNS" as const },
+                { name: "ethereum" as const, rpc: "https://eth.llamarpc.com", registry: ethereumCnsRegistryAddress, type: "CNS" as const },
+            ]
 
-                const owner = await polygonUnsRegistry.ownerOf(tokenId)
-
-                // Fetch resolver address (may be registry itself or separate contract)
-                let resolverAddress: string
-                try {
-                    resolverAddress = await polygonUnsRegistry.resolverOf(tokenId)
-                } catch {
-                    resolverAddress = polygonUnsRegistryAddress
-                }
-
-                // Fetch all records from resolver
-                const resolver = new ethers.Contract(resolverAddress, resolverAbi, polygonProvider)
-                const records = await this.fetchDomainRecords(resolver, tokenId)
-
-                log.debug(`Domain ${domain} resolved on Polygon UNS: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`)
-
-                // Convert to unified format
-                const evmResolution: EVMDomainResolution = {
+            for (const network of evmNetworks) {
+                const result = await this.tryEvmNetwork(
                     domain,
-                    network: "polygon",
                     tokenId,
-                    owner,
-                    resolver: resolverAddress,
-                    records,
-                }
-                return this.evmToUnified(evmResolution)
-            } catch (polygonError) {
-                log.debug(
-                    `Polygon UNS lookup failed for ${domain}, trying Base`,
+                    network.rpc,
+                    network.registry,
+                    network.name,
+                    network.type,
                 )
 
-                // Try Base L2 UNS (new L2 option)
-                try {
-                    const baseProvider = new ethers.JsonRpcProvider(
-                        "https://mainnet.base.org",
-                    )
-                    const baseUnsRegistry = new ethers.Contract(
-                        baseUnsRegistryAddress,
-                        registryAbi,
-                        baseProvider,
-                    )
-
-                    const owner = await baseUnsRegistry.ownerOf(tokenId)
-
-                    let resolverAddress: string
-                    try {
-                        resolverAddress = await baseUnsRegistry.resolverOf(tokenId)
-                    } catch {
-                        resolverAddress = baseUnsRegistryAddress
-                    }
-
-                    const resolver = new ethers.Contract(resolverAddress, resolverAbi, baseProvider)
-                    const records = await this.fetchDomainRecords(resolver, tokenId)
-
-                    log.debug(`Domain ${domain} resolved on Base UNS: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`)
-
-                    const evmResolution: EVMDomainResolution = {
-                        domain,
-                        network: "base",
-                        tokenId,
-                        owner,
-                        resolver: resolverAddress,
-                        records,
-                    }
-                    return this.evmToUnified(evmResolution)
-                } catch (baseError) {
-                    log.debug(
-                        `Base UNS lookup failed for ${domain}, trying Sonic`,
-                    )
-
-                    // Try Sonic (emerging network)
-                    try {
-                        const sonicProvider = new ethers.JsonRpcProvider(
-                            "https://rpc.soniclabs.com",
-                        )
-                        const sonicUnsRegistry = new ethers.Contract(
-                            sonicUnsRegistryAddress,
-                            registryAbi,
-                            sonicProvider,
-                        )
-
-                        const owner = await sonicUnsRegistry.ownerOf(tokenId)
-
-                        let resolverAddress: string
-                        try {
-                            resolverAddress = await sonicUnsRegistry.resolverOf(tokenId)
-                        } catch {
-                            resolverAddress = sonicUnsRegistryAddress
-                        }
-
-                        const resolver = new ethers.Contract(resolverAddress, resolverAbi, sonicProvider)
-                        const records = await this.fetchDomainRecords(resolver, tokenId)
-
-                        log.debug(`Domain ${domain} resolved on Sonic UNS: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`)
-
-                        const evmResolution: EVMDomainResolution = {
-                            domain,
-                            network: "sonic",
-                            tokenId,
-                            owner,
-                            resolver: resolverAddress,
-                            records,
-                        }
-                        return this.evmToUnified(evmResolution)
-                    } catch (sonicError) {
-                        log.debug(
-                            `Sonic UNS lookup failed for ${domain}, trying Ethereum`,
-                        )
-
-                        // Try Ethereum L1 UNS (fallback)
-                        try {
-                            const ethereumProvider = new ethers.JsonRpcProvider(
-                                "https://eth.llamarpc.com",
-                            )
-                            const ethereumUnsRegistry = new ethers.Contract(
-                                ethereumUnsRegistryAddress,
-                                registryAbi,
-                                ethereumProvider,
-                            )
-
-                            const owner = await ethereumUnsRegistry.ownerOf(tokenId)
-
-                            let resolverAddress: string
-                            try {
-                                resolverAddress = await ethereumUnsRegistry.resolverOf(tokenId)
-                            } catch {
-                                resolverAddress = ethereumUnsRegistryAddress
-                            }
-
-                            const resolver = new ethers.Contract(resolverAddress, resolverAbi, ethereumProvider)
-                            const records = await this.fetchDomainRecords(resolver, tokenId)
-
-                            log.debug(`Domain ${domain} resolved on Ethereum UNS: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`)
-
-                            const evmResolution: EVMDomainResolution = {
-                                domain,
-                                network: "ethereum",
-                                tokenId,
-                                owner,
-                                resolver: resolverAddress,
-                                records,
-                            }
-                            return this.evmToUnified(evmResolution)
-                        } catch (ethereumUnsError) {
-                            log.debug(
-                                `Ethereum UNS lookup failed for ${domain}, trying CNS`,
-                            )
-
-                            // Try Ethereum L1 CNS (legacy fallback)
-                            const ethereumProvider = new ethers.JsonRpcProvider(
-                                "https://eth.llamarpc.com",
-                            )
-                            const ethereumCnsRegistry = new ethers.Contract(
-                                ethereumCnsRegistryAddress,
-                                registryAbi,
-                                ethereumProvider,
-                            )
-
-                            const owner = await ethereumCnsRegistry.ownerOf(tokenId)
-
-                            let resolverAddress: string
-                            try {
-                                resolverAddress = await ethereumCnsRegistry.resolverOf(tokenId)
-                            } catch {
-                                resolverAddress = ethereumCnsRegistryAddress
-                            }
-
-                            const resolver = new ethers.Contract(resolverAddress, resolverAbi, ethereumProvider)
-                            const records = await this.fetchDomainRecords(resolver, tokenId)
-
-                            log.debug(`Domain ${domain} resolved on Ethereum CNS: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`)
-
-                            const evmResolution: EVMDomainResolution = {
-                                domain,
-                                network: "ethereum",
-                                tokenId,
-                                owner,
-                                resolver: resolverAddress,
-                                records,
-                            }
-                            return this.evmToUnified(evmResolution)
-                        }
-                    }
+                if (result !== null) {
+                    return result
                 }
             }
 
@@ -433,16 +324,15 @@ export class UDIdentityManager {
         sender: string,
     ): Promise<{ success: boolean; message: string }> {
         try {
-            // REVIEW: Using resolvedAddress for backward compatibility
-            // Phase 5 will update SDK to use signingAddress + signatureType
-            const { domain, resolvedAddress, signature, signedData, network, registryType } =
+            // Phase 5: Updated to use signingAddress + signatureType
+            const { domain, signingAddress, signatureType, signature, signedData, network, registryType } =
                 payload.payload
 
             // Step 1: Resolve domain to get all authorized addresses
             const resolution = await this.resolveUDDomain(domain)
 
             log.debug(
-                `Verifying UD domain ${domain}: signing_address=${resolvedAddress}, network=${resolution.network}, authorized_addresses=${resolution.authorizedAddresses.length}`,
+                `Verifying UD domain ${domain}: signing_address=${signingAddress}, signature_type=${signatureType}, network=${resolution.network}, authorized_addresses=${resolution.authorizedAddresses.length}`,
             )
 
             // Step 2: Check if domain has any authorized addresses
@@ -454,22 +344,27 @@ export class UDIdentityManager {
             }
 
             // Step 3: Verify network matches (warn if mismatch but allow)
-            if (resolution.network !== network) {
+            // SECURITY RATIONALE: network and registryType are optional auto-detected fields.
+            // Clients may not know ahead of time which network/registry a domain is on.
+            // The critical security validation is whether signingAddress is actually authorized
+            // for the domain (Step 5), not which network it was resolved from.
+            // Mismatches only indicate the client's hint was incorrect, not a security breach.
+            if (network && resolution.network !== network) {
                 log.warning(
-                    `Network mismatch for ${domain}: claimed=${network}, actual=${resolution.network}`,
+                    `Network mismatch for ${domain}: claimed=${network}, actual=${resolution.network}. This is informational only - proceeding with actual network.`,
                 )
             }
 
             // Step 4: Verify registry type matches (warn if mismatch but allow)
-            if (resolution.registryType !== registryType) {
+            if (registryType && resolution.registryType !== registryType) {
                 log.warning(
-                    `Registry type mismatch for ${domain}: claimed=${registryType}, actual=${resolution.registryType}`,
+                    `Registry type mismatch for ${domain}: claimed=${registryType}, actual=${resolution.registryType}. This is informational only - proceeding with actual registry type.`,
                 )
             }
 
             // Step 5: Find the authorized address that matches the signing address
             const matchingAddress = resolution.authorizedAddresses.find(
-                (auth) => auth.address.toLowerCase() === resolvedAddress.toLowerCase(),
+                (auth) => auth.address.toLowerCase() === signingAddress.toLowerCase(),
             )
 
             if (!matchingAddress) {
@@ -478,7 +373,7 @@ export class UDIdentityManager {
                     .join(", ")
                 return {
                     success: false,
-                    message: `Address ${resolvedAddress} is not authorized for domain ${domain}. Authorized addresses: ${authorizedList}`,
+                    message: `Address ${signingAddress} is not authorized for domain ${domain}. Authorized addresses: ${authorizedList}`,
                 }
             }
 
@@ -498,10 +393,28 @@ export class UDIdentityManager {
             }
 
             // Step 7: Verify challenge contains correct Demos public key
-            if (!signedData.includes(sender)) {
+            // SECURITY: Use strict validation instead of substring matching to prevent attacks
+            // Expected format: "Link {signingAddress} to Demos identity {demosPublicKey}\n..."
+            try {
+                const demosIdentityRegex =
+                    /Link .+ to Demos identity ([a-fA-F0-9]+)/
+                const match = signedData.match(demosIdentityRegex)
+
+                if (!match || match[1] !== sender) {
+                    return {
+                        success: false,
+                        message:
+                            "Challenge message does not contain correct Demos public key or format is invalid",
+                    }
+                }
+            } catch (error) {
+                log.error(
+                    `Error parsing challenge message for sender validation: ${error}`,
+                )
                 return {
                     success: false,
-                    message: "Challenge message does not contain Demos public key",
+                    message:
+                        "Invalid challenge message format - could not verify Demos public key",
                 }
             }
 
@@ -558,6 +471,20 @@ export class UDIdentityManager {
                     const signatureBytes = bs58.decode(signature)
                     const messageBytes = new TextEncoder().encode(signedData)
                     const publicKeyBytes = bs58.decode(authorizedAddress.address)
+
+                    // Validate byte lengths for Solana
+                    if (signatureBytes.length !== 64) {
+                        return {
+                            success: false,
+                            message: `Invalid Solana signature length: expected 64 bytes, got ${signatureBytes.length}`,
+                        }
+                    }
+                    if (publicKeyBytes.length !== 32) {
+                        return {
+                            success: false,
+                            message: `Invalid Solana public key length: expected 32 bytes, got ${publicKeyBytes.length}`,
+                        }
+                    }
 
                     // Verify signature using nacl
                     const isValid = nacl.sign.detached.verify(

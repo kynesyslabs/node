@@ -253,6 +253,13 @@ export class SolanaDomainResolver {
     recordKey: string,
     version = this.defaultVersion,
   ): PublicKey {
+    // Validate recordVersion before BigInt conversion to prevent TypeError
+    if (!Number.isInteger(recordVersion) || recordVersion < 0) {
+      throw new Error(
+        `Invalid record version: ${recordVersion}. Must be a non-negative integer.`,
+      )
+    }
+
     const versionBuffer = Buffer.alloc(8)
     versionBuffer.writeBigUInt64LE(BigInt(recordVersion))
 
@@ -337,9 +344,22 @@ export class SolanaDomainResolver {
    * ```
    */
   async resolveRecord(label: string, tld: string, recordKey: string): Promise<RecordResult> {
+    // Validate domain components early to avoid unnecessary async operations
+    const trimmedLabel = label?.trim()
+    const trimmedTld = tld?.trim()
+
+    if (!trimmedLabel || !trimmedTld) {
+      return {
+        key: recordKey,
+        value: null,
+        found: false,
+        error: "Invalid domain: label and tld must be non-empty strings",
+      }
+    }
+
     try {
       const program = await this.getProgram()
-      const sldPda = this.deriveSldPda(label, tld)
+      const sldPda = this.deriveSldPda(trimmedLabel, trimmedTld)
       const domainPropertiesPda = this.deriveDomainPropertiesPda(sldPda)
 
       // Get domain properties to get records_version
@@ -351,7 +371,7 @@ export class SolanaDomainResolver {
           key: recordKey,
           value: null,
           found: false,
-          error: `Domain ${label}.${tld} not found`,
+          error: `Domain ${trimmedLabel}.${trimmedTld} not found`,
         }
       }
 
@@ -415,11 +435,43 @@ export class SolanaDomainResolver {
    * ```
    */
   async resolve(label: string, tld: string, recordKeys: string[]): Promise<DomainResolutionResult> {
-    const domain = `${label}.${tld}`
+    // Validate domain components early
+    const trimmedLabel = label?.trim()
+    const trimmedTld = tld?.trim()
+
+    if (!trimmedLabel || !trimmedTld) {
+      // Return consistent error structure without attempting PDA derivation
+      return {
+        domain: `${label ?? ""}.${tld ?? ""}`,
+        exists: false,
+        sldPda: "",
+        records: [],
+        error: "Invalid domain: label and tld must be non-empty strings",
+      }
+    }
+
+    const domain = `${trimmedLabel}.${trimmedTld}`
+
+    // Validate recordKeys is an array
+    if (!Array.isArray(recordKeys)) {
+      const sldPda = this.deriveSldPda(trimmedLabel, trimmedTld)
+      return {
+        domain,
+        exists: false,
+        sldPda: sldPda.toString(),
+        records: [],
+        error: "Invalid recordKeys: must be an array of strings",
+      }
+    }
+
+    // Filter out invalid record keys (empty strings or non-strings)
+    const validRecordKeys = recordKeys.filter(
+      (key) => typeof key === "string" && key.trim() !== "",
+    )
 
     try {
       const program = await this.getProgram()
-      const sldPda = this.deriveSldPda(label, tld)
+      const sldPda = this.deriveSldPda(trimmedLabel, trimmedTld)
       const domainPropertiesPda = this.deriveDomainPropertiesPda(sldPda)
 
       // Try to fetch domain properties
@@ -436,9 +488,9 @@ export class SolanaDomainResolver {
         }
       }
 
-      // Fetch all records
+      // Fetch all records (empty array is valid - returns domain properties only)
       const records: RecordResult[] = await Promise.all(
-        recordKeys.map(async (recordKey) => {
+        validRecordKeys.map(async (recordKey) => {
           try {
             const recordPda = this.deriveRecordPda(
               domainProperties.recordsVersion,
@@ -474,7 +526,7 @@ export class SolanaDomainResolver {
       return {
         domain,
         exists: false,
-        sldPda: this.deriveSldPda(label, tld).toString(),
+        sldPda: this.deriveSldPda(trimmedLabel, trimmedTld).toString(),
         records: [],
         error: error instanceof Error ? error.message : "Unknown error occurred",
       }
