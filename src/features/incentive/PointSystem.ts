@@ -928,6 +928,56 @@ export class PointSystem {
                 }
             }
 
+            // SECURITY: Verify domain ownership before allowing points award
+            const { linkedWallets } = await this.getUserIdentitiesFromGCR(userId)
+
+            // Resolve domain to get current authorized addresses from blockchain
+            let domainResolution
+            try {
+                domainResolution = await UDIdentityManager.resolveUDDomain(normalizedDomain)
+            } catch (error) {
+                log.warning(`Failed to resolve UD domain ${normalizedDomain} during award: ${error}`)
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: `Cannot verify ownership: domain ${normalizedDomain} is not resolvable`,
+                    },
+                    require_reply: false,
+                    extra: { error: error instanceof Error ? error.message : String(error) },
+                }
+            }
+
+            // Extract wallet addresses from linkedWallets (format: "chain:address")
+            const userWalletAddresses = linkedWallets.map(wallet => {
+                const parts = wallet.split(":")
+                return parts.length > 1 ? parts[1] : wallet
+            })
+
+            // Check if any user wallet matches an authorized address for the domain
+            const isOwner = domainResolution.authorizedAddresses.some(authAddr => {
+                return userWalletAddresses.some(userAddr => {
+                    if (authAddr.signatureType === "solana") {
+                        return authAddr.address === userAddr
+                    }
+                    return authAddr.address.toLowerCase() === userAddr.toLowerCase()
+                })
+            })
+
+            if (!isOwner) {
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: `Cannot award points: domain ${normalizedDomain} is not owned by any of your linked wallets`,
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
             // Award points by updating the GCR
             await this.addPointsToGCR(
                 userId,
