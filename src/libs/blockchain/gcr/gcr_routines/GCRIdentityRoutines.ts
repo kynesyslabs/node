@@ -8,6 +8,7 @@ import Hashing from "@/libs/crypto/hashing"
 import {
     PqcIdentityEdit,
     SavedXmIdentity,
+    SavedUdIdentity,
 } from "@/model/entities/types/IdentityTypes"
 import log from "@/utilities/logger"
 import { IncentiveManager } from "./IncentiveManager"
@@ -465,6 +466,146 @@ export default class GCRIdentityRoutines {
         return { success: true, message: "PQC identities removed" }
     }
 
+    // SECTION UD Identity Routines
+    static async applyUdIdentityAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const {
+            domain,
+            signingAddress,
+            signatureType,
+            signature,
+            publicKey,
+            timestamp,
+            signedData,
+            network,
+            registryType,
+        } = editOperation.data
+
+        // REVIEW: Validate required fields
+        if (
+            !domain ||
+            !signingAddress ||
+            !signatureType ||
+            !signature ||
+            !timestamp ||
+            !signedData ||
+            !network ||
+            !registryType
+        ) {
+            return { success: false, message: "Invalid edit operation data" }
+        }
+
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+
+        accountGCR.identities.ud = accountGCR.identities.ud || []
+
+        // Check if domain already exists for this account
+        const domainExists = accountGCR.identities.ud.some(
+            (id: SavedUdIdentity) => id.domain.toLowerCase() === domain.toLowerCase(),
+        )
+
+        if (domainExists) {
+            return { success: false, message: "Domain already linked to this account" }
+        }
+
+        const data: SavedUdIdentity = {
+            domain,
+            signingAddress,
+            signatureType,
+            signature,
+            publicKey: publicKey || "",
+            timestamp,
+            signedData,
+            network,
+            registryType,
+        }
+
+        accountGCR.identities.ud.push(data)
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            /**
+             * Check if this is the first connection for this domain
+             */
+            const isFirst = await this.isFirstConnection(
+                "ud",
+                { domain },
+                gcrMainRepository,
+                editOperation.account,
+            )
+
+            /**
+             * Award incentive points for UD domain linking
+             */
+            if (isFirst) {
+                await IncentiveManager.udDomainLinked(
+                    accountGCR.pubkey,
+                    domain,
+                    editOperation.referralCode,
+                )
+            }
+        }
+
+        return { success: true, message: "UD identity added" }
+    }
+
+    static async applyUdIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { domain } = editOperation.data
+
+        if (!domain) {
+            return { success: false, message: "Invalid edit operation data" }
+        }
+
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
+
+        if (!accountGCR) {
+            return { success: false, message: "Account not found" }
+        }
+
+        if (!accountGCR.identities || !accountGCR.identities.ud) {
+            return {
+                success: false,
+                message: "No UD identities found",
+            }
+        }
+
+        const domainExists = accountGCR.identities.ud.some(
+            (id: SavedUdIdentity) => id.domain.toLowerCase() === domain.toLowerCase(),
+        )
+
+        if (!domainExists) {
+            return { success: false, message: "Domain not found" }
+        }
+
+        accountGCR.identities.ud = accountGCR.identities.ud.filter(
+            (id: SavedUdIdentity) => id.domain.toLowerCase() !== domain.toLowerCase(),
+        )
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            /**
+             * Deduct incentive points for UD domain unlinking
+             */
+            await IncentiveManager.udDomainUnlinked(
+                accountGCR.pubkey,
+                domain,
+            )
+        }
+
+        return { success: true, message: "UD identity removed" }
+    }
+
     static async applyAwardPoints(
         editOperation: any,
         gcrMainRepository: Repository<GCRMain>,
@@ -595,6 +736,20 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
+            case "udadd":
+                result = await this.applyUdIdentityAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "udremove":
+                result = await this.applyUdIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
             case "pointsadd":
                 result = await this.applyAwardPoints(
                     identityEdit,
@@ -620,12 +775,13 @@ export default class GCRIdentityRoutines {
     }
 
     private static async isFirstConnection(
-        type: "twitter" | "github" | "web3" | "discord",
+        type: "twitter" | "github" | "web3" | "discord" | "ud",
         data: {
             userId?: string // for twitter/github/discord
             chain?: string // for web3
             subchain?: string // for web3
             address?: string // for web3
+            domain?: string // for ud
         },
         gcrMainRepository: Repository<GCRMain>,
         currentAccount?: string,
@@ -683,6 +839,23 @@ export default class GCRIdentityRoutines {
 
             /**
              * Return true if no account has this userId
+             */
+            return !result
+        } else if (type === "ud") {
+            /**
+             * Check if this UD domain exists anywhere
+             */
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'ud', '[]'::jsonb)) AS ud_id WHERE LOWER(ud_id->>'domain') = LOWER(:domain))",
+                    { domain: data.domain },
+                )
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
+
+            /**
+             * Return true if no account has this domain
              */
             return !result
         } else {
