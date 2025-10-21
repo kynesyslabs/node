@@ -1,3 +1,5 @@
+// TODO GCREditIdentity but typed as any due to union type constraints <- we have a lot of editOperations marked as any. Why is that? Should we standardize the identity operation types?
+
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../handleGCR"
 import { GCREdit, Web2GCRData } from "@kynesyslabs/demosdk/types"
@@ -16,7 +18,7 @@ import { IncentiveManager } from "./IncentiveManager"
 export default class GCRIdentityRoutines {
     // SECTION XM Identity Routines
     static async applyXmIdentityAdd(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -108,7 +110,7 @@ export default class GCRIdentityRoutines {
     }
 
     static async applyXmIdentityRemove(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -179,7 +181,7 @@ export default class GCRIdentityRoutines {
 
     // SECTION Web2 Identity Routines
     static async applyWeb2IdentityAdd(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -201,15 +203,59 @@ export default class GCRIdentityRoutines {
         /**
          * Verify the proof
          */
-        const proofOk = Hashing.sha256(data.proof) === data.proofHash
+        let proofOk = false
+
+        if (context === "telegram") {
+            // Telegram uses dual signature validation (user + bot signatures)
+            // The proof is a TelegramSignedAttestation object, not a URL
+            try {
+                // Import verifyWeb2Proof which handles telegram verification
+                const { verifyWeb2Proof } = await import("@/libs/abstraction")
+
+                const verificationResult = await verifyWeb2Proof(
+                    {
+                        context: "telegram",
+                        username: data.username,
+                        userId: data.userId,
+                        proof: data.proof,
+                    },
+                    accountGCR.pubkey, // sender's ed25519 address
+                )
+
+                proofOk = verificationResult.success
+
+                if (!proofOk) {
+                    log.error(
+                        `Telegram verification failed: ${verificationResult.message}`,
+                    )
+                    return {
+                        success: false,
+                        message: verificationResult.message,
+                    }
+                }
+
+                log.info(
+                    `Telegram identity verified: ${data.username} (${data.userId})`,
+                )
+            } catch (error) {
+                log.error(`Telegram proof verification failed: ${error}`)
+                proofOk = false
+            }
+        } else {
+            // Standard SHA256 proof validation for other platforms
+            proofOk = Hashing.sha256(data.proof) === data.proofHash
+        }
+
         if (!proofOk) {
             return {
                 success: false,
                 message:
-                    "Sha256 proof mismatch: Expected " +
-                    data.proofHash +
-                    " but got " +
-                    Hashing.sha256(data.proof),
+                    context === "telegram"
+                        ? "Telegram attestation validation failed"
+                        : "Sha256 proof mismatch: Expected " +
+                          data.proofHash +
+                          " but got " +
+                          Hashing.sha256(data.proof),
             }
         }
 
@@ -249,6 +295,22 @@ export default class GCRIdentityRoutines {
                         editOperation.referralCode,
                     )
                 }
+            } else if (context === "telegram") {
+                const isFirst = await this.isFirstConnection(
+                    "telegram",
+                    { userId: data.userId },
+                    gcrMainRepository,
+                    editOperation.account,
+                )
+                if (isFirst) {
+                    // REVIEW: Pass attestation to check group membership for conditional points
+                    await IncentiveManager.telegramLinked(
+                        editOperation.account,
+                        data.userId,
+                        editOperation.referralCode,
+                        data.proof, // TelegramSignedAttestation with group_membership field
+                    )
+                }
             } else if (context === "discord") {
                 const isFirst = await this.isFirstConnection(
                     "discord",
@@ -271,7 +333,7 @@ export default class GCRIdentityRoutines {
     }
 
     static async applyWeb2IdentityRemove(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -293,9 +355,9 @@ export default class GCRIdentityRoutines {
             return { success: false, message: "Identity not found" }
         }
 
-        // Store the identity being removed for GitHub unlinking (need userId)
+        // Store the identity being removed for GitHub and Telegram unlinking (need userId)
         let removedIdentity: Web2GCRData["data"] | null = null
-        if (context === "github") {
+        if (context === "github" || context === "telegram") {
             removedIdentity =
                 accountGCR.identities.web2[context].find(
                     (id: Web2GCRData["data"]) => id.username === username,
@@ -323,6 +385,12 @@ export default class GCRIdentityRoutines {
                     editOperation.account,
                     removedIdentity.userId,
                 )
+            } else if (
+                context === "telegram" &&
+                removedIdentity &&
+                removedIdentity.userId
+            ) {
+                await IncentiveManager.telegramUnlinked(editOperation.account)
             } else if (context === "discord") {
                 await IncentiveManager.discordUnlinked(editOperation.account)
             }
@@ -333,7 +401,7 @@ export default class GCRIdentityRoutines {
 
     // SECTION PQC Identity Routines
     static async applyPqcIdentityAdd(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -390,7 +458,7 @@ export default class GCRIdentityRoutines {
     }
 
     static async applyPqcIdentityRemove(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -643,7 +711,7 @@ export default class GCRIdentityRoutines {
     }
 
     static async applyAwardPoints(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -671,7 +739,7 @@ export default class GCRIdentityRoutines {
     }
 
     static async applyAwardPointsRollback(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -811,7 +879,7 @@ export default class GCRIdentityRoutines {
     }
 
     private static async isFirstConnection(
-        type: "twitter" | "github" | "web3" | "discord" | "ud",
+        type: "twitter" | "github" | "web3" | "telegram" | "discord" | "ud",
         data: {
             userId?: string // for twitter/github/discord
             chain?: string // for web3
@@ -822,56 +890,19 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         currentAccount?: string,
     ): Promise<boolean> {
-        if (type === "twitter") {
-            /**
-             * Check if this Twitter userId exists anywhere
-             */
+        if (type !== "web3") {
+            const queryTemplate = `
+            EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'${type}', '[]'::jsonb)) as ${type}_id WHERE ${type}_id->>'userId' = :userId)
+        `
+
             const result = await gcrMainRepository
                 .createQueryBuilder("gcr")
-                .where(
-                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'userId' = :userId)",
-                    {
-                        userId: data.userId,
-                    },
-                )
+                .where(queryTemplate, { userId: data.userId })
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()
 
-            /**
-             * Return true if no account has this userId
-             */
             return !result
-        } else if (type === "github") {
-            /**
-             * Check if this GitHub userId exists anywhere
-             */
-            const result = await gcrMainRepository
-                .createQueryBuilder("gcr")
-                .where(
-                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'github') as github_id WHERE github_id->>'userId' = :userId)",
-                    {
-                        userId: data.userId,
-                    },
-                )
-                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
-                .getOne()
-
-            /**
-             * Return true if no account has this userId
-             */
-            return !result
-        } else if (type === "discord") {
-            /**
-             * Check if this Discord userId exists anywhere
-             */
-            const result = await gcrMainRepository
-                .createQueryBuilder("gcr")
-                .where(
-                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'discord', '[]'::jsonb)) AS discord_id WHERE discord_id->>'userId' = :userId)",
-                    { userId: data.userId },
-                )
-                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
-                .getOne()
+        }
 
             /**
              * Return true if no account has this userId
@@ -901,23 +932,23 @@ export default class GCRIdentityRoutines {
             const addressToCheck =
                 data.chain === "evm" ? data.address.toLowerCase() : data.address
 
-            const result = await gcrMainRepository
-                .createQueryBuilder("gcr")
-                .where(
-                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)",
-                    {
-                        chain: data.chain,
-                        subchain: data.subchain,
-                        address: addressToCheck,
-                    },
-                )
-                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
-                .getOne()
+        const result = await gcrMainRepository
+            .createQueryBuilder("gcr")
+            .where(
+                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)",
+                {
+                    chain: data.chain,
+                    subchain: data.subchain,
+                    address: addressToCheck,
+                },
+            )
+            .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+            .getOne()
 
-            /**
-             * Return true if this is the first connection
-             */
-            return !result
-        }
+        /**
+         * Return true if this is the first connection
+         */
+        return !result
+        // }
     }
 }

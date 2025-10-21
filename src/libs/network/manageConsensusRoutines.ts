@@ -15,6 +15,8 @@ import log from "src/utilities/logger"
 import Cryptography from "../crypto/cryptography"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { Waiter } from "src/utilities/waiter"
+import { PeerManager } from "../peer"
+import Chain from "../blockchain/chain"
 
 export interface ConsensusMethod {
     method:
@@ -36,6 +38,12 @@ export default async function manageConsensusRoutines(
     sender: string,
     payload: ConsensusMethod,
 ): Promise<RPCResponse> {
+    log.debug("👍👍👍👍👍👍👍👍👍 RECEIVED CONSENSUS CALL 👍👍👍👍👍👍👍👍")
+
+    const peer = PeerManager.getInstance().getPeer(sender)
+    log.debug("Sender: " + peer.connection.string)
+    log.debug("Payload: " + JSON.stringify(payload, null, 2))
+    log.debug("-----------------------------")
     let response = _.cloneDeep(emptyResponse)
 
     /* REVIEW
@@ -51,6 +59,8 @@ export default async function manageConsensusRoutines(
     const isConsensusTime = await checkConsensusTime(true, 2)
     const isConsensusRunning = isConsensusAlreadyRunning()
     const inConsensus = isConsensusTime || isConsensusRunning
+
+    log.debug("inConsensus: " + inConsensus)
 
     if (!inConsensus) {
         response.result = 400
@@ -72,7 +82,8 @@ export default async function manageConsensusRoutines(
     }
 
     // Also refuses the routine if we are not in the shard
-    const shard = await getShard(getSharedState.currentValidatorSeed)
+    const { commonValidatorSeed } = await getCommonValidatorSeed()
+    const shard = await getShard(commonValidatorSeed)
     const ourId = getSharedState.publicKeyHex
     let isInShard = false
 
@@ -83,10 +94,69 @@ export default async function manageConsensusRoutines(
         }
     }
 
-    if (!isInShard) {
+    log.debug("isInShard: " + isInShard)
+
+    inShardCheck: if (!isInShard) {
+        // INFO: If is a greenlight request, return 200
+        if (payload.method == "greenlight") {
+            // response.result = 200
+            // response.response = "Greenlight received too late, ignoring"
+
+            // return response
+            break inShardCheck
+        }
+
+        if (payload.method == "setValidatorPhase") {
+            // response.result = 200
+            // response.response =
+            //     "Set validator phase received too late, ignoring"
+            // response.extra = {
+            //     greenlight: true,
+            // }
+            // return response
+            break inShardCheck
+        }
+
         response.result = 400
         response.response =
-            "We are not in the shard, cannot proceed with the routine"
+            "We are not in the shard(" +
+            getSharedState.exposedUrl +
+            "), cannot proceed with the routine"
+
+        log.error("🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒")
+        log.error("Payload: " + JSON.stringify(payload, null, 2))
+        log.error(
+            "We are not in the shard(" +
+                getSharedState.exposedUrl +
+                "), cannot proceed with the routine",
+        )
+        log.error("current validator seed: " + commonValidatorSeed)
+        log.error(
+            "calculated shard: " +
+                JSON.stringify(
+                    shard.map(m => m.connection.string),
+                    null,
+                    2,
+                ),
+        )
+        const sharedStateLastShard = shard.map(m => m.connection.string)
+
+        log.error(
+            "shared state last shard: " +
+                JSON.stringify(sharedStateLastShard, null, 2),
+        )
+        log.error("last block number: " + getSharedState.lastBlockNumber)
+        log.error("🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒")
+
+        // INFO: Check if seed is from past consensus round
+        // const lastBlockMinus1 = await Chain.getBlockByNumber(getSharedState.lastBlockNumber - 1)
+        // const { commonValidatorSeed: pastCommonValidatorSeed } = await getCommonValidatorSeed(lastBlockMinus1)
+        // if (pastCommonValidatorSeed == commonValidatorSeed) {
+        //     log.error("Seed is from past consensus round")
+        //     response.result = 400
+        //     response.response = "Seed is from past consensus round"
+        //     return response
+        // }
         return response
     }
 
@@ -152,14 +222,26 @@ export default async function manageConsensusRoutines(
         case "getCommonValidatorSeed":
             response.result = 200
             await getCommonValidatorSeed() // NOTE This is generated each time and stored in the shared state
-            response.response = getSharedState.currentValidatorSeed
+            response.response = commonValidatorSeed
             break
 
         // SECTION: New Secretary Manager class handlers
         case "setValidatorPhase": {
             try {
                 const [phase, seed, blockRef] = payload.params
-                const manager = SecretaryManager.getInstance()
+                const manager = SecretaryManager.getInstance(blockRef)
+
+                //INFO: If the manager class for that block is not found, assume peer is behind on the consensus
+                // return a greenlight to unblock peer
+                if (!manager) {
+                    response.result = 200
+                    response.response = "Secretary manager not found"
+                    response.extra = {
+                        greenlight: true,
+                    }
+
+                    return response
+                }
 
                 // INFO: Seed check
                 if (
@@ -262,20 +344,26 @@ export default async function manageConsensusRoutines(
         case "greenlight": {
             // TODO: Check if the sender is the secretary (without verifying the signature
             // as we have already done that) in validateHeaders
-            const [timestamp, validatorPhase] = payload.params as [
-                number,
-                number,
+            const [blockRef, timestamp, validatorPhase] = payload.params as [
+                number, // blockRef
+                number, // timestamp
+                number, // validatorPhase
             ]
-            log.info(
-                "payload.params: " + JSON.stringify(payload.params, null, 2),
-            )
-            const manager = SecretaryManager.getInstance()
 
-            log.debug("Our secretary identity: " + manager.secretary.identity)
-            log.debug("shard: " + manager.shard.members.map(m => m.identity))
+            const manager = SecretaryManager.getInstance(blockRef)
+
+            // INFO: If the manager class for that block is not found, assume peer is behind on the consensus
+            // return a 200 to unblock peer
+            if (!manager) {
+                log.debug("returning a fake 200")
+                response.result = 200
+                response.response = "Secretary manager not found"
+                return response
+            }
 
             // INFO: Check if the sender is the secretary
             if (sender !== manager.secretary.identity) {
+                log.debug("returning a 401")
                 response.result = 401
                 response.response = "Greenlight not accepted"
                 response.extra = "Secretary identity mismatch"
@@ -299,14 +387,31 @@ export default async function manageConsensusRoutines(
         // NOTE: Ideally, we should never need to use these methods
         case "getValidatorPhase": {
             const manager = SecretaryManager.getInstance()
+
+            if (!manager) {
+                response.result = 400
+                response.response = [null]
+                response.extra = { error: "Consensus not in progress" }
+                return response
+            }
+
             response.result = 200
             response.response = [manager.ourValidatorPhase.currentPhase]
             break
         }
 
         case "getBlockTimestamp": {
+            const manager = SecretaryManager.getInstance()
+
+            if (!manager) {
+                response.result = 400
+                response.response = [null]
+                response.extra = { error: "Consensus not in progress" }
+                return response
+            }
+
             response.result = 200
-            response.response = [SecretaryManager.getInstance().blockTimestamp]
+            response.response = [manager.blockTimestamp]
             break
         }
     }

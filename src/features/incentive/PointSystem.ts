@@ -37,6 +37,7 @@ const pointValues = {
     LINK_WEB3_WALLET: 0.5,
     LINK_TWITTER: 2,
     LINK_GITHUB: 1,
+    LINK_TELEGRAM: 1,
     FOLLOW_DEMOS: 1,
     LINK_DISCORD: 1,
     LINK_UD_DOMAIN_DEMOS: 3,
@@ -145,11 +146,15 @@ export class PointSystem {
             totalPoints: account.points.totalPoints || 0,
             breakdown: {
                 web3Wallets: account.points.breakdown?.web3Wallets || {},
-                socialAccounts: account.points.breakdown?.socialAccounts || {
-                    twitter: 0,
-                    github: 0,
-                    discord: 0,
-                    telegram: 0,
+                socialAccounts: {
+                    twitter:
+                        account.points.breakdown?.socialAccounts?.twitter ?? 0,
+                    github:
+                        account.points.breakdown?.socialAccounts?.github ?? 0,
+                    telegram:
+                        account.points.breakdown?.socialAccounts?.telegram ?? 0,
+                    discord:
+                        account.points.breakdown?.socialAccounts?.discord ?? 0,
                 },
                 udDomains: account.points.breakdown?.udDomains || {},
                 referrals: account.points.breakdown?.referrals || 0,
@@ -177,52 +182,15 @@ export class PointSystem {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
         const account = await ensureGCRForUser(userId)
-
-        // const account = await gcrMainRepository.findOneBy({ pubkey: userId })
-        // if (!account) {
-        //     const newAccount = await HandleGCR.createAccount(userId)
-        //     newAccount.points.totalPoints = points
-
-        //     if (
-        //         type === "socialAccounts" &&
-        //         (platform === "twitter" ||
-        //             platform === "github" ||
-        //             platform === "discord")
-        //     ) {
-        //         newAccount.points.breakdown = {
-        //             web3Wallets: {},
-        //             socialAccounts: {
-        //                 twitter: platform === "twitter" ? points : 0,
-        //                 github: platform === "github" ? points : 0,
-        //                 discord: platform === "discord" ? points : 0,
-        //             },
-        //             referrals: 0,
-        //         }
-        //     } else {
-        //         newAccount.points.breakdown = {
-        //             web3Wallets: {},
-        //             socialAccounts: {
-        //                 twitter: 0,
-        //                 github: 0,
-        //                 discord: 0,
-        //             },
-        //             referrals: 0,
-        //         }
-        //     }
-        //     newAccount.points.lastUpdated = new Date()
-
-        //     // Process referral for new account
-        //     if (referralCode) {
-        //         await Referrals.processReferral(
-        //             newAccount,
-        //             referralCode,
-        //             gcrMainRepository,
-        //         )
-        //     }
-
-        //     await gcrMainRepository.save(newAccount)
-        // } else {
         const isEligibleForReferral = Referrals.isEligibleForReferral(account)
+
+        // REVIEW: Ensure breakdown structure is properly initialized before assignment
+        account.points.breakdown = account.points.breakdown || {
+            web3Wallets: {},
+            socialAccounts: { twitter: 0, github: 0, telegram: 0, discord: 0 },
+            referrals: 0,
+            demosFollow: 0,
+        }
 
         const oldTotal = account.points.totalPoints || 0
         account.points.totalPoints = oldTotal + points
@@ -231,10 +199,11 @@ export class PointSystem {
             type === "socialAccounts" &&
             (platform === "twitter" ||
                 platform === "github" ||
+                platform === "telegram" ||
                 platform === "discord")
         ) {
             const oldPlatformPoints =
-                account.points.breakdown?.socialAccounts?.[platform] || 0
+                account.points.breakdown.socialAccounts[platform] || 0
             account.points.breakdown.socialAccounts[platform] =
                 oldPlatformPoints + points
         } else if (type === "web3Wallets") {
@@ -612,9 +581,9 @@ export class PointSystem {
             )
 
             // Check if user has Twitter points to deduct
-            if (
-                userPointsWithIdentities.breakdown.socialAccounts.twitter <= 0
-            ) {
+            const currentTwitter =
+                userPointsWithIdentities.breakdown.socialAccounts?.twitter ?? 0
+            if (currentTwitter <= 0) {
                 return {
                     result: 200,
                     response: {
@@ -670,35 +639,14 @@ export class PointSystem {
         githubUserId: string,
     ): Promise<RPCResponse> {
         try {
-            // Get user's account data from GCR to verify GitHub ownership
-            const account = await ensureGCRForUser(userId)
-
-            // Verify the GitHub account is actually linked to this user
-            const githubIdentities = account.identities.web2?.github || []
-            const isOwner = githubIdentities.some(
-                (gh: any) => gh.userId === githubUserId,
-            )
-
-            if (!isOwner) {
-                return {
-                    result: 400,
-                    response: {
-                        pointsDeducted: 0,
-                        totalPoints: account.points.totalPoints || 0,
-                        message:
-                            "Error: GitHub account not linked to this user",
-                    },
-                    require_reply: false,
-                    extra: {},
-                }
-            }
-
             const userPointsWithIdentities = await this.getUserPointsInternal(
                 userId,
             )
 
             // Check if user has GitHub points to deduct
-            if (userPointsWithIdentities.breakdown.socialAccounts.github <= 0) {
+            const currentGithub =
+                userPointsWithIdentities.breakdown.socialAccounts?.github ?? 0
+            if (currentGithub <= 0) {
                 return {
                     result: 200,
                     response: {
@@ -726,6 +674,170 @@ export class PointSystem {
                     pointsDeducted: pointValues.LINK_GITHUB,
                     totalPoints: updatedPoints.totalPoints,
                     message: "Points deducted for unlinking GitHub",
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error deducting points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Award points for linking a Telegram account
+     * @param userId The user's Demos address
+     * @param telegramUserId The Telegram user ID
+     * @param referralCode Optional referral code
+     * @param attestation Optional TelegramSignedAttestation with group_membership field
+     * @returns RPCResponse
+     */
+    async awardTelegramPoints(
+        userId: string,
+        telegramUserId: string,
+        referralCode?: string,
+        attestation?: any, // TelegramSignedAttestation from SDK
+    ): Promise<RPCResponse> {
+        try {
+            // Get user's account data from GCR to verify Telegram ownership
+            const account = await ensureGCRForUser(userId)
+
+            // Verify the Telegram account is actually linked to this user
+            const telegramIdentities = account.identities.web2?.telegram || []
+            const isOwner = telegramIdentities.some((tg: any) => tg.userId === telegramUserId)
+
+            if (!isOwner) {
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: account.points.totalPoints || 0,
+                        message: "Error: Telegram account not linked to this user",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            const userPointsWithIdentities = await this.getUserPointsInternal(
+                userId,
+            )
+
+            // Check if user already has Telegram points specifically
+            if (userPointsWithIdentities.breakdown.socialAccounts.telegram > 0) {
+                return {
+                    result: 200,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "Telegram points already awarded",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            // REVIEW: Check group membership from attestation (SDK v2.4.18+)
+            // Award points ONLY if user is member of required Telegram group
+            const isGroupMember = attestation?.payload?.group_membership === true
+
+            if (!isGroupMember) {
+                log.info(`Telegram linked but user not in required group: ${telegramUserId}`)
+                return {
+                    result: 200,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "Telegram linked successfully, but you must join the required group to earn points",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            await this.addPointsToGCR(
+                userId,
+                pointValues.LINK_TELEGRAM,
+                "socialAccounts",
+                "telegram",
+                referralCode,
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsAwarded: pointValues.LINK_TELEGRAM,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: "Points awarded for linking Telegram",
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error awarding points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Deduct points for unlinking a Telegram account
+     * @param userId The user's Demos address
+     * @param telegramUserId The Telegram user ID to verify ownership
+     * @returns RPCResponse
+     */
+    async deductTelegramPoints(userId: string): Promise<RPCResponse> {
+        try {
+            const userPointsWithIdentities = await this.getUserPointsInternal(
+                userId,
+            )
+
+            // Check if user has Telegram points to deduct
+            const currentTelegram =
+                userPointsWithIdentities.breakdown.socialAccounts?.telegram ?? 0
+            if (currentTelegram <= 0) {
+                return {
+                    result: 200,
+                    response: {
+                        pointsDeducted: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "No Telegram points to deduct",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            await this.addPointsToGCR(
+                userId,
+                -pointValues.LINK_TELEGRAM,
+                "socialAccounts",
+                "telegram",
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsDeducted: pointValues.LINK_TELEGRAM,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: "Points deducted for unlinking Telegram",
                 },
                 require_reply: false,
                 extra: {},

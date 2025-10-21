@@ -30,7 +30,8 @@ export default class SharedState {
     lastShardSeed = ""
     referenceBlockRoom = 1
     shardSize = parseInt(process.env.SHARD_SIZE) || 4
-
+    mainLoopSleepTime = parseInt(process.env.MAIN_LOOP_SLEEP_TIME) || 1000 // 1 second
+ 
     // NOTE See calibrateTime.ts for this value
     timestampCorrection = 0
 
@@ -77,8 +78,7 @@ export default class SharedState {
     peerRoutineRunning = 0
     // SECTION shared state variables
     shard: Peer[]
-    lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard
-    currentValidatorSeed: string
+    // lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard
     identity: Identity
     keypair: {
         publicKey:
@@ -111,6 +111,7 @@ export default class SharedState {
     candidateBlock: Block
     lastBlockNumber = 0
     _lastBlockHash = ""
+    genesisIdentities = new Set<string>()
 
     set lastBlockHash(value: string) {
         this._lastBlockHash = value
@@ -201,8 +202,11 @@ export default class SharedState {
         return Number(process.env.CONSENSUS_CHECK_INTERVAL)
     }
 
+    /**
+     * @returns The block time in seconds
+     */
     public getConsensusTime(): number {
-        return Number(process.env.CONSENSUS_TIME)
+        return Number(process.env.CONSENSUS_TIME) || this.block_time
     }
 
     public async getConnectionString(): Promise<string> {

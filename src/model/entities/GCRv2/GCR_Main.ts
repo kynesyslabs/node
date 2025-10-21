@@ -31,7 +31,7 @@ export class GCRMain {
                 twitter: number
                 github: number
                 discord: number
-                telegram?: number // Optional for backward compatibility with historical records
+                telegram: number
             }
             udDomains?: { [domain: string]: number } // Optional for backward compatibility with historical records
             referrals: number

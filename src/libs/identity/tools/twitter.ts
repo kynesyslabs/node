@@ -473,7 +473,7 @@ export class Twitter {
     async makeRequest<T>(url: string, delay = 0): Promise<AxiosResponse<T>> {
         if (delay > 0) {
             await new Promise(resolve => setTimeout(resolve, delay))
-            log.only(`☺️😔👀 Delayed request to ${url} for ${delay}ms`)
+            log.debug(`☺️😔👀 Delayed request to ${url} for ${delay}ms`)
         }
 
         return await axios.get<T>(url, {
@@ -524,7 +524,7 @@ export class Twitter {
         )
 
         if (res.status === 200) {
-            fs.writeFileSync(
+            await fs.promises.writeFile(
                 `data/twitter/${userId}.json`,
                 JSON.stringify(res.data, null, 2),
             )
@@ -543,7 +543,7 @@ export class Twitter {
         )
 
         if (res.status === 200) {
-            fs.writeFileSync(
+            await fs.promises.writeFile(
                 `data/twitter/${userId}_followers.json`,
                 JSON.stringify(res.data, null, 2),
             )
@@ -577,6 +577,11 @@ export class Twitter {
     static getInstance() {
         if (!Twitter.instance) {
             Twitter.instance = new Twitter()
+
+            // create the directory if it doesn't exist
+            if (!fs.existsSync("data/twitter")) {
+                fs.mkdirSync("data/twitter", { recursive: true })
+            }
         }
 
         return Twitter.instance

@@ -29,6 +29,7 @@ import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
+import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
 
 dotenv.config()
 const term = terminalkit.terminal
@@ -242,7 +243,7 @@ async function preMainLoop() {
     getSharedState.connectionString = ourselves
     log.info("Our connection string is: " + ourselves)
     // And saves the public key file
-    fs.writeFileSync(
+    await fs.promises.writeFile(
         "publickey_" + getSharedState.signingAlgorithm + "_" + publicKeyHex,
         publicKeyHex + "\n",
     )
@@ -270,6 +271,7 @@ async function preMainLoop() {
     term.yellow("[BOOTSTRAP] Looking for the genesis block\n")
     // INFO Now ensuring we have an initialized chain or initializing the genesis block
     await findGenesisBlock()
+    await loadGenesisIdentities()
     term.green("[GENESIS] 🖥️ Found the genesis block\n")
 
     // Loading the peers
