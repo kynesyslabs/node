@@ -60,9 +60,25 @@ export default async function handleNativeBridgeTx(
             }
         }
 
-        const tankMan = EVMSmartContractManagement.getInstance()
+        // INFO: Validate bridge ID
+        const bridge = new NativeBridge(null, null as any)
+        const expectedBridgeId = bridge.generateBridgeId(
+            compiledOperation.content.operation,
+            txHash,
+        )
 
-        // INFO: Verify the bridgeId is not already executed
+        if (expectedBridgeId !== bridgeId) {
+            log.error(
+                `${fname} Bridge ID mismatch: expected=${expectedBridgeId}, got=${bridgeId}`,
+            )
+            return {
+                success: false,
+                error: "Bridge ID mismatch",
+            }
+        }
+
+        // INFO: Verify bridgeId is not already executed
+        const tankMan = EVMSmartContractManagement.getInstance()
         const bridgeStatus = await tankMan.validateBridgeId(
             bridgeId,
             compiledOperation.content.operation.to.chain,
@@ -94,7 +110,7 @@ export default async function handleNativeBridgeTx(
         }
 
         // INFO: Verify the deposit transaction (again)
-        const bridge = new NativeBridge(null, evm as any)
+        // const bridge = new NativeBridge(null, evm as any)
         bridge.verifyDepositTx(
             depositReceipt as any,
             {

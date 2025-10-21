@@ -747,13 +747,6 @@ export class EVMSmartContractManagement {
             process.exit(1)
         }
 
-        log.debug("bridgeId: " + bridgeId)
-        log.debug("tokenName: " + tokenName)
-        log.debug("amount: " + amount.toString())
-        log.debug("recipient: " + recipient)
-        log.debug("chainKey: " + chainKey)
-        log.debug("Multisig signer address: " + evmInstance.getAddress())
-
         try {
             // REVIEW: Updated to use multisig pattern instead of non-existent executeMetaTransaction
             // Generate unique proposal ID for this withdrawal
@@ -958,28 +951,22 @@ export class EVMSmartContractManagement {
         const contract = tankConfig.contract
 
         // [approvalCount, deadline, executed, expired]
-        type ProposalStatus = [number, number, boolean, boolean]
+        type ProposalStatus = [bigint, bigint, boolean, boolean]
 
         // Derive bytes32 proposalId from bridgeId and contract address to match _generateProposalId
         const contractAddress = await contract.getAddress()
         const proposalId = solidityPackedKeccak256(
             ["string", "string", "address"],
-            ["MULTISIG_PROPOSAL", "bridge_3c5aeee771e6d664", contractAddress],
+            ["MULTISIG_PROPOSAL", bridgeId, contractAddress],
         )
 
-        const [approvalCount, deadline, executed, expired] =
+        const [_approvalCount, deadline, _executed, _expired] =
             (await contract.checkProposalStatus(proposalId)) as ProposalStatus
-        log.debug(
-            "status: " +
-                JSON.stringify([approvalCount, executed, expired, deadline]),
-        )
 
-        if (executed) {
+        if (deadline !== 0n) {
             return {
                 valid: false,
-                message: `Bridge operation: ${bridgeId} has already been executed. Status: ${
-                    executed ? "executed" : expired ? "expired" : "seen"
-                }`,
+                message: `Bridge operation: ${bridgeId} has already been submitted.`,
             }
         }
 

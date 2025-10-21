@@ -93,6 +93,7 @@ async function processBridgeTx(bridgeTx: NativeBridgeTransaction): Promise<{
     const compiled = bridgeTx.content.data[1].operation
     const operation = compiled.content.operation
     const txHash = bridgeTx.content.data[1].txHash
+    const bridgeId = bridgeTx.content.data[1].bridgeId
     const destination = operation.to.chain
 
     // Detect if this is a gasless operation
@@ -219,7 +220,7 @@ async function processBridgeTx(bridgeTx: NativeBridgeTransaction): Promise<{
         // Execute regular withdrawal using multisig
         log.info(`${fname} Executing regular withdrawal on ${destination}`)
         const txHash = await evmTankManager.executeWithdrawal(
-            compiled.content.bridgeId,
+            bridgeId,
             destination,
             operation.to.address,
             operation.token.name,

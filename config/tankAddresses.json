@@ -1,6 +1,6 @@
 {
-    "evm.eth.sepolia": "0xa2fb6be0f82b0eD9b2453AadDc3b793485091241",
-    "evm.polygon.amoy": "0x64D06b253066d28F98e4394d379Dc6fb4dF67FE0",
+    "evm.eth.sepolia": "0x7AE3A8B899BE0D9E9de51b81a9912C0CEE128d88",
+    "evm.polygon.amoy": "0x57cA16EeE7fbeC69BFD46E4806B5d91e173dd600",
     "evm.bsc.testnet": "0x0000000000000000000000000000000000000000",
     "evm.arbitrum.sepolia": "0x0000000000000000000000000000000000000000",
     "evm.base.sepolia": "0x0000000000000000000000000000000000000000",

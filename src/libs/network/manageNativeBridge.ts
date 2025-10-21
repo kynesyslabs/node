@@ -15,7 +15,6 @@ import { EVMSmartContractManagement } from "@/features/bridges/native/EVMSmartCo
 const EvmLiquidityTankABI = [
     {
         inputs: [
-            { internalType: "string", name: "bridgeId", type: "string" },
             { internalType: "address", name: "user", type: "address" },
             { internalType: "bytes", name: "signature", type: "bytes" },
             {
