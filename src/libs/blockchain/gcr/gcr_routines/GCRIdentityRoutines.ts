@@ -490,6 +490,7 @@ export default class GCRIdentityRoutines {
             !signingAddress ||
             !signatureType ||
             !signature ||
+            !publicKey ||
             !timestamp ||
             !signedData ||
             !network ||
@@ -525,13 +526,11 @@ export default class GCRIdentityRoutines {
             }
         }
 
-        // Validate timestamp is valid number or parseable date
-        const timestampNum =
-            typeof timestamp === "number" ? timestamp : Date.parse(timestamp)
-        if (isNaN(timestampNum) || timestampNum <= 0) {
+        // Validate timestamp is a valid positive number
+        if (typeof timestamp !== "number" || isNaN(timestamp) || timestamp <= 0) {
             return {
                 success: false,
-                message: `Invalid timestamp: ${timestamp}. Must be valid date or epoch milliseconds`,
+                message: `Invalid timestamp: ${timestamp}. Must be a positive number (epoch milliseconds)`,
             }
         }
 
@@ -553,7 +552,7 @@ export default class GCRIdentityRoutines {
             signingAddress,
             signatureType,
             signature,
-            publicKey: publicKey || "",
+            publicKey,
             timestamp,
             signedData,
             network,

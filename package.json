@@ -7,7 +7,7 @@
     "private": true,
     "main": "src/index.ts",
     "scripts": {
-        "lint": "prettier --plugin-search-dir . --check . && eslint .",
+        "lint": "prettier --plugin-search-dir . --check . && eslint . --ignore-pattern 'local_tests' --ignore-pattern 'aptos_tests'",
         "lint:fix": "eslint . --ignore-pattern 'local_tests' --ignore-pattern 'aptos_tests' --fix --ext .ts",
         "prettier-format": "prettier --config .prettierrc.json modules/**/*.ts --write",
         "format": "prettier --plugin-search-dir . --write .",
@@ -66,7 +66,6 @@
         "bs58": "^6.0.0",
         "bun": "^1.2.10",
         "cli-progress": "^3.12.0",
-        "crypto": "^1.0.1",
         "dotenv": "^16.4.5",
         "express": "^4.19.2",
         "fastify": "^4.28.1",
