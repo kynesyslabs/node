@@ -894,8 +894,12 @@ export class PointSystem {
         referralCode?: string,
     ): Promise<RPCResponse> {
         try {
+            // Normalize domain to lowercase for case-insensitive comparison
+            // SECURITY: Prevents point farming by linking same domain with different cases
+            const normalizedDomain = domain.toLowerCase()
+
             // Determine point value based on TLD
-            const isDemosDomain = domain.toLowerCase().endsWith(".demos")
+            const isDemosDomain = normalizedDomain.endsWith(".demos")
             const pointValue = isDemosDomain
                 ? pointValues.LINK_UD_DOMAIN_DEMOS
                 : pointValues.LINK_UD_DOMAIN
@@ -908,7 +912,7 @@ export class PointSystem {
             // Check if this specific domain is already linked
             const account = await ensureGCRForUser(userId)
             const udDomains = account.points.breakdown?.udDomains || {}
-            const domainAlreadyLinked = domain in udDomains
+            const domainAlreadyLinked = normalizedDomain in udDomains
 
             if (domainAlreadyLinked) {
                 return {
@@ -928,7 +932,7 @@ export class PointSystem {
                 userId,
                 pointValue,
                 "udDomains",
-                domain,
+                normalizedDomain,
                 referralCode,
             )
 
@@ -969,8 +973,12 @@ export class PointSystem {
         domain: string,
     ): Promise<RPCResponse> {
         try {
+            // Normalize domain to lowercase for case-insensitive comparison
+            // SECURITY: Ensures consistent lookup regardless of input case
+            const normalizedDomain = domain.toLowerCase()
+
             // Determine point value based on TLD
-            const isDemosDomain = domain.toLowerCase().endsWith(".demos")
+            const isDemosDomain = normalizedDomain.endsWith(".demos")
             const pointValue = isDemosDomain
                 ? pointValues.LINK_UD_DOMAIN_DEMOS
                 : pointValues.LINK_UD_DOMAIN
@@ -978,7 +986,7 @@ export class PointSystem {
             // Check if user has points for this domain to deduct
             const account = await ensureGCRForUser(userId)
             const udDomains = account.points.breakdown?.udDomains || {}
-            const hasDomainPoints = domain in udDomains && udDomains[domain] > 0
+            const hasDomainPoints = normalizedDomain in udDomains && udDomains[normalizedDomain] > 0
 
             if (!hasDomainPoints) {
                 const userPointsWithIdentities = await this.getUserPointsInternal(
@@ -997,7 +1005,7 @@ export class PointSystem {
             }
 
             // Deduct points by updating the GCR
-            await this.addPointsToGCR(userId, -pointValue, "udDomains", domain)
+            await this.addPointsToGCR(userId, -pointValue, "udDomains", normalizedDomain)
 
             // Get updated points
             const updatedPoints = await this.getUserPointsInternal(userId)
