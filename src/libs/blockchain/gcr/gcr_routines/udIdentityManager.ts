@@ -1,6 +1,6 @@
 import ensureGCRForUser from "./ensureGCRForUser"
 import log from "@/utilities/logger"
-import { UDIdentityAssignPayload } from "node_modules/@kynesyslabs/demosdk/build/types/abstraction"
+import { UDIdentityAssignPayload } from "@kynesyslabs/demosdk/build/types/abstraction"
 import { EVMDomainResolution, SignableAddress, UnifiedDomainResolution } from "@kynesyslabs/demosdk/types"
 import { ethers } from "ethers"
 import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
@@ -255,7 +255,7 @@ export class UDIdentityManager {
      * @param domain - The UD domain (e.g., "brad.crypto" or "partner-engineering.demos")
      * @returns UnifiedDomainResolution with authorized addresses and chain-specific metadata
      */
-    private static async resolveUDDomain(
+    public static async resolveUDDomain(
         domain: string,
     ): Promise<UnifiedDomainResolution> {
         try {
