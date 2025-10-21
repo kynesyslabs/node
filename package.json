@@ -9,6 +9,8 @@
     "scripts": {
         "lint": "prettier --plugin-search-dir . --check . && eslint . --ignore-pattern 'local_tests' --ignore-pattern 'aptos_tests'",
         "lint:fix": "eslint . --ignore-pattern 'local_tests' --ignore-pattern 'aptos_tests' --fix --ext .ts",
+        "type-check": "bun build src/index.ts --target=bun --no-emit",
+        "type-check-ts": "tsc --noEmit",
         "prettier-format": "prettier --config .prettierrc.json modules/**/*.ts --write",
         "format": "prettier --plugin-search-dir . --write .",
         "start": "tsx -r tsconfig-paths/register src/index.ts",
