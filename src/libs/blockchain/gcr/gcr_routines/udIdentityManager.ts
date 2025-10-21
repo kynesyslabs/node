@@ -363,11 +363,18 @@ export class UDIdentityManager {
             }
 
             // Step 5: Find the authorized address that matches the signing address
-            const matchingAddress = resolution.authorizedAddresses.find(
-                (auth) => auth.address.toLowerCase() === signingAddress.toLowerCase(),
-            )
+            // SECURITY: Solana addresses are case-sensitive (base58), EVM addresses are case-insensitive
+            const matchingAddress = resolution.authorizedAddresses.find((auth) => {
+                // Solana addresses are case-sensitive (base58 encoding)
+                if (auth.signatureType === "solana") {
+                    return auth.address === signingAddress
+                }
+                // EVM addresses are case-insensitive
+                return auth.address.toLowerCase() === signingAddress.toLowerCase()
+            })
 
             if (!matchingAddress) {
+                // Use original casing in error message
                 const authorizedList = resolution.authorizedAddresses
                     .map((a) => `${a.address} (${a.recordKey})`)
                     .join(", ")
