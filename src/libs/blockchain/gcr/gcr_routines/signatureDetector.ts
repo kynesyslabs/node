@@ -21,16 +21,23 @@ import { SignatureType } from "@kynesyslabs/demosdk/types"
  * detectSignatureType("8VqZ8cqQ8h9FqF7cXNx5bXKqNz9V8F7h9FqF7cXNx5b") // "solana"
  */
 export function detectSignatureType(address: string): SignatureType | null {
+    // SECURITY: Early guard for non-string inputs to prevent TypeError on regex.test()
+    if (typeof address !== "string" || !address.trim()) {
+        return null
+    }
+
+    const trimmedAddress = address.trim()
+
     // EVM address pattern: 0x followed by 40 hex characters
     // Examples: 0x45238D633D6a1d18ccde5fFD234958ECeA46eB86
-    if (/^0x[0-9a-fA-F]{40}$/.test(address)) {
+    if (/^0x[0-9a-fA-F]{40}$/.test(trimmedAddress)) {
         return "evm"
     }
 
     // Solana address pattern: Base58 encoded, typically 32-44 characters
     // Base58 alphabet: 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
     // Examples: 8VqZ8cqQ8h9FqF7cXNx5bXKqNz9V8F7h9FqF7cXNx5b
-    if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
+    if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmedAddress)) {
         return "solana"
     }
 
