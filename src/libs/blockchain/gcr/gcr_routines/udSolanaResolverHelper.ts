@@ -262,7 +262,7 @@ export class SolanaDomainResolver {
     }
 
     const versionBuffer = Buffer.alloc(8)
-    versionBuffer.writeBigUInt64LE(BigInt(recordVersion))
+    versionBuffer.writeBigUInt64LE(BigInt(recordVersion.toString()))
 
     const [userRecordPda] = PublicKey.findProgramAddressSync(
       [
