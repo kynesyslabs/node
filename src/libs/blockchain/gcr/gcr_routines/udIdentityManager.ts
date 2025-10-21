@@ -1,10 +1,13 @@
 import ensureGCRForUser from "./ensureGCRForUser"
 import log from "@/utilities/logger"
 import { UDIdentityAssignPayload } from "node_modules/@kynesyslabs/demosdk/build/types/abstraction"
-import { EVMDomainResolution, SignableAddress } from "@kynesyslabs/demosdk/types"
+import { EVMDomainResolution, SignableAddress, UnifiedDomainResolution } from "@kynesyslabs/demosdk/types"
 import { ethers } from "ethers"
 import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
 import { detectSignatureType } from "./signatureDetector"
+import { SolanaDomainResolver } from "./udSolanaResolverHelper"
+import nacl from "tweetnacl"
+import bs58 from "bs58"
 
 /**
  * UDIdentityManager - Handles Unstoppable Domains identity verification and storage
@@ -54,6 +57,62 @@ const UD_RECORD_KEYS = [
 
 export class UDIdentityManager {
     constructor() {}
+
+    /**
+     * Convert EVM domain resolution to unified format
+     *
+     * @param evmResolution - EVM resolution result
+     * @returns UnifiedDomainResolution
+     */
+    private static evmToUnified(evmResolution: EVMDomainResolution): UnifiedDomainResolution {
+        const authorizedAddresses = this.extractSignableAddresses(evmResolution.records)
+
+        return {
+            domain: evmResolution.domain,
+            network: evmResolution.network,
+            registryType: "UNS", // EVM resolutions are always UNS (CNS handled separately if needed)
+            authorizedAddresses,
+            metadata: {
+                evm: {
+                    tokenId: evmResolution.tokenId,
+                    owner: evmResolution.owner,
+                    resolver: evmResolution.resolver,
+                },
+            },
+        }
+    }
+
+    /**
+     * Convert Solana domain resolution to unified format
+     *
+     * @param solanaResolution - Solana resolution result from SolanaDomainResolver
+     * @returns UnifiedDomainResolution
+     */
+    private static solanaToUnified(
+        solanaResolution: import("./udSolanaResolverHelper").DomainResolutionResult,
+    ): UnifiedDomainResolution {
+        // Convert Solana records to Record<string, string | null> format
+        const recordsMap: Record<string, string | null> = {}
+        for (const record of solanaResolution.records) {
+            recordsMap[record.key] = record.value
+        }
+
+        const authorizedAddresses = this.extractSignableAddresses(recordsMap)
+
+        return {
+            domain: solanaResolution.domain,
+            network: "solana",
+            registryType: "UNS",
+            authorizedAddresses,
+            metadata: {
+                solana: {
+                    sldPda: solanaResolution.sldPda,
+                    domainPropertiesPda: solanaResolution.domainPropertiesPda || "",
+                    recordsVersion: solanaResolution.recordsVersion || 0,
+                },
+            },
+        }
+    }
 
     /**
      * Fetch all domain records from a resolver contract
@@ -115,23 +174,24 @@ export class UDIdentityManager {
     }
 
     /**
-     * Resolve an Unstoppable Domain with full records (UPDATED for multi-address verification)
+     * Resolve an Unstoppable Domain with full records (PHASE 3: Multi-chain unified resolution)
      *
-     * Multi-chain resolution strategy (per UD docs):
+     * Multi-chain resolution strategy:
      * 1. Try Polygon L2 UNS first (most new domains, cheaper gas)
      * 2. Try Base L2 UNS (new L2 option - growing adoption)
      * 3. Try Sonic (emerging network support)
      * 4. Fallback to Ethereum L1 UNS (legacy domains)
      * 5. Fallback to Ethereum L1 CNS (oldest legacy domains)
+     * 6. Fallback to Solana (.demos and other Solana domains)
      *
-     * CHANGED: Now fetches ALL domain records, not just owner
+     * CHANGED (Phase 3): Returns UnifiedDomainResolution supporting both EVM and Solana
      *
-     * @param domain - The UD domain (e.g., "brad.crypto")
-     * @returns EVMDomainResolution with owner, resolver, and all records
+     * @param domain - The UD domain (e.g., "brad.crypto" or "partner-engineering.demos")
+     * @returns UnifiedDomainResolution with authorized addresses and chain-specific metadata
      */
     private static async resolveUDDomain(
         domain: string,
-    ): Promise<EVMDomainResolution> {
+    ): Promise<UnifiedDomainResolution> {
         try {
             // Convert domain to tokenId using namehash algorithm
             const tokenId = ethers.namehash(domain)
@@ -163,7 +223,8 @@ export class UDIdentityManager {
 
                 log.debug(`Domain ${domain} resolved on Polygon UNS: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`)
 
-                return {
+                // Convert to unified format
+                const evmResolution: EVMDomainResolution = {
                     domain,
                     network: "polygon",
                     tokenId,
@@ -171,6 +232,7 @@ export class UDIdentityManager {
                     resolver: resolverAddress,
                     records,
                 }
+                return this.evmToUnified(evmResolution)
             } catch (polygonError) {
                 log.debug(
                     `Polygon UNS lookup failed for ${domain}, trying Base`,
@@ -201,7 +263,7 @@ export class UDIdentityManager {
 
                     log.debug(`Domain ${domain} resolved on Base UNS: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`)
 
-                    return {
+                    const evmResolution: EVMDomainResolution = {
                         domain,
                         network: "base",
                         tokenId,
@@ -209,6 +271,7 @@ export class UDIdentityManager {
                         resolver: resolverAddress,
                         records,
                     }
+                    return this.evmToUnified(evmResolution)
                 } catch (baseError) {
                     log.debug(
                         `Base UNS lookup failed for ${domain}, trying Sonic`,
@@ -239,7 +302,7 @@ export class UDIdentityManager {
 
                         log.debug(`Domain ${domain} resolved on Sonic UNS: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`)
 
-                        return {
+                        const evmResolution: EVMDomainResolution = {
                             domain,
                             network: "sonic",
                             tokenId,
@@ -247,6 +310,7 @@ export class UDIdentityManager {
                             resolver: resolverAddress,
                             records,
                         }
+                        return this.evmToUnified(evmResolution)
                     } catch (sonicError) {
                         log.debug(
                             `Sonic UNS lookup failed for ${domain}, trying Ethereum`,
@@ -277,7 +341,7 @@ export class UDIdentityManager {
 
                             log.debug(`Domain ${domain} resolved on Ethereum UNS: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`)
 
-                            return {
+                            const evmResolution: EVMDomainResolution = {
                                 domain,
                                 network: "ethereum",
                                 tokenId,
@@ -285,6 +349,7 @@ export class UDIdentityManager {
                                 resolver: resolverAddress,
                                 records,
                             }
+                            return this.evmToUnified(evmResolution)
                         } catch (ethereumUnsError) {
                             log.debug(
                                 `Ethereum UNS lookup failed for ${domain}, trying CNS`,
@@ -314,7 +379,7 @@ export class UDIdentityManager {
 
                             log.debug(`Domain ${domain} resolved on Ethereum CNS: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`)
 
-                            return {
+                            const evmResolution: EVMDomainResolution = {
                                 domain,
                                 network: "ethereum",
                                 tokenId,
@@ -322,9 +387,28 @@ export class UDIdentityManager {
                                 resolver: resolverAddress,
                                 records,
                             }
+                            return this.evmToUnified(evmResolution)
                         }
                     }
                 }
+            }
+
+            // PHASE 3: All EVM networks failed, try Solana fallback
+            log.debug(`All EVM networks failed for ${domain}, trying Solana`)
+
+            try {
+                const solanaResolver = new SolanaDomainResolver()
+                const solanaResult = await solanaResolver.resolveDomain(domain, UD_RECORD_KEYS)
+
+                if (solanaResult.exists) {
+                    log.debug(`Domain ${domain} resolved on Solana: records=${solanaResult.records.filter(r => r.found).length}/${UD_RECORD_KEYS.length}`)
+                    return this.solanaToUnified(solanaResult)
+                } else {
+                    throw new Error(solanaResult.error || "Domain not found on Solana")
+                }
+            } catch (solanaError) {
+                log.debug(`Solana lookup failed for ${domain}: ${solanaError}`)
+                throw new Error(`Domain ${domain} not found on any network (EVM or Solana)`)
             }
         } catch (error) {
             log.error(`Error resolving UD domain ${domain}: ${error}`)
@@ -333,7 +417,12 @@ export class UDIdentityManager {
     }
 
     /**
-     * Verify UD domain ownership and signature
+     * Verify UD domain ownership and signature (PHASE 4: Multi-address verification)
+     *
+     * This method now supports:
+     * - Verification with ANY authorized address in domain records (not just owner)
+     * - Both EVM and Solana signature types
+     * - Mixed signature types within the same domain
      *
      * @param payload - The UD identity payload from transaction
      * @param sender - The ed25519 address from transaction body
@@ -344,85 +433,167 @@ export class UDIdentityManager {
         sender: string,
     ): Promise<{ success: boolean; message: string }> {
         try {
+            // REVIEW: Using resolvedAddress for backward compatibility
+            // Phase 5 will update SDK to use signingAddress + signatureType
             const { domain, resolvedAddress, signature, signedData, network, registryType } =
                 payload.payload
 
-            // Step 1: Resolve domain to get actual owner address and verify network
+            // Step 1: Resolve domain to get all authorized addresses
             const resolution = await this.resolveUDDomain(domain)
 
             log.debug(
-                `Verifying UD domain ${domain}: resolved=${resolvedAddress}, actual=${resolution.owner}, network=${resolution.network}`,
+                `Verifying UD domain ${domain}: signing_address=${resolvedAddress}, network=${resolution.network}, authorized_addresses=${resolution.authorizedAddresses.length}`,
             )
 
-            // Step 2: Verify resolved address matches actual owner
-            if (resolution.owner.toLowerCase() !== resolvedAddress.toLowerCase()) {
+            // Step 2: Check if domain has any authorized addresses
+            if (resolution.authorizedAddresses.length === 0) {
                 return {
                     success: false,
-                    message: `Domain ownership mismatch: domain ${domain} is owned by ${resolution.owner}, not ${resolvedAddress}`,
+                    message: `Domain ${domain} has no authorized addresses in records`,
                 }
             }
 
-            // Step 2.5: Verify network matches (warn if mismatch but allow)
+            // Step 3: Verify network matches (warn if mismatch but allow)
             if (resolution.network !== network) {
                 log.warning(
                     `Network mismatch for ${domain}: claimed=${network}, actual=${resolution.network}`,
                 )
             }
 
-            // Step 2.6: Verify registry type matches (warn if mismatch but allow)
+            // Step 4: Verify registry type matches (warn if mismatch but allow)
             if (resolution.registryType !== registryType) {
                 log.warning(
                     `Registry type mismatch for ${domain}: claimed=${registryType}, actual=${resolution.registryType}`,
                 )
             }
 
-            // Step 3: Verify signature from resolved address
-            // ethers.verifyMessage recovers the address that signed the message
-            let recoveredAddress: string
-            try {
-                recoveredAddress = ethers.verifyMessage(signedData, signature)
-            } catch (error) {
-                log.error(`Error verifying signature: ${error}`)
+            // Step 5: Find the authorized address that matches the signing address
+            const matchingAddress = resolution.authorizedAddresses.find(
+                (auth) => auth.address.toLowerCase() === resolvedAddress.toLowerCase(),
+            )
+
+            if (!matchingAddress) {
+                const authorizedList = resolution.authorizedAddresses
+                    .map((a) => `${a.address} (${a.recordKey})`)
+                    .join(", ")
                 return {
                     success: false,
-                    message: `Invalid signature format: ${error}`,
+                    message: `Address ${resolvedAddress} is not authorized for domain ${domain}. Authorized addresses: ${authorizedList}`,
                 }
             }
 
-            log.debug(`Recovered address from signature: ${recoveredAddress}`)
+            log.debug(
+                `Found matching authorized address: ${matchingAddress.address} (${matchingAddress.signatureType}) from ${matchingAddress.recordKey}`,
+            )
 
-            // Step 4: Verify recovered address matches resolved address
-            if (
-                recoveredAddress.toLowerCase() !== resolvedAddress.toLowerCase()
-            ) {
-                return {
-                    success: false,
-                    message: `Signature verification failed: signed by ${recoveredAddress}, expected ${resolvedAddress}`,
-                }
+            // Step 6: Verify signature based on signature type
+            const signatureValid = await this.verifySignature(
+                signedData,
+                signature,
+                matchingAddress,
+            )
+
+            if (!signatureValid.success) {
+                return signatureValid
             }
 
-            // Step 5: Verify challenge contains correct Demos public key
+            // Step 7: Verify challenge contains correct Demos public key
             if (!signedData.includes(sender)) {
                 return {
                     success: false,
-                    message:
-                        "Challenge message does not contain Demos public key",
+                    message: "Challenge message does not contain Demos public key",
                 }
             }
 
             log.info(
-                `UD identity verified for domain ${domain} (${resolution.network} ${resolution.registryType} registry)`,
+                `UD identity verified for domain ${domain}: signed by ${matchingAddress.address} (${matchingAddress.signatureType}) via ${resolution.network} ${resolution.registryType} registry`,
             )
 
             return {
                 success: true,
-                message: `Verified ownership of ${domain} via ${resolution.network} ${resolution.registryType} registry`,
+                message: `Verified ownership of ${domain} via ${matchingAddress.signatureType} signature from ${matchingAddress.recordKey}`,
             }
         } catch (error) {
             log.error(`Error verifying UD payload: ${error}`)
             return {
                 success: false,
                 message: `Verification error: ${error}`,
+            }
+        }
+    }
+
+    /**
+     * Verify a signature based on signature type (PHASE 4: EVM + Solana support)
+     *
+     * @param signedData - The message that was signed
+     * @param signature - The signature to verify
+     * @param authorizedAddress - The authorized address with signature type
+     * @returns Verification result
+     */
+    private static async verifySignature(
+        signedData: string,
+        signature: string,
+        authorizedAddress: SignableAddress,
+    ): Promise<{ success: boolean; message: string }> {
+        try {
+            if (authorizedAddress.signatureType === "evm") {
+                // EVM signature verification using ethers
+                const recoveredAddress = ethers.verifyMessage(signedData, signature)
+
+                if (recoveredAddress.toLowerCase() !== authorizedAddress.address.toLowerCase()) {
+                    return {
+                        success: false,
+                        message: `EVM signature verification failed: signed by ${recoveredAddress}, expected ${authorizedAddress.address}`,
+                    }
+                }
+
+                log.debug(`EVM signature verified: ${recoveredAddress}`)
+                return { success: true, message: "EVM signature valid" }
+
+            } else if (authorizedAddress.signatureType === "solana") {
+                // Solana signature verification using nacl
+                // Solana uses base58 encoding for addresses and signatures
+                try {
+                    // Decode base58 signature and public key to Uint8Array
+                    const signatureBytes = bs58.decode(signature)
+                    const messageBytes = new TextEncoder().encode(signedData)
+                    const publicKeyBytes = bs58.decode(authorizedAddress.address)
+
+                    // Verify signature using nacl
+                    const isValid = nacl.sign.detached.verify(
+                        messageBytes,
+                        signatureBytes,
+                        publicKeyBytes,
+                    )
+
+                    if (!isValid) {
+                        return {
+                            success: false,
+                            message: `Solana signature verification failed for address ${authorizedAddress.address}`,
+                        }
+                    }
+
+                    log.debug(`Solana signature verified: ${authorizedAddress.address}`)
+                    return { success: true, message: "Solana signature valid" }
+
+                } catch (error) {
+                    return {
+                        success: false,
+                        message: `Solana signature format error: ${error}`,
+                    }
+                }
+
+            } else {
+                return {
+                    success: false,
+                    message: `Unsupported signature type: ${authorizedAddress.signatureType}`,
+                }
+            }
+        } catch (error) {
+            log.error(`Error verifying signature: ${error}`)
+            return {
+                success: false,
+                message: `Signature verification error: ${error}`,
             }
         }
     }
