@@ -31,7 +31,9 @@ export class GCRMain {
                 twitter: number
                 github: number
                 discord: number
+                telegram: number
             }
+            udDomains: { [domain: string]: number }
             referrals: number
             demosFollow: number
             weeklyChallenge?: Array<{
