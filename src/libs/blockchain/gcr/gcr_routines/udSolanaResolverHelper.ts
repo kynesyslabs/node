@@ -302,8 +302,7 @@ export class SolanaDomainResolver {
       const provider = new AnchorProvider(connection, wallet, {
         commitment: this.config.commitment,
       })
-      this.program = new Program(UnsSolIdl, provider) as Program<UnsSol>
-
+      this.program = new Program(UnsSolIdl as any, this.unsProgramId, provider) as Program<UnsSol>
       return this.program
     } catch (error) {
       throw new ConnectionError(
