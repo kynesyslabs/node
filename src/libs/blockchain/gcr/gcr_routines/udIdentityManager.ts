@@ -1,8 +1,10 @@
 import ensureGCRForUser from "./ensureGCRForUser"
 import log from "@/utilities/logger"
 import { UDIdentityAssignPayload } from "node_modules/@kynesyslabs/demosdk/build/types/abstraction"
+import { EVMDomainResolution, SignableAddress } from "@kynesyslabs/demosdk/types"
 import { ethers } from "ethers"
 import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
+import { detectSignatureType } from "./signatureDetector"
 
 /**
  * UDIdentityManager - Handles Unstoppable Domains identity verification and storage
@@ -30,13 +32,90 @@ const ethereumCnsRegistryAddress = "0xD1E5b0FF1287aA9f9A268759062E4Ab08b9Dacbe"
 
 const registryAbi = [
     "function ownerOf(uint256 tokenId) external view returns (address)",
+    "function resolverOf(uint256 tokenId) external view returns (address)",
+]
+
+const resolverAbi = [
+    "function get(string key, uint256 tokenId) external view returns (string)",
+]
+
+// REVIEW: UD record keys to fetch for multi-address verification
+// Based on test data: EVM domains have sparse records, prioritize common ones
+const UD_RECORD_KEYS = [
+    "crypto.ETH.address",
+    "crypto.SOL.address",
+    "crypto.BTC.address",
+    "crypto.MATIC.address",
+    "token.EVM.ETH.ETH.address",
+    "token.EVM.MATIC.MATIC.address",
+    "token.SOL.SOL.SOL.address",
+    "token.SOL.SOL.USDC.address",
 ]
 
 export class UDIdentityManager {
     constructor() {}
 
     /**
-     * Resolve an Unstoppable Domain to its owner's Ethereum address
+     * Fetch all domain records from a resolver contract
+     *
+     * @param resolver - ethers Contract instance for the resolver
+     * @param tokenId - Domain token ID (namehash)
+     * @returns Record key-value pairs
+     */
+    private static async fetchDomainRecords(
+        resolver: ethers.Contract,
+        tokenId: string,
+    ): Promise<Record<string, string | null>> {
+        const records: Record<string, string | null> = {}
+
+        for (const key of UD_RECORD_KEYS) {
+            try {
+                const value = await resolver.get(key, tokenId)
+                records[key] = value && value !== "" ? value : null
+            } catch {
+                records[key] = null
+            }
+        }
+
+        return records
+    }
+
+    /**
+     * Extract signable addresses from domain records
+     *
+     * @param records - Record key-value pairs from domain resolution
+     * @returns Array of signable addresses with their metadata
+     */
+    private static extractSignableAddresses(
+        records: Record<string, string | null>,
+    ): SignableAddress[] {
+        const signableAddresses: SignableAddress[] = []
+
+        for (const [recordKey, address] of Object.entries(records)) {
+            // Skip null/empty addresses
+            if (!address || address === "") {
+                continue
+            }
+
+            // Detect signature type from address format
+            const signatureType = detectSignatureType(address)
+            if (!signatureType) {
+                log.debug(`Skipping unrecognized address format: ${address} (${recordKey})`)
+                continue
+            }
+
+            signableAddresses.push({
+                address,
+                recordKey,
+                signatureType,
+            })
+        }
+
+        return signableAddresses
+    }
+
+    /**
+     * Resolve an Unstoppable Domain with full records (UPDATED for multi-address verification)
      *
      * Multi-chain resolution strategy (per UD docs):
      * 1. Try Polygon L2 UNS first (most new domains, cheaper gas)
@@ -45,16 +124,14 @@ export class UDIdentityManager {
      * 4. Fallback to Ethereum L1 UNS (legacy domains)
      * 5. Fallback to Ethereum L1 CNS (oldest legacy domains)
      *
+     * CHANGED: Now fetches ALL domain records, not just owner
+     *
      * @param domain - The UD domain (e.g., "brad.crypto")
-     * @returns Object with owner address, network, and registry type
+     * @returns EVMDomainResolution with owner, resolver, and all records
      */
     private static async resolveUDDomain(
         domain: string,
-    ): Promise<{
-        owner: string
-        network: "polygon" | "ethereum" | "base" | "sonic"
-        registryType: "UNS" | "CNS"
-    }> {
+    ): Promise<EVMDomainResolution> {
         try {
             // Convert domain to tokenId using namehash algorithm
             const tokenId = ethers.namehash(domain)
@@ -71,8 +148,29 @@ export class UDIdentityManager {
                 )
 
                 const owner = await polygonUnsRegistry.ownerOf(tokenId)
-                log.debug(`Domain ${domain} owner (Polygon UNS): ${owner}`)
-                return { owner, network: "polygon", registryType: "UNS" }
+
+                // Fetch resolver address (may be registry itself or separate contract)
+                let resolverAddress: string
+                try {
+                    resolverAddress = await polygonUnsRegistry.resolverOf(tokenId)
+                } catch {
+                    resolverAddress = polygonUnsRegistryAddress
+                }
+
+                // Fetch all records from resolver
+                const resolver = new ethers.Contract(resolverAddress, resolverAbi, polygonProvider)
+                const records = await this.fetchDomainRecords(resolver, tokenId)
+
+                log.debug(`Domain ${domain} resolved on Polygon UNS: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`)
+
+                return {
+                    domain,
+                    network: "polygon",
+                    tokenId,
+                    owner,
+                    resolver: resolverAddress,
+                    records,
+                }
             } catch (polygonError) {
                 log.debug(
                     `Polygon UNS lookup failed for ${domain}, trying Base`,
@@ -90,8 +188,27 @@ export class UDIdentityManager {
                     )
 
                     const owner = await baseUnsRegistry.ownerOf(tokenId)
-                    log.debug(`Domain ${domain} owner (Base UNS): ${owner}`)
-                    return { owner, network: "base", registryType: "UNS" }
+
+                    let resolverAddress: string
+                    try {
+                        resolverAddress = await baseUnsRegistry.resolverOf(tokenId)
+                    } catch {
+                        resolverAddress = baseUnsRegistryAddress
+                    }
+
+                    const resolver = new ethers.Contract(resolverAddress, resolverAbi, baseProvider)
+                    const records = await this.fetchDomainRecords(resolver, tokenId)
+
+                    log.debug(`Domain ${domain} resolved on Base UNS: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`)
+
+                    return {
+                        domain,
+                        network: "base",
+                        tokenId,
+                        owner,
+                        resolver: resolverAddress,
+                        records,
+                    }
                 } catch (baseError) {
                     log.debug(
                         `Base UNS lookup failed for ${domain}, trying Sonic`,
@@ -109,8 +226,27 @@ export class UDIdentityManager {
                         )
 
                         const owner = await sonicUnsRegistry.ownerOf(tokenId)
-                        log.debug(`Domain ${domain} owner (Sonic UNS): ${owner}`)
-                        return { owner, network: "sonic", registryType: "UNS" }
+
+                        let resolverAddress: string
+                        try {
+                            resolverAddress = await sonicUnsRegistry.resolverOf(tokenId)
+                        } catch {
+                            resolverAddress = sonicUnsRegistryAddress
+                        }
+
+                        const resolver = new ethers.Contract(resolverAddress, resolverAbi, sonicProvider)
+                        const records = await this.fetchDomainRecords(resolver, tokenId)
+
+                        log.debug(`Domain ${domain} resolved on Sonic UNS: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`)
+
+                        return {
+                            domain,
+                            network: "sonic",
+                            tokenId,
+                            owner,
+                            resolver: resolverAddress,
+                            records,
+                        }
                     } catch (sonicError) {
                         log.debug(
                             `Sonic UNS lookup failed for ${domain}, trying Ethereum`,
@@ -128,8 +264,27 @@ export class UDIdentityManager {
                             )
 
                             const owner = await ethereumUnsRegistry.ownerOf(tokenId)
-                            log.debug(`Domain ${domain} owner (Ethereum UNS): ${owner}`)
-                            return { owner, network: "ethereum", registryType: "UNS" }
+
+                            let resolverAddress: string
+                            try {
+                                resolverAddress = await ethereumUnsRegistry.resolverOf(tokenId)
+                            } catch {
+                                resolverAddress = ethereumUnsRegistryAddress
+                            }
+
+                            const resolver = new ethers.Contract(resolverAddress, resolverAbi, ethereumProvider)
+                            const records = await this.fetchDomainRecords(resolver, tokenId)
+
+                            log.debug(`Domain ${domain} resolved on Ethereum UNS: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`)
+
+                            return {
+                                domain,
+                                network: "ethereum",
+                                tokenId,
+                                owner,
+                                resolver: resolverAddress,
+                                records,
+                            }
                         } catch (ethereumUnsError) {
                             log.debug(
                                 `Ethereum UNS lookup failed for ${domain}, trying CNS`,
@@ -146,8 +301,27 @@ export class UDIdentityManager {
                             )
 
                             const owner = await ethereumCnsRegistry.ownerOf(tokenId)
-                            log.debug(`Domain ${domain} owner (Ethereum CNS): ${owner}`)
-                            return { owner, network: "ethereum", registryType: "CNS" }
+
+                            let resolverAddress: string
+                            try {
+                                resolverAddress = await ethereumCnsRegistry.resolverOf(tokenId)
+                            } catch {
+                                resolverAddress = ethereumCnsRegistryAddress
+                            }
+
+                            const resolver = new ethers.Contract(resolverAddress, resolverAbi, ethereumProvider)
+                            const records = await this.fetchDomainRecords(resolver, tokenId)
+
+                            log.debug(`Domain ${domain} resolved on Ethereum CNS: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`)
+
+                            return {
+                                domain,
+                                network: "ethereum",
+                                tokenId,
+                                owner,
+                                resolver: resolverAddress,
+                                records,
+                            }
                         }
                     }
                 }
