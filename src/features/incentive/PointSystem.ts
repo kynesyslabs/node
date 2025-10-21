@@ -9,30 +9,7 @@ import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUse
 import { Twitter } from "@/libs/identity/tools/twitter"
 import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentityManager"
 import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
-
-// Local UserPoints interface matching GCR entity structure
-interface UserPoints {
-    userId: string
-    referralCode: string
-    totalPoints: number
-    breakdown: {
-        web3Wallets: { [chain: string]: number }
-        socialAccounts: {
-            twitter: number
-            github: number
-            discord: number
-            telegram: number
-        }
-        udDomains: { [domain: string]: number }
-        referrals: number
-        demosFollow: number
-    }
-    linkedWallets: string[]
-    linkedSocials: { twitter?: string }
-    lastUpdated: Date
-    flagged: boolean | null
-    flaggedReason: string | null
-}
+import { UserPoints } from "@kynesyslabs/demosdk/abstraction"
 
 const pointValues = {
     LINK_WEB3_WALLET: 0.5,
@@ -1046,7 +1023,7 @@ export class PointSystem {
             // SECURITY: Verify domain exists in GCR identities to prevent race conditions
             // This prevents concurrent transactions from awarding points before domain is removed
             const domainInIdentities = account.identities.ud?.some(
-                (id: SavedUdIdentity) => id.domain.toLowerCase() === normalizedDomain
+                (id: SavedUdIdentity) => id.domain.toLowerCase() === normalizedDomain,
             )
             if (!domainInIdentities) {
                 return {
