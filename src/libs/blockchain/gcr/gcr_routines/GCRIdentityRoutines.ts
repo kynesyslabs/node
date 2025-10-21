@@ -484,7 +484,7 @@ export default class GCRIdentityRoutines {
             registryType,
         } = editOperation.data
 
-        // REVIEW: Validate required fields
+        // REVIEW: Validate required fields presence
         if (
             !domain ||
             !signingAddress ||
@@ -495,7 +495,44 @@ export default class GCRIdentityRoutines {
             !network ||
             !registryType
         ) {
-            return { success: false, message: "Invalid edit operation data" }
+            return {
+                success: false,
+                message: "Invalid edit operation data: missing required fields",
+            }
+        }
+
+        // Validate enum fields have allowed values
+        const validSignatureTypes = ["evm", "solana"]
+        const validNetworks = ["polygon", "base", "sonic", "ethereum", "solana"]
+        const validRegistryTypes = ["UNS", "CNS"]
+
+        if (!validSignatureTypes.includes(signatureType)) {
+            return {
+                success: false,
+                message: `Invalid signatureType: ${signatureType}. Must be "evm" or "solana"`,
+            }
+        }
+        if (!validNetworks.includes(network)) {
+            return {
+                success: false,
+                message: `Invalid network: ${network}. Must be one of: ${validNetworks.join(", ")}`,
+            }
+        }
+        if (!validRegistryTypes.includes(registryType)) {
+            return {
+                success: false,
+                message: `Invalid registryType: ${registryType}. Must be "UNS" or "CNS"`,
+            }
+        }
+
+        // Validate timestamp is valid number or parseable date
+        const timestampNum =
+            typeof timestamp === "number" ? timestamp : Date.parse(timestamp)
+        if (isNaN(timestampNum) || timestampNum <= 0) {
+            return {
+                success: false,
+                message: `Invalid timestamp: ${timestamp}. Must be valid date or epoch milliseconds`,
+            }
         }
 
         const accountGCR = await ensureGCRForUser(editOperation.account)
