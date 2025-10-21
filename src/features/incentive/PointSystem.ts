@@ -928,6 +928,24 @@ export class PointSystem {
                 }
             }
 
+            // SECURITY: Verify domain exists in GCR identities to prevent race conditions
+            // This prevents concurrent transactions from awarding points before domain is removed
+            const domainInIdentities = account.identities.ud?.some(
+                (id: SavedUdIdentity) => id.domain.toLowerCase() === normalizedDomain
+            )
+            if (!domainInIdentities) {
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: `Cannot award points: domain ${normalizedDomain} not found in GCR identities`,
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
             // SECURITY: Verify domain ownership before allowing points award
             const { linkedWallets } = await this.getUserIdentitiesFromGCR(userId)
 
