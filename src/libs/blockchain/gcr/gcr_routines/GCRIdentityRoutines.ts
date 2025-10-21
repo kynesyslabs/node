@@ -548,7 +548,7 @@ export default class GCRIdentityRoutines {
         }
 
         const data: SavedUdIdentity = {
-            domain,
+            domain: domain.toLowerCase(), // Normalize to lowercase for consistency
             signingAddress,
             signatureType,
             signature,
