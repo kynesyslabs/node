@@ -1,4 +1,5 @@
-import { AnchorProvider, Wallet, Program } from "@coral-xyz/anchor"
+import { AnchorProvider, Program } from "@coral-xyz/anchor"
+import Wallet from "@coral-xyz/anchor/dist/cjs/nodewallet"
 import { PublicKey, Connection, Keypair, type Commitment } from "@solana/web3.js"
 import { createHash } from "crypto"
 import UnsSolIdl from "../../UDTypes/uns_sol.json" with { type: "json" }
