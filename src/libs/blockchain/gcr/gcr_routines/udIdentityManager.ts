@@ -406,11 +406,16 @@ export class UDIdentityManager {
             // SECURITY: Use strict validation instead of substring matching to prevent attacks
             // Expected format: "Link {signingAddress} to Demos identity {demosPublicKey}\n..."
             try {
+                // Allow optional 0x prefix in the challenge message
                 const demosIdentityRegex =
-                    /Link .+ to Demos identity ([a-fA-F0-9]+)/
+                    /Link .+ to Demos identity (?:0x)?([a-fA-F0-9]+)/
                 const match = signedData.match(demosIdentityRegex)
 
-                if (!match || match[1] !== sender) {
+                // Normalize both values by removing 0x prefix and lowercasing for comparison
+                const normalizedMatch = match?.[1]?.replace(/^0x/i, "").toLowerCase()
+                const normalizedSender = sender.replace(/^0x/i, "").toLowerCase()
+
+                if (!match || normalizedMatch !== normalizedSender) {
                     return {
                         success: false,
                         message:
