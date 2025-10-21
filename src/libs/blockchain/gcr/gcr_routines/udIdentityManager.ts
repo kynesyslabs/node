@@ -64,13 +64,16 @@ export class UDIdentityManager {
      * @param evmResolution - EVM resolution result
      * @returns UnifiedDomainResolution
      */
-    private static evmToUnified(evmResolution: EVMDomainResolution): UnifiedDomainResolution {
+    private static evmToUnified(
+        evmResolution: EVMDomainResolution,
+        registryType: "UNS" | "CNS",
+    ): UnifiedDomainResolution {
         const authorizedAddresses = this.extractSignableAddresses(evmResolution.records)
 
         return {
             domain: evmResolution.domain,
             network: evmResolution.network,
-            registryType: "UNS", // EVM resolutions are always UNS (CNS handled separately if needed)
+            registryType, // Use parameter instead of hardcoded value
             authorizedAddresses,
             metadata: {
                 evm: {
@@ -227,7 +230,7 @@ export class UDIdentityManager {
                 resolver: resolverAddress,
                 records,
             }
-            return this.evmToUnified(evmResolution)
+            return this.evmToUnified(evmResolution, registryType)
         } catch (error) {
             log.debug(
                 `${networkName} ${registryType} lookup failed for ${domain}: ${error instanceof Error ? error.message : String(error)}`,
