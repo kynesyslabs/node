@@ -90,6 +90,29 @@ async function handleCreate(
         }
     }
 
+    // Validate programName content
+    if (typeof programName !== "string" || programName.length === 0) {
+        return {
+            success: false,
+            message: "programName must be a non-empty string",
+        }
+    }
+
+    if (programName.length > 128) {
+        return {
+            success: false,
+            message: "programName exceeds maximum length of 128 characters",
+        }
+    }
+
+    // Validate programName format (alphanumeric, underscores, hyphens, dots)
+    if (!/^[a-zA-Z0-9_.-]+$/.test(programName)) {
+        return {
+            success: false,
+            message: "programName contains invalid characters (allowed: a-z, A-Z, 0-9, _, -, .)",
+        }
+    }
+
     if (!data) {
         return {
             success: false,
@@ -101,6 +124,48 @@ async function handleCreate(
         return {
             success: false,
             message: "CREATE requires accessControl mode",
+        }
+    }
+
+    // Validate allowedAddresses if provided
+    if (allowedAddresses !== undefined) {
+        if (!Array.isArray(allowedAddresses)) {
+            return {
+                success: false,
+                message: "allowedAddresses must be an array",
+            }
+        }
+
+        // Validate each address in the array
+        for (const addr of allowedAddresses) {
+            if (typeof addr !== "string") {
+                return {
+                    success: false,
+                    message: "allowedAddresses must contain only string values",
+                }
+            }
+
+            // Demos Network addresses are 64 character hex strings
+            if (!/^[a-f0-9]{64}$/i.test(addr)) {
+                return {
+                    success: false,
+                    message: `Invalid address format in allowedAddresses: ${addr}`,
+                }
+            }
+        }
+
+        // Validate restricted mode requires allowedAddresses
+        if (accessControl === "restricted" && allowedAddresses.length === 0) {
+            return {
+                success: false,
+                message: "Restricted mode requires at least one address in allowedAddresses",
+            }
+        }
+    } else if (accessControl === "restricted") {
+        // Restricted mode MUST have allowedAddresses
+        return {
+            success: false,
+            message: "Restricted mode requires allowedAddresses array",
         }
     }
 

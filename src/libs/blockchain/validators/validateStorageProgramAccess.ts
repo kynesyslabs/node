@@ -78,8 +78,13 @@ export function validateStorageProgramAccess(
                         error: "Public mode: only deployer can write",
                     }
                 }
+                return { success: true }
             }
-            return { success: true }
+            // Explicitly reject unknown operations
+            return {
+                success: false,
+                error: `Unknown operation for public mode: ${operation}`,
+            }
 
         case "restricted":
             // Check if address is in allowlist
