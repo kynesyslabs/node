@@ -69,16 +69,23 @@ export default class IdentityManager {
     static async filterConnections(
         sender: string,
         payload: InferFromSignaturePayload,
-    ): Promise<{ success: boolean; message: string }> {
+    ): Promise<{
+        success: boolean
+        message: string
+        twitterAccountConnected: boolean
+    }> {
         // INFO: Check if the user has a Twitter account
         const account = await ensureGCRForUser(sender)
         const twitterAccounts = account.identities.web2["twitter"] || []
-        if (twitterAccounts.length === 0) {
-            return {
-                success: false,
-                message:
-                    "Error: No Twitter account found. Please connect a Twitter account first",
-            }
+        let twitterAccountConnected = false
+
+        if (twitterAccounts.length > 0) {
+            twitterAccountConnected = true
+        }
+
+        const response = {
+            success: false,
+            twitterAccountConnected,
         }
 
         // INFO: Check if target address is active
@@ -89,7 +96,7 @@ export default class IdentityManager {
         // INFO: Check if the chainId is provided
         if (isEVM && !chainId) {
             return {
-                success: false,
+                ...response,
                 message: "Failed: EVM chainId not provided",
             }
         }
@@ -97,7 +104,7 @@ export default class IdentityManager {
         // INFO: Check if the chainId matches the subchain
         if (isEVM && chainId === chainIds.eth.sepolia) {
             return {
-                success: false,
+                ...response,
                 message: "Failed: Testnet addresses are not supported",
             }
         }
@@ -105,7 +112,7 @@ export default class IdentityManager {
         // INFO: Check if the given chainId and subchain are supported
         if (isEVM && !chainIds.eth[subchain]) {
             return {
-                success: false,
+                ...response,
                 message: "Failed: Unsupported chain",
             }
         }
@@ -113,7 +120,7 @@ export default class IdentityManager {
         // INFO: Check if the chainId matches the subchain
         if (isEVM && chainIds.eth[subchain] !== chainId) {
             return {
-                success: false,
+                ...response,
                 message: "Failed: ChainId does not match the given subchain",
             }
         }
@@ -137,27 +144,28 @@ export default class IdentityManager {
         // INFO: Check if the subchain is mainnet
         if (chain === "solana" && subchain !== "mainnet") {
             return {
-                success: false,
+                ...response,
                 message: "Failed: Testnet addresses are not supported",
             }
         }
 
         // INFO: Check if the target address is active
-    //     if (chain === "solana") {
-    //         const txcount =
-    //             await CrossChainTools.countSolanaTransactionsByAddress(
-    //                 targetAddress,
-    //             )
+        //     if (chain === "solana") {
+        //         const txcount =
+        //             await CrossChainTools.countSolanaTransactionsByAddress(
+        //                 targetAddress,
+        //             )
 
-    //         if (txcount === 0) {
-    //             return {
-    //                 success: false,
-    //                 message: "Failed: Target address is not active",
-    //             }
-    //         }
-    //     }
+        //         if (txcount === 0) {
+        //             return {
+        //                 success: false,
+        //                 message: "Failed: Target address is not active",
+        //             }
+        //         }
+        //     }
 
         return {
+            ...response,
             success: true,
             message: "Filter check passed",
         }
@@ -174,10 +182,9 @@ export default class IdentityManager {
         payload: InferFromSignaturePayload,
         sender: string,
     ): Promise<{ success: boolean; message: string }> {
-        const { success, message } = await this.filterConnections(
-            sender,
-            payload,
-        )
+        const { success, message, twitterAccountConnected } =
+            await this.filterConnections(sender, payload)
+
         if (!success) {
             return {
                 success: false,
@@ -218,13 +225,17 @@ export default class IdentityManager {
             if (!messageVerified) {
                 return {
                     success: false,
-                    message: "Message could not be verified",
+                    message: `${chainId} payload signature could not be verified`,
                 }
             }
 
             return {
                 success: true,
-                message: "Message verified",
+                message:
+                    `${chainId} payload signature verified` +
+                    (!twitterAccountConnected
+                        ? ". Twitter account not connected, won't award points"
+                        : ""),
             }
         } catch (error) {
             log.error("Error: " + error)
