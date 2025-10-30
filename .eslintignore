@@ -7,3 +7,4 @@ dist
 .env
 postgres_*
 aptos_examples_ts
+local_tests

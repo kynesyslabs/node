@@ -31,6 +31,12 @@ import { manageNativeBridge } from "./manageNativeBridge"
 import Chain from "../blockchain/chain"
 import { RateLimiter } from "./middleware/rateLimiter"
 import GCR from "../blockchain/gcr/gcr"
+import {
+    handleD402Health,
+    handleD402Nonce,
+    handleD402Verify,
+    handleD402Settle,
+} from "./rpc/d402/routes"
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
@@ -390,6 +396,12 @@ export async function serverRpcBun() {
     server.get("/rate-limit/stats", () => {
         return jsonResponse(rateLimiter.getStats())
     })
+
+    // D402 Facilitator API Endpoints
+    server.get("/d402/health", handleD402Health)
+    server.get("/d402/nonce/:address", handleD402Nonce)
+    server.post("/d402/verify", handleD402Verify)
+    server.post("/d402/settle", handleD402Settle)
 
     // Main RPC endpoint
     server.post("/", async req => {

@@ -194,6 +194,24 @@ export default class GCR {
         }
     }
 
+    static async getGCRNonce(address: string): Promise<number> {
+        const db = await Datasource.getInstance()
+        const gcrRepository = db
+            .getDataSource()
+            .getRepository(GlobalChangeRegistry)
+
+        try {
+            const response = await gcrRepository.findOne({
+                select: ["details"],
+                where: { publicKey: address },
+            })
+            return response ? response.details.content.nonce : 0
+        } catch (e) {
+            term.yellow("[GET NONCE] No nonce for: " + address + "\n")
+            return 0
+        }
+    }
+
     static async getGCRTokenBalance(address: string, tokenAddress: string) {
         const db = await Datasource.getInstance()
         const gcrRepository = db
