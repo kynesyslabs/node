@@ -27,6 +27,15 @@ import {
     handleProtoPing,
     handleProtoVersionNegotiate,
 } from "./handlers/meta"
+import {
+    handleProposeBlockHash,
+    handleSetValidatorPhase,
+    handleGreenlight,
+    handleGetCommonValidatorSeed,
+    handleGetValidatorTimestamp,
+    handleGetValidatorPhase,
+    handleGetBlockTimestamp,
+} from "./handlers/consensus"
 
 export interface HandlerDescriptor {
     opcode: OmniOpcode
@@ -74,15 +83,15 @@ const DESCRIPTORS: HandlerDescriptor[] = [
 
     // 0x3X Consensus
     { opcode: OmniOpcode.CONSENSUS_GENERIC, name: "consensus_generic", authRequired: true, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.PROPOSE_BLOCK_HASH, name: "proposeBlockHash", authRequired: true, handler: createHttpFallbackHandler() },
+    { opcode: OmniOpcode.PROPOSE_BLOCK_HASH, name: "proposeBlockHash", authRequired: true, handler: handleProposeBlockHash },
     { opcode: OmniOpcode.VOTE_BLOCK_HASH, name: "voteBlockHash", authRequired: true, handler: createHttpFallbackHandler() },
     { opcode: OmniOpcode.BROADCAST_BLOCK, name: "broadcastBlock", authRequired: true, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.GET_COMMON_VALIDATOR_SEED, name: "getCommonValidatorSeed", authRequired: true, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.GET_VALIDATOR_TIMESTAMP, name: "getValidatorTimestamp", authRequired: true, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.SET_VALIDATOR_PHASE, name: "setValidatorPhase", authRequired: true, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.GET_VALIDATOR_PHASE, name: "getValidatorPhase", authRequired: true, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.GREENLIGHT, name: "greenlight", authRequired: true, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.GET_BLOCK_TIMESTAMP, name: "getBlockTimestamp", authRequired: true, handler: createHttpFallbackHandler() },
+    { opcode: OmniOpcode.GET_COMMON_VALIDATOR_SEED, name: "getCommonValidatorSeed", authRequired: true, handler: handleGetCommonValidatorSeed },
+    { opcode: OmniOpcode.GET_VALIDATOR_TIMESTAMP, name: "getValidatorTimestamp", authRequired: true, handler: handleGetValidatorTimestamp },
+    { opcode: OmniOpcode.SET_VALIDATOR_PHASE, name: "setValidatorPhase", authRequired: true, handler: handleSetValidatorPhase },
+    { opcode: OmniOpcode.GET_VALIDATOR_PHASE, name: "getValidatorPhase", authRequired: true, handler: handleGetValidatorPhase },
+    { opcode: OmniOpcode.GREENLIGHT, name: "greenlight", authRequired: true, handler: handleGreenlight },
+    { opcode: OmniOpcode.GET_BLOCK_TIMESTAMP, name: "getBlockTimestamp", authRequired: true, handler: handleGetBlockTimestamp },
     { opcode: OmniOpcode.VALIDATOR_STATUS_SYNC, name: "validatorStatusSync", authRequired: true, handler: createHttpFallbackHandler() },
 
     // 0x4X GCR Operations
