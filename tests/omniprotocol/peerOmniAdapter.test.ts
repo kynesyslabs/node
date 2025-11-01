@@ -35,7 +35,7 @@ let PeerOmniAdapter: typeof import("src/libs/omniprotocol/integration/peerAdapte
     ["default"]
 
 beforeAll(async () => {
-    ;({ DEFAULT_OMNIPROTOCOL_CONFIG } = await import("src/libs/omniprotocol/types/config"))
+    ({ DEFAULT_OMNIPROTOCOL_CONFIG } = await import("src/libs/omniprotocol/types/config"))
     ;({ default: PeerOmniAdapter } = await import("src/libs/omniprotocol/integration/peerAdapter"))
 })
 

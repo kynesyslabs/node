@@ -46,7 +46,7 @@ let OmniOpcode: typeof import("src/libs/omniprotocol/protocol/opcodes")["OmniOpc
 import type { HandlerContext } from "src/libs/omniprotocol/types/message"
 
 beforeAll(async () => {
-    ;({ handlerRegistry } = await import("src/libs/omniprotocol/protocol/registry"))
+    ({ handlerRegistry } = await import("src/libs/omniprotocol/protocol/registry"))
     ;({ OmniOpcode } = await import("src/libs/omniprotocol/protocol/opcodes"))
 })
 

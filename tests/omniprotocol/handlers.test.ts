@@ -149,7 +149,7 @@ let sharedStateMock: {
 }
 
 beforeAll(async () => {
-    ;({ dispatchOmniMessage } = await import("src/libs/omniprotocol/protocol/dispatcher"))
+    ({ dispatchOmniMessage } = await import("src/libs/omniprotocol/protocol/dispatcher"))
     ;({ OmniOpcode } = await import("src/libs/omniprotocol/protocol/opcodes"))
     ;({ encodeJsonRequest } = await import("src/libs/omniprotocol/serialization/jsonEnvelope"))
 

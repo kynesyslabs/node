@@ -47,7 +47,7 @@ let UnknownOpcodeError: typeof import("src/libs/omniprotocol/types/errors")
     ["UnknownOpcodeError"]
 
 beforeAll(async () => {
-    ;({ dispatchOmniMessage } = await import("src/libs/omniprotocol/protocol/dispatcher"))
+    ({ dispatchOmniMessage } = await import("src/libs/omniprotocol/protocol/dispatcher"))
     ;({ OmniOpcode } = await import("src/libs/omniprotocol/protocol/opcodes"))
     ;({ handlerRegistry } = await import("src/libs/omniprotocol/protocol/registry"))
     ;({ UnknownOpcodeError } = await import("src/libs/omniprotocol/types/errors"))
