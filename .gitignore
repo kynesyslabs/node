@@ -153,3 +153,8 @@ docs/storage_features
 claudedocs
 temp
 STORAGE_PROGRAMS_SPEC.md
+captraf.sh
+.gitignore
+omniprotocol_fixtures_scripts
+http-capture-1762006580.pcap
+http-traffic.json
