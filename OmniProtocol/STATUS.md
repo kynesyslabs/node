@@ -15,6 +15,11 @@
 - `0x26 getBlockByHash`
 - `0x27 getTxByHash`
 - `0x28 getMempool`
+- `0xF0 proto_versionNegotiate`
+- `0xF1 proto_capabilityExchange`
+- `0xF2 proto_error`
+- `0xF3 proto_ping`
+- `0xF4 proto_disconnect`
 - `0x4A gcr_getAddressInfo`
 
 ## Binary Handlers Pending
@@ -29,6 +34,5 @@
 - `0x50`–`0x5F` browser/client ops
 - `0x60`–`0x62` admin ops
 - `0x60`–`0x6F` reserved
-- `0xF0`–`0xF4` protocol meta (version/capabilities/error/ping/disconnect)
 
 _Last updated: 2025-10-31_
