@@ -169,7 +169,7 @@ export function encodeValidatorTimestampResponse(
 ): Buffer {
     return Buffer.concat([
         PrimitiveEncoder.encodeUInt16(payload.status),
-        PrimitiveEncoder.encodeUInt64(payload.timestamp ?? 0n),
+        PrimitiveEncoder.encodeUInt64(payload.timestamp ?? BigInt(0)),
         PrimitiveEncoder.encodeVarBytes(
             Buffer.from(JSON.stringify(payload.metadata ?? null), "utf8"),
         ),
@@ -217,8 +217,8 @@ export function encodeSetValidatorPhaseResponse(
     return Buffer.concat([
         PrimitiveEncoder.encodeUInt16(payload.status),
         PrimitiveEncoder.encodeBoolean(payload.greenlight ?? false),
-        PrimitiveEncoder.encodeUInt64(payload.timestamp ?? 0n),
-        PrimitiveEncoder.encodeUInt64(payload.blockRef ?? 0n),
+        PrimitiveEncoder.encodeUInt64(payload.timestamp ?? BigInt(0)),
+        PrimitiveEncoder.encodeUInt64(payload.blockRef ?? BigInt(0)),
         PrimitiveEncoder.encodeVarBytes(
             Buffer.from(JSON.stringify(payload.metadata ?? null), "utf8"),
         ),
@@ -277,7 +277,7 @@ export function encodeBlockTimestampResponse(
 ): Buffer {
     return Buffer.concat([
         PrimitiveEncoder.encodeUInt16(payload.status),
-        PrimitiveEncoder.encodeUInt64(payload.timestamp ?? 0n),
+        PrimitiveEncoder.encodeUInt64(payload.timestamp ?? BigInt(0)),
         PrimitiveEncoder.encodeVarBytes(
             Buffer.from(JSON.stringify(payload.metadata ?? null), "utf8"),
         ),
