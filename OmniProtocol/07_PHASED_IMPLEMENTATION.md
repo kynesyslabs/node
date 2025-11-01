@@ -46,7 +46,7 @@ Reserved opcode bands (0x7X – 0xEX) remain unassigned in this phase.
 - Feature flag documentation in `DEFAULT_OMNIPROTOCOL_CONFIG` and ops notes.
 - Basic integration test proving HTTP fallback works when OmniProtocol feature flag is disabled.
 - Captured HTTP json fixtures under `fixtures/` for peerlist, mempool, block header, and address info parity checks.
-- Converted `getPeerlist`, `peerlist_sync`, `getMempool`, `mempool_sync`, `mempool_merge`, `block_sync`, `getBlocks`, `getBlockByNumber`, `getBlockByHash`, `getTxByHash`, and `gcr_getAddressInfo` handlers to binary payload encoders per Step 5, with parity tests verifying structured decoding. Transactions and block metadata now serialize key fields (addresses, amounts, hashes, status, ordered tx hashes) instead of raw JSON blobs.
+- Converted `getPeerlist`, `peerlist_sync`, `getMempool`, `mempool_sync`, `mempool_merge`, `block_sync`, `getBlocks`, `getBlockByNumber`, `getBlockByHash`, `getTxByHash`, `nodeCall`, `getPeerInfo`, `getNodeVersion`, `getNodeStatus`, the protocol meta suite (`proto_versionNegotiate`, `proto_capabilityExchange`, `proto_error`, `proto_ping`, `proto_disconnect`), and `gcr_getAddressInfo` to binary payload encoders per Step 5, with parity tests verifying structured decoding. Transactions and block metadata now serialize key fields (addresses, amounts, hashes, status, ordered tx hashes) instead of raw JSON blobs.
 
 **Exit Criteria**
 - Bun type-check passes with registry wired.

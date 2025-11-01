@@ -1,7 +1,43 @@
-import { beforeEach, describe, expect, it, jest } from "@jest/globals"
+import { beforeAll, beforeEach, describe, expect, it, jest } from "@jest/globals"
 
-import { DEFAULT_OMNIPROTOCOL_CONFIG } from "src/libs/omniprotocol/types/config"
-import PeerOmniAdapter from "src/libs/omniprotocol/integration/peerAdapter"
+jest.mock("@kynesyslabs/demosdk/encryption", () => ({
+    __esModule: true,
+    ucrypto: {
+        getIdentity: jest.fn(async () => ({
+            publicKey: new Uint8Array(32),
+            algorithm: "ed25519",
+        })),
+        sign: jest.fn(async () => ({
+            signature: new Uint8Array([1, 2, 3, 4]),
+        })),
+        verify: jest.fn(async () => true),
+    },
+    uint8ArrayToHex: jest.fn((input: Uint8Array) =>
+        Buffer.from(input).toString("hex"),
+    ),
+    hexToUint8Array: jest.fn((hex: string) => {
+        const normalized = hex.startsWith("0x") ? hex.slice(2) : hex
+        return new Uint8Array(Buffer.from(normalized, "hex"))
+    }),
+}))
+jest.mock("@kynesyslabs/demosdk/build/multichain/core", () => ({
+    __esModule: true,
+    default: {},
+}))
+jest.mock("@kynesyslabs/demosdk/build/multichain/localsdk", () => ({
+    __esModule: true,
+    default: {},
+}))
+
+let DEFAULT_OMNIPROTOCOL_CONFIG: typeof import("src/libs/omniprotocol/types/config")
+    ["DEFAULT_OMNIPROTOCOL_CONFIG"]
+let PeerOmniAdapter: typeof import("src/libs/omniprotocol/integration/peerAdapter")
+    ["default"]
+
+beforeAll(async () => {
+    ;({ DEFAULT_OMNIPROTOCOL_CONFIG } = await import("src/libs/omniprotocol/types/config"))
+    ;({ default: PeerOmniAdapter } = await import("src/libs/omniprotocol/integration/peerAdapter"))
+})
 
 const createMockPeer = () => {
     return {

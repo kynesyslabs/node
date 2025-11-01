@@ -20,6 +20,13 @@ import {
     handleMempoolSync,
 } from "./handlers/sync"
 import { handleGetAddressInfo } from "./handlers/gcr"
+import {
+    handleProtoCapabilityExchange,
+    handleProtoDisconnect,
+    handleProtoError,
+    handleProtoPing,
+    handleProtoVersionNegotiate,
+} from "./handlers/meta"
 
 export interface HandlerDescriptor {
     opcode: OmniOpcode
@@ -105,11 +112,11 @@ const DESCRIPTORS: HandlerDescriptor[] = [
     { opcode: OmniOpcode.ADMIN_AWARD_POINTS, name: "admin_awardPoints", authRequired: true, handler: createHttpFallbackHandler() },
 
     // 0xFX Meta
-    { opcode: OmniOpcode.PROTO_VERSION_NEGOTIATE, name: "proto_versionNegotiate", authRequired: false, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.PROTO_CAPABILITY_EXCHANGE, name: "proto_capabilityExchange", authRequired: false, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.PROTO_ERROR, name: "proto_error", authRequired: false, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.PROTO_PING, name: "proto_ping", authRequired: false, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.PROTO_DISCONNECT, name: "proto_disconnect", authRequired: false, handler: createHttpFallbackHandler() },
+    { opcode: OmniOpcode.PROTO_VERSION_NEGOTIATE, name: "proto_versionNegotiate", authRequired: false, handler: handleProtoVersionNegotiate },
+    { opcode: OmniOpcode.PROTO_CAPABILITY_EXCHANGE, name: "proto_capabilityExchange", authRequired: false, handler: handleProtoCapabilityExchange },
+    { opcode: OmniOpcode.PROTO_ERROR, name: "proto_error", authRequired: false, handler: handleProtoError },
+    { opcode: OmniOpcode.PROTO_PING, name: "proto_ping", authRequired: false, handler: handleProtoPing },
+    { opcode: OmniOpcode.PROTO_DISCONNECT, name: "proto_disconnect", authRequired: false, handler: handleProtoDisconnect },
 ]
 
 export const handlerRegistry: HandlerRegistry = new Map()

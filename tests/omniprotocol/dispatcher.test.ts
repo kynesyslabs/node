@@ -1,9 +1,57 @@
-import { describe, expect, it, jest } from "@jest/globals"
+import { beforeAll, describe, expect, it, jest } from "@jest/globals"
 
-import { dispatchOmniMessage } from "src/libs/omniprotocol/protocol/dispatcher"
-import { OmniOpcode } from "src/libs/omniprotocol/protocol/opcodes"
-import { handlerRegistry } from "src/libs/omniprotocol/protocol/registry"
-import { UnknownOpcodeError } from "src/libs/omniprotocol/types/errors"
+jest.mock("@kynesyslabs/demosdk/encryption", () => ({
+    __esModule: true,
+    ucrypto: {
+        getIdentity: jest.fn(async () => ({
+            publicKey: new Uint8Array(32),
+            algorithm: "ed25519",
+        })),
+        sign: jest.fn(async () => ({
+            signature: new Uint8Array([1, 2, 3, 4]),
+        })),
+        verify: jest.fn(async () => true),
+    },
+    uint8ArrayToHex: jest.fn((input: Uint8Array) =>
+        Buffer.from(input).toString("hex"),
+    ),
+    hexToUint8Array: jest.fn((hex: string) => {
+        const normalized = hex.startsWith("0x") ? hex.slice(2) : hex
+        return new Uint8Array(Buffer.from(normalized, "hex"))
+    }),
+}))
+jest.mock("@kynesyslabs/demosdk/build/multichain/core", () => ({
+    __esModule: true,
+    default: {},
+}))
+jest.mock("@kynesyslabs/demosdk/build/multichain/localsdk", () => ({
+    __esModule: true,
+    default: {},
+}))
+
+jest.mock("src/utilities/sharedState", () => ({
+    __esModule: true,
+    getSharedState: {
+        getConnectionString: jest.fn().mockResolvedValue(""),
+        version: "1.0.0",
+        getInfo: jest.fn().mockResolvedValue({}),
+    },
+}))
+
+let dispatchOmniMessage: typeof import("src/libs/omniprotocol/protocol/dispatcher")
+    ["dispatchOmniMessage"]
+let OmniOpcode: typeof import("src/libs/omniprotocol/protocol/opcodes")["OmniOpcode"]
+let handlerRegistry: typeof import("src/libs/omniprotocol/protocol/registry")
+    ["handlerRegistry"]
+let UnknownOpcodeError: typeof import("src/libs/omniprotocol/types/errors")
+    ["UnknownOpcodeError"]
+
+beforeAll(async () => {
+    ;({ dispatchOmniMessage } = await import("src/libs/omniprotocol/protocol/dispatcher"))
+    ;({ OmniOpcode } = await import("src/libs/omniprotocol/protocol/opcodes"))
+    ;({ handlerRegistry } = await import("src/libs/omniprotocol/protocol/registry"))
+    ;({ UnknownOpcodeError } = await import("src/libs/omniprotocol/types/errors"))
+})
 
 const makeMessage = (opcode: number) => ({
     header: {
@@ -56,4 +104,3 @@ describe("dispatchOmniMessage", () => {
         ).rejects.toBeInstanceOf(UnknownOpcodeError)
     })
 })
-

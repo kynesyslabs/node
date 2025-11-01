@@ -1,38 +1,91 @@
-import { describe, expect, it, jest, beforeEach } from "@jest/globals"
+import { beforeAll, describe, expect, it, jest, beforeEach } from "@jest/globals"
+
+jest.mock("@kynesyslabs/demosdk/encryption", () => ({
+    __esModule: true,
+    ucrypto: {
+        getIdentity: jest.fn(async () => ({
+            publicKey: new Uint8Array(32),
+            algorithm: "ed25519",
+        })),
+        sign: jest.fn(async () => ({
+            signature: new Uint8Array([1, 2, 3, 4]),
+        })),
+        verify: jest.fn(async () => true),
+    },
+    uint8ArrayToHex: jest.fn((input: Uint8Array) =>
+        Buffer.from(input).toString("hex"),
+    ),
+    hexToUint8Array: jest.fn((hex: string) => {
+        const normalized = hex.startsWith("0x") ? hex.slice(2) : hex
+        return new Uint8Array(Buffer.from(normalized, "hex"))
+    }),
+}))
+jest.mock("@kynesyslabs/demosdk/build/multichain/core", () => ({
+    __esModule: true,
+    default: {},
+}))
+jest.mock("@kynesyslabs/demosdk/build/multichain/localsdk", () => ({
+    __esModule: true,
+    default: {},
+}))
 import { readFileSync } from "fs"
 import path from "path"
-
-import { dispatchOmniMessage } from "src/libs/omniprotocol/protocol/dispatcher"
-import { OmniOpcode } from "src/libs/omniprotocol/protocol/opcodes"
-import { encodeJsonRequest } from "src/libs/omniprotocol/serialization/jsonEnvelope"
-import {
-    decodePeerlistResponse,
-    encodePeerlistSyncRequest,
-    decodePeerlistSyncResponse,
-    decodeNodeCallResponse,
-    encodeNodeCallRequest,
-    decodeStringResponse,
-    decodeJsonResponse,
-} from "src/libs/omniprotocol/serialization/control"
-import {
-    decodeMempoolResponse,
-    decodeBlockResponse,
-    encodeMempoolSyncRequest,
-    decodeMempoolSyncResponse,
-    encodeBlockSyncRequest,
-    decodeBlocksResponse,
-    encodeBlocksRequest,
-    encodeMempoolMergeRequest,
-    decodeBlockMetadata,
-} from "src/libs/omniprotocol/serialization/sync"
-import { decodeAddressInfoResponse } from "src/libs/omniprotocol/serialization/gcr"
-import Hashing from "src/libs/crypto/hashing"
-import { PrimitiveDecoder, PrimitiveEncoder } from "src/libs/omniprotocol/serialization/primitives"
-import {
-    decodeTransaction,
-    decodeTransactionEnvelope,
-} from "src/libs/omniprotocol/serialization/transaction"
 import type { RPCResponse } from "@kynesyslabs/demosdk/types"
+
+let dispatchOmniMessage: typeof import("src/libs/omniprotocol/protocol/dispatcher")
+    ["dispatchOmniMessage"]
+let OmniOpcode: typeof import("src/libs/omniprotocol/protocol/opcodes")["OmniOpcode"]
+let encodeJsonRequest: typeof import("src/libs/omniprotocol/serialization/jsonEnvelope")
+    ["encodeJsonRequest"]
+let decodePeerlistResponse: typeof import("src/libs/omniprotocol/serialization/control")
+    ["decodePeerlistResponse"]
+let encodePeerlistSyncRequest: typeof import("src/libs/omniprotocol/serialization/control")
+    ["encodePeerlistSyncRequest"]
+let decodePeerlistSyncResponse: typeof import("src/libs/omniprotocol/serialization/control")
+    ["decodePeerlistSyncResponse"]
+let decodeNodeCallResponse: typeof import("src/libs/omniprotocol/serialization/control")
+    ["decodeNodeCallResponse"]
+let encodeNodeCallRequest: typeof import("src/libs/omniprotocol/serialization/control")
+    ["encodeNodeCallRequest"]
+let decodeStringResponse: typeof import("src/libs/omniprotocol/serialization/control")
+    ["decodeStringResponse"]
+let decodeJsonResponse: typeof import("src/libs/omniprotocol/serialization/control")
+    ["decodeJsonResponse"]
+let decodeMempoolResponse: typeof import("src/libs/omniprotocol/serialization/sync")
+    ["decodeMempoolResponse"]
+let decodeBlockResponse: typeof import("src/libs/omniprotocol/serialization/sync")
+    ["decodeBlockResponse"]
+let encodeMempoolSyncRequest: typeof import("src/libs/omniprotocol/serialization/sync")
+    ["encodeMempoolSyncRequest"]
+let decodeMempoolSyncResponse: typeof import("src/libs/omniprotocol/serialization/sync")
+    ["decodeMempoolSyncResponse"]
+let encodeBlockSyncRequest: typeof import("src/libs/omniprotocol/serialization/sync")
+    ["encodeBlockSyncRequest"]
+let decodeBlocksResponse: typeof import("src/libs/omniprotocol/serialization/sync")
+    ["decodeBlocksResponse"]
+let encodeBlocksRequest: typeof import("src/libs/omniprotocol/serialization/sync")
+    ["encodeBlocksRequest"]
+let encodeMempoolMergeRequest: typeof import("src/libs/omniprotocol/serialization/sync")
+    ["encodeMempoolMergeRequest"]
+let decodeBlockMetadata: typeof import("src/libs/omniprotocol/serialization/sync")
+    ["decodeBlockMetadata"]
+let decodeAddressInfoResponse: typeof import("src/libs/omniprotocol/serialization/gcr")
+    ["decodeAddressInfoResponse"]
+let Hashing: any
+let PrimitiveDecoder: typeof import("src/libs/omniprotocol/serialization/primitives")
+    ["PrimitiveDecoder"]
+let PrimitiveEncoder: typeof import("src/libs/omniprotocol/serialization/primitives")
+    ["PrimitiveEncoder"]
+let decodeTransaction: typeof import("src/libs/omniprotocol/serialization/transaction")
+    ["decodeTransaction"]
+let decodeTransactionEnvelope: typeof import("src/libs/omniprotocol/serialization/transaction")
+    ["decodeTransactionEnvelope"]
+let encodeProtocolDisconnect: typeof import("src/libs/omniprotocol/serialization/meta")
+    ["encodeProtocolDisconnect"]
+let encodeProtocolError: typeof import("src/libs/omniprotocol/serialization/meta")
+    ["encodeProtocolError"]
+let encodeVersionNegotiateResponse: typeof import("src/libs/omniprotocol/serialization/meta")
+    ["encodeVersionNegotiateResponse"]
 
 jest.mock("src/libs/network/routines/nodecalls/getPeerlist", () => ({
     __esModule: true,
@@ -65,41 +118,101 @@ jest.mock("src/libs/network/manageNodeCall", () => ({
     __esModule: true,
     default: jest.fn(),
 }))
-const sharedStateMock = {
-    getConnectionString: jest.fn(),
-    version: "1.0.0",
-    getInfo: jest.fn(),
-}
-jest.mock("src/utilities/sharedState", () => ({
-    __esModule: true,
-    getSharedState: sharedStateMock,
-}))
+jest.mock("src/utilities/sharedState", () => {
+    const sharedState = {
+        getConnectionString: jest.fn(),
+        version: "1.0.0",
+        getInfo: jest.fn(),
+    }
 
-const mockedGetPeerlist = jest.requireMock(
-    "src/libs/network/routines/nodecalls/getPeerlist",
-).default as jest.Mock
-const mockedGetBlockByNumber = jest.requireMock(
-    "src/libs/network/routines/nodecalls/getBlockByNumber",
-).default as jest.Mock
-const mockedMempool = jest.requireMock(
-    "src/libs/blockchain/mempool_v2",
-).default as { getMempool: jest.Mock; receive: jest.Mock }
-const mockedChain = jest.requireMock(
-    "src/libs/blockchain/chain",
-).default as {
+    return {
+        __esModule: true,
+        getSharedState: sharedState,
+        __sharedStateMock: sharedState,
+    }
+})
+
+let mockedGetPeerlist: jest.Mock
+let mockedGetBlockByNumber: jest.Mock
+let mockedMempool: { getMempool: jest.Mock; receive: jest.Mock }
+let mockedChain: {
     getBlocks: jest.Mock
     getBlockByHash: jest.Mock
     getTxByHash: jest.Mock
 }
-const mockedEnsureGCRForUser = jest.requireMock(
-    "src/libs/blockchain/gcr/gcr_routines/ensureGCRForUser",
-).default as jest.Mock
-const mockedManageNodeCall = jest.requireMock(
-    "src/libs/network/manageNodeCall",
-).default as jest.Mock
-const mockedSharedState = jest.requireMock(
-    "src/utilities/sharedState",
-).getSharedState as typeof sharedStateMock
+let mockedEnsureGCRForUser: jest.Mock
+let mockedManageNodeCall: jest.Mock
+let sharedStateMock: {
+    getConnectionString: jest.Mock<Promise<string>, []>
+    version: string
+    getInfo: jest.Mock<Promise<unknown>, []>
+}
+
+beforeAll(async () => {
+    ;({ dispatchOmniMessage } = await import("src/libs/omniprotocol/protocol/dispatcher"))
+    ;({ OmniOpcode } = await import("src/libs/omniprotocol/protocol/opcodes"))
+    ;({ encodeJsonRequest } = await import("src/libs/omniprotocol/serialization/jsonEnvelope"))
+
+    const controlSerializers = await import("src/libs/omniprotocol/serialization/control")
+    decodePeerlistResponse = controlSerializers.decodePeerlistResponse
+    encodePeerlistSyncRequest = controlSerializers.encodePeerlistSyncRequest
+    decodePeerlistSyncResponse = controlSerializers.decodePeerlistSyncResponse
+    decodeNodeCallResponse = controlSerializers.decodeNodeCallResponse
+    encodeNodeCallRequest = controlSerializers.encodeNodeCallRequest
+    decodeStringResponse = controlSerializers.decodeStringResponse
+    decodeJsonResponse = controlSerializers.decodeJsonResponse
+
+    const syncSerializers = await import("src/libs/omniprotocol/serialization/sync")
+    decodeMempoolResponse = syncSerializers.decodeMempoolResponse
+    decodeBlockResponse = syncSerializers.decodeBlockResponse
+    encodeMempoolSyncRequest = syncSerializers.encodeMempoolSyncRequest
+    decodeMempoolSyncResponse = syncSerializers.decodeMempoolSyncResponse
+    encodeBlockSyncRequest = syncSerializers.encodeBlockSyncRequest
+    decodeBlocksResponse = syncSerializers.decodeBlocksResponse
+    encodeBlocksRequest = syncSerializers.encodeBlocksRequest
+    encodeMempoolMergeRequest = syncSerializers.encodeMempoolMergeRequest
+    decodeBlockMetadata = syncSerializers.decodeBlockMetadata
+
+    ;({ decodeAddressInfoResponse } = await import("src/libs/omniprotocol/serialization/gcr"))
+
+    Hashing = (await import("src/libs/crypto/hashing")).default
+
+    const primitives = await import("src/libs/omniprotocol/serialization/primitives")
+    PrimitiveDecoder = primitives.PrimitiveDecoder
+    PrimitiveEncoder = primitives.PrimitiveEncoder
+
+    const transactionSerializers = await import("src/libs/omniprotocol/serialization/transaction")
+    decodeTransaction = transactionSerializers.decodeTransaction
+    decodeTransactionEnvelope = transactionSerializers.decodeTransactionEnvelope
+
+    const metaSerializers = await import("src/libs/omniprotocol/serialization/meta")
+    encodeProtocolDisconnect = metaSerializers.encodeProtocolDisconnect
+    encodeProtocolError = metaSerializers.encodeProtocolError
+    encodeVersionNegotiateResponse = metaSerializers.encodeVersionNegotiateResponse
+
+    mockedGetPeerlist = (await import("src/libs/network/routines/nodecalls/getPeerlist"))
+        .default as jest.Mock
+    mockedGetBlockByNumber = (await import("src/libs/network/routines/nodecalls/getBlockByNumber"))
+        .default as jest.Mock
+    mockedMempool = (await import("src/libs/blockchain/mempool_v2"))
+        .default as { getMempool: jest.Mock; receive: jest.Mock }
+    mockedChain = (await import("src/libs/blockchain/chain"))
+        .default as {
+            getBlocks: jest.Mock
+            getBlockByHash: jest.Mock
+            getTxByHash: jest.Mock
+        }
+    mockedEnsureGCRForUser = (await import("src/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"))
+        .default as jest.Mock
+    mockedManageNodeCall = (await import("src/libs/network/manageNodeCall"))
+        .default as jest.Mock
+    sharedStateMock = (await import("src/utilities/sharedState"))
+        .getSharedState as unknown as {
+            getConnectionString: jest.Mock<Promise<string>, []>
+            version: string
+            getInfo: jest.Mock<Promise<unknown>, []>
+        }
+})
 
 const baseContext = {
     context: {
@@ -119,9 +232,9 @@ describe("OmniProtocol handlers", () => {
         mockedChain.getTxByHash.mockReset()
         mockedMempool.receive.mockReset()
         mockedManageNodeCall.mockReset()
-        mockedSharedState.getConnectionString.mockReset()
-        mockedSharedState.getInfo.mockReset()
-        mockedSharedState.version = "1.0.0"
+        sharedStateMock.getConnectionString.mockReset().mockResolvedValue("")
+        sharedStateMock.getInfo.mockReset().mockResolvedValue({})
+        sharedStateMock.version = "1.0.0"
     })
 
     it("encodes nodeCall response", async () => {
@@ -165,8 +278,129 @@ describe("OmniProtocol handlers", () => {
         expect(decoded.extra).toEqual({ source: "http" })
     })
 
+    it("encodes proto version negotiation response", async () => {
+        const request = Buffer.concat([
+            PrimitiveEncoder.encodeUInt16(1),
+            PrimitiveEncoder.encodeUInt16(2),
+            PrimitiveEncoder.encodeUInt16(2),
+            PrimitiveEncoder.encodeUInt16(1),
+            PrimitiveEncoder.encodeUInt16(2),
+        ])
+
+        const buffer = await dispatchOmniMessage({
+            ...baseContext,
+            message: {
+                header: {
+                    version: 1,
+                    opcode: OmniOpcode.PROTO_VERSION_NEGOTIATE,
+                    sequence: 1,
+                    payloadLength: request.length,
+                },
+                payload: request,
+                checksum: 0,
+            },
+        })
+
+        const response = PrimitiveDecoder.decodeUInt16(buffer, 0)
+        const negotiated = PrimitiveDecoder.decodeUInt16(buffer, response.bytesRead)
+        expect(response.value).toBe(200)
+        expect(negotiated.value).toBe(1)
+    })
+
+    it("encodes proto capability exchange response", async () => {
+        const request = Buffer.concat([
+            PrimitiveEncoder.encodeUInt16(1),
+            PrimitiveEncoder.encodeUInt16(0x0001),
+            PrimitiveEncoder.encodeUInt16(0x0001),
+            PrimitiveEncoder.encodeBoolean(true),
+        ])
+
+        const buffer = await dispatchOmniMessage({
+            ...baseContext,
+            message: {
+                header: {
+                    version: 1,
+                    opcode: OmniOpcode.PROTO_CAPABILITY_EXCHANGE,
+                    sequence: 1,
+                    payloadLength: request.length,
+                },
+                payload: request,
+                checksum: 0,
+            },
+        })
+
+        const status = PrimitiveDecoder.decodeUInt16(buffer, 0)
+        const count = PrimitiveDecoder.decodeUInt16(buffer, status.bytesRead)
+        expect(status.value).toBe(200)
+        expect(count.value).toBeGreaterThan(0)
+    })
+
+    it("handles proto_error without response", async () => {
+        const payload = encodeProtocolError({ errorCode: 0x0004, message: "Invalid opcode" })
+
+        const buffer = await dispatchOmniMessage({
+            ...baseContext,
+            message: {
+                header: {
+                    version: 1,
+                    opcode: OmniOpcode.PROTO_ERROR,
+                    sequence: 1,
+                    payloadLength: payload.length,
+                },
+                payload,
+                checksum: 0,
+            },
+        })
+
+        expect(buffer.length).toBe(0)
+    })
+
+    it("encodes proto_ping response", async () => {
+        const now = BigInt(Date.now())
+        const payload = PrimitiveEncoder.encodeUInt64(now)
+
+        const buffer = await dispatchOmniMessage({
+            ...baseContext,
+            message: {
+                header: {
+                    version: 1,
+                    opcode: OmniOpcode.PROTO_PING,
+                    sequence: 1,
+                    payloadLength: payload.length,
+                },
+                payload,
+                checksum: 0,
+            },
+        })
+
+        const status = PrimitiveDecoder.decodeUInt16(buffer, 0)
+        const timestamp = PrimitiveDecoder.decodeUInt64(buffer, status.bytesRead)
+        expect(status.value).toBe(200)
+        expect(timestamp.value).toBe(now)
+    })
+
+    it("handles proto_disconnect without response", async () => {
+        const payload = encodeProtocolDisconnect({ reason: 0x01, message: "Shutdown" })
+
+        const buffer = await dispatchOmniMessage({
+            ...baseContext,
+            message: {
+                header: {
+                    version: 1,
+                    opcode: OmniOpcode.PROTO_DISCONNECT,
+                    sequence: 1,
+                    payloadLength: payload.length,
+                },
+                payload,
+                checksum: 0,
+            },
+        })
+
+        expect(buffer.length).toBe(0)
+    })
+
     it("encodes getPeerInfo response", async () => {
-        mockedSharedState.getConnectionString.mockResolvedValue("https://node.test")
+        sharedStateMock.getConnectionString.mockResolvedValue("https://node.test")
 
         const buffer = await dispatchOmniMessage({
             ...baseContext,
@@ -188,7 +422,7 @@ describe("OmniProtocol handlers", () => {
     })
 
     it("encodes getNodeVersion response", async () => {
-        mockedSharedState.version = "2.3.4"
+        sharedStateMock.version = "2.3.4"
 
         const buffer = await dispatchOmniMessage({
             ...baseContext,
@@ -211,7 +445,7 @@ describe("OmniProtocol handlers", () => {
 
     it("encodes getNodeStatus response", async () => {
         const statusPayload = { status: "ok", peers: 5 }
-        mockedSharedState.getInfo.mockResolvedValue(statusPayload)
+        sharedStateMock.getInfo.mockResolvedValue(statusPayload)
 
         const buffer = await dispatchOmniMessage({
             ...baseContext,
