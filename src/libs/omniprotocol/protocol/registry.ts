@@ -19,7 +19,24 @@ import {
     handleMempoolMerge,
     handleMempoolSync,
 } from "./handlers/sync"
-import { handleGetAddressInfo } from "./handlers/gcr"
+import {
+    handleGetAddressInfo,
+    handleGetIdentities,
+    handleGetWeb2Identities,
+    handleGetXmIdentities,
+    handleGetPoints,
+    handleGetTopAccounts,
+    handleGetReferralInfo,
+    handleValidateReferral,
+    handleGetAccountByIdentity,
+} from "./handlers/gcr"
+import {
+    handleExecute,
+    handleNativeBridge,
+    handleBridge,
+    handleBroadcast,
+    handleConfirm,
+} from "./handlers/transaction"
 import {
     handleProtoCapabilityExchange,
     handleProtoDisconnect,
@@ -62,13 +79,13 @@ const DESCRIPTORS: HandlerDescriptor[] = [
     { opcode: OmniOpcode.GET_NODE_STATUS, name: "getNodeStatus", authRequired: false, handler: handleGetNodeStatus },
 
     // 0x1X Transactions & Execution
-    { opcode: OmniOpcode.EXECUTE, name: "execute", authRequired: true, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.NATIVE_BRIDGE, name: "nativeBridge", authRequired: true, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.BRIDGE, name: "bridge", authRequired: true, handler: createHttpFallbackHandler() },
+    { opcode: OmniOpcode.EXECUTE, name: "execute", authRequired: true, handler: handleExecute },
+    { opcode: OmniOpcode.NATIVE_BRIDGE, name: "nativeBridge", authRequired: true, handler: handleNativeBridge },
+    { opcode: OmniOpcode.BRIDGE, name: "bridge", authRequired: true, handler: handleBridge },
     { opcode: OmniOpcode.BRIDGE_GET_TRADE, name: "bridge_getTrade", authRequired: true, handler: createHttpFallbackHandler() },
     { opcode: OmniOpcode.BRIDGE_EXECUTE_TRADE, name: "bridge_executeTrade", authRequired: true, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.CONFIRM, name: "confirm", authRequired: true, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.BROADCAST, name: "broadcast", authRequired: true, handler: createHttpFallbackHandler() },
+    { opcode: OmniOpcode.CONFIRM, name: "confirm", authRequired: true, handler: handleConfirm },
+    { opcode: OmniOpcode.BROADCAST, name: "broadcast", authRequired: true, handler: handleBroadcast },
 
     // 0x2X Data Synchronization
     { opcode: OmniOpcode.MEMPOOL_SYNC, name: "mempool_sync", authRequired: true, handler: handleMempoolSync },
@@ -97,14 +114,14 @@ const DESCRIPTORS: HandlerDescriptor[] = [
     // 0x4X GCR Operations
     { opcode: OmniOpcode.GCR_GENERIC, name: "gcr_generic", authRequired: true, handler: createHttpFallbackHandler() },
     { opcode: OmniOpcode.GCR_IDENTITY_ASSIGN, name: "gcr_identityAssign", authRequired: true, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.GCR_GET_IDENTITIES, name: "gcr_getIdentities", authRequired: false, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.GCR_GET_WEB2_IDENTITIES, name: "gcr_getWeb2Identities", authRequired: false, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.GCR_GET_XM_IDENTITIES, name: "gcr_getXmIdentities", authRequired: false, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.GCR_GET_POINTS, name: "gcr_getPoints", authRequired: false, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.GCR_GET_TOP_ACCOUNTS, name: "gcr_getTopAccounts", authRequired: false, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.GCR_GET_REFERRAL_INFO, name: "gcr_getReferralInfo", authRequired: false, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.GCR_VALIDATE_REFERRAL, name: "gcr_validateReferral", authRequired: true, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.GCR_GET_ACCOUNT_BY_IDENTITY, name: "gcr_getAccountByIdentity", authRequired: false, handler: createHttpFallbackHandler() },
+    { opcode: OmniOpcode.GCR_GET_IDENTITIES, name: "gcr_getIdentities", authRequired: false, handler: handleGetIdentities },
+    { opcode: OmniOpcode.GCR_GET_WEB2_IDENTITIES, name: "gcr_getWeb2Identities", authRequired: false, handler: handleGetWeb2Identities },
+    { opcode: OmniOpcode.GCR_GET_XM_IDENTITIES, name: "gcr_getXmIdentities", authRequired: false, handler: handleGetXmIdentities },
+    { opcode: OmniOpcode.GCR_GET_POINTS, name: "gcr_getPoints", authRequired: false, handler: handleGetPoints },
+    { opcode: OmniOpcode.GCR_GET_TOP_ACCOUNTS, name: "gcr_getTopAccounts", authRequired: false, handler: handleGetTopAccounts },
+    { opcode: OmniOpcode.GCR_GET_REFERRAL_INFO, name: "gcr_getReferralInfo", authRequired: false, handler: handleGetReferralInfo },
+    { opcode: OmniOpcode.GCR_VALIDATE_REFERRAL, name: "gcr_validateReferral", authRequired: true, handler: handleValidateReferral },
+    { opcode: OmniOpcode.GCR_GET_ACCOUNT_BY_IDENTITY, name: "gcr_getAccountByIdentity", authRequired: false, handler: handleGetAccountByIdentity },
     { opcode: OmniOpcode.GCR_GET_ADDRESS_INFO, name: "gcr_getAddressInfo", authRequired: false, handler: handleGetAddressInfo },
     { opcode: OmniOpcode.GCR_GET_ADDRESS_NONCE, name: "gcr_getAddressNonce", authRequired: false, handler: createHttpFallbackHandler() },
 
