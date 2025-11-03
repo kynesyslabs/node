@@ -29,6 +29,7 @@ import {
     handleGetReferralInfo,
     handleValidateReferral,
     handleGetAccountByIdentity,
+    handleIdentityAssign,
 } from "./handlers/gcr"
 import {
     handleExecute,
@@ -113,7 +114,7 @@ const DESCRIPTORS: HandlerDescriptor[] = [
 
     // 0x4X GCR Operations
     { opcode: OmniOpcode.GCR_GENERIC, name: "gcr_generic", authRequired: true, handler: createHttpFallbackHandler() },
-    { opcode: OmniOpcode.GCR_IDENTITY_ASSIGN, name: "gcr_identityAssign", authRequired: true, handler: createHttpFallbackHandler() },
+    { opcode: OmniOpcode.GCR_IDENTITY_ASSIGN, name: "gcr_identityAssign", authRequired: true, handler: handleIdentityAssign },
     { opcode: OmniOpcode.GCR_GET_IDENTITIES, name: "gcr_getIdentities", authRequired: false, handler: handleGetIdentities },
     { opcode: OmniOpcode.GCR_GET_WEB2_IDENTITIES, name: "gcr_getWeb2Identities", authRequired: false, handler: handleGetWeb2Identities },
     { opcode: OmniOpcode.GCR_GET_XM_IDENTITIES, name: "gcr_getXmIdentities", authRequired: false, handler: handleGetXmIdentities },

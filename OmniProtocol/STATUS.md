@@ -36,6 +36,7 @@
 - `0x48 gcr_validateReferral`
 - `0x49 gcr_getAccountByIdentity`
 - `0x4A gcr_getAddressInfo`
+- `0x41 gcr_identityAssign`
 
 - `0x10 execute`
 - `0x11 nativeBridge`
@@ -52,11 +53,12 @@
 - `0x32 voteBlockHash` (deprecated - may be removed)
 - `0x3B`–`0x3F` reserved
 - `0x40 gcr_generic` (wrapper opcode - low priority)
-- `0x41 gcr_identityAssign` (internal operation - used by identity verification flows)
-- `0x4B gcr_getAddressNonce` (can be extracted from gcr_getAddressInfo response)
 - `0x4C`–`0x4F` reserved
 - `0x50`–`0x5F` browser/client ops
 - `0x60`–`0x62` admin ops
 - `0x63`–`0x6F` reserved
+
+## Redundant Opcodes (No Implementation Needed)
+- `0x4B gcr_getAddressNonce` - **REDUNDANT**: Nonce is already included in the `gcr_getAddressInfo` (0x4A) response. Extract from `response.nonce` field instead of using separate opcode.
 
 _Last updated: 2025-11-02_
