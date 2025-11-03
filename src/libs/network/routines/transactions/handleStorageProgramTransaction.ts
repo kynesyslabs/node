@@ -12,6 +12,84 @@ interface StorageProgramResponse {
     gcrEdits?: GCREdit[]
 }
 
+const ACCESS_CONTROL_VALUES = ["private", "public", "restricted", "deployer-only"] as const
+type AccessControlMode = (typeof ACCESS_CONTROL_VALUES)[number]
+type ValidationContext = "CREATE" | "UPDATE_ACCESS_CONTROL"
+
+const ACCESS_CONTROL_MODES = new Set<AccessControlMode>(ACCESS_CONTROL_VALUES)
+const ALLOWED_ADDRESS_PATTERN = /^[a-f0-9]{64}$/i
+
+function normalizeAccessControl(
+    accessControl: unknown,
+    context: ValidationContext,
+): { success: true; mode: AccessControlMode } | { success: false; message: string } {
+    if (typeof accessControl !== "string" || !ACCESS_CONTROL_MODES.has(accessControl as AccessControlMode)) {
+        return {
+            success: false,
+            message: `${context} requires valid accessControl mode`,
+        }
+    }
+
+    return {
+        success: true,
+        mode: accessControl as AccessControlMode,
+    }
+}
+
+function validateAllowedAddresses(
+    accessControl: AccessControlMode,
+    allowedAddresses: unknown,
+): { success: true; addresses: string[] } | { success: false; message: string } {
+    if (allowedAddresses === undefined) {
+        if (accessControl === "restricted") {
+            return {
+                success: false,
+                message: "Restricted mode requires allowedAddresses array",
+            }
+        }
+
+        return {
+            success: true,
+            addresses: [],
+        }
+    }
+
+    if (!Array.isArray(allowedAddresses)) {
+        return {
+            success: false,
+            message: "allowedAddresses must be an array",
+        }
+    }
+
+    for (const address of allowedAddresses) {
+        if (typeof address !== "string") {
+            return {
+                success: false,
+                message: "allowedAddresses must contain only string values",
+            }
+        }
+
+        if (!ALLOWED_ADDRESS_PATTERN.test(address)) {
+            return {
+                success: false,
+                message: `Invalid address format in allowedAddresses: ${address}`,
+            }
+        }
+    }
+
+    if (accessControl === "restricted" && allowedAddresses.length === 0) {
+        return {
+            success: false,
+            message: "Restricted mode requires at least one address in allowedAddresses",
+        }
+    }
+
+    return {
+        success: true,
+        addresses: allowedAddresses as string[],
+    }
+}
+
 /**
  * Handle Storage Program transactions
  *
@@ -120,59 +198,29 @@ async function handleCreate(
         }
     }
 
-    if (!accessControl) {
+    const accessControlValidation = normalizeAccessControl(accessControl, "CREATE")
+    if (accessControlValidation.success === false) {
         return {
             success: false,
-            message: "CREATE requires accessControl mode",
+            message: accessControlValidation.message,
         }
     }
 
-    // Validate allowedAddresses if provided
-    if (allowedAddresses !== undefined) {
-        if (!Array.isArray(allowedAddresses)) {
-            return {
-                success: false,
-                message: "allowedAddresses must be an array",
-            }
-        }
-
-        // Validate each address in the array
-        for (const addr of allowedAddresses) {
-            if (typeof addr !== "string") {
-                return {
-                    success: false,
-                    message: "allowedAddresses must contain only string values",
-                }
-            }
-
-            // Demos Network addresses are 64 character hex strings
-            if (!/^[a-f0-9]{64}$/i.test(addr)) {
-                return {
-                    success: false,
-                    message: `Invalid address format in allowedAddresses: ${addr}`,
-                }
-            }
-        }
-
-        // Validate restricted mode requires allowedAddresses
-        if (accessControl === "restricted" && allowedAddresses.length === 0) {
-            return {
-                success: false,
-                message: "Restricted mode requires at least one address in allowedAddresses",
-            }
-        }
-    } else if (accessControl === "restricted") {
-        // Restricted mode MUST have allowedAddresses
+    const allowedAddressesValidation = validateAllowedAddresses(
+        accessControlValidation.mode,
+        allowedAddresses,
+    )
+    if (allowedAddressesValidation.success === false) {
         return {
             success: false,
-            message: "Restricted mode requires allowedAddresses array",
+            message: allowedAddressesValidation.message,
         }
     }
 
     // CREATE is permissionless - any address can create a storage program
     // The sender becomes the deployer and is recorded in metadata
 
-// Validate data constraints
+    // Validate data constraints
     const dataValidation = validateStorageProgramData(data)
     if (!dataValidation.success) {
         return {
@@ -198,8 +246,8 @@ async function handleCreate(
                 metadata: {
                     programName,
                     deployer: sender,
-                    accessControl,
-                    allowedAddresses: allowedAddresses || [],
+                    accessControl: accessControlValidation.mode,
+                    allowedAddresses: allowedAddressesValidation.addresses,
                     created: now,
                     lastModified: now,
                     size: dataSize,
@@ -286,10 +334,22 @@ async function handleUpdateAccessControl(
 ): Promise<StorageProgramResponse> {
     const { storageAddress, accessControl, allowedAddresses } = payload
 
-    if (!accessControl) {
+    const accessControlValidation = normalizeAccessControl(accessControl, "UPDATE_ACCESS_CONTROL")
+    if (accessControlValidation.success === false) {
         return {
             success: false,
-            message: "UPDATE_ACCESS_CONTROL requires accessControl mode",
+            message: accessControlValidation.message,
+        }
+    }
+
+    const allowedAddressesValidation = validateAllowedAddresses(
+        accessControlValidation.mode,
+        allowedAddresses,
+    )
+    if (allowedAddressesValidation.success === false) {
+        return {
+            success: false,
+            message: allowedAddressesValidation.message,
         }
     }
 
@@ -306,8 +366,8 @@ async function handleUpdateAccessControl(
             data: {
                 variables: {}, // No variable changes in access control update
                 metadata: {
-                    accessControl,
-                    allowedAddresses: allowedAddresses || [],
+                    accessControl: accessControlValidation.mode,
+                    allowedAddresses: allowedAddressesValidation.addresses,
                     lastModified: Date.now(),
                 },
             },
