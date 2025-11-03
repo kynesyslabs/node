@@ -28,6 +28,94 @@ interface AccountByIdentityRequest {
     identity: string
 }
 
+interface IdentityAssignRequest {
+    editOperation: {
+        type: "identity"
+        isRollback: boolean
+        account: string
+        context: "xm" | "web2" | "pqc" | "ud"
+        operation: "add" | "remove"
+        data: any  // Varies by context - see GCREditIdentity
+        txhash: string
+        referralCode?: string
+    }
+}
+
+/**
+ * Handler for 0x41 GCR_IDENTITY_ASSIGN opcode
+ *
+ * Internal operation triggered by write transactions to assign/remove identities.
+ * Uses GCRIdentityRoutines to apply identity changes (xm, web2, pqc, ud).
+ */
+export const handleIdentityAssign: OmniHandler = async ({ message, context }) => {
+    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
+        return encodeResponse(errorResponse(400, "Missing payload for identityAssign"))
+    }
+
+    try {
+        const request = decodeJsonRequest<IdentityAssignRequest>(message.payload)
+
+        if (!request.editOperation) {
+            return encodeResponse(errorResponse(400, "editOperation is required"))
+        }
+
+        const { editOperation } = request
+
+        // Validate required fields
+        if (editOperation.type !== "identity") {
+            return encodeResponse(errorResponse(400, "Invalid edit operation type, expected 'identity'"))
+        }
+
+        if (!editOperation.account) {
+            return encodeResponse(errorResponse(400, "account is required"))
+        }
+
+        if (!editOperation.context || !["xm", "web2", "pqc", "ud"].includes(editOperation.context)) {
+            return encodeResponse(errorResponse(400, "Invalid context, must be xm, web2, pqc, or ud"))
+        }
+
+        if (!editOperation.operation || !["add", "remove"].includes(editOperation.operation)) {
+            return encodeResponse(errorResponse(400, "Invalid operation, must be add or remove"))
+        }
+
+        if (!editOperation.data) {
+            return encodeResponse(errorResponse(400, "data is required"))
+        }
+
+        if (!editOperation.txhash) {
+            return encodeResponse(errorResponse(400, "txhash is required"))
+        }
+
+        // Import GCR routines
+        const { default: gcrIdentityRoutines } = await import(
+            "src/libs/blockchain/gcr/gcr_routines/GCRIdentityRoutines"
+        )
+        const { default: datasource } = await import("src/model/datasource")
+        const { GCRMain: gcrMain } = await import("@/model/entities/GCRv2/GCR_Main")
+
+        const gcrMainRepository = datasource.getRepository(gcrMain)
+
+        // Apply the identity operation (simulate = false for actual execution)
+        const result = await gcrIdentityRoutines.apply(
+            editOperation,
+            gcrMainRepository,
+            false,  // simulate = false (actually apply changes)
+        )
+
+        if (result.success) {
+            return encodeResponse(successResponse({
+                success: true,
+                message: result.message,
+            }))
+        } else {
+            return encodeResponse(errorResponse(400, result.message || "Identity assignment failed"))
+        }
+    } catch (error) {
+        console.error("[handleIdentityAssign] Error:", error)
+        return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
+    }
+}
+
 export const handleGetAddressInfo: OmniHandler = async ({ message }) => {
     if (!message.payload || message.payload.length === 0) {
         return encodeResponse(

@@ -133,13 +133,15 @@ Blockchain state queries and identity management.
 | 0x48 | `gcr_validateReferral` | Referral code validation | Yes | Yes |
 | 0x49 | `gcr_getAccountByIdentity` | Account lookup by identity | No | Yes |
 | 0x4A | `gcr_getAddressInfo` | Full address state query | No | Yes |
-| 0x4B | `gcr_getAddressNonce` | Get address nonce only | No | Yes |
+| 0x4B | `gcr_getAddressNonce` | ~~Get address nonce only~~ **REDUNDANT** | No | ~~Yes~~ N/A |
 | 0x4C-0x4F | - | **Reserved** | - | - |
 
 **Notes:**
-- Read operations (0x42-0x47, 0x49-0x4B) typically don't require auth
+- Read operations (0x42-0x47, 0x49-0x4A) typically don't require auth
 - Write operations (0x41, 0x48) require authentication
 - Used by SDK clients and inter-node GCR synchronization
+- **0x41 Implementation**: Internal operation triggered by write transactions. Payload contains `GCREditIdentity` with context (xm/web2/pqc/ud), operation (add/remove), and context-specific identity data. Implemented via `GCRIdentityRoutines.apply()`.
+- **0x4B Redundancy**: Nonce is already included in `gcr_getAddressInfo` (0x4A) response as `response.nonce` field. No separate opcode needed.
 
 ### 0x5X - Browser/Client Communication
 
