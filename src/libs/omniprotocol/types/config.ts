@@ -1,6 +1,7 @@
 export type MigrationMode = "HTTP_ONLY" | "OMNI_PREFERRED" | "OMNI_ONLY"
 
 export interface ConnectionPoolConfig {
+    maxTotalConnections: number // Wave 8.1: Maximum total TCP connections across all peers
     maxConnectionsPerPeer: number
     idleTimeout: number
     connectTimeout: number
@@ -33,6 +34,7 @@ export interface OmniProtocolConfig {
 
 export const DEFAULT_OMNIPROTOCOL_CONFIG: OmniProtocolConfig = {
     pool: {
+        maxTotalConnections: 100, // Wave 8.1: TCP connection pool limit
         maxConnectionsPerPeer: 1,
         idleTimeout: 10 * 60 * 1000,
         connectTimeout: 5_000,
