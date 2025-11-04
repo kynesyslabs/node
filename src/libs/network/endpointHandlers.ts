@@ -49,6 +49,8 @@ import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
+import handleStorageProgramTransaction from "./routines/transactions/handleStorageProgramTransaction"
+import { StorageProgramPayload } from "@kynesyslabs/demosdk/storage"
 import {
     hexToUint8Array,
     ucrypto,
@@ -286,6 +288,14 @@ export default class ServerHandlers {
             // NOTE This is to be removed once demosWork is in place, but is crucial for now
             case "crosschainOperation":
                 payload = tx.content.data
+                if (!Array.isArray(payload) || payload.length < 2) {
+                    log.error("[handleExecuteTransaction] Invalid crosschainOperation payload structure")
+                    result.success = false
+                    result.response = { message: "Invalid payload structure" }
+                    result.extra = "Invalid crosschainOperation payload"
+                    break
+                }
+                console.log("[Included CrossChain Operation Payload]")
                 console.log("[Included XM Chainscript]")
                 console.log(payload[1])
                 // TODO Better types on answers
@@ -389,6 +399,51 @@ export default class ServerHandlers {
                 }
                 result.response = nativeBridgeResult
                 break
+
+            case "storageProgram": {
+                // REVIEW: Storage Program transaction handling
+                payload = tx.content.data
+                if (!Array.isArray(payload) || payload.length < 2) {
+                    log.error("[handleExecuteTransaction] Invalid storageProgram payload structure")
+                    result.success = false
+                    result.response = { message: "Invalid payload structure" }
+                    result.extra = "Invalid storageProgram payload"
+                    break
+                }
+
+                const storagePayload = payload[1] as StorageProgramPayload
+
+                console.log("[Included Storage Program Payload]")
+                console.log(storagePayload)
+
+                try {
+                    const storageProgramResult = await handleStorageProgramTransaction(
+                        storagePayload,
+                        tx.content.from,
+                        tx.hash,
+                    )
+
+                    result.success = storageProgramResult.success
+                    result.response = {
+                        message: storageProgramResult.message,
+                    }
+
+                    // If handler generated GCR edits, add them to transaction for HandleGCR to apply
+                    if (storageProgramResult.gcrEdits && storageProgramResult.gcrEdits.length > 0) {
+                        tx.content.gcr_edits = storageProgramResult.gcrEdits
+                        queriedTx.content.gcr_edits = storageProgramResult.gcrEdits
+                    }
+                } catch (e) {
+                    log.error(
+                        "[handleExecuteTransaction] Error in storageProgram: " + e,
+                    )
+                    result.success = false
+                    result.response = e
+                    result.extra = "Error in storageProgram"
+                }
+
+                break
+            }
         }
 
         // Only if the transaction is valid we add it to the mempool

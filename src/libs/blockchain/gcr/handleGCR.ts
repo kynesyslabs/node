@@ -49,6 +49,8 @@ import Chain from "../chain"
 import { Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { Referrals } from "@/features/incentive/referrals"
+import { validateStorageProgramAccess } from "@/libs/blockchain/validators/validateStorageProgramAccess"
+import { getDataSize, STORAGE_LIMITS } from "@/libs/blockchain/validators/validateStorageProgramSize"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -274,6 +276,12 @@ export default class HandleGCR {
                     repositories.main as Repository<GCRMain>,
                     simulate,
                 )
+            case "storageProgram":
+                return this.applyStorageProgramEdit(
+                    editOperation,
+                    repositories.main as Repository<GCRMain>,
+                    simulate,
+                )
             case "assign":
             case "subnetsTx":
                 // TODO implementations
@@ -281,6 +289,276 @@ export default class HandleGCR {
                 return { success: true, message: "Not implemented" }
             default:
                 return { success: false, message: "Invalid GCREdit type" }
+        }
+    }
+
+    /**
+     * Apply Storage Program edit to GCR
+     * @param editOperation The GCR edit operation for storage program
+     * @param repository GCR_Main repository
+     * @param simulate Whether to simulate the operation
+     * @returns Result of the storage program edit application
+     */
+    // REVIEW: Storage Program GCR edit application
+    private static async applyStorageProgramEdit(
+        editOperation: GCREdit,
+        repository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        // Type narrowing for storage program edits
+        if (editOperation.type !== "storageProgram") {
+            return {
+                success: false,
+                message: "Invalid edit type for storage program handler",
+            }
+        }
+
+        const { target, context } = editOperation
+
+        if (!context || !context.operation) {
+            return {
+                success: false,
+                message: "Storage program edit missing operation context",
+            }
+        }
+
+        // DELETE operations don't require data field, only operation and sender
+        if (context.operation !== "DELETE" && !context.data) {
+            return {
+                success: false,
+                message: "Storage program edit missing data context",
+            }
+        }
+
+        // Safe type casting: context.operation and context.sender validated above
+        const operation = context.operation as string
+        const sender = context.sender as string
+        try {
+            // REVIEW: Find the storage program account (using 'pubkey' not 'address')
+            let account = await repository.findOne({
+                where: { pubkey: target },
+            })
+
+            // REVIEW: Handle operation-specific account existence requirements
+            if (operation === "CREATE") {
+                // CREATE requires account to NOT exist
+                if (account) {
+                    return {
+                        success: false,
+                        message: `Storage program already exists: ${target}`,
+                    }
+                }
+
+                // Create new account for CREATE operation
+                const initialSize = getDataSize(context.data.variables)
+                if (initialSize > STORAGE_LIMITS.MAX_SIZE_BYTES) {
+                    return {
+                        success: false,
+                        message: `Initial data size ${initialSize} bytes exceeds limit of ${STORAGE_LIMITS.MAX_SIZE_BYTES} bytes (128KB)`,
+                    }
+                }
+
+                account = repository.create({
+                    pubkey: target,
+                    balance: 0n,
+                    nonce: 0,
+                    assignedTxs: [],
+                    identities: { xm: {}, web2: {}, pqc: {} },
+                    points: {
+                        totalPoints: 0,
+                        breakdown: {
+                            web3Wallets: {},
+                            socialAccounts: {
+                                twitter: 0,
+                                github: 0,
+                                discord: 0,
+                                telegram: 0,
+                            },
+                            referrals: 0,
+                            demosFollow: 0,
+                        },
+                        lastUpdated: new Date(),
+                    },
+                    referralInfo: {
+                        totalReferrals: 0,
+                        referralCode: "",
+                        referrals: [],
+                    },
+                    data: {
+                        variables: context.data.variables,
+                        metadata: {
+                            ...context.data.metadata,
+                            size: initialSize,
+                            lastModified: context.data.metadata?.lastModified ?? Date.now(),
+                        },
+                    },
+                    flagged: false,
+                    flaggedReason: "",
+                    reviewed: false,
+                })
+
+                if (!simulate) {
+                    await repository.save(account)
+                    log.info(`[StorageProgram] CREATE: ${target} by ${sender}`)
+                }
+
+                return {
+                    success: true,
+                    message: `Storage program created: ${target}`,
+                }
+            }
+
+            // For all other operations (WRITE, UPDATE_ACCESS_CONTROL, DELETE), account must exist
+            if (!account || !account.data || !account.data.metadata) {
+                return {
+                    success: false,
+                    message: "Storage program does not exist",
+                }
+            }
+
+            // Handle WRITE operation
+            if (operation === "WRITE") {
+                // Validate access control
+                const accessCheck = validateStorageProgramAccess(
+                    "WRITE_STORAGE",
+                    sender,
+                    account.data,
+                )
+
+                if (!accessCheck.success) {
+                    return {
+                        success: false,
+                        message: accessCheck.error || "Access denied",
+                    }
+                }
+
+                if (!context.data || !context.data.variables) {
+                    return {
+                        success: false,
+                        message: "WRITE operation missing data.variables",
+                    }
+                }
+
+                // Merge new variables with existing ones
+                const mergedVariables = {
+                    ...account.data.variables,
+                    ...context.data.variables,
+                }
+
+                // REVIEW: Validate merged size BEFORE saving to prevent size limit bypass
+                const mergedSize = getDataSize(mergedVariables)
+                if (mergedSize > STORAGE_LIMITS.MAX_SIZE_BYTES) {
+                    return {
+                        success: false,
+                        message: `Merged data size ${mergedSize} bytes exceeds limit of ${STORAGE_LIMITS.MAX_SIZE_BYTES} bytes (128KB)`,
+                    }
+                }
+
+                account.data.variables = mergedVariables
+                account.data.metadata.lastModified = context.data.metadata?.lastModified || Date.now()
+                // REVIEW: Recalculate size to reflect actual merged total (overrides delta from transaction handler)
+                account.data.metadata.size = mergedSize
+
+                if (!simulate) {
+                    await repository.save(account)
+                    log.info(`[StorageProgram] WRITE: ${target} by ${sender}`)
+                }
+
+                return {
+                    success: true,
+                    message: `Storage program updated: ${target}`,
+                }
+            }
+
+            // Handle UPDATE_ACCESS_CONTROL operation
+            if (operation === "UPDATE_ACCESS_CONTROL") {
+                // Validate deployer-only access
+                const accessCheck = validateStorageProgramAccess(
+                    "UPDATE_ACCESS_CONTROL",
+                    sender,
+                    account.data,
+                )
+
+                if (!accessCheck.success) {
+                    return {
+                        success: false,
+                        message: accessCheck.error || "Only deployer can update access control",
+                    }
+                }
+
+                if (!context.data || !context.data.metadata) {
+                    return {
+                        success: false,
+                        message: "UPDATE_ACCESS_CONTROL missing metadata",
+                    }
+                }
+
+                // Update access control settings
+                if (context.data.metadata.accessControl) {
+                    account.data.metadata.accessControl = context.data.metadata.accessControl
+                }
+
+                if (context.data.metadata.allowedAddresses !== undefined) {
+                    account.data.metadata.allowedAddresses = context.data.metadata.allowedAddresses
+                }
+
+                account.data.metadata.lastModified = context.data.metadata.lastModified || Date.now()
+
+                if (!simulate) {
+                    await repository.save(account)
+                    log.info(`[StorageProgram] ACCESS_CONTROL_UPDATE: ${target} by ${sender}`)
+                }
+
+                return {
+                    success: true,
+                    message: `Access control updated for: ${target}`,
+                }
+            }
+
+            // Handle DELETE operation
+            if (operation === "DELETE") {
+                // Validate deployer-only access
+                const accessCheck = validateStorageProgramAccess(
+                    "DELETE_STORAGE_PROGRAM",
+                    sender,
+                    account.data,
+                )
+
+                if (!accessCheck.success) {
+                    return {
+                        success: false,
+                        message: accessCheck.error || "Only deployer can delete storage program",
+                    }
+                }
+
+                // Clear storage program data (null metadata signals deletion)
+                account.data = {
+                    variables: {},
+                    metadata: null, // Null metadata indicates the storage program has been deleted
+                }
+
+                if (!simulate) {
+                    await repository.save(account)
+                    log.info(`[StorageProgram] DELETE: ${target} by ${sender}`)
+                }
+
+                return {
+                    success: true,
+                    message: `Storage program deleted: ${target}`,
+                }
+            }
+
+            return {
+                success: false,
+                message: `Unknown storage program operation: ${operation}`,
+            }
+        } catch (error) {
+            log.error(`[StorageProgram] Error applying edit: ${error instanceof Error ? `${error.message}
+Stack: ${error.stack || "N/A"}` : String(error)}`)
+            return {
+                success: false,
+                message: `Error: ${error instanceof Error ? error.message : String(error)}`,
+            }
         }
     }
 
