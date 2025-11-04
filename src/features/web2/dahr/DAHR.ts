@@ -10,6 +10,41 @@ import { generateUniqueId } from "src/utilities/generateUniqueId"
 import { EnumWeb2Actions } from "@kynesyslabs/demosdk/types"
 import { validateAndNormalizeHttpUrl } from "src/features/web2/validator"
 
+const SENSITIVE_HEADER_KEYS = new Set([
+    "authorization",
+    "proxy-authorization",
+    "x-api-key",
+    "api-key",
+    "x-auth-token",
+    "x-access-token",
+    "x-authorization",
+    "x-session-token",
+    "cookie",
+    "set-cookie",
+])
+
+type Web2Headers = NonNullable<IWeb2Request["raw"]["headers"]>
+
+function sanitizeHeaders(
+    headers?: IWeb2Request["raw"]["headers"],
+): IWeb2Request["raw"]["headers"] {
+    if (!headers) {
+        return headers
+    }
+
+    const sanitized: Partial<Web2Headers> = {}
+
+    for (const key of Object.keys(headers)) {
+        if (SENSITIVE_HEADER_KEYS.has(key.toLowerCase())) {
+            continue
+        }
+
+        sanitized[key] = headers[key]
+    }
+
+    return Object.keys(sanitized).length > 0 ? sanitized : undefined
+}
+
 /**
  * DAHR - Data Agnostic HTTPS Relay, class that handles the Web2 request and proxy process.
  */
@@ -112,10 +147,18 @@ export class DAHR {
         sessionId: string
         web2Request: IWeb2Request
     } {
+        const raw = this.web2Request.raw
+        const sanitizedRaw = raw
+            ? {
+                  ...raw,
+                  headers: sanitizeHeaders(raw.headers),
+              }
+            : raw
+
         return {
             sessionId: this.sessionId,
             web2Request: {
-                raw: this.web2Request.raw,
+                raw: sanitizedRaw,
                 result: this.web2Request.result,
                 hash: this.web2Request.hash,
                 signature: this.web2Request.signature,
