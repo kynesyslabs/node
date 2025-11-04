@@ -149,10 +149,10 @@ docs/src
 src/features/bridges/EVMSmartContract/docs
 src/features/bridges/LiquidityTank_UserGuide.md
 local_tests
-docs/storage_features
-STORAGE_PROGRAMS_SPEC.md
-temp
 claudedocs
+docs/storage_features
+temp
+STORAGE_PROGRAMS_SPEC.md
 omniprotocol_fixtures_scripts
 captraf.sh
 http-capture-1762006580.pcap

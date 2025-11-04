@@ -289,13 +289,13 @@ export default class ServerHandlers {
             case "crosschainOperation":
                 payload = tx.content.data
                 if (!Array.isArray(payload) || payload.length < 2) {
-                    log.error("[handleExecuteTransaction] Invalid storageProgram payload structure")
+                    log.error("[handleExecuteTransaction] Invalid crosschainOperation payload structure")
                     result.success = false
                     result.response = { message: "Invalid payload structure" }
-                    result.extra = "Invalid storageProgram payload"
+                    result.extra = "Invalid crosschainOperation payload"
                     break
                 }
-                console.log("[Included Storage Program Payload]")
+                console.log("[Included CrossChain Operation Payload]")
                 console.log("[Included XM Chainscript]")
                 console.log(payload[1])
                 // TODO Better types on answers
