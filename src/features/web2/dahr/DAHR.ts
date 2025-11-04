@@ -25,6 +25,12 @@ const SENSITIVE_HEADER_KEYS = new Set([
 
 type Web2Headers = NonNullable<IWeb2Request["raw"]["headers"]>
 
+/**
+ * Removes sensitive headers from a Web2 request headers object.
+ * Headers with keys matching SENSITIVE_HEADER_KEYS (case-insensitive) are excluded.
+ * @param headers - The original headers object
+ * @returns A new headers object with sensitive headers removed, or undefined if empty
+ */
 function sanitizeHeaders(
     headers?: IWeb2Request["raw"]["headers"],
 ): IWeb2Request["raw"]["headers"] {
@@ -32,7 +38,7 @@ function sanitizeHeaders(
         return headers
     }
 
-    const sanitized: Partial<Web2Headers> = {}
+    const sanitized: Record<string, any> = {}
 
     for (const key of Object.keys(headers)) {
         if (SENSITIVE_HEADER_KEYS.has(key.toLowerCase())) {
