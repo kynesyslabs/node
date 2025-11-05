@@ -10,6 +10,7 @@ import Hashing from "@/libs/crypto/hashing"
 import {
     PqcIdentityEdit,
     SavedXmIdentity,
+    SavedUdIdentity,
 } from "@/model/entities/types/IdentityTypes"
 import log from "@/utilities/logger"
 import { IncentiveManager } from "./IncentiveManager"
@@ -533,6 +534,182 @@ export default class GCRIdentityRoutines {
         return { success: true, message: "PQC identities removed" }
     }
 
+    // SECTION UD Identity Routines
+    static async applyUdIdentityAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const {
+            domain,
+            signingAddress,
+            signatureType,
+            signature,
+            publicKey,
+            timestamp,
+            signedData,
+            network,
+            registryType,
+        } = editOperation.data
+
+        // REVIEW: Validate required fields presence
+        if (
+            !domain ||
+            !signingAddress ||
+            !signatureType ||
+            !signature ||
+            !publicKey ||
+            !timestamp ||
+            !signedData ||
+            !network ||
+            !registryType
+        ) {
+            return {
+                success: false,
+                message: "Invalid edit operation data: missing required fields",
+            }
+        }
+
+        // Validate enum fields have allowed values
+        const validSignatureTypes = ["evm", "solana"]
+        const validNetworks = ["polygon", "base", "sonic", "ethereum", "solana"]
+        const validRegistryTypes = ["UNS", "CNS"]
+
+        if (!validSignatureTypes.includes(signatureType)) {
+            return {
+                success: false,
+                message: `Invalid signatureType: ${signatureType}. Must be "evm" or "solana"`,
+            }
+        }
+        if (!validNetworks.includes(network)) {
+            return {
+                success: false,
+                message: `Invalid network: ${network}. Must be one of: ${validNetworks.join(", ")}`,
+            }
+        }
+        if (!validRegistryTypes.includes(registryType)) {
+            return {
+                success: false,
+                message: `Invalid registryType: ${registryType}. Must be "UNS" or "CNS"`,
+            }
+        }
+
+        // Validate timestamp is a valid positive number
+        if (typeof timestamp !== "number" || isNaN(timestamp) || timestamp <= 0) {
+            return {
+                success: false,
+                message: `Invalid timestamp: ${timestamp}. Must be a positive number (epoch milliseconds)`,
+            }
+        }
+
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+
+        accountGCR.identities.ud = accountGCR.identities.ud || []
+
+        // Check if domain already exists for this account
+        const domainExists = accountGCR.identities.ud.some(
+            (id: SavedUdIdentity) => id.domain.toLowerCase() === domain.toLowerCase(),
+        )
+
+        if (domainExists) {
+            return { success: false, message: "Domain already linked to this account" }
+        }
+
+        const data: SavedUdIdentity = {
+            domain: domain.toLowerCase(), // Normalize to lowercase for consistency
+            signingAddress,
+            signatureType,
+            signature,
+            publicKey,
+            timestamp,
+            signedData,
+            network,
+            registryType,
+        }
+
+        accountGCR.identities.ud.push(data)
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            /**
+             * Check if this is the first connection for this domain
+             */
+            const isFirst = await this.isFirstConnection(
+                "ud",
+                { domain },
+                gcrMainRepository,
+                editOperation.account,
+            )
+
+            /**
+             * Award incentive points for UD domain linking
+             */
+            if (isFirst) {
+                await IncentiveManager.udDomainLinked(
+                    accountGCR.pubkey,
+                    domain,
+                    editOperation.referralCode,
+                )
+            }
+        }
+
+        return { success: true, message: "UD identity added" }
+    }
+
+    static async applyUdIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { domain } = editOperation.data
+
+        if (!domain) {
+            return { success: false, message: "Invalid edit operation data" }
+        }
+
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
+
+        if (!accountGCR) {
+            return { success: false, message: "Account not found" }
+        }
+
+        if (!accountGCR.identities || !accountGCR.identities.ud) {
+            return {
+                success: false,
+                message: "No UD identities found",
+            }
+        }
+
+        const domainExists = accountGCR.identities.ud.some(
+            (id: SavedUdIdentity) => id.domain.toLowerCase() === domain.toLowerCase(),
+        )
+
+        if (!domainExists) {
+            return { success: false, message: "Domain not found" }
+        }
+
+        accountGCR.identities.ud = accountGCR.identities.ud.filter(
+            (id: SavedUdIdentity) => id.domain.toLowerCase() !== domain.toLowerCase(),
+        )
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            /**
+             * Deduct incentive points for UD domain unlinking
+             */
+            await IncentiveManager.udDomainUnlinked(
+                accountGCR.pubkey,
+                domain,
+            )
+        }
+
+        return { success: true, message: "UD identity removed" }
+    }
+
     static async applyAwardPoints(
         editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
@@ -663,6 +840,20 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
+            case "udadd":
+                result = await this.applyUdIdentityAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "udremove":
+                result = await this.applyUdIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
             case "pointsadd":
                 result = await this.applyAwardPoints(
                     identityEdit,
@@ -688,17 +879,19 @@ export default class GCRIdentityRoutines {
     }
 
     private static async isFirstConnection(
-        type: "twitter" | "github" | "web3" | "telegram" | "discord",
+        type: "twitter" | "github" | "web3" | "telegram" | "discord" | "ud",
         data: {
             userId?: string // for twitter/github/discord
             chain?: string // for web3
             subchain?: string // for web3
             address?: string // for web3
+            domain?: string // for ud
         },
         gcrMainRepository: Repository<GCRMain>,
         currentAccount?: string,
     ): Promise<boolean> {
-        if (type !== "web3") {
+        if (type !== "web3" && type !== "ud") {
+            // Handle web2 identity types: twitter, github, telegram, discord
             const queryTemplate = `
             EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'${type}', '[]'::jsonb)) as ${type}_id WHERE ${type}_id->>'userId' = :userId)
         `
@@ -709,88 +902,51 @@ export default class GCRIdentityRoutines {
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()
 
+            /**
+             * Return true if no account has this userId
+             */
+            return !result
+        } else if (type === "ud") {
+            /**
+             * Check if this UD domain exists anywhere
+             */
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'ud', '[]'::jsonb)) AS ud_id WHERE LOWER(ud_id->>'domain') = LOWER(:domain))",
+                    { domain: data.domain },
+                )
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
+
+            /**
+             * Return true if no account has this domain
+             */
+            return !result
+        } else {
+            /**
+             * For web3 wallets, check if this address exists in any account for this chain/subchain
+             */
+            const addressToCheck =
+                data.chain === "evm" ? data.address.toLowerCase() : data.address
+
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)",
+                    {
+                        chain: data.chain,
+                        subchain: data.subchain,
+                        address: addressToCheck,
+                    },
+                )
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
+
+            /**
+             * Return true if this is the first connection
+             */
             return !result
         }
-
-        // if (type === "twitter") {
-        //     /**
-        //      * Check if this Twitter userId exists anywhere
-        //      */
-        //     const result = await gcrMainRepository
-        //         .createQueryBuilder("gcr")
-        //         .where(
-        //             "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'userId' = :userId)",
-        //             {
-        //                 userId: data.userId,
-        //             },
-        //         )
-        //         .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
-        //         .getOne()
-
-        //     /**
-        //      * Return true if no account has this userId
-        //      */
-        //     return !result
-        // } else if (type === "github") {
-        //     /**
-        //      * Check if this GitHub userId exists anywhere
-        //      */
-        //     const result = await gcrMainRepository
-        //         .createQueryBuilder("gcr")
-        //         .where(
-        //             "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'github') as github_id WHERE github_id->>'userId' = :userId)",
-        //             {
-        //                 userId: data.userId,
-        //             },
-        //         )
-        //         .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
-        //         .getOne()
-
-        //     /**
-        //      * Return true if no account has this userId
-        //      */
-        //     return !result
-        // } else if (type === "discord") {
-        //     /**
-        //      * Check if this Discord userId exists anywhere
-        //      */
-        //     const result = await gcrMainRepository
-        //         .createQueryBuilder("gcr")
-        //         .where(
-        //             "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'discord', '[]'::jsonb)) AS discord_id WHERE discord_id->>'userId' = :userId)",
-        //             { userId: data.userId },
-        //         )
-        //         .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
-        //         .getOne()
-
-        //     /**
-        //      * Return true if no account has this userId
-        //      */
-        //     return !result
-        // } else {
-        /**
-         * For web3 wallets, check if this address exists in any account for this chain/subchain
-         */
-        const addressToCheck =
-            data.chain === "evm" ? data.address.toLowerCase() : data.address
-
-        const result = await gcrMainRepository
-            .createQueryBuilder("gcr")
-            .where(
-                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)",
-                {
-                    chain: data.chain,
-                    subchain: data.subchain,
-                    address: addressToCheck,
-                },
-            )
-            .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
-            .getOne()
-
-        /**
-         * Return true if this is the first connection
-         */
-        return !result
-        // }
     }
 }
