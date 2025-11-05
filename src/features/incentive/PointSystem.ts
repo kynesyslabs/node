@@ -276,13 +276,24 @@ export class PointSystem {
     ): Promise<RPCResponse> {
         let walletIsAlreadyLinked = false
         let hasExistingWalletOnChain = false
+
         const walletIsAlreadyLinkedMessage = "This wallet is already linked"
         const hasExistingWalletOnChainMessage = `A ${chain} wallet is already linked. Please disconnect it first.`
+
         try {
             // Get current points and identities from GCR
             const userPointsWithIdentities = await this.getUserPointsInternal(
                 userId,
             )
+
+            if (!userPointsWithIdentities.linkedSocials.twitter) {
+                return {
+                    result: 400,
+                    response: "Twitter account not linked. Not awarding points",
+                    require_reply: false,
+                    extra: null,
+                }
+            }
 
             if (
                 userPointsWithIdentities.linkedWallets.includes(
@@ -689,7 +700,9 @@ export class PointSystem {
 
             // Verify the Telegram account is actually linked to this user
             const telegramIdentities = account.identities.web2?.telegram || []
-            const isOwner = telegramIdentities.some((tg: any) => tg.userId === telegramUserId)
+            const isOwner = telegramIdentities.some(
+                (tg: any) => tg.userId === telegramUserId,
+            )
 
             if (!isOwner) {
                 return {
@@ -697,7 +710,8 @@ export class PointSystem {
                     response: {
                         pointsAwarded: 0,
                         totalPoints: account.points.totalPoints || 0,
-                        message: "Error: Telegram account not linked to this user",
+                        message:
+                            "Error: Telegram account not linked to this user",
                     },
                     require_reply: false,
                     extra: {},
@@ -709,7 +723,9 @@ export class PointSystem {
             )
 
             // Check if user already has Telegram points specifically
-            if (userPointsWithIdentities.breakdown.socialAccounts.telegram > 0) {
+            if (
+                userPointsWithIdentities.breakdown.socialAccounts.telegram > 0
+            ) {
                 return {
                     result: 200,
                     response: {
@@ -724,16 +740,20 @@ export class PointSystem {
 
             // REVIEW: Check group membership from attestation (SDK v2.4.18+)
             // Award points ONLY if user is member of required Telegram group
-            const isGroupMember = attestation?.payload?.group_membership === true
+            const isGroupMember =
+                attestation?.payload?.group_membership === true
 
             if (!isGroupMember) {
-                log.info(`Telegram linked but user not in required group: ${telegramUserId}`)
+                log.info(
+                    `Telegram linked but user not in required group: ${telegramUserId}`,
+                )
                 return {
                     result: 200,
                     response: {
                         pointsAwarded: 0,
                         totalPoints: userPointsWithIdentities.totalPoints,
-                        message: "Telegram linked successfully, but you must join the required group to earn points",
+                        message:
+                            "Telegram linked successfully, but you must join the required group to earn points",
                     },
                     require_reply: false,
                     extra: {},

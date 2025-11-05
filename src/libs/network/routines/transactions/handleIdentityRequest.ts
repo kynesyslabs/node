@@ -102,7 +102,6 @@ export default async function handleIdentityRequest(
         default:
             return {
                 success: false,
-                // @ts-expect-error - we should never get here
                 message: `Unsupported identity method: ${payload.method}`,
             }
     }
