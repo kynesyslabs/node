@@ -8,48 +8,8 @@ import { ProxyFactory } from "src/features/web2/proxy/ProxyFactory"
 import required from "src/utilities/required"
 import { generateUniqueId } from "src/utilities/generateUniqueId"
 import { EnumWeb2Actions } from "@kynesyslabs/demosdk/types"
+import { sanitizeWeb2RequestForStorage } from "src/features/web2/sanitizeWeb2Request"
 import { validateAndNormalizeHttpUrl } from "src/features/web2/validator"
-
-const SENSITIVE_HEADER_KEYS = new Set([
-    "authorization",
-    "proxy-authorization",
-    "x-api-key",
-    "api-key",
-    "x-auth-token",
-    "x-access-token",
-    "x-authorization",
-    "x-session-token",
-    "cookie",
-    "set-cookie",
-])
-
-type Web2Headers = NonNullable<IWeb2Request["raw"]["headers"]>
-
-/**
- * Removes sensitive headers from a Web2 request headers object.
- * Headers with keys matching SENSITIVE_HEADER_KEYS (case-insensitive) are excluded.
- * @param headers - The original headers object
- * @returns A new headers object with sensitive headers removed, or undefined if empty
- */
-function sanitizeHeaders(
-    headers?: IWeb2Request["raw"]["headers"],
-): IWeb2Request["raw"]["headers"] {
-    if (!headers) {
-        return headers
-    }
-
-    const sanitized: Record<string, any> = {}
-
-    for (const key of Object.keys(headers)) {
-        if (SENSITIVE_HEADER_KEYS.has(key.toLowerCase())) {
-            continue
-        }
-
-        sanitized[key] = headers[key]
-    }
-
-    return Object.keys(sanitized).length > 0 ? sanitized : undefined
-}
 
 /**
  * DAHR - Data Agnostic HTTPS Relay, class that handles the Web2 request and proxy process.
@@ -153,21 +113,15 @@ export class DAHR {
         sessionId: string
         web2Request: IWeb2Request
     } {
-        const raw = this.web2Request.raw
-        const sanitizedRaw = raw
-            ? {
-                  ...raw,
-                  headers: sanitizeHeaders(raw.headers),
-              }
-            : raw
+        const sanitizedRequest = sanitizeWeb2RequestForStorage(this.web2Request)
 
         return {
             sessionId: this.sessionId,
             web2Request: {
-                raw: sanitizedRaw,
-                result: this.web2Request.result,
-                hash: this.web2Request.hash,
-                signature: this.web2Request.signature,
+                raw: sanitizedRequest.raw,
+                result: sanitizedRequest.result,
+                hash: sanitizedRequest.hash,
+                signature: sanitizedRequest.signature,
             },
         }
     }
