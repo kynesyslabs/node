@@ -890,7 +890,8 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         currentAccount?: string,
     ): Promise<boolean> {
-        if (type !== "web3") {
+        if (type !== "web3" && type !== "ud") {
+            // Handle web2 identity types: twitter, github, telegram, discord
             const queryTemplate = `
             EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'${type}', '[]'::jsonb)) as ${type}_id WHERE ${type}_id->>'userId' = :userId)
         `
@@ -900,9 +901,6 @@ export default class GCRIdentityRoutines {
                 .where(queryTemplate, { userId: data.userId })
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()
-
-            return !result
-        }
 
             /**
              * Return true if no account has this userId
@@ -932,23 +930,23 @@ export default class GCRIdentityRoutines {
             const addressToCheck =
                 data.chain === "evm" ? data.address.toLowerCase() : data.address
 
-        const result = await gcrMainRepository
-            .createQueryBuilder("gcr")
-            .where(
-                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)",
-                {
-                    chain: data.chain,
-                    subchain: data.subchain,
-                    address: addressToCheck,
-                },
-            )
-            .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
-            .getOne()
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)",
+                    {
+                        chain: data.chain,
+                        subchain: data.subchain,
+                        address: addressToCheck,
+                    },
+                )
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
 
-        /**
-         * Return true if this is the first connection
-         */
-        return !result
-        // }
+            /**
+             * Return true if this is the first connection
+             */
+            return !result
+        }
     }
 }
