@@ -153,3 +153,8 @@ claudedocs
 docs/storage_features
 temp
 STORAGE_PROGRAMS_SPEC.md
+omniprotocol_fixtures_scripts
+captraf.sh
+http-capture-1762006580.pcap
+http-capture-1762008909.pcap
+http-traffic.json

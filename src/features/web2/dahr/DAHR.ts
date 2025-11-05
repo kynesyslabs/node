@@ -8,6 +8,7 @@ import { ProxyFactory } from "src/features/web2/proxy/ProxyFactory"
 import required from "src/utilities/required"
 import { generateUniqueId } from "src/utilities/generateUniqueId"
 import { EnumWeb2Actions } from "@kynesyslabs/demosdk/types"
+import { sanitizeWeb2RequestForStorage } from "src/features/web2/sanitizeWeb2Request"
 import { validateAndNormalizeHttpUrl } from "src/features/web2/validator"
 
 /**
@@ -112,13 +113,15 @@ export class DAHR {
         sessionId: string
         web2Request: IWeb2Request
     } {
+        const sanitizedRequest = sanitizeWeb2RequestForStorage(this.web2Request)
+
         return {
             sessionId: this.sessionId,
             web2Request: {
-                raw: this.web2Request.raw,
-                result: this.web2Request.result,
-                hash: this.web2Request.hash,
-                signature: this.web2Request.signature,
+                raw: sanitizedRequest.raw,
+                result: sanitizedRequest.result,
+                hash: sanitizedRequest.hash,
+                signature: sanitizedRequest.signature,
             },
         }
     }
