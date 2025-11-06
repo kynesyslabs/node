@@ -23,10 +23,10 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
 import TxUtils from "../blockchain/transaction"
 import Mempool from "../blockchain/mempool_v2"
+import L2PSMempool from "../blockchain/l2ps_mempool"
 import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import { Twitter } from "../identity/tools/twitter"
 import { Tweet } from "@kynesyslabs/demosdk/types"
-import Mempool from "../blockchain/mempool_v2"
 
 export interface NodeCall {
     message: string
@@ -331,7 +331,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = {
                     participating: isParticipating,
                     l2psUid: data.l2psUid,
-                    nodeIdentity: getSharedState.publicKeyHex
+                    nodeIdentity: getSharedState.publicKeyHex,
                 }
                 
                 log.debug(`[L2PS] Participation query for ${data.l2psUid}: ${isParticipating}`)
@@ -342,27 +342,83 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             }
             break
 
-        case "getL2PSMempoolInfo":
+        case "getL2PSMempoolInfo": {
+            // REVIEW: Phase 3c-1 - L2PS mempool info endpoint
             console.log("[L2PS] Received L2PS mempool info request")
             if (!data.l2psUid) {
                 response.result = 400
                 response.response = "No L2PS UID specified"
                 break
             }
-            response.result = 501
-            response.response = "UNIMPLEMENTED - L2PS mempool info endpoint"
-            break
 
-        case "getL2PSTransactions":
+            try {
+                // Get all processed transactions for this L2PS UID
+                const transactions = await L2PSMempool.getByUID(data.l2psUid, "processed")
+
+                response.result = 200
+                response.response = {
+                    l2psUid: data.l2psUid,
+                    transactionCount: transactions.length,
+                    lastTimestamp: transactions.length > 0
+                        ? transactions[transactions.length - 1].timestamp
+                        : 0,
+                    oldestTimestamp: transactions.length > 0
+                        ? transactions[0].timestamp
+                        : 0,
+                }
+            } catch (error: any) {
+                log.error("[L2PS] Failed to get mempool info:", error)
+                response.result = 500
+                response.response = "Failed to get L2PS mempool info"
+                response.extra = error.message || "Internal error"
+            }
+            break
+        }
+
+        case "getL2PSTransactions": {
+            // REVIEW: Phase 3c-1 - L2PS transactions sync endpoint
             console.log("[L2PS] Received L2PS transactions sync request")
             if (!data.l2psUid) {
                 response.result = 400
                 response.response = "No L2PS UID specified"
                 break
             }
-            response.result = 501
-            response.response = "UNIMPLEMENTED - L2PS transactions sync endpoint"
+
+            try {
+                // Optional timestamp filter for incremental sync
+                const sinceTimestamp = data.since_timestamp || 0
+
+                // Get all processed transactions for this L2PS UID
+                let transactions = await L2PSMempool.getByUID(data.l2psUid, "processed")
+
+                // Filter by timestamp if provided (incremental sync)
+                if (sinceTimestamp > 0) {
+                    transactions = transactions.filter(tx => tx.timestamp > sinceTimestamp)
+                }
+
+                // Return encrypted transactions (validators never see this)
+                // Only L2PS participants can decrypt
+                response.result = 200
+                response.response = {
+                    l2psUid: data.l2psUid,
+                    transactions: transactions.map(tx => ({
+                        hash: tx.hash,
+                        l2ps_uid: tx.l2ps_uid,
+                        original_hash: tx.original_hash,
+                        encrypted_tx: tx.encrypted_tx,
+                        timestamp: tx.timestamp,
+                        block_number: tx.block_number,
+                    })),
+                    count: transactions.length,
+                }
+            } catch (error: any) {
+                log.error("[L2PS] Failed to get transactions:", error)
+                response.result = 500
+                response.response = "Failed to get L2PS transactions"
+                response.extra = error.message || "Internal error"
+            }
             break
+        }
         default:
             console.log("[SERVER] Received unknown message")
             // eslint-disable-next-line quotes
