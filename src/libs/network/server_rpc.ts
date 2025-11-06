@@ -289,7 +289,7 @@ export async function serverRpcBun() {
         return jsonResponse({
             enabled: getSharedState.isMCPServerStarted,
             transport: "sse",
-            status: getSharedState.isMCPServerStarted ? "running" : "stopped"
+            status: getSharedState.isMCPServerStarted ? "running" : "stopped",
         })
     })
 
