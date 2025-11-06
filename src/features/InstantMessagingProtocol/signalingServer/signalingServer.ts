@@ -59,7 +59,7 @@ import {
     SerializedEncryptedObject,
     ucrypto,
 } from "@kynesyslabs/demosdk/encryption"
-import Mempool from "@/libs/blockchain/mempool"
+import Mempool from "@/libs/blockchain/mempool_v2"
 import { Cryptography } from "@kynesyslabs/demosdk/encryption"
 import { UnifiedCrypto } from "@kynesyslabs/demosdk/encryption"
 import Hashing from "@/libs/crypto/hashing"
@@ -581,14 +581,18 @@ export class SignalingServer {
         const db = await Datasource.getInstance()
         const offlineMessageRepository = db.getDataSource().getRepository(OfflineMessage)
 
-        const messageHash = Hashing.sha256(JSON.stringify({ senderId, targetId, message, timestamp: Date.now() }))
+        const messageContent = JSON.stringify({ senderId, targetId, message, timestamp: Date.now() })
+        const messageHash = Hashing.sha256(messageContent)
+
+        // Sign the message hash with node's private key for integrity verification
+        const signature = Cryptography.sign(messageHash, getSharedState.identity.ed25519.privateKey)
 
         const offlineMessage = offlineMessageRepository.create({
             recipientPublicKey: targetId,
             senderPublicKey: senderId,
             messageHash,
             encryptedContent: message,
-            signature: "", // Could add signature for integrity
+            signature: Buffer.from(signature).toString("base64"),
             timestamp: BigInt(Date.now()),
             status: "pending",
         })
@@ -618,6 +622,10 @@ export class SignalingServer {
     private async deliverOfflineMessages(ws: WebSocket, peerId: string) {
         const offlineMessages = await this.getOfflineMessages(peerId)
 
+        // Get DB/repository once before loop for better performance
+        const db = await Datasource.getInstance()
+        const offlineMessageRepository = db.getDataSource().getRepository(OfflineMessage)
+
         for (const msg of offlineMessages) {
             ws.send(JSON.stringify({
                 type: "message",
@@ -629,8 +637,6 @@ export class SignalingServer {
             }))
 
             // Mark as delivered
-            const db = await Datasource.getInstance()
-            const offlineMessageRepository = db.getDataSource().getRepository(OfflineMessage)
             await offlineMessageRepository.update(msg.id, { status: "delivered" })
         }
     }

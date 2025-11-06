@@ -163,7 +163,7 @@ export default class ParallelNetworks {
         if (!fs.existsSync(l2psDir)) {
             console.warn("L2PS data directory not found, creating...")
             fs.mkdirSync(l2psDir, { recursive: true })
-            return
+            return []
         }
 
         const dirs = fs
