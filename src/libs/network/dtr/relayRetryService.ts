@@ -153,9 +153,16 @@ export class RelayRetryService {
                 return []
             }
         }
-        
+
         // Return validators in random order for load balancing
-        return [...this.cachedValidators].sort(() => Math.random() - 0.5)
+        // Using Fisher-Yates (Knuth) shuffle for truly uniform random distribution
+        // This avoids the bias of sort(() => Math.random() - 0.5) which can favor certain positions by 30-40%
+        const shuffled = [...this.cachedValidators]
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+        }
+        return shuffled
     }
     
     /**
