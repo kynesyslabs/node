@@ -8,7 +8,7 @@
     "main": "src/index.ts",
     "scripts": {
         "lint": "prettier --plugin-search-dir . --check . && eslint .",
-        "lint:fix": "eslint . --fix --ext .ts",
+        "lint:fix": "eslint . --fix --ext .ts --ignore-pattern 'local_tests/**'",
         "prettier-format": "prettier --config .prettierrc.json modules/**/*.ts --write",
         "format": "prettier --plugin-search-dir . --write .",
         "start": "tsx -r tsconfig-paths/register src/index.ts",

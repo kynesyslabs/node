@@ -14,6 +14,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool_v2"
+import L2PSHashes from "@/libs/blockchain/l2ps_hashes"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
 import { L2PSTransaction, Transaction } from "@kynesyslabs/demosdk/types"
 import Cryptography from "src/libs/crypto/cryptography"
@@ -730,7 +731,7 @@ export default class ServerHandlers {
      * @returns RPCResponse with processing result
      */
     static async handleL2PSHashUpdate(tx: Transaction): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
+        const response: RPCResponse = _.cloneDeep(emptyResponse)
         
         try {
             // Extract L2PS hash payload from transaction data
@@ -748,18 +749,31 @@ export default class ServerHandlers {
                 return response
             }
             
-            // TODO: Store hash update for validator consensus
-            // This is where validators store L2PS UID → hash mappings
-            // Implementation will be added in Phase 3
-            
-            log.info(`[L2PS Hash Update] Processed hash update for L2PS ${l2psUid}: ${l2psHashPayload.consolidated_hash} (${l2psHashPayload.transaction_count} txs)`)
+            // REVIEW: Store hash update for validator consensus (Phase 3b)
+            // Validators store ONLY UID → hash mappings (content blind)
+            try {
+                await L2PSHashes.updateHash(
+                    l2psHashPayload.l2ps_uid,
+                    l2psHashPayload.consolidated_hash,
+                    l2psHashPayload.transaction_count,
+                    BigInt(tx.block_number || 0),
+                )
+
+                log.info(`[L2PS Hash Update] Stored hash for L2PS ${l2psUid}: ${l2psHashPayload.consolidated_hash.substring(0, 16)}... (${l2psHashPayload.transaction_count} txs)`)
+            } catch (storageError: any) {
+                log.error("[L2PS Hash Update] Failed to store hash mapping:", storageError)
+                response.result = 500
+                response.response = "Failed to store L2PS hash update"
+                response.extra = storageError.message || "Storage error"
+                return response
+            }
             
             response.result = 200
             response.response = {
                 message: "L2PS hash update processed",
                 l2ps_uid: l2psUid,
                 consolidated_hash: l2psHashPayload.consolidated_hash,
-                transaction_count: l2psHashPayload.transaction_count
+                transaction_count: l2psHashPayload.transaction_count,
             }
             return response
             
