@@ -27,6 +27,11 @@ import {
 import { BlockNotFoundError, PeerUnreachableError } from "src/exceptions"
 import GCR from "../gcr/gcr"
 import HandleGCR from "../gcr/handleGCR"
+import {
+    discoverL2PSParticipants,
+    syncL2PSWithPeer,
+    exchangeL2PSParticipation,
+} from "@/libs/l2ps/L2PSConcurrentSync"
 
 const term = terminalkit.terminal
 
@@ -106,6 +111,22 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
             ],
         }
         promises.set(peer.identity, peer.call(call, false))
+    }
+
+    // REVIEW: Phase 3c-3 - Discover L2PS participants concurrently with block discovery
+    // Run L2PS discovery in background (non-blocking, doesn't await)
+    if (getSharedState.l2psJoinedUids?.length > 0) {
+        discoverL2PSParticipants(peers, getSharedState.l2psJoinedUids)
+            .then(participantMap => {
+                let totalParticipants = 0
+                for (const participants of participantMap.values()) {
+                    totalParticipants += participants.length
+                }
+                log.debug(`[Sync] Discovered L2PS participants: ${participantMap.size} networks, ${totalParticipants} total peers`)
+            })
+            .catch(error => {
+                log.error("[Sync] L2PS participant discovery failed:", error.message)
+            })
     }
 
     // Wait for all the promises to resolve (synchronously?)
@@ -358,6 +379,21 @@ async function requestBlocks() {
         // await sleep(250)
         try {
             await downloadBlock(peer, blockToAsk)
+
+            // REVIEW: Phase 3c-3 - Sync L2PS mempools concurrently with blockchain sync
+            // Run L2PS sync in background (non-blocking, doesn't block blockchain sync)
+            if (getSharedState.l2psJoinedUids?.length > 0 && peer) {
+                for (const l2psUid of getSharedState.l2psJoinedUids) {
+                    syncL2PSWithPeer(peer, l2psUid)
+                        .then(() => {
+                            log.debug(`[Sync] L2PS mempool synced: ${l2psUid}`)
+                        })
+                        .catch(error => {
+                            log.error(`[Sync] L2PS sync failed for ${l2psUid}:`, error.message)
+                            // Don't break blockchain sync on L2PS errors
+                        })
+                }
+            }
         } catch (error) {
             // INFO: Handle chain head reached
             if (error instanceof BlockNotFoundError) {
@@ -467,6 +503,23 @@ export async function mergePeerlist(block: Block): Promise<string[]> {
         const success = peerManager.addPeer(peerObject)
         if (success) {
             mergedPeers.push(peerObject.identity)
+        }
+    }
+
+    // REVIEW: Phase 3c-3 - Exchange L2PS participation with newly discovered peers
+    // Inform new peers about our L2PS networks (non-blocking)
+    if (mergedPeers.length > 0 && getSharedState.l2psJoinedUids?.length > 0) {
+        const newPeerObjects = mergedPeers
+            .map(identity => peerManager.getPeer(identity))
+            .filter(peer => peer !== undefined) as Peer[]
+
+        if (newPeerObjects.length > 0) {
+            // Run in background, don't block blockchain sync
+            exchangeL2PSParticipation(newPeerObjects, getSharedState.l2psJoinedUids)
+                .catch(error => {
+                    log.error("[Sync] L2PS participation exchange failed:", error.message)
+                })
+            log.debug(`[Sync] Exchanging L2PS participation with ${newPeerObjects.length} new peers`)
         }
     }
 
