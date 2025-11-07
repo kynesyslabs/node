@@ -24,7 +24,8 @@ import log from "@/utilities/logger"
  */
 export default class L2PSMempool {
     /** TypeORM repository for L2PS mempool transactions */
-    public static repo: Repository<L2PSMempoolTx> = null
+    // REVIEW: PR Fix - Added | null to type annotation for type safety
+    public static repo: Repository<L2PSMempoolTx> | null = null
 
     /**
      * Initialize the L2PS mempool repository
@@ -219,9 +220,11 @@ export default class L2PSMempool {
 
         } catch (error: any) {
             log.error(`[L2PS Mempool] Error generating hash for UID ${l2psUid}, block ${blockNumber}:`, error)
-            // Return deterministic error hash
+            // REVIEW: PR Fix #5 - Return truly deterministic error hash (removed Date.now() for reproducibility)
+            // Algorithm: SHA256("L2PS_ERROR_" + l2psUid + blockSuffix)
+            // This ensures the same error conditions always produce the same hash
             const blockSuffix = blockNumber !== undefined ? `_BLOCK_${blockNumber}` : "_ALL"
-            return Hashing.sha256(`L2PS_ERROR_${l2psUid}${blockSuffix}_${Date.now()}`)
+            return Hashing.sha256(`L2PS_ERROR_${l2psUid}${blockSuffix}`)
         }
     }
 
@@ -271,7 +274,8 @@ export default class L2PSMempool {
             return await this.repo.exists({ where: { original_hash: originalHash } })
         } catch (error: any) {
             log.error(`[L2PS Mempool] Error checking original hash ${originalHash}:`, error)
-            return false
+            // REVIEW: PR Fix #3 - Throw error instead of returning false to prevent duplicates on DB errors
+            throw error
         }
     }
 
@@ -286,7 +290,8 @@ export default class L2PSMempool {
             return await this.repo.exists({ where: { hash } })
         } catch (error: any) {
             log.error(`[L2PS Mempool] Error checking hash ${hash}:`, error)
-            return false
+            // REVIEW: PR Fix #3 - Throw error instead of returning false to prevent duplicates on DB errors
+            throw error
         }
     }
 

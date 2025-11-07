@@ -158,7 +158,8 @@ export default class ParallelNetworks {
      * @returns {Promise<string[]>} Array of successfully loaded L2PS network IDs
      */
     async loadAllL2PS(): Promise<string[]> {
-        var l2psJoinedUids = []
+        // REVIEW: PR Fix - Changed var to const for better scoping and immutability
+        const l2psJoinedUids: string[] = []
         const l2psDir = path.join(process.cwd(), "data", "l2ps")
         if (!fs.existsSync(l2psDir)) {
             console.warn("L2PS data directory not found, creating...")

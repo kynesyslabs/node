@@ -41,6 +41,16 @@ export default class L2PSHashes {
     }
 
     /**
+     * REVIEW: PR Fix - Ensure repository is initialized before use
+     * @throws {Error} If repository not initialized
+     */
+    private static ensureInitialized(): void {
+        if (!this.repo) {
+            throw new Error("[L2PS Hashes] Repository not initialized. Call init() first.")
+        }
+    }
+
+    /**
      * Update or create hash mapping for a L2PS network
      * Validators receive these updates via DTR relay from L2PS participants
      *
@@ -66,6 +76,7 @@ export default class L2PSHashes {
         txCount: number,
         blockNumber: bigint,
     ): Promise<void> {
+        this.ensureInitialized()
         try {
             // Check if hash mapping already exists
             const existing = await this.repo.findOne({
@@ -114,11 +125,13 @@ export default class L2PSHashes {
      * ```
      */
     public static async getHash(l2psUid: string): Promise<L2PSHash | null> {
+        this.ensureInitialized()
         try {
             const entry = await this.repo.findOne({
                 where: { l2ps_uid: l2psUid },
             })
-            return entry
+            // REVIEW: PR Fix - TypeORM returns undefined, explicitly convert to null
+            return entry ?? null
         } catch (error: any) {
             log.error(`[L2PS Hashes] Failed to get hash for ${l2psUid}:`, error)
             throw error
@@ -138,6 +151,7 @@ export default class L2PSHashes {
      * ```
      */
     public static async getAll(): Promise<L2PSHash[]> {
+        this.ensureInitialized()
         try {
             const entries = await this.repo.find({
                 order: { timestamp: "DESC" },
@@ -169,6 +183,7 @@ export default class L2PSHashes {
         lastUpdateTime: bigint
         oldestUpdateTime: bigint
     }> {
+        this.ensureInitialized()
         try {
             const allEntries = await this.getAll()
 
@@ -211,7 +226,5 @@ export default class L2PSHashes {
     }
 }
 
-// Initialize the L2PS hashes repository on import
-L2PSHashes.init().catch(error => {
-    log.error("[L2PS Hashes] Failed to initialize during import:", error)
-})
+// REVIEW: PR Fix - Removed auto-initialization to improve testability and make initialization contract explicit
+// The init() method must be called explicitly before using any other methods

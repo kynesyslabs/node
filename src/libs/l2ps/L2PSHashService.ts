@@ -16,7 +16,7 @@ import getCommonValidatorSeed from "@/libs/consensus/v2/routines/getCommonValida
  * 
  * Key Features:
  * - Reentrancy protection prevents overlapping hash generation cycles
- * - Automatic retry with exponential backoff for failed relays
+ * - Automatic retry with sequential fallback across validators for failed relays
  * - Comprehensive error handling and logging
  * - Graceful shutdown support
  * - Performance monitoring and statistics
@@ -211,7 +211,13 @@ export class L2PSHashService {
         try {
             // Generate consolidated hash for this L2PS UID
             const consolidatedHash = await L2PSMempool.getHashForL2PS(l2psUid)
-            
+
+            // REVIEW: PR Fix - Validate hash generation succeeded
+            if (!consolidatedHash || consolidatedHash.length === 0) {
+                log.warn(`[L2PS Hash Service] Invalid hash generated for L2PS ${l2psUid}, skipping`)
+                return
+            }
+
             // Get transaction count for this UID (only processed transactions)
             const transactions = await L2PSMempool.getByUID(l2psUid, "processed")
             const transactionCount = transactions.length
@@ -236,7 +242,11 @@ export class L2PSHashService {
             // Relay to validators via DTR infrastructure
             // Note: Self-directed transaction will automatically trigger DTR routing
             await this.relayToValidators(hashUpdateTx)
-            
+
+            // REVIEW: PR Fix - Document metric behavior
+            // Despite the name "totalRelayAttempts", this counter is only incremented after successful relay
+            // If relayToValidators throws, execution jumps to catch block and counter is not incremented
+            // This effectively tracks successful relays, not total attempts (including failures)
             this.stats.totalRelayAttempts++
 
             log.debug(`[L2PS Hash Service] Generated hash for ${l2psUid}: ${consolidatedHash} (${transactionCount} txs)`)

@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto"
 import { Peer } from "@/libs/peer/Peer"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import log from "@/utilities/logger"
@@ -48,15 +49,19 @@ export async function discoverL2PSParticipants(
                     const response: RPCResponse = await peer.call({
                         message: "getL2PSParticipationById",
                         data: { l2psUid },
-                        muid: `discovery_${l2psUid}_${Date.now()}`,
+                        // REVIEW: PR Fix - Use randomUUID() instead of Date.now() to prevent muid collisions
+                        muid: `discovery_${l2psUid}_${randomUUID()}`,
                     })
 
                     // If peer participates, add to map
-                    if (response.result === 200 && response.response?.participates === true) {
-                        const participants = participantMap.get(l2psUid) || []
-                        participants.push(peer)
-                        participantMap.set(l2psUid, participants)
-                        log.debug(`[L2PS Sync] Peer ${peer.muid} participates in L2PS ${l2psUid}`)
+                    if (response.result === 200 && response.response?.participating === true) {
+                        // REVIEW: PR Fix - Push directly to avoid race condition in concurrent updates
+                        // Array is guaranteed to exist due to initialization at lines 36-38
+                        const participants = participantMap.get(l2psUid)
+                        if (participants) {
+                            participants.push(peer)
+                            log.debug(`[L2PS Sync] Peer ${peer.muid} participates in L2PS ${l2psUid}`)
+                        }
                     }
                 } catch (error: any) {
                     // Gracefully handle peer failures (don't break discovery)
@@ -113,7 +118,8 @@ export async function syncL2PSWithPeer(
         const infoResponse: RPCResponse = await peer.call({
             message: "getL2PSMempoolInfo",
             data: { l2psUid },
-            muid: `sync_info_${l2psUid}_${Date.now()}`,
+            // REVIEW: PR Fix - Use randomUUID() instead of Date.now() to prevent muid collisions
+            muid: `sync_info_${l2psUid}_${randomUUID()}`,
         })
 
         if (infoResponse.result !== 200 || !infoResponse.response) {
@@ -138,20 +144,23 @@ export async function syncL2PSWithPeer(
 
         log.debug(`[L2PS Sync] Local: ${localTxCount} txs, Peer: ${peerTxCount} txs for ${l2psUid}`)
 
-        // Step 3: Determine if sync is needed
-        if (peerTxCount <= localTxCount) {
-            log.debug(`[L2PS Sync] Local mempool is up-to-date for ${l2psUid}`)
-            return
-        }
+        // REVIEW: PR Fix - Removed flawed count-based comparison
+        // Always attempt sync with timestamp-based filtering to ensure correctness
+        // The timestamp-based approach handles all cases:
+        // - If peer has no new transactions (timestamp <= localLastTimestamp), peer returns empty list
+        // - If peer has new transactions, we get them
+        // - Duplicate detection at insertion prevents duplicates (line 172)
+        // This trades minor network overhead for guaranteed consistency
 
-        // Step 4: Request missing transactions (incremental sync)
+        // Step 3: Request transactions newer than our latest (incremental sync)
         const txResponse: RPCResponse = await peer.call({
             message: "getL2PSTransactions",
             data: {
                 l2psUid,
                 since_timestamp: localLastTimestamp, // Only get newer transactions
             },
-            muid: `sync_txs_${l2psUid}_${Date.now()}`,
+            // REVIEW: PR Fix - Use randomUUID() instead of Date.now() to prevent muid collisions
+            muid: `sync_txs_${l2psUid}_${randomUUID()}`,
         })
 
         if (txResponse.result !== 200 || !txResponse.response?.transactions) {
@@ -235,9 +244,12 @@ export async function exchangeL2PSParticipation(
             // Send participation info for each L2PS UID
             for (const l2psUid of l2psUids) {
                 await peer.call({
-                    message: "getL2PSParticipationById",
+                    // REVIEW: PR Fix - Changed from "getL2PSParticipationById" to "announceL2PSParticipation"
+                    // to better reflect broadcasting behavior. Requires corresponding RPC handler update.
+                    message: "announceL2PSParticipation",
                     data: { l2psUid },
-                    muid: `exchange_${l2psUid}_${Date.now()}`,
+                    // REVIEW: PR Fix - Use randomUUID() instead of Date.now() to prevent muid collisions
+                    muid: `exchange_${l2psUid}_${randomUUID()}`,
                 })
             }
             log.debug(`[L2PS Sync] Exchanged participation info with peer ${peer.muid}`)

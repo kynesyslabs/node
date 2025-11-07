@@ -89,7 +89,8 @@ export default async function handleL2PS(
         encrypted_hash: l2psTx.hash,
         original_hash: originalHash,
         l2ps_uid: l2psUid,
-        decrypted_tx: decryptedTx, // Include for client confirmation
+        // REVIEW: PR Fix #4 - Return only hash for verification, not full plaintext (preserves L2PS privacy)
+        decrypted_tx_hash: decryptedTx.hash, // Hash only for verification, not full plaintext
     }
     return response
 }

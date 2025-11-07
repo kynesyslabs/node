@@ -382,19 +382,33 @@ export class SignalingServer {
                 return
             }
 
-            // Create blockchain transaction for the message
-            await this.storeMessageOnBlockchain(senderId, payload.targetId, payload.message)
-
+            // Check if target peer exists BEFORE blockchain write (prevent DoS)
             const targetPeer = this.peers.get(payload.targetId)
+
             if (!targetPeer) {
                 // Store as offline message if target is not online
-                await this.storeOfflineMessage(senderId, payload.targetId, payload.message)
+                try {
+                    await this.storeMessageOnBlockchain(senderId, payload.targetId, payload.message)
+                    await this.storeOfflineMessage(senderId, payload.targetId, payload.message)
+                } catch (error) {
+                    console.error("Failed to store offline message:", error)
+                    this.sendError(ws, ImErrorType.INTERNAL_ERROR, "Failed to store offline message")
+                    return
+                }
                 this.sendError(
                     ws,
                     ImErrorType.PEER_NOT_FOUND,
                     `Target peer ${payload.targetId} not found - stored as offline message`,
                 )
                 return
+            }
+
+            // Create blockchain transaction for online message
+            try {
+                await this.storeMessageOnBlockchain(senderId, payload.targetId, payload.message)
+            } catch (error) {
+                console.error("Failed to store message on blockchain:", error)
+                // Continue with delivery even if blockchain storage fails
             }
 
             // Forward the message to the target peer
@@ -540,6 +554,25 @@ export class SignalingServer {
 
     /**
      * Stores a message on the blockchain
+     *
+     * REVIEW: PR Fix #6 - Authentication Architecture
+     *
+     * Current Implementation: Node Signing
+     * - Node signs transactions with its own private key
+     * - Provides: Tamper detection, integrity verification
+     * - Limitations: No sender authentication, no non-repudiation
+     *
+     * Recommended Implementation: Sender Signing
+     * - Clients sign messages with their private key before sending
+     * - Server verifies sender signature instead of creating one
+     * - Provides: True authentication, non-repudiation, sender accountability
+     *
+     * Migration Path:
+     * 1. Add 'signature' field to ImPeerMessage payload (types/IMMessage.ts)
+     * 2. Update client SDK to sign messages before sending
+     * 3. Add signature verification in handlePeerMessage()
+     * 4. Deprecate node signing in favor of verified sender signatures
+     *
      * @param senderId - The ID of the sender
      * @param targetId - The ID of the target recipient
      * @param message - The encrypted message content
@@ -559,7 +592,8 @@ export class SignalingServer {
             transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0 },
         }
 
-        // Sign and hash transaction
+        // TODO: Replace with sender signature verification once client-side signing is implemented
+        // Current: Sign with node's private key for integrity (not authentication)
         const signature = Cryptography.sign(
             JSON.stringify(transaction.content),
             getSharedState.identity.ed25519.privateKey,
@@ -573,6 +607,10 @@ export class SignalingServer {
 
     /**
      * Stores a message in the database for offline delivery
+     *
+     * REVIEW: PR Fix #6 - Same authentication architecture issue as storeMessageOnBlockchain()
+     * See storeMessageOnBlockchain() documentation for full details on recommended sender signing approach.
+     *
      * @param senderId - The ID of the sender
      * @param targetId - The ID of the target recipient
      * @param message - The encrypted message content
@@ -584,7 +622,8 @@ export class SignalingServer {
         const messageContent = JSON.stringify({ senderId, targetId, message, timestamp: Date.now() })
         const messageHash = Hashing.sha256(messageContent)
 
-        // Sign the message hash with node's private key for integrity verification
+        // TODO: Replace with sender signature verification once client-side signing is implemented
+        // Current: Sign with node's private key for integrity (not authentication)
         const signature = Cryptography.sign(messageHash, getSharedState.identity.ed25519.privateKey)
 
         const offlineMessage = offlineMessageRepository.create({
