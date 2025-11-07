@@ -33,10 +33,15 @@ export default async function handleL2PS(
         return response
     }
 
+    // REVIEW: PR Fix #Medium4 - Extract payload data once after validation
+    // L2PS transaction data structure: data[0] = metadata, data[1] = L2PS payload
+    const payloadData = l2psTx.content.data[1]
+
     // Defining a subnet from the uid: checking if we have the config or if its loaded already
     const parallelNetworks = ParallelNetworks.getInstance()
-    const l2psUid = l2psTx.content.data[1].l2ps_uid
-    var l2psInstance = await parallelNetworks.getL2PS(l2psUid)
+    const l2psUid = payloadData.l2ps_uid
+    // REVIEW: PR Fix #Low1 - Use let instead of var for better scoping
+    let l2psInstance = await parallelNetworks.getL2PS(l2psUid)
     if (!l2psInstance) {
         // Try to load the l2ps from the local storage (if the node is part of the l2ps)
         l2psInstance = await parallelNetworks.loadL2PS(l2psUid)
@@ -64,7 +69,7 @@ export default async function handleL2PS(
     }
 
     // REVIEW: PR Fix #11 - Validate encrypted payload structure before type assertion
-    const payloadData = l2psTx.content.data[1]
+    // Reuse payloadData extracted earlier (line 38)
     if (!payloadData || typeof payloadData !== "object" || !("original_hash" in payloadData)) {
         response.result = 400
         response.response = false

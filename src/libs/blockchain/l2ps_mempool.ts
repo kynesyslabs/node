@@ -27,6 +27,9 @@ export default class L2PSMempool {
     // REVIEW: PR Fix - Added | null to type annotation for type safety
     public static repo: Repository<L2PSMempoolTx> | null = null
 
+    /** REVIEW: PR Fix - Promise lock for lazy initialization to prevent race conditions */
+    private static initPromise: Promise<void> | null = null
+
     /**
      * Initialize the L2PS mempool repository
      * Must be called before using any other methods
@@ -45,14 +48,18 @@ export default class L2PSMempool {
     }
 
     /**
-     * Ensure repository is initialized before use
-     * REVIEW: PR Fix - Guard against null repository access from race condition
-     * @throws {Error} If repository not yet initialized
+     * Ensure repository is initialized before use (lazy initialization with locking)
+     * REVIEW: PR Fix - Async lazy initialization to prevent race conditions
+     * @throws {Error} If initialization fails
      */
-    private static ensureInitialized(): void {
-        if (!this.repo) {
-            throw new Error("[L2PS Mempool] Not initialized - repository is null. Ensure init() completes before calling methods.")
+    private static async ensureInitialized(): Promise<void> {
+        if (this.repo) return
+
+        if (!this.initPromise) {
+            this.initPromise = this.init()
         }
+
+        await this.initPromise
     }
 
     /**
@@ -84,7 +91,7 @@ export default class L2PSMempool {
         status = "processed",
     ): Promise<{ success: boolean; error?: string }> {
         try {
-            this.ensureInitialized()
+            await this.ensureInitialized()
 
             // Check if original transaction already processed (duplicate detection)
             // REVIEW: PR Fix #8 - Consistent error handling for duplicate checks
@@ -171,7 +178,7 @@ export default class L2PSMempool {
      */
     public static async getByUID(l2psUid: string, status?: string): Promise<L2PSMempoolTx[]> {
         try {
-            this.ensureInitialized()
+            await this.ensureInitialized()
 
             const options: FindManyOptions<L2PSMempoolTx> = {
                 where: { l2ps_uid: l2psUid },
@@ -214,7 +221,7 @@ export default class L2PSMempool {
      */
     public static async getHashForL2PS(l2psUid: string, blockNumber?: number): Promise<string> {
         try {
-            this.ensureInitialized()
+            await this.ensureInitialized()
 
             const options: FindManyOptions<L2PSMempoolTx> = {
                 where: { 
@@ -281,7 +288,7 @@ export default class L2PSMempool {
      */
     public static async updateStatus(hash: string, status: string): Promise<boolean> {
         try {
-            this.ensureInitialized()
+            await this.ensureInitialized()
 
             const result = await this.repo.update(
                 { hash },
@@ -309,7 +316,7 @@ export default class L2PSMempool {
      */
     public static async existsByOriginalHash(originalHash: string): Promise<boolean> {
         try {
-            this.ensureInitialized()
+            await this.ensureInitialized()
 
             return await this.repo.exists({ where: { original_hash: originalHash } })
         } catch (error: any) {
@@ -327,7 +334,7 @@ export default class L2PSMempool {
      */
     public static async existsByHash(hash: string): Promise<boolean> {
         try {
-            this.ensureInitialized()
+            await this.ensureInitialized()
 
             return await this.repo.exists({ where: { hash } })
         } catch (error: any) {
@@ -345,7 +352,7 @@ export default class L2PSMempool {
      */
     public static async getByHash(hash: string): Promise<L2PSMempoolTx | null> {
         try {
-            this.ensureInitialized()
+            await this.ensureInitialized()
 
             return await this.repo.findOne({ where: { hash } })
         } catch (error: any) {
@@ -369,7 +376,7 @@ export default class L2PSMempool {
      */
     public static async cleanup(olderThanMs: number): Promise<number> {
         try {
-            this.ensureInitialized()
+            await this.ensureInitialized()
 
             const cutoffTimestamp = (Date.now() - olderThanMs).toString()
 
@@ -412,7 +419,7 @@ export default class L2PSMempool {
         transactionsByStatus: Record<string, number>;
     }> {
         try {
-            this.ensureInitialized()
+            await this.ensureInitialized()
 
             const totalTransactions = await this.repo.count()
             
@@ -459,7 +466,5 @@ export default class L2PSMempool {
     }
 }
 
-// Initialize the mempool on import
-L2PSMempool.init().catch(error => {
-    log.error("[L2PS Mempool] Failed to initialize during import:", error)
-})
+// REVIEW: PR Fix - Removed auto-init to prevent race conditions
+// Initialization now happens lazily on first use via ensureInitialized()

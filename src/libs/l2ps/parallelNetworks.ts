@@ -1,7 +1,7 @@
 // FIXME Add L2PS private mempool logic with L2PS mempool/txs hash in the global GCR for integrity
 // FIXME Add L2PS Sync in Sync.ts (I guess)
 
-import { UnifiedCrypto } from "@kynesyslabs/demosdk/encryption"
+import { UnifiedCrypto, ucrypto, hexToUint8Array, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import * as forge from "node-forge"
 import fs from "fs"
 import path from "path"
@@ -10,7 +10,7 @@ import {
     L2PSConfig,
     L2PSEncryptedPayload,
 } from "@kynesyslabs/demosdk/l2ps"
-import { L2PSTransaction, Transaction } from "@kynesyslabs/demosdk/types"
+import { L2PSTransaction, Transaction, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 
 /**
@@ -62,6 +62,8 @@ export default class ParallelNetworks {
     private static instance: ParallelNetworks
     private l2pses: Map<string, L2PS> = new Map()
     private configs: Map<string, L2PSNodeConfig> = new Map()
+    // REVIEW: PR Fix - Promise lock to prevent concurrent loadL2PS race conditions
+    private loadingPromises: Map<string, Promise<L2PS>> = new Map()
 
     private constructor() {}
 
@@ -83,17 +85,47 @@ export default class ParallelNetworks {
      * @throws {Error} If the configuration is invalid or required files are missing
      */
     async loadL2PS(uid: string): Promise<L2PS> {
+        // REVIEW: PR Fix - Validate uid to prevent path traversal attacks
+        if (!uid || !/^[A-Za-z0-9_-]+$/.test(uid)) {
+            throw new Error(`Invalid L2PS uid: ${uid}`)
+        }
+
         if (this.l2pses.has(uid)) {
             return this.l2pses.get(uid) as L2PS
         }
 
-        const configPath = path.join(
-            process.cwd(),
-            "data",
-            "l2ps",
-            uid,
-            "config.json",
-        )
+        // REVIEW: PR Fix - Check if already loading to prevent race conditions
+        const existingPromise = this.loadingPromises.get(uid)
+        if (existingPromise) {
+            return existingPromise
+        }
+
+        const loadPromise = this.loadL2PSInternal(uid)
+        this.loadingPromises.set(uid, loadPromise)
+
+        try {
+            const l2ps = await loadPromise
+            return l2ps
+        } finally {
+            this.loadingPromises.delete(uid)
+        }
+    }
+
+    /**
+     * Internal method to load L2PS configuration and initialize instance
+     * REVIEW: PR Fix - Extracted from loadL2PS to enable promise locking
+     * @param {string} uid - The unique identifier of the L2PS network
+     * @returns {Promise<L2PS>} The initialized L2PS instance
+     * @private
+     */
+    private async loadL2PSInternal(uid: string): Promise<L2PS> {
+        // REVIEW: PR Fix - Verify resolved path is within expected directory
+        const basePath = path.resolve(process.cwd(), "data", "l2ps")
+        const configPath = path.resolve(basePath, uid, "config.json")
+
+        if (!configPath.startsWith(basePath)) {
+            throw new Error(`Path traversal detected in uid: ${uid}`)
+        }
         if (!fs.existsSync(configPath)) {
             throw new Error(`L2PS config file not found: ${configPath}`)
         }
@@ -110,6 +142,11 @@ export default class ParallelNetworks {
 
         if (!nodeConfig.uid || !nodeConfig.enabled) {
             throw new Error(`L2PS config invalid or disabled: ${uid}`)
+        }
+
+        // REVIEW: PR Fix - Validate nodeConfig.keys exists before accessing
+        if (!nodeConfig.keys || !nodeConfig.keys.private_key_path || !nodeConfig.keys.iv_path) {
+            throw new Error(`L2PS config missing required keys for ${uid}`)
         }
 
         const privateKeyPath = path.resolve(
@@ -205,8 +242,23 @@ export default class ParallelNetworks {
         senderIdentity?: any,
     ): Promise<Transaction> {
         const l2ps = await this.loadL2PS(uid)
-        return l2ps.encryptTx(tx, senderIdentity)
-        // TODO: Sign with node private key
+        const encryptedTx = l2ps.encryptTx(tx, senderIdentity)
+
+        // REVIEW: PR Fix - Sign encrypted transaction with node's private key
+        const sharedState = getSharedState()
+        const signature = await ucrypto.sign(
+            sharedState.signingAlgorithm,
+            new TextEncoder().encode(JSON.stringify(encryptedTx.content)),
+        )
+
+        if (signature) {
+            encryptedTx.signature = {
+                type: sharedState.signingAlgorithm,
+                data: uint8ArrayToHex(signature.signature),
+            }
+        }
+
+        return encryptedTx
     }
 
     /**
@@ -220,8 +272,24 @@ export default class ParallelNetworks {
         encryptedTx: L2PSTransaction,
     ): Promise<Transaction> {
         const l2ps = await this.loadL2PS(uid)
+
+        // REVIEW: PR Fix - Verify signature before decrypting
+        if (encryptedTx.signature) {
+            const isValid = await ucrypto.verify({
+                algorithm: encryptedTx.signature.type as SigningAlgorithm,
+                message: new TextEncoder().encode(JSON.stringify(encryptedTx.content)),
+                publicKey: hexToUint8Array(encryptedTx.content.from as string),
+                signature: hexToUint8Array(encryptedTx.signature.data),
+            })
+
+            if (!isValid) {
+                throw new Error(`L2PS transaction signature verification failed for ${uid}`)
+            }
+        } else {
+            console.warn(`[L2PS] Warning: No signature found on encrypted transaction for ${uid}`)
+        }
+
         return l2ps.decryptTx(encryptedTx)
-        // TODO: Verify signature of the decrypted transaction
     }
 
     /**

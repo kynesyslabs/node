@@ -76,12 +76,16 @@ export class RelayRetryService {
             }
 
             // REVIEW: PR Fix #12 - Add cache eviction for validityDataCache
+            // REVIEW: PR Fix #Low2 - Add null check to prevent runtime error if cache is undefined
             // Remove ValidityData for transactions no longer in mempool
             let cacheEntriesEvicted = 0
-            for (const [txHash] of getSharedState.validityDataCache) {
-                if (!mempoolHashes.has(txHash)) {
-                    getSharedState.validityDataCache.delete(txHash)
-                    cacheEntriesEvicted++
+            const sharedState = getSharedState()
+            if (sharedState?.validityDataCache) {
+                for (const [txHash] of sharedState.validityDataCache) {
+                    if (!mempoolHashes.has(txHash)) {
+                        sharedState.validityDataCache.delete(txHash)
+                        cacheEntriesEvicted++
+                    }
                 }
             }
 

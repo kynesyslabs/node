@@ -630,7 +630,14 @@ export class SignalingServer {
         const db = await Datasource.getInstance()
         const offlineMessageRepository = db.getDataSource().getRepository(OfflineMessage)
 
-        const messageContent = JSON.stringify({ senderId, targetId, message, timestamp: Date.now() })
+        // REVIEW: PR Fix - Use deterministic key ordering for consistent hashing
+        const timestamp = Date.now()
+        const messageContent = JSON.stringify({
+            message,      // Keys in alphabetical order
+            senderId,
+            targetId,
+            timestamp,
+        })
         const messageHash = Hashing.sha256(messageContent)
 
         // TODO: Replace with sender signature verification once client-side signing is implemented

@@ -46,10 +46,14 @@ export class L2PSHashService {
         failedCycles: 0,
         skippedCycles: 0,
         totalHashesGenerated: 0,
-        totalRelayAttempts: 0,
+        successfulRelays: 0,  // REVIEW: PR Fix #Medium3 - Renamed from totalRelayAttempts for clarity
         lastCycleTime: 0,
         averageCycleTime: 0,
     }
+
+    // REVIEW: PR Fix #Medium1 - Reuse Demos instance instead of creating new one each cycle
+    /** Shared Demos SDK instance for creating transactions */
+    private demos: Demos | null = null
 
     /**
      * Get singleton instance of L2PS Hash Service
@@ -76,10 +80,10 @@ export class L2PSHashService {
         }
 
         log.info("[L2PS Hash Service] Starting hash generation service")
-        
+
         this.isRunning = true
         this.isGenerating = false
-        
+
         // Reset statistics
         this.stats = {
             totalCycles: 0,
@@ -87,10 +91,13 @@ export class L2PSHashService {
             failedCycles: 0,
             skippedCycles: 0,
             totalHashesGenerated: 0,
-            totalRelayAttempts: 0,
+            successfulRelays: 0,
             lastCycleTime: 0,
             averageCycleTime: 0,
         }
+
+        // REVIEW: PR Fix #Medium1 - Initialize Demos instance once for reuse
+        this.demos = new Demos()
 
         // Start the interval timer
         this.intervalId = setInterval(async () => {
@@ -231,13 +238,16 @@ export class L2PSHashService {
                 return
             }
 
+            // REVIEW: PR Fix #Medium1 - Reuse initialized Demos instance
             // Create L2PS hash update transaction using SDK
-            const demos = new Demos() // TODO: Get from shared state or service registry - will be fixed once Demos SDK is updated to the latest version
+            if (!this.demos) {
+                throw new Error("[L2PS Hash Service] Demos instance not initialized - service not started properly")
+            }
             const hashUpdateTx = await DemosTransactions.createL2PSHashUpdate(
                 l2psUid,
                 consolidatedHash,
                 transactionCount,
-                demos,
+                this.demos,
             )
 
             this.stats.totalHashesGenerated++
@@ -246,11 +256,8 @@ export class L2PSHashService {
             // Note: Self-directed transaction will automatically trigger DTR routing
             await this.relayToValidators(hashUpdateTx)
 
-            // REVIEW: PR Fix - Document metric behavior
-            // Despite the name "totalRelayAttempts", this counter is only incremented after successful relay
-            // If relayToValidators throws, execution jumps to catch block and counter is not incremented
-            // This effectively tracks successful relays, not total attempts (including failures)
-            this.stats.totalRelayAttempts++
+            // REVIEW: PR Fix #Medium3 - Track successful relays (only incremented after successful relay)
+            this.stats.successfulRelays++
 
             log.debug(`[L2PS Hash Service] Generated hash for ${l2psUid}: ${consolidatedHash} (${transactionCount} txs)`)
 
@@ -345,11 +352,11 @@ export class L2PSHashService {
             successfulCycles: this.stats.successfulCycles,
             failedCycles: this.stats.failedCycles,
             skippedCycles: this.stats.skippedCycles,
-            successRate: this.stats.totalCycles > 0 
-                ? `${Math.round((this.stats.successfulCycles / this.stats.totalCycles) * 100)}%` 
+            successRate: this.stats.totalCycles > 0
+                ? `${Math.round((this.stats.successfulCycles / this.stats.totalCycles) * 100)}%`
                 : "0%",
             totalHashesGenerated: this.stats.totalHashesGenerated,
-            totalRelayAttempts: this.stats.totalRelayAttempts,
+            successfulRelays: this.stats.successfulRelays,
             averageCycleTime: `${this.stats.averageCycleTime}ms`,
             lastCycleTime: `${this.stats.lastCycleTime}ms`,
         }))
