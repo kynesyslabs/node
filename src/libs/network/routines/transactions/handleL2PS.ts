@@ -24,6 +24,15 @@ export default async function handleL2PS(
 ): Promise<RPCResponse> {
     // ! TODO Finalize the below TODOs
     const response = _.cloneDeep(emptyResponse)
+
+    // REVIEW: PR Fix #10 - Validate nested data access before use
+    if (!l2psTx.content || !l2psTx.content.data || !l2psTx.content.data[1] || !l2psTx.content.data[1].l2ps_uid) {
+        response.result = 400
+        response.response = false
+        response.extra = "Invalid L2PS transaction structure: missing l2ps_uid in data payload"
+        return response
+    }
+
     // Defining a subnet from the uid: checking if we have the config or if its loaded already
     const parallelNetworks = ParallelNetworks.getInstance()
     const l2psUid = l2psTx.content.data[1].l2ps_uid
@@ -53,8 +62,18 @@ export default async function handleL2PS(
         response.extra = "Transaction signature verification failed"
         return response
     }
+
+    // REVIEW: PR Fix #11 - Validate encrypted payload structure before type assertion
+    const payloadData = l2psTx.content.data[1]
+    if (!payloadData || typeof payloadData !== "object" || !("original_hash" in payloadData)) {
+        response.result = 400
+        response.response = false
+        response.extra = "Invalid L2PS payload: missing original_hash field"
+        return response
+    }
+
     // Extract original hash from encrypted payload for duplicate detection
-    const encryptedPayload = l2psTx.content.data[1] as L2PSEncryptedPayload
+    const encryptedPayload = payloadData as L2PSEncryptedPayload
     const originalHash = encryptedPayload.original_hash
     
     // Check for duplicates (prevent reprocessing)

@@ -23,8 +23,10 @@ export class OfflineMessage {
     @Column("text", { name: "signature" })
     signature: string
 
+    // REVIEW: PR Fix #9 - TypeORM returns SQL bigint as string type to prevent JavaScript precision loss
+    // Using string type for TypeScript to match TypeORM runtime behavior
     @Column("bigint", { name: "timestamp" })
-    timestamp: bigint
+    timestamp: string
 
     @Column("text", { name: "status", default: "pending" })
     status: "pending" | "delivered" | "failed"

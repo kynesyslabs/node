@@ -15,9 +15,9 @@ export class L2PSMempoolTx {
     /**
      * Primary key: Hash of the encrypted L2PS transaction wrapper
      * @example "0xa1b2c3d4..."
+     * REVIEW: PR Fix #14 - Removed redundant @Index() as primary keys are automatically indexed
      */
-    @Index()
-    @PrimaryColumn("text") 
+    @PrimaryColumn("text")
     hash: string
 
     /**

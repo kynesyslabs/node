@@ -632,7 +632,8 @@ export class SignalingServer {
             messageHash,
             encryptedContent: message,
             signature: Buffer.from(signature).toString("base64"),
-            timestamp: BigInt(Date.now()),
+            // REVIEW: PR Fix #9 - timestamp is string type to match TypeORM bigint behavior
+            timestamp: Date.now().toString(),
             status: "pending",
         })
 
@@ -655,6 +656,11 @@ export class SignalingServer {
 
     /**
      * Delivers offline messages to a peer when they come online
+     *
+     * REVIEW: PR Fix #6 - Transactional message delivery with error handling
+     * Only marks messages as delivered after successful WebSocket send to prevent message loss
+     * Breaks on first failure to maintain message ordering and prevent partial delivery
+     *
      * @param ws - The WebSocket connection of the peer
      * @param peerId - The ID of the peer
      */
@@ -666,17 +672,27 @@ export class SignalingServer {
         const offlineMessageRepository = db.getDataSource().getRepository(OfflineMessage)
 
         for (const msg of offlineMessages) {
-            ws.send(JSON.stringify({
-                type: "message",
-                payload: {
-                    message: msg.encryptedContent,
-                    fromId: msg.senderPublicKey,
-                    timestamp: Number(msg.timestamp),
-                },
-            }))
+            try {
+                // Attempt to send message via WebSocket
+                ws.send(JSON.stringify({
+                    type: "message",
+                    payload: {
+                        message: msg.encryptedContent,
+                        fromId: msg.senderPublicKey,
+                        timestamp: Number(msg.timestamp),
+                    },
+                }))
 
-            // Mark as delivered
-            await offlineMessageRepository.update(msg.id, { status: "delivered" })
+                // Only mark as delivered if send succeeded (didn't throw)
+                await offlineMessageRepository.update(msg.id, { status: "delivered" })
+
+            } catch (error) {
+                // WebSocket send failed - stop delivery to prevent out-of-order messages
+                console.error(`Failed to deliver offline message ${msg.id} to ${peerId}:`, error)
+                // Break on first failure to maintain message ordering
+                // Undelivered messages will be retried when peer reconnects
+                break
+            }
         }
     }
 

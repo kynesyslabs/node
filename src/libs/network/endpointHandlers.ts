@@ -53,6 +53,13 @@ import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
+
+// REVIEW: PR Fix #12 - Interface for L2PS hash update payload with proper type safety
+interface L2PSHashPayload {
+    l2ps_uid: string
+    consolidated_hash: string
+    transaction_count: number
+}
 import {
     hexToUint8Array,
     ucrypto,
@@ -433,14 +440,16 @@ export default class ServerHandlers {
                             .filter(v => v.status.online && v.sync.status)
                             .sort(() => Math.random() - 0.5) // Random order for load balancing
                         
-                        console.log(`[DTR] Found ${availableValidators.length} available validators, trying all`)
-                        
-                        // Try ALL validators in random order
-                        for (let i = 0; i < availableValidators.length; i++) {
+                        console.log(`[DTR] Found ${availableValidators.length} available validators`)
+
+                        // REVIEW: PR Fix #7 - Parallel relay with concurrency limit to prevent blocking timeouts
+                        // Use Promise.allSettled() with limited concurrency (3-5 validators) instead of sequential blocking calls
+                        const concurrencyLimit = 5
+                        const validatorsToTry = availableValidators.slice(0, concurrencyLimit)
+                        console.log(`[DTR] Attempting parallel relay to ${validatorsToTry.length} validators (concurrency limit: ${concurrencyLimit})`)
+
+                        const relayPromises = validatorsToTry.map(async (validator) => {
                             try {
-                                const validator = availableValidators[i]
-                                console.log(`[DTR] Attempting relay ${i + 1}/${availableValidators.length} to validator ${validator.identity.substring(0, 8)}...`)
-                                
                                 const relayResult = await validator.call({
                                     method: "nodeCall",
                                     params: [{
@@ -448,23 +457,41 @@ export default class ServerHandlers {
                                         data: { transaction: queriedTx, validityData: validatedData },
                                     }],
                                 }, true)
-                                
+
                                 if (relayResult.result === 200) {
-                                    console.log(`[DTR] Successfully relayed to validator ${validator.identity.substring(0, 8)}...`)
-                                    result.success = true
-                                    result.response = { message: "Transaction relayed to validator" }
-                                    result.require_reply = false
-                                    return result
+                                    return { success: true, validator, result: relayResult }
                                 }
-                                
-                                console.log(`[DTR] Validator ${validator.identity.substring(0, 8)}... rejected: ${relayResult.response}`)
-                                
+
+                                return { success: false, validator, error: `Rejected: ${relayResult.response}` }
                             } catch (error: any) {
-                                console.log(`[DTR] Validator ${availableValidators[i].identity.substring(0, 8)}... error: ${error.message}`)
-                                continue // Try next validator
+                                return { success: false, validator, error: error.message }
+                            }
+                        })
+
+                        const results = await Promise.allSettled(relayPromises)
+
+                        // Check if any relay succeeded
+                        for (const promiseResult of results) {
+                            if (promiseResult.status === "fulfilled" && promiseResult.value.success) {
+                                const { validator } = promiseResult.value
+                                console.log(`[DTR] Successfully relayed to validator ${validator.identity.substring(0, 8)}...`)
+                                result.success = true
+                                result.response = { message: "Transaction relayed to validator" }
+                                result.require_reply = false
+                                return result
                             }
                         }
-                        
+
+                        // Log all failures
+                        for (const promiseResult of results) {
+                            if (promiseResult.status === "fulfilled" && !promiseResult.value.success) {
+                                const { validator, error } = promiseResult.value
+                                console.log(`[DTR] Validator ${validator.identity.substring(0, 8)}... ${error}`)
+                            } else if (promiseResult.status === "rejected") {
+                                console.log(`[DTR] Validator promise rejected: ${promiseResult.reason}`)
+                            }
+                        }
+
                         console.log("[DTR] All validators failed, storing locally for background retry")
                         
                     } catch (relayError) {
@@ -732,23 +759,53 @@ export default class ServerHandlers {
      */
     static async handleL2PSHashUpdate(tx: Transaction): Promise<RPCResponse> {
         const response: RPCResponse = _.cloneDeep(emptyResponse)
-        
+
         try {
-            // Extract L2PS hash payload from transaction data
-            const l2psHashPayload = tx.content.data[1] as any
+            // REVIEW: PR Fix #12 - Validate payload structure and reject transactions without block_number
+            if (!tx.content || !tx.content.data || !tx.content.data[1]) {
+                response.result = 400
+                response.response = "Invalid transaction structure"
+                response.extra = "Missing L2PS hash payload in transaction data"
+                return response
+            }
+
+            if (!tx.block_number) {
+                response.result = 400
+                response.response = "Missing block_number"
+                response.extra = "L2PS hash updates require valid block_number (cannot default to 0)"
+                return response
+            }
+
+            const payloadData = tx.content.data[1]
+
+            // Validate payload has required L2PSHashPayload structure
+            if (
+                typeof payloadData !== "object" ||
+                !("l2ps_uid" in payloadData) ||
+                !("consolidated_hash" in payloadData) ||
+                !("transaction_count" in payloadData)
+            ) {
+                response.result = 400
+                response.response = "Invalid L2PS hash payload"
+                response.extra = "Missing required fields: l2ps_uid, consolidated_hash, or transaction_count"
+                return response
+            }
+
+            // Extract L2PS hash payload from transaction data with proper typing
+            const l2psHashPayload = payloadData as L2PSHashPayload
             const l2psUid = l2psHashPayload.l2ps_uid
-            
+
             // Validate sender is part of the L2PS network
             const parallelNetworks = ParallelNetworks.getInstance()
             const l2psInstance = await parallelNetworks.getL2PS(l2psUid)
-            
+
             if (!l2psInstance) {
                 response.result = 403
                 response.response = "Not participant in L2PS network"
                 response.extra = `L2PS network ${l2psUid} not found or not joined`
                 return response
             }
-            
+
             // REVIEW: Store hash update for validator consensus (Phase 3b)
             // Validators store ONLY UID → hash mappings (content blind)
             try {
@@ -756,7 +813,7 @@ export default class ServerHandlers {
                     l2psHashPayload.l2ps_uid,
                     l2psHashPayload.consolidated_hash,
                     l2psHashPayload.transaction_count,
-                    BigInt(tx.block_number || 0),
+                    BigInt(tx.block_number), // Now guaranteed to exist due to validation above
                 )
 
                 log.info(`[L2PS Hash Update] Stored hash for L2PS ${l2psUid}: ${l2psHashPayload.consolidated_hash.substring(0, 16)}... (${l2psHashPayload.transaction_count} txs)`)

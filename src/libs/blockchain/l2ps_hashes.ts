@@ -21,7 +21,8 @@ import log from "@/utilities/logger"
 // REVIEW: New manager for Phase 3b - Validator Hash Storage
 export default class L2PSHashes {
     /** TypeORM repository for L2PS hash mappings */
-    public static repo: Repository<L2PSHash> = null
+    // REVIEW: PR Fix #8 - Add | null to repo type annotation for proper TypeScript type safety
+    public static repo: Repository<L2PSHash> | null = null
 
     /**
      * Initialize the L2PS hashes repository

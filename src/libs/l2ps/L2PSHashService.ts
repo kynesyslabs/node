@@ -23,9 +23,12 @@ import getCommonValidatorSeed from "@/libs/consensus/v2/routines/getCommonValida
  */
 export class L2PSHashService {
     private static instance: L2PSHashService | null = null
-    
+
     /** Interval timer for hash generation cycles */
     private intervalId: NodeJS.Timeout | null = null
+
+    // REVIEW: PR Fix #13 - Private constructor enforces singleton pattern
+    private constructor() {}
     
     /** Reentrancy protection flag - prevents overlapping operations */
     private isGenerating = false
