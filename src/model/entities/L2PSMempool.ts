@@ -56,10 +56,12 @@ export class L2PSMempoolTx {
 
     /**
      * Unix timestamp in milliseconds when transaction was processed
+     * REVIEW: PR Fix - TypeORM returns SQL bigint as string type to prevent JavaScript precision loss
+     * Using string type for TypeScript to match TypeORM runtime behavior
      */
     @Index()
-    @Column("bigint") 
-    timestamp: bigint
+    @Column("bigint")
+    timestamp: string
 
     /**
      * Target block number for inclusion (follows main mempool pattern)

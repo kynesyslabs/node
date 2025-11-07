@@ -23,9 +23,11 @@ export class RelayRetryService {
     private static instance: RelayRetryService
     private isRunning = false
     private retryInterval: NodeJS.Timeout | null = null
+    private cleanupInterval: NodeJS.Timeout | null = null
     private retryAttempts = new Map<string, number>() // txHash -> attempt count
     private readonly maxRetryAttempts = 10
     private readonly retryIntervalMs = 10000 // 10 seconds
+    private readonly validatorCallTimeoutMs = 5000 // REVIEW: PR Fix - 5 second timeout for validator calls
     
     // Optimization: only recalculate validators when block number changes
     private lastBlockNumber = 0
@@ -37,18 +39,78 @@ export class RelayRetryService {
         }
         return RelayRetryService.instance
     }
-    
+
+    /**
+     * Wraps a promise with a timeout to prevent indefinite hanging
+     * REVIEW: PR Fix - Prevents validator.call() from blocking the retry service
+     * @param promise - Promise to wrap
+     * @param timeoutMs - Timeout in milliseconds
+     * @returns Promise that rejects on timeout
+     */
+    private callWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+        return Promise.race([
+            promise,
+            new Promise<T>((_, reject) =>
+                setTimeout(() => reject(new Error(`Operation timed out after ${timeoutMs}ms`)), timeoutMs),
+            ),
+        ])
+    }
+
+    /**
+     * Cleanup stale entries from retryAttempts Map and validityDataCache
+     * REVIEW: PR Fix #12 - Prevents memory leak when transactions removed externally
+     * Also evicts stale ValidityData from cache
+     */
+    private async cleanupStaleEntries(): Promise<void> {
+        try {
+            const mempoolTxs = await Mempool.getMempool()
+            const mempoolHashes = new Set(mempoolTxs.map((tx: any) => tx.hash))
+
+            // Remove retry attempts for transactions no longer in mempool
+            let retryEntriesRemoved = 0
+            for (const [txHash] of this.retryAttempts) {
+                if (!mempoolHashes.has(txHash)) {
+                    this.retryAttempts.delete(txHash)
+                    retryEntriesRemoved++
+                }
+            }
+
+            // REVIEW: PR Fix #12 - Add cache eviction for validityDataCache
+            // Remove ValidityData for transactions no longer in mempool
+            let cacheEntriesEvicted = 0
+            for (const [txHash] of getSharedState.validityDataCache) {
+                if (!mempoolHashes.has(txHash)) {
+                    getSharedState.validityDataCache.delete(txHash)
+                    cacheEntriesEvicted++
+                }
+            }
+
+            if (retryEntriesRemoved > 0 || cacheEntriesEvicted > 0) {
+                log.debug(`[DTR RetryService] Cleanup: ${retryEntriesRemoved} retry entries, ${cacheEntriesEvicted} cache entries removed`)
+            }
+        } catch (error) {
+            log.error("[DTR RetryService] Error during cleanup: " + error)
+        }
+    }
+
     /**
      * Starts the background relay retry service
      * Only starts if not already running
      */
     start() {
         if (this.isRunning) return
-        
+
         console.log("[DTR RetryService] Starting background relay service")
         log.info("[DTR RetryService] Service started - will retry every 10 seconds")
         this.isRunning = true
-        
+
+        // REVIEW: PR Fix - Start cleanup interval to prevent memory leak
+        this.cleanupInterval = setInterval(() => {
+            this.cleanupStaleEntries().catch(error => {
+                log.error("[DTR RetryService] Error in cleanup cycle: " + error)
+            })
+        }, 60000) // Cleanup every 60 seconds
+
         this.retryInterval = setInterval(() => {
             this.processMempool().catch(error => {
                 log.error("[DTR RetryService] Error in retry cycle: " + error)
@@ -62,16 +124,22 @@ export class RelayRetryService {
      */
     stop() {
         if (!this.isRunning) return
-        
+
         console.log("[DTR RetryService] Stopping relay service")
         log.info("[DTR RetryService] Service stopped")
         this.isRunning = false
-        
+
         if (this.retryInterval) {
             clearInterval(this.retryInterval)
             this.retryInterval = null
         }
-        
+
+        // REVIEW: PR Fix - Clear cleanup interval
+        if (this.cleanupInterval) {
+            clearInterval(this.cleanupInterval)
+            this.cleanupInterval = null
+        }
+
         // Clean up state
         this.retryAttempts.clear()
         this.cachedValidators = []
@@ -117,12 +185,26 @@ export class RelayRetryService {
             }
             
             console.log(`[DTR RetryService] Found ${availableValidators.length} available validators`)
-            
-            // Process each transaction in mempool
-            for (const tx of mempool) {
-                await this.tryRelayTransaction(tx, availableValidators)
+
+            // REVIEW: PR Fix - Process transactions in parallel with concurrency limit
+            // This prevents blocking and allows faster processing of the mempool
+            const concurrencyLimit = 5
+            const results = []
+
+            for (let i = 0; i < mempool.length; i += concurrencyLimit) {
+                const batch = mempool.slice(i, i + concurrencyLimit)
+                const batchResults = await Promise.allSettled(
+                    batch.map(tx => this.tryRelayTransaction(tx, availableValidators)),
+                )
+                results.push(...batchResults)
             }
-            
+
+            // Log any failures
+            const failures = results.filter(r => r.status === "rejected")
+            if (failures.length > 0) {
+                log.warning(`[DTR RetryService] ${failures.length}/${mempool.length} transactions failed to process`)
+            }
+
         } catch (error) {
             log.error("[DTR RetryService] Error processing mempool: " + error)
         }
@@ -197,32 +279,40 @@ export class RelayRetryService {
         // Try all validators in random order
         for (const validator of validators) {
             try {
-                const result = await validator.call({
-                    method: "nodeCall",
-                    params: [{
-                        type: "RELAY_TX",
-                        data: { 
-                            transaction,
-                            validityData: validityData,
-                        },
-                    }],
-                }, true)
-                
+                // REVIEW: PR Fix - Add timeout to validator.call() to prevent indefinite hanging
+                const result = await this.callWithTimeout(
+                    validator.call({
+                        method: "nodeCall",
+                        params: [{
+                            type: "RELAY_TX",
+                            data: {
+                                transaction,
+                                validityData: validityData,
+                            },
+                        }],
+                    }, true),
+                    this.validatorCallTimeoutMs,
+                )
+
+                // REVIEW: PR Fix - Safe validator.identity access with fallback
+                const validatorId = validator.identity?.substring(0, 8) || "unknown"
+
                 if (result.result === 200) {
-                    console.log(`[DTR RetryService] Successfully relayed ${txHash} to validator ${validator.identity.substring(0, 8)}...`)
+                    console.log(`[DTR RetryService] Successfully relayed ${txHash} to validator ${validatorId}...`)
                     log.info(`[DTR RetryService] Transaction ${txHash} successfully relayed after ${currentAttempts + 1} attempts`)
-                    
+
                     // Remove from local mempool since it's now in validator's mempool
                     await Mempool.removeTransaction(txHash)
                     this.retryAttempts.delete(txHash)
                     getSharedState.validityDataCache.delete(txHash)
                     return // Success!
                 }
-                
-                console.log(`[DTR RetryService] Validator ${validator.identity.substring(0, 8)}... rejected ${txHash}: ${result.response}`)
-                
+
+                console.log(`[DTR RetryService] Validator ${validatorId}... rejected ${txHash}: ${result.response}`)
+
             } catch (error: any) {
-                console.log(`[DTR RetryService] Validator ${validator.identity.substring(0, 8)}... error for ${txHash}: ${error.message}`)
+                const validatorId = validator.identity?.substring(0, 8) || "unknown"
+                console.log(`[DTR RetryService] Validator ${validatorId}... error for ${txHash}: ${error.message}`)
                 continue // Try next validator
             }
         }

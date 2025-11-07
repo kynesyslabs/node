@@ -594,6 +594,11 @@ export class SignalingServer {
 
         // TODO: Replace with sender signature verification once client-side signing is implemented
         // Current: Sign with node's private key for integrity (not authentication)
+        // REVIEW: PR Fix #14 - Add null safety check for private key access (location 1/3)
+        if (!getSharedState.identity?.ed25519?.privateKey) {
+            throw new Error("[Signaling Server] Private key not available for message signing")
+        }
+
         const signature = Cryptography.sign(
             JSON.stringify(transaction.content),
             getSharedState.identity.ed25519.privateKey,
@@ -602,7 +607,13 @@ export class SignalingServer {
         transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
 
         // Add to mempool
-        await Mempool.addTransaction(transaction)
+        // REVIEW: PR Fix #13 - Add error handling for blockchain storage consistency
+        try {
+            await Mempool.addTransaction(transaction)
+        } catch (error: any) {
+            console.error("[Signaling Server] Failed to add message transaction to mempool:", error.message)
+            throw error // Rethrow to be caught by caller's error handling
+        }
     }
 
     /**
@@ -624,6 +635,11 @@ export class SignalingServer {
 
         // TODO: Replace with sender signature verification once client-side signing is implemented
         // Current: Sign with node's private key for integrity (not authentication)
+        // REVIEW: PR Fix #14 - Add null safety check for private key access (location 2/3)
+        if (!getSharedState.identity?.ed25519?.privateKey) {
+            throw new Error("[Signaling Server] Private key not available for offline message signing")
+        }
+
         const signature = Cryptography.sign(messageHash, getSharedState.identity.ed25519.privateKey)
 
         const offlineMessage = offlineMessageRepository.create({

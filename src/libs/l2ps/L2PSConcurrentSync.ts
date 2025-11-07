@@ -172,30 +172,67 @@ export async function syncL2PSWithPeer(
         log.debug(`[L2PS Sync] Received ${transactions.length} transactions from peer ${peer.muid}`)
 
         // Step 5: Insert transactions into local mempool
+        // REVIEW: PR Fix #9 - Batch duplicate detection for efficiency
         let insertedCount = 0
         let duplicateCount = 0
 
+        if (transactions.length === 0) {
+            log.debug("[L2PS Sync] No transactions to process")
+            return
+        }
+
+        // Batch duplicate detection: check all hashes at once
+        const txHashes = transactions.map(tx => tx.hash)
+        const existingHashes = new Set<string>()
+
+        // Query database once for all hashes
+        try {
+            // REVIEW: PR Fix - Safe repository access without non-null assertion
+            if (!L2PSMempool.repo) {
+                throw new Error("[L2PS Sync] L2PSMempool repository not initialized")
+            }
+
+            const existingTxs = await L2PSMempool.repo.createQueryBuilder("tx")
+                .where("tx.hash IN (:...hashes)", { hashes: txHashes })
+                .select("tx.hash")
+                .getMany()
+
+            for (const tx of existingTxs) {
+                existingHashes.add(tx.hash)
+            }
+        } catch (error: any) {
+            log.error("[L2PS Sync] Failed to batch check duplicates:", error.message)
+            throw error
+        }
+
+        // Filter out duplicates and insert new transactions
         for (const tx of transactions) {
             try {
-                // Check if transaction already exists (avoid duplicates)
-                const existing = await L2PSMempool.getByHash(tx.hash)
-                if (existing) {
+                // Check against pre-fetched duplicates
+                if (existingHashes.has(tx.hash)) {
                     duplicateCount++
                     continue
                 }
 
                 // Insert transaction into local mempool
-                await L2PSMempool.insert({
-                    hash: tx.hash,
-                    l2ps_uid: tx.l2ps_uid,
-                    original_hash: tx.original_hash,
-                    encrypted_tx: tx.encrypted_tx,
-                    timestamp: tx.timestamp,
-                    block_number: tx.block_number,
-                    status: "processed",
-                })
+                // REVIEW: PR Fix #10 - Use addTransaction() instead of direct insert to ensure validation
+                const result = await L2PSMempool.addTransaction(
+                    tx.l2ps_uid,
+                    tx.encrypted_tx,
+                    tx.original_hash,
+                    "processed",
+                )
 
-                insertedCount++
+                if (result.success) {
+                    insertedCount++
+                } else {
+                    // addTransaction failed (validation or duplicate)
+                    if (result.error?.includes("already")) {
+                        duplicateCount++
+                    } else {
+                        log.error(`[L2PS Sync] Failed to add transaction ${tx.hash}: ${result.error}`)
+                    }
+                }
             } catch (error: any) {
                 log.error(`[L2PS Sync] Failed to insert transaction ${tx.hash}:`, error.message)
             }

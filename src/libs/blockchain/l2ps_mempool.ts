@@ -30,7 +30,7 @@ export default class L2PSMempool {
     /**
      * Initialize the L2PS mempool repository
      * Must be called before using any other methods
-     * 
+     *
      * @throws {Error} If database connection fails
      */
     public static async init(): Promise<void> {
@@ -41,6 +41,17 @@ export default class L2PSMempool {
         } catch (error: any) {
             log.error("[L2PS Mempool] Failed to initialize:", error)
             throw error
+        }
+    }
+
+    /**
+     * Ensure repository is initialized before use
+     * REVIEW: PR Fix - Guard against null repository access from race condition
+     * @throws {Error} If repository not yet initialized
+     */
+    private static ensureInitialized(): void {
+        if (!this.repo) {
+            throw new Error("[L2PS Mempool] Not initialized - repository is null. Ensure init() completes before calling methods.")
         }
     }
 
@@ -67,13 +78,16 @@ export default class L2PSMempool {
      * ```
      */
     public static async addTransaction(
-        l2psUid: string, 
-        encryptedTx: L2PSTransaction, 
+        l2psUid: string,
+        encryptedTx: L2PSTransaction,
         originalHash: string,
         status = "processed",
     ): Promise<{ success: boolean; error?: string }> {
         try {
+            this.ensureInitialized()
+
             // Check if original transaction already processed (duplicate detection)
+            // REVIEW: PR Fix #8 - Consistent error handling for duplicate checks
             const alreadyExists = await this.existsByOriginalHash(originalHash)
             if (alreadyExists) {
                 return {
@@ -83,7 +97,8 @@ export default class L2PSMempool {
             }
 
             // Check if encrypted hash already exists
-            const encryptedExists = await this.repo.exists({ where: { hash: encryptedTx.hash } })
+            // Use existsByHash() instead of direct repo access for consistent error handling
+            const encryptedExists = await this.existsByHash(encryptedTx.hash)
             if (encryptedExists) {
                 return {
                     success: false,
@@ -92,13 +107,30 @@ export default class L2PSMempool {
             }
 
             // Determine block number (following main mempool pattern)
+            // REVIEW: PR Fix #7 - Add validation for block number edge cases
             let blockNumber: number
             const manager = SecretaryManager.getInstance()
 
-            if (manager.shard?.blockRef) {
+            if (manager.shard?.blockRef && manager.shard.blockRef >= 0) {
                 blockNumber = manager.shard.blockRef + 1
             } else {
-                blockNumber = (await Chain.getLastBlockNumber()) + 1
+                const lastBlockNumber = await Chain.getLastBlockNumber()
+                // Validate lastBlockNumber is a valid positive number
+                if (typeof lastBlockNumber !== "number" || lastBlockNumber < 0) {
+                    return {
+                        success: false,
+                        error: `Invalid last block number: ${lastBlockNumber}`,
+                    }
+                }
+                blockNumber = lastBlockNumber + 1
+            }
+
+            // Additional safety check for final blockNumber
+            if (!Number.isFinite(blockNumber) || blockNumber <= 0) {
+                return {
+                    success: false,
+                    error: `Calculated invalid block number: ${blockNumber}`,
+                }
             }
 
             // Save to L2PS mempool
@@ -108,7 +140,7 @@ export default class L2PSMempool {
                 original_hash: originalHash,
                 encrypted_tx: encryptedTx,
                 status: status,
-                timestamp: BigInt(Date.now()),
+                timestamp: Date.now().toString(),
                 block_number: blockNumber,
             })
 
@@ -139,6 +171,8 @@ export default class L2PSMempool {
      */
     public static async getByUID(l2psUid: string, status?: string): Promise<L2PSMempoolTx[]> {
         try {
+            this.ensureInitialized()
+
             const options: FindManyOptions<L2PSMempoolTx> = {
                 where: { l2ps_uid: l2psUid },
                 order: {
@@ -180,6 +214,8 @@ export default class L2PSMempool {
      */
     public static async getHashForL2PS(l2psUid: string, blockNumber?: number): Promise<string> {
         try {
+            this.ensureInitialized()
+
             const options: FindManyOptions<L2PSMempoolTx> = {
                 where: { 
                     l2ps_uid: l2psUid,
@@ -245,9 +281,11 @@ export default class L2PSMempool {
      */
     public static async updateStatus(hash: string, status: string): Promise<boolean> {
         try {
+            this.ensureInitialized()
+
             const result = await this.repo.update(
                 { hash },
-                { status, timestamp: BigInt(Date.now()) },
+                { status, timestamp: Date.now().toString() },
             )
             
             const updated = result.affected > 0
@@ -271,6 +309,8 @@ export default class L2PSMempool {
      */
     public static async existsByOriginalHash(originalHash: string): Promise<boolean> {
         try {
+            this.ensureInitialized()
+
             return await this.repo.exists({ where: { original_hash: originalHash } })
         } catch (error: any) {
             log.error(`[L2PS Mempool] Error checking original hash ${originalHash}:`, error)
@@ -287,6 +327,8 @@ export default class L2PSMempool {
      */
     public static async existsByHash(hash: string): Promise<boolean> {
         try {
+            this.ensureInitialized()
+
             return await this.repo.exists({ where: { hash } })
         } catch (error: any) {
             log.error(`[L2PS Mempool] Error checking hash ${hash}:`, error)
@@ -303,6 +345,8 @@ export default class L2PSMempool {
      */
     public static async getByHash(hash: string): Promise<L2PSMempoolTx | null> {
         try {
+            this.ensureInitialized()
+
             return await this.repo.findOne({ where: { hash } })
         } catch (error: any) {
             log.error(`[L2PS Mempool] Error getting transaction ${hash}:`, error)
@@ -325,13 +369,15 @@ export default class L2PSMempool {
      */
     public static async cleanup(olderThanMs: number): Promise<number> {
         try {
-            const cutoffTimestamp = BigInt(Date.now() - olderThanMs)
-            
+            this.ensureInitialized()
+
+            const cutoffTimestamp = (Date.now() - olderThanMs).toString()
+
             const result = await this.repo
                 .createQueryBuilder()
                 .delete()
                 .from(L2PSMempoolTx)
-                .where("timestamp < :cutoff", { cutoff: cutoffTimestamp.toString() })
+                .where("timestamp < :cutoff", { cutoff: cutoffTimestamp })
                 .andWhere("status = :status", { status: "processed" })
                 .execute()
 
@@ -366,6 +412,8 @@ export default class L2PSMempool {
         transactionsByStatus: Record<string, number>;
     }> {
         try {
+            this.ensureInitialized()
+
             const totalTransactions = await this.repo.count()
             
             // Get transactions by UID

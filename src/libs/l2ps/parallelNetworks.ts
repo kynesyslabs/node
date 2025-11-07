@@ -98,9 +98,16 @@ export default class ParallelNetworks {
             throw new Error(`L2PS config file not found: ${configPath}`)
         }
 
-        const nodeConfig: L2PSNodeConfig = JSON.parse(
-            fs.readFileSync(configPath, "utf8"),
-        )
+        // REVIEW: PR Fix #18 - Add JSON parsing error handling
+        let nodeConfig: L2PSNodeConfig
+        try {
+            nodeConfig = JSON.parse(
+                fs.readFileSync(configPath, "utf8"),
+            )
+        } catch (error: any) {
+            throw new Error(`Failed to parse L2PS config for ${uid}: ${error.message}`)
+        }
+
         if (!nodeConfig.uid || !nodeConfig.enabled) {
             throw new Error(`L2PS config invalid or disabled: ${uid}`)
         }
@@ -237,6 +244,12 @@ export default class ParallelNetworks {
         }
 
         try {
+            // REVIEW: PR Fix #17 - Add array validation before destructuring
+            if (!Array.isArray(tx.content.data) || tx.content.data.length < 2) {
+                console.error("Invalid L2PS transaction data format: expected array with at least 2 elements")
+                return undefined
+            }
+
             const [dataType, payload] = tx.content.data
             if (dataType === "l2psEncryptedTx") {
                 const encryptedPayload = payload as L2PSEncryptedPayload

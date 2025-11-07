@@ -79,10 +79,9 @@ export default class L2PSHashes {
     ): Promise<void> {
         this.ensureInitialized()
         try {
-            // Check if hash mapping already exists
-            const existing = await this.repo.findOne({
-                where: { l2ps_uid: l2psUid },
-            })
+            // REVIEW: PR Fix #11 - Use atomic upsert to prevent race condition
+            // Previous code: check-then-act pattern allowed concurrent inserts to cause conflicts
+            // Solution: Use TypeORM's save() which performs atomic upsert when entity has primary key
 
             const hashEntry: L2PSHash = {
                 l2ps_uid: l2psUid,
@@ -92,18 +91,11 @@ export default class L2PSHashes {
                 timestamp: BigInt(Date.now()),
             }
 
-            if (existing) {
-                // Update existing hash mapping
-                await this.repo.update(
-                    { l2ps_uid: l2psUid },
-                    hashEntry,
-                )
-                log.debug(`[L2PS Hashes] Updated hash for L2PS ${l2psUid}: ${hash.substring(0, 16)}... (${txCount} txs)`)
-            } else {
-                // Create new hash mapping
-                await this.repo.save(hashEntry)
-                log.debug(`[L2PS Hashes] Created hash for L2PS ${l2psUid}: ${hash.substring(0, 16)}... (${txCount} txs)`)
-            }
+            // TypeORM's save() performs atomic upsert when entity with primary key exists
+            // This prevents race conditions from concurrent updates
+            await this.repo.save(hashEntry)
+
+            log.debug(`[L2PS Hashes] Upserted hash for L2PS ${l2psUid}: ${hash.substring(0, 16)}... (${txCount} txs)`)
         } catch (error: any) {
             log.error(`[L2PS Hashes] Failed to update hash for ${l2psUid}:`, error)
             throw error
