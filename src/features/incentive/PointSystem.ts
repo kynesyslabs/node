@@ -35,13 +35,19 @@ export class PointSystem {
      */
     private async getUserIdentitiesFromGCR(userId: string): Promise<{
         linkedWallets: string[]
-        linkedSocials: { twitter?: string; discord?: string }
+        linkedSocials: { twitter?: string; github?: string; discord?: string }
     }> {
         const xmIdentities = await IdentityManager.getIdentities(userId)
         const twitterIdentities = await IdentityManager.getWeb2Identities(
             userId,
             "twitter",
         )
+
+        const githubIdentities = await IdentityManager.getWeb2Identities(
+            userId,
+            "github",
+        )
+
         const discordIdentities = await IdentityManager.getWeb2Identities(
             userId,
             "discord",
@@ -69,10 +75,14 @@ export class PointSystem {
             }
         }
 
-        const linkedSocials: { twitter?: string; discord?: string } = {}
+        const linkedSocials: { twitter?: string; github?: string; discord?: string } = {}
 
         if (Array.isArray(twitterIdentities) && twitterIdentities.length > 0) {
             linkedSocials.twitter = twitterIdentities[0].username
+        }
+
+        if (Array.isArray(githubIdentities) && githubIdentities.length > 0) {
+            linkedSocials.github = githubIdentities[0].username
         }
 
         if (Array.isArray(discordIdentities) && discordIdentities.length > 0) {
