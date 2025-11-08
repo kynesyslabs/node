@@ -24,6 +24,9 @@ import { Tweet } from "@kynesyslabs/demosdk/types"
 import Mempool from "../blockchain/mempool_v2"
 import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Discord, DiscordMessage } from "../identity/tools/discord"
+import Datasource from "@/model/datasource"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import { validateStorageProgramAccess } from "@/libs/blockchain/validators/validateStorageProgramAccess"
 
 export interface NodeCall {
     message: string
@@ -32,7 +35,7 @@ export interface NodeCall {
 }
 
 // REVIEW Is this module too big?
-export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
+export async function manageNodeCall(content: NodeCall, sender?: string): Promise<RPCResponse> {
     // Basic Node API handling logic
     // ...
     let result: any // Storage for the result
@@ -177,6 +180,72 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             nStat = await ensureGCRForUser(data.address)
             response.response = nStat.nonce
             break
+
+        // REVIEW: Storage Program query endpoint
+        case "getStorageProgram": {
+            const storageAddress = data.storageAddress
+            const key = data.key
+
+            if (!storageAddress) {
+                response.result = 400
+                response.response = { error: "Missing storageAddress parameter" }
+                break
+            }
+
+            // REVIEW: Allow no-auth requests (sender will be empty string for public storage programs)
+            // Access control validator will determine if anonymous access is permitted
+
+            try {
+                const db = await Datasource.getInstance()
+                const gcrRepo = db.getDataSource().getRepository(GCRMain)
+
+                // REVIEW: Query by 'pubkey' not 'address' to match GCRMain entity
+                const storageProgram = await gcrRepo.findOne({
+                    where: { pubkey: storageAddress },
+                })
+
+                if (!storageProgram || !storageProgram.data || !storageProgram.data.metadata) {
+                    response.result = 404
+                    response.response = { error: "Storage program not found" }
+                    break
+                }
+
+                // REVIEW: Enforce access control before returning data
+                // Use empty string as sentinel value for unauthenticated requests
+                const UNAUTHENTICATED_SENDER = ""
+                const accessCheck = validateStorageProgramAccess(
+                    "READ_STORAGE",
+                    sender || UNAUTHENTICATED_SENDER,
+                    storageProgram.data,
+                )
+
+                if (!accessCheck.success) {
+                    response.result = 403
+                    response.response = { error: accessCheck.error || "Access denied" }
+                    break
+                }
+
+                // REVIEW: Return specific key or all data
+                const responseData = key
+                    ? storageProgram.data.variables?.[key]
+                    : storageProgram.data
+
+                response.result = 200
+                response.response = {
+                    success: true,
+                    data: responseData,
+                    metadata: storageProgram.data.metadata,
+                }
+            } catch (error) {
+                response.result = 500
+                response.response = {
+                    error: "Internal server error",
+                    details: error instanceof Error ? error.message : String(error),
+                }
+            }
+            break
+        }
+
         case "getPeerTime":
             response.response = new Date().getTime()
             break
@@ -244,7 +313,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
             response.result = tweet ? 200 : 400
             if (tweet) {
-                const data = {
+                // REVIEW: Renamed to avoid shadowing outer 'data' variable
+                const tweetData = {
                     id: tweet.id,
                     created_at: tweet.created_at,
                     text: tweet.text,
@@ -252,7 +322,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     userId: tweet.author.rest_id,
                 }
                 response.response = {
-                    tweet: data,
+                    tweet: tweetData,
                     success: true,
                 }
             } else {
