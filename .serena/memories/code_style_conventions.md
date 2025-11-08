@@ -1,117 +1,52 @@
-# Code Style and Conventions
+# Demos Network Node Software - Code Style & Conventions
 
-## Naming Conventions (ESLint Enforced)
+## ESLint Configuration
+### Naming Conventions (enforced by @typescript-eslint/naming-convention)
+- **Variables/Functions/Methods**: camelCase (leading/trailing underscores allowed)
+- **Classes/Types/Interfaces**: PascalCase
+- **Interfaces**: PascalCase (no "I" prefix - explicitly forbidden)
+- **Type Aliases**: PascalCase
 
-### Variables and Functions
-- **Format**: camelCase
-- **Leading/Trailing Underscores**: Allowed
-- **Example**: `getUserData`, `_privateVar`, `helperFunction_`
+### Code Style Rules
+- **Quotes**: Double quotes (`"`) required
+- **Semicolons**: None (`;` forbidden)
+- **Indentation**: 4 spaces (via Prettier)
+- **Comma Dangling**: Always multiline
+- **Switch Cases**: Colon spacing enforced
 
-### Functions and Methods
-- **Format**: camelCase
-- **Example**: `calibrateTime()`, `digestArguments()`, `getNextAvailablePort()`
-
-### Classes, Types, and Interfaces
-- **Format**: PascalCase
-- **Interface Prefix**: NO "I" prefix (enforced by ESLint)
-- **Example**: 
-  - Classes: `UserManager`, `DataProcessor`
-  - Interfaces: `UserData` (NOT `IUserData`)
-  - Type Aliases: `ResponseType`, `ConfigOptions`
-
-## Code Formatting
-
-### Quotes and Semicolons
-- **Quotes**: Double quotes (enforced)
-- **Semicolons**: NO semicolons (enforced)
-- **Example**:
-```typescript
-const message = "Hello world"  // ✓ Correct
-const message = 'Hello world'; // ✗ Wrong
-```
-
-### Spacing and Structure
-- **Switch Case**: Space after colon
-- **Comma Dangle**: Always in multiline structures
-- **Extra Semicolons**: Error
-- **Example**:
-```typescript
-switch (value) {
-    case "a": return true  // ✓ Correct spacing
-    case "b": return false
-}
-
-const obj = {
-    key1: "value1",
-    key2: "value2",  // ✓ Trailing comma
-}
-```
-
-## Import Organization
-
-### Path Aliases (CRITICAL)
-- **Use**: `@/` for all imports instead of relative paths
-- **Example**:
-```typescript
-// ✓ Correct
-import { helper } from "@/libs/utils/helper"
-import { Feature } from "@/features/incentive/types"
-
-// ✗ Wrong
-import { helper } from "../../../libs/utils/helper"
-import { Feature } from "../../features/incentive/types"
-```
-
-### Import Rules
-- **Restricted Imports**: Warning enabled
-- **No Relative Imports**: Prefer @/ aliases for maintainability
+## Prettier Configuration
+- **Print Width**: 80 characters
+- **Tab Width**: 4 spaces
+- **Single Quote**: false (use double quotes)
+- **Semi**: false (no semicolons)
+- **Trailing Comma**: "all" (always for multiline)
+- **Arrow Parens**: "avoid" (omit when possible)
+- **End of Line**: "lf" (Unix line endings)
+- **Bracket Spacing**: true
 
 ## TypeScript Configuration
+- **Target**: ESNext
+- **Module**: ESNext with bundler resolution
+- **Strict Mode**: Enabled with exceptions:
+  - `strictNullChecks`: false
+  - `noImplicitAny`: false
+  - `strictBindCallApply`: false
+- **Decorators**: Experimental decorators enabled
+- **Source Maps**: Enabled for debugging
 
-### Type Safety
-- **strictNullChecks**: false (relaxed)
-- **noImplicitAny**: false (relaxed)
-- **strictBindCallApply**: false (relaxed)
-- **strict**: true (but with above overrides)
-- **skipLibCheck**: true
+## Import Conventions
+- **Path Aliases**: Use `@/` instead of relative imports (`../../../`)
+- **Import Style**: ES6 imports with destructuring where appropriate
+- **Restricted Imports**: Warnings for certain import patterns
 
-### Decorators
-- **experimentalDecorators**: true (required for TypeORM)
-- **emitDecoratorMetadata**: true (required for TypeORM)
+## File Organization
+- **License Headers**: All files start with KyneSys Labs license
+- **Feature-based Structure**: Code organized in `src/features/` by domain
+- **Utilities**: Shared utilities in `src/utilities/` and `src/libs/`
+- **Types**: Centralized type definitions in `src/types/`
 
-## Documentation Standards
-
-### JSDoc Format
-- **Required**: All new methods and functions must have JSDoc comments
-- **Inline Comments**: Required for complex logic or business rules
-- **Implementation Decisions**: Document non-obvious choices
-
-### Code Review Markers
-- **Marker**: `// REVIEW:` before newly added features or significant code blocks
-- **Purpose**: Highlight changes for review process
-
-## Linting and Disabled Rules
-
-### Relaxed Rules
-- `no-unused-vars`: OFF
-- `@typescript-eslint/no-unused-vars`: OFF
-- `@typescript-eslint/no-var-requires`: OFF
-- `@typescript-eslint/ban-types`: OFF
-- `@typescript-eslint/no-empty-function`: OFF
-- `@typescript-eslint/no-explicit-any`: OFF
-- `no-var`: OFF
-- `no-console`: Not enforced (warnings disabled)
-
-## Best Practices
-
-### Error Messages
-- Provide clear, actionable error messages for debugging
-
-### Variable Naming
-- Use descriptive names expressing intent clearly
-- Follow domain-specific terminology from blockchain/network context
-
-### Code Organization
-- Follow established project structure
-- Maintain consistency with existing patterns
-- Integrate with SDK methods properly
+## Comments & Documentation
+- **License**: CC BY-NC-ND 4.0 header in all source files
+- **JSDoc**: Expected for public APIs and complex functions
+- **Review Comments**: Use `// REVIEW:` for new features needing attention
+- **FIXME Comments**: For temporary workarounds needing later fixes

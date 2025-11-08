@@ -20,6 +20,8 @@ import {
 // TODO: refactor import to use high level abstraction module
 import { PqcIdentityAssignPayload } from "node_modules/@kynesyslabs/demosdk/build/types/abstraction"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { CrossChainTools } from "@/libs/identity/tools/crosschain"
+import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 
 /*
  * Example of a payload for the gcr_routine method
@@ -59,6 +61,117 @@ export default class IdentityManager {
     }
 
     /**
+     * Filter the connections of a user
+     *
+     * @param sender The ed25519 address of the user
+     * @param payload The payload containing the signature to verify
+     */
+    static async filterConnections(
+        sender: string,
+        payload: InferFromSignaturePayload,
+    ): Promise<{
+        success: boolean
+        message: string
+        twitterAccountConnected: boolean
+    }> {
+        // INFO: Check if the user has a Twitter account
+        const account = await ensureGCRForUser(sender)
+        const twitterAccounts = account.identities.web2["twitter"] || []
+        let twitterAccountConnected = false
+
+        if (twitterAccounts.length > 0) {
+            twitterAccountConnected = true
+        }
+
+        const response = {
+            success: false,
+            twitterAccountConnected,
+        }
+
+        // INFO: Check if target address is active
+        const { chain, subchain, chainId, targetAddress, isEVM } =
+            payload.target_identity
+
+        // SECTION: EVM Checks
+        // INFO: Check if the chainId is provided
+        if (isEVM && !chainId) {
+            return {
+                ...response,
+                message: "Failed: EVM chainId not provided",
+            }
+        }
+
+        // INFO: Check if the chainId matches the subchain
+        if (isEVM && chainId === chainIds.eth.sepolia) {
+            return {
+                ...response,
+                message: "Failed: Testnet addresses are not supported",
+            }
+        }
+
+        // INFO: Check if the given chainId and subchain are supported
+        if (isEVM && !chainIds.eth[subchain]) {
+            return {
+                ...response,
+                message: "Failed: Unsupported chain",
+            }
+        }
+
+        // INFO: Check if the chainId matches the subchain
+        if (isEVM && chainIds.eth[subchain] !== chainId) {
+            return {
+                ...response,
+                message: "Failed: ChainId does not match the given subchain",
+            }
+        }
+
+        // INFO: Check if the target address is active
+        // if (isEVM && typeof chainId === "number") {
+        //     const txcount = await CrossChainTools.countEthTransactionsByAddress(
+        //         targetAddress,
+        //         chainId,
+        //     )
+
+        //     if (txcount === 0) {
+        //         return {
+        //             success: false,
+        //             message: "Failed: Target address is not active",
+        //         }
+        //     }
+        // }
+
+        // SECTION: SOLANA Checks
+        // INFO: Check if the subchain is mainnet
+        if (chain === "solana" && subchain !== "mainnet") {
+            return {
+                ...response,
+                message: "Failed: Testnet addresses are not supported",
+            }
+        }
+
+        // INFO: Check if the target address is active
+        //     if (chain === "solana") {
+        //         const txcount =
+        //             await CrossChainTools.countSolanaTransactionsByAddress(
+        //                 targetAddress,
+        //             )
+
+        //         if (txcount === 0) {
+        //             return {
+        //                 success: false,
+        //                 message: "Failed: Target address is not active",
+        //             }
+        //         }
+        //     }
+
+        return {
+            ...response,
+            success: true,
+            message: "Filter check passed",
+        }
+    }
+
+    /**
      * Verify the xm identity payload signature
      *
      * @param payload - The payload containing the signature to verify
@@ -67,8 +180,20 @@ export default class IdentityManager {
      */
     static async verifyPayload(
         payload: InferFromSignaturePayload,
+        sender: string,
     ): Promise<{ success: boolean; message: string }> {
-        log.debug("Verifying payload: " + JSON.stringify(payload, null, 2))
+        const { success, message, twitterAccountConnected } =
+            await this.filterConnections(sender, payload)
+
+        if (!success) {
+            return {
+                success: false,
+                message: message,
+            }
+        }
+
+        // Filter out crosschain addresses without activity here!
+
         const chainId = payload.target_identity.chain
         // @ts-expect-error - This is a workaround to avoid type errors
         const sdk = await chains[chainId].create(null)
@@ -100,13 +225,17 @@ export default class IdentityManager {
             if (!messageVerified) {
                 return {
                     success: false,
-                    message: "Message could not be verified",
+                    message: `${chainId} payload signature could not be verified`,
                 }
             }
 
             return {
                 success: true,
-                message: "Message verified",
+                message:
+                    `${chainId} payload signature verified` +
+                    (!twitterAccountConnected
+                        ? ". Twitter account not connected, won't award points"
+                        : ""),
             }
         } catch (error) {
             log.error("Error: " + error)

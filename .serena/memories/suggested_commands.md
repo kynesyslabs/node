@@ -1,142 +1,102 @@
-# Suggested Commands
+# Demos Network Node Software - Essential Commands
 
-## Essential Development Commands
-
-### Linting and Code Quality
+## Development Commands
+### Code Quality & Linting
 ```bash
-bun run lint          # Check code quality and formatting
-bun run lint:fix      # Auto-fix linting issues (RECOMMENDED AFTER CHANGES)
-bun run format        # Format code with Prettier
+bun run lint                # Check code style and linting
+bun run lint:fix            # Auto-fix ESLint issues
+bun run format              # Format code with Prettier
+bun run prettier-format     # Format specific modules
 ```
 
-**CRITICAL**: Always run `bun run lint:fix` after making code changes to validate syntax and code quality. Never start the node directly during development.
-
-### Package Management
+### Node Operations
 ```bash
-bun install                    # Install dependencies
-bun update @kynesyslabs/demosdk --latest  # Update SDK to latest version
-bun update-interactive --latest           # Interactive dependency updates
+bun install                 # Install dependencies
+bun run start               # Start the node with tsx
+bun run start:bun          # Start with native Bun runtime
+bun run start:up           # Install deps and start
+bun run start:clean        # Clean database and start
+bun run start:purge        # Full purge and start
+bun run dev                # Development mode with auto-restart
+```
+
+### Database Operations
+```bash
+bun run migration:generate  # Generate TypeORM migration
+bun run migration:run       # Run pending migrations
+bun run migration:revert    # Revert last migration
 ```
 
 ### Testing
 ```bash
-bun run test:chains   # Run test suite (excludes src/* and test utilities)
-```
-
-### Node Operations
-
-**WARNING**: Never start the node directly during development. Use linting for validation.
-
-```bash
-# Production/Controlled Environment Only
-./run                 # Start database and node (default: port 53550, postgres 5332)
-./run -p 8080         # Custom node port
-./run -d 5433         # Custom postgres port
-./run -i .identity    # Custom identity file
-./run -c              # Clean database before start
-./run -n              # No git pull (use custom branch)
-
-# Manual node start (after database is running)
-bun run start         # Start with tsx
-bun run start:bun     # Start with bun runtime
-bun run start:clean   # Start with clean chain.db
-bun run start:purge   # Start with clean identity and chain.db
-```
-
-### Database Operations (TypeORM)
-```bash
-bun run migration:run       # Run pending migrations
-bun run migration:revert    # Revert last migration
-bun run migration:generate  # Generate new migration
+bun run test:chains        # Run chain-specific tests
 ```
 
 ### Utilities
 ```bash
-bun run keygen             # Generate new identity keypair
-bun run dump_balance       # Dump balance information
+bun run keygen             # Generate cryptographic keys
+bun run restore            # Backup and restore utility
+bun run upgrade_sdk        # Update @kynesyslabs/demosdk
+bun run upgrade_deps       # Interactive dependency updates
 ```
 
-## Docker and Database Management
-
-### Database Lifecycle
+## Production Commands
+### Running the Node
 ```bash
-# Start database (typically handled by ./run script)
-cd postgres_5332
-./start.sh
-cd ..
-
-# Stop database
-cd postgres_5332
-./stop.sh
-cd ..
-
-# Check Docker status
-docker info
-docker ps
+./run                      # Start database and node (recommended)
+./run -p <port>           # Custom node port
+./run -d <db_port>        # Custom database port
+./run -i <identity>       # Custom identity file
+./run -c                  # Clean database before start
+./run -n                  # Skip git pull
 ```
 
-### Port Verification
+## System Commands (macOS/Darwin)
+### Essential Unix Tools
 ```bash
-# Check if ports are available
-sudo lsof -i :5332   # PostgreSQL port
-sudo lsof -i :53550  # Node software port
+ls -la                     # List files with details
+cd /path/to/dir           # Change directory (use /usr/bin/zoxide if available)
+grep -r "pattern" src/    # Search in files (prefer `rg` if available)
+find . -name "*.ts"       # Find files by pattern
 ```
 
-## Development Workflow
-
-### Initial Setup
+### Process Management
 ```bash
-git clone <repository>
-bun install
-bun run keygen
-cp env.example .env
-cp demos_peerlist.json.example demos_peerlist.json
-# Edit .env and demos_peerlist.json as needed
+lsof -i :53550            # Check if node port is in use
+lsof -i :5332             # Check if database port is in use
+ps aux | grep node        # Find Node.js processes
+kill -9 <pid>             # Force kill process
 ```
 
-### Standard Development Cycle
+### Docker Operations
 ```bash
-# 1. Make code changes
-# 2. Run linting validation
-bun run lint:fix
-
-# 3. Run tests if applicable
-bun run test:chains
-
-# 4. For production/testing (controlled environment only)
-./run
+docker info               # Check Docker status
+docker ps                 # List running containers
+docker compose up -d      # Start services in background
+docker compose down       # Stop services
 ```
 
-### Troubleshooting
+## Git Workflow
 ```bash
-# Clean database
-./run -c
-
-# View logs
-tail -f logs/node.log
-tail -f postgres_5332/postgres.log
-
-# Check Docker
-docker info
-docker ps
-docker logs <container-name>
-
-# Restart database
-cd postgres_5332
-./stop.sh
-./start.sh
-cd ..
+git status                # Check current status
+git branch                # List branches
+git checkout -b feature/name  # Create feature branch
+git add .                 # Stage changes
+git commit -m "message"   # Commit changes
 ```
 
-## System-Specific Notes
+## Troubleshooting Commands
+```bash
+# Check system requirements
+node --version            # Should be 20.x+
+bun --version            # Should be latest
+docker --version         # Should be latest
 
-### Linux Commands
-- Standard Unix commands: `ls`, `cd`, `grep`, `find`, `cat`, etc.
-- Git operations: `git status`, `git add`, `git commit`, `git branch`
-- Package management: Use `bun` exclusively
+# Port diagnostics
+sudo lsof -i :5332       # PostgreSQL port
+sudo lsof -i :53550      # Node port
 
-### Special Considerations
-- **Bun over npm/yarn**: Always prefer Bun for all package operations
-- **Never start node in development**: Use `bun run lint:fix` for validation
-- **Docker required**: PostgreSQL runs in Docker container
-- **Ports must be free**: 5332 (PostgreSQL) and 53550 (node) must be available
+# Log inspection
+tail -f logs/node.log    # Node logs
+tail -f postgres_*/postgres.log  # Database logs
+```

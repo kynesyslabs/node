@@ -6,3 +6,4 @@ dist
 .vscode
 .env
 postgres_*
+aptos_examples_ts

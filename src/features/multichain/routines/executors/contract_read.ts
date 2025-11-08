@@ -1,6 +1,8 @@
 import type { IOperation } from "@kynesyslabs/demosdk/types"
 import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
+// import handleAptosContractRead from "./aptos_contract_read"
+import { handleAptosContractReadRest } from "./aptos_contract_read"
 
 export default async function handleContractRead(
     operation: IOperation,
@@ -65,10 +67,13 @@ export default async function handleContractRead(
             result: result,
             status: true,
         }
+    } else if (operation.chain === "aptos") {
+        // Handle Aptos contract reads using dedicated handler
+        return await handleAptosContractReadRest(operation)
     } else {
         return {
             result: "error",
-            error: "Not implemented yet: contract_read on non-EVM chains",
+            error: `Not implemented yet: contract_read on ${operation.chain} chain`,
         }
     }
 }

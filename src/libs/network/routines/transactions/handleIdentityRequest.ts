@@ -54,6 +54,13 @@ export default async function handleIdentityRequest(
         }
     }
 
+    if (tx.content.from_ed25519_address !== sender) {
+        return {
+            success: false,
+            message: "Error: Tx sender and request sender address do not match",
+        }
+    }
+
     switch (payload.method) {
         case "xm_identity_assign":
             // NOTE: Sender here is the ed25519 address coming from the transaction body
@@ -61,6 +68,7 @@ export default async function handleIdentityRequest(
             // The sender address here will be the message to verify using the signature in the payload.
             return await IdentityManager.verifyPayload(
                 payload.payload as InferFromSignaturePayload,
+                sender,
             )
         case "pqc_identity_assign":
             // NOTE: Sender here should be the ed25519 address coming from the request headers
@@ -84,7 +92,6 @@ export default async function handleIdentityRequest(
         default:
             return {
                 success: false,
-                // @ts-expect-error - we should never get here
                 message: `Unsupported identity method: ${payload.method}`,
             }
     }

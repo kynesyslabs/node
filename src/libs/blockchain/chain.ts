@@ -36,6 +36,7 @@ import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorSeed"
+import HandleGCR from "./gcr/handleGCR"
 
 export default class Chain {
     static blocks: Repository<Blocks>
@@ -84,6 +85,31 @@ export default class Chain {
             console.error(error)
             throw error // It does not crash the node, as it is caught by the endpoint handler
         }
+    }
+
+    static async getTransactionHistory(
+        address: string,
+        txtype: TransactionContent["type"] | "all",
+        start = 0,
+        limit = 100,
+    ) {
+        const whereConditions: any[] = [{ from: address }, { to: address }]
+
+        if (txtype !== "all") {
+            whereConditions[0].type = txtype
+            whereConditions[1].type = txtype
+        }
+
+        const transaction = await this.transactions.find({
+            where: whereConditions,
+            order: {
+                timestamp: "DESC",
+            },
+            take: limit,
+            skip: start,
+        })
+
+        return transaction.map(tx => Transaction.fromRawTransaction(tx))
     }
 
     // INFO Get the last block number
@@ -145,6 +171,15 @@ export default class Chain {
 
     static async getGenesisBlock(): Promise<Blocks> {
         return await this.getBlockByNumber(0)
+    }
+
+    static async getGenesisBlockHash(): Promise<string> {
+        const genesisBlock = await this.blocks.findOne({
+            where: { number: 0 },
+            select: { hash: true },
+        })
+
+        return genesisBlock ? genesisBlock.hash : null
     }
 
     // ANCHOR Transactions
@@ -284,13 +319,11 @@ export default class Chain {
         operations: Operation[] = [],
         position?: number,
         cleanMempool = true,
-    ): Promise<any> {
+    ): Promise<Blocks> {
         log.info(
             "[insertBlock] Attempting to insert a block with hash: " +
                 block.hash,
         )
-        log.info("[insertBlock] Block to be inserted: ")
-        log.info(JSON.stringify(block))
         // Convert the transactions strings back to Transaction objects
         log.info("[insertBlock] Extracting transactions from block")
         // ! FIXME The below fails when a tx like a web2Request is inserted
@@ -420,14 +453,17 @@ export default class Chain {
         genesisTx.content.transaction_fee.additional_fee = 0
 
         genesisTx.hash = Hashing.sha256(JSON.stringify(genesisTx.content))
-        console.log(genesisTx)
 
         // Build a block containing the genesis tx
         genesisBlock.content.timestamp = genesisTx.content.timestamp
         genesisBlock.content.ordered_transactions.push(genesisTx.hash)
         genesisBlock.content.previousHash = "0x0"
+        genesisBlock.content["extra"] = {
+            genesisData: JSON.stringify(genesisData),
+        }
         genesisBlock.status = "confirmed"
         genesisBlock.proposer = "0x000000000000000000000000"
+        genesisBlock.content.encrypted_transactions_hashes = new Map()
         genesisBlock.validation_data = {
             signatures: {
                 "0x000000000000000000000000": "0x0",
@@ -458,29 +494,62 @@ export default class Chain {
         // Insert the genesis block into the database
         //console.log(genesis_block)
         console.log("[GENESIS] Block generated, ready to insert it")
-        console.log(genesisBlock)
+        // console.log(genesisBlock)
         console.log("[GENESIS] inserting transaction into the mempool")
-        console.log(genesisTx)
+        // console.log(genesisTx)
         //await this.insertTransaction(genesis_tx)
         await Mempool.addTransaction({ ...genesisTx, reference_block: 0 }) // ! FIXME This fails
         console.log("[GENESIS] inserted transaction")
-        await this.insertBlock(genesisBlock, [genesisOp], 0)
 
-        // REVIEW Maybe this should be done prior to inserting the block
-        // NOTE Assigning balances from the genesis block
-        const allBalances = genesisData.balances
-        for (let i = 0; i < allBalances.length; i++) {
-            const individualBalance = allBalances[i]
-            const address = individualBalance[0]
-            const balance = BigInt(individualBalance[1])
-            const balanceSuccess = await manageNative.balance.setBalance(
-                address,
-                balance,
+        // SECTION: Restoring account data
+        const users = {}
+
+        // INFO: Create genesis users
+        for (const balance of genesisData.balances) {
+            const user = {
+                pubkey: balance[0],
+                balance: balance[1],
+            }
+            users[user.pubkey] = user
+        }
+
+        // INFO: Update genesis users with existing balances
+        for (const user of genesisData?.users || []) {
+            // If the user is already indexed, use existing balance
+            const balance = users[user.pubkey]?.balance || 0n
+
+            users[user.pubkey] = {
+                ...user,
+                balance: balance,
+            }
+        }
+
+        const userAccounts: Record<string, any>[] = Object.values(users)
+        console.log("total users: " + userAccounts.length)
+
+        // INFO: Create all users in parallel batches
+        const batchSize = 100
+        for (let i = 0; i < userAccounts.length; i += batchSize) {
+            const batch = userAccounts.slice(i, i + batchSize)
+            log.info(
+                `[GENESIS] Processing batch ${
+                    Math.floor(i / batchSize) + 1
+                }/${Math.ceil(userAccounts.length / batchSize)} (${
+                    batch.length
+                } accounts)`,
+            )
+
+            // Process all accounts in the current batch concurrently
+            await Promise.all(
+                batch.map(async user => {
+                    await HandleGCR.createAccount(user.pubkey, user)
+                }),
             )
         }
 
-        // Adding an empty encrypted transactions list
-        genesisBlock.content.encrypted_transactions_hashes = new Map()
+        // !SECTION Restoring account data
+
+        await this.insertBlock(genesisBlock, [genesisOp], 0)
         return genesisBlock
     }
 

@@ -41,4 +41,9 @@ export const chainProviders = {
         mainnet: "https://blockstream.info/api",
         testnet: "https://blockstream.info/testnet/api",
     },
+    aptos: {
+        mainnet: "https://fullnode.mainnet.aptoslabs.com/v1",
+        testnet: "https://fullnode.testnet.aptoslabs.com/v1", 
+        devnet: "https://fullnode.devnet.aptoslabs.com/v1",
+    },
 }

@@ -2,6 +2,7 @@ import type { IOperation } from "@kynesyslabs/demosdk/types"
 import { EVM } from "@kynesyslabs/demosdk/xm-localsdk"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 import log from "@/utilities/logger"
+import handleAptosContractWrite from "./aptos_contract_write"
 
 async function handleEVMContractWrite(operation: IOperation, chainID: number) {
     // NOTE: Logic is similar to handleEVMPay
@@ -24,9 +25,13 @@ export default async function handleContractWrite(
     operation: IOperation,
     chainID: number,
 ) {
+    if (operation.is_evm) {
+        return await handleEVMContractWrite(operation, chainID)
+    }
+
     switch (operation.chain) {
-        case "eth":
-            return await handleEVMContractWrite(operation, chainID)
+        case "aptos":
+            return await handleAptosContractWrite(operation)
         default:
             return {
                 result: "error",

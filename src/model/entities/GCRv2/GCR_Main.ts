@@ -1,4 +1,11 @@
-import { Column, Entity, Index, PrimaryColumn } from "typeorm"
+import {
+    Column,
+    CreateDateColumn,
+    UpdateDateColumn,
+    Entity,
+    Index,
+    PrimaryColumn,
+} from "typeorm"
 import type { StoredIdentities } from "../types/IdentityTypes"
 // Define the shape of your JSON data
 
@@ -24,8 +31,14 @@ export class GCRMain {
                 twitter: number
                 github: number
                 discord: number
+                telegram: number
             }
             referrals: number
+            demosFollow: number
+            weeklyChallenge?: Array<{
+                date: string
+                points: number
+            }>
         }
         lastUpdated: Date
     }
@@ -40,4 +53,22 @@ export class GCRMain {
             pointsAwarded: number
         }>
     }
+    @Column({ type: "boolean", name: "flagged", default: false })
+    flagged: boolean
+    @Column({ type: "text", name: "flaggedReason", default: "" })
+    flaggedReason:
+        | "twitter_bot"
+        | "evm_no_tx"
+        | "solana_no_tx"
+        | "web3_no_tx"
+        | "only_evm_no_tx"
+        | "manualFlag"
+        | "referrerFlagged"
+        | ""
+    @Column({ type: "boolean", name: "reviewed", default: false })
+    reviewed: boolean
+    @CreateDateColumn({ type: "timestamp", name: "createdAt" })
+    createdAt: Date
+    @UpdateDateColumn({ type: "timestamp", name: "updatedAt" })
+    updatedAt: Date
 }

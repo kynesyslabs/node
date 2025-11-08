@@ -62,7 +62,6 @@ export default async function getCommonValidatorSeed(
     commonValidatorSeed: string
     lastBlockNumber: number
 }> {
-    logger("lastBlock: " + JSON.stringify(lastBlock, null, 2))
     const blockCount = 3
 
     if (!lastBlock) {
@@ -91,13 +90,10 @@ export default async function getCommonValidatorSeed(
         }
     }
 
-    let genesisHash: string
+    let genesisHash = await Chain.getGenesisBlockHash()
     // Get genesis block for chain anchoring
-    const genesisBlock = await Chain.getGenesisBlock()
 
-    if (genesisBlock) {
-        genesisHash = genesisBlock.hash
-    } else {
+    if (!genesisHash) {
         // NOTE: Only happens when forging genesis block
         // INFO: check if genesis is lastBlock
         if (lastBlock.number === 0) {
@@ -126,7 +122,11 @@ export default async function getCommonValidatorSeed(
     const commonValidatorSeed = Hashing.sha256(hashString)
 
     // NOTE The common validator seed is set in the sharedState as soon as it is computed
-    getSharedState.currentValidatorSeed = commonValidatorSeed
+    // NOTE: This should only happen when calculating the CVSA based on the last forged block (aka: when using this function's default parameters)
+    // if (updateSharedState) {
+    //     getSharedState.currentValidatorSeed = commonValidatorSeed
+    // }
+
     logger(`Common validator seed: ${commonValidatorSeed}`)
     return { commonValidatorSeed, lastBlockNumber }
 }

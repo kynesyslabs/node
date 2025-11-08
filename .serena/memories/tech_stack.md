@@ -1,52 +1,50 @@
-# Tech Stack
+# Demos Network Node Software - Technology Stack
 
 ## Core Technologies
-- **Runtime**: Bun (primary), Node.js 20.x+ (supported)
-- **Language**: TypeScript (ESNext target)
-- **Module System**: ESNext modules with bundler resolution
-- **Package Manager**: Bun (required for package management)
+- **Runtime**: Bun (preferred over npm/yarn) with Node.js 20.x+ compatibility
+- **Language**: TypeScript with ES modules
+- **Module System**: ESNext with bundler resolution
+- **Package Manager**: Bun (primary), with npm fallback
+
+## Database & ORM
+- **Database**: PostgreSQL (port 5332 by default)
+- **ORM**: TypeORM with decorators and migrations
+- **Connection**: Custom datasource configuration in `src/model/datasource.ts`
+
+## Web Framework & APIs
+- **Primary Framework**: Fastify with CORS support
+- **API Documentation**: Swagger/OpenAPI integration
+- **Alternative**: Express.js (legacy support)
+- **WebSocket**: Socket.io for real-time communication
 
 ## Key Dependencies
+### Core Network & Blockchain
+- `@kynesyslabs/demosdk`: ^2.3.22 (Demos Network SDK)
+- `@cosmjs/encoding`: Cosmos blockchain integration
+- `web3`: ^4.16.0 (Ethereum integration)
+- `rubic-sdk`: ^5.57.4 (Cross-chain bridge integration)
 
-### Blockchain & Crypto
-- **@kynesyslabs/demosdk**: ^2.2.71 - Demos Network SDK (core integration)
-- **web3**: ^4.16.0 - Ethereum compatibility
-- **@cosmjs/encoding**: ^0.33.1 - Cosmos ecosystem support
-- **superdilithium**: ^2.0.6 - Post-quantum cryptography
-- **node-seal**: ^5.1.3 - Fully Homomorphic Encryption (FHE)
-- **openpgp**: ^5.11.0 - PGP encryption
-- **node-forge**: ^1.3.1 - Additional cryptography
-
-### Database & ORM
-- **typeorm**: ^0.3.17 - Database ORM
-- **pg**: ^8.12.0 - PostgreSQL driver
-- **sqlite3**: ^5.1.6 - SQLite support
-- **reflect-metadata**: Required for TypeORM decorators
-
-### Server & API
-- **fastify**: ^4.28.1 - HTTP server framework
-- **@fastify/cors**: ^9.0.1 - CORS support
-- **@fastify/swagger**: ^8.15.0 - API documentation
-- **express**: ^4.19.2 - Alternative HTTP framework
-- **socket.io**: ^4.7.1 - WebSocket support
+### Cryptography & Security
+- `node-forge`: ^1.3.1 (Cryptographic operations)
+- `openpgp`: ^5.11.0 (PGP encryption)
+- `superdilithium`: ^2.0.6 (Post-quantum cryptography)
+- `node-seal`: ^5.1.3 (Homomorphic encryption)
+- `rijndael-js`: ^2.0.0 (AES encryption)
 
 ### Development Tools
 - **TypeScript**: ^5.8.3
-- **ESLint**: ^8.57.1 with TypeScript plugin
+- **ESLint**: ^8.57.1 with @typescript-eslint
 - **Prettier**: ^2.8.0
-- **Jest**: ^29.7.0 - Testing framework
-- **ts-node-dev**: ^2.0.0 - Development server
+- **Jest**: ^29.7.0 (Testing framework)
+- **tsx**: ^3.12.8 (TypeScript execution)
 
 ## Infrastructure
-- **Docker & Docker Compose**: Required for PostgreSQL database
-- **PostgreSQL**: Database backend (runs on port 5332 by default)
-- **Port Requirements**: 
-  - 5332: PostgreSQL
-  - 53550: Node software default port
+- **Containerization**: Docker with docker-compose
+- **Networking**: Custom P2P networking implementation
+- **Time Synchronization**: NTP client integration
+- **Terminal Interface**: terminal-kit for CLI interactions
 
-## Build Configuration
-- **Target**: ESNext
-- **Module**: ESNext with bundler resolution
-- **Source Maps**: Enabled with inline sources
-- **Path Aliases**: @/* maps to src/*
-- **Decorators**: Experimental decorators enabled (required for TypeORM)
+## Path Resolution
+- **Base URL**: `./` (project root)
+- **Path Aliases**: `@/*` maps to `src/*`
+- **Module Resolution**: Bundler-style with tsconfig-paths

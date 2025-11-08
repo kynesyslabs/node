@@ -52,18 +52,26 @@ import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistr
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { Validators } from "src/model/entities/Validators"
 import terminalkit from "terminal-kit"
-import { LessThanOrEqual, Repository } from "typeorm"
+import { In, LessThan, LessThanOrEqual, Not } from "typeorm"
 
 import {
     Operation,
     OperationRegistrySlot,
     OperationResult,
+    RPCResponse,
 } from "@kynesyslabs/demosdk/types"
 
 import Chain from "../chain"
 import executeOperations, { Actor } from "../routines/executeOperations"
 import gcrStateSave from "./gcr_routines/gcrStateSaverHelper"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import { Referrals } from "@/features/incentive/referrals"
+import log from "@/utilities/logger"
+import { skeletons } from "@kynesyslabs/demosdk/websdk"
+import { getSharedState } from "@/utilities/sharedState"
+import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import HandleGCR from "./handleGCR"
+import Mempool from "../mempool_v2"
 
 const term = terminalkit.terminal
 
@@ -79,7 +87,7 @@ export class OperationsRegistry {
     }
 
     // INFO Adding an operation to the registry
-    add(operation: Operation) {
+    async add(operation: Operation) {
         this.operations.push({
             operation: operation,
             status: "pending",
@@ -89,7 +97,7 @@ export class OperationsRegistry {
             },
             timestamp: Date.now(),
         })
-        fs.writeFileSync(this.path, JSON.stringify(this.operations))
+        await fs.promises.writeFile(this.path, JSON.stringify(this.operations))
     }
 
     // INFO Getting the full list of operations currently in the registry
@@ -346,89 +354,6 @@ export default class GCR {
 
     // !SECTION Validators management
 
-    // !SECTION Getters
-
-    static async getGCRNativeStatus(address: string): Promise<GCRMain> {
-        const db = await Datasource.getInstance()
-        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
-
-        let nativeStatus: GCRMain
-
-        try {
-            nativeStatus = await gcrMainRepository.findOne({
-                where: { pubkey: address },
-            })
-
-            if (!nativeStatus) {
-                nativeStatus = {
-                    pubkey: address,
-                    assignedTxs: [],
-                    nonce: 0,
-                    balance: BigInt(0),
-                    identities: {
-                        xm: {},
-                        web2: {},
-                        pqc: {},
-                    },
-                    points: {
-                        totalPoints: 0,
-                        breakdown: {
-                            web3Wallets: {},
-                            socialAccounts: {
-                                twitter: 0,
-                                github: 0,
-                                discord: 0,
-                            },
-                        },
-                        lastUpdated: new Date(),
-                    },
-                }
-            }
-        } catch (e) {
-            nativeStatus = {
-                pubkey: address,
-                assignedTxs: [],
-                nonce: 0,
-                balance: BigInt(0),
-                identities: {
-                    xm: {},
-                    web2: {},
-                    pqc: {},
-                },
-                points: {
-                    totalPoints: 0,
-                    breakdown: {
-                        web3Wallets: {},
-                        socialAccounts: {
-                            twitter: 0,
-                            github: 0,
-                            discord: 0,
-                        },
-                    },
-                    lastUpdated: new Date(),
-                },
-            }
-        }
-        return nativeStatus
-    }
-
-    static async getGCRStatusProperties(address: string): Promise<GCRExtended> {
-        const db = await Datasource.getInstance()
-        const gcrRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-        let statusProperties: GCRExtended
-        try {
-            const gcrSearch = await gcrRepository.findOneBy({
-                publicKey: address,
-            })
-            statusProperties = gcrSearch?.extended
-        } catch (e) {
-            statusProperties = null
-        }
-        return statusProperties
-    }
-
     // SECTION Setters
     // NOTE For consistency, setters should return a Promise<boolean>
 
@@ -610,6 +535,590 @@ export default class GCR {
             return false
         }
     }
+
+    static async getAccountByTwitterUsername(username: string) {
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+        // INFO: Find all accounts that have the twitter identity with the given username using a jsonb query
+        const accounts = await gcrMainRepository
+            .createQueryBuilder("gcr")
+            .where(
+                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'username' = :username)",
+                { username },
+            )
+            .getMany()
+
+        // If no accounts found, return null
+        if (accounts.length === 0) {
+            return null
+        }
+
+        // If only one account found, return it
+        if (accounts.length === 1) {
+            return accounts[0]
+        }
+
+        // If multiple accounts found, find the one that was awarded points
+        // (Twitter points > 0 means the account was awarded points)
+        const accountWithPoints = accounts.find(
+            account => account.points?.breakdown?.socialAccounts?.twitter > 0,
+        )
+
+        // Return the account with points if found, otherwise return the first account
+        return accountWithPoints || accounts[0]
+    }
+    static async getAccountByIdentity(identity: {
+        type: "web2" | "xm"
+        // web2
+        context?: "twitter" | "telegram" | "github" | "discord"
+        username?: string
+        userId?: string
+        // xm
+        chain?: string // eg. "eth.mainnet" | "solana.mainnet", etc.
+        address?: string
+    }): Promise<GCRMain[]> {
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+        if (!identity || !identity.type) {
+            return null
+        }
+
+        if (identity.type === "web2") {
+            if (!identity.context || (!identity.username && !identity.userId)) {
+                return null
+            }
+
+            // Find accounts that have the specified web2 identity (by username or userId)
+            const accounts = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    identity.userId
+                        ? "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->:context, '[]'::jsonb)) AS w2 WHERE w2->>'userId' = :userId)"
+                        : "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->:context, '[]'::jsonb)) AS w2 WHERE w2->>'username' = :username)",
+                    identity.userId
+                        ? { context: identity.context, userId: identity.userId }
+                        : {
+                              context: identity.context,
+                              username: identity.username,
+                          },
+                )
+                .getMany()
+
+            return accounts
+        }
+
+        if (identity.type === "xm") {
+            if (!identity.chain || !identity.address) {
+                return null
+            }
+
+            // eslint-disable-next-line prefer-const
+            let [chain, subchain] = identity.chain.split(".")
+            if (!chain || !subchain) {
+                return null
+            }
+
+            // Replace "eth" with "evm"
+            if (chain === "eth") {
+                chain = "evm"
+            }
+
+            // Find accounts that have the specified web3 wallet address under the specific chain/subchain
+            const accounts = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'xm'->:chain->:subchain, '[]'::jsonb)) AS xm_id WHERE lower(xm_id->>'address') = lower(:address))",
+                    { chain, subchain, address: identity.address },
+                )
+                .getMany()
+
+            return accounts
+        }
+
+        return null
+    }
+
+    // static async getAccountByTelegramUsername(username: string) {
+    //     const db = await Datasource.getInstance()
+    //     const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+    //     // INFO: Find all accounts that have the telegram identity with the given username using a jsonb query
+    //     const accounts = await gcrMainRepository
+    //         .createQueryBuilder("gcr")
+    //         .where(
+    //             "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'telegram') as telegram_id WHERE telegram_id->>'username' = :username)",
+    //             { username },
+    //         )
+    //         .getMany()
+
+    //     // If no accounts found, return null
+    //     if (accounts.length === 0) {
+    //         return null
+    //     }
+
+    //     // If only one account found, return it
+    //     if (accounts.length === 1) {
+    //         return accounts[0]
+    //     }
+
+    //     // If multiple accounts found, find the one that was awarded points
+    //     // (Telegram points > 0 means the account was awarded points)
+    //     const accountWithPoints = accounts.find(
+    //         account => account.points?.breakdown?.socialAccounts?.telegram > 0,
+    //     )
+
+    //     // Return the account with points if found, otherwise return the first account
+    //     return accountWithPoints || accounts[0]
+    // }
+
+    static async getCampaignData() {
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+        const allUsers = await gcrMainRepository.find({
+            where: {
+                balance: LessThan(BigInt(1000000000000)),
+                flaggedReason: Not(
+                    In(["manualFlag", "referrerFlagged", "twitter_bot"]),
+                ),
+            },
+        })
+
+        const twitterUsers = new Set()
+
+        const campaignData = {
+            users: {
+                total: 0,
+                withTwitter: {
+                    total: 0,
+                    followDemos: 0,
+                },
+                withWeb3Wallet: 0,
+                fromReferral: 0,
+            },
+            points: {
+                total: 0,
+                twitter: 0,
+                web3Wallets: 0,
+                accountsWithTwitterTotal: 0,
+                referrals: 0,
+                demosFollow: 0,
+                demTotal: 0,
+                accountsWithTwitterDemTotal: 0,
+            },
+            evmAccounts: 0,
+            solanaAccounts: 0,
+        }
+
+        for (const user of allUsers) {
+            campaignData.users.total++
+            campaignData.points.total += user.points.totalPoints
+            campaignData.points.twitter +=
+                user.points.breakdown.socialAccounts.twitter
+            campaignData.points.referrals +=
+                user.points.breakdown.referrals || 0
+            campaignData.points.demosFollow +=
+                user.points.breakdown.demosFollow || 0
+
+            const web3WalletPoints = Object.values(
+                user.points.breakdown.web3Wallets,
+            ).reduce(function (acc, curr) {
+                return acc + curr
+            }, 0)
+
+            campaignData.points.web3Wallets += web3WalletPoints
+            campaignData.users.withWeb3Wallet += web3WalletPoints ? 1 : 0
+
+            if (user.identities.web2.twitter) {
+                campaignData.points.accountsWithTwitterTotal +=
+                    user.points.totalPoints || 0
+                for (const twitterAccount of user.identities.web2.twitter) {
+                    twitterUsers.add(twitterAccount.userId)
+                    campaignData.users.withTwitter.followDemos += user.points
+                        .breakdown.demosFollow
+                        ? 1
+                        : 0
+                }
+            }
+
+            if (user.identities.xm["evm"]) {
+                for (const evmAccount of Object.keys(
+                    user.identities.xm["evm"],
+                )) {
+                    campaignData.evmAccounts++
+                }
+            }
+
+            if (user.identities.xm["solana"]) {
+                campaignData.solanaAccounts++
+            }
+
+            if (user.referralInfo && user.referralInfo.referredBy) {
+                campaignData.users.fromReferral++
+            }
+        }
+
+        campaignData.users.withTwitter.total = twitterUsers.size
+        campaignData.points.demTotal = campaignData.points.total * 30
+        campaignData.points.accountsWithTwitterDemTotal =
+            campaignData.points.accountsWithTwitterTotal * 30
+
+        return campaignData
+    }
+
+    static async getAddressesByTwitterUsernames(twitterUsernames: string[]) {
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+        if (!twitterUsernames || twitterUsernames.length === 0) {
+            return {}
+        }
+
+        // Query accounts that have Twitter identities with usernames in the provided array
+        const accounts = await gcrMainRepository
+            .createQueryBuilder("gcr")
+            .where(
+                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'username' = ANY(:usernames))",
+                { usernames: twitterUsernames },
+            )
+            .getMany()
+
+        const usernameToAddressMap: Record<string, string> = {}
+
+        for (const account of accounts) {
+            // Check if the account has zero Twitter points (means Twitter was already connected elsewhere)
+            if (account.points?.breakdown?.socialAccounts?.twitter === 0) {
+                console.log(
+                    `Skipping account ${account.pubkey} - Twitter already connected to another account`,
+                )
+                continue
+            }
+
+            // Find Twitter identities that match the provided usernames
+            const twitterIdentities = account.identities.web2?.twitter || []
+
+            for (const twitterIdentity of twitterIdentities) {
+                if (twitterUsernames.includes(twitterIdentity.username)) {
+                    usernameToAddressMap[twitterIdentity.username] =
+                        account.pubkey
+                }
+            }
+        }
+
+        return usernameToAddressMap
+    }
+
+    /**
+     * Create a transaction to award points to the users
+     * @param twitterUsernames List of twitter usernames to award points to
+     *
+     */
+    static async createAwardPointsTransaction(
+        twitterUsernames: {
+            /**
+             * The username of the user to award points to
+             */
+            username: string
+            /**
+             * The amount of points to award
+             */
+            points: number
+        }[],
+    ) {
+        const awardDate = new Date().toISOString()
+        const addresses = await this.getAddressesByTwitterUsernames(
+            twitterUsernames.map(u => u.username),
+        )
+
+        const edits = []
+
+        for (const account of twitterUsernames as any) {
+            if (addresses[account.username]) {
+                edits.push({
+                    type: "identity",
+                    context: "points",
+                    isRollback: false,
+                    operation: "add",
+                    account: addresses[account.username],
+                    amount: Number(account.points),
+                    date: awardDate,
+                    txhash: "",
+                })
+                account.address = addresses[account.username]
+                account.comment = "Account found"
+            } else {
+                account.address = null
+                account.comment = "Account not found"
+            }
+        }
+
+        const tx = structuredClone(skeletons.transaction)
+        tx.content.type = "identity"
+        tx.content.from = getSharedState.publicKeyHex
+        tx.content.to = getSharedState.publicKeyHex
+        tx.content.from_ed25519_address = getSharedState.publicKeyHex
+        tx.content.gcr_edits = edits
+        tx.content.nonce = 1
+        tx.content.timestamp = Date.now()
+        tx.content.amount = 0
+        // @ts-expect-error This is a custom tx type
+        tx.content.data = ["awardPoints", twitterUsernames]
+        tx.hash = Hashing.sha256(JSON.stringify(tx.content))
+
+        const signature = await ucrypto.sign(
+            getSharedState.signingAlgorithm,
+            new TextEncoder().encode(tx.hash),
+        )
+        tx.signature = {
+            type: getSharedState.signingAlgorithm,
+            data: uint8ArrayToHex(signature.signature),
+        }
+
+        console.log("tx", JSON.stringify(tx, null, 2))
+        return tx
+    }
+
+    /**
+     * Get top accounts by points with their Web3 addresses
+     * @param limit Maximum number of accounts to return (default: 100)
+     * @returns RPCResponse with top accounts and their blockchain addresses
+     */
+    static async getTopAccountsByPoints(limit = 100): Promise<RPCResponse> {
+        try {
+            const db = await Datasource.getInstance()
+            const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+            // Query top accounts by points, excluding flagged accounts
+            const accounts = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where("gcr.flagged = :flagged", { flagged: false })
+                .orderBy(
+                    "(gcr.points->>'totalPoints')::numeric",
+                    "DESC",
+                    "NULLS LAST",
+                )
+                .limit(limit)
+                .getMany()
+
+            // Transform to simplified structure with only pubkey and Web3 addresses
+            const formattedAccounts = accounts.map((account, index) => {
+                // Extract Ethereum addresses from xm.evm.mainnet
+                const ethereumAddresses =
+                    account.identities?.xm?.evm?.mainnet?.map(
+                        identity => identity.address,
+                    ) || []
+
+                // Extract Solana addresses from xm.solana.mainnet
+                const solanaAddresses =
+                    account.identities?.xm?.solana?.mainnet?.map(
+                        identity => identity.address,
+                    ) || []
+
+                return {
+                    pubkey: account.pubkey,
+                    rank: index + 1,
+                    totalPoints: account.points?.totalPoints || 0,
+                    breakdown: account.points?.breakdown || {},
+                    ethereumAddresses,
+                    solanaAddresses,
+                }
+            })
+
+            return {
+                result: 200,
+                response: {
+                    success: true,
+                    accounts: formattedAccounts,
+                    count: formattedAccounts.length,
+                    limit,
+                },
+                extra: null,
+                require_reply: false,
+            }
+        } catch (error) {
+            log.error("Error fetching top accounts by points:" + error)
+            return {
+                result: 500,
+                response: {
+                    success: false,
+                    error: "Failed to fetch top accounts",
+                    message:
+                        error instanceof Error
+                            ? error.message
+                            : "Unknown error",
+                },
+                extra: null,
+                require_reply: false,
+            }
+        }
+    }
+
+    /**
+     * @param twitterUsernames List of twitter usernames to award points to
+     * @returns Array of usernames that were successfully awarded points
+     */
+    static async awardPoints(
+        twitterUsernames: {
+            username: string
+            points: number
+        }[],
+    ): Promise<{
+        success: boolean
+        error?: string
+        message: string
+        txhash?: string
+        confirmationBlock: number
+    }> {
+        if (!twitterUsernames || twitterUsernames.length === 0) {
+            console.log("No Twitter usernames provided")
+            return {
+                success: false,
+                message: "No Twitter usernames provided",
+                confirmationBlock: null,
+            }
+        }
+
+        // INFO: Make sure each twitter username has valid points
+        for (const account of twitterUsernames) {
+            const points = Number(account.points)
+            if (isNaN(points) || points <= 0) {
+                return {
+                    success: false,
+                    message:
+                        "Failed: Invalid input. Point value must be a number greater than 0.",
+                    confirmationBlock: null,
+                }
+            }
+        }
+
+        const tx = await this.createAwardPointsTransaction(twitterUsernames)
+
+        const editResults = await HandleGCR.applyToTx(
+            structuredClone(tx),
+            false,
+            true,
+        )
+
+        if (!editResults.success) {
+            console.log("Failed to apply GCREdit")
+            return {
+                success: false,
+                message: "Failed to apply transaction",
+                confirmationBlock: null,
+            }
+        }
+
+        const { confirmationBlock, error } = await Mempool.addTransaction({
+            ...tx,
+            reference_block: await Chain.getLastBlockNumber(),
+        })
+
+        if (error) {
+            console.log("Failed to add transaction to mempool")
+            return {
+                success: false,
+                message: "Failed to add transaction to mempool",
+                confirmationBlock: null,
+            }
+        }
+
+        return {
+            success: true,
+            message: "Points awarded",
+            txhash: tx.hash,
+            confirmationBlock,
+        }
+
+        // const db = await Datasource.getInstance()
+        // const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+        // // Query accounts that have Twitter identities with usernames in the provided array
+        // const accounts = await gcrMainRepository
+        //     .createQueryBuilder("gcr")
+        //     .where(
+        //         "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'username' = ANY(:usernames))",
+        //         { usernames: twitterUsernames },
+        //     )
+        //     .getMany()
+
+        // let awardedCount = 0
+        // let skippedCount = 0
+        // const awardedAccounts: Record<string, string>[] = []
+
+        // for (const account of accounts) {
+        //     // Check if the account has zero Twitter points (means Twitter was already connected elsewhere)
+        //     if (account.points?.breakdown?.socialAccounts?.twitter === 0) {
+        //         console.log(
+        //             `Skipping account ${account.pubkey} - Twitter already connected to another account`,
+        //         )
+        //         skippedCount++
+        //         continue
+        //     }
+
+        //     // Initialize weeklyChallenge if it doesn't exist
+        //     if (!account.points.breakdown.weeklyChallenge) {
+        //         account.points.breakdown.weeklyChallenge = []
+        //     }
+
+        //     // Add the weekly challenge point
+        //     const challengeEntry = {
+        //         date: new Date().toISOString(),
+        //         points: 1,
+        //     }
+
+        //     account.points.breakdown.weeklyChallenge.push(challengeEntry)
+        //     account.points.totalPoints = (account.points.totalPoints || 0) + 1
+        //     account.points.lastUpdated = new Date()
+
+        //     // Get Twitter username that matches the provided list
+        //     const twitterIdentity = account.identities.web2?.twitter?.find(
+        //         (twitter: any) => twitterUsernames.includes(twitter.username),
+        //     )
+
+        //     // Save the account
+        //     await gcrMainRepository.save(account)
+        //     awardedCount++
+
+        //     // Add to successful usernames list
+        //     if (twitterIdentity?.username) {
+        //         awardedAccounts.push({
+        //             username: twitterIdentity.username,
+        //             pubkey: account.pubkey,
+        //         })
+        //     }
+        // }
+
+        // return awardedAccounts
+    }
+
+    // static async getFlaggedAccounts(start: number, end: number) {
+    //     const db = await Datasource.getInstance()
+    //     const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+    //     const flaggedAccounts = await gcrMainRepository.find({
+    //         where: { flagged: true },
+    //         order: { pubkey: "ASC" },
+    //         skip: start,
+    //         take: end - start,
+    //     })
+
+    //     return flaggedAccounts
+    // }
+
+    // static async removeAccount(address: string) {
+    //     const db = await Datasource.getInstance()
+    //     const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+    //     return await gcrMainRepository.delete({ pubkey: address })
+    // }
+
+    // static async unflagAccount(address: string) {
+    //     const db = await Datasource.getInstance()
+    //     const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+    //     return await gcrMainRepository.update(
+    //         { pubkey: address },
+    //         { flagged: false, flaggedReason: "", reviewed: true },
+    //     )
+    // }
 
     // TODO Build objects for tokens and nfts and write setters for them
 

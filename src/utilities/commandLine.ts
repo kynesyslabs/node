@@ -38,7 +38,7 @@ export default async function commandLine(): Promise<any> {
         switch (input.toLowerCase()) {
             // INFO Wallet case is to work with wallets
             case "wallet":
-                Wallet.getInstance().dispatch(dividedInput)
+                await Wallet.getInstance().dispatch(dividedInput)
                 break
             // TODO Write commands
             case "crypto":

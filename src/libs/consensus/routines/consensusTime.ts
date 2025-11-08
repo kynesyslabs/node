@@ -12,7 +12,9 @@ export async function checkConsensusTime(
 ): Promise<boolean> {
     // Safeguard to prevent the consensus time from being checked before the last block is forged
     if (getSharedState.inConsensusLoop) {
-        log.warning("[CONSENSUS TIME] Cannot check consensus time while in consensus loop, skipping")
+        log.warning(
+            "[CONSENSUS TIME] Cannot check consensus time while in consensus loop, skipping",
+        )
         return false
     }
     let isConsensusTime = false
@@ -27,16 +29,21 @@ export async function checkConsensusTime(
     // REVIEW Using the UTC timestamp as per mainLoop.ts settings
     const currentTimestamp = getNetworkTimestamp() // Date.now()
     const delta = currentTimestamp - lastTimestamp
-    const consensusIntervalTime =
-        getSharedState.getConsensusTime() || 10 // 10 seconds, use 10000 for 10 seconds in ms
+    const consensusIntervalTime = getSharedState.getConsensusTime()
     log.debug("[CONSENSUS TIME] lastTimestamp: " + lastTimestamp, true)
     log.debug("[CONSENSUS TIME] currentTimestamp: " + currentTimestamp, true)
-    log.debug("[CONSENSUS TIME] delta: " + delta, true)
-    log.debug("[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime, true)
+    log.debug("[CONSENSUS TIME] delta: " + delta)
+    log.debug(
+        "[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime,
+        true,
+    )
     //process.exit(0)
 
     // If the delta is greater than the consensus interval time, then the consensus time has passed
-    log.info("[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime, false)
+    log.info(
+        "[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime,
+        false,
+    )
     if (delta >= consensusIntervalTime) {
         isConsensusTime = true
         log.info("[CONSENSUS TIME] Consensus time reached", true)
@@ -48,7 +55,12 @@ export async function checkConsensusTime(
             const minDelta = consensusIntervalTime - flextime
             if (delta > minDelta && delta < maxDelta) {
                 isConsensusTime = true
-                log.info("[CONSENSUS TIME] Consensus time reached (with flexible time and delta: " + delta + ")", true)
+                log.info(
+                    "[CONSENSUS TIME] Consensus time reached (with flexible time and delta: " +
+                        delta +
+                        ")",
+                    true,
+                )
             }
         }
     }
@@ -58,5 +70,3 @@ export async function checkConsensusTime(
     // We can return the result
     return isConsensusTime
 }
-
-

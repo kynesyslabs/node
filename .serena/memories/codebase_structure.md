@@ -1,145 +1,87 @@
-# Codebase Structure
+# Demos Network Node Software - Codebase Structure
 
-## Root Directory Layout
+## Root Directory Structure
+```
+/
+├── src/                    # Main source code
+├── documentation/          # Project documentation
+├── postgres/              # Database scripts and configs
+├── sdk/                   # SDK-related files
+├── ssl/                   # SSL certificates
+├── data/                  # Runtime data storage
+├── REPO_ANALYSIS/         # Repository analysis files
+├── .serena/               # Serena MCP configuration
+├── .claude/               # Claude AI configuration
+└── .trunk/                # Trunk.io tooling
+```
 
-### Source Code
+## Source Code Structure (`src/`)
 ```
 src/
-├── index.ts              # Main entry point
-├── benchmark.ts          # Performance benchmarking
-├── client/               # Client implementations
-├── exceptions/           # Custom exception classes
-├── features/            # Feature modules (see below)
-├── libs/                # Shared libraries and utilities
-├── migrations/          # Database migrations
-├── model/              # TypeORM models and database layer
-├── ssl/                # SSL/TLS certificates
-├── tests/              # Test files
-├── types/              # TypeScript type definitions
-└── utilities/          # Utility scripts
+├── index.ts               # Main application entry point
+├── benchmark.ts           # Performance benchmarking
+├── features/              # Feature-based modules
+│   ├── multichain/        # Cross-chain functionality (XM)
+│   ├── bridges/           # Bridge implementations
+│   ├── contracts/         # Smart contract interactions
+│   ├── zk/               # Zero-knowledge proofs
+│   ├── fhe/              # Fully homomorphic encryption
+│   ├── postQuantumCryptography/  # Post-quantum crypto
+│   ├── logicexecution/    # Logic execution engine
+│   ├── incentive/         # Incentive mechanisms
+│   ├── web2/             # Web2 integrations
+│   ├── mcp/              # MCP (Model Context Protocol)
+│   ├── activitypub/      # ActivityPub protocol
+│   ├── pgp/              # PGP encryption
+│   └── InstantMessagingProtocol/  # Messaging features
+├── libs/                 # Core libraries
+│   ├── network/          # Network layer (RPC, P2P)
+│   ├── blockchain/       # Blockchain operations
+│   ├── peer/             # Peer management
+│   └── utils/            # Utility functions
+├── model/                # Database models (TypeORM)
+├── client/               # Client-side code
+├── utilities/            # Shared utilities
+├── types/                # TypeScript type definitions
+├── exceptions/           # Error handling
+├── migrations/           # Database migrations
+├── tests/                # Test files
+└── ssl/                  # SSL certificates
 ```
 
-### Feature Modules (src/features/)
-```
-features/
-├── InstantMessagingProtocol/  # Messaging protocol
-├── activitypub/              # ActivityPub integration
-├── bridges/                  # Cross-chain bridges
-├── contracts/                # Smart contract interactions
-├── fhe/                      # Fully Homomorphic Encryption
-├── incentive/                # Incentive system
-├── logicexecution/           # Logic execution engine
-├── mcp/                      # MCP protocol
-├── multichain/               # Cross-chain (XM) capabilities
-├── pgp/                      # PGP encryption
-├── postQuantumCryptography/  # Post-quantum crypto
-├── web2/                     # Web2 integrations
-└── zk/                       # Zero-knowledge proofs
-```
+## Key Architecture Patterns
+
+### Feature-Based Organization
+- Each major feature has its own directory under `src/features/`
+- Features are self-contained with their own models, services, and utilities
+- Cross-feature communication through well-defined interfaces
+
+### Core Library Structure
+- `libs/network/`: RPC server, API endpoints, networking protocols
+- `libs/blockchain/`: Genesis block management, chain operations
+- `libs/peer/`: P2P networking, peer discovery, connection management
+- `libs/utils/`: Shared utilities like time calibration, cryptographic operations
+
+### Database Layer
+- TypeORM-based models in `src/model/`
+- Migration files in `src/migrations/`
+- Connection configuration in `src/model/datasource.ts`
 
 ### Configuration Files
-```
-.
-├── package.json           # Dependencies and scripts
-├── tsconfig.json          # TypeScript configuration
-├── .eslintrc.cjs         # ESLint configuration
-├── .prettierrc           # Prettier configuration
-├── jest.config.ts        # Jest testing configuration
-├── .env                  # Environment variables (not in git)
-├── .env.example          # Environment template
-├── demos_peerlist.json   # Peer list (not in git)
-└── demos_peerlist.json.example  # Peer list template
-```
+- `package.json`: Dependencies and scripts
+- `tsconfig.json`: TypeScript configuration
+- `.eslintrc.cjs`: ESLint rules and naming conventions
+- `.prettierrc`: Code formatting rules
+- `ormconfig.json`: Database ORM configuration
+- `.env.example`: Environment variable template
 
-### Documentation
-```
-docs/                    # General documentation
-documentation/           # Additional documentation
-architecture/            # Architecture documentation
-bridges_docs/           # Bridge implementation docs
-claudedocs/             # Claude-generated documentation
-PR_COMMENTS/            # Pull request comments
-```
+## Entry Points
+- **Main Application**: `src/index.ts`
+- **Key Generation**: `src/libs/utils/keyMaker.ts`
+- **Backup/Restore**: `src/utilities/backupAndRestore.ts`
 
-### Data and Runtime
-```
-data/                   # Runtime data (chain.db, etc.)
-logs/                   # Application logs
-postgres/               # PostgreSQL data directory
-postgres_5332/          # Default PostgreSQL instance
-docker_data/            # Docker-related data
-dist/                   # Compiled output
-```
-
-### Development and Testing
-```
-local_tests/            # Local testing scripts
-sdk/                    # SDK-related files
-temp/                   # Temporary files
-ssl/                    # SSL certificates
-```
-
-## Important Files
-
-### Identity and Keys
-- `.demos_identity` - Node private key (never commit)
-- `.demos_identity.key` - Key file (never commit)
-- `publickey_*` - Public key files
-
-### Configuration
-- `ormconfig.json` - TypeORM configuration
-- `.gitignore` - Git ignore rules
-- `bun.lockb` - Bun lock file
-
-### Scripts
-- `run` - Main startup script (database + node)
-- `captraf.sh` - Traffic capture script
-
-### Phase Documents
-- `*_PHASES.md` - Phase-based workflow documents
-- `*_SPEC.md` - Feature specifications
-- Examples:
-  - `STORAGE_PROGRAMS_PHASES.md`
-  - `STORAGE_PROGRAMS_SPEC.md`
-  - `D402_HTTP_PHASES.md`
-  - `APTOS_INTEGRATION_PLAN.md`
-
-## Path Aliases
-
-### @/ Prefix
-All imports use the `@/` prefix mapping to `src/`:
-```typescript
-// ✓ Correct
-import { helper } from "@/libs/utils/helper"
-import { Feature } from "@/features/incentive/types"
-import { Model } from "@/model/entities/User"
-
-// ✗ Wrong - Never use relative paths
-import { helper } from "../../../libs/utils/helper"
-```
-
-## Naming Conventions in Repository
-
-### Special Terminology
-- **XM / Crosschain**: Multichain capabilities (synonymous)
-- **SDK / demosdk**: @kynesyslabs/demosdk package
-- **SDK sources**: ../sdks/ separate repository
-- **Phases workflow**: Implementation following *_PHASES.md files
-- **GCR**: Global Consensus Registry (always GCRv2 unless specified)
-- **PoR BFT**: Proof of Reserve Byzantine Fault Tolerance (v2)
-
-## Build Output
-- Compiled files go to `dist/` directory
-- Source maps are generated and inlined
-- Declarations are emitted
-
-## Ignored Directories
-Common directories in .gitignore:
-- `node_modules/`
-- `dist/`
-- `data/`
-- `logs/`
-- `postgres*/`
-- `.env`
-- `.demos_identity*`
-- `publickey_*`
+## Important Directories
+- **Runtime Data**: `data/` (chain.db, logs)
+- **Identity Files**: `.demos_identity`, `public.key`
+- **Peer Configuration**: `demos_peerlist.json`
+- **Environment**: `.env` file

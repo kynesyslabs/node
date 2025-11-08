@@ -24,6 +24,32 @@ import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
 import { GCRTracker } from "./entities/GCR/GCRTracker.js"
 import { OfflineMessage } from "./entities/OfflineMessages"
 
+export const dataSource = new DataSource({
+    type: "postgres",
+    host: "localhost",
+    port: parseInt(process.env.PG_PORT) || 5332,
+    username: "demosuser",
+    password: "demospassword",
+    database: "demos",
+    migrations: ["../migrations/*.{ts,js}"],
+    entities: [
+        Blocks,
+        MempoolTx,
+        Consensus,
+        PgpKeyServer,
+        GCRHashes,
+        GCRSubnetsTxs,
+        Transactions,
+        Validators,
+        GlobalChangeRegistry,
+        GCRTracker,
+        GCRMain,
+    ],
+    synchronize: true,
+    logging: false,
+})
+
+
 class Datasource {
     private static instance: Datasource
     private dataSource: DataSource

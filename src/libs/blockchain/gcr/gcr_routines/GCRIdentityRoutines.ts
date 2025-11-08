@@ -1,3 +1,5 @@
+// TODO GCREditIdentity but typed as any due to union type constraints <- we have a lot of editOperations marked as any. Why is that? Should we standardize the identity operation types?
+
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../handleGCR"
 import { GCREdit, Web2GCRData } from "@kynesyslabs/demosdk/types"
@@ -15,12 +17,19 @@ import { IncentiveManager } from "./IncentiveManager"
 export default class GCRIdentityRoutines {
     // SECTION XM Identity Routines
     static async applyXmIdentityAdd(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const { chain, isEVM, subchain, targetAddress, signature, timestamp, signedData } =
-            editOperation.data
+        const {
+            chain,
+            isEVM,
+            subchain,
+            targetAddress,
+            signature,
+            timestamp,
+            signedData,
+        } = editOperation.data
 
         // REVIEW: Is there a better way to check this?
         if (
@@ -100,7 +109,7 @@ export default class GCRIdentityRoutines {
     }
 
     static async applyXmIdentityRemove(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -171,7 +180,7 @@ export default class GCRIdentityRoutines {
 
     // SECTION Web2 Identity Routines
     static async applyWeb2IdentityAdd(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -193,15 +202,59 @@ export default class GCRIdentityRoutines {
         /**
          * Verify the proof
          */
-        const proofOk = Hashing.sha256(data.proof) === data.proofHash
+        let proofOk = false
+
+        if (context === "telegram") {
+            // Telegram uses dual signature validation (user + bot signatures)
+            // The proof is a TelegramSignedAttestation object, not a URL
+            try {
+                // Import verifyWeb2Proof which handles telegram verification
+                const { verifyWeb2Proof } = await import("@/libs/abstraction")
+
+                const verificationResult = await verifyWeb2Proof(
+                    {
+                        context: "telegram",
+                        username: data.username,
+                        userId: data.userId,
+                        proof: data.proof,
+                    },
+                    accountGCR.pubkey, // sender's ed25519 address
+                )
+
+                proofOk = verificationResult.success
+
+                if (!proofOk) {
+                    log.error(
+                        `Telegram verification failed: ${verificationResult.message}`,
+                    )
+                    return {
+                        success: false,
+                        message: verificationResult.message,
+                    }
+                }
+
+                log.info(
+                    `Telegram identity verified: ${data.username} (${data.userId})`,
+                )
+            } catch (error) {
+                log.error(`Telegram proof verification failed: ${error}`)
+                proofOk = false
+            }
+        } else {
+            // Standard SHA256 proof validation for other platforms
+            proofOk = Hashing.sha256(data.proof) === data.proofHash
+        }
+
         if (!proofOk) {
             return {
                 success: false,
                 message:
-                    "Sha256 proof mismatch: Expected " +
-                    data.proofHash +
-                    " but got " +
-                    Hashing.sha256(data.proof),
+                    context === "telegram"
+                        ? "Telegram attestation validation failed"
+                        : "Sha256 proof mismatch: Expected " +
+                          data.proofHash +
+                          " but got " +
+                          Hashing.sha256(data.proof),
             }
         }
 
@@ -221,13 +274,55 @@ export default class GCRIdentityRoutines {
                     editOperation.account,
                 )
                 if (isFirst) {
-                    await IncentiveManager.twitterLinked(editOperation.account, editOperation.referralCode)
+                    await IncentiveManager.twitterLinked(
+                        editOperation.account,
+                        data.userId,
+                        editOperation.referralCode,
+                    )
                 }
             } else if (context === "github") {
-                // Future implementation for GitHub
-                log.info(
-                    `GitHub linking for ${data.username}, no incentive handler yet`,
+                const isFirst = await this.isFirstConnection(
+                    "github",
+                    { userId: data.userId },
+                    gcrMainRepository,
+                    editOperation.account,
                 )
+                if (isFirst) {
+                    await IncentiveManager.githubLinked(
+                        editOperation.account,
+                        data.userId,
+                        editOperation.referralCode,
+                    )
+                }
+            } else if (context === "telegram") {
+                const isFirst = await this.isFirstConnection(
+                    "telegram",
+                    { userId: data.userId },
+                    gcrMainRepository,
+                    editOperation.account,
+                )
+                if (isFirst) {
+                    // REVIEW: Pass attestation to check group membership for conditional points
+                    await IncentiveManager.telegramLinked(
+                        editOperation.account,
+                        data.userId,
+                        editOperation.referralCode,
+                        data.proof, // TelegramSignedAttestation with group_membership field
+                    )
+                }
+            } else if (context === "discord") {
+                const isFirst = await this.isFirstConnection(
+                    "discord",
+                    { userId: data.userId },
+                    gcrMainRepository,
+                    editOperation.account,
+                )
+                if (isFirst) {
+                    await IncentiveManager.discordLinked(
+                        editOperation.account,
+                        editOperation.referralCode,
+                    )
+                }
             } else {
                 log.info(`Web2 identity linked: ${context}/${data.username}`)
             }
@@ -237,7 +332,7 @@ export default class GCRIdentityRoutines {
     }
 
     static async applyWeb2IdentityRemove(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -259,6 +354,15 @@ export default class GCRIdentityRoutines {
             return { success: false, message: "Identity not found" }
         }
 
+        // Store the identity being removed for GitHub and Telegram unlinking (need userId)
+        let removedIdentity: Web2GCRData["data"] | null = null
+        if (context === "github" || context === "telegram") {
+            removedIdentity =
+                accountGCR.identities.web2[context].find(
+                    (id: Web2GCRData["data"]) => id.username === username,
+                ) || null
+        }
+
         accountGCR.identities.web2[context] = accountGCR.identities.web2[
             context
         ].filter((id: Web2GCRData["data"]) => id.username !== username)
@@ -271,6 +375,23 @@ export default class GCRIdentityRoutines {
              */
             if (context === "twitter") {
                 await IncentiveManager.twitterUnlinked(editOperation.account)
+            } else if (
+                context === "github" &&
+                removedIdentity &&
+                removedIdentity.userId
+            ) {
+                await IncentiveManager.githubUnlinked(
+                    editOperation.account,
+                    removedIdentity.userId,
+                )
+            } else if (
+                context === "telegram" &&
+                removedIdentity &&
+                removedIdentity.userId
+            ) {
+                await IncentiveManager.telegramUnlinked(editOperation.account)
+            } else if (context === "discord") {
+                await IncentiveManager.discordUnlinked(editOperation.account)
             }
         }
 
@@ -279,7 +400,7 @@ export default class GCRIdentityRoutines {
 
     // SECTION PQC Identity Routines
     static async applyPqcIdentityAdd(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -336,7 +457,7 @@ export default class GCRIdentityRoutines {
     }
 
     static async applyPqcIdentityRemove(
-        editOperation: any,
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -412,6 +533,63 @@ export default class GCRIdentityRoutines {
         return { success: true, message: "PQC identities removed" }
     }
 
+    static async applyAwardPoints(
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { account: address, amount, date } = editOperation
+        const account = await ensureGCRForUser(address)
+
+        const challengeEntry = {
+            date,
+            points: amount,
+        }
+
+        if (!account.points.breakdown.weeklyChallenge) {
+            account.points.breakdown.weeklyChallenge = []
+        }
+
+        account.points.breakdown.weeklyChallenge.push(challengeEntry)
+        account.points.totalPoints = (account.points.totalPoints || 0) + amount
+        account.points.lastUpdated = new Date()
+
+        if (!simulate) {
+            await gcrMainRepository.save(account)
+        }
+
+        return { success: true, message: "Points awarded" }
+    }
+
+    static async applyAwardPointsRollback(
+        editOperation: any, // GCREditIdentity but typed as any due to union type constraints
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { account: address, amount, date } = editOperation
+        const account = await ensureGCRForUser(address)
+
+        if (!account.points.breakdown.weeklyChallenge) {
+            account.points.breakdown.weeklyChallenge = []
+        }
+
+        account.points.breakdown.weeklyChallenge =
+            account.points.breakdown.weeklyChallenge.filter(
+                (entry: { date: string }) => entry.date !== date,
+            )
+
+        account.points.totalPoints =
+            (account.points.totalPoints || 0) - amount < 0
+                ? 0
+                : account.points.totalPoints - amount
+
+        if (!simulate) {
+            await gcrMainRepository.save(account)
+        }
+
+        return { success: true, message: "Points deducted" }
+    }
+
     static async apply(
         editOperation: GCREdit,
         gcrMainRepository: Repository<GCRMain>,
@@ -485,6 +663,20 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
+            case "pointsadd":
+                result = await this.applyAwardPoints(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "pointsremove":
+                result = await this.applyAwardPointsRollback(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
             default:
                 result = {
                     success: false,
@@ -496,9 +688,9 @@ export default class GCRIdentityRoutines {
     }
 
     private static async isFirstConnection(
-        type: "twitter" | "web3",
+        type: "twitter" | "github" | "web3" | "telegram" | "discord",
         data: {
-            userId?: string // for twitter
+            userId?: string // for twitter/github/discord
             chain?: string // for web3
             subchain?: string // for web3
             address?: string // for web3
@@ -506,43 +698,99 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         currentAccount?: string,
     ): Promise<boolean> {
-        if (type === "twitter") {
-            /**
-             * Check if this Twitter userId exists anywhere
-             */
+        if (type !== "web3") {
+            const queryTemplate = `
+            EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'${type}', '[]'::jsonb)) as ${type}_id WHERE ${type}_id->>'userId' = :userId)
+        `
+
             const result = await gcrMainRepository
                 .createQueryBuilder("gcr")
-                .where("EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'userId' = :userId)", {
-                    userId: data.userId,
-                })
+                .where(queryTemplate, { userId: data.userId })
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()
 
-            /**
-             * Return true if no account has this userId
-             */
             return !result
-        } else {
-            /**
-             * For web3 wallets, check if this address exists in any account for this chain/subchain
-             */
-            const addressToCheck =
-                data.chain === "evm" ? data.address.toLowerCase() : data.address
+        }
 
-            const result = await gcrMainRepository
-                .createQueryBuilder("gcr")
-                .where("EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)", {
+        // if (type === "twitter") {
+        //     /**
+        //      * Check if this Twitter userId exists anywhere
+        //      */
+        //     const result = await gcrMainRepository
+        //         .createQueryBuilder("gcr")
+        //         .where(
+        //             "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'userId' = :userId)",
+        //             {
+        //                 userId: data.userId,
+        //             },
+        //         )
+        //         .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+        //         .getOne()
+
+        //     /**
+        //      * Return true if no account has this userId
+        //      */
+        //     return !result
+        // } else if (type === "github") {
+        //     /**
+        //      * Check if this GitHub userId exists anywhere
+        //      */
+        //     const result = await gcrMainRepository
+        //         .createQueryBuilder("gcr")
+        //         .where(
+        //             "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'github') as github_id WHERE github_id->>'userId' = :userId)",
+        //             {
+        //                 userId: data.userId,
+        //             },
+        //         )
+        //         .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+        //         .getOne()
+
+        //     /**
+        //      * Return true if no account has this userId
+        //      */
+        //     return !result
+        // } else if (type === "discord") {
+        //     /**
+        //      * Check if this Discord userId exists anywhere
+        //      */
+        //     const result = await gcrMainRepository
+        //         .createQueryBuilder("gcr")
+        //         .where(
+        //             "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'discord', '[]'::jsonb)) AS discord_id WHERE discord_id->>'userId' = :userId)",
+        //             { userId: data.userId },
+        //         )
+        //         .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+        //         .getOne()
+
+        //     /**
+        //      * Return true if no account has this userId
+        //      */
+        //     return !result
+        // } else {
+        /**
+         * For web3 wallets, check if this address exists in any account for this chain/subchain
+         */
+        const addressToCheck =
+            data.chain === "evm" ? data.address.toLowerCase() : data.address
+
+        const result = await gcrMainRepository
+            .createQueryBuilder("gcr")
+            .where(
+                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)",
+                {
                     chain: data.chain,
                     subchain: data.subchain,
                     address: addressToCheck,
-                })
-                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
-                .getOne()
+                },
+            )
+            .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+            .getOne()
 
-            /**
-             * Return true if this is the first connection
-             */
-            return !result
-        }
+        /**
+         * Return true if this is the first connection
+         */
+        return !result
+        // }
     }
 }

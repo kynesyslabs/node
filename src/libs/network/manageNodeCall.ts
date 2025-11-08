@@ -1,7 +1,6 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
 import Chain from "../blockchain/chain"
-import GCR from "../blockchain/gcr/gcr"
 import eggs from "./routines/eggs"
 import { getSharedState } from "src/utilities/sharedState"
 import _ from "lodash"
@@ -27,6 +26,12 @@ import L2PSMempool from "../blockchain/l2ps_mempool"
 import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import { Twitter } from "../identity/tools/twitter"
 import { Tweet } from "@kynesyslabs/demosdk/types"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { Twitter } from "../identity/tools/twitter"
+import { Tweet } from "@kynesyslabs/demosdk/types"
+import Mempool from "../blockchain/mempool_v2"
+import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
+import { Discord, DiscordMessage } from "../identity/tools/discord"
 
 export interface NodeCall {
     message: string
@@ -98,7 +103,6 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             response.response = await Chain.getLastBlockHash()
             break
         case "getBlockByNumber":
-            console.log(`get block by number ${data.blockNumber}`)
             return await getBlockByNumber(data)
         case "getBlocks":
             return await getBlocks(data)
@@ -162,7 +166,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 break
             }
             try {
-                nStat = (await GCR.getGCRNativeStatus(data.address)) as GCRMain
+                nStat = await ensureGCRForUser(data.address)
                 response.response = nStat
             } catch (error) {
                 response.result = 400
@@ -176,7 +180,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "No address specified"
                 break
             }
-            nStat = (await GCR.getGCRNativeStatus(data.address)) as GCRMain
+            nStat = await ensureGCRForUser(data.address)
             response.response = nStat.nonce
             break
         case "getPeerTime":
@@ -208,6 +212,20 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 ...(data.options ? [data.options] : []),
             )
             break
+        case "getTransactionHistory": {
+            if (!data.address || !data.type) {
+                response.result = 400
+                response.response = "No address or type specified"
+                break
+            }
+            response.response = await Chain.getTransactionHistory(
+                data.address,
+                data.type,
+                data.start || 0,
+                data.limit || 100,
+            )
+            break
+        }
 
         case "getTweet": {
             if (!data.tweetUrl) {
@@ -251,6 +269,179 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             }
             break
         }
+
+        case "getDiscordMessage": {
+            if (!data.discordUrl) {
+                response.result = 400
+                response.response = "No Discord URL specified"
+                break
+            }
+
+            let discord: Discord
+            try {
+                discord = Discord.getInstance()
+            } catch (e) {
+                response.result = 500
+                response.response = {
+                    success: false,
+                    error: "Discord not configured",
+                }
+                break
+            }
+
+            let message: DiscordMessage | null = null
+
+            try {
+                message = await discord.getMessageByUrl(data.discordUrl)
+            } catch (error) {
+                response.result = 400
+                response.response = {
+                    success: false,
+                    error: "Failed to get Discord message",
+                }
+                break
+            }
+
+            response.result = message ? 200 : 400
+            if (message) {
+                let guildIdFromUrl: string | undefined
+                let channelIdFromUrl: string | undefined
+                let messageIdFromUrl: string | undefined
+
+                try {
+                    const details = discord.extractMessageDetails(
+                        data.discordUrl,
+                    )
+                    guildIdFromUrl = details.guildId
+                    channelIdFromUrl = details.channelId
+                    messageIdFromUrl = details.messageId
+                } catch {
+                    // non-fatal, e.g. if URL format was unexpected
+                }
+
+                const payload = {
+                    id: message.id,
+                    timestamp: message.timestamp,
+                    authorUsername: message.author?.username ?? null,
+                    authorId: message.author?.id ?? null,
+                    channelId: message.channel_id ?? channelIdFromUrl ?? null,
+                    guildId:
+                        (message as any).guild_id ?? guildIdFromUrl ?? null,
+                }
+
+                response.response = {
+                    message: payload,
+                    success: true,
+                }
+            } else {
+                response.response = {
+                    success: false,
+                    error: "Failed to get Discord message",
+                }
+            }
+            break
+        }
+
+        // INFO: Tests if twitter account is a bot
+        // case "checkIsBot": {
+        //     if (!data.username || !data.userId) {
+        //         response.result = 400
+        //         response.response = "No username or userId specified"
+        //         break
+        //     }
+
+        //     response.response = await Twitter.getInstance().checkIsBot(
+        //         data.username,
+        //         data.userId,
+        //     )
+        //     break
+        // }
+
+        // case "getFlaggedAccounts": {
+        //     log.only("getFlaggedAccounts")
+        //     log.only(JSON.stringify(data))
+        //     if (data.start === undefined || data.end === undefined) {
+        //         response.result = 400
+        //         response.response = "No start or end specified"
+        //         break
+        //     }
+
+        //     // INFO: Verify signature
+        //     const isVerified = await ucrypto.verify({
+        //         algorithm: "ed25519",
+        //         message: new TextEncoder().encode("demos"),
+        //         publicKey: hexToUint8Array(process.env.SUDO_PUBKEY),
+        //         signature: hexToUint8Array(data.signature),
+        //     })
+
+        //     if (!isVerified) {
+        //         response.result = 400
+        //         response.response = "Invalid public key on protected endpoint"
+        //         break
+        //     }
+
+        //     response.response = await GCR.getFlaggedAccounts(
+        //         data.start,
+        //         data.end,
+        //     )
+        //     break
+        // }
+
+        // case "removeAccount": {
+        //     if (!data.address) {
+        //         response.result = 400
+        //         response.response = "No address specified"
+        //         break
+        //     }
+
+        //     // INFO: Verify signature
+        //     const isVerified = await ucrypto.verify({
+        //         algorithm: "ed25519",
+        //         message: new TextEncoder().encode("demos"),
+        //         publicKey: hexToUint8Array(process.env.SUDO_PUBKEY),
+        //         signature: hexToUint8Array(data.signature),
+        //     })
+
+        //     if (!isVerified) {
+        //         response.result = 400
+        //         response.response = "Invalid public key on protected endpoint"
+        //         break
+        //     }
+
+        //     const result = await GCR.removeAccount(data.address)
+        //     response.result = result ? 200 : 400
+        //     response.response = result ? "Account removed" : "Account not found"
+        //     break
+        // }
+
+        // case "unflagAccount": {
+        //     if (!data.address) {
+        //         response.result = 400
+        //         response.response = "No address specified"
+        //         break
+        //     }
+
+        //     // INFO: Verify signature
+        //     const isVerified = await ucrypto.verify({
+        //         algorithm: "ed25519",
+        //         message: new TextEncoder().encode("demos"),
+        //         publicKey: hexToUint8Array(process.env.SUDO_PUBKEY),
+        //         signature: hexToUint8Array(data.signature),
+        //     })
+
+        //     if (!isVerified) {
+        //         response.result = 400
+        //         response.response = "Invalid public key on protected endpoint"
+        //         break
+        //     }
+
+        //     const result = await GCR.unflagAccount(data.address)
+        //     response.result = result ? 200 : 400
+        //     response.response = result
+        //         ? "Account unflagged"
+        //         : "Account not found"
+        //     break
+        // }
 
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen

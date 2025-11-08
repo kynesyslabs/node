@@ -29,16 +29,16 @@ export interface PqcIdentityEdit extends SavedPqcIdentity {
 
 export type StoredIdentities = {
     xm: {
-        [key: string]: {
-            [key: string]: SavedXmIdentity[]
+        [chain: string]: {
+            [subchain: string]: SavedXmIdentity[]
         }
     }
     web2: {
-        [key: string]: Web2GCRData["data"][]
+        [context: string]: Web2GCRData["data"][]
     }
     pqc: {
         // A mapping of the algorithm identifier a list of the signature and address objects
         // eg. falcon: [{address: "pubkey1", signature: "signature1"}, {address: "pubkey2", signature: "signature2"}]
-        [key: string]: SavedPqcIdentity[]
+        [algorithm: string]: SavedPqcIdentity[]
     }
 }

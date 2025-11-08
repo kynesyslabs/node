@@ -30,7 +30,9 @@ export default class SharedState {
     lastTimestamp = 0
     lastShardSeed = ""
     referenceBlockRoom = 1
-
+    shardSize = parseInt(process.env.SHARD_SIZE) || 4
+    mainLoopSleepTime = parseInt(process.env.MAIN_LOOP_SLEEP_TIME) || 1000 // 1 second
+ 
     // NOTE See calibrateTime.ts for this value
     timestampCorrection = 0
 
@@ -51,8 +53,6 @@ export default class SharedState {
     // Mempool
     inGetMempool = false
     inCleanMempool = false
-    // REVIEW Mempool caching
-    mempoolCache: MempoolData | null = null
 
     // DTR (Distributed Transaction Routing) - ValidityData cache for retry mechanism
     // Stores ValidityData for transactions that need to be relayed to validators
@@ -87,8 +87,7 @@ export default class SharedState {
 
     // SECTION shared state variables
     shard: Peer[]
-    lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard
-    currentValidatorSeed: string
+    // lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard
     identity: Identity
     keypair: {
         publicKey:
@@ -121,6 +120,7 @@ export default class SharedState {
     candidateBlock: Block
     lastBlockNumber = 0
     _lastBlockHash = ""
+    genesisIdentities = new Set<string>()
 
     set lastBlockHash(value: string) {
         this._lastBlockHash = value
@@ -140,7 +140,7 @@ export default class SharedState {
     connectionString: string = "http://localhost:" + this.serverPort
     exposedUrl: string = process.env.EXPOSED_URL || this.connectionString
     PROD: boolean = process.env.PROD == "true" || false // ! debug line, set to true to run in prod
-
+    SUDO_PUBKEY = process.env.SUDO_PUBKEY || null
     // ABSTRACTION
     twitterCookieFile = "twitter_cookies.json"
     // !SECTION Configuration
@@ -211,8 +211,11 @@ export default class SharedState {
         return Number(process.env.CONSENSUS_CHECK_INTERVAL)
     }
 
+    /**
+     * @returns The block time in seconds
+     */
     public getConsensusTime(): number {
-        return Number(process.env.CONSENSUS_TIME)
+        return Number(process.env.CONSENSUS_TIME) || this.block_time
     }
 
     public async getConnectionString(): Promise<string> {
@@ -220,11 +223,45 @@ export default class SharedState {
         return this.exposedUrl
     }
 
+    // SECTION Rate limiting configuration
+    rateLimitConfig = {
+        enabled: true,
+        defaultLimit: { maxRequests: 2000, windowMs: 60000 },
+        blockDurationMs: undefined,
+        // INFO: localhost is always whitelisted
+        whitelistedIPs: [
+            "127.0.0.1",
+            ...(process.env.WHITELISTED_IPS?.split(",").map(ip => ip.trim()) ||
+                []),
+        ],
+        methodLimits: {
+            // REVIEW: Do we need this?
+            POST: { maxRequests: 200000, windowMs: 86400000 },
+            // INFO: POST method limits per IP address
+            // "nodeCall": { maxRequests: 200, windowMs: 60000 },
+            // "execute": { maxRequests: 1, windowMs: 86400000 },
+            // "login_request": { maxRequests: 5, windowMs: 60000 },
+            // "auth": { maxRequests: 20, windowMs: 60000 },
+            // "ping": { maxRequests: 100, windowMs: 60000 },
+            // "info": { maxRequests: 100, windowMs: 60000 },
+            // "version": { maxRequests: 200, windowMs: 60000 },
+            // "publickey": { maxRequests: 100, windowMs: 60000 },
+            // "connectionstring": { maxRequests: 100, windowMs: 60000 },
+            // "peerlist": { maxRequests: 50, windowMs: 60000 },
+            // "public_logs": { maxRequests: 30, windowMs: 60000 },
+            // "diagnostics": { maxRequests: 20, windowMs: 60000 },
+            // "genesis": { maxRequests: 100, windowMs: 60000 },
+            // "rate_limit_stats": { maxRequests: 50, windowMs: 60000 },
+            // "rate_limit_unblock": { maxRequests: 5, windowMs: 60000 },
+        },
+        txPerBlock: 4,
+    }
+
     // NOTE This is a wrapper for many stats that are used by the node and the rpc server
     public async getInfo(): Promise<any> {
         const info = {
             version: this.version,
-            identity: this.identity.ed25519.publicKey.toString("hex"),
+            identity: this.publicKeyHex,
             connectionString: await this.getConnectionString(),
             peerlist: PeerManager.getInstance().getPeers(),
         }
