@@ -159,7 +159,7 @@ docker --version
 docker compose version
 ```
 
-### 3. Install Bun using Mise
+### 3a. Install Bun using Mise
 
 ```bash
 # Install Mise
@@ -167,6 +167,15 @@ curl https://mise.run | sh
 
 # Install Bun
 mise use -g bun@latest
+
+# Verify Bun
+bun -v
+```
+### 3b. Install Bun without Mise
+
+```bash
+# If method 3a does not work, use this alternate method to install Bun
+curl -fsSL https://bun.sh/install | bash
 
 # Verify Bun
 bun -v
