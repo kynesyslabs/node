@@ -56,7 +56,11 @@ export default class L2PSMempool {
         if (this.repo) return
 
         if (!this.initPromise) {
-            this.initPromise = this.init()
+            // REVIEW: PR Fix #1 - Clear initPromise on failure to allow retry
+            this.initPromise = this.init().catch((error) => {
+                this.initPromise = null  // Clear promise on failure
+                throw error
+            })
         }
 
         await this.initPromise
@@ -141,13 +145,14 @@ export default class L2PSMempool {
             }
 
             // Save to L2PS mempool
+            // REVIEW: PR Fix #2 - Store timestamp as numeric for correct comparison
             await this.repo.save({
                 hash: encryptedTx.hash,
                 l2ps_uid: l2psUid,
                 original_hash: originalHash,
                 encrypted_tx: encryptedTx,
                 status: status,
-                timestamp: Date.now().toString(),
+                timestamp: Date.now(),
                 block_number: blockNumber,
             })
 
@@ -290,9 +295,10 @@ export default class L2PSMempool {
         try {
             await this.ensureInitialized()
 
+            // REVIEW: PR Fix #2 - Store timestamp as numeric for correct comparison
             const result = await this.repo.update(
                 { hash },
-                { status, timestamp: Date.now().toString() },
+                { status, timestamp: Date.now() },
             )
             
             const updated = result.affected > 0
@@ -378,7 +384,8 @@ export default class L2PSMempool {
         try {
             await this.ensureInitialized()
 
-            const cutoffTimestamp = (Date.now() - olderThanMs).toString()
+            // REVIEW: PR Fix #2 - Use numeric timestamp for correct comparison
+            const cutoffTimestamp = Date.now() - olderThanMs
 
             const result = await this.repo
                 .createQueryBuilder()

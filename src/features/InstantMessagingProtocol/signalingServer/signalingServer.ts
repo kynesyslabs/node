@@ -75,6 +75,11 @@ export class SignalingServer {
     /** Map of connected peers, keyed by their client IDs */
     private peers: Map<string, ImPeer> = new Map()
     private server: Server
+    /** Per-sender nonce counter for transaction uniqueness and replay prevention */
+    private senderNonces: Map<string, number> = new Map()
+    /** Basic DoS protection: track offline message count per sender (reset on successful delivery) */
+    private offlineMessageCounts: Map<string, number> = new Map()
+    private readonly MAX_OFFLINE_MESSAGES_PER_SENDER = 100
 
     /**
      * Creates a new signaling server instance
@@ -208,7 +213,8 @@ export class SignalingServer {
                         )
                         return
                     }
-                    this.handlePeerMessage(ws, data.payload)
+                    // REVIEW: PR Fix - Await async method to catch errors
+                    await this.handlePeerMessage(ws, data.payload)
                     break
                 case "request_public_key":
                     if (!data.payload.targetId) {
@@ -386,29 +392,49 @@ export class SignalingServer {
             const targetPeer = this.peers.get(payload.targetId)
 
             if (!targetPeer) {
+                // REVIEW: PR Fix #9 - Basic DoS protection: rate limit offline messages per sender
+                const currentCount = this.offlineMessageCounts.get(senderId) || 0
+                if (currentCount >= this.MAX_OFFLINE_MESSAGES_PER_SENDER) {
+                    this.sendError(
+                        ws,
+                        ImErrorType.INTERNAL_ERROR,
+                        `Offline message limit reached (${this.MAX_OFFLINE_MESSAGES_PER_SENDER} messages). Please wait for recipient to come online.`,
+                    )
+                    return
+                }
+
                 // Store as offline message if target is not online
                 try {
                     await this.storeMessageOnBlockchain(senderId, payload.targetId, payload.message)
                     await this.storeOfflineMessage(senderId, payload.targetId, payload.message)
+                    
+                    // Increment offline message count for this sender
+                    this.offlineMessageCounts.set(senderId, currentCount + 1)
                 } catch (error) {
                     console.error("Failed to store offline message:", error)
                     this.sendError(ws, ImErrorType.INTERNAL_ERROR, "Failed to store offline message")
                     return
                 }
-                this.sendError(
-                    ws,
-                    ImErrorType.PEER_NOT_FOUND,
-                    `Target peer ${payload.targetId} not found - stored as offline message`,
-                )
+                // REVIEW: PR Fix #11 - Use proper success message instead of error for offline storage
+                ws.send(JSON.stringify({
+                    type: "message_queued",
+                    payload: {
+                        targetId: payload.targetId,
+                        status: "offline",
+                        message: "Message stored for offline delivery",
+                    },
+                }))
                 return
             }
 
+            // REVIEW: PR Fix #5 - Make blockchain storage mandatory for online path consistency
             // Create blockchain transaction for online message
             try {
                 await this.storeMessageOnBlockchain(senderId, payload.targetId, payload.message)
             } catch (error) {
                 console.error("Failed to store message on blockchain:", error)
-                // Continue with delivery even if blockchain storage fails
+                this.sendError(ws, ImErrorType.INTERNAL_ERROR, "Failed to store message")
+                return  // Abort on blockchain failure for audit trail consistency
             }
 
             // Forward the message to the target peer
@@ -578,6 +604,11 @@ export class SignalingServer {
      * @param message - The encrypted message content
      */
     private async storeMessageOnBlockchain(senderId: string, targetId: string, message: SerializedEncryptedObject) {
+        // REVIEW: PR Fix #6 - Implement per-sender nonce counter for transaction uniqueness
+        const currentNonce = this.senderNonces.get(senderId) || 0
+        const nonce = currentNonce + 1
+        // Don't increment yet - wait for mempool success for better error handling
+
         const transaction = new Transaction()
         transaction.content = {
             type: "instantMessaging",
@@ -587,7 +618,7 @@ export class SignalingServer {
             amount: 0,
             data: ["instantMessaging", { message, timestamp: Date.now() }] as any,
             gcr_edits: [],
-            nonce: 0,
+            nonce,
             timestamp: Date.now(),
             transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0 },
         }
@@ -610,6 +641,8 @@ export class SignalingServer {
         // REVIEW: PR Fix #13 - Add error handling for blockchain storage consistency
         try {
             await Mempool.addTransaction(transaction)
+            // REVIEW: PR Fix #6 - Only increment nonce after successful mempool addition
+            this.senderNonces.set(senderId, nonce)
         } catch (error: any) {
             console.error("[Signaling Server] Failed to add message transaction to mempool:", error.message)
             throw error // Rethrow to be caught by caller's error handling
@@ -627,6 +660,12 @@ export class SignalingServer {
      * @param message - The encrypted message content
      */
     private async storeOfflineMessage(senderId: string, targetId: string, message: SerializedEncryptedObject) {
+        // REVIEW: PR Fix #9 - Defensive rate limiting check (in case method is called from other locations)
+        const currentCount = this.offlineMessageCounts.get(senderId) || 0
+        if (currentCount >= this.MAX_OFFLINE_MESSAGES_PER_SENDER) {
+            throw new Error(`Sender ${senderId} has exceeded offline message limit (${this.MAX_OFFLINE_MESSAGES_PER_SENDER})`)
+        }
+
         const db = await Datasource.getInstance()
         const offlineMessageRepository = db.getDataSource().getRepository(OfflineMessage)
 
@@ -661,6 +700,9 @@ export class SignalingServer {
         })
 
         await offlineMessageRepository.save(offlineMessage)
+        
+        // REVIEW: PR Fix #9 - Increment count after successful save
+        this.offlineMessageCounts.set(senderId, currentCount + 1)
     }
 
     /**
@@ -672,8 +714,10 @@ export class SignalingServer {
         const db = await Datasource.getInstance()
         const offlineMessageRepository = db.getDataSource().getRepository(OfflineMessage)
 
+        // REVIEW: PR Fix #10 - Add chronological ordering for message delivery
         return await offlineMessageRepository.find({
             where: { recipientPublicKey: recipientId, status: "pending" },
+            order: { timestamp: "ASC" },
         })
     }
 
@@ -694,7 +738,16 @@ export class SignalingServer {
         const db = await Datasource.getInstance()
         const offlineMessageRepository = db.getDataSource().getRepository(OfflineMessage)
 
+        let deliveredCount = 0
+        const senderCounts = new Map<string, number>()
+
         for (const msg of offlineMessages) {
+            // REVIEW: PR Fix #7 - Check WebSocket readyState before sending to prevent silent failures
+            if (ws.readyState !== WebSocket.OPEN) {
+                console.log(`WebSocket not open for ${peerId}, stopping delivery`)
+                break
+            }
+
             try {
                 // Attempt to send message via WebSocket
                 ws.send(JSON.stringify({
@@ -706,8 +759,15 @@ export class SignalingServer {
                     },
                 }))
 
-                // Only mark as delivered if send succeeded (didn't throw)
-                await offlineMessageRepository.update(msg.id, { status: "delivered" })
+                // REVIEW: PR Fix #7 - Only mark delivered if socket still open after send
+                if (ws.readyState === WebSocket.OPEN) {
+                    await offlineMessageRepository.update(msg.id, { status: "delivered" })
+                    deliveredCount++
+                    
+                    // Track delivered messages per sender for rate limit reset
+                    const currentCount = senderCounts.get(msg.senderPublicKey) || 0
+                    senderCounts.set(msg.senderPublicKey, currentCount + 1)
+                }
 
             } catch (error) {
                 // WebSocket send failed - stop delivery to prevent out-of-order messages
@@ -716,6 +776,20 @@ export class SignalingServer {
                 // Undelivered messages will be retried when peer reconnects
                 break
             }
+        }
+
+        // REVIEW: PR Fix #9 - Reset offline message counts for senders after successful delivery
+        if (deliveredCount > 0) {
+            for (const [senderId, count] of senderCounts.entries()) {
+                const currentCount = this.offlineMessageCounts.get(senderId) || 0
+                const newCount = Math.max(0, currentCount - count)
+                if (newCount === 0) {
+                    this.offlineMessageCounts.delete(senderId)
+                } else {
+                    this.offlineMessageCounts.set(senderId, newCount)
+                }
+            }
+            console.log(`Delivered ${deliveredCount} offline messages to ${peerId}`)
         }
     }
 
