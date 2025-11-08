@@ -28,6 +28,7 @@ export class OfflineMessage {
     @Column("bigint", { name: "timestamp" })
     timestamp: string
 
+    // REVIEW: PR Fix #10 - Changed "delivered" to "sent" for semantic accuracy (ws.send() doesn't guarantee receipt)
     @Column("text", { name: "status", default: "pending" })
-    status: "pending" | "delivered" | "failed"
+    status: "pending" | "sent" | "failed"
 }

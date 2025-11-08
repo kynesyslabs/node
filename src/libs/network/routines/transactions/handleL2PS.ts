@@ -53,9 +53,26 @@ export default async function handleL2PS(
         }
     }
     // Now we should have the l2ps instance, we can decrypt the transaction
-    const decryptedTx = await l2psInstance.decryptTx(l2psTx)
+    // REVIEW: PR Fix #6 - Add error handling for decryption and null safety checks
+    let decryptedTx
+    try {
+        decryptedTx = await l2psInstance.decryptTx(l2psTx)
+    } catch (error) {
+        response.result = 400
+        response.response = false
+        response.extra = `Decryption failed: ${error instanceof Error ? error.message : "Unknown error"}`
+        return response
+    }
+
+    if (!decryptedTx || !decryptedTx.content || !decryptedTx.content.from) {
+        response.result = 400
+        response.response = false
+        response.extra = "Invalid decrypted transaction structure"
+        return response
+    }
+
     // NOTE Hash is already verified in the decryptTx function (sdk)
-    
+
     // NOTE Re-verify the decrypted transaction signature using the same method as other transactions
     // This is necessary because the L2PS transaction was encrypted and bypassed initial verification.
     // The encrypted L2PSTransaction was verified, but we need to verify the underlying Transaction
@@ -80,9 +97,19 @@ export default async function handleL2PS(
     // Extract original hash from encrypted payload for duplicate detection
     const encryptedPayload = payloadData as L2PSEncryptedPayload
     const originalHash = encryptedPayload.original_hash
-    
+
     // Check for duplicates (prevent reprocessing)
-    const alreadyProcessed = await L2PSMempool.existsByOriginalHash(originalHash)
+    // REVIEW: PR Fix #7 - Add error handling for mempool operations
+    let alreadyProcessed
+    try {
+        alreadyProcessed = await L2PSMempool.existsByOriginalHash(originalHash)
+    } catch (error) {
+        response.result = 500
+        response.response = false
+        response.extra = `Mempool check failed: ${error instanceof Error ? error.message : "Unknown error"}`
+        return response
+    }
+
     if (alreadyProcessed) {
         response.result = 409
         response.response = "Transaction already processed"

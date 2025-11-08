@@ -43,6 +43,7 @@
  */
 
 import { Server } from "bun"
+import { Mutex } from "async-mutex"
 import { ImPeer } from "./ImPeers"
 import { ImErrorType } from "./types/Errors"
 import {
@@ -77,8 +78,14 @@ export class SignalingServer {
     private server: Server
     /** Per-sender nonce counter for transaction uniqueness and replay prevention */
     private senderNonces: Map<string, number> = new Map()
+    /** Mutex to protect senderNonces from race conditions */
+    // REVIEW: PR Fix #2 - Add mutex for thread-safe nonce management
+    private nonceMutex: Mutex = new Mutex()
     /** Basic DoS protection: track offline message count per sender (reset on successful delivery) */
     private offlineMessageCounts: Map<string, number> = new Map()
+    /** Mutex to protect offlineMessageCounts from race conditions */
+    // REVIEW: PR Fix #2 - Add mutex for thread-safe count management
+    private countMutex: Mutex = new Mutex()
     private readonly MAX_OFFLINE_MESSAGES_PER_SENDER = 100
 
     /**
@@ -153,7 +160,7 @@ export class SignalingServer {
      * @param ws - The WebSocket that sent the message
      * @param message - The raw message string
      */
-    private handleMessage(ws: WebSocket, message: string) {
+    private async handleMessage(ws: WebSocket, message: string) {
         try {
             const data: ImBaseMessage = JSON.parse(message)
             //console.log("[IM] Received a message: ", data)
@@ -392,28 +399,32 @@ export class SignalingServer {
             const targetPeer = this.peers.get(payload.targetId)
 
             if (!targetPeer) {
-                // REVIEW: PR Fix #9 - Basic DoS protection: rate limit offline messages per sender
-                const currentCount = this.offlineMessageCounts.get(senderId) || 0
-                if (currentCount >= this.MAX_OFFLINE_MESSAGES_PER_SENDER) {
-                    this.sendError(
-                        ws,
-                        ImErrorType.INTERNAL_ERROR,
-                        `Offline message limit reached (${this.MAX_OFFLINE_MESSAGES_PER_SENDER} messages). Please wait for recipient to come online.`,
-                    )
+                // Store as offline message if target is not online
+                // REVIEW: PR Fix #3 #5 - Store to database first (easier to rollback), then blockchain (best-effort)
+                // REVIEW: PR Fix #2 - Removed redundant rate limit check; storeOfflineMessage has authoritative check with mutex
+                try {
+                    await this.storeOfflineMessage(senderId, payload.targetId, payload.message)
+                } catch (error: any) {
+                    console.error("Failed to store offline message in DB:", error)
+                    // REVIEW: PR Fix #2 - Provide specific error message for rate limit
+                    if (error.message?.includes("exceeded offline message limit")) {
+                        this.sendError(
+                            ws,
+                            ImErrorType.INTERNAL_ERROR,
+                            `Offline message limit reached (${this.MAX_OFFLINE_MESSAGES_PER_SENDER} messages). Please wait for recipient to come online.`,
+                        )
+                    } else {
+                        this.sendError(ws, ImErrorType.INTERNAL_ERROR, "Failed to store offline message")
+                    }
                     return
                 }
 
-                // Store as offline message if target is not online
+                // Then store to blockchain (best-effort, log errors but don't fail the operation)
                 try {
                     await this.storeMessageOnBlockchain(senderId, payload.targetId, payload.message)
-                    await this.storeOfflineMessage(senderId, payload.targetId, payload.message)
-                    
-                    // Increment offline message count for this sender
-                    this.offlineMessageCounts.set(senderId, currentCount + 1)
                 } catch (error) {
-                    console.error("Failed to store offline message:", error)
-                    this.sendError(ws, ImErrorType.INTERNAL_ERROR, "Failed to store offline message")
-                    return
+                    console.error("Failed to store message on blockchain (non-fatal):", error)
+                    // Don't return - message is in DB queue, blockchain is supplementary audit trail
                 }
                 // REVIEW: PR Fix #11 - Use proper success message instead of error for offline storage
                 ws.send(JSON.stringify({
@@ -604,49 +615,53 @@ export class SignalingServer {
      * @param message - The encrypted message content
      */
     private async storeMessageOnBlockchain(senderId: string, targetId: string, message: SerializedEncryptedObject) {
-        // REVIEW: PR Fix #6 - Implement per-sender nonce counter for transaction uniqueness
-        const currentNonce = this.senderNonces.get(senderId) || 0
-        const nonce = currentNonce + 1
-        // Don't increment yet - wait for mempool success for better error handling
+        // REVIEW: PR Fix #2 - Use mutex to prevent nonce race conditions
+        // Acquire lock before reading/modifying nonce to ensure atomic operation
+        return await this.nonceMutex.runExclusive(async () => {
+            // REVIEW: PR Fix #6 - Implement per-sender nonce counter for transaction uniqueness
+            const currentNonce = this.senderNonces.get(senderId) || 0
+            const nonce = currentNonce + 1
+            // Don't increment yet - wait for mempool success for better error handling
 
-        const transaction = new Transaction()
-        transaction.content = {
-            type: "instantMessaging",
-            from: senderId,
-            to: targetId,
-            from_ed25519_address: senderId,
-            amount: 0,
-            data: ["instantMessaging", { message, timestamp: Date.now() }] as any,
-            gcr_edits: [],
-            nonce,
-            timestamp: Date.now(),
-            transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0 },
-        }
+            const transaction = new Transaction()
+            transaction.content = {
+                type: "instantMessaging",
+                from: senderId,
+                to: targetId,
+                from_ed25519_address: senderId,
+                amount: 0,
+                data: ["instantMessaging", { message, timestamp: Date.now() }] as any,
+                gcr_edits: [],
+                nonce,
+                timestamp: Date.now(),
+                transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0 },
+            }
 
-        // TODO: Replace with sender signature verification once client-side signing is implemented
-        // Current: Sign with node's private key for integrity (not authentication)
-        // REVIEW: PR Fix #14 - Add null safety check for private key access (location 1/3)
-        if (!getSharedState.identity?.ed25519?.privateKey) {
-            throw new Error("[Signaling Server] Private key not available for message signing")
-        }
+            // TODO: Replace with sender signature verification once client-side signing is implemented
+            // Current: Sign with node's private key for integrity (not authentication)
+            // REVIEW: PR Fix #14 - Add null safety check for private key access (location 1/3)
+            if (!getSharedState.identity?.ed25519?.privateKey) {
+                throw new Error("[Signaling Server] Private key not available for message signing")
+            }
 
-        const signature = Cryptography.sign(
-            JSON.stringify(transaction.content),
-            getSharedState.identity.ed25519.privateKey,
-        )
-        transaction.signature = signature as any
-        transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
+            const signature = Cryptography.sign(
+                JSON.stringify(transaction.content),
+                getSharedState.identity.ed25519.privateKey,
+            )
+            transaction.signature = signature as any
+            transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
 
-        // Add to mempool
-        // REVIEW: PR Fix #13 - Add error handling for blockchain storage consistency
-        try {
-            await Mempool.addTransaction(transaction)
-            // REVIEW: PR Fix #6 - Only increment nonce after successful mempool addition
-            this.senderNonces.set(senderId, nonce)
-        } catch (error: any) {
-            console.error("[Signaling Server] Failed to add message transaction to mempool:", error.message)
-            throw error // Rethrow to be caught by caller's error handling
-        }
+            // Add to mempool
+            // REVIEW: PR Fix #13 - Add error handling for blockchain storage consistency
+            try {
+                await Mempool.addTransaction(transaction)
+                // REVIEW: PR Fix #6 - Only increment nonce after successful mempool addition
+                this.senderNonces.set(senderId, nonce)
+            } catch (error: any) {
+                console.error("[Signaling Server] Failed to add message transaction to mempool:", error.message)
+                throw error // Rethrow to be caught by caller's error handling
+            }
+        })
     }
 
     /**
@@ -660,49 +675,53 @@ export class SignalingServer {
      * @param message - The encrypted message content
      */
     private async storeOfflineMessage(senderId: string, targetId: string, message: SerializedEncryptedObject) {
-        // REVIEW: PR Fix #9 - Defensive rate limiting check (in case method is called from other locations)
-        const currentCount = this.offlineMessageCounts.get(senderId) || 0
-        if (currentCount >= this.MAX_OFFLINE_MESSAGES_PER_SENDER) {
-            throw new Error(`Sender ${senderId} has exceeded offline message limit (${this.MAX_OFFLINE_MESSAGES_PER_SENDER})`)
-        }
+        // REVIEW: PR Fix #2 - Use mutex to prevent rate limit bypass via race conditions
+        // Acquire lock before checking/modifying count to ensure atomic operation
+        return await this.countMutex.runExclusive(async () => {
+            // REVIEW: PR Fix #9 - Defensive rate limiting check (in case method is called from other locations)
+            const currentCount = this.offlineMessageCounts.get(senderId) || 0
+            if (currentCount >= this.MAX_OFFLINE_MESSAGES_PER_SENDER) {
+                throw new Error(`Sender ${senderId} has exceeded offline message limit (${this.MAX_OFFLINE_MESSAGES_PER_SENDER})`)
+            }
 
-        const db = await Datasource.getInstance()
-        const offlineMessageRepository = db.getDataSource().getRepository(OfflineMessage)
+            const db = await Datasource.getInstance()
+            const offlineMessageRepository = db.getDataSource().getRepository(OfflineMessage)
 
-        // REVIEW: PR Fix - Use deterministic key ordering for consistent hashing
-        const timestamp = Date.now()
-        const messageContent = JSON.stringify({
-            message,      // Keys in alphabetical order
-            senderId,
-            targetId,
-            timestamp,
+            // REVIEW: PR Fix - Use deterministic key ordering for consistent hashing
+            const timestamp = Date.now()
+            const messageContent = JSON.stringify({
+                message,      // Keys in alphabetical order
+                senderId,
+                targetId,
+                timestamp,
+            })
+            const messageHash = Hashing.sha256(messageContent)
+
+            // TODO: Replace with sender signature verification once client-side signing is implemented
+            // Current: Sign with node's private key for integrity (not authentication)
+            // REVIEW: PR Fix #14 - Add null safety check for private key access (location 2/3)
+            if (!getSharedState.identity?.ed25519?.privateKey) {
+                throw new Error("[Signaling Server] Private key not available for offline message signing")
+            }
+
+            const signature = Cryptography.sign(messageHash, getSharedState.identity.ed25519.privateKey)
+
+            const offlineMessage = offlineMessageRepository.create({
+                recipientPublicKey: targetId,
+                senderPublicKey: senderId,
+                messageHash,
+                encryptedContent: message,
+                signature: Buffer.from(signature).toString("base64"),
+                // REVIEW: PR Fix #9 - timestamp is string type to match TypeORM bigint behavior
+                timestamp: Date.now().toString(),
+                status: "pending",
+            })
+
+            await offlineMessageRepository.save(offlineMessage)
+
+            // REVIEW: PR Fix #9 - Increment count after successful save
+            this.offlineMessageCounts.set(senderId, currentCount + 1)
         })
-        const messageHash = Hashing.sha256(messageContent)
-
-        // TODO: Replace with sender signature verification once client-side signing is implemented
-        // Current: Sign with node's private key for integrity (not authentication)
-        // REVIEW: PR Fix #14 - Add null safety check for private key access (location 2/3)
-        if (!getSharedState.identity?.ed25519?.privateKey) {
-            throw new Error("[Signaling Server] Private key not available for offline message signing")
-        }
-
-        const signature = Cryptography.sign(messageHash, getSharedState.identity.ed25519.privateKey)
-
-        const offlineMessage = offlineMessageRepository.create({
-            recipientPublicKey: targetId,
-            senderPublicKey: senderId,
-            messageHash,
-            encryptedContent: message,
-            signature: Buffer.from(signature).toString("base64"),
-            // REVIEW: PR Fix #9 - timestamp is string type to match TypeORM bigint behavior
-            timestamp: Date.now().toString(),
-            status: "pending",
-        })
-
-        await offlineMessageRepository.save(offlineMessage)
-        
-        // REVIEW: PR Fix #9 - Increment count after successful save
-        this.offlineMessageCounts.set(senderId, currentCount + 1)
     }
 
     /**
@@ -738,7 +757,7 @@ export class SignalingServer {
         const db = await Datasource.getInstance()
         const offlineMessageRepository = db.getDataSource().getRepository(OfflineMessage)
 
-        let deliveredCount = 0
+        let sentCount = 0
         const senderCounts = new Map<string, number>()
 
         for (const msg of offlineMessages) {
@@ -759,12 +778,12 @@ export class SignalingServer {
                     },
                 }))
 
-                // REVIEW: PR Fix #7 - Only mark delivered if socket still open after send
+                // REVIEW: PR Fix #7 #10 - Mark as "sent" (not "delivered") since WebSocket.send() doesn't guarantee receipt
                 if (ws.readyState === WebSocket.OPEN) {
-                    await offlineMessageRepository.update(msg.id, { status: "delivered" })
-                    deliveredCount++
-                    
-                    // Track delivered messages per sender for rate limit reset
+                    await offlineMessageRepository.update(msg.id, { status: "sent" })
+                    sentCount++
+
+                    // Track sent messages per sender for rate limit reset
                     const currentCount = senderCounts.get(msg.senderPublicKey) || 0
                     senderCounts.set(msg.senderPublicKey, currentCount + 1)
                 }
@@ -779,17 +798,20 @@ export class SignalingServer {
         }
 
         // REVIEW: PR Fix #9 - Reset offline message counts for senders after successful delivery
-        if (deliveredCount > 0) {
+        if (sentCount > 0) {
+            // REVIEW: PR Fix #2 - Use mutex to prevent lost updates during concurrent deliveries
             for (const [senderId, count] of senderCounts.entries()) {
-                const currentCount = this.offlineMessageCounts.get(senderId) || 0
-                const newCount = Math.max(0, currentCount - count)
-                if (newCount === 0) {
-                    this.offlineMessageCounts.delete(senderId)
-                } else {
-                    this.offlineMessageCounts.set(senderId, newCount)
-                }
+                await this.countMutex.runExclusive(async () => {
+                    const currentCount = this.offlineMessageCounts.get(senderId) || 0
+                    const newCount = Math.max(0, currentCount - count)
+                    if (newCount === 0) {
+                        this.offlineMessageCounts.delete(senderId)
+                    } else {
+                        this.offlineMessageCounts.set(senderId, newCount)
+                    }
+                })
             }
-            console.log(`Delivered ${deliveredCount} offline messages to ${peerId}`)
+            console.log(`Sent ${sentCount} offline messages to ${peerId}`)
         }
     }
 

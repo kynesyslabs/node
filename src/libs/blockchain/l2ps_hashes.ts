@@ -93,7 +93,8 @@ export default class L2PSHashes {
 
             // TypeORM's save() performs atomic upsert when entity with primary key exists
             // This prevents race conditions from concurrent updates
-            await this.repo.save(hashEntry)
+            // REVIEW: PR Fix #9 - Add non-null assertion for type safety
+            await this.repo!.save(hashEntry)
 
             log.debug(`[L2PS Hashes] Upserted hash for L2PS ${l2psUid}: ${hash.substring(0, 16)}... (${txCount} txs)`)
         } catch (error: any) {
@@ -120,7 +121,8 @@ export default class L2PSHashes {
     public static async getHash(l2psUid: string): Promise<L2PSHash | null> {
         this.ensureInitialized()
         try {
-            const entry = await this.repo.findOne({
+            // REVIEW: PR Fix #9 - Add non-null assertion for type safety
+            const entry = await this.repo!.findOne({
                 where: { l2ps_uid: l2psUid },
             })
             // REVIEW: PR Fix - TypeORM returns undefined, explicitly convert to null
@@ -135,19 +137,31 @@ export default class L2PSHashes {
      * Get all L2PS hash mappings
      * Useful for monitoring and statistics
      *
-     * @returns Promise resolving to array of all hash entries
+     * @param limit - Optional maximum number of entries to return
+     * @param offset - Optional number of entries to skip (for pagination)
+     * @returns Promise resolving to array of hash entries
      *
      * @example
      * ```typescript
      * const allHashes = await L2PSHashes.getAll()
      * console.log(`Tracking ${allHashes.length} L2PS networks`)
+     *
+     * // With pagination
+     * const page1 = await L2PSHashes.getAll(10, 0)  // First 10 entries
+     * const page2 = await L2PSHashes.getAll(10, 10) // Next 10 entries
      * ```
      */
-    public static async getAll(): Promise<L2PSHash[]> {
+    public static async getAll(
+        limit?: number,
+        offset?: number,
+    ): Promise<L2PSHash[]> {
         this.ensureInitialized()
         try {
-            const entries = await this.repo.find({
+            // REVIEW: PR Fix #8 - Add pagination support and type safety
+            const entries = await this.repo!.find({
                 order: { timestamp: "DESC" },
+                ...(limit && { take: limit }),
+                ...(offset && { skip: offset }),
             })
             return entries
         } catch (error: any) {
