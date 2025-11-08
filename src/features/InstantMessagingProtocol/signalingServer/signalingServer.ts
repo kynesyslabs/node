@@ -419,12 +419,14 @@ export class SignalingServer {
                     return
                 }
 
-                // Then store to blockchain (best-effort, log errors but don't fail the operation)
+                // REVIEW: PR Fix - CodeRabbit Issue #1 - Make blockchain storage mandatory for audit trail consistency
+                // Then store to blockchain (mandatory for audit trail consistency with online path)
                 try {
                     await this.storeMessageOnBlockchain(senderId, payload.targetId, payload.message)
                 } catch (error) {
-                    console.error("Failed to store message on blockchain (non-fatal):", error)
-                    // Don't return - message is in DB queue, blockchain is supplementary audit trail
+                    console.error("Failed to store message on blockchain:", error)
+                    this.sendError(ws, ImErrorType.INTERNAL_ERROR, "Failed to store offline message")
+                    return  // Abort on blockchain failure for audit trail consistency
                 }
                 // REVIEW: PR Fix #11 - Use proper success message instead of error for offline storage
                 ws.send(JSON.stringify({
