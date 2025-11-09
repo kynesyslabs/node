@@ -31,6 +31,15 @@ import { manageNativeBridge } from "./manageNativeBridge"
 import Chain from "../blockchain/chain"
 import { RateLimiter } from "./middleware/rateLimiter"
 import GCR from "../blockchain/gcr/gcr"
+// REVIEW: ZK imports for Phase 8
+import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
+import { MerkleTreeManager } from "@/features/zk/merkle/MerkleTreeManager"
+import {
+    getCurrentMerkleTreeState,
+} from "@/features/zk/merkle/updateMerkleTreeAfterBlock"
+import Datasource from "@/model/datasource"
+import { UsedNullifier } from "@/model/entities/GCRv2/UsedNullifier"
+import type { IdentityAttestationProof } from "@/features/zk/proof/ProofVerifier"
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
@@ -301,6 +310,49 @@ async function processPayload(
             }
         }
 
+        // REVIEW: ZK proof verification endpoint for Phase 8
+        case "verifyProof": {
+            try {
+                const attestation = payload.params[0] as IdentityAttestationProof
+
+                if (!attestation.proof || !attestation.publicSignals) {
+                    return {
+                        result: 400,
+                        response: "Invalid proof format",
+                        require_reply: false,
+                        extra: null,
+                    }
+                }
+
+                const db = await Datasource.getInstance()
+                const dataSource = db.getDataSource()
+                const verifier = new ProofVerifier(dataSource)
+
+                const verificationResult =
+                    await verifier.verifyIdentityAttestation(attestation)
+
+                return {
+                    result: verificationResult.valid ? 200 : 400,
+                    response: {
+                        valid: verificationResult.valid,
+                        reason: verificationResult.reason,
+                        nullifier: attestation.publicSignals[0],
+                        merkleRoot: attestation.publicSignals[1],
+                    },
+                    require_reply: false,
+                    extra: null,
+                }
+            } catch (error) {
+                log.error("[ZK RPC] Error verifying proof:", error)
+                return {
+                    result: 500,
+                    response: "Internal server error",
+                    require_reply: false,
+                    extra: { error: error.toString() },
+                }
+            }
+        }
+
         default:
             log.warning(
                 "[RPC Call] [Received] Method not found: " + payload.method,
@@ -389,6 +441,113 @@ export async function serverRpcBun() {
 
     server.get("/rate-limit/stats", () => {
         return jsonResponse(rateLimiter.getStats())
+    })
+
+    // REVIEW: ZK endpoints for Phase 8
+    // Get current Merkle tree root
+    server.get("/zk/merkle-root", async () => {
+        try {
+            const db = await Datasource.getInstance()
+            const dataSource = db.getDataSource()
+            const currentState = await getCurrentMerkleTreeState(dataSource)
+
+            if (!currentState) {
+                return jsonResponse(
+                    { error: "Merkle tree not initialized" },
+                    404,
+                )
+            }
+
+            return jsonResponse({
+                rootHash: currentState.rootHash,
+                blockNumber: currentState.blockNumber,
+                leafCount: currentState.leafCount,
+            })
+        } catch (error) {
+            log.error("[ZK RPC] Error getting Merkle root:", error)
+            return jsonResponse({ error: "Internal server error" }, 500)
+        }
+    })
+
+    // Get Merkle proof for a commitment
+    server.get("/zk/merkle/proof/:commitment", async req => {
+        try {
+            const commitment = req.params.commitment
+
+            if (!commitment) {
+                return jsonResponse(
+                    { error: "Commitment hash required" },
+                    400,
+                )
+            }
+
+            const db = await Datasource.getInstance()
+            const dataSource = db.getDataSource()
+            const merkleManager = new MerkleTreeManager(
+                dataSource,
+                20,
+                "global",
+            )
+            await merkleManager.initialize()
+
+            const proof = await merkleManager.getProofForCommitment(commitment)
+
+            if (!proof) {
+                return jsonResponse(
+                    { error: "Commitment not found in Merkle tree" },
+                    404,
+                )
+            }
+
+            return jsonResponse({
+                commitment: commitment,
+                proof: {
+                    siblings: proof.siblings,
+                    pathIndices: proof.pathIndices,
+                    root: proof.root,
+                    leafIndex: proof.leafIndex,
+                },
+            })
+        } catch (error) {
+            log.error("[ZK RPC] Error getting Merkle proof:", error)
+            return jsonResponse({ error: "Internal server error" }, 500)
+        }
+    })
+
+    // Check if nullifier has been used
+    server.get("/zk/nullifier/:hash", async req => {
+        try {
+            const nullifierHash = req.params.hash
+
+            if (!nullifierHash) {
+                return jsonResponse({ error: "Nullifier hash required" }, 400)
+            }
+
+            const db = await Datasource.getInstance()
+            const dataSource = db.getDataSource()
+            const nullifierRepo = dataSource.getRepository(UsedNullifier)
+
+            const nullifier = await nullifierRepo.findOne({
+                where: { nullifierHash },
+            })
+
+            if (!nullifier) {
+                return jsonResponse({
+                    used: false,
+                    nullifierHash,
+                })
+            }
+
+            return jsonResponse({
+                used: true,
+                nullifierHash,
+                blockNumber: nullifier.blockNumber,
+                transactionHash: nullifier.transactionHash,
+            })
+        } catch (error) {
+            log.error("[ZK RPC] Error checking nullifier:", error)
+            return jsonResponse({ error: "Internal server error" }, 500)
+        }
     })
 
     // Main RPC endpoint
