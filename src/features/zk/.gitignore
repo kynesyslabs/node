@@ -3,6 +3,7 @@ circuits/*.r1cs
 circuits/*.wasm
 circuits/*.sym
 circuits/*.json
+circuits/*_js/
 
 # Proving keys (large, not needed for validators)
 keys/*_*.zkey

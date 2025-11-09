@@ -123,7 +123,7 @@ bun run zk:test
 
 **What you need:**
 - ✅ Circuit source code (from repo)
-- ✅ Verification key (from repo)
+- ✅ Verification key (from repo) - **CRITICAL: Use the committed file, not your own generated one**
 - ❌ Proving key (NOT needed - validators only verify proofs, don't generate them)
 
 **Setup:**
@@ -131,11 +131,13 @@ bun run zk:test
 git clone <repo>
 cd demos-node
 bun install
-bun run zk:setup-all  # Downloads Powers of Tau, but only uses it if generating proving keys
+# The repo already contains verification_key.json - use that one!
+# You can run setup for completeness, but DO NOT commit your generated key
+bun run zk:setup-all  # Downloads Powers of Tau, compiles circuit locally
 bun start
 ```
 
-Validators will verify proofs using `verification_key.json` from the repo. No proof generation required!
+**IMPORTANT**: Even though `bun run zk:setup-all` will generate a `verification_key.json` locally, you MUST use the one that's already committed in the repo for consensus. The locally generated one will be identical (the key is deterministic), but using the repo version ensures all validators are using the exact same key.
 
 ## Architecture Overview
 

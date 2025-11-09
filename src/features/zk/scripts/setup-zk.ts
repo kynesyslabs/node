@@ -129,7 +129,8 @@ async function generateKeys(circuitName: string) {
         )
         log("  ✓ Verification key exported", "green")
         log(`    → ${vkeyPath}`, "green")
-        log("    ⚠ IMPORTANT: Commit verification_key.json to repo for consensus!", "yellow")
+        log("    ⚠ FOR CIRCUIT DEVELOPERS: Commit verification_key.json to repo (ONE TIME)", "yellow")
+        log("    ⚠ FOR VALIDATORS: Use the verification_key.json from the repo (DO NOT commit your own)", "yellow")
     } catch (error) {
         log("  ✗ Verification key export failed", "red")
         throw error

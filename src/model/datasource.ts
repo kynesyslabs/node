@@ -22,6 +22,9 @@ import { GCRHashes } from "./entities/GCRv2/GCRHashes.js"
 import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs.js"
 import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
 import { GCRTracker } from "./entities/GCR/GCRTracker.js"
+import { IdentityCommitment } from "./entities/GCRv2/IdentityCommitment.js"
+import { UsedNullifier } from "./entities/GCRv2/UsedNullifier.js"
+import { MerkleTreeState } from "./entities/GCRv2/MerkleTreeState.js"
 
 export const dataSource = new DataSource({
     type: "postgres",
@@ -43,6 +46,9 @@ export const dataSource = new DataSource({
         GlobalChangeRegistry,
         GCRTracker,
         GCRMain,
+        IdentityCommitment,
+        UsedNullifier,
+        MerkleTreeState,
     ],
     synchronize: true,
     logging: false,

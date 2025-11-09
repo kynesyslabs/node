@@ -20,11 +20,11 @@ export default async function getBlockByNumber(
 
         let block: Blocks
         if (blockNumber === 0) {
-            // @ts-ignore
+            // Genesis block only has number and hash, cast to partial then to Blocks
             block = {
                 number: 0,
                 hash: await Chain.getGenesisBlockHash(),
-            }
+            } as Partial<Blocks> as Blocks
         } else {
             block = await Chain.getBlockByNumber(blockNumber)
         }
