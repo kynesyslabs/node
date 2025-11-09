@@ -12,8 +12,9 @@ keys/circuit_final.zkey
 # Powers of Tau (large, public download)
 keys/powersOfTau*.ptau
 
-# IMPORTANT: Verification key MUST be committed for consensus
+# IMPORTANT: Verification keys MUST be committed for consensus
 !keys/verification_key.json
+!keys/verification_key_merkle.json
 
 # Build artifacts
 *.o
