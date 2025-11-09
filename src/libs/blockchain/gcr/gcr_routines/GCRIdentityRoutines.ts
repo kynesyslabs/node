@@ -712,14 +712,21 @@ export default class GCRIdentityRoutines {
             )
 
             // REVIEW: Award points for ZK attestation
+            // REVIEW: Phase 10.1 - Configurable ZK attestation points
             // Note: We don't know which specific account this is (that's the point of ZK!)
             // But we can still award points based on the nullifier uniqueness
             // The user who submitted this transaction gets the points
             const account = await ensureGCRForUser(editOperation.account)
 
+            // Get configurable points from environment (default: 10)
+            const zkAttestationPoints = parseInt(
+                process.env.ZK_ATTESTATION_POINTS || "10",
+                10,
+            )
+
             const zkAttestationEntry = {
                 date: new Date().toISOString(),
-                points: 10, // TODO: Make this configurable
+                points: zkAttestationPoints,
                 nullifier: payload.nullifier_hash.slice(0, 10) + "...", // Store abbreviated for reference
             }
 
@@ -728,7 +735,8 @@ export default class GCRIdentityRoutines {
             }
 
             account.points.breakdown.zkAttestation.push(zkAttestationEntry)
-            account.points.totalPoints = (account.points.totalPoints || 0) + 10
+            account.points.totalPoints =
+                (account.points.totalPoints || 0) + zkAttestationPoints
             account.points.lastUpdated = new Date()
 
             await gcrMainRepository.save(account)
