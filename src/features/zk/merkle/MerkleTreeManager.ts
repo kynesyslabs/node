@@ -33,7 +33,7 @@ export class MerkleTreeManager {
      * @param depth - Tree depth (default: 20 levels = 1M+ capacity)
      * @param treeId - Tree identifier (default: "global")
      */
-    constructor(dataSource: DataSource, depth: number = 20, treeId: string = "global") {
+    constructor(dataSource: DataSource, depth = 20, treeId = "global") {
         this.dataSource = dataSource
         this.depth = depth
         this.treeId = treeId
@@ -57,7 +57,7 @@ export class MerkleTreeManager {
 
             if (state && state.treeSnapshot) {
                 // Restore tree from database snapshot
-                // @ts-ignore - IncrementalMerkleTree.import exists but types may be incomplete
+                // @ts-expect-error - IncrementalMerkleTree.import exists but types may be incomplete
                 this.tree = IncrementalMerkleTree.import(state.treeSnapshot)
                 console.log(
                     `✅ Loaded Merkle tree: ${state.leafCount} commitments, root: ${state.rootHash.slice(0, 10)}...`,

@@ -13,6 +13,14 @@ import {
 } from "@/model/entities/types/IdentityTypes"
 import log from "@/utilities/logger"
 import { IncentiveManager } from "./IncentiveManager"
+import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
+import { IdentityCommitment } from "@/model/entities/GCRv2/IdentityCommitment"
+import { UsedNullifier } from "@/model/entities/GCRv2/UsedNullifier"
+import {
+    IdentityCommitmentPayload,
+    IdentityAttestationPayload,
+} from "@/features/zk/types"
+import Datasource from "@/model/datasource"
 
 export default class GCRIdentityRoutines {
     // SECTION XM Identity Routines
@@ -590,6 +598,152 @@ export default class GCRIdentityRoutines {
         return { success: true, message: "Points deducted" }
     }
 
+    // SECTION ZK Identity Routines
+
+    /**
+     * Process ZK commitment addition
+     * Stores user's identity commitment (to be added to Merkle tree during block commit)
+     */
+    static async applyZkCommitmentAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const payload = editOperation.data as IdentityCommitmentPayload
+
+        // Validate commitment format (should be 64-char hex or large number string)
+        if (!payload.commitment_hash || typeof payload.commitment_hash !== "string") {
+            return {
+                success: false,
+                message: "Invalid commitment hash format",
+            }
+        }
+
+        // Get datasource for IdentityCommitment repository
+        const db = await Datasource.getInstance()
+        const dataSource = db.getDataSource()
+        const commitmentRepo = dataSource.getRepository(IdentityCommitment)
+
+        // Check if commitment already exists
+        const existing = await commitmentRepo.findOne({
+            where: { commitmentHash: payload.commitment_hash },
+        })
+
+        if (existing) {
+            return {
+                success: false,
+                message: "Commitment already exists",
+            }
+        }
+
+        // Store commitment (leaf_index will be set during Merkle tree update in block commit)
+        if (!simulate) {
+            await commitmentRepo.save({
+                commitmentHash: payload.commitment_hash,
+                leafIndex: -1, // Placeholder, will be updated during Merkle tree insertion
+                provider: payload.provider,
+                blockNumber: 0, // Will be updated during block commit
+                timestamp: payload.timestamp,
+                transactionHash: editOperation.txhash || "",
+            })
+
+            log.info(
+                `✅ ZK commitment stored: ${payload.commitment_hash.slice(0, 10)}... (provider: ${payload.provider})`,
+            )
+        }
+
+        return {
+            success: true,
+            message: "ZK commitment stored (pending Merkle tree insertion)",
+        }
+    }
+
+    /**
+     * Process ZK attestation (anonymous identity proof)
+     * Verifies ZK-SNARK proof and awards points if valid
+     */
+    static async applyZkAttestationAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const payload = editOperation.data as IdentityAttestationPayload
+
+        // Validate payload structure
+        if (
+            !payload.nullifier_hash ||
+            !payload.merkle_root ||
+            !payload.proof ||
+            !payload.public_signals
+        ) {
+            return {
+                success: false,
+                message: "Invalid ZK attestation payload",
+            }
+        }
+
+        // Get datasource for verification
+        const db = await Datasource.getInstance()
+        const dataSource = db.getDataSource()
+        const verifier = new ProofVerifier(dataSource)
+
+        // Verify the ZK proof (3-step verification: crypto + nullifier + root)
+        const verificationResult = await verifier.verifyIdentityAttestation({
+            proof: payload.proof,
+            publicSignals: payload.public_signals,
+        })
+
+        if (!verificationResult.valid) {
+            log.warn(
+                `❌ ZK attestation verification failed: ${verificationResult.reason}`,
+            )
+            return {
+                success: false,
+                message: `ZK proof verification failed: ${verificationResult.reason}`,
+            }
+        }
+
+        // Mark nullifier as used (prevent double-attestation)
+        if (!simulate) {
+            await verifier.markNullifierUsed(
+                payload.nullifier_hash,
+                0, // Block number will be updated during block commit
+                editOperation.txhash || "",
+            )
+
+            // REVIEW: Award points for ZK attestation
+            // Note: We don't know which specific account this is (that's the point of ZK!)
+            // But we can still award points based on the nullifier uniqueness
+            // The user who submitted this transaction gets the points
+            const account = await ensureGCRForUser(editOperation.account)
+
+            const zkAttestationEntry = {
+                date: new Date().toISOString(),
+                points: 10, // TODO: Make this configurable
+                nullifier: payload.nullifier_hash.slice(0, 10) + "...", // Store abbreviated for reference
+            }
+
+            if (!account.points.breakdown.zkAttestation) {
+                account.points.breakdown.zkAttestation = []
+            }
+
+            account.points.breakdown.zkAttestation.push(zkAttestationEntry)
+            account.points.totalPoints = (account.points.totalPoints || 0) + 10
+            account.points.lastUpdated = new Date()
+
+            await gcrMainRepository.save(account)
+
+            log.info(
+                `✅ ZK attestation verified and points awarded (nullifier: ${payload.nullifier_hash.slice(0, 10)}...)`,
+            )
+        }
+
+        return {
+            success: true,
+            message: "ZK attestation verified and points awarded",
+        }
+    }
+
     static async apply(
         editOperation: GCREdit,
         gcrMainRepository: Repository<GCRMain>,
@@ -672,6 +826,20 @@ export default class GCRIdentityRoutines {
                 break
             case "pointsremove":
                 result = await this.applyAwardPointsRollback(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "zk_commitmentadd":
+                result = await this.applyZkCommitmentAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "zk_attestationadd":
+                result = await this.applyZkAttestationAdd(
                     identityEdit,
                     gcrMainRepository,
                     simulate,

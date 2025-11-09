@@ -28,6 +28,7 @@ import Hashing from "../crypto/hashing"
 import Datasource from "src/model/datasource"
 import { Blocks } from "src/model/entities/Blocks"
 import { Operation } from "@kynesyslabs/demosdk/types"
+import { updateMerkleTreeAfterBlock } from "@/features/zk/merkle/updateMerkleTreeAfterBlock"
 import manageNative from "./gcr/gcr_routines/manageNative"
 import { getSharedState } from "src/utilities/sharedState"
 import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
@@ -412,6 +413,27 @@ export default class Chain {
                     transactionEntities.map(tx => tx.hash),
                 )
             }
+
+            // REVIEW Update ZK Merkle tree with any new commitments from this block
+            try {
+                const db = await Datasource.getInstance()
+                const commitmentsAdded = await updateMerkleTreeAfterBlock(
+                    db.getDataSource(),
+                    block.number,
+                )
+                if (commitmentsAdded > 0) {
+                    log.info(
+                        `[ZK] Added ${commitmentsAdded} commitment(s) to Merkle tree for block ${block.number}`,
+                    )
+                }
+            } catch (error) {
+                log.error(
+                    `[ZK] Failed to update Merkle tree for block ${block.number}:`,
+                    error,
+                )
+                // Don't throw - block is already committed, just log the error
+            }
+
             return result
         }
     }

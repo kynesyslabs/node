@@ -117,13 +117,13 @@ describe("ProofVerifier", () => {
 
             // Mock the cryptographic verification to pass (we're testing nullifier check)
             const originalVerify = ProofVerifier.verifyProofOnly
-            // @ts-ignore - Mocking static method for test
+            // @ts-expect-error - Mocking static method for test
             ProofVerifier.verifyProofOnly = async () => true
 
             const result = await verifier.verifyIdentityAttestation(attestation)
 
             // Restore original method
-            // @ts-ignore
+            // @ts-expect-error - Restoring mocked static method
             ProofVerifier.verifyProofOnly = originalVerify
 
             expect(result.valid).toBe(false)
@@ -151,13 +151,13 @@ describe("ProofVerifier", () => {
 
             // Mock the cryptographic verification to pass (we're testing Merkle root check)
             const originalVerify = ProofVerifier.verifyProofOnly
-            // @ts-ignore - Mocking static method for test
+            // @ts-expect-error - Mocking static method for test
             ProofVerifier.verifyProofOnly = async () => true
 
             const result = await verifier.verifyIdentityAttestation(attestation)
 
             // Restore original method
-            // @ts-ignore
+            // @ts-expect-error - Restoring mocked static method
             ProofVerifier.verifyProofOnly = originalVerify
 
             expect(result.valid).toBe(false)
