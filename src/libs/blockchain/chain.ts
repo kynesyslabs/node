@@ -391,34 +391,43 @@ export default class Chain {
                     position +
                     " does not exist: inserting a new block",
             )
-            const result = await this.blocks.save(newBlock)
-            getSharedState.lastBlockNumber = block.number
-            getSharedState.lastBlockHash = block.hash
 
-            log.debug(
-                "[insertBlock] lastBlockNumber: " +
-                    getSharedState.lastBlockNumber,
-            )
-            log.debug(
-                "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
-            )
-            // REVIEW We then add the transactions to the Transactions repository
-            for (let i = 0; i < transactionEntities.length; i++) {
-                const tx = transactionEntities[i]
-                await this.insertTransaction(tx)
-            }
-            // REVIEW And we clean the mempool
-            if (cleanMempool) {
-                await Mempool.removeTransactionsByHashes(
-                    transactionEntities.map(tx => tx.hash),
+            // REVIEW: Wrap block insertion and Merkle tree update in transaction
+            // This ensures both succeed or both fail (prevents state divergence)
+            const db = await Datasource.getInstance()
+            const dataSource = db.getDataSource()
+
+            return await dataSource.transaction(async (transactionalEntityManager) => {
+                // Save block within transaction
+                const result = await transactionalEntityManager.save(this.blocks.target, newBlock)
+                getSharedState.lastBlockNumber = block.number
+                getSharedState.lastBlockHash = block.hash
+
+                log.debug(
+                    "[insertBlock] lastBlockNumber: " +
+                        getSharedState.lastBlockNumber,
                 )
-            }
+                log.debug(
+                    "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
+                )
 
-            // REVIEW Update ZK Merkle tree with any new commitments from this block
-            try {
-                const db = await Datasource.getInstance()
+                // Add transactions within transaction
+                for (let i = 0; i < transactionEntities.length; i++) {
+                    const tx = transactionEntities[i]
+                    await this.insertTransaction(tx)
+                }
+
+                // Clean mempool (outside transaction scope is fine)
+                if (cleanMempool) {
+                    await Mempool.removeTransactionsByHashes(
+                        transactionEntities.map(tx => tx.hash),
+                    )
+                }
+
+                // Update ZK Merkle tree within same transaction
+                // If this fails, entire block commit rolls back
                 const commitmentsAdded = await updateMerkleTreeAfterBlock(
-                    db.getDataSource(),
+                    dataSource,
                     block.number,
                 )
                 if (commitmentsAdded > 0) {
@@ -426,15 +435,9 @@ export default class Chain {
                         `[ZK] Added ${commitmentsAdded} commitment(s) to Merkle tree for block ${block.number}`,
                     )
                 }
-            } catch (error) {
-                log.error(
-                    `[ZK] Failed to update Merkle tree for block ${block.number}:`,
-                    error,
-                )
-                // Don't throw - block is already committed, just log the error
-            }
 
-            return result
+                return result
+            })
         }
     }
 
