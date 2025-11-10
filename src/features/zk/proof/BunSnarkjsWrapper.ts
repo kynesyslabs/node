@@ -1,0 +1,128 @@
+/**
+ * Bun-Compatible snarkjs Wrapper
+ *
+ * PROBLEM: snarkjs.groth16.verify uses worker threads by default,
+ *          which crashes on Bun due to worker thread bugs
+ *
+ * SOLUTION: Direct implementation using snarkjs internals with singleThread mode
+ *
+ * This module provides a Bun-compatible groth16.verify that:
+ * - Uses single-threaded curve operations (no workers)
+ * - Maintains full cryptographic security
+ * - Works identically to snarkjs.groth16.verify
+ */
+
+/* eslint-disable @typescript-eslint/naming-convention */
+/* eslint-disable @typescript-eslint/ban-ts-comment */
+// NOTE: Variable names use snake_case to match ZK-SNARK cryptographic notation
+// (pi_a, pi_b, pi_c, vk_alpha_1, etc. are standard Groth16 protocol names)
+
+import { Scalar, utils } from "ffjavascript"
+// @ts-expect-error - Import from snarkjs internal sources (using tsconfig baseUrl)
+import * as curves from "node_modules/snarkjs/src/curves.js"
+
+const { unstringifyBigInts } = utils
+
+export interface ZKProof {
+    pi_a: string[]
+    pi_b: string[][]
+    pi_c: string[]
+    protocol: string
+}
+
+/**
+ * Verify a Groth16 proof (Bun-compatible, single-threaded)
+ *
+ * @param vk_verifier - Verification key
+ * @param publicSignals - Public signals array
+ * @param proof - Groth16 proof object
+ * @returns True if proof is valid
+ */
+export async function groth16VerifyBun(
+    _vk_verifier: any,
+    _publicSignals: any[],
+    _proof: ZKProof,
+): Promise<boolean> {
+    try {
+        const vk_verifier = unstringifyBigInts(_vk_verifier)
+        const proof = unstringifyBigInts(_proof)
+        const publicSignals = unstringifyBigInts(_publicSignals)
+
+        // CRITICAL: Pass singleThread: true to avoid worker threads
+        const curve = await curves.getCurveFromName(vk_verifier.curve, {
+            singleThread: true,
+        })
+
+        const IC0 = curve.G1.fromObject(vk_verifier.IC[0])
+        const IC = new Uint8Array(curve.G1.F.n8 * 2 * publicSignals.length)
+        const w = new Uint8Array(curve.Fr.n8 * publicSignals.length)
+
+        // Validate public inputs
+        if (!publicInputsAreValid(curve, publicSignals)) {
+            console.error("ZK Verify: Public inputs are not valid")
+            return false
+        }
+
+        // Build the public input linear combination
+        for (let i = 0; i < publicSignals.length; i++) {
+            const buffP = curve.G1.fromObject(vk_verifier.IC[i + 1])
+            IC.set(buffP, i * curve.G1.F.n8 * 2)
+            Scalar.toRprLE(w, curve.Fr.n8 * i, publicSignals[i], curve.Fr.n8)
+        }
+
+        let cpub = await curve.G1.multiExpAffine(IC, w)
+        cpub = curve.G1.add(cpub, IC0)
+
+        const pi_a = curve.G1.fromObject(proof.pi_a)
+        const pi_b = curve.G2.fromObject(proof.pi_b)
+        const pi_c = curve.G1.fromObject(proof.pi_c)
+
+        if (!isWellConstructed(curve, { pi_a, pi_b, pi_c })) {
+            console.error("ZK Verify: Proof commitments are not valid")
+            return false
+        }
+
+        const vk_gamma_2 = curve.G2.fromObject(vk_verifier.vk_gamma_2)
+        const vk_delta_2 = curve.G2.fromObject(vk_verifier.vk_delta_2)
+        const vk_alpha_1 = curve.G1.fromObject(vk_verifier.vk_alpha_1)
+        const vk_beta_2 = curve.G2.fromObject(vk_verifier.vk_beta_2)
+
+        // Pairing check: e(pi_a, pi_b) = e(cpub, vk_gamma_2) * e(pi_c, vk_delta_2) * e(vk_alpha_1, vk_beta_2)
+        const res = await curve.pairingEq(
+            curve.G1.neg(pi_a),
+            pi_b,
+            cpub,
+            vk_gamma_2,
+            pi_c,
+            vk_delta_2,
+            vk_alpha_1,
+            vk_beta_2,
+        )
+
+        if (!res) {
+            console.error("ZK Verify: Invalid proof (pairing check failed)")
+            return false
+        }
+
+        return true
+    } catch (error) {
+        console.error("ZK Verify: Verification error:", error)
+        return false
+    }
+}
+
+function isWellConstructed(curve: any, proof: any): boolean {
+    const G1 = curve.G1
+    const G2 = curve.G2
+
+    return G1.isValid(proof.pi_a) && G2.isValid(proof.pi_b) && G1.isValid(proof.pi_c)
+}
+
+function publicInputsAreValid(curve: any, publicInputs: any[]): boolean {
+    for (let i = 0; i < publicInputs.length; i++) {
+        if (!Scalar.lt(publicInputs[i], curve.r)) {
+            return false
+        }
+    }
+    return true
+}

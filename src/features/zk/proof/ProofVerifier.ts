@@ -23,6 +23,8 @@ import { join } from "path"
 import { DataSource, Repository } from "typeorm"
 import { UsedNullifier } from "@/model/entities/GCRv2/UsedNullifier.js"
 import { MerkleTreeState } from "@/model/entities/GCRv2/MerkleTreeState.js"
+// REVIEW: Bun-compatible verification wrapper (avoids worker thread crashes)
+import { groth16VerifyBun } from "./BunSnarkjsWrapper.js"
 
 export interface ZKProof {
     pi_a: string[]
@@ -92,7 +94,10 @@ export class ProofVerifier {
     ): Promise<boolean> {
         try {
             await this.loadVerificationKey()
-            const isValid = await snarkjs.groth16.verify(this.vKey, publicSignals, proof)
+            // REVIEW: Use Bun-compatible wrapper instead of snarkjs.groth16.verify
+            // snarkjs uses worker threads which crash on Bun runtime
+            // groth16VerifyBun uses single-threaded mode for Bun compatibility
+            const isValid = await groth16VerifyBun(this.vKey, publicSignals, proof)
             return isValid
         } catch (error) {
             console.error("❌ Cryptographic verification failed:", error)
