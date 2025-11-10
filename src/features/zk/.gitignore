@@ -27,3 +27,4 @@ tests/output/
 
 # Node modules (shouldn't be here but just in case)
 node_modules/
+*.sym
