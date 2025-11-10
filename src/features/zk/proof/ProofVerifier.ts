@@ -92,8 +92,10 @@ export class ProofVerifier {
         proof: ZKProof,
         publicSignals: string[],
     ): Promise<boolean> {
+        // Let verification key loading errors propagate (system errors)
+        await this.loadVerificationKey()
+
         try {
-            await this.loadVerificationKey()
             // REVIEW: Use Bun-compatible wrapper instead of snarkjs.groth16.verify
             // snarkjs uses worker threads which crash on Bun runtime
             // groth16VerifyBun uses single-threaded mode for Bun compatibility
@@ -101,7 +103,8 @@ export class ProofVerifier {
             return isValid
         } catch (error) {
             console.error("❌ Cryptographic verification failed:", error)
-            return false
+            // Re-throw to distinguish from invalid proof (which returns false)
+            throw new Error("Cryptographic verification system error")
         }
     }
 
@@ -229,7 +232,7 @@ export class ProofVerifier {
             await this.nullifierRepo.save({
                 nullifierHash,
                 blockNumber,
-                timestamp: Date.now(),
+                timestamp: Date.now().toString(),
                 transactionHash,
             })
 

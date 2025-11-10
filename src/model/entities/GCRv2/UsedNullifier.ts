@@ -37,10 +37,11 @@ export class UsedNullifier {
 
     /**
      * Timestamp when nullifier was used
-     * Stored as bigint to support large timestamps
+     * Stored as bigint; represented as string to avoid precision loss
+     * TypeORM returns bigint columns as strings by default
      */
     @Column({ type: "bigint", name: "timestamp" })
-    timestamp: number
+    timestamp: string
 
     /**
      * Auto-generated creation timestamp

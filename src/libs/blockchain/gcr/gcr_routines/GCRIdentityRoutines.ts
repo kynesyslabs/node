@@ -633,7 +633,7 @@ export default class GCRIdentityRoutines {
                     leafIndex: -1, // Placeholder, will be updated during Merkle tree insertion
                     provider: payload.provider,
                     blockNumber: 0, // Will be updated during block commit
-                    timestamp: payload.timestamp,
+                    timestamp: payload.timestamp.toString(),
                     transactionHash: editOperation.txhash || "",
                 })
 

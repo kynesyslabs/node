@@ -227,7 +227,11 @@ export class MerkleTreeManager {
         root: bigint,
     ): boolean {
         try {
-            return IncrementalMerkleTree.verifyProof(proof, poseidon2)
+            // Include leaf and root in proof object as required by zk-kit library
+            return IncrementalMerkleTree.verifyProof(
+                { ...proof, leaf, root },
+                poseidon2,
+            )
         } catch (error) {
             console.error("❌ Proof verification failed:", error)
             return false

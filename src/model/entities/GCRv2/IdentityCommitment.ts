@@ -51,10 +51,11 @@ export class IdentityCommitment {
 
     /**
      * Timestamp when commitment was created
-     * Stored as bigint to support large timestamps
+     * Stored as bigint; represented as string to avoid precision loss
+     * TypeORM returns bigint columns as strings by default
      */
     @Column({ type: "bigint", name: "timestamp" })
-    timestamp: number
+    timestamp: string
 
     /**
      * Auto-generated creation timestamp
