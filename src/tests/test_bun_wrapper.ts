@@ -2,7 +2,7 @@
  * Test Bun-compatible snarkjs wrapper
  */
 
-import { groth16VerifyBun } from "./src/features/zk/proof/BunSnarkjsWrapper"
+import { groth16VerifyBun } from "@/features/zk/proof/BunSnarkjsWrapper"
 import { readFileSync } from "fs"
 import { join } from "path"
 

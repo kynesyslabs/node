@@ -4,7 +4,7 @@
  * Tests the complete verification flow using ProofVerifier with BunSnarkjsWrapper
  */
 
-import { ProofVerifier, ZKProof } from './src/features/zk/proof/ProofVerifier'
+import { ProofVerifier, ZKProof } from '@/features/zk/proof/ProofVerifier'
 
 console.log('🧪 Testing Production ZK Verification (Bun-compatible)\n')
 
