@@ -39,6 +39,31 @@ echo "   Secret: $SECRET"
 echo "   Provider ID: $PROVIDER_ID"
 echo "   Context: $CONTEXT"
 
+# Check required files exist
+echo "🔍 Checking required files..."
+required_files=(
+  "src/features/zk/circuits/identity_with_merkle_js/identity_with_merkle.wasm"
+  "src/features/zk/keys/identity_with_merkle_0000.zkey"
+  "src/features/zk/keys/verification_key_merkle.json"
+)
+
+for file in "${required_files[@]}"; do
+  if [ ! -f "$file" ]; then
+    echo "❌ Missing required file: $file" >&2
+    echo "   Run 'bun run zk:setup-all' to generate keys first" >&2
+    exit 1
+  fi
+done
+
+# Verify npx is available
+if ! command -v npx &> /dev/null; then
+  echo "❌ npx is not installed" >&2
+  echo "   Install Node.js/npm first" >&2
+  exit 1
+fi
+
+echo "✅ All required files present"
+
 # Generate witness
 echo "🧮 Generating witness..."
 npx snarkjs wtns calculate \

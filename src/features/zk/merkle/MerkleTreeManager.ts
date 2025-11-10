@@ -56,9 +56,18 @@ export class MerkleTreeManager {
             })
 
             if (state && state.treeSnapshot) {
-                // Restore tree from database snapshot
-                // @ts-expect-error - IncrementalMerkleTree.import exists but types may be incomplete
-                this.tree = IncrementalMerkleTree.import(state.treeSnapshot)
+                // REVIEW: Reconstruct tree from stored leaves
+                // The @zk-kit/incremental-merkle-tree v1.1.0 library does not have import() method
+                // Instead, we reconstruct the tree from leaves using the constructor
+                const snapshot = state.treeSnapshot as { leaves: string[] }
+
+                if (!snapshot.leaves || !Array.isArray(snapshot.leaves)) {
+                    throw new Error("Invalid tree snapshot format: missing leaves array")
+                }
+
+                // Convert string leaves back to BigInt and reconstruct tree with poseidon2 hash
+                const leaves = snapshot.leaves.map((leaf) => BigInt(leaf))
+                this.tree = new IncrementalMerkleTree(poseidon2, this.depth, BigInt(0), 2, leaves)
 
                 // Validate depth consistency
                 if (this.tree.depth !== this.depth) {
@@ -194,7 +203,12 @@ export class MerkleTreeManager {
      */
     async saveToDatabase(blockNumber: number): Promise<void> {
         try {
-            const snapshot = this.tree.export()
+            // REVIEW: Save tree leaves for reconstruction
+            // The @zk-kit/incremental-merkle-tree v1.1.0 library does not have export() method
+            // We store the leaves array which can be used to reconstruct the tree
+            const snapshot = {
+                leaves: this.tree.leaves.map((leaf) => leaf.toString()),
+            }
 
             await this.stateRepo.save({
                 treeId: this.treeId,

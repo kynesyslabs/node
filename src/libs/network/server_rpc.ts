@@ -45,6 +45,28 @@ import type { IdentityAttestationProof } from "@/features/zk/proof/ProofVerifier
 const ZK_MERKLE_TREE_DEPTH = 20 // Maximum tree depth for ZK proofs
 const ZK_MERKLE_TREE_ID = "global" // Global tree identifier for identity attestations
 
+// REVIEW: Singleton MerkleTreeManager instance to avoid expensive per-request initialization
+let globalMerkleManager: MerkleTreeManager | null = null
+
+/**
+ * Get or create the global MerkleTreeManager singleton instance
+ * Lazily initializes on first call to avoid startup overhead
+ */
+async function getMerkleTreeManager(): Promise<MerkleTreeManager> {
+    if (!globalMerkleManager) {
+        const db = await Datasource.getInstance()
+        const dataSource = db.getDataSource()
+        globalMerkleManager = new MerkleTreeManager(
+            dataSource,
+            ZK_MERKLE_TREE_DEPTH,
+            ZK_MERKLE_TREE_ID,
+        )
+        await globalMerkleManager.initialize()
+        log.info("✅ Global MerkleTreeManager initialized")
+    }
+    return globalMerkleManager
+}
+
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
@@ -354,11 +376,12 @@ async function processPayload(
                 }
             } catch (error) {
                 log.error("[ZK RPC] Error verifying proof:", error)
+                // REVIEW: Sanitize error response - don't expose internal details
                 return {
                     result: 500,
                     response: "Internal server error",
                     require_reply: false,
-                    extra: { error: error.toString() },
+                    extra: null,
                 }
             }
         }
@@ -491,14 +514,16 @@ export async function serverRpcBun() {
                 )
             }
 
-            const db = await Datasource.getInstance()
-            const dataSource = db.getDataSource()
-            const merkleManager = new MerkleTreeManager(
-                dataSource,
-                ZK_MERKLE_TREE_DEPTH,
-                ZK_MERKLE_TREE_ID,
-            )
-            await merkleManager.initialize()
+            // REVIEW: Input validation to prevent injection attacks
+            if (!/^0x[0-9a-fA-F]{64}$/.test(commitment)) {
+                return jsonResponse(
+                    { error: "Invalid commitment format" },
+                    400,
+                )
+            }
+
+            // REVIEW: Use singleton MerkleTreeManager to avoid per-request initialization overhead
+            const merkleManager = await getMerkleTreeManager()
 
             const proof = await merkleManager.getProofForCommitment(commitment)
 
@@ -531,6 +556,11 @@ export async function serverRpcBun() {
 
             if (!nullifierHash) {
                 return jsonResponse({ error: "Nullifier hash required" }, 400)
+            }
+
+            // REVIEW: Input validation to prevent injection attacks
+            if (!/^0x[0-9a-fA-F]{64}$/.test(nullifierHash)) {
+                return jsonResponse({ error: "Invalid nullifier hash format" }, 400)
             }
 
             const db = await Datasource.getInstance()

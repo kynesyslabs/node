@@ -61,6 +61,14 @@ export async function groth16VerifyBun(
             return false
         }
 
+        // REVIEW: Validate reasonable bounds on public signals to prevent DoS
+        // Adjust MAX_PUBLIC_SIGNALS based on circuit requirements (typical: 2-10 signals)
+        const MAX_PUBLIC_SIGNALS = 1024
+        if (!Array.isArray(publicSignals) || publicSignals.length > MAX_PUBLIC_SIGNALS) {
+            console.error(`ZK Verify: Public signals length ${publicSignals.length} exceeds maximum ${MAX_PUBLIC_SIGNALS}`)
+            return false
+        }
+
         const IC = new Uint8Array(curve.G1.F.n8 * 2 * publicSignals.length)
         const w = new Uint8Array(curve.Fr.n8 * publicSignals.length)
 

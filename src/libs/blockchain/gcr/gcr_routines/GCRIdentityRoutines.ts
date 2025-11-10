@@ -642,7 +642,8 @@ export default class GCRIdentityRoutines {
                 )
             } catch (error: any) {
                 // Handle primary key constraint violation (commitment already exists)
-                if (error.code === "23505" || error.code === "SQLITE_CONSTRAINT") {
+                // REVIEW: Use startsWith for SQLite constraint codes (handles all variants)
+                if (error.code === "23505" || error.code?.startsWith("SQLITE_CONSTRAINT")) {
                     return {
                         success: false,
                         message: "Commitment already exists",
@@ -715,9 +716,10 @@ export default class GCRIdentityRoutines {
                 )
             } catch (error: any) {
                 // Database constraint will catch concurrent double-attestation attempts
+                // REVIEW: Use startsWith for SQLite constraint codes (handles all variants)
                 if (error.message?.includes("Double-attestation attempt") ||
                     error.code === "23505" ||
-                    error.code === "SQLITE_CONSTRAINT") {
+                    error.code?.startsWith("SQLITE_CONSTRAINT")) {
                     log.warn(`❌ Double-attestation attempt detected for nullifier: ${payload.nullifier_hash.slice(0, 10)}...`)
                     return {
                         success: false,
@@ -730,9 +732,13 @@ export default class GCRIdentityRoutines {
 
             // REVIEW: Award points for ZK attestation
             // REVIEW: Phase 10.1 - Configurable ZK attestation points
-            // Note: We don't know which specific account this is (that's the point of ZK!)
-            // But we can still award points based on the nullifier uniqueness
-            // The user who submitted this transaction gets the points
+            //
+            // Design Note: ZK Privacy vs Points
+            // - The ZK proof preserves identity privacy (we don't know WHICH identity proved ownership)
+            // - The transaction submitter (editOperation.account) receives points
+            // - The submitter may or may not be the identity holder (could be a relayer)
+            // - This is intentional: points reward the transaction submission, not identity disclosure
+            // - For fully private identities, users can choose not to submit attestation transactions
             const account = await ensureGCRForUser(editOperation.account)
 
             // Get configurable points from environment (default: 10)
