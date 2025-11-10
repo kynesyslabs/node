@@ -4,7 +4,9 @@ This document contains **6 critical/high priority issues** that require architec
 
 ---
 
-## 🔴 CRITICAL ISSUE #1: Circuit Privacy Vulnerability
+## ✅ FIXED - CRITICAL ISSUE #1: Circuit Privacy Vulnerability
+
+**Status**: COMPLETED (commits: 59f68486, b683a1f9)
 
 **Files**:
 - `src/features/zk/circuits/identity_with_merkle.circom:126-132`
@@ -57,10 +59,13 @@ nullifier <== nullifierHasher.out;
 - All existing proofs will be invalidated
 - May need migration strategy for existing commitments
 
-**Questions for You**:
-1. Is per-provider nullifier distinction important for your business logic?
-2. Do you have existing proofs/commitments that need migration?
-3. When can you schedule the circuit recompilation and trusted setup?
+**Resolution Applied**:
+- ✅ Implemented Option 2: Poseidon(3) with provider_id + secret + context
+- ✅ Circuits recompiled with new nullifier computation
+- ✅ New proving/verification keys generated using existing ptau
+- ✅ CDN updated with new verification_key_merkle.json, identity_with_merkle_0000.zkey, identity_with_merkle.wasm
+- ✅ Local verification_key_merkle.json committed to repo
+- ✅ All URL references remain unchanged (files overwritten in same CDN location)
 
 ---
 
@@ -496,9 +501,9 @@ const isValid = await ProofVerifier.verifyProofOnly(
 
 ## Summary
 
-**6 Issues Requiring Decisions:**
+**5 Remaining Issues + 1 Completed:**
 
-1. 🔴 **Circuit Privacy** - Which nullifier computation approach?
+1. ✅ **Circuit Privacy** - FIXED with Poseidon(3) approach
 2. 🔴 **Nullifier TOCTOU** - Transaction, constraint, or both?
 3. 🔴 **Merkle Rollback** - Straightforward fix, proceed?
 4. 🔴 **Block-Merkle Consistency** - Atomic or retry+reconciliation?
