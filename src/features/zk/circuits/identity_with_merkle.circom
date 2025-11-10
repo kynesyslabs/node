@@ -123,12 +123,15 @@ template IdentityProofWithMerkle(levels) {
     // This ensures the commitment is in the actual global tree
     merkle_root === merkleProof.root;
 
-    // Step 4: Compute nullifier = Poseidon(provider_id, context)
+    // Step 4: Compute nullifier = Poseidon(provider_id, secret, context)
     // This prevents double-attestation in the same context
+    // Including secret ensures nullifiers cannot be linked even if provider_id leaks
     // Different context → different nullifier (allows reuse across contexts)
-    component nullifierHasher = Poseidon(2);
+    // SECURITY: Secret inclusion prevents cross-context tracking and linkability attacks
+    component nullifierHasher = Poseidon(3);
     nullifierHasher.inputs[0] <== provider_id;
-    nullifierHasher.inputs[1] <== context;
+    nullifierHasher.inputs[1] <== secret;
+    nullifierHasher.inputs[2] <== context;
     nullifier <== nullifierHasher.out;
 }
 
