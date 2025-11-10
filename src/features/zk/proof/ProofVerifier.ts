@@ -217,20 +217,33 @@ export class ProofVerifier {
      * @param nullifierHash - The nullifier to mark as used
      * @param blockNumber - Current block number
      * @param transactionHash - Transaction hash for reference
+     * @throws Error if nullifier already used (primary key constraint violation)
      */
     async markNullifierUsed(
         nullifierHash: string,
         blockNumber: number,
         transactionHash: string,
     ): Promise<void> {
-        await this.nullifierRepo.save({
-            nullifierHash,
-            blockNumber,
-            timestamp: Date.now(),
-            transactionHash,
-        })
+        // REVIEW: Primary key constraint on nullifierHash prevents double-attestation
+        try {
+            await this.nullifierRepo.save({
+                nullifierHash,
+                blockNumber,
+                timestamp: Date.now(),
+                transactionHash,
+            })
 
-        console.log(`✅ Nullifier marked as used: ${nullifierHash.slice(0, 10)}...`)
+            console.log(`✅ Nullifier marked as used: ${nullifierHash.slice(0, 10)}...`)
+        } catch (error: any) {
+            // Handle primary key constraint violation (nullifier already used)
+            if (error.code === "23505" || error.code === "SQLITE_CONSTRAINT") {
+                throw new Error(
+                    `Double-attestation attempt: Nullifier ${nullifierHash.slice(0, 10)}... already used`,
+                )
+            }
+            // Re-throw other errors
+            throw error
+        }
     }
 
     /**
