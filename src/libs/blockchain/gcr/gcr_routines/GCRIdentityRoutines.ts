@@ -624,32 +624,33 @@ export default class GCRIdentityRoutines {
         const dataSource = db.getDataSource()
         const commitmentRepo = dataSource.getRepository(IdentityCommitment)
 
-        // Check if commitment already exists
-        const existing = await commitmentRepo.findOne({
-            where: { commitmentHash: payload.commitment_hash },
-        })
-
-        if (existing) {
-            return {
-                success: false,
-                message: "Commitment already exists",
-            }
-        }
-
-        // Store commitment (leaf_index will be set during Merkle tree update in block commit)
+        // REVIEW: Removed check-then-insert TOCTOU race condition
+        // Primary key constraint on commitmentHash prevents duplicates at DB level
         if (!simulate) {
-            await commitmentRepo.save({
-                commitmentHash: payload.commitment_hash,
-                leafIndex: -1, // Placeholder, will be updated during Merkle tree insertion
-                provider: payload.provider,
-                blockNumber: 0, // Will be updated during block commit
-                timestamp: payload.timestamp,
-                transactionHash: editOperation.txhash || "",
-            })
+            try {
+                await commitmentRepo.save({
+                    commitmentHash: payload.commitment_hash,
+                    leafIndex: -1, // Placeholder, will be updated during Merkle tree insertion
+                    provider: payload.provider,
+                    blockNumber: 0, // Will be updated during block commit
+                    timestamp: payload.timestamp,
+                    transactionHash: editOperation.txhash || "",
+                })
 
-            log.info(
-                `✅ ZK commitment stored: ${payload.commitment_hash.slice(0, 10)}... (provider: ${payload.provider})`,
-            )
+                log.info(
+                    `✅ ZK commitment stored: ${payload.commitment_hash.slice(0, 10)}... (provider: ${payload.provider})`,
+                )
+            } catch (error: any) {
+                // Handle primary key constraint violation (commitment already exists)
+                if (error.code === "23505" || error.code === "SQLITE_CONSTRAINT") {
+                    return {
+                        success: false,
+                        message: "Commitment already exists",
+                    }
+                }
+                // Re-throw other errors
+                throw error
+            }
         }
 
         return {
