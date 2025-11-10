@@ -39,11 +39,11 @@ async function testVerification() {
         if (!isValid) {
             console.log("\n✅ SUCCESS: snarkjs.groth16.verify works with Bun!")
             console.log("   Invalid proof was correctly rejected")
+            return true
         } else {
             console.log("\n⚠️  WARNING: Invalid proof was accepted (should not happen)")
+            return false
         }
-
-        return true
     } catch (error) {
         console.log(`\n❌ FAILED: ${error}`)
         console.log(`   Error type: ${error instanceof Error ? error.constructor.name : typeof error}`)

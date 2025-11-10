@@ -40,6 +40,11 @@ import {
 import Datasource from "@/model/datasource"
 import { UsedNullifier } from "@/model/entities/GCRv2/UsedNullifier"
 import type { IdentityAttestationProof } from "@/features/zk/proof/ProofVerifier"
+
+// REVIEW: ZK Merkle tree configuration constants
+const ZK_MERKLE_TREE_DEPTH = 20 // Maximum tree depth for ZK proofs
+const ZK_MERKLE_TREE_ID = "global" // Global tree identifier for identity attestations
+
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
@@ -315,10 +320,15 @@ async function processPayload(
             try {
                 const attestation = payload.params[0] as IdentityAttestationProof
 
-                if (!attestation.proof || !attestation.publicSignals) {
+                if (
+                    !attestation.proof ||
+                    !attestation.publicSignals ||
+                    !Array.isArray(attestation.publicSignals) ||
+                    attestation.publicSignals.length < 2
+                ) {
                     return {
                         result: 400,
-                        response: "Invalid proof format",
+                        response: "Invalid proof format: missing proof or insufficient public signals",
                         require_reply: false,
                         extra: null,
                     }
@@ -485,8 +495,8 @@ export async function serverRpcBun() {
             const dataSource = db.getDataSource()
             const merkleManager = new MerkleTreeManager(
                 dataSource,
-                20,
-                "global",
+                ZK_MERKLE_TREE_DEPTH,
+                ZK_MERKLE_TREE_ID,
             )
             await merkleManager.initialize()
 

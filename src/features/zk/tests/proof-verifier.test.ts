@@ -14,6 +14,7 @@ import { ProofVerifier } from "../proof/ProofVerifier.js"
 import type { IdentityAttestationProof, ZKProof } from "../proof/ProofVerifier.js"
 import { Datasource } from "@/model/datasource.js"
 import type { DataSource } from "typeorm"
+import { In } from "typeorm"
 import { UsedNullifier } from "@/model/entities/GCRv2/UsedNullifier.js"
 import { MerkleTreeState } from "@/model/entities/GCRv2/MerkleTreeState.js"
 
@@ -44,7 +45,10 @@ describe("ProofVerifier", () => {
         const nullifierRepo = dataSource.getRepository(UsedNullifier)
         const merkleStateRepo = dataSource.getRepository(MerkleTreeState)
 
-        await nullifierRepo.delete({})
+        // Only delete nullifiers created in this test suite
+        await nullifierRepo.delete({
+            nullifierHash: In(["test_nullifier_already_used", "test_nullifier_mark"]),
+        })
         await merkleStateRepo.delete({ treeId: "global" })
     })
 
@@ -120,14 +124,15 @@ describe("ProofVerifier", () => {
             // @ts-expect-error - Mocking static method for test
             ProofVerifier.verifyProofOnly = async () => true
 
-            const result = await verifier.verifyIdentityAttestation(attestation)
-
-            // Restore original method
-            // @ts-expect-error - Restoring mocked static method
-            ProofVerifier.verifyProofOnly = originalVerify
-
-            expect(result.valid).toBe(false)
-            expect(result.reason).toContain("Nullifier already used")
+            try {
+                const result = await verifier.verifyIdentityAttestation(attestation)
+                expect(result.valid).toBe(false)
+                expect(result.reason).toContain("Nullifier already used")
+            } finally {
+                // Restore original method
+                // @ts-expect-error - Restoring mocked static method
+                ProofVerifier.verifyProofOnly = originalVerify
+            }
         })
 
         it("should reject proof with non-current Merkle root", async () => {
@@ -154,14 +159,15 @@ describe("ProofVerifier", () => {
             // @ts-expect-error - Mocking static method for test
             ProofVerifier.verifyProofOnly = async () => true
 
-            const result = await verifier.verifyIdentityAttestation(attestation)
-
-            // Restore original method
-            // @ts-expect-error - Restoring mocked static method
-            ProofVerifier.verifyProofOnly = originalVerify
-
-            expect(result.valid).toBe(false)
-            expect(result.reason).toContain("Merkle root does not match current tree state")
+            try {
+                const result = await verifier.verifyIdentityAttestation(attestation)
+                expect(result.valid).toBe(false)
+                expect(result.reason).toContain("Merkle root does not match current tree state")
+            } finally {
+                // Restore original method
+                // @ts-expect-error - Restoring mocked static method
+                ProofVerifier.verifyProofOnly = originalVerify
+            }
         })
     })
 

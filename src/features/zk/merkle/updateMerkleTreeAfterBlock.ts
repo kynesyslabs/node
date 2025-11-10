@@ -61,14 +61,16 @@ export async function updateMerkleTreeAfterBlock(
                 commitment.commitmentHash,
             )
 
-            // Update commitment with its leaf index
+            // Update commitment with its leaf index (in-memory)
             commitment.leafIndex = leafIndex
-            await commitmentRepo.save(commitment)
 
             log.debug(
                 `  ✅ Commitment ${commitment.commitmentHash.slice(0, 10)}... added at leaf index ${leafIndex}`,
             )
         }
+
+        // Batch save all updated commitments
+        await commitmentRepo.save(newCommitments)
 
         // Save updated Merkle tree state
         await merkleManager.saveToDatabase(blockNumber)

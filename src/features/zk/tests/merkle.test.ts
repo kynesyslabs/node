@@ -11,13 +11,14 @@ import Datasource from "@/model/datasource.js"
 describe("MerkleTreeManager", () => {
     let merkleManager: MerkleTreeManager
 
-    beforeAll(async () => {
+    beforeEach(async () => {
         // Initialize database connection and get DataSource
         const db = await Datasource.getInstance()
         const dataSource = db.getDataSource()
 
-        // Create a test Merkle tree manager
-        merkleManager = new MerkleTreeManager(dataSource, 20, "test")
+        // Create a test Merkle tree manager with unique namespace per test
+        const testId = Math.random().toString(36).substring(7)
+        merkleManager = new MerkleTreeManager(dataSource, 20, `test_${testId}`)
         await merkleManager.initialize()
     })
 

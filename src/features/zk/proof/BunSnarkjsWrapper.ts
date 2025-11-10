@@ -54,6 +54,13 @@ export async function groth16VerifyBun(
         })
 
         const IC0 = curve.G1.fromObject(vk_verifier.IC[0])
+
+        // Validate IC length matches public signals
+        if (vk_verifier.IC.length !== publicSignals.length + 1) {
+            console.error("ZK Verify: IC length mismatch with public signals")
+            return false
+        }
+
         const IC = new Uint8Array(curve.G1.F.n8 * 2 * publicSignals.length)
         const w = new Uint8Array(curve.Fr.n8 * publicSignals.length)
 
