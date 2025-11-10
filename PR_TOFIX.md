@@ -69,9 +69,11 @@ nullifier <== nullifierHasher.out;
 
 ---
 
-## 🔴 CRITICAL ISSUE #2: TOCTOU Race in Nullifier Verification
+## ✅ FIXED - CRITICAL ISSUE #2: TOCTOU Race in Nullifier Verification
 
-**File**: `src/features/zk/proof/ProofVerifier.ts:152-212`
+**Status**: COMPLETED (commit: 31c63393)
+
+**File**: `src/features/zk/proof/ProofVerifier.ts:214-247`
 
 **Problem**:
 The method checks if a nullifier is used but doesn't atomically mark it as used. There's a time-of-check to time-of-use (TOCTOU) race condition between:
@@ -175,15 +177,21 @@ try {
 - ⚠️ Requires database migration
 - ⚠️ Error handling for constraint violations
 
-**Impact**:
-- **CRITICAL** - Enables double-attestation attacks
-- Breaks proof security model
-- Medium effort - database transaction refactoring
+**Resolution Applied** (Simpler than proposed options):
+- ✅ Discovered `nullifierHash` is already `@PrimaryColumn` (automatic unique constraint)
+- ✅ Added constraint violation handling in `markNullifierUsed`
+- ✅ Throws descriptive error on double-attestation attempt (error code 23505/SQLITE_CONSTRAINT)
+- ✅ **No method signature changes** - markNullifierUsed keeps same interface
+- ✅ **No caller code changes** - existing code works as-is
+- ✅ **No migration needed** - constraint exists via TypeORM @PrimaryColumn
+- ✅ Works perfectly with `synchronize: true`
 
-**Questions for You**:
-1. Do you prefer Option 1 (transaction), Option 2 (constraint), or both (defense in depth)?
-2. Can you pass blockNumber and txHash to verifyIdentityAttestation?
-3. Who calls verifyIdentityAttestation currently? Need to update callers?
+**Why this is better than proposed options**:
+- Simpler than Option 1 (no transaction refactoring, no signature changes)
+- Uses existing Option 2 (constraint already exists as primary key)
+- Database-level enforcement (most reliable)
+- Clear error messages for monitoring
+- Zero breaking changes to existing code
 
 ---
 
@@ -512,10 +520,10 @@ const isValid = await ProofVerifier.verifyProofOnly(
 
 ## Summary
 
-**3 Remaining Issues + 3 Completed:**
+**2 Remaining Issues + 4 Completed:**
 
 1. ✅ **Circuit Privacy** - FIXED with Poseidon(3) approach
-2. 🔴 **Nullifier TOCTOU** - Transaction, constraint, or both?
+2. ✅ **Nullifier TOCTOU** - FIXED with constraint violation handling
 3. ✅ **Merkle Rollback** - FIXED with transaction wrapper
 4. 🔴 **Block-Merkle Consistency** - Atomic or retry+reconciliation?
 5. ✅ **Duplicate Commitment** - FIXED with constraint violation handling
