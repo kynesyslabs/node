@@ -417,7 +417,7 @@ export default class Chain {
                     await this.insertTransaction(tx)
                 }
 
-                // Clean mempool (outside transaction scope is fine)
+                // Clean mempool within transaction
                 if (cleanMempool) {
                     await Mempool.removeTransactionsByHashes(
                         transactionEntities.map(tx => tx.hash),

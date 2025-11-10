@@ -59,6 +59,14 @@ export class MerkleTreeManager {
                 // Restore tree from database snapshot
                 // @ts-expect-error - IncrementalMerkleTree.import exists but types may be incomplete
                 this.tree = IncrementalMerkleTree.import(state.treeSnapshot)
+
+                // Validate depth consistency
+                if (this.tree.depth !== this.depth) {
+                    throw new Error(
+                        `Tree depth mismatch: expected ${this.depth}, got ${this.tree.depth}`,
+                    )
+                }
+
                 console.log(
                     `✅ Loaded Merkle tree: ${state.leafCount} commitments, root: ${state.rootHash.slice(0, 10)}...`,
                 )
@@ -81,6 +89,14 @@ export class MerkleTreeManager {
      */
     addCommitment(commitment: string): number {
         try {
+            // Check tree capacity before insertion
+            const capacity = Math.pow(2, this.depth)
+            if (this.tree.leaves.length >= capacity) {
+                throw new Error(
+                    `Merkle tree capacity reached: ${capacity} leaves (depth ${this.depth})`,
+                )
+            }
+
             const commitmentBigInt = BigInt(commitment)
             this.tree.insert(commitmentBigInt)
             const leafIndex = this.tree.leaves.length - 1

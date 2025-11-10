@@ -13,6 +13,9 @@ import { MerkleTreeState } from "@/model/entities/GCRv2/MerkleTreeState"
 import { MerkleTreeManager } from "./MerkleTreeManager"
 import log from "@/utilities/logger"
 
+// Global Merkle tree identifier
+const GLOBAL_TREE_ID = GLOBAL_TREE_ID
+
 /**
  * Update Merkle tree with commitments from a specific block
  *
@@ -52,7 +55,7 @@ export async function updateMerkleTreeAfterBlock(
         )
 
         // Initialize Merkle tree manager
-        const merkleManager = new MerkleTreeManager(dataSource, 20, "global")
+        const merkleManager = new MerkleTreeManager(dataSource, 20, GLOBAL_TREE_ID)
         await merkleManager.initialize()
 
         // Add each commitment to the tree and update the leaf index
@@ -99,7 +102,7 @@ export async function getCurrentMerkleTreeState(
     const merkleStateRepo = dataSource.getRepository(MerkleTreeState)
 
     const currentState = await merkleStateRepo.findOne({
-        where: { treeId: "global" },
+        where: { treeId: GLOBAL_TREE_ID },
         order: { blockNumber: "DESC" },
     })
 
@@ -129,7 +132,7 @@ export async function rollbackMerkleTreeToBlock(
             // Find the target tree state
             const targetState = await merkleStateRepo.findOne({
                 where: {
-                    treeId: "global",
+                    treeId: GLOBAL_TREE_ID,
                     blockNumber: targetBlockNumber,
                 },
             })
@@ -157,7 +160,7 @@ export async function rollbackMerkleTreeToBlock(
                 .where("block_number > :blockNumber", {
                     blockNumber: targetBlockNumber,
                 })
-                .andWhere("tree_id = :treeId", { treeId: "global" })
+                .andWhere("tree_id = :treeId", { treeId: GLOBAL_TREE_ID })
                 .execute()
 
             log.info(

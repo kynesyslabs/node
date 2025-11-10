@@ -725,6 +725,17 @@ export default class GCRIdentityRoutines {
                 10,
             )
 
+            // Validate environment variable
+            if (isNaN(zkAttestationPoints) || zkAttestationPoints < 0) {
+                log.error(
+                    `Invalid ZK_ATTESTATION_POINTS configuration: ${process.env.ZK_ATTESTATION_POINTS}`,
+                )
+                return {
+                    success: false,
+                    message: "System configuration error: invalid attestation points",
+                }
+            }
+
             const zkAttestationEntry = {
                 date: new Date().toISOString(),
                 points: zkAttestationPoints,

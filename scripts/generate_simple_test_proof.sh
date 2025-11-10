@@ -1,6 +1,12 @@
 #!/bin/bash
 # Generate a valid ZK proof using the simpler identity circuit (no Merkle proof)
 
+# Cleanup temporary files on exit
+cleanup() {
+  rm -f test_input_simple.json test_witness_simple.wtns test_proof_simple.json test_public_simple.json
+}
+trap cleanup EXIT
+
 set -e
 
 echo "🔧 Generating test proof for identity circuit (Phase 3 - no Merkle)..."
@@ -55,5 +61,6 @@ echo "✅ All done! Now run these commands to save the fixture:"
 echo ""
 echo "   mkdir -p src/tests/fixtures"
 echo "   cat test_proof_simple.json test_public_simple.json | jq -s '{proof: .[0], publicSignals: .[1]}' > src/tests/fixtures/valid_proof_fixture.json"
-echo "   rm test_input_simple.json test_witness_simple.wtns test_proof_simple.json test_public_simple.json"
+echo ""
+echo "Note: Temporary files will be cleaned up automatically on exit."
 echo ""
