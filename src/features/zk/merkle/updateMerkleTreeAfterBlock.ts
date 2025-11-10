@@ -116,56 +116,59 @@ export async function rollbackMerkleTreeToBlock(
     dataSource: DataSource,
     targetBlockNumber: number,
 ): Promise<void> {
-    try {
-        const commitmentRepo = dataSource.getRepository(IdentityCommitment)
-        const merkleStateRepo = dataSource.getRepository(MerkleTreeState)
+    // REVIEW: Wrapped in transaction to prevent partial rollback corruption
+    await dataSource.transaction(async (transactionalEntityManager) => {
+        try {
+            const commitmentRepo = transactionalEntityManager.getRepository(IdentityCommitment)
+            const merkleStateRepo = transactionalEntityManager.getRepository(MerkleTreeState)
 
-        log.info(
-            `Rolling back Merkle tree to block ${targetBlockNumber}`,
-        )
-
-        // Find the target tree state
-        const targetState = await merkleStateRepo.findOne({
-            where: {
-                treeId: "global",
-                blockNumber: targetBlockNumber,
-            },
-        })
-
-        if (!targetState) {
-            throw new Error(
-                `No Merkle tree state found for block ${targetBlockNumber}`,
+            log.info(
+                `Rolling back Merkle tree to block ${targetBlockNumber}`,
             )
+
+            // Find the target tree state
+            const targetState = await merkleStateRepo.findOne({
+                where: {
+                    treeId: "global",
+                    blockNumber: targetBlockNumber,
+                },
+            })
+
+            if (!targetState) {
+                throw new Error(
+                    `No Merkle tree state found for block ${targetBlockNumber}`,
+                )
+            }
+
+            // Reset leaf indices for commitments after target block (within transaction)
+            await commitmentRepo
+                .createQueryBuilder()
+                .update(IdentityCommitment)
+                .set({ leafIndex: -1 })
+                .where("block_number > :blockNumber", {
+                    blockNumber: targetBlockNumber,
+                })
+                .execute()
+
+            // Delete tree states after target block (within transaction)
+            await merkleStateRepo
+                .createQueryBuilder()
+                .delete()
+                .where("block_number > :blockNumber", {
+                    blockNumber: targetBlockNumber,
+                })
+                .andWhere("tree_id = :treeId", { treeId: "global" })
+                .execute()
+
+            log.info(
+                `Merkle tree rolled back to block ${targetBlockNumber}`,
+            )
+        } catch (error) {
+            log.error(
+                `Failed to rollback Merkle tree to block ${targetBlockNumber}:`,
+                error,
+            )
+            throw error // Transaction will auto-rollback on throw
         }
-
-        // Delete all commitments after the target block
-        await commitmentRepo
-            .createQueryBuilder()
-            .update(IdentityCommitment)
-            .set({ leafIndex: -1 })
-            .where("block_number > :blockNumber", {
-                blockNumber: targetBlockNumber,
-            })
-            .execute()
-
-        // Delete tree states after the target block
-        await merkleStateRepo
-            .createQueryBuilder()
-            .delete()
-            .where("block_number > :blockNumber", {
-                blockNumber: targetBlockNumber,
-            })
-            .andWhere("tree_id = :treeId", { treeId: "global" })
-            .execute()
-
-        log.info(
-            `Merkle tree rolled back to block ${targetBlockNumber}`,
-        )
-    } catch (error) {
-        log.error(
-            `Failed to rollback Merkle tree to block ${targetBlockNumber}:`,
-            error,
-        )
-        throw error
-    }
+    })
 }
