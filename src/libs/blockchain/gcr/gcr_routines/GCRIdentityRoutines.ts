@@ -705,12 +705,28 @@ export default class GCRIdentityRoutines {
         }
 
         // Mark nullifier as used (prevent double-attestation)
+        // REVIEW: Race condition fix - rely on database constraint for atomicity
         if (!simulate) {
-            await verifier.markNullifierUsed(
-                payload.nullifier_hash,
-                0, // Block number will be updated during block commit
-                editOperation.txhash || "",
-            )
+            try {
+                await verifier.markNullifierUsed(
+                    payload.nullifier_hash,
+                    0, // Block number will be updated during block commit
+                    editOperation.txhash || "",
+                )
+            } catch (error: any) {
+                // Database constraint will catch concurrent double-attestation attempts
+                if (error.message?.includes("Double-attestation attempt") ||
+                    error.code === "23505" ||
+                    error.code === "SQLITE_CONSTRAINT") {
+                    log.warn(`❌ Double-attestation attempt detected for nullifier: ${payload.nullifier_hash.slice(0, 10)}...`)
+                    return {
+                        success: false,
+                        message: "This identity has already been attested in this context",
+                    }
+                }
+                // Re-throw other errors
+                throw error
+            }
 
             // REVIEW: Award points for ZK attestation
             // REVIEW: Phase 10.1 - Configurable ZK attestation points

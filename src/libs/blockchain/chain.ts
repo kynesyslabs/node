@@ -397,24 +397,17 @@ export default class Chain {
             const db = await Datasource.getInstance()
             const dataSource = db.getDataSource()
 
-            return await dataSource.transaction(async (transactionalEntityManager) => {
+            // REVIEW: Transaction boundary fix - defer shared state updates until after commit
+            const result = await dataSource.transaction(async (transactionalEntityManager) => {
                 // Save block within transaction
-                const result = await transactionalEntityManager.save(this.blocks.target, newBlock)
-                getSharedState.lastBlockNumber = block.number
-                getSharedState.lastBlockHash = block.hash
+                const savedBlock = await transactionalEntityManager.save(this.blocks.target, newBlock)
 
-                log.debug(
-                    "[insertBlock] lastBlockNumber: " +
-                        getSharedState.lastBlockNumber,
-                )
-                log.debug(
-                    "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
-                )
-
-                // Add transactions within transaction
+                // REVIEW: Add transactions using transactional manager (not direct repository)
+                // This ensures all saves are part of the same transaction
                 for (let i = 0; i < transactionEntities.length; i++) {
                     const tx = transactionEntities[i]
-                    await this.insertTransaction(tx)
+                    const rawTransaction = Transaction.toRawTransaction(tx, "confirmed")
+                    await transactionalEntityManager.save(this.transactions.target, rawTransaction)
                 }
 
                 // Clean mempool within transaction
@@ -429,6 +422,7 @@ export default class Chain {
                 const commitmentsAdded = await updateMerkleTreeAfterBlock(
                     dataSource,
                     block.number,
+                    transactionalEntityManager,
                 )
                 if (commitmentsAdded > 0) {
                     log.info(
@@ -436,8 +430,23 @@ export default class Chain {
                     )
                 }
 
-                return result
+                return savedBlock
             })
+
+            // REVIEW: Update shared state AFTER transaction commits successfully
+            // This prevents memory state corruption if transaction rolls back
+            getSharedState.lastBlockNumber = block.number
+            getSharedState.lastBlockHash = block.hash
+
+            log.debug(
+                "[insertBlock] lastBlockNumber: " +
+                    getSharedState.lastBlockNumber,
+            )
+            log.debug(
+                "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
+            )
+
+            return result
         }
     }
 

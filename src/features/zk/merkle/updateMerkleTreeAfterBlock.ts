@@ -7,29 +7,54 @@
  * Called after each block is successfully committed to the blockchain.
  */
 
-import { DataSource } from "typeorm"
+import { DataSource, EntityManager } from "typeorm"
 import { IdentityCommitment } from "@/model/entities/GCRv2/IdentityCommitment"
 import { MerkleTreeState } from "@/model/entities/GCRv2/MerkleTreeState"
 import { MerkleTreeManager } from "./MerkleTreeManager"
 import log from "@/utilities/logger"
 
 // Global Merkle tree identifier
-const GLOBAL_TREE_ID = GLOBAL_TREE_ID
+const GLOBAL_TREE_ID = "global"
 
 /**
  * Update Merkle tree with commitments from a specific block
  *
+ * REVIEW: Transaction wrapper added to ensure atomicity
+ * All tree operations (fetch, add, save) must succeed or fail together
+ *
  * @param dataSource - TypeORM DataSource
  * @param blockNumber - Block number that was just committed
+ * @param manager - Optional EntityManager for transactional operations
  * @returns Number of commitments added to the tree
  */
 export async function updateMerkleTreeAfterBlock(
     dataSource: DataSource,
     blockNumber: number,
+    manager?: EntityManager,
+): Promise<number> {
+    // REVIEW: If called with a manager, use it; otherwise create own transaction
+    if (manager) {
+        return await updateMerkleTreeWithManager(manager, dataSource, blockNumber)
+    }
+
+    // Standalone call - wrap in own transaction
+    return await dataSource.transaction(async (transactionalEntityManager) => {
+        return await updateMerkleTreeWithManager(transactionalEntityManager, dataSource, blockNumber)
+    })
+}
+
+/**
+ * Internal implementation that uses a specific EntityManager
+ * This ensures all database operations are part of the same transaction
+ */
+async function updateMerkleTreeWithManager(
+    manager: EntityManager,
+    dataSource: DataSource,
+    blockNumber: number,
 ): Promise<number> {
     try {
-        const commitmentRepo = dataSource.getRepository(IdentityCommitment)
-        const merkleStateRepo = dataSource.getRepository(MerkleTreeState)
+        const commitmentRepo = manager.getRepository(IdentityCommitment)
+        const merkleStateRepo = manager.getRepository(MerkleTreeState)
 
         // Find all commitments from this block that haven't been added to tree yet
         // (leafIndex === -1 means not yet in tree)
@@ -72,21 +97,21 @@ export async function updateMerkleTreeAfterBlock(
             )
         }
 
-        // Batch save all updated commitments
+        // REVIEW: Batch save all updated commitments within transaction
         await commitmentRepo.save(newCommitments)
 
-        // Save updated Merkle tree state
+        // REVIEW: Save updated Merkle tree state within transaction
         await merkleManager.saveToDatabase(blockNumber)
 
         const stats = merkleManager.getStats()
         log.info(
-            `Merkle tree updated for block ${blockNumber}: ${stats.totalLeaves} total leaves, root: ${stats.currentRoot.slice(0, 10)}...`,
+            `Merkle tree updated for block ${blockNumber}: ${stats.leafCount} total leaves, root: ${stats.root.slice(0, 10)}...`,
         )
 
         return newCommitments.length
     } catch (error) {
         log.error(`Failed to update Merkle tree for block ${blockNumber}:`, error)
-        throw error
+        throw error // Transaction will rollback
     }
 }
 
