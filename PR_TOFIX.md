@@ -187,9 +187,11 @@ try {
 
 ---
 
-## 🔴 CRITICAL ISSUE #3: Merkle Rollback Race Condition
+## ✅ FIXED - CRITICAL ISSUE #3: Merkle Rollback Race Condition
 
-**File**: `src/features/zk/merkle/updateMerkleTreeAfterBlock.ts:117-168`
+**Status**: COMPLETED (commit: 37ee69d1)
+
+**File**: `src/features/zk/merkle/updateMerkleTreeAfterBlock.ts:115-174`
 
 **Problem**:
 The `rollbackMerkleTreeToBlock` function performs multiple database operations without a transaction wrapper:
@@ -252,12 +254,12 @@ export async function rollbackMerkleTreeToBlock(
 }
 ```
 
-**Impact**:
-- **CRITICAL** - Can corrupt Merkle tree state during chain reorgs
-- Low effort - straightforward transaction wrapper
-- No architectural decisions needed
-
-**Action**: This is straightforward to implement. Proceed with fix?
+**Resolution Applied**:
+- ✅ Wrapped entire function in `dataSource.transaction()`
+- ✅ All database operations now atomic (both succeed or both rollback)
+- ✅ Transaction automatically rolls back on error (throw)
+- ✅ Prevents partial rollback corruption during chain reorgs
+- ✅ No breaking changes to function signature
 
 ---
 
@@ -501,11 +503,11 @@ const isValid = await ProofVerifier.verifyProofOnly(
 
 ## Summary
 
-**5 Remaining Issues + 1 Completed:**
+**4 Remaining Issues + 2 Completed:**
 
 1. ✅ **Circuit Privacy** - FIXED with Poseidon(3) approach
 2. 🔴 **Nullifier TOCTOU** - Transaction, constraint, or both?
-3. 🔴 **Merkle Rollback** - Straightforward fix, proceed?
+3. ✅ **Merkle Rollback** - FIXED with transaction wrapper
 4. 🔴 **Block-Merkle Consistency** - Atomic or retry+reconciliation?
 5. 🔴 **Duplicate Commitment** - Unique constraint, transaction, or both?
 6. 🟡 **Valid Proof Test** - Generate proofs or use fixtures?
