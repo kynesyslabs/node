@@ -351,9 +351,11 @@ if (retries === 0) {
 
 ---
 
-## 🔴 CRITICAL ISSUE #5: Duplicate Commitment Race
+## ✅ FIXED - CRITICAL ISSUE #5: Duplicate Commitment Race
 
-**File**: `src/libs/blockchain/gcr/gcr_routines/GCRIdentityRoutines.ts:628-637`
+**Status**: COMPLETED (commit: bd0305ed)
+
+**File**: `src/libs/blockchain/gcr/gcr_routines/GCRIdentityRoutines.ts:622-654`
 
 **Problem**:
 The check for existing commitments and the subsequent insert are not atomic:
@@ -427,13 +429,20 @@ try {
 - ⚠️ More verbose
 - ⚠️ Transaction overhead on every insert
 
-**Impact**:
-- **CRITICAL** - Can create duplicate commitments, breaking tree integrity
-- Low effort - add unique constraint + catch violation
+**Resolution Applied** (Better than proposed options):
+- ✅ Discovered `commitmentHash` is already `@PrimaryColumn` (automatic unique constraint)
+- ✅ Removed check-then-insert TOCTOU pattern entirely
+- ✅ Direct save with constraint violation handling (error code 23505/SQLITE_CONSTRAINT)
+- ✅ More performant (1 DB operation instead of 2)
+- ✅ Database-level enforcement already exists
+- ✅ **No migration needed** - constraint exists via TypeORM @PrimaryColumn
+- ✅ Works perfectly with `synchronize: true`
 
-**Questions for You**:
-1. Do you prefer Option 1 (unique constraint), Option 2 (transaction), or both?
-2. Can you run a database migration to add the unique constraint?
+**Why this is better**:
+- Simpler than transaction approach (no transaction overhead)
+- Unique constraint already exists (primary key)
+- Catches violations at database level (most reliable)
+- Compatible with user's no-migration constraint
 
 ---
 
@@ -503,13 +512,13 @@ const isValid = await ProofVerifier.verifyProofOnly(
 
 ## Summary
 
-**4 Remaining Issues + 2 Completed:**
+**3 Remaining Issues + 3 Completed:**
 
 1. ✅ **Circuit Privacy** - FIXED with Poseidon(3) approach
 2. 🔴 **Nullifier TOCTOU** - Transaction, constraint, or both?
 3. ✅ **Merkle Rollback** - FIXED with transaction wrapper
 4. 🔴 **Block-Merkle Consistency** - Atomic or retry+reconciliation?
-5. 🔴 **Duplicate Commitment** - Unique constraint, transaction, or both?
+5. ✅ **Duplicate Commitment** - FIXED with constraint violation handling
 6. 🟡 **Valid Proof Test** - Generate proofs or use fixtures?
 
 **Next Steps:**
