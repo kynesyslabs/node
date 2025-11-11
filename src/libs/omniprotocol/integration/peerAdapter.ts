@@ -9,6 +9,7 @@ import {
 import { ConnectionPool } from "../transport/ConnectionPool"
 import { encodeJsonRequest, decodeRpcResponse } from "../serialization/jsonEnvelope"
 import { OmniOpcode } from "../protocol/opcodes"
+import { getNodePrivateKey, getNodePublicKey } from "./keys"
 
 export interface AdapterOptions {
     config?: OmniProtocolConfig
@@ -110,16 +111,44 @@ export class PeerOmniAdapter {
             // Encode RPC request as JSON envelope
             const payload = encodeJsonRequest(request)
 
-            // Send via OmniProtocol (opcode 0x03 = NODE_CALL)
-            const responseBuffer = await this.connectionPool.send(
-                peer.identity,
-                tcpConnectionString,
-                OmniOpcode.NODE_CALL,
-                payload,
-                {
-                    timeout: 30000, // 30 second timeout
-                },
-            )
+            // If authenticated, use sendAuthenticated with node's keys
+            let responseBuffer: Buffer
+
+            if (isAuthenticated) {
+                const privateKey = getNodePrivateKey()
+                const publicKey = getNodePublicKey()
+
+                if (!privateKey || !publicKey) {
+                    console.warn(
+                        `[PeerOmniAdapter] Node keys not available, falling back to HTTP`
+                    )
+                    return peer.call(request, isAuthenticated)
+                }
+
+                // Send authenticated via OmniProtocol
+                responseBuffer = await this.connectionPool.sendAuthenticated(
+                    peer.identity,
+                    tcpConnectionString,
+                    OmniOpcode.NODE_CALL,
+                    payload,
+                    privateKey,
+                    publicKey,
+                    {
+                        timeout: 30000, // 30 second timeout
+                    },
+                )
+            } else {
+                // Send unauthenticated via OmniProtocol
+                responseBuffer = await this.connectionPool.send(
+                    peer.identity,
+                    tcpConnectionString,
+                    OmniOpcode.NODE_CALL,
+                    payload,
+                    {
+                        timeout: 30000, // 30 second timeout
+                    },
+                )
+            }
 
             // Decode response from RPC envelope
             const response = decodeRpcResponse(responseBuffer)
