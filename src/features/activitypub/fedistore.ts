@@ -3,6 +3,24 @@ import * as sqlite3 from "sqlite3"
 export class ActivityPubStorage {
     db: sqlite3.Database
     private readonly validCollections: Set<string>
+    private readonly collectionSchemas = {
+        actors: "id TEXT PRIMARY KEY, type TEXT, name TEXT, inbox TEXT, outbox TEXT, followers TEXT, following TEXT, liked TEXT",
+        objects:
+            "id TEXT PRIMARY KEY, type TEXT, attributedTo TEXT, content TEXT",
+        activities:
+            "id TEXT PRIMARY KEY, type TEXT, actor TEXT, object TEXT",
+        inboxes: "id TEXT PRIMARY KEY, owner TEXT, content TEXT",
+        outboxes: "id TEXT PRIMARY KEY, owner TEXT, content TEXT",
+        followers: "id TEXT PRIMARY KEY, owner TEXT, actor TEXT",
+        followings: "id TEXT PRIMARY KEY, owner TEXT, actor TEXT",
+        likeds: "id TEXT PRIMARY KEY, owner TEXT, object TEXT",
+        collections: "id TEXT PRIMARY KEY, owner TEXT, items TEXT",
+        blockeds: "id TEXT PRIMARY KEY, owner TEXT, actor TEXT",
+        rejections: "id TEXT PRIMARY KEY, owner TEXT, activity TEXT",
+        rejecteds: "id TEXT PRIMARY KEY, owner TEXT, activity TEXT",
+        shares: "id TEXT PRIMARY KEY, owner TEXT, object TEXT",
+        likes: "id TEXT PRIMARY KEY, owner TEXT, object TEXT",
+    }
 
     constructor(dbPath) {
         this.db = new sqlite3.Database(dbPath, err => {
@@ -24,26 +42,7 @@ export class ActivityPubStorage {
     }
 
     createTables() {
-        const collections = {
-            actors: "id TEXT PRIMARY KEY, type TEXT, name TEXT, inbox TEXT, outbox TEXT, followers TEXT, following TEXT, liked TEXT",
-            objects:
-                "id TEXT PRIMARY KEY, type TEXT, attributedTo TEXT, content TEXT",
-            activities:
-                "id TEXT PRIMARY KEY, type TEXT, actor TEXT, object TEXT",
-            inboxes: "id TEXT PRIMARY KEY, owner TEXT, content TEXT",
-            outboxes: "id TEXT PRIMARY KEY, owner TEXT, content TEXT",
-            followers: "id TEXT PRIMARY KEY, owner TEXT, actor TEXT",
-            followings: "id TEXT PRIMARY KEY, owner TEXT, actor TEXT",
-            likeds: "id TEXT PRIMARY KEY, owner TEXT, object TEXT",
-            collections: "id TEXT PRIMARY KEY, owner TEXT, items TEXT",
-            blockeds: "id TEXT PRIMARY KEY, owner TEXT, actor TEXT",
-            rejections: "id TEXT PRIMARY KEY, owner TEXT, activity TEXT",
-            rejecteds: "id TEXT PRIMARY KEY, owner TEXT, activity TEXT",
-            shares: "id TEXT PRIMARY KEY, owner TEXT, object TEXT",
-            likes: "id TEXT PRIMARY KEY, owner TEXT, object TEXT",
-        }
-
-        for (const [collection, columns] of Object.entries(collections)) {
+        for (const [collection, columns] of Object.entries(this.collectionSchemas)) {
             const sql = `CREATE TABLE IF NOT EXISTS ${collection} (${columns})`
             this.db.run(sql)
         }
