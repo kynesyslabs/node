@@ -201,8 +201,9 @@ export class MerkleTreeManager {
      * Save current tree state to database
      *
      * @param blockNumber - Current block number
+     * @param manager - Optional EntityManager for transactional operations
      */
-    async saveToDatabase(blockNumber: number): Promise<void> {
+    async saveToDatabase(blockNumber: number, manager?: any): Promise<void> {
         try {
             // REVIEW: Save tree leaves for reconstruction
             // The @zk-kit/incremental-merkle-tree v1.1.0 library does not have export() method
@@ -211,7 +212,11 @@ export class MerkleTreeManager {
                 leaves: this.tree.leaves.map((leaf) => leaf.toString()),
             }
 
-            await this.stateRepo.save({
+            // REVIEW: HIGH FIX - Use transactional manager if provided to ensure atomicity
+            // When called within a transaction, use the provided EntityManager
+            const repo = manager ? manager.getRepository(MerkleTreeState) : this.stateRepo
+
+            await repo.save({
                 treeId: this.treeId,
                 rootHash: this.getRoot(),
                 blockNumber,

@@ -100,8 +100,9 @@ async function updateMerkleTreeWithManager(
         // REVIEW: Batch save all updated commitments within transaction
         await commitmentRepo.save(newCommitments)
 
-        // REVIEW: Save updated Merkle tree state within transaction
-        await merkleManager.saveToDatabase(blockNumber)
+        // REVIEW: HIGH FIX - Pass EntityManager to ensure Merkle tree save is within transaction
+        // saveToDatabase() will use the transactional manager, ensuring atomicity
+        await merkleManager.saveToDatabase(blockNumber, manager)
 
         const stats = merkleManager.getStats()
         log.info(
@@ -168,24 +169,30 @@ export async function rollbackMerkleTreeToBlock(
                 )
             }
 
+            // REVIEW: HIGH FIX - Use entity property names with alias, not column names
+            // TypeORM QueryBuilder requires property names (blockNumber, treeId) not DB columns (block_number, tree_id)
             // Reset leaf indices for commitments after target block (within transaction)
             await commitmentRepo
-                .createQueryBuilder()
+                .createQueryBuilder('commitment')
                 .update(IdentityCommitment)
                 .set({ leafIndex: -1 })
-                .where("block_number > :blockNumber", {
+                .where("commitment.blockNumber > :blockNumber", {
                     blockNumber: targetBlockNumber,
+                })
+                .andWhere("commitment.treeId = :treeId", {
+                    treeId: GLOBAL_TREE_ID,
                 })
                 .execute()
 
+            // REVIEW: HIGH FIX - Use entity property names, not column names
             // Delete tree states after target block (within transaction)
             await merkleStateRepo
                 .createQueryBuilder()
                 .delete()
-                .where("block_number > :blockNumber", {
+                .where("blockNumber > :blockNumber", {
                     blockNumber: targetBlockNumber,
                 })
-                .andWhere("tree_id = :treeId", { treeId: GLOBAL_TREE_ID })
+                .andWhere("treeId = :treeId", { treeId: GLOBAL_TREE_ID })
                 .execute()
 
             log.info(

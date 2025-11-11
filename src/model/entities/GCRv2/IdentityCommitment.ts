@@ -17,8 +17,9 @@ import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from "typeorm"
 export class IdentityCommitment {
     /**
      * Primary key: Hash of the commitment
-     * Format: Hex string (64 characters)
-     * Example: "0x1a2b3c4d..."
+     * Format: 64 hex digits with optional 0x prefix (66 chars total with prefix, 64 without)
+     * Examples: "0x1a2b3c4d..." (with prefix) or "1a2b3c4d..." (without prefix)
+     * Note: Validation accepts both formats (see GCRIdentityRoutines.ts)
      */
     @PrimaryColumn({ type: "text", name: "commitment_hash" })
     commitmentHash: string

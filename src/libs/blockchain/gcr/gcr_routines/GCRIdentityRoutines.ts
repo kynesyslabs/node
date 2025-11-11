@@ -611,11 +611,29 @@ export default class GCRIdentityRoutines {
     ): Promise<GCRResult> {
         const payload = editOperation.data as IdentityCommitmentPayload
 
+        // REVIEW: HIGH FIX - Strengthen commitment hash format validation
         // Validate commitment format (should be 64-char hex or large number string)
-        if (!payload.commitment_hash || typeof payload.commitment_hash !== "string") {
+        if (
+            !payload.commitment_hash ||
+            typeof payload.commitment_hash !== "string" ||
+            payload.commitment_hash.length === 0
+        ) {
             return {
                 success: false,
                 message: "Invalid commitment hash format",
+            }
+        }
+
+        // Validate format: either 64-char hex (with optional 0x prefix) or numeric string
+        const hexPattern = /^(0x)?[0-9a-fA-F]{64}$/
+        const isValidHex = hexPattern.test(payload.commitment_hash)
+        const isValidNumber =
+            /^\d+$/.test(payload.commitment_hash) && payload.commitment_hash.length > 0
+
+        if (!isValidHex && !isValidNumber) {
+            return {
+                success: false,
+                message: "Commitment hash must be 64-char hex or numeric string",
             }
         }
 
@@ -709,8 +727,9 @@ export default class GCRIdentityRoutines {
         // The verifier already marked the nullifier with temporary data to prevent race conditions.
         // Now we update it with proper block/tx info and award points in a single transaction.
         if (!simulate) {
-            const dataSource = await Datasource.getInstance()
-            const queryRunner = dataSource.getDataSource().createQueryRunner()
+            // REVIEW: MEDIUM FIX - Reuse existing dataSource instead of redundant getInstance() call
+            // The dataSource variable is already available from line 707, no need to retrieve it again
+            const queryRunner = dataSource.createQueryRunner()
             await queryRunner.connect()
             await queryRunner.startTransaction()
 
