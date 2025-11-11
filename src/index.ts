@@ -441,6 +441,22 @@ async function main() {
                     maxConnections: 1000,
                     authTimeout: 5000,
                     connectionTimeout: 600000, // 10 minutes
+                    // TLS configuration
+                    tls: {
+                        enabled: process.env.OMNI_TLS_ENABLED === "true",
+                        mode: (process.env.OMNI_TLS_MODE as 'self-signed' | 'ca') || 'self-signed',
+                        certPath: process.env.OMNI_CERT_PATH || './certs/node-cert.pem',
+                        keyPath: process.env.OMNI_KEY_PATH || './certs/node-key.pem',
+                        caPath: process.env.OMNI_CA_PATH,
+                        minVersion: (process.env.OMNI_TLS_MIN_VERSION as 'TLSv1.2' | 'TLSv1.3') || 'TLSv1.3',
+                    },
+                    // Rate limiting configuration
+                    rateLimit: {
+                        enabled: process.env.OMNI_RATE_LIMIT_ENABLED !== "false", // Default true
+                        maxConnectionsPerIP: parseInt(process.env.OMNI_MAX_CONNECTIONS_PER_IP || "10", 10),
+                        maxRequestsPerSecondPerIP: parseInt(process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP || "100", 10),
+                        maxRequestsPerSecondPerIdentity: parseInt(process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY || "200", 10),
+                    },
                 })
                 indexState.omniServer = omniServer
                 console.log(
