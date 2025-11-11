@@ -13,12 +13,8 @@ export class ActivityPubStorage {
             this.createTables()
         })
 
-        // Initialize valid collections whitelist
-        this.validCollections = new Set([
-            'actors', 'objects', 'activities', 'inboxes', 'outboxes',
-            'followers', 'followings', 'likeds', 'collections', 'blockeds',
-            'rejections', 'rejecteds', 'shares', 'likes'
-        ])
+        // Initialize valid collections whitelist from the single source of truth
+        this.validCollections = new Set(Object.keys(this.collectionSchemas));
     }
 
     private validateCollection(collection: string): void {
