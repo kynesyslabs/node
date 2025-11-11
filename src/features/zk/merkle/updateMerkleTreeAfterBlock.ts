@@ -170,7 +170,8 @@ export async function rollbackMerkleTreeToBlock(
             }
 
             // REVIEW: HIGH FIX - Use entity property names with alias, not column names
-            // TypeORM QueryBuilder requires property names (blockNumber, treeId) not DB columns (block_number, tree_id)
+            // TypeORM QueryBuilder requires property names (blockNumber) not DB columns (block_number)
+            // NOTE: IdentityCommitment doesn't have treeId - all commitments are in the global tree
             // Reset leaf indices for commitments after target block (within transaction)
             await commitmentRepo
                 .createQueryBuilder('commitment')
@@ -178,9 +179,6 @@ export async function rollbackMerkleTreeToBlock(
                 .set({ leafIndex: -1 })
                 .where("commitment.blockNumber > :blockNumber", {
                     blockNumber: targetBlockNumber,
-                })
-                .andWhere("commitment.treeId = :treeId", {
-                    treeId: GLOBAL_TREE_ID,
                 })
                 .execute()
 

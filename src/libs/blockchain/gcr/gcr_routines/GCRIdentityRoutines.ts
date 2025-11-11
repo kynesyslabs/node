@@ -637,6 +637,26 @@ export default class GCRIdentityRoutines {
             }
         }
 
+        // REVIEW: MEDIUM FIX - Add provider field validation
+        if (
+            !payload.provider ||
+            typeof payload.provider !== "string" ||
+            payload.provider.trim().length === 0
+        ) {
+            return {
+                success: false,
+                message: "Invalid or missing provider field",
+            }
+        }
+
+        // REVIEW: MEDIUM FIX - Add timestamp validation
+        if (!payload.timestamp || typeof payload.timestamp !== "number") {
+            return {
+                success: false,
+                message: "Invalid or missing timestamp",
+            }
+        }
+
         // Get datasource for IdentityCommitment repository
         const db = await Datasource.getInstance()
         const dataSource = db.getDataSource()
@@ -689,16 +709,35 @@ export default class GCRIdentityRoutines {
     ): Promise<GCRResult> {
         const payload = editOperation.data as IdentityAttestationPayload
 
-        // Validate payload structure
+        // REVIEW: MEDIUM FIX - Validate payload structure with type and format checks
         if (
             !payload.nullifier_hash ||
+            typeof payload.nullifier_hash !== "string" ||
+            payload.nullifier_hash.length === 0 ||
             !payload.merkle_root ||
+            typeof payload.merkle_root !== "string" ||
+            payload.merkle_root.length === 0 ||
             !payload.proof ||
-            !payload.public_signals
+            typeof payload.proof !== "object" ||
+            !payload.public_signals ||
+            !Array.isArray(payload.public_signals)
         ) {
             return {
                 success: false,
                 message: "Invalid ZK attestation payload",
+            }
+        }
+
+        // REVIEW: MEDIUM FIX - Validate nullifier hash format (should match commitment format)
+        const hexPattern = /^(0x)?[0-9a-fA-F]{64}$/
+        const isValidNullifier =
+            hexPattern.test(payload.nullifier_hash) ||
+            (/^\d+$/.test(payload.nullifier_hash) && payload.nullifier_hash.length > 0)
+
+        if (!isValidNullifier) {
+            return {
+                success: false,
+                message: "Invalid nullifier hash format",
             }
         }
 
@@ -741,7 +780,8 @@ export default class GCRIdentityRoutines {
                     {
                         blockNumber: 0, // Will be updated during block commit
                         transactionHash: editOperation.txhash || "",
-                        timestamp: Date.now(),
+                        // REVIEW: HIGH FIX - Standardize timestamp format to string (matching line 654)
+                        timestamp: Date.now().toString(),
                     },
                 )
 

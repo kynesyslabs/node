@@ -49,6 +49,9 @@ const ZK_MERKLE_TREE_ID = "global" // Global tree identifier for identity attest
 let globalMerkleManager: MerkleTreeManager | null = null
 // REVIEW: Initialization promise to prevent concurrent initialization race condition
 let initializationPromise: Promise<MerkleTreeManager> | null = null
+// REVIEW: HIGH FIX - Track initialization failures to prevent retry storms
+let lastInitializationError: { timestamp: number; error: Error } | null = null
+const INITIALIZATION_BACKOFF_MS = 5000 // 5 seconds
 
 /**
  * Get or create the global MerkleTreeManager singleton instance
@@ -64,6 +67,22 @@ async function getMerkleTreeManager(): Promise<MerkleTreeManager> {
     // Wait for ongoing initialization
     if (initializationPromise) {
         return await initializationPromise
+    }
+
+    // REVIEW: HIGH FIX - Check if recent initialization failed and enforce backoff
+    if (lastInitializationError) {
+        const timeSinceError = Date.now() - lastInitializationError.timestamp
+        if (timeSinceError < INITIALIZATION_BACKOFF_MS) {
+            const remainingMs = INITIALIZATION_BACKOFF_MS - timeSinceError
+            log.warn(
+                `MerkleTreeManager initialization failed recently. Retry blocked for ${remainingMs}ms`,
+            )
+            throw new Error(
+                `MerkleTreeManager initialization in backoff period. Retry in ${Math.ceil(remainingMs / 1000)}s`,
+            )
+        }
+        // Backoff period expired, clear error and allow retry
+        lastInitializationError = null
     }
 
     // Start initialization
@@ -83,10 +102,19 @@ async function getMerkleTreeManager(): Promise<MerkleTreeManager> {
     })()
 
     try {
-        return await initializationPromise
-    } finally {
-        // Clear promise after initialization completes (success or failure)
+        const result = await initializationPromise
+        // REVIEW: HIGH FIX - Only clear promise on success
         initializationPromise = null
+        return result
+    } catch (error) {
+        // REVIEW: HIGH FIX - Cache error with timestamp to enforce backoff
+        lastInitializationError = {
+            timestamp: Date.now(),
+            error: error instanceof Error ? error : new Error(String(error)),
+        }
+        log.error("MerkleTreeManager initialization failed:", error)
+        // Keep initializationPromise set to prevent concurrent retries
+        throw error
     }
 }
 
@@ -503,21 +531,19 @@ export async function serverRpcBun() {
     // Get current Merkle tree root
     server.get("/zk/merkle-root", async () => {
         try {
+            // REVIEW: HIGH FIX - Use singleton MerkleTreeManager for consistency
+            const manager = await getMerkleTreeManager()
+            const stats = manager.getStats()
+
+            // Get current block number from database (required for response)
             const db = await Datasource.getInstance()
             const dataSource = db.getDataSource()
             const currentState = await getCurrentMerkleTreeState(dataSource)
 
-            if (!currentState) {
-                return jsonResponse(
-                    { error: "Merkle tree not initialized" },
-                    404,
-                )
-            }
-
             return jsonResponse({
-                rootHash: currentState.rootHash,
-                blockNumber: currentState.blockNumber,
-                leafCount: currentState.leafCount,
+                rootHash: stats.root, // From in-memory singleton (fast)
+                blockNumber: currentState?.blockNumber || 0, // From database
+                leafCount: stats.leafCount, // From in-memory singleton (fast)
             })
         } catch (error) {
             log.error("[ZK RPC] Error getting Merkle root:", error)
