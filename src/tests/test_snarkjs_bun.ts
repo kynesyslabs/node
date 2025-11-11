@@ -5,14 +5,18 @@
 
 import * as snarkjs from "snarkjs"
 import { readFileSync } from "fs"
-import { join } from "path"
+import { join, dirname } from "path"
+import { fileURLToPath } from "url"
 
 console.log("🧪 Testing snarkjs.groth16.verify with Bun\n")
 
 async function testVerification() {
     try {
         console.log("📋 Loading verification key...")
-        const vKeyPath = join(process.cwd(), "src/features/zk/keys/verification_key_merkle.json")
+        // REVIEW: Use import.meta.url for reliable path resolution independent of cwd
+        const __filename = fileURLToPath(import.meta.url)
+        const __dirname = dirname(__filename)
+        const vKeyPath = join(__dirname, "../features/zk/keys/verification_key_merkle.json")
         const vKey = JSON.parse(readFileSync(vKeyPath, "utf-8"))
         console.log("✅ Verification key loaded\n")
 
@@ -55,10 +59,16 @@ async function testVerification() {
     }
 }
 
+// REVIEW: Add exit codes for CI/CD integration
 testVerification().then(success => {
     if (success) {
         console.log("\n🎉 snarkjs works with Bun - no workarounds needed!")
+        process.exit(0)
     } else {
         console.log("\n⚠️  snarkjs has issues with Bun - need workaround")
+        process.exit(1)
     }
+}).catch(error => {
+    console.error("\n❌ Unexpected error:", error)
+    process.exit(1)
 })

@@ -192,7 +192,8 @@ export class MerkleTreeManager {
             }
         } catch (error) {
             console.error("❌ Failed to get proof for commitment:", error)
-            return null
+            // REVIEW: Throw error instead of returning null to distinguish from "not found"
+            throw error
         }
     }
 
@@ -241,11 +242,9 @@ export class MerkleTreeManager {
         root: bigint,
     ): boolean {
         try {
+            // REVIEW: verifyProof accepts only one argument - the MerkleProof object
             // Include leaf and root in proof object as required by zk-kit library
-            return IncrementalMerkleTree.verifyProof(
-                { ...proof, leaf, root },
-                poseidon2,
-            )
+            return IncrementalMerkleTree.verifyProof({ ...proof, leaf, root })
         } catch (error) {
             console.error("❌ Proof verification failed:", error)
             return false

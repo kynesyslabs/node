@@ -129,10 +129,10 @@ bun run zk:setup-all
 - Provider differentiation handled in commitment hash itself
 
 ### 3. Proof System: Groth16
-**Decision**: Groth16 over PLONK  
+**Decision**: Groth16 over PLONK
 **Rationale**:
-- ~5x faster verification (1-2ms vs 5-10ms)
-- Smaller proofs (~200 bytes vs ~800 bytes)
+- Groth16 typically shows lower verification latency than PLONK (often 30-50% faster depending on circuit complexity)
+- Smaller proofs (~288 bytes vs ~512 bytes for PLONK)
 - Battle-tested in production
 - Can use existing Powers of Tau ceremony
 - Can migrate to PLONK later if transparency becomes priority

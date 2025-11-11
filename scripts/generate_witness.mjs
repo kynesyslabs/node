@@ -11,11 +11,15 @@ async function generateWitness() {
     const rawInputPath = process.argv[2] || 'test_input.json';
     const rawOutputPath = process.argv[3] || 'test_witness.wtns';
 
-    // Prevent path traversal attacks
-    if (isAbsolute(rawInputPath) || rawInputPath.includes('..')) {
+    // REVIEW: Prevent path traversal attacks - check ".." as path segment, not substring
+    // This allows filenames like "file..json" while rejecting actual path traversal
+    const normalizedInput = normalize(rawInputPath);
+    if (isAbsolute(rawInputPath) || normalizedInput.startsWith('..')) {
         throw new Error('Input path must be relative and cannot contain ".."');
     }
-    if (isAbsolute(rawOutputPath) || rawOutputPath.includes('..')) {
+
+    const normalizedOutput = normalize(rawOutputPath);
+    if (isAbsolute(rawOutputPath) || normalizedOutput.startsWith('..')) {
         throw new Error('Output path must be relative and cannot contain ".."');
     }
 

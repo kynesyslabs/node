@@ -70,13 +70,15 @@ async function getMerkleTreeManager(): Promise<MerkleTreeManager> {
     initializationPromise = (async () => {
         const db = await Datasource.getInstance()
         const dataSource = db.getDataSource()
-        globalMerkleManager = new MerkleTreeManager(
+        // REVIEW: Create local instance, only assign to global after successful init
+        const manager = new MerkleTreeManager(
             dataSource,
             ZK_MERKLE_TREE_DEPTH,
             ZK_MERKLE_TREE_ID,
         )
-        await globalMerkleManager.initialize()
+        await manager.initialize()
         log.info("✅ Global MerkleTreeManager initialized")
+        globalMerkleManager = manager
         return globalMerkleManager
     })()
 

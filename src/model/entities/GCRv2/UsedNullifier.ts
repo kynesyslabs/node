@@ -17,8 +17,8 @@ import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from "typeorm"
 export class UsedNullifier {
     /**
      * Primary key: Hash of the nullifier
-     * Format: Hex string (64 characters)
-     * Example: "0x5e6f7g8h..."
+     * Format: Hex string (64 hex digits + "0x" prefix = 66 characters total)
+     * Example: "0x5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f"
      */
     @PrimaryColumn({ type: "text", name: "nullifier_hash" })
     nullifierHash: string
@@ -36,11 +36,18 @@ export class UsedNullifier {
     transactionHash: string
 
     /**
-     * Timestamp when nullifier was used
-     * REVIEW: Changed from bigint to integer for type consistency with blockNumber
-     * JavaScript Date.now() returns number (safe up to 2^53, covers dates until year 285616)
+     * Timestamp when nullifier was used (milliseconds since epoch)
+     * REVIEW: Using bigint to safely store Date.now() values (JavaScript safe up to 2^53)
+     * TypeORM bigint is stored as string in DB but transformed to/from number in TypeScript
      */
-    @Column({ type: "integer", name: "timestamp" })
+    @Column({
+        type: "bigint",
+        name: "timestamp",
+        transformer: {
+            to: (value: number) => value,
+            from: (value: string) => parseInt(value, 10),
+        },
+    })
     timestamp: number
 
     /**
