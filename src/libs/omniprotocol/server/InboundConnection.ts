@@ -3,6 +3,7 @@ import { EventEmitter } from "events"
 import { MessageFramer } from "../transport/MessageFramer"
 import { dispatchOmniMessage } from "../protocol/dispatcher"
 import { OmniMessageHeader, ParsedOmniMessage } from "../types/message"
+import { RateLimiter } from "../ratelimit"
 
 export type ConnectionState =
     | "PENDING_AUTH"      // Waiting for hello_peer
@@ -14,6 +15,7 @@ export type ConnectionState =
 export interface InboundConnectionConfig {
     authTimeout: number
     connectionTimeout: number
+    rateLimiter?: RateLimiter
 }
 
 /**
@@ -26,6 +28,7 @@ export class InboundConnection extends EventEmitter {
     private framer: MessageFramer
     private state: ConnectionState = "PENDING_AUTH"
     private config: InboundConnectionConfig
+    private rateLimiter?: RateLimiter
 
     private peerIdentity: string | null = null
     private createdAt: number = Date.now()
@@ -41,6 +44,7 @@ export class InboundConnection extends EventEmitter {
         this.socket = socket
         this.connectionId = connectionId
         this.config = config
+        this.rateLimiter = config.rateLimiter
         this.framer = new MessageFramer()
     }
 
@@ -102,6 +106,43 @@ export class InboundConnection extends EventEmitter {
         console.log(
             `[InboundConnection] ${this.connectionId} received opcode 0x${message.header.opcode.toString(16)}`
         )
+
+        // Check rate limits
+        if (this.rateLimiter) {
+            const ipAddress = this.socket.remoteAddress || "unknown"
+
+            // Check IP-based rate limit
+            const ipResult = this.rateLimiter.checkIPRequest(ipAddress)
+            if (!ipResult.allowed) {
+                console.warn(
+                    `[InboundConnection] ${this.connectionId} IP rate limit exceeded: ${ipResult.reason}`
+                )
+                // Send error response
+                await this.sendErrorResponse(
+                    message.header.sequence,
+                    0xf429, // Too Many Requests
+                    ipResult.reason || "Rate limit exceeded"
+                )
+                return
+            }
+
+            // Check identity-based rate limit (if authenticated)
+            if (this.peerIdentity) {
+                const identityResult = this.rateLimiter.checkIdentityRequest(this.peerIdentity)
+                if (!identityResult.allowed) {
+                    console.warn(
+                        `[InboundConnection] ${this.connectionId} identity rate limit exceeded: ${identityResult.reason}`
+                    )
+                    // Send error response
+                    await this.sendErrorResponse(
+                        message.header.sequence,
+                        0xf429, // Too Many Requests
+                        identityResult.reason || "Rate limit exceeded"
+                    )
+                    return
+                }
+            }
+        }
 
         try {
             // Dispatch to handler
@@ -181,6 +222,23 @@ export class InboundConnection extends EventEmitter {
                 }
             })
         })
+    }
+
+    /**
+     * Send error response
+     */
+    private async sendErrorResponse(
+        sequence: number,
+        errorCode: number,
+        errorMessage: string
+    ): Promise<void> {
+        // Create error payload: 2 bytes error code + error message
+        const messageBuffer = Buffer.from(errorMessage, "utf8")
+        const payload = Buffer.allocUnsafe(2 + messageBuffer.length)
+        payload.writeUInt16BE(errorCode, 0)
+        messageBuffer.copy(payload, 2)
+
+        return this.sendResponse(sequence, payload)
     }
 
     /**

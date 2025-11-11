@@ -211,11 +211,11 @@ const response = await conn.sendAuthenticated(
 
 ## 📊 Implementation Statistics
 
-- **Total New Files**: 13
-- **Modified Files**: 7
-- **Total Lines of Code**: ~3,600 lines
-- **Documentation**: ~4,000 lines
-- **Implementation Progress**: 75% complete
+- **Total New Files**: 26
+- **Modified Files**: 10
+- **Total Lines of Code**: ~5,500 lines
+- **Documentation**: ~6,000 lines
+- **Implementation Progress**: 85% complete
 
 **Breakdown by Component:**
 - Authentication: 100% ✅
@@ -223,80 +223,78 @@ const response = await conn.sendAuthenticated(
 - Dispatcher: 100% ✅
 - Client (PeerConnection): 100% ✅
 - Server (TCP): 100% ✅
-- Integration: 100% ✅
+- TLS/SSL: 100% ✅
+- Node Integration: 100% ✅
+- Rate Limiting: 0% ❌
 - Testing: 0% ❌
-- Production Hardening: 40% ⚠️
+- Production Hardening: 75% ⚠️
 
 ---
 
 ## ⚠️ What's NOT Implemented Yet
 
-### 1. Post-Quantum Cryptography
+### 1. Rate Limiting (CRITICAL SECURITY GAP)
+- ❌ Per-IP rate limiting
+- ❌ Per-identity rate limiting
+- ❌ Request rate limiting
+- **Reason**: Not yet implemented
+- **Impact**: Vulnerable to DoS attacks - DO NOT USE IN PRODUCTION
+
+### 2. Testing
+- ❌ Unit tests for authentication
+- ❌ Unit tests for server components
+- ❌ Unit tests for TLS components
+- ❌ Integration tests (client-server roundtrip)
+- ❌ Load tests (1000+ concurrent connections)
+- **Impact**: No automated test coverage
+
+### 3. Post-Quantum Cryptography
 - ❌ Falcon signature verification
 - ❌ ML-DSA signature verification
 - **Reason**: Library integration needed
 - **Impact**: Only Ed25519 works currently
 
-### 2. TLS/SSL Support
-- ❌ Encrypted TCP connections (tls://)
-- **Reason**: Requires SSL/TLS layer integration
-- **Impact**: All traffic is plain TCP
-
-### 3. Testing
-- ❌ Unit tests for authentication
-- ❌ Unit tests for server components
-- ❌ Integration tests (client-server roundtrip)
-- ❌ Load tests (1000+ concurrent connections)
-- **Impact**: No automated test coverage
-
-### 4. Node Startup Integration
-- ❌ Not wired into src/index.ts
-- ❌ No configuration in node config
-- **Impact**: Server won't start automatically
-
-### 5. Rate Limiting
-- ❌ Per-IP rate limiting
-- ❌ Per-identity rate limiting
-- **Impact**: Vulnerable to DoS attacks
-
-### 6. Metrics & Monitoring
+### 4. Metrics & Monitoring
 - ❌ Prometheus metrics
 - ❌ Latency tracking
 - ❌ Throughput monitoring
 - **Impact**: Limited observability
 
-### 7. Advanced Features
+### 5. Advanced Features
 - ❌ Push messages (server-initiated)
 - ❌ Multiplexing (multiple requests per connection)
 - ❌ Connection pooling enhancements
 - ❌ Automatic reconnection logic
+- ❌ Protocol versioning
 
 ---
 
 ## 🚀 Next Steps (Priority Order)
 
-### Immediate (P0 - Required for Testing)
+### Immediate (P0 - Required for Production)
 1. ✅ **Complete** - Authentication system
 2. ✅ **Complete** - TCP server
 3. ✅ **Complete** - Key management integration
-4. **TODO** - Add to src/index.ts startup
-5. **TODO** - Basic unit tests
-6. **TODO** - Integration test (localhost client-server)
+4. ✅ **Complete** - Add to src/index.ts startup
+5. ✅ **Complete** - TLS/SSL encryption
+6. **TODO** - Rate limiting implementation (CRITICAL)
+7. **TODO** - Basic unit tests
+8. **TODO** - Integration test (localhost client-server)
 
 ### Short Term (P1 - Required for Production)
-7. **TODO** - Rate limiting implementation
-8. **TODO** - Comprehensive test suite
-9. **TODO** - Load testing (1000+ connections)
-10. **TODO** - Security audit
-11. **TODO** - Operator runbook
-12. **TODO** - Metrics and monitoring
+9. **TODO** - Comprehensive test suite
+10. **TODO** - Load testing (1000+ connections)
+11. **TODO** - Security audit
+12. **TODO** - Operator runbook
+13. **TODO** - Metrics and monitoring
+14. **TODO** - Connection health checks
 
 ### Long Term (P2 - Nice to Have)
-13. **TODO** - Post-quantum crypto support
-14. **TODO** - TLS/SSL encryption
-15. **TODO** - Push message support
-16. **TODO** - Connection pooling enhancements
-17. **TODO** - Automatic peer discovery
+15. **TODO** - Post-quantum crypto support
+16. **TODO** - Push message support
+17. **TODO** - Connection pooling enhancements
+18. **TODO** - Automatic peer discovery
+19. **TODO** - Protocol versioning
 
 ---
 
@@ -309,21 +307,27 @@ const response = await conn.sendAuthenticated(
 - Identity verification on every authenticated message
 - Checksum validation (CRC32)
 - Connection limits (max 1000)
+- TLS/SSL encryption with certificate pinning
+- Self-signed and CA certificate modes
+- Strong cipher suites (TLSv1.2/1.3)
+- Automatic certificate generation and validation
 
-### ⚠️ Security Gaps
-- No rate limiting (DoS vulnerable)
-- No TLS/SSL (traffic not encrypted)
+### ⚠️ Security Gaps (CRITICAL)
+- **No rate limiting** (DoS vulnerable) - MUST FIX BEFORE PRODUCTION
 - No per-IP connection limits
+- No request rate limiting
 - No nonce tracking (additional replay protection)
 - Post-quantum algorithms not implemented
 - No security audit performed
 
 ### 🎯 Security Recommendations
-1. Enable server only after implementing rate limiting
-2. Use behind firewall/VPN until TLS implemented
-3. Monitor connection counts and patterns
-4. Implement IP-based rate limiting ASAP
-5. Conduct security audit before mainnet deployment
+1. **CRITICAL**: Implement rate limiting before production use
+2. Enable TLS for all production deployments (OMNI_TLS_ENABLED=true)
+3. Use firewall rules to restrict IP access
+4. Monitor connection counts and patterns
+5. Implement IP-based rate limiting ASAP
+6. Conduct security audit before mainnet deployment
+7. Consider using CA certificates instead of self-signed for production
 
 ---
 
@@ -348,29 +352,33 @@ const response = await conn.sendAuthenticated(
 
 ## 🎉 Summary
 
-The OmniProtocol implementation is **~75% complete** with all core components functional:
+The OmniProtocol implementation is **~85% complete** with all core components functional:
 
 ✅ **Authentication** - Ed25519 signing and verification
 ✅ **TCP Server** - Accept incoming connections, dispatch to handlers
 ✅ **Message Framing** - Parse auth blocks, encode/decode messages
 ✅ **Client** - Send authenticated messages
+✅ **TLS/SSL** - Encrypted connections with certificate pinning
+✅ **Node Integration** - Server wired into startup, key management complete
 ✅ **Integration** - Key management, startup helpers, PeerOmniAdapter
 
-The protocol is **ready for integration testing** with these caveats:
-- ⚠️ Enable server manually in src/index.ts
+The protocol is **ready for controlled testing** with these caveats:
 - ⚠️ Only Ed25519 supported (no post-quantum)
-- ⚠️ Plain TCP only (no TLS)
-- ⚠️ No rate limiting (use in controlled environment)
+- ⚠️ **CRITICAL: No rate limiting** (vulnerable to DoS attacks)
 - ⚠️ No automated tests yet
+- ⚠️ Use in controlled/trusted environment only
 
-**Next milestone**: Wire into node startup and create integration tests.
+**Next milestone**: Implement rate limiting and create test suite.
 
 ---
 
-**Commits:**
+**Recent Commits:**
 1. `ed159ef` - feat: Implement authentication and TCP server for OmniProtocol
 2. `1c31278` - feat: Add key management integration and startup helpers for OmniProtocol
+3. `2d00c74` - feat: Integrate OmniProtocol server into node startup
+4. `914a2c7` - docs: Add OmniProtocol environment variables to .env.example
+5. `96a6909` - feat: Add TLS/SSL encryption support to OmniProtocol
 
 **Branch**: `claude/custom-tcp-protocol-011CV1uA6TQDiV9Picft86Y5`
 
-**Ready for**: Integration testing and node startup wiring
+**Ready for**: Rate limiting implementation and testing infrastructure
