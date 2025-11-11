@@ -103,17 +103,16 @@ async function getMerkleTreeManager(): Promise<MerkleTreeManager> {
 
     try {
         const result = await initializationPromise
-        // REVIEW: HIGH FIX - Only clear promise on success
         initializationPromise = null
         return result
     } catch (error) {
-        // REVIEW: HIGH FIX - Cache error with timestamp to enforce backoff
+        // Clear promise to allow backoff logic to run on next attempt
+        initializationPromise = null
         lastInitializationError = {
             timestamp: Date.now(),
             error: error instanceof Error ? error : new Error(String(error)),
         }
         log.error("MerkleTreeManager initialization failed:", error)
-        // Keep initializationPromise set to prevent concurrent retries
         throw error
     }
 }
