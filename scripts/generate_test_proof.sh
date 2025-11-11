@@ -16,7 +16,9 @@ SECRET="12345678901234567890"
 PROVIDER_ID="999888777666555444"
 CONTEXT="1111111111"
 
-# Create input JSON
+# REVIEW: HIGH FIX - Clarify this is intentional dummy data for basic tests
+# NOTE: This generates invalid Merkle proof data (all zeros) for simple circuit testing
+# For real proofs with valid Merkle paths, use actual tree data from RPC
 cat > test_input.json <<EOF
 {
   "secret": "$SECRET",
@@ -35,9 +37,10 @@ cat > test_input.json <<EOF
 EOF
 
 echo "📝 Test inputs created"
-echo "   Secret: $SECRET"
-echo "   Provider ID: $PROVIDER_ID"
-echo "   Context: $CONTEXT"
+# REVIEW: HIGH FIX - Hide secrets in output to prevent log leakage
+echo "   Secret: (hidden for security)"
+echo "   Provider ID: (hidden for security)"
+echo "   Context: (hidden for security)"
 
 # Check required files exist
 echo "🔍 Checking required files..."

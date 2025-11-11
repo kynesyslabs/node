@@ -410,10 +410,12 @@ export default class Chain {
                     await transactionalEntityManager.save(this.transactions.target, rawTransaction)
                 }
 
-                // Clean mempool within transaction
+                // REVIEW: CRITICAL FIX - Clean mempool within transaction using transactional manager
+                // This ensures atomicity: if Merkle tree update fails, mempool cleanup rolls back
                 if (cleanMempool) {
                     await Mempool.removeTransactionsByHashes(
                         transactionEntities.map(tx => tx.hash),
+                        transactionalEntityManager,
                     )
                 }
 

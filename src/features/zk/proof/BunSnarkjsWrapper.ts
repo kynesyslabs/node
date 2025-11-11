@@ -17,9 +17,10 @@
 // NOTE: Variable names use snake_case to match ZK-SNARK cryptographic notation
 // (pi_a, pi_b, pi_c, vk_alpha_1, etc. are standard Groth16 protocol names)
 
-import { Scalar, utils } from "ffjavascript"
-// @ts-expect-error - Import from snarkjs internal sources (using tsconfig baseUrl)
-import * as curves from "node_modules/snarkjs/src/curves.js"
+import { Scalar, utils, getCurveFromName } from "ffjavascript"
+// REVIEW: HIGH FIX - Use public API instead of internal snarkjs import
+// Previous: import * as curves from "node_modules/snarkjs/src/curves.js"
+// Now using: getCurveFromName from ffjavascript public API
 
 const { unstringifyBigInts } = utils
 
@@ -43,6 +44,7 @@ export async function groth16VerifyBun(
     _publicSignals: any[],
     _proof: ZKProof,
 ): Promise<boolean> {
+    let curve: any = null
     try {
         const vk_verifier = unstringifyBigInts(_vk_verifier)
         const proof = unstringifyBigInts(_proof)
@@ -68,8 +70,9 @@ export async function groth16VerifyBun(
             return false
         }
 
+        // REVIEW: HIGH FIX - Use public API (getCurveFromName from ffjavascript)
         // CRITICAL: Pass singleThread: true to avoid worker threads
-        const curve = await curves.getCurveFromName(vk_verifier.curve, {
+        curve = await getCurveFromName(vk_verifier.curve, {
             singleThread: true,
         })
 
@@ -143,6 +146,12 @@ export async function groth16VerifyBun(
     } catch (error) {
         console.error("ZK Verify: Verification error:", error)
         return false
+    } finally {
+        // REVIEW: HIGH FIX - Always terminate curve to prevent memory leaks
+        // Curve objects may hold WASM instances and memory buffers
+        if (curve && typeof curve.terminate === "function") {
+            await curve.terminate()
+        }
     }
 }
 

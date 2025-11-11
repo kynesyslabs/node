@@ -705,79 +705,86 @@ export default class GCRIdentityRoutines {
             }
         }
 
-        // Mark nullifier as used (prevent double-attestation)
-        // REVIEW: Race condition fix - rely on database constraint for atomicity
+        // REVIEW: HIGH FIX - Update nullifier entry (already inserted by verifier) and award points atomically
+        // The verifier already marked the nullifier with temporary data to prevent race conditions.
+        // Now we update it with proper block/tx info and award points in a single transaction.
         if (!simulate) {
+            const dataSource = await Datasource.getInstance()
+            const queryRunner = dataSource.getDataSource().createQueryRunner()
+            await queryRunner.connect()
+            await queryRunner.startTransaction()
+
             try {
-                await verifier.markNullifierUsed(
-                    payload.nullifier_hash,
-                    0, // Block number will be updated during block commit
-                    editOperation.txhash || "",
+                // Update nullifier entry with proper block/tx info
+                await queryRunner.manager.update(
+                    UsedNullifier,
+                    { nullifierHash: payload.nullifier_hash },
+                    {
+                        blockNumber: 0, // Will be updated during block commit
+                        transactionHash: editOperation.txhash || "",
+                        timestamp: Date.now(),
+                    },
                 )
-            } catch (error: any) {
-                // Database constraint will catch concurrent double-attestation attempts
-                // REVIEW: Use startsWith for SQLite constraint codes (handles all variants)
-                if (error.message?.includes("Double-attestation attempt") ||
-                    error.code === "23505" ||
-                    error.code?.startsWith("SQLITE_CONSTRAINT")) {
-                    log.warn(`❌ Double-attestation attempt detected for nullifier: ${payload.nullifier_hash.slice(0, 10)}...`)
+
+                // REVIEW: Award points for ZK attestation atomically with nullifier update
+                // REVIEW: Phase 10.1 - Configurable ZK attestation points
+                //
+                // Design Note: ZK Privacy vs Points
+                // - The ZK proof preserves identity privacy (we don't know WHICH identity proved ownership)
+                // - The transaction submitter (editOperation.account) receives points
+                // - The submitter may or may not be the identity holder (could be a relayer)
+                // - This is intentional: points reward the transaction submission, not identity disclosure
+                // - For fully private identities, users can choose not to submit attestation transactions
+                const account = await ensureGCRForUser(editOperation.account)
+
+                // Get configurable points from environment (default: 10)
+                const zkAttestationPoints = parseInt(
+                    process.env.ZK_ATTESTATION_POINTS || "10",
+                    10,
+                )
+
+                // Validate environment variable
+                if (isNaN(zkAttestationPoints) || zkAttestationPoints < 0) {
+                    await queryRunner.rollbackTransaction()
+                    log.error(
+                        `Invalid ZK_ATTESTATION_POINTS configuration: ${process.env.ZK_ATTESTATION_POINTS}`,
+                    )
                     return {
                         success: false,
-                        message: "This identity has already been attested in this context",
+                        message: "System configuration error: invalid attestation points",
                     }
                 }
-                // Re-throw other errors
-                throw error
-            }
 
-            // REVIEW: Award points for ZK attestation
-            // REVIEW: Phase 10.1 - Configurable ZK attestation points
-            //
-            // Design Note: ZK Privacy vs Points
-            // - The ZK proof preserves identity privacy (we don't know WHICH identity proved ownership)
-            // - The transaction submitter (editOperation.account) receives points
-            // - The submitter may or may not be the identity holder (could be a relayer)
-            // - This is intentional: points reward the transaction submission, not identity disclosure
-            // - For fully private identities, users can choose not to submit attestation transactions
-            const account = await ensureGCRForUser(editOperation.account)
-
-            // Get configurable points from environment (default: 10)
-            const zkAttestationPoints = parseInt(
-                process.env.ZK_ATTESTATION_POINTS || "10",
-                10,
-            )
-
-            // Validate environment variable
-            if (isNaN(zkAttestationPoints) || zkAttestationPoints < 0) {
-                log.error(
-                    `Invalid ZK_ATTESTATION_POINTS configuration: ${process.env.ZK_ATTESTATION_POINTS}`,
-                )
-                return {
-                    success: false,
-                    message: "System configuration error: invalid attestation points",
+                const zkAttestationEntry = {
+                    date: new Date().toISOString(),
+                    points: zkAttestationPoints,
+                    nullifier: payload.nullifier_hash.slice(0, 10) + "...", // Store abbreviated for reference
                 }
+
+                if (!account.points.breakdown.zkAttestation) {
+                    account.points.breakdown.zkAttestation = []
+                }
+
+                account.points.breakdown.zkAttestation.push(zkAttestationEntry)
+                account.points.totalPoints =
+                    (account.points.totalPoints || 0) + zkAttestationPoints
+                account.points.lastUpdated = new Date()
+
+                // Save account with transaction manager for atomicity
+                await queryRunner.manager.save(account)
+
+                // Commit transaction - both nullifier update and points awarding succeed together
+                await queryRunner.commitTransaction()
+
+                log.info(
+                    `✅ ZK attestation verified and points awarded (nullifier: ${payload.nullifier_hash.slice(0, 10)}...)`,
+                )
+            } catch (error) {
+                await queryRunner.rollbackTransaction()
+                throw error
+            } finally {
+                await queryRunner.release()
             }
-
-            const zkAttestationEntry = {
-                date: new Date().toISOString(),
-                points: zkAttestationPoints,
-                nullifier: payload.nullifier_hash.slice(0, 10) + "...", // Store abbreviated for reference
-            }
-
-            if (!account.points.breakdown.zkAttestation) {
-                account.points.breakdown.zkAttestation = []
-            }
-
-            account.points.breakdown.zkAttestation.push(zkAttestationEntry)
-            account.points.totalPoints =
-                (account.points.totalPoints || 0) + zkAttestationPoints
-            account.points.lastUpdated = new Date()
-
-            await gcrMainRepository.save(account)
-
-            log.info(
-                `✅ ZK attestation verified and points awarded (nullifier: ${payload.nullifier_hash.slice(0, 10)}...)`,
-            )
         }
 
         return {

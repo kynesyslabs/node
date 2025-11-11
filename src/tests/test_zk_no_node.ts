@@ -109,13 +109,15 @@ try {
         testResults.proofRejection = true
     } else {
         console.log("  ❌ Invalid proof was accepted - BUG!")
-        process.exit(1)
+        // REVIEW: MEDIUM FIX - Don't exit early, let all tests run for comprehensive results
+        testResults.proofRejection = false
     }
 } catch (error) {
-    // REVIEW: Unexpected errors indicate configuration issues
+    // REVIEW: MEDIUM FIX - Unexpected errors indicate configuration issues
+    // Don't exit early - log error and continue to other tests
     console.log(`  ❌ Unexpected error: ${error instanceof Error ? error.message : String(error)}`)
     console.log("  ⚠️  Check verification key or snarkjs setup")
-    process.exit(1)
+    testResults.proofRejection = false
 }
 console.log()
 
@@ -159,9 +161,20 @@ console.log()
 // Test 5: CDN Files Match Local Files
 console.log("📋 Test 5: CDN Files Match Local Files")
 try {
-    // Fetch verification key from CDN
+    // REVIEW: MEDIUM FIX - Add timeout and status validation for CDN fetch
     const cdnVKeyUrl = "https://files.demos.sh/zk-circuits/v1/verification_key_merkle.json"
-    const cdnResponse = await fetch(cdnVKeyUrl)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
+
+    const cdnResponse = await fetch(cdnVKeyUrl, {
+        signal: controller.signal,
+    })
+    clearTimeout(timeoutId)
+
+    if (!cdnResponse.ok) {
+        throw new Error(`CDN returned status ${cdnResponse.status}`)
+    }
+
     const cdnVKey = await cdnResponse.json()
 
     // Load local verification key

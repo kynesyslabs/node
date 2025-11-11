@@ -10,7 +10,7 @@
  * Run with: bun run zk:setup-all
  */
 
-import { existsSync, mkdirSync, readFileSync } from "fs"
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from "fs"
 import { execSync } from "child_process"
 import { join } from "path"
 import { createHash } from "crypto"
@@ -82,7 +82,8 @@ async function downloadPowersOfTau() {
         // REVIEW: Verify existing file integrity
         if (!verifyPtauChecksum(ptauPath)) {
             log("  ⚠ Existing file failed verification, re-downloading...", "yellow")
-            execSync(`rm "${ptauPath}"`)
+            // REVIEW: HIGH FIX - Use Node.js unlinkSync for cross-platform compatibility
+            unlinkSync(ptauPath)
         } else {
             return
         }
@@ -109,7 +110,8 @@ async function downloadPowersOfTau() {
 
         // REVIEW: Verify downloaded file integrity for supply chain security
         if (!verifyPtauChecksum(ptauPath)) {
-            execSync(`rm "${ptauPath}"`)
+            // REVIEW: HIGH FIX - Use Node.js unlinkSync for cross-platform compatibility
+            unlinkSync(ptauPath)
             throw new Error("Downloaded file failed integrity verification")
         }
     } catch (error) {
