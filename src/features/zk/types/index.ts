@@ -16,6 +16,18 @@ export interface IdentityCommitmentPayload {
 }
 
 /**
+ * Groth16 ZK Proof Structure
+ * Standard Groth16 proof format used across all ZK operations
+ */
+export interface Groth16Proof {
+    pi_a: string[]
+    pi_b: string[][]
+    pi_c: string[]
+    protocol: string
+    curve?: string
+}
+
+/**
  * Identity Attestation Payload
  * Submitted by users to prove ownership of a committed identity via ZK proof
  */
@@ -25,13 +37,7 @@ export interface IdentityAttestationPayload {
     /** Current Merkle root that proof is verified against */
     merkle_root: string
     /** Groth16 ZK proof */
-    proof: {
-        pi_a: string[]
-        pi_b: string[][]
-        pi_c: string[]
-        protocol: string
-        curve?: string
-    }
+    proof: Groth16Proof
     /** Public signals: [nullifier, merkle_root, context] */
     public_signals: string[]
     /** Provider type (for categorization) */
@@ -106,13 +112,7 @@ export interface IdentityProofCircuitInput {
  */
 export interface ProofGenerationResult {
     /** Groth16 proof */
-    proof: {
-        pi_a: string[]
-        pi_b: string[][]
-        pi_c: string[]
-        protocol: string
-        curve?: string
-    }
+    proof: Groth16Proof
     /** Public signals */
-    publicSignals: string[]
+    public_signals: string[]
 }

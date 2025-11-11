@@ -1,6 +1,6 @@
 pragma circom 2.0.0;
 
-include "circomlib/circuits/poseidon.circom";
+include "circomlib/poseidon.circom";
 
 /*
  * IdentityProof - Basic ZK-SNARK Identity Commitment Circuit

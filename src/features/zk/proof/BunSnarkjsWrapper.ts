@@ -51,9 +51,9 @@ export async function groth16VerifyBun(
         const publicSignals = unstringifyBigInts(_publicSignals)
 
         // REVIEW: Validate verification key structure to prevent cryptic errors
-        if (!vk_verifier.curve || !vk_verifier.IC || !vk_verifier.vk_alpha_1 ||
-            !vk_verifier.vk_beta_2 || !vk_verifier.vk_gamma_2 || !vk_verifier.vk_delta_2) {
-            console.error("ZK Verify: Invalid verification key structure - missing required fields")
+        if (!vk_verifier.curve || !Array.isArray(vk_verifier.IC) || vk_verifier.IC.length === 0 ||
+            !vk_verifier.vk_alpha_1 || !vk_verifier.vk_beta_2 || !vk_verifier.vk_gamma_2 || !vk_verifier.vk_delta_2) {
+            console.error("ZK Verify: Invalid verification key structure - missing or invalid IC (must be non-empty array) or other required fields")
             return false
         }
 
