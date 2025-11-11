@@ -2,6 +2,7 @@ import * as sqlite3 from "sqlite3"
 
 export class ActivityPubStorage {
     db: sqlite3.Database
+    private readonly validCollections: Set<string>
 
     constructor(dbPath) {
         this.db = new sqlite3.Database(dbPath, err => {
@@ -11,6 +12,19 @@ export class ActivityPubStorage {
             console.log("Connected to the SQLite database.")
             this.createTables()
         })
+
+        // Initialize valid collections whitelist
+        this.validCollections = new Set([
+            'actors', 'objects', 'activities', 'inboxes', 'outboxes',
+            'followers', 'followings', 'likeds', 'collections', 'blockeds',
+            'rejections', 'rejecteds', 'shares', 'likes'
+        ])
+    }
+
+    private validateCollection(collection: string): void {
+        if (!this.validCollections.has(collection)) {
+            throw new Error(`Invalid collection name: ${collection}`)
+        }
     }
 
     createTables() {
@@ -40,6 +54,7 @@ export class ActivityPubStorage {
     }
 
     saveItem(collection, item) {
+        this.validateCollection(collection)
         const sql = `INSERT INTO ${collection}(id, data) VALUES(?, ?)`
         this.db.run(sql, [item.id, JSON.stringify(item)], function (err) {
             if (err) {
@@ -50,6 +65,7 @@ export class ActivityPubStorage {
     }
 
     getItem(collection, id, callback) {
+        this.validateCollection(collection)
         const sql = `SELECT * FROM ${collection} WHERE id = ?`
         this.db.get(sql, [id], (err, row: any) => {
             if (err) {
@@ -66,6 +82,7 @@ export class ActivityPubStorage {
     }
 
     deleteItem(collection, id) {
+        this.validateCollection(collection)
         const sql = `DELETE FROM ${collection} WHERE id = ?`
         this.db.run(sql, [id], function (err) {
             if (err) {
