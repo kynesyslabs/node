@@ -41,8 +41,9 @@ bun run zk:setup-all
 This will:
 1. ✅ Verify PTAU file integrity (already downloaded, ~140MB)
 2. ✅ Recompile `identity_with_merkle.circom` circuit
-3. ✅ Generate NEW `identity_with_merkle_0000.zkey` with proper entropy
-4. ✅ Export NEW `verification_key_merkle.json` with distinct gamma/delta
+3. ✅ Generate initial `identity_with_merkle_0000.zkey` (phase 0)
+4. ✅ Add random contribution creating `identity_with_merkle_0001.zkey` (phase 1)
+5. ✅ Export NEW `verification_key_merkle.json` with distinct gamma/delta from contributed key
 
 **Expected output:**
 ```
@@ -126,7 +127,7 @@ Upload these files to your CDN for client-side proof generation:
 ```
 /home/tcsenpai/kynesys/caddycdn/files/zk-circuits/v1/
 ├── identity_with_merkle.wasm          # Circuit WASM (from circuits/ dir)
-├── identity_with_merkle_0000.zkey     # Proving key (from keys/ dir)
+├── identity_with_merkle_final.zkey    # Contributed proving key (from keys/ dir, renamed)
 └── verification_key_merkle.json        # NEW verification key (from keys/ dir)
 ```
 
@@ -142,8 +143,9 @@ cd /home/tcsenpai/kynesys/caddycdn/files/zk-circuits/v1
 # Upload Circuit WASM (generated during compilation)
 put src/features/zk/circuits/identity_with_merkle_js/identity_with_merkle.wasm identity_with_merkle.wasm
 
-# Upload NEW Proving Key (generated in Step 2)
-put src/features/zk/keys/identity_with_merkle_0000.zkey identity_with_merkle_0000.zkey
+# Upload NEW Contributed Proving Key (generated in Step 2, phase 1)
+# IMPORTANT: Upload the _0001.zkey (contributed) not _0000.zkey (initial)
+put src/features/zk/keys/identity_with_merkle_0001.zkey identity_with_merkle_final.zkey
 
 # Upload NEW Verification Key (generated in Step 2)
 put src/features/zk/keys/verification_key_merkle.json verification_key_merkle.json
@@ -158,9 +160,11 @@ exit
 **Expected CDN files:**
 ```
 -rw-r--r--  identity_with_merkle.wasm          (~50-200 KB)
--rw-r--r--  identity_with_merkle_0000.zkey     (~10-50 MB depending on circuit size)
+-rw-r--r--  identity_with_merkle_final.zkey    (~10-50 MB, from contributed phase)
 -rw-r--r--  verification_key_merkle.json        (~2-5 KB)
 ```
+
+**IMPORTANT**: The proving key must be from the contributed phase (_0001.zkey), not the initial phase (_0000.zkey), to ensure gamma ≠ delta security.
 
 ---
 

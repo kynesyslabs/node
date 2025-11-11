@@ -143,8 +143,9 @@ function compileCircuit(circuitName: string) {
 async function generateKeys(circuitName: string) {
     const r1csPath = join(CIRCUITS_DIR, `${circuitName}.r1cs`)
     const ptauPath = join(KEYS_DIR, PTAU_FILE)
-    const zkeyPath = join(KEYS_DIR, `${circuitName}_0000.zkey`)
-    const vkeyPath = join(KEYS_DIR, "verification_key.json")
+    const zkeyPath0 = join(KEYS_DIR, `${circuitName}_0000.zkey`)
+    const zkeyPath1 = join(KEYS_DIR, `${circuitName}_0001.zkey`)
+    const vkeyPath = join(KEYS_DIR, circuitName === "identity_with_merkle" ? "verification_key_merkle.json" : "verification_key.json")
 
     if (!existsSync(r1csPath)) {
         log("  ⚠ R1CS file not found, skipping key generation", "yellow")
@@ -156,30 +157,60 @@ async function generateKeys(circuitName: string) {
         throw new Error("Powers of Tau file missing")
     }
 
-    // Generate proving key
-    log("  → Generating proving key (this may take 10-30 seconds)...", "yellow")
+    // Generate initial proving key (phase 0)
+    log("  → Generating initial proving key (phase 0)...", "yellow")
     try {
         execSync(
-            `npx snarkjs groth16 setup ${r1csPath} ${ptauPath} ${zkeyPath}`,
+            `npx snarkjs groth16 setup ${r1csPath} ${ptauPath} ${zkeyPath0}`,
             { stdio: "inherit" },
         )
-        log("  ✓ Proving key generated", "green")
+        log("  ✓ Initial proving key generated", "green")
     } catch (error) {
-        log("  ✗ Proving key generation failed", "red")
+        log("  ✗ Initial proving key generation failed", "red")
         throw error
     }
 
-    // Export verification key
-    log("  → Exporting verification key...", "yellow")
+    // REVIEW: Add random contribution to create distinct gamma/delta
+    log("  → Adding random contribution for production security...", "yellow")
+    try {
+        // Generate random entropy
+        const entropy = Array.from({length: 32}, () =>
+            Math.floor(Math.random() * 256).toString(16).padStart(2, '0')
+        ).join('')
+
+        execSync(
+            `npx snarkjs zkey contribute ${zkeyPath0} ${zkeyPath1} --name="ProductionContribution" -e="${entropy}"`,
+            { stdio: "inherit" },
+        )
+        log("  ✓ Contribution added (gamma and delta are now distinct)", "green")
+    } catch (error) {
+        log("  ✗ Contribution failed", "red")
+        throw error
+    }
+
+    // Export verification key from contributed zkey
+    log("  → Exporting verification key from contributed zkey...", "yellow")
     try {
         execSync(
-            `npx snarkjs zkey export verificationkey ${zkeyPath} ${vkeyPath}`,
+            `npx snarkjs zkey export verificationkey ${zkeyPath1} ${vkeyPath}`,
             { stdio: "inherit" },
         )
         log("  ✓ Verification key exported", "green")
         log(`    → ${vkeyPath}`, "green")
-        log("    ⚠ FOR CIRCUIT DEVELOPERS: Commit verification_key.json to repo (ONE TIME)", "yellow")
-        log("    ⚠ FOR VALIDATORS: Use the verification_key.json from the repo (DO NOT commit your own)", "yellow")
+
+        // Verify gamma ≠ delta
+        const vkContent = JSON.parse(readFileSync(vkeyPath, 'utf-8'))
+        const gamma = JSON.stringify(vkContent.vk_gamma_2)
+        const delta = JSON.stringify(vkContent.vk_delta_2)
+
+        if (gamma === delta) {
+            log("  ✗ WARNING: gamma and delta are still identical!", "red")
+        } else {
+            log("  ✓ Verified: gamma and delta are distinct (production-safe)", "green")
+        }
+
+        log("    ⚠ FOR CIRCUIT DEVELOPERS: Commit verification_key*.json to repo (ONE TIME)", "yellow")
+        log("    ⚠ FOR VALIDATORS: Use the verification_key*.json from the repo (DO NOT commit your own)", "yellow")
     } catch (error) {
         log("  ✗ Verification key export failed", "red")
         throw error

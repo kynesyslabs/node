@@ -26,13 +26,29 @@ else
     echo -e "${YELLOW}⚠ No existing verification key found${NC}"
 fi
 
-# Step 2: Remove old proving key
-echo -e "${YELLOW}[2/5] Removing old proving key...${NC}"
+# Step 2: Remove old proving keys
+echo -e "${YELLOW}[2/5] Removing old proving keys...${NC}"
+REMOVED=0
 if [ -f "src/features/zk/keys/identity_with_merkle_0000.zkey" ]; then
     rm src/features/zk/keys/identity_with_merkle_0000.zkey
-    echo -e "${GREEN}✓ Old proving key removed${NC}"
+    REMOVED=$((REMOVED + 1))
+fi
+if [ -f "src/features/zk/keys/identity_with_merkle_0001.zkey" ]; then
+    rm src/features/zk/keys/identity_with_merkle_0001.zkey
+    REMOVED=$((REMOVED + 1))
+fi
+if [ -f "src/features/zk/keys/identity_0000.zkey" ]; then
+    rm src/features/zk/keys/identity_0000.zkey
+    REMOVED=$((REMOVED + 1))
+fi
+if [ -f "src/features/zk/keys/identity_0001.zkey" ]; then
+    rm src/features/zk/keys/identity_0001.zkey
+    REMOVED=$((REMOVED + 1))
+fi
+if [ $REMOVED -gt 0 ]; then
+    echo -e "${GREEN}✓ Removed $REMOVED old proving key(s)${NC}"
 else
-    echo -e "${YELLOW}⚠ No old proving key found${NC}"
+    echo -e "${YELLOW}⚠ No old proving keys found${NC}"
 fi
 
 # Step 3: Regenerate keys
@@ -72,7 +88,7 @@ echo -e "${YELLOW}2. Upload to CDN (client-side proving):${NC}"
 echo "   sftp tcsenpai@discus.sh"
 echo "   cd /home/tcsenpai/kynesys/caddycdn/files/zk-circuits/v1"
 echo "   put src/features/zk/circuits/identity_with_merkle_js/identity_with_merkle.wasm"
-echo "   put src/features/zk/keys/identity_with_merkle_0000.zkey"
+echo "   put src/features/zk/keys/identity_with_merkle_0001.zkey identity_with_merkle_final.zkey"
 echo "   put src/features/zk/keys/verification_key_merkle.json"
 echo "   exit"
 echo ""
