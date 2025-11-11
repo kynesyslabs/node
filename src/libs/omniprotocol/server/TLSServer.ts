@@ -5,6 +5,7 @@ import { ServerConnectionManager } from "./ServerConnectionManager"
 import type { TLSConfig } from "../tls/types"
 import { DEFAULT_TLS_CONFIG } from "../tls/types"
 import { loadCertificate } from "../tls/certificates"
+import { RateLimiter, RateLimitConfig } from "../ratelimit"
 
 export interface TLSServerConfig {
     host: string
@@ -14,6 +15,7 @@ export interface TLSServerConfig {
     authTimeout: number
     backlog: number
     tls: TLSConfig
+    rateLimit?: Partial<RateLimitConfig>
 }
 
 /**
@@ -26,6 +28,7 @@ export class TLSServer extends EventEmitter {
     private config: TLSServerConfig
     private isRunning: boolean = false
     private trustedFingerprints: Map<string, string> = new Map()
+    private rateLimiter: RateLimiter
 
     constructor(config: Partial<TLSServerConfig>) {
         super()
@@ -38,12 +41,17 @@ export class TLSServer extends EventEmitter {
             authTimeout: config.authTimeout ?? 5000,
             backlog: config.backlog ?? 511,
             tls: { ...DEFAULT_TLS_CONFIG, ...config.tls } as TLSConfig,
+            rateLimit: config.rateLimit,
         }
+
+        // Initialize rate limiter
+        this.rateLimiter = new RateLimiter(this.config.rateLimit ?? { enabled: true })
 
         this.connectionManager = new ServerConnectionManager({
             maxConnections: this.config.maxConnections,
             connectionTimeout: this.config.connectionTimeout,
             authTimeout: this.config.authTimeout,
+            rateLimiter: this.rateLimiter,
         })
 
         // Load trusted fingerprints
@@ -134,8 +142,21 @@ export class TLSServer extends EventEmitter {
      */
     private handleSecureConnection(socket: tls.TLSSocket): void {
         const remoteAddress = `${socket.remoteAddress}:${socket.remotePort}`
+        const ipAddress = socket.remoteAddress || "unknown"
 
         console.log(`[TLSServer] New TLS connection from ${remoteAddress}`)
+
+        // Check rate limits for IP
+        const rateLimitResult = this.rateLimiter.checkConnection(ipAddress)
+        if (!rateLimitResult.allowed) {
+            console.warn(
+                `[TLSServer] Rate limit exceeded for ${remoteAddress}: ${rateLimitResult.reason}`
+            )
+            socket.destroy()
+            this.emit("connection_rejected", remoteAddress, "rate_limit")
+            this.emit("rate_limit_exceeded", ipAddress, rateLimitResult)
+            return
+        }
 
         // Verify TLS connection is authorized
         if (!socket.authorized && this.config.tls.rejectUnauthorized) {
@@ -202,6 +223,9 @@ export class TLSServer extends EventEmitter {
             `[TLSServer] TLS ${protocol} with ${cipher?.name || "unknown cipher"}`
         )
 
+        // Register connection with rate limiter
+        this.rateLimiter.addConnection(ipAddress)
+
         // Hand off to connection manager
         try {
             this.connectionManager.handleConnection(socket)
@@ -211,6 +235,7 @@ export class TLSServer extends EventEmitter {
                 `[TLSServer] Failed to handle connection from ${remoteAddress}:`,
                 error
             )
+            this.rateLimiter.removeConnection(ipAddress)
             socket.destroy()
             this.emit("connection_rejected", remoteAddress, "error")
         }
@@ -236,6 +261,9 @@ export class TLSServer extends EventEmitter {
 
         // Close all existing connections
         await this.connectionManager.closeAll()
+
+        // Stop rate limiter
+        this.rateLimiter.stop()
 
         this.isRunning = false
         this.server = null
@@ -272,6 +300,14 @@ export class TLSServer extends EventEmitter {
             tlsVersion: this.config.tls.minVersion,
             trustedPeers: this.trustedFingerprints.size,
             connections: this.connectionManager.getStats(),
+            rateLimit: this.rateLimiter.getStats(),
         }
+    }
+
+    /**
+     * Get rate limiter instance (for manual control)
+     */
+    getRateLimiter(): RateLimiter {
+        return this.rateLimiter
     }
 }
