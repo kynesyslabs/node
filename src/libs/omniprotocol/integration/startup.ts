@@ -10,6 +10,7 @@ import { OmniProtocolServer } from "../server/OmniProtocolServer"
 import { TLSServer } from "../server/TLSServer"
 import { initializeTLSCertificates } from "../tls/initialize"
 import type { TLSConfig } from "../tls/types"
+import type { RateLimitConfig } from "../ratelimit/types"
 import log from "src/utilities/logger"
 
 let serverInstance: OmniProtocolServer | TLSServer | null = null
@@ -29,6 +30,7 @@ export interface OmniServerConfig {
         caPath?: string
         minVersion?: 'TLSv1.2' | 'TLSv1.3'
     }
+    rateLimit?: Partial<RateLimitConfig>
 }
 
 /**
@@ -88,6 +90,7 @@ export async function startOmniProtocolServer(
                 authTimeout,
                 connectionTimeout,
                 tls: tlsConfig,
+                rateLimit: config.rateLimit,
             })
 
             log.info(`[OmniProtocol] TLS server configured (${tlsConfig.mode} mode, ${tlsConfig.minVersion})`)
@@ -99,6 +102,7 @@ export async function startOmniProtocolServer(
                 maxConnections,
                 authTimeout,
                 connectionTimeout,
+                rateLimit: config.rateLimit,
             })
 
             log.info("[OmniProtocol] Plain TCP server configured (no encryption)")
@@ -116,6 +120,12 @@ export async function startOmniProtocolServer(
         serverInstance.on("connection_rejected", (remoteAddress, reason) => {
             log.warn(
                 `[OmniProtocol] ❌ Connection rejected from ${remoteAddress}: ${reason}`
+            )
+        })
+
+        serverInstance.on("rate_limit_exceeded", (ipAddress, result) => {
+            log.warn(
+                `[OmniProtocol] ⚠️  Rate limit exceeded for ${ipAddress}: ${result.reason} (${result.currentCount}/${result.limit})`
             )
         })
 

@@ -1,11 +1,13 @@
 import { Socket } from "net"
 import { InboundConnection } from "./InboundConnection"
 import { EventEmitter } from "events"
+import { RateLimiter } from "../ratelimit"
 
 export interface ConnectionManagerConfig {
     maxConnections: number
     connectionTimeout: number
     authTimeout: number
+    rateLimiter?: RateLimiter
 }
 
 /**
@@ -15,10 +17,12 @@ export class ServerConnectionManager extends EventEmitter {
     private connections: Map<string, InboundConnection> = new Map()
     private config: ConnectionManagerConfig
     private cleanupTimer: NodeJS.Timeout | null = null
+    private rateLimiter?: RateLimiter
 
     constructor(config: ConnectionManagerConfig) {
         super()
         this.config = config
+        this.rateLimiter = config.rateLimiter
         this.startCleanupTimer()
     }
 
@@ -32,6 +36,7 @@ export class ServerConnectionManager extends EventEmitter {
         const connection = new InboundConnection(socket, connectionId, {
             authTimeout: this.config.authTimeout,
             connectionTimeout: this.config.connectionTimeout,
+            rateLimiter: this.rateLimiter,
         })
 
         // Track connection
@@ -44,11 +49,11 @@ export class ServerConnectionManager extends EventEmitter {
 
         connection.on("error", (error: Error) => {
             this.emit("connection_error", connectionId, error)
-            this.removeConnection(connectionId)
+            this.removeConnection(connectionId, socket)
         })
 
         connection.on("close", () => {
-            this.removeConnection(connectionId)
+            this.removeConnection(connectionId, socket)
         })
 
         // Start connection (will wait for hello_peer)
@@ -108,9 +113,13 @@ export class ServerConnectionManager extends EventEmitter {
     /**
      * Remove connection from tracking
      */
-    private removeConnection(connectionId: string): void {
+    private removeConnection(connectionId: string, socket?: Socket): void {
         const removed = this.connections.delete(connectionId)
         if (removed) {
+            // Notify rate limiter to decrement connection count
+            if (socket && socket.remoteAddress && this.rateLimiter) {
+                this.rateLimiter.removeConnection(socket.remoteAddress)
+            }
             this.emit("connection_removed", connectionId)
         }
     }

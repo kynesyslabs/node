@@ -1,6 +1,7 @@
 import { Server as NetServer, Socket } from "net"
 import { EventEmitter } from "events"
 import { ServerConnectionManager } from "./ServerConnectionManager"
+import { RateLimiter, RateLimitConfig } from "../ratelimit"
 
 export interface ServerConfig {
     host: string                    // Listen address (default: "0.0.0.0")
@@ -11,6 +12,7 @@ export interface ServerConfig {
     backlog: number                 // TCP backlog queue (default: 511)
     enableKeepalive: boolean        // TCP keepalive (default: true)
     keepaliveInitialDelay: number   // Keepalive delay (default: 60 sec)
+    rateLimit?: Partial<RateLimitConfig> // Rate limiting configuration
 }
 
 /**
@@ -21,6 +23,7 @@ export class OmniProtocolServer extends EventEmitter {
     private connectionManager: ServerConnectionManager
     private config: ServerConfig
     private isRunning: boolean = false
+    private rateLimiter: RateLimiter
 
     constructor(config: Partial<ServerConfig> = {}) {
         super()
@@ -34,12 +37,17 @@ export class OmniProtocolServer extends EventEmitter {
             backlog: config.backlog ?? 511,
             enableKeepalive: config.enableKeepalive ?? true,
             keepaliveInitialDelay: config.keepaliveInitialDelay ?? 60000,
+            rateLimit: config.rateLimit,
         }
+
+        // Initialize rate limiter
+        this.rateLimiter = new RateLimiter(this.config.rateLimit ?? { enabled: true })
 
         this.connectionManager = new ServerConnectionManager({
             maxConnections: this.config.maxConnections,
             connectionTimeout: this.config.connectionTimeout,
             authTimeout: this.config.authTimeout,
+            rateLimiter: this.rateLimiter,
         })
     }
 
@@ -116,6 +124,9 @@ export class OmniProtocolServer extends EventEmitter {
         // Close all existing connections
         await this.connectionManager.closeAll()
 
+        // Stop rate limiter
+        this.rateLimiter.stop()
+
         this.isRunning = false
         this.server = null
 
@@ -127,8 +138,21 @@ export class OmniProtocolServer extends EventEmitter {
      */
     private handleNewConnection(socket: Socket): void {
         const remoteAddress = `${socket.remoteAddress}:${socket.remotePort}`
+        const ipAddress = socket.remoteAddress || "unknown"
 
         console.log(`[OmniProtocolServer] New connection from ${remoteAddress}`)
+
+        // Check rate limits for IP
+        const rateLimitResult = this.rateLimiter.checkConnection(ipAddress)
+        if (!rateLimitResult.allowed) {
+            console.warn(
+                `[OmniProtocolServer] Rate limit exceeded for ${remoteAddress}: ${rateLimitResult.reason}`
+            )
+            socket.destroy()
+            this.emit("connection_rejected", remoteAddress, "rate_limit")
+            this.emit("rate_limit_exceeded", ipAddress, rateLimitResult)
+            return
+        }
 
         // Check if we're at capacity
         if (this.connectionManager.getConnectionCount() >= this.config.maxConnections) {
@@ -146,6 +170,9 @@ export class OmniProtocolServer extends EventEmitter {
         }
         socket.setNoDelay(true) // Disable Nagle's algorithm for low latency
 
+        // Register connection with rate limiter
+        this.rateLimiter.addConnection(ipAddress)
+
         // Hand off to connection manager
         try {
             this.connectionManager.handleConnection(socket)
@@ -155,6 +182,7 @@ export class OmniProtocolServer extends EventEmitter {
                 `[OmniProtocolServer] Failed to handle connection from ${remoteAddress}:`,
                 error
             )
+            this.rateLimiter.removeConnection(ipAddress)
             socket.destroy()
             this.emit("connection_rejected", remoteAddress, "error")
         }
@@ -168,7 +196,15 @@ export class OmniProtocolServer extends EventEmitter {
             isRunning: this.isRunning,
             port: this.config.port,
             connections: this.connectionManager.getStats(),
+            rateLimit: this.rateLimiter.getStats(),
         }
+    }
+
+    /**
+     * Get rate limiter instance (for manual control)
+     */
+    getRateLimiter(): RateLimiter {
+        return this.rateLimiter
     }
 
     /**
