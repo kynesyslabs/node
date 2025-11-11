@@ -10,14 +10,17 @@
  * Run with: bun run zk:setup-all
  */
 
-import { existsSync, mkdirSync } from "fs"
+import { existsSync, mkdirSync, readFileSync } from "fs"
 import { execSync } from "child_process"
 import { join } from "path"
+import { createHash } from "crypto"
 
 const KEYS_DIR = "src/features/zk/keys"
 const CIRCUITS_DIR = "src/features/zk/circuits"
 const PTAU_FILE = "powersOfTau28_hez_final_14.ptau"
 const PTAU_URL = "https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_14.ptau"
+// REVIEW: SHA-256 checksum of the official Powers of Tau file for supply chain security
+const PTAU_SHA256 = "489be9e5ac65d524f7b1685baac8a183c6e77924fdb73d2b8105e335f277895d"
 
 // Terminal colors
 const colors = {
@@ -47,24 +50,68 @@ function exec(command: string, description: string) {
     }
 }
 
+// REVIEW: Verify Powers of Tau file integrity for supply chain security
+function verifyPtauChecksum(filePath: string): boolean {
+    log("  → Verifying file integrity...", "yellow")
+
+    try {
+        const fileBuffer = readFileSync(filePath)
+        const hash = createHash('sha256').update(fileBuffer).digest('hex')
+
+        if (hash !== PTAU_SHA256) {
+            log(`  ✗ Checksum mismatch!`, "red")
+            log(`    Expected: ${PTAU_SHA256}`, "red")
+            log(`    Got:      ${hash}`, "red")
+            log(`    The downloaded file may be corrupted or tampered with.`, "red")
+            return false
+        }
+
+        log("  ✓ File integrity verified", "green")
+        return true
+    } catch (error) {
+        log(`  ✗ Verification failed: ${error}`, "red")
+        return false
+    }
+}
+
 async function downloadPowersOfTau() {
     const ptauPath = join(KEYS_DIR, PTAU_FILE)
 
     if (existsSync(ptauPath)) {
-        log("  ✓ Powers of Tau file already exists, skipping download", "green")
-        return
+        log("  ✓ Powers of Tau file already exists", "green")
+        // REVIEW: Verify existing file integrity
+        if (!verifyPtauChecksum(ptauPath)) {
+            log("  ⚠ Existing file failed verification, re-downloading...", "yellow")
+            execSync(`rm "${ptauPath}"`)
+        } else {
+            return
+        }
     }
 
     log("  → Downloading Powers of Tau ceremony file (~140MB)...", "yellow")
     log("    This is a one-time download from public Hermez ceremony", "yellow")
 
     try {
-        // Using curl with progress bar
+        // REVIEW: Using curl with progress bar and 5-minute timeout for cross-platform compatibility
+        // Check curl availability first
+        try {
+            execSync('curl --version', { stdio: 'ignore' })
+        } catch {
+            log("  ✗ curl not found. Please install curl first.", "red")
+            throw new Error('curl not found. Install curl or download manually.')
+        }
+
         execSync(
-            `curl -L --progress-bar -o "${ptauPath}" "${PTAU_URL}"`,
-            { stdio: "inherit" },
+            `curl -L --progress-bar --max-time 300 -o "${ptauPath}" "${PTAU_URL}"`,
+            { stdio: "inherit", timeout: 300000 },
         )
         log("  ✓ Powers of Tau downloaded successfully", "green")
+
+        // REVIEW: Verify downloaded file integrity for supply chain security
+        if (!verifyPtauChecksum(ptauPath)) {
+            execSync(`rm "${ptauPath}"`)
+            throw new Error("Downloaded file failed integrity verification")
+        }
     } catch (error) {
         log("  ✗ Download failed", "red")
         log("    You can manually download from:", "yellow")
@@ -158,24 +205,23 @@ async function main() {
         // Step 2: Compile circuits
         stepLog(2, 3, "Compile Circom Circuits")
 
+        // REVIEW: Track compilation results for accurate key generation logic
         // Try basic circuit first
         const basicCompiled = compileCircuit("identity")
 
         // Try Merkle circuit (Phase 5)
-        const merkleExists = existsSync(join(CIRCUITS_DIR, "identity_with_merkle.circom"))
-        if (merkleExists) {
-            compileCircuit("identity_with_merkle")
-        }
+        const merkleCompiled = compileCircuit("identity_with_merkle")
 
         // Step 3: Generate keys
         stepLog(3, 3, "Generate Proving and Verification Keys")
 
-        if (basicCompiled) {
-            await generateKeys("identity")
-        } else if (merkleExists) {
+        // REVIEW: Use compilation results instead of file existence to avoid stale R1CS
+        if (merkleCompiled) {
             await generateKeys("identity_with_merkle")
+        } else if (basicCompiled) {
+            await generateKeys("identity")
         } else {
-            log("  ⚠ No circuits found to generate keys for", "yellow")
+            log("  ⚠ No circuits compiled successfully", "yellow")
             log("    Create circuit files in src/features/zk/circuits/ first", "yellow")
         }
 

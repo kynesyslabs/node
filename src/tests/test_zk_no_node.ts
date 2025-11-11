@@ -18,6 +18,15 @@ import { join } from "path"
 
 console.log("🧪 Testing ZK Identity System - Node Side (No Node Required)\n")
 
+// REVIEW: Track test results for accurate summary
+const testResults = {
+    vkeyLoading: false,
+    structure: false,
+    proofRejection: false,
+    fileValidation: false,
+    cdnSync: false,
+}
+
 // Test 1: Verification Key Loading
 console.log("📋 Test 1: Verification Key Loading")
 try {
@@ -29,6 +38,7 @@ try {
     console.log(`  ✅ Key has protocol: ${vKey.protocol}`)
     console.log(`  ✅ Key has curve: ${vKey.curve}`)
     console.log(`  ✅ Key has nPublic: ${vKey.nPublic}`)
+    testResults.vkeyLoading = true
 } catch (error) {
     console.log(`  ❌ Failed to load verification key: ${error}`)
 }
@@ -61,6 +71,7 @@ try {
     const allValid = hasProtocol && hasCurve && hasNPublic && hasVkAlpha1 &&
                      hasVkBeta2 && hasVkGamma2 && hasVkDelta2 && hasIC
     console.log(`  Overall structure: ${allValid ? "✅ Valid" : "❌ Invalid"}`)
+    testResults.structure = allValid
 } catch (error) {
     console.log(`  ❌ Validation failed: ${error}`)
 }
@@ -90,13 +101,21 @@ try {
         "11111", // context
     ]
 
+    // REVIEW: Differentiate between rejection (expected) and errors (unexpected)
     const isValid = await snarkjs.groth16.verify(vKey, publicSignals, invalidProof)
 
-    console.log(`  Proof verification result: ${isValid}`)
-    console.log(`  ${!isValid ? "✅" : "❌"} Invalid proof correctly rejected`)
+    if (!isValid) {
+        console.log("  ✅ Invalid proof correctly rejected")
+        testResults.proofRejection = true
+    } else {
+        console.log("  ❌ Invalid proof was accepted - BUG!")
+        process.exit(1)
+    }
 } catch (error) {
-    console.log(`  ⚠️  Verification errored (expected for invalid proof): ${error instanceof Error ? error.message : String(error)}`)
-    console.log("  ✅ snarkjs correctly rejects malformed proofs")
+    // REVIEW: Unexpected errors indicate configuration issues
+    console.log(`  ❌ Unexpected error: ${error instanceof Error ? error.message : String(error)}`)
+    console.log("  ⚠️  Check verification key or snarkjs setup")
+    process.exit(1)
 }
 console.log()
 
@@ -131,6 +150,7 @@ try {
 
     const allFilesExist = provingKeyStat && verificationKeyStat && ptauStat
     console.log(`  All key files present: ${allFilesExist ? "✅" : "❌"}`)
+    testResults.fileValidation = allFilesExist
 } catch (error) {
     console.log(`  ❌ File validation failed: ${error}`)
 }
@@ -164,20 +184,28 @@ try {
     if (keysMatch) {
         console.log("  ✅ CDN is serving the correct verification key")
     }
+    testResults.cdnSync = keysMatch
 } catch (error) {
     console.log(`  ⚠️  CDN check failed: ${error}`)
 }
 console.log()
 
-// Summary
-console.log("✅ Node-Side Tests Complete!\n")
-console.log("📊 Summary:")
-console.log("  - Verification key: ✅ Loaded and validated")
-console.log("  - Key structure: ✅ Groth16 format correct")
-console.log("  - Invalid proof rejection: ✅ Working")
-console.log("  - Key files: ✅ Present and correct sizes")
-console.log("  - CDN sync: ✅ Matches local keys")
+// REVIEW: Dynamic summary based on actual test results
+console.log("📊 Test Results Summary:\n")
+console.log(`  - Verification key: ${testResults.vkeyLoading ? "✅" : "❌"} Loaded and validated`)
+console.log(`  - Key structure: ${testResults.structure ? "✅" : "❌"} Groth16 format correct`)
+console.log(`  - Invalid proof rejection: ${testResults.proofRejection ? "✅" : "❌"} Working`)
+console.log(`  - Key files: ${testResults.fileValidation ? "✅" : "❌"} Present and correct sizes`)
+console.log(`  - CDN sync: ${testResults.cdnSync ? "✅" : "❌"} Matches local keys`)
 console.log()
+
+// Check if all tests passed
+const allPassed = Object.values(testResults).every((result) => result === true)
+if (allPassed) {
+    console.log("✅ All Node-Side Tests Passed!\n")
+} else {
+    console.log("❌ Some tests failed - check output above\n")
+}
 
 console.log("🚫 Cannot Test Without Running Node:")
 console.log("  - Database operations (nullifier checks, Merkle tree queries)")
@@ -190,3 +218,6 @@ console.log("💡 To test full verification flow:")
 console.log("  1. Start the node: bun run dev")
 console.log("  2. Run integration tests: bun test src/features/zk/tests/")
 console.log()
+
+// REVIEW: Exit with error code if any tests failed (for CI/CD integration)
+process.exit(allPassed ? 0 : 1)

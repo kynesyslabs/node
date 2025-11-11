@@ -37,11 +37,11 @@ export class UsedNullifier {
 
     /**
      * Timestamp when nullifier was used
-     * Stored as bigint; represented as string to avoid precision loss
-     * TypeORM returns bigint columns as strings by default
+     * REVIEW: Changed from bigint to integer for type consistency with blockNumber
+     * JavaScript Date.now() returns number (safe up to 2^53, covers dates until year 285616)
      */
-    @Column({ type: "bigint", name: "timestamp" })
-    timestamp: string
+    @Column({ type: "integer", name: "timestamp" })
+    timestamp: number
 
     /**
      * Auto-generated creation timestamp

@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from 'fs';
-import { resolve } from 'path';
+import { resolve, isAbsolute, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
@@ -7,10 +7,32 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 async function generateWitness() {
+    // REVIEW: Path traversal vulnerability fix - validate CLI arguments
+    const rawInputPath = process.argv[2] || 'test_input.json';
+    const rawOutputPath = process.argv[3] || 'test_witness.wtns';
+
+    // Prevent path traversal attacks
+    if (isAbsolute(rawInputPath) || rawInputPath.includes('..')) {
+        throw new Error('Input path must be relative and cannot contain ".."');
+    }
+    if (isAbsolute(rawOutputPath) || rawOutputPath.includes('..')) {
+        throw new Error('Output path must be relative and cannot contain ".."');
+    }
+
+    // Validate file extensions
+    if (!rawInputPath.endsWith('.json')) {
+        throw new Error('Input must be a .json file');
+    }
+    if (!rawOutputPath.endsWith('.wtns')) {
+        throw new Error('Output must be a .wtns file');
+    }
+
+    // Safely resolve paths relative to current working directory
+    const inputPath = resolve(process.cwd(), normalize(rawInputPath));
+    const outputPath = resolve(process.cwd(), normalize(rawOutputPath));
+
     // Dynamic import of witness calculator (CommonJS module)
     const wasmPath = resolve(__dirname, '../src/features/zk/circuits/identity_with_merkle_js/identity_with_merkle.wasm');
-    const inputPath = process.argv[2] || 'test_input.json';
-    const outputPath = process.argv[3] || 'test_witness.wtns';
 
     // Load input
     const input = JSON.parse(readFileSync(inputPath, 'utf-8'));

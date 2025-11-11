@@ -47,13 +47,27 @@ const ZK_MERKLE_TREE_ID = "global" // Global tree identifier for identity attest
 
 // REVIEW: Singleton MerkleTreeManager instance to avoid expensive per-request initialization
 let globalMerkleManager: MerkleTreeManager | null = null
+// REVIEW: Initialization promise to prevent concurrent initialization race condition
+let initializationPromise: Promise<MerkleTreeManager> | null = null
 
 /**
  * Get or create the global MerkleTreeManager singleton instance
  * Lazily initializes on first call to avoid startup overhead
+ * Thread-safe: Prevents concurrent initialization with promise guard
  */
 async function getMerkleTreeManager(): Promise<MerkleTreeManager> {
-    if (!globalMerkleManager) {
+    // Fast path: already initialized
+    if (globalMerkleManager) {
+        return globalMerkleManager
+    }
+
+    // Wait for ongoing initialization
+    if (initializationPromise) {
+        return await initializationPromise
+    }
+
+    // Start initialization
+    initializationPromise = (async () => {
         const db = await Datasource.getInstance()
         const dataSource = db.getDataSource()
         globalMerkleManager = new MerkleTreeManager(
@@ -63,8 +77,15 @@ async function getMerkleTreeManager(): Promise<MerkleTreeManager> {
         )
         await globalMerkleManager.initialize()
         log.info("✅ Global MerkleTreeManager initialized")
+        return globalMerkleManager
+    })()
+
+    try {
+        return await initializationPromise
+    } finally {
+        // Clear promise after initialization completes (success or failure)
+        initializationPromise = null
     }
-    return globalMerkleManager
 }
 
 // Reading the port from sharedState

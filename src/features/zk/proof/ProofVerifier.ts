@@ -18,7 +18,7 @@
  */
 
 import * as snarkjs from "snarkjs"
-import { readFileSync } from "fs"
+import { readFile } from "fs/promises"
 import { join } from "path"
 import { DataSource, Repository } from "typeorm"
 import { UsedNullifier } from "@/model/entities/GCRv2/UsedNullifier.js"
@@ -62,6 +62,7 @@ export class ProofVerifier {
     /**
      * Initialize verification key (load from file, cache in memory)
      * Called automatically on first verification
+     * REVIEW: Uses async readFile instead of blocking readFileSync
      */
     private static async loadVerificationKey(): Promise<void> {
         if (this.vKey) {
@@ -70,7 +71,7 @@ export class ProofVerifier {
 
         try {
             const vKeyPath = join(process.cwd(), this.vKeyPath)
-            const vKeyJson = readFileSync(vKeyPath, "utf-8")
+            const vKeyJson = await readFile(vKeyPath, "utf-8")
             this.vKey = JSON.parse(vKeyJson)
             console.log("✅ ZK verification key loaded successfully")
         } catch (error) {
@@ -232,7 +233,8 @@ export class ProofVerifier {
             await this.nullifierRepo.save({
                 nullifierHash,
                 blockNumber,
-                timestamp: Date.now().toString(),
+                // REVIEW: Use number for timestamp consistency with blockNumber (not string)
+                timestamp: Date.now(),
                 transactionHash,
             })
 

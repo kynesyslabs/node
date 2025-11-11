@@ -48,6 +48,26 @@ export async function groth16VerifyBun(
         const proof = unstringifyBigInts(_proof)
         const publicSignals = unstringifyBigInts(_publicSignals)
 
+        // REVIEW: Validate verification key structure to prevent cryptic errors
+        if (!vk_verifier.curve || !vk_verifier.IC || !vk_verifier.vk_alpha_1 ||
+            !vk_verifier.vk_beta_2 || !vk_verifier.vk_gamma_2 || !vk_verifier.vk_delta_2) {
+            console.error("ZK Verify: Invalid verification key structure - missing required fields")
+            return false
+        }
+
+        // REVIEW: Validate curve is supported
+        const SUPPORTED_CURVES = ["bn128", "bls12381"]
+        if (!SUPPORTED_CURVES.includes(vk_verifier.curve)) {
+            console.error(`ZK Verify: Unsupported curve ${vk_verifier.curve}`)
+            return false
+        }
+
+        // REVIEW: Validate proof protocol is groth16
+        if (proof.protocol && proof.protocol !== "groth16") {
+            console.error(`ZK Verify: Unsupported protocol ${proof.protocol} (expected groth16)`)
+            return false
+        }
+
         // CRITICAL: Pass singleThread: true to avoid worker threads
         const curve = await curves.getCurveFromName(vk_verifier.curve, {
             singleThread: true,
