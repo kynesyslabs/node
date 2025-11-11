@@ -1,7 +1,11 @@
 // REVIEW: PeerConnection - TCP socket wrapper for single peer connection with state management
 import { Socket } from "net"
+import * as ed25519 from "@noble/ed25519"
+import { sha256 } from "@noble/hashes/sha256"
 import { MessageFramer } from "./MessageFramer"
 import type { OmniMessageHeader } from "../types/message"
+import type { AuthBlock } from "../auth/types"
+import { SignatureAlgorithm, SignatureMode } from "../auth/types"
 import type {
     ConnectionState,
     ConnectionOptions,
@@ -167,6 +171,84 @@ export class PeerConnection {
             }
 
             const messageBuffer = MessageFramer.encodeMessage(header, payload)
+            this.socket!.write(messageBuffer)
+
+            this.lastActivity = Date.now()
+            this.resetIdleTimer()
+        })
+    }
+
+    /**
+     * Send authenticated request and await response
+     * @param opcode OmniProtocol opcode
+     * @param payload Message payload
+     * @param privateKey Ed25519 private key for signing
+     * @param publicKey Ed25519 public key for identity
+     * @param options Request options (timeout)
+     * @returns Promise resolving to response payload
+     */
+    async sendAuthenticated(
+        opcode: number,
+        payload: Buffer,
+        privateKey: Buffer,
+        publicKey: Buffer,
+        options: ConnectionOptions = {},
+    ): Promise<Buffer> {
+        if (this.state !== "READY") {
+            throw new Error(
+                `Cannot send message in state ${this.state}, must be READY`,
+            )
+        }
+
+        const sequence = this.nextSequence++
+        const timeout = options.timeout ?? 30000 // 30 second default
+        const timestamp = Date.now()
+
+        // Build data to sign: Message ID + SHA256(Payload)
+        const msgIdBuf = Buffer.allocUnsafe(4)
+        msgIdBuf.writeUInt32BE(sequence)
+        const payloadHash = Buffer.from(sha256(payload))
+        const dataToSign = Buffer.concat([msgIdBuf, payloadHash])
+
+        // Sign with Ed25519
+        const signature = await ed25519.sign(dataToSign, privateKey)
+
+        // Build auth block
+        const auth: AuthBlock = {
+            algorithm: SignatureAlgorithm.ED25519,
+            signatureMode: SignatureMode.SIGN_MESSAGE_ID_PAYLOAD_HASH,
+            timestamp,
+            identity: publicKey,
+            signature: Buffer.from(signature),
+        }
+
+        return new Promise((resolve, reject) => {
+            const timeoutTimer = setTimeout(() => {
+                this.inFlightRequests.delete(sequence)
+                reject(
+                    new ConnectionTimeoutError(
+                        `Request timeout after ${timeout}ms`,
+                    ),
+                )
+            }, timeout)
+
+            // Store pending request for response correlation
+            this.inFlightRequests.set(sequence, {
+                resolve,
+                reject,
+                timer: timeoutTimer,
+                sentAt: Date.now(),
+            })
+
+            // Encode and send message with auth
+            const header: OmniMessageHeader = {
+                version: 1,
+                opcode,
+                sequence,
+                payloadLength: payload.length,
+            }
+
+            const messageBuffer = MessageFramer.encodeMessage(header, payload, auth)
             this.socket!.write(messageBuffer)
 
             this.lastActivity = Date.now()

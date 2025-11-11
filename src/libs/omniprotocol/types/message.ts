@@ -1,4 +1,5 @@
 import { Buffer } from "buffer"
+import type { AuthBlock } from "../auth/types"
 
 export interface OmniMessageHeader {
     version: number
@@ -15,8 +16,8 @@ export interface OmniMessage {
 
 export interface ParsedOmniMessage<TPayload = unknown> {
     header: OmniMessageHeader
+    auth: AuthBlock | null       // Present if Flags bit 0 = 1
     payload: TPayload
-    checksum: number
 }
 
 export interface SendOptions {
@@ -31,9 +32,11 @@ export interface SendOptions {
 
 export interface ReceiveContext {
     peerIdentity: string
-    connectionId: string
-    receivedAt: number
-    requiresAuth: boolean
+    connectionId?: string
+    remoteAddress?: string
+    receivedAt?: number
+    requiresAuth?: boolean
+    isAuthenticated?: boolean
 }
 
 export interface HandlerContext<TPayload = unknown> {
