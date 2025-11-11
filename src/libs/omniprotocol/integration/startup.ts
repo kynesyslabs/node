@@ -3,12 +3,16 @@
  *
  * This module provides a simple way to start the OmniProtocol TCP server
  * alongside the existing HTTP server in the node.
+ * Supports both plain TCP and TLS-encrypted connections.
  */
 
 import { OmniProtocolServer } from "../server/OmniProtocolServer"
+import { TLSServer } from "../server/TLSServer"
+import { initializeTLSCertificates } from "../tls/initialize"
+import type { TLSConfig } from "../tls/types"
 import log from "src/utilities/logger"
 
-let serverInstance: OmniProtocolServer | null = null
+let serverInstance: OmniProtocolServer | TLSServer | null = null
 
 export interface OmniServerConfig {
     enabled?: boolean
@@ -17,16 +21,24 @@ export interface OmniServerConfig {
     maxConnections?: number
     authTimeout?: number
     connectionTimeout?: number
+    tls?: {
+        enabled?: boolean
+        mode?: 'self-signed' | 'ca'
+        certPath?: string
+        keyPath?: string
+        caPath?: string
+        minVersion?: 'TLSv1.2' | 'TLSv1.3'
+    }
 }
 
 /**
- * Start the OmniProtocol TCP server
+ * Start the OmniProtocol TCP/TLS server
  * @param config Server configuration (optional)
- * @returns OmniProtocolServer instance or null if disabled
+ * @returns OmniProtocolServer or TLSServer instance, or null if disabled
  */
 export async function startOmniProtocolServer(
     config: OmniServerConfig = {}
-): Promise<OmniProtocolServer | null> {
+): Promise<OmniProtocolServer | TLSServer | null> {
     // Check if enabled (default: false for now until fully tested)
     if (config.enabled === false) {
         log.info("[OmniProtocol] Server disabled in configuration")
@@ -34,14 +46,63 @@ export async function startOmniProtocolServer(
     }
 
     try {
-        // Create server with configuration
-        serverInstance = new OmniProtocolServer({
-            host: config.host ?? "0.0.0.0",
-            port: config.port ?? detectDefaultPort(),
-            maxConnections: config.maxConnections ?? 1000,
-            authTimeout: config.authTimeout ?? 5000,
-            connectionTimeout: config.connectionTimeout ?? 600000, // 10 minutes
-        })
+        const port = config.port ?? detectDefaultPort()
+        const host = config.host ?? "0.0.0.0"
+        const maxConnections = config.maxConnections ?? 1000
+        const authTimeout = config.authTimeout ?? 5000
+        const connectionTimeout = config.connectionTimeout ?? 600000
+
+        // Check if TLS is enabled
+        if (config.tls?.enabled) {
+            log.info("[OmniProtocol] Starting with TLS encryption...")
+
+            // Initialize certificates
+            let certPath = config.tls.certPath
+            let keyPath = config.tls.keyPath
+
+            if (!certPath || !keyPath) {
+                log.info("[OmniProtocol] No certificate paths provided, initializing self-signed certificates...")
+                const certInit = await initializeTLSCertificates()
+                certPath = certInit.certPath
+                keyPath = certInit.keyPath
+            }
+
+            // Build TLS config
+            const tlsConfig: TLSConfig = {
+                enabled: true,
+                mode: config.tls.mode ?? 'self-signed',
+                certPath,
+                keyPath,
+                caPath: config.tls.caPath,
+                rejectUnauthorized: false, // Custom verification
+                minVersion: config.tls.minVersion ?? 'TLSv1.3',
+                requestCert: true,
+                trustedFingerprints: new Map(),
+            }
+
+            // Create TLS server
+            serverInstance = new TLSServer({
+                host,
+                port,
+                maxConnections,
+                authTimeout,
+                connectionTimeout,
+                tls: tlsConfig,
+            })
+
+            log.info(`[OmniProtocol] TLS server configured (${tlsConfig.mode} mode, ${tlsConfig.minVersion})`)
+        } else {
+            // Create plain TCP server
+            serverInstance = new OmniProtocolServer({
+                host,
+                port,
+                maxConnections,
+                authTimeout,
+                connectionTimeout,
+            })
+
+            log.info("[OmniProtocol] Plain TCP server configured (no encryption)")
+        }
 
         // Setup event listeners
         serverInstance.on("listening", (port) => {
