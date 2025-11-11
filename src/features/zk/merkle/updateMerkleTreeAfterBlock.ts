@@ -174,7 +174,7 @@ export async function rollbackMerkleTreeToBlock(
             // NOTE: IdentityCommitment doesn't have treeId - all commitments are in the global tree
             // Reset leaf indices for commitments after target block (within transaction)
             await commitmentRepo
-                .createQueryBuilder('commitment')
+                .createQueryBuilder("commitment")
                 .update(IdentityCommitment)
                 .set({ leafIndex: -1 })
                 .where("commitment.blockNumber > :blockNumber", {

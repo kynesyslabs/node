@@ -20,7 +20,7 @@
 import * as snarkjs from "snarkjs"
 import { readFile } from "fs/promises"
 import { join } from "path"
-import { DataSource, Repository } from "typeorm"
+import { DataSource, Repository, EntityManager } from "typeorm"
 import { UsedNullifier } from "@/model/entities/GCRv2/UsedNullifier.js"
 import { MerkleTreeState } from "@/model/entities/GCRv2/MerkleTreeState.js"
 // REVIEW: Bun-compatible verification wrapper (avoids worker thread crashes)
@@ -150,15 +150,19 @@ export class ProofVerifier {
      * 2. Nullifier uniqueness check (prevent double-attestation)
      * 3. Merkle root validation (ensure current tree state)
      *
-     * REVIEW: CRITICAL FIX - TOCTOU race condition prevented using database transaction
-     * This method now uses pessimistic locking to prevent double-attestation race conditions.
-     * The nullifier check and verification are atomic within the same transaction.
+     * REVIEW: CRITICAL FIX - Now uses pessimistic locking instead of optimistic marking
+     * When manager is provided, verification happens within a transaction with pessimistic_write lock.
+     * This prevents TOCTOU race conditions without leaving dirty data in the database.
      *
      * @param attestation - The identity attestation proof
+     * @param manager - Optional EntityManager for transactional verification
+     * @param metadata - Optional metadata for nullifier marking (blockNumber, txHash)
      * @returns Verification result with details
      */
     async verifyIdentityAttestation(
         attestation: IdentityAttestationProof,
+        manager?: EntityManager,
+        metadata?: { blockNumber: number; transactionHash: string },
     ): Promise<ProofVerificationResult> {
         const { proof, publicSignals } = attestation
 
@@ -174,25 +178,21 @@ export class ProofVerifier {
         const merkleRoot = publicSignals[1]
         const context = publicSignals[2] || "default" // Context is optional in some circuit versions
 
-        // REVIEW: CRITICAL FIX - Use optimistic nullifier marking to prevent TOCTOU race
-        // This prevents race condition where two requests with same nullifier could both
-        // pass the check before either marks it as used.
-        //
-        // Strategy: Mark nullifier FIRST (optimistic insertion), then verify.
-        // If insertion fails (constraint error), nullifier already used.
-        // If verification fails, delete the marker.
-        // This ensures the first to mark wins, preventing double-attestation.
+        // REVIEW: CRITICAL FIX - Pessimistic locking approach
+        // If EntityManager provided, use pessimistic lock within transaction
+        // Otherwise, fall back to check-then-mark (less safe but maintains backward compatibility)
 
-        // Step 1: Try to mark nullifier immediately (optimistic approach)
-        try {
-            await this.markNullifierUsed(nullifier, 0, "pending_verification")
-        } catch (error: any) {
-            // Constraint error means nullifier already used
-            if (
-                error.message?.includes("Double-attestation attempt") ||
-                error.code === "23505" ||
-                error.code?.startsWith("SQLITE_CONSTRAINT")
-            ) {
+        if (manager) {
+            // Transactional path with pessimistic locking (RECOMMENDED)
+            const nullifierRepo = manager.getRepository(UsedNullifier)
+
+            // Step 1: Check nullifier with pessimistic write lock
+            const existing = await nullifierRepo.findOne({
+                where: { nullifierHash: nullifier },
+                lock: { mode: "pessimistic_write" },
+            })
+
+            if (existing) {
                 return {
                     valid: false,
                     reason: "Nullifier already used (double-attestation attempt)",
@@ -201,45 +201,101 @@ export class ProofVerifier {
                     context,
                 }
             }
-            // Other errors should propagate
-            throw error
-        }
 
-        // Step 2: Cryptographic verification
-        const cryptoValid = await ProofVerifier.verifyCryptographically(proof, publicSignals)
-        if (!cryptoValid) {
-            // Verification failed - remove the marker
-            await this.nullifierRepo.delete({ nullifierHash: nullifier })
+            // Step 2: Cryptographic verification
+            const cryptoValid = await ProofVerifier.verifyCryptographically(proof, publicSignals)
+            if (!cryptoValid) {
+                return {
+                    valid: false,
+                    reason: "Proof failed cryptographic verification",
+                    nullifier,
+                    merkleRoot,
+                    context,
+                }
+            }
+
+            // Step 3: Validate Merkle root is current
+            const rootIsCurrent = await this.isMerkleRootCurrent(merkleRoot)
+            if (!rootIsCurrent) {
+                return {
+                    valid: false,
+                    reason: "Merkle root does not match current tree state",
+                    nullifier,
+                    merkleRoot,
+                    context,
+                }
+            }
+
+            // Step 4: Mark nullifier with CORRECT values (not dummy data)
+            await nullifierRepo.save({
+                nullifierHash: nullifier,
+                blockNumber: metadata?.blockNumber || 0,
+                timestamp: Date.now().toString(),
+                transactionHash: metadata?.transactionHash || "",
+            })
+
             return {
-                valid: false,
-                reason: "Proof failed cryptographic verification",
+                valid: true,
                 nullifier,
                 merkleRoot,
                 context,
             }
-        }
+        } else {
+            // Non-transactional fallback (for backward compatibility)
+            // This path is less safe - callers should prefer passing EntityManager
 
-        // Step 3: Validate Merkle root is current
-        const rootIsCurrent = await this.isMerkleRootCurrent(merkleRoot)
-        if (!rootIsCurrent) {
-            // Verification failed - remove the marker
-            await this.nullifierRepo.delete({ nullifierHash: nullifier })
+            // Step 1: Check if nullifier already used
+            const existing = await this.nullifierRepo.findOne({
+                where: { nullifierHash: nullifier },
+            })
+
+            if (existing) {
+                return {
+                    valid: false,
+                    reason: "Nullifier already used (double-attestation attempt)",
+                    nullifier,
+                    merkleRoot,
+                    context,
+                }
+            }
+
+            // Step 2: Cryptographic verification
+            const cryptoValid = await ProofVerifier.verifyCryptographically(proof, publicSignals)
+            if (!cryptoValid) {
+                return {
+                    valid: false,
+                    reason: "Proof failed cryptographic verification",
+                    nullifier,
+                    merkleRoot,
+                    context,
+                }
+            }
+
+            // Step 3: Validate Merkle root is current
+            const rootIsCurrent = await this.isMerkleRootCurrent(merkleRoot)
+            if (!rootIsCurrent) {
+                return {
+                    valid: false,
+                    reason: "Merkle root does not match current tree state",
+                    nullifier,
+                    merkleRoot,
+                    context,
+                }
+            }
+
+            // Step 4: Mark nullifier (TOCTOU race possible here without transaction)
+            await this.markNullifierUsed(
+                nullifier,
+                metadata?.blockNumber || 0,
+                metadata?.transactionHash || "",
+            )
+
             return {
-                valid: false,
-                reason: "Merkle root does not match current tree state",
+                valid: true,
                 nullifier,
                 merkleRoot,
                 context,
             }
-        }
-
-        // All checks passed!
-        // NOTE: Nullifier is already marked (Step 1). Caller should update with proper block/tx info.
-        return {
-            valid: true,
-            nullifier,
-            merkleRoot,
-            context,
         }
     }
 

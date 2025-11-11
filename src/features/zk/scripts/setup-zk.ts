@@ -56,13 +56,13 @@ function verifyPtauChecksum(filePath: string): boolean {
 
     try {
         const fileBuffer = readFileSync(filePath)
-        const hash = createHash('sha256').update(fileBuffer).digest('hex')
+        const hash = createHash("sha256").update(fileBuffer).digest("hex")
 
         if (hash !== PTAU_SHA256) {
-            log(`  ✗ Checksum mismatch!`, "red")
+            log("  ✗ Checksum mismatch!", "red")
             log(`    Expected: ${PTAU_SHA256}`, "red")
             log(`    Got:      ${hash}`, "red")
-            log(`    The downloaded file may be corrupted or tampered with.`, "red")
+            log("    The downloaded file may be corrupted or tampered with.", "red")
             return false
         }
 
@@ -96,10 +96,10 @@ async function downloadPowersOfTau() {
         // REVIEW: Using curl with progress bar and 5-minute timeout for cross-platform compatibility
         // Check curl availability first
         try {
-            execSync('curl --version', { stdio: 'ignore' })
+            execSync("curl --version", { stdio: "ignore" })
         } catch {
             log("  ✗ curl not found. Please install curl first.", "red")
-            throw new Error('curl not found. Install curl or download manually.')
+            throw new Error("curl not found. Install curl or download manually.")
         }
 
         execSync(

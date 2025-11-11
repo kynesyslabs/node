@@ -746,44 +746,38 @@ export default class GCRIdentityRoutines {
         const dataSource = db.getDataSource()
         const verifier = new ProofVerifier(dataSource)
 
-        // Verify the ZK proof (3-step verification: crypto + nullifier + root)
-        const verificationResult = await verifier.verifyIdentityAttestation({
-            proof: payload.proof,
-            publicSignals: payload.public_signals,
-        })
-
-        if (!verificationResult.valid) {
-            log.warn(
-                `❌ ZK attestation verification failed: ${verificationResult.reason}`,
-            )
-            return {
-                success: false,
-                message: `ZK proof verification failed: ${verificationResult.reason}`,
-            }
-        }
-
-        // REVIEW: HIGH FIX - Update nullifier entry (already inserted by verifier) and award points atomically
-        // The verifier already marked the nullifier with temporary data to prevent race conditions.
-        // Now we update it with proper block/tx info and award points in a single transaction.
+        // REVIEW: CRITICAL FIX - Perform verification and points awarding atomically within transaction
+        // This ensures nullifier marking uses correct values and prevents dirty data
         if (!simulate) {
-            // REVIEW: MEDIUM FIX - Reuse existing dataSource instead of redundant getInstance() call
-            // The dataSource variable is already available from line 707, no need to retrieve it again
             const queryRunner = dataSource.createQueryRunner()
             await queryRunner.connect()
             await queryRunner.startTransaction()
 
             try {
-                // Update nullifier entry with proper block/tx info
-                await queryRunner.manager.update(
-                    UsedNullifier,
-                    { nullifierHash: payload.nullifier_hash },
+                // REVIEW: CRITICAL FIX - Verify ZK proof WITH transactional manager for pessimistic locking
+                // Pass manager and metadata to ensure nullifier is marked with correct values only after verification
+                const verificationResult = await verifier.verifyIdentityAttestation(
+                    {
+                        proof: payload.proof,
+                        publicSignals: payload.public_signals,
+                    },
+                    queryRunner.manager,
                     {
                         blockNumber: 0, // Will be updated during block commit
                         transactionHash: editOperation.txhash || "",
-                        // REVIEW: HIGH FIX - Standardize timestamp format to string (matching line 654)
-                        timestamp: Date.now().toString(),
                     },
                 )
+
+                if (!verificationResult.valid) {
+                    await queryRunner.rollbackTransaction()
+                    log.warn(
+                        `❌ ZK attestation verification failed: ${verificationResult.reason}`,
+                    )
+                    return {
+                        success: false,
+                        message: `ZK proof verification failed: ${verificationResult.reason}`,
+                    }
+                }
 
                 // REVIEW: Award points for ZK attestation atomically with nullifier update
                 // REVIEW: Phase 10.1 - Configurable ZK attestation points
@@ -844,11 +838,33 @@ export default class GCRIdentityRoutines {
             } finally {
                 await queryRunner.release()
             }
+        } else {
+            // REVIEW: CRITICAL FIX - Simulate path: verify without transaction
+            const verificationResult = await verifier.verifyIdentityAttestation({
+                proof: payload.proof,
+                publicSignals: payload.public_signals,
+            })
+
+            if (!verificationResult.valid) {
+                log.warn(
+                    `❌ ZK attestation verification failed (simulate): ${verificationResult.reason}`,
+                )
+                return {
+                    success: false,
+                    message: `ZK proof verification failed: ${verificationResult.reason}`,
+                }
+            }
+
+            log.info(
+                "✅ ZK attestation verified (simulate mode - no points awarded)",
+            )
         }
 
         return {
             success: true,
-            message: "ZK attestation verified and points awarded",
+            message: simulate
+                ? "ZK attestation verified (simulation)"
+                : "ZK attestation verified and points awarded",
         }
     }
 
