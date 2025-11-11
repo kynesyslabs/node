@@ -151,6 +151,50 @@ export class ConnectionPool {
     }
 
     /**
+     * Send an authenticated request to a peer (acquire connection, sign, send, release)
+     * Convenience method that handles connection lifecycle with authentication
+     * @param peerIdentity Peer public key or identifier
+     * @param connectionString Connection string (e.g., "tcp://ip:port")
+     * @param opcode OmniProtocol opcode
+     * @param payload Request payload
+     * @param privateKey Ed25519 private key for signing
+     * @param publicKey Ed25519 public key for identity
+     * @param options Request options
+     * @returns Promise resolving to response payload
+     */
+    async sendAuthenticated(
+        peerIdentity: string,
+        connectionString: string,
+        opcode: number,
+        payload: Buffer,
+        privateKey: Buffer,
+        publicKey: Buffer,
+        options: ConnectionOptions = {},
+    ): Promise<Buffer> {
+        const connection = await this.acquire(
+            peerIdentity,
+            connectionString,
+            options,
+        )
+
+        try {
+            const response = await connection.sendAuthenticated(
+                opcode,
+                payload,
+                privateKey,
+                publicKey,
+                options
+            )
+            this.release(connection)
+            return response
+        } catch (error) {
+            // On error, close the connection and remove from pool
+            await this.closeConnection(connection)
+            throw error
+        }
+    }
+
+    /**
      * Get pool statistics for monitoring
      * @returns Current pool statistics
      */

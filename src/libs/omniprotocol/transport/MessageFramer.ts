@@ -1,8 +1,10 @@
 // REVIEW: MessageFramer - Parse TCP stream into complete OmniProtocol messages
 import { Buffer } from "buffer"
 import { crc32 } from "crc"
-import type { OmniMessage, OmniMessageHeader } from "../types/message"
+import type { OmniMessage, OmniMessageHeader, ParsedOmniMessage } from "../types/message"
 import { PrimitiveDecoder, PrimitiveEncoder } from "../serialization/primitives"
+import { AuthBlockParser } from "../auth/parser"
+import type { AuthBlock } from "../auth/types"
 
 /**
  * MessageFramer handles parsing of TCP byte streams into complete OmniProtocol messages
@@ -41,9 +43,75 @@ export class MessageFramer {
 
     /**
      * Try to extract a complete message from buffered data
-     * @returns Complete message or null if insufficient data
+     * @returns Complete message with auth block or null if insufficient data
      */
-    extractMessage(): OmniMessage | null {
+    extractMessage(): ParsedOmniMessage | null {
+        // Need at least header + checksum to proceed
+        if (this.buffer.length < MessageFramer.MIN_MESSAGE_SIZE) {
+            return null
+        }
+
+        // Parse header to get payload length
+        const header = this.parseHeader()
+        if (!header) {
+            return null // Invalid header
+        }
+
+        let offset = MessageFramer.HEADER_SIZE
+
+        // Check if auth block is present (Flags bit 0)
+        let auth: AuthBlock | null = null
+        if (this.isAuthRequired(header)) {
+            // Need to peek at auth block to know its size
+            if (this.buffer.length < offset + 12) {
+                return null // Need at least auth header
+            }
+
+            try {
+                const authResult = AuthBlockParser.parse(this.buffer, offset)
+                auth = authResult.auth
+                offset += authResult.bytesRead
+            } catch (error) {
+                console.error("Failed to parse auth block:", error)
+                throw new Error("Invalid auth block format")
+            }
+        }
+
+        // Calculate total message size including auth block
+        const totalSize = offset + header.payloadLength + MessageFramer.CHECKSUM_SIZE
+
+        // Check if we have the complete message
+        if (this.buffer.length < totalSize) {
+            return null // Need more data
+        }
+
+        // Extract complete message
+        const messageBuffer = this.buffer.subarray(0, totalSize)
+        this.buffer = this.buffer.subarray(totalSize)
+
+        // Parse payload and checksum
+        const payload = messageBuffer.subarray(offset, offset + header.payloadLength)
+        const checksumOffset = offset + header.payloadLength
+        const checksum = messageBuffer.readUInt32BE(checksumOffset)
+
+        // Validate checksum (over everything except checksum itself)
+        if (!this.validateChecksum(messageBuffer, checksum)) {
+            throw new Error(
+                "Message checksum validation failed - corrupted data",
+            )
+        }
+
+        return {
+            header,
+            auth,
+            payload,
+        }
+    }
+
+    /**
+     * Extract legacy message without auth block parsing (for backwards compatibility)
+     */
+    extractLegacyMessage(): OmniMessage | null {
         // Need at least header + checksum to proceed
         if (this.buffer.length < MessageFramer.MIN_MESSAGE_SIZE) {
             return null
@@ -163,6 +231,15 @@ export class MessageFramer {
     }
 
     /**
+     * Check if auth is required based on Flags bit 0
+     */
+    private isAuthRequired(header: OmniMessageHeader): boolean {
+        // Flags is byte at offset 3 in header
+        const flags = this.buffer[3]
+        return (flags & 0x01) === 0x01 // Check bit 0
+    }
+
+    /**
      * Get current buffer size (for debugging/metrics)
      * @returns Number of bytes in buffer
      */
@@ -181,17 +258,24 @@ export class MessageFramer {
      * Encode a complete OmniMessage into binary format for sending
      * @param header Message header
      * @param payload Message payload
+     * @param auth Optional authentication block
+     * @param flags Optional flags byte (default: 0)
      * @returns Complete message buffer ready to send
      * @static
      */
     static encodeMessage(
         header: OmniMessageHeader,
         payload: Buffer,
+        auth?: AuthBlock | null,
+        flags?: number
     ): Buffer {
+        // Determine flags
+        const flagsByte = flags !== undefined ? flags : (auth ? 0x01 : 0x00)
+
         // Encode header (12 bytes)
         const versionBuf = PrimitiveEncoder.encodeUInt16(header.version)
         const opcodeBuf = PrimitiveEncoder.encodeUInt8(header.opcode)
-        const flagsBuf = PrimitiveEncoder.encodeUInt8(0) // Flags = 0 for now
+        const flagsBuf = PrimitiveEncoder.encodeUInt8(flagsByte)
         const lengthBuf = PrimitiveEncoder.encodeUInt32(payload.length)
         const sequenceBuf = PrimitiveEncoder.encodeUInt32(header.sequence)
 
@@ -204,12 +288,15 @@ export class MessageFramer {
             sequenceBuf,
         ])
 
-        // Calculate checksum over header + payload
-        const dataToCheck = Buffer.concat([headerBuf, payload])
+        // Encode auth block if present
+        const authBuf = auth ? AuthBlockParser.encode(auth) : Buffer.alloc(0)
+
+        // Calculate checksum over header + auth + payload
+        const dataToCheck = Buffer.concat([headerBuf, authBuf, payload])
         const checksum = crc32(dataToCheck)
         const checksumBuf = PrimitiveEncoder.encodeUInt32(checksum)
 
         // Return complete message
-        return Buffer.concat([headerBuf, payload, checksumBuf])
+        return Buffer.concat([headerBuf, authBuf, payload, checksumBuf])
     }
 }

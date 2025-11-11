@@ -99,8 +99,8 @@ export interface ConnectionInfo {
  * Parsed connection string components
  */
 export interface ParsedConnectionString {
-    /** Protocol: 'tcp' or 'tcps' (TLS) */
-    protocol: "tcp" | "tcps"
+    /** Protocol: 'tcp', 'tls', or 'tcps' (TLS) */
+    protocol: "tcp" | "tls" | "tcps"
     /** Hostname or IP address */
     host: string
     /** Port number */
@@ -139,14 +139,14 @@ export class AuthenticationError extends Error {
 
 /**
  * Parse connection string into components
- * @param connectionString Format: "tcp://host:port" or "tcps://host:port"
+ * @param connectionString Format: "tcp://host:port", "tls://host:port", or "tcps://host:port"
  * @returns Parsed components
  * @throws Error if format is invalid
  */
 export function parseConnectionString(
     connectionString: string,
 ): ParsedConnectionString {
-    const match = connectionString.match(/^(tcp|tcps):\/\/([^:]+):(\d+)$/)
+    const match = connectionString.match(/^(tcp|tls|tcps):\/\/([^:]+):(\d+)$/)
     if (!match) {
         throw new Error(
             `Invalid connection string format: ${connectionString}. Expected tcp://host:port`,
@@ -154,7 +154,7 @@ export function parseConnectionString(
     }
 
     return {
-        protocol: match[1] as "tcp" | "tcps",
+        protocol: match[1] as "tcp" | "tls" | "tcps",
         host: match[2],
         port: parseInt(match[3], 10),
     }

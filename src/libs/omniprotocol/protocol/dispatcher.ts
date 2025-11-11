@@ -6,6 +6,7 @@ import {
 } from "../types/message"
 import { getHandler } from "./registry"
 import { OmniOpcode } from "./opcodes"
+import { SignatureVerifier } from "../auth/verifier"
 
 export interface DispatchOptions<TPayload = unknown> {
     message: ParsedOmniMessage<TPayload>
@@ -21,6 +22,35 @@ export async function dispatchOmniMessage<TPayload = unknown>(
 
     if (!descriptor) {
         throw new UnknownOpcodeError(opcode)
+    }
+
+    // Check if handler requires authentication
+    if (descriptor.authRequired) {
+        // Verify auth block is present
+        if (!options.message.auth) {
+            throw new OmniProtocolError(
+                `Authentication required for opcode ${descriptor.name} (0x${opcode.toString(16)})`,
+                0xf401 // Unauthorized
+            )
+        }
+
+        // Verify signature
+        const verificationResult = await SignatureVerifier.verify(
+            options.message.auth,
+            options.message.header,
+            options.message.payload as Buffer
+        )
+
+        if (!verificationResult.valid) {
+            throw new OmniProtocolError(
+                `Authentication failed for opcode ${descriptor.name}: ${verificationResult.error}`,
+                0xf401 // Unauthorized
+            )
+        }
+
+        // Update context with verified identity
+        options.context.peerIdentity = verificationResult.peerIdentity!
+        options.context.isAuthenticated = true
     }
 
     const handlerContext: HandlerContext<TPayload> = {

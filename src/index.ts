@@ -30,6 +30,7 @@ import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
+import { startOmniProtocolServer, stopOmniProtocolServer } from "./libs/omniprotocol/integration/startup"
 
 dotenv.config()
 const term = terminalkit.terminal
@@ -50,6 +51,9 @@ const indexState: {
     MCP_SERVER_PORT: number
     MCP_ENABLED: boolean
     mcpServer: any
+    OMNI_ENABLED: boolean
+    OMNI_PORT: number
+    omniServer: any
 } = {
     OVERRIDE_PORT: null,
     OVERRIDE_IS_TESTER: null,
@@ -65,6 +69,9 @@ const indexState: {
     MCP_SERVER_PORT: 0,
     MCP_ENABLED: true,
     mcpServer: null,
+    OMNI_ENABLED: false,
+    OMNI_PORT: 0,
+    omniServer: null,
 }
 
 // SECTION Preparation methods
@@ -191,6 +198,11 @@ async function warmup() {
             parseInt(process.env.MCP_SERVER_PORT, 10) || 3001
     }
     indexState.MCP_ENABLED = process.env.MCP_ENABLED !== "false"
+
+    // OmniProtocol TCP Server configuration
+    indexState.OMNI_ENABLED = process.env.OMNI_ENABLED === "true"
+    indexState.OMNI_PORT = parseInt(process.env.OMNI_PORT, 10) || (indexState.SERVER_PORT + 1)
+
     // Setting the server port to the shared state
     getSharedState.serverPort = indexState.SERVER_PORT
     // Exposed URL
@@ -205,6 +217,8 @@ async function warmup() {
     console.log("SIGNALING_SERVER_PORT: " + indexState.SIGNALING_SERVER_PORT)
     console.log("MCP_SERVER_PORT: " + indexState.MCP_SERVER_PORT)
     console.log("MCP_ENABLED: " + indexState.MCP_ENABLED)
+    console.log("OMNI_ENABLED: " + indexState.OMNI_ENABLED)
+    console.log("OMNI_PORT: " + indexState.OMNI_PORT)
     console.log("= End of Configuration = \n")
     // Configure the logs directory
     log.setLogsDir(indexState.SERVER_PORT)
@@ -336,6 +350,44 @@ async function main() {
             process.exit(1)
         }
 
+        // Start OmniProtocol TCP server (optional)
+        if (indexState.OMNI_ENABLED) {
+            try {
+                const omniServer = await startOmniProtocolServer({
+                    enabled: true,
+                    port: indexState.OMNI_PORT,
+                    maxConnections: 1000,
+                    authTimeout: 5000,
+                    connectionTimeout: 600000, // 10 minutes
+                    // TLS configuration
+                    tls: {
+                        enabled: process.env.OMNI_TLS_ENABLED === "true",
+                        mode: (process.env.OMNI_TLS_MODE as 'self-signed' | 'ca') || 'self-signed',
+                        certPath: process.env.OMNI_CERT_PATH || './certs/node-cert.pem',
+                        keyPath: process.env.OMNI_KEY_PATH || './certs/node-key.pem',
+                        caPath: process.env.OMNI_CA_PATH,
+                        minVersion: (process.env.OMNI_TLS_MIN_VERSION as 'TLSv1.2' | 'TLSv1.3') || 'TLSv1.3',
+                    },
+                    // Rate limiting configuration
+                    rateLimit: {
+                        enabled: process.env.OMNI_RATE_LIMIT_ENABLED !== "false", // Default true
+                        maxConnectionsPerIP: parseInt(process.env.OMNI_MAX_CONNECTIONS_PER_IP || "10", 10),
+                        maxRequestsPerSecondPerIP: parseInt(process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP || "100", 10),
+                        maxRequestsPerSecondPerIdentity: parseInt(process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY || "200", 10),
+                    },
+                })
+                indexState.omniServer = omniServer
+                console.log(
+                    `[MAIN] ✅ OmniProtocol server started on port ${indexState.OMNI_PORT}`,
+                )
+            } catch (error) {
+                console.log("[MAIN] ⚠️  Failed to start OmniProtocol server:", error)
+                // Continue without OmniProtocol (failsafe - falls back to HTTP)
+            }
+        } else {
+            console.log("[MAIN] OmniProtocol server disabled (set OMNI_ENABLED=true to enable)")
+        }
+
         // Start MCP server (failsafe)
         if (indexState.MCP_ENABLED) {
             try {
@@ -376,3 +428,36 @@ async function main() {
 
 // INFO Starting the main routine
 main()
+
+// Graceful shutdown handler
+async function gracefulShutdown(signal: string) {
+    console.log(`\n[SHUTDOWN] Received ${signal}, shutting down gracefully...`)
+
+    try {
+        // Stop OmniProtocol server if running
+        if (indexState.omniServer) {
+            console.log("[SHUTDOWN] Stopping OmniProtocol server...")
+            await stopOmniProtocolServer()
+        }
+
+        // Stop MCP server if running
+        if (indexState.mcpServer) {
+            console.log("[SHUTDOWN] Stopping MCP server...")
+            try {
+                await indexState.mcpServer.stop()
+            } catch (error) {
+                console.error("[SHUTDOWN] Error stopping MCP server:", error)
+            }
+        }
+
+        console.log("[SHUTDOWN] Cleanup complete, exiting...")
+        process.exit(0)
+    } catch (error) {
+        console.error("[SHUTDOWN] Error during shutdown:", error)
+        process.exit(1)
+    }
+}
+
+// Register shutdown handlers
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"))
+process.on("SIGINT", () => gracefulShutdown("SIGINT"))
