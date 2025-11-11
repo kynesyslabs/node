@@ -59,11 +59,11 @@ console.log("📋 Test 3: ZK Key Files Validation")
 try {
     const keysDir = "src/features/zk/keys/"
 
-    // Check proving key
-    const provingKeyPath = join(process.cwd(), keysDir, "identity_with_merkle_0000.zkey")
+    // Check proving key (contributed phase)
+    const provingKeyPath = join(process.cwd(), keysDir, "identity_with_merkle_0001.zkey")
     const provingKeyStat = await Bun.file(provingKeyPath).exists()
     const provingKeySize = provingKeyStat ? (await Bun.file(provingKeyPath).size()) : 0
-    console.log("  Proving key (identity_with_merkle_0000.zkey):")
+    console.log("  Proving key (identity_with_merkle_0001.zkey - contributed):")
     console.log(`    ${provingKeyStat ? "✅" : "❌"} Exists: ${provingKeyStat}`)
     console.log(`    ${provingKeySize > 0 ? "✅" : "❌"} Size: ${(provingKeySize / 1024 / 1024).toFixed(2)} MB`)
 
