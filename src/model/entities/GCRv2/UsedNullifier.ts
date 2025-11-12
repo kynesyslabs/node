@@ -44,7 +44,7 @@ export class UsedNullifier {
         type: "bigint",
         name: "timestamp",
         transformer: {
-            to: (value: number) => value,
+            to: (value: number) => value.toString(),
             from: (value: string) => parseInt(value, 10),
         },
     })

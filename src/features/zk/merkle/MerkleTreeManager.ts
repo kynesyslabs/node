@@ -14,7 +14,7 @@
 
 import { IncrementalMerkleTree } from "@zk-kit/incremental-merkle-tree"
 import { poseidon2 } from "poseidon-lite"
-import { DataSource, Repository } from "typeorm"
+import { DataSource, Repository, EntityManager } from "typeorm"
 import { MerkleTreeState } from "@/model/entities/GCRv2/MerkleTreeState.js"
 import { IdentityCommitment } from "@/model/entities/GCRv2/IdentityCommitment.js"
 
@@ -98,6 +98,19 @@ export class MerkleTreeManager {
      */
     addCommitment(commitment: string): number {
         try {
+            // REVIEW: Validate commitment input
+            if (!commitment || typeof commitment !== "string") {
+                throw new Error("Invalid commitment: must be a non-empty string")
+            }
+
+            // REVIEW: Validate BigInt conversion
+            let commitmentBigInt: bigint
+            try {
+                commitmentBigInt = BigInt(commitment)
+            } catch (e) {
+                throw new Error(`Invalid commitment format: ${commitment}`)
+            }
+
             // Check tree capacity before insertion
             const capacity = Math.pow(2, this.depth)
             if (this.tree.leaves.length >= capacity) {
@@ -106,7 +119,6 @@ export class MerkleTreeManager {
                 )
             }
 
-            const commitmentBigInt = BigInt(commitment)
             this.tree.insert(commitmentBigInt)
             const leafIndex = this.tree.leaves.length - 1
             return leafIndex
@@ -203,7 +215,12 @@ export class MerkleTreeManager {
      * @param blockNumber - Current block number
      * @param manager - Optional EntityManager for transactional operations
      */
-    async saveToDatabase(blockNumber: number, manager?: any): Promise<void> {
+    async saveToDatabase(blockNumber: number, manager?: EntityManager): Promise<void> {
+        // REVIEW: Validate blockNumber to prevent invalid saves
+        if (blockNumber < 0) {
+            throw new Error(`Invalid block number: ${blockNumber}`)
+        }
+
         try {
             // REVIEW: Save tree leaves for reconstruction
             // The @zk-kit/incremental-merkle-tree v1.1.0 library does not have export() method

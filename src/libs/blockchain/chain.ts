@@ -397,58 +397,66 @@ export default class Chain {
             const db = await Datasource.getInstance()
             const dataSource = db.getDataSource()
 
-            // REVIEW: Transaction boundary fix - defer shared state updates until after commit
-            const result = await dataSource.transaction(async (transactionalEntityManager) => {
-                // Save block within transaction
-                const savedBlock = await transactionalEntityManager.save(this.blocks.target, newBlock)
+            // REVIEW: HIGH FIX - Wrap transaction in try/catch for proper error handling
+            try {
+                // REVIEW: Transaction boundary fix - defer shared state updates until after commit
+                const result = await dataSource.transaction(async (transactionalEntityManager) => {
+                    // Save block within transaction
+                    const savedBlock = await transactionalEntityManager.save(this.blocks.target, newBlock)
 
-                // REVIEW: Add transactions using transactional manager (not direct repository)
-                // This ensures all saves are part of the same transaction
-                for (let i = 0; i < transactionEntities.length; i++) {
-                    const tx = transactionEntities[i]
-                    const rawTransaction = Transaction.toRawTransaction(tx, "confirmed")
-                    await transactionalEntityManager.save(this.transactions.target, rawTransaction)
-                }
+                    // REVIEW: Add transactions using transactional manager (not direct repository)
+                    // This ensures all saves are part of the same transaction
+                    for (let i = 0; i < transactionEntities.length; i++) {
+                        const tx = transactionEntities[i]
+                        const rawTransaction = Transaction.toRawTransaction(tx, "confirmed")
+                        await transactionalEntityManager.save(this.transactions.target, rawTransaction)
+                    }
 
-                // REVIEW: CRITICAL FIX - Clean mempool within transaction using transactional manager
-                // This ensures atomicity: if Merkle tree update fails, mempool cleanup rolls back
-                if (cleanMempool) {
-                    await Mempool.removeTransactionsByHashes(
-                        transactionEntities.map(tx => tx.hash),
+                    // REVIEW: CRITICAL FIX - Clean mempool within transaction using transactional manager
+                    // This ensures atomicity: if Merkle tree update fails, mempool cleanup rolls back
+                    if (cleanMempool) {
+                        await Mempool.removeTransactionsByHashes(
+                            transactionEntities.map(tx => tx.hash),
+                            transactionalEntityManager,
+                        )
+                    }
+
+                    // Update ZK Merkle tree within same transaction
+                    // If this fails, entire block commit rolls back
+                    const commitmentsAdded = await updateMerkleTreeAfterBlock(
+                        dataSource,
+                        block.number,
                         transactionalEntityManager,
                     )
-                }
+                    if (commitmentsAdded > 0) {
+                        log.info(
+                            `[ZK] Added ${commitmentsAdded} commitment(s) to Merkle tree for block ${block.number}`,
+                        )
+                    }
 
-                // Update ZK Merkle tree within same transaction
-                // If this fails, entire block commit rolls back
-                const commitmentsAdded = await updateMerkleTreeAfterBlock(
-                    dataSource,
-                    block.number,
-                    transactionalEntityManager,
+                    return savedBlock
+                })
+
+                // REVIEW: Update shared state AFTER transaction commits successfully
+                // This prevents memory state corruption if transaction rolls back
+                getSharedState.lastBlockNumber = block.number
+                getSharedState.lastBlockHash = block.hash
+
+                log.debug(
+                    "[insertBlock] lastBlockNumber: " +
+                        getSharedState.lastBlockNumber,
                 )
-                if (commitmentsAdded > 0) {
-                    log.info(
-                        `[ZK] Added ${commitmentsAdded} commitment(s) to Merkle tree for block ${block.number}`,
-                    )
-                }
+                log.debug(
+                    "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
+                )
 
-                return savedBlock
-            })
-
-            // REVIEW: Update shared state AFTER transaction commits successfully
-            // This prevents memory state corruption if transaction rolls back
-            getSharedState.lastBlockNumber = block.number
-            getSharedState.lastBlockHash = block.hash
-
-            log.debug(
-                "[insertBlock] lastBlockNumber: " +
-                    getSharedState.lastBlockNumber,
-            )
-            log.debug(
-                "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
-            )
-
-            return result
+                return result
+            } catch (error) {
+                log.error(
+                    `[ChainDB] [ ERROR ]: Failed to insert block ${block.number} with hash ${block.hash}: ${error}`,
+                )
+                throw error
+            }
         }
     }
 

@@ -4,7 +4,7 @@
  * Tests for the global identity commitment Merkle tree
  */
 
-import { describe, it, expect, beforeAll } from "bun:test"
+import { describe, it, expect, beforeEach } from "bun:test"
 import { MerkleTreeManager } from "../merkle/MerkleTreeManager.js"
 import Datasource from "@/model/datasource.js"
 
@@ -63,21 +63,28 @@ describe("MerkleTreeManager", () => {
     })
 
     it("should save and load tree state from database", async () => {
-        // Add some commitments
-        merkleManager.addCommitment("1111")
-        merkleManager.addCommitment("2222")
-        merkleManager.addCommitment("3333")
-
-        const rootBeforeSave = merkleManager.getRoot()
-        const leafCountBeforeSave = merkleManager.getLeafCount()
-
-        // Save to database
-        await merkleManager.saveToDatabase(1)
-
-        // Create a new manager and load from database
+        // REVIEW: Use a dedicated namespace for this test to ensure save/load consistency
+        // Create a manager with a known namespace for this specific test
         const db = await Datasource.getInstance()
         const dataSource = db.getDataSource()
-        const newManager = new MerkleTreeManager(dataSource, 20, "test")
+        const testManager = new MerkleTreeManager(dataSource, 20, "test_save_load")
+        await testManager.initialize()
+
+        // Add some commitments
+        testManager.addCommitment("1111")
+        testManager.addCommitment("2222")
+        testManager.addCommitment("3333")
+
+        const rootBeforeSave = testManager.getRoot()
+        const leafCountBeforeSave = testManager.getLeafCount()
+
+        // Save to database
+        await testManager.saveToDatabase(1)
+
+        // Create a new manager and load from database with matching namespace
+        const db2 = await Datasource.getInstance()
+        const dataSource2 = db2.getDataSource()
+        const newManager = new MerkleTreeManager(dataSource2, 20, "test_save_load")
         const loaded = await newManager.initialize()
 
         expect(loaded).toBe(true)

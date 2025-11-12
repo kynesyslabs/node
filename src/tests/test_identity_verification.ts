@@ -17,7 +17,8 @@ async function test() {
 
     try {
         // Load verification key for identity circuit
-        const vKeyPath = join(process.cwd(), "src/features/zk/keys/verification_key.json")
+        // REVIEW: Use import.meta.url for reliable path resolution (not process.cwd())
+        const vKeyPath = new URL("../features/zk/keys/verification_key.json", import.meta.url).pathname
         const vKey = JSON.parse(readFileSync(vKeyPath, "utf-8"))
         console.log("✅ Identity verification key loaded\n")
 
@@ -51,7 +52,8 @@ async function test() {
         console.log("\n📋 Test 2: Valid Proof Acceptance")
         console.log("   Loading valid proof fixture...")
 
-        const fixturePath = join(process.cwd(), "src/tests/fixtures/valid_proof_fixture.json")
+        // REVIEW: Use import.meta.url for reliable path resolution (not process.cwd())
+        const fixturePath = new URL("./fixtures/valid_proof_fixture.json", import.meta.url).pathname
         const fixture = JSON.parse(readFileSync(fixturePath, "utf-8"))
 
         console.log(`   Loaded proof with ${fixture.publicSignals.length} public signals`)

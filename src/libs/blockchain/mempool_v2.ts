@@ -1,4 +1,5 @@
 import {
+    EntityManager,
     FindManyOptions,
     In,
     LessThanOrEqual,
@@ -131,7 +132,7 @@ export default class Mempool {
 
     public static async removeTransactionsByHashes(
         hashes: string[],
-        transactionalEntityManager?: any,
+        transactionalEntityManager?: EntityManager,
     ) {
         // REVIEW: CRITICAL FIX - Support transactional entity manager for atomic operations
         // When called within a transaction, use the transactional manager to ensure atomicity

@@ -52,6 +52,8 @@ let initializationPromise: Promise<MerkleTreeManager> | null = null
 // REVIEW: HIGH FIX - Track initialization failures to prevent retry storms
 let lastInitializationError: { timestamp: number; error: Error } | null = null
 const INITIALIZATION_BACKOFF_MS = 5000 // 5 seconds
+// REVIEW: Timeout for initialization to prevent indefinite hangs
+const INIT_TIMEOUT_MS = 30000 // 30 seconds
 
 /**
  * Get or create the global MerkleTreeManager singleton instance
@@ -73,33 +75,39 @@ async function getMerkleTreeManager(): Promise<MerkleTreeManager> {
     if (lastInitializationError) {
         const timeSinceError = Date.now() - lastInitializationError.timestamp
         if (timeSinceError < INITIALIZATION_BACKOFF_MS) {
-            const remainingMs = INITIALIZATION_BACKOFF_MS - timeSinceError
+            // REVIEW: Don't expose precise timing to avoid leaking information
             log.warn(
-                `MerkleTreeManager initialization failed recently. Retry blocked for ${remainingMs}ms`,
+                "MerkleTreeManager initialization in backoff period",
             )
             throw new Error(
-                `MerkleTreeManager initialization in backoff period. Retry in ${Math.ceil(remainingMs / 1000)}s`,
+                "MerkleTreeManager initialization temporarily unavailable. Please retry shortly.",
             )
         }
         // Backoff period expired, clear error and allow retry
         lastInitializationError = null
     }
 
-    // Start initialization
-    initializationPromise = (async () => {
-        const db = await Datasource.getInstance()
-        const dataSource = db.getDataSource()
-        // REVIEW: Create local instance, only assign to global after successful init
-        const manager = new MerkleTreeManager(
-            dataSource,
-            ZK_MERKLE_TREE_DEPTH,
-            ZK_MERKLE_TREE_ID,
-        )
-        await manager.initialize()
-        log.info("✅ Global MerkleTreeManager initialized")
-        globalMerkleManager = manager
-        return globalMerkleManager
-    })()
+    // Start initialization with timeout protection
+    // REVIEW: Wrap initialization in timeout to prevent indefinite hangs
+    initializationPromise = Promise.race([
+        (async () => {
+            const db = await Datasource.getInstance()
+            const dataSource = db.getDataSource()
+            // REVIEW: Create local instance, only assign to global after successful init
+            const manager = new MerkleTreeManager(
+                dataSource,
+                ZK_MERKLE_TREE_DEPTH,
+                ZK_MERKLE_TREE_ID,
+            )
+            await manager.initialize()
+            log.info("✅ Global MerkleTreeManager initialized")
+            globalMerkleManager = manager
+            return globalMerkleManager
+        })(),
+        new Promise<MerkleTreeManager>((_, reject) =>
+            setTimeout(() => reject(new Error("Initialization timeout")), INIT_TIMEOUT_MS),
+        ),
+    ])
 
     try {
         const result = await initializationPromise

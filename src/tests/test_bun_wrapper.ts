@@ -11,7 +11,8 @@ console.log("🧪 Testing Bun-Compatible snarkjs Wrapper\n")
 async function test() {
     try {
         console.log("📋 Loading verification key...")
-        const vKeyPath = join(process.cwd(), "src/features/zk/keys/verification_key_merkle.json")
+        // REVIEW: Use import.meta.url for reliable path resolution (not process.cwd())
+        const vKeyPath = new URL("../features/zk/keys/verification_key_merkle.json", import.meta.url).pathname
         const vKey = JSON.parse(readFileSync(vKeyPath, "utf-8"))
         console.log("✅ Verification key loaded\n")
 
@@ -35,15 +36,16 @@ async function test() {
         console.log("\n✅ SUCCESS! Verification completed without crash")
         console.log(`   Result: ${isValid} (expected: false)`)
 
+        // REVIEW: Return false when invalid proof is unexpectedly accepted
         if (!isValid) {
             console.log("\n🎉 PERFECT! Bun-compatible verification works!")
             console.log("   Invalid proof was correctly rejected")
             console.log("   No worker threads = no crashes")
+            return true
         } else {
             console.log("\n⚠️  WARNING: Invalid proof was accepted")
+            return false
         }
-
-        return true
     } catch (error) {
         console.log(`\n❌ FAILED: ${error}`)
         if (error instanceof Error) {

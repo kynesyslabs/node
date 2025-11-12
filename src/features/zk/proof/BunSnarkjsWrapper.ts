@@ -76,6 +76,12 @@ export async function groth16VerifyBun(
             singleThread: true,
         })
 
+        // REVIEW: Validate curve initialization succeeded
+        if (!curve || !curve.G1 || !curve.G2) {
+            console.error(`ZK Verify: Failed to initialize curve ${vk_verifier.curve}`)
+            return false
+        }
+
         const IC0 = curve.G1.fromObject(vk_verifier.IC[0])
 
         // Validate IC length matches public signals
