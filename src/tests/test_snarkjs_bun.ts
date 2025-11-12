@@ -20,6 +20,10 @@ async function testVerification() {
         const vKey = JSON.parse(readFileSync(vKeyPath, "utf-8"))
         console.log("✅ Verification key loaded\n")
 
+        // REVIEW: Validate expected signal count from verification key
+        const expectedSignalsCount = vKey.nPublic
+        console.log(`📋 Expected public signals count: ${expectedSignalsCount}`)
+
         console.log("📋 Testing with invalid proof (should reject)...")
         const invalidProof = {
             pi_a: ["1", "2", "1"],
@@ -32,7 +36,10 @@ async function testVerification() {
             protocol: "groth16",
         }
 
-        const publicSignals = ["12345", "67890", "11111"]
+        // REVIEW: Generate public signals array with correct size based on vKey
+        const publicSignals = Array.from({ length: expectedSignalsCount }, (_, i) =>
+            (12345 + i * 55555).toString()
+        )
 
         console.log("🔍 Calling snarkjs.groth16.verify...")
         const isValid = await snarkjs.groth16.verify(vKey, publicSignals, invalidProof)

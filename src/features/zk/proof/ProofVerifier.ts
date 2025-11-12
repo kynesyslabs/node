@@ -126,10 +126,16 @@ export class ProofVerifier {
      * Verify that the Merkle root is current (matches our tree state)
      *
      * @param merkleRoot - The Merkle root from the proof
+     * @param manager - Optional EntityManager for transactional reads
      * @returns True if root matches current tree state
      */
-    private async isMerkleRootCurrent(merkleRoot: string): Promise<boolean> {
-        const currentState = await this.merkleStateRepo.findOne({
+    private async isMerkleRootCurrent(
+        merkleRoot: string,
+        manager?: EntityManager,
+    ): Promise<boolean> {
+        // REVIEW: Use transactional EntityManager if provided for transaction isolation
+        const repo = manager?.getRepository(MerkleTreeState) ?? this.merkleStateRepo
+        const currentState = await repo.findOne({
             where: { treeId: "global" },
             order: { blockNumber: "DESC" },
         })
@@ -186,7 +192,32 @@ export class ProofVerifier {
             // Transactional path with pessimistic locking (RECOMMENDED)
             const nullifierRepo = manager.getRepository(UsedNullifier)
 
-            // Step 1: Check nullifier with pessimistic write lock
+            // REVIEW: PERFORMANCE FIX - Do expensive crypto verification BEFORE acquiring lock
+            // Step 1: Cryptographic verification (no lock needed)
+            const cryptoValid = await ProofVerifier.verifyCryptographically(proof, publicSignals)
+            if (!cryptoValid) {
+                return {
+                    valid: false,
+                    reason: "Proof failed cryptographic verification",
+                    nullifier,
+                    merkleRoot,
+                    context,
+                }
+            }
+
+            // Step 2: Validate Merkle root is current (no lock needed)
+            const rootIsCurrent = await this.isMerkleRootCurrent(merkleRoot, manager)
+            if (!rootIsCurrent) {
+                return {
+                    valid: false,
+                    reason: "Merkle root does not match current tree state",
+                    nullifier,
+                    merkleRoot,
+                    context,
+                }
+            }
+
+            // Step 3: Check nullifier with pessimistic write lock (now after validation)
             const existing = await nullifierRepo.findOne({
                 where: { nullifierHash: nullifier },
                 lock: { mode: "pessimistic_write" },
@@ -202,35 +233,12 @@ export class ProofVerifier {
                 }
             }
 
-            // Step 2: Cryptographic verification
-            const cryptoValid = await ProofVerifier.verifyCryptographically(proof, publicSignals)
-            if (!cryptoValid) {
-                return {
-                    valid: false,
-                    reason: "Proof failed cryptographic verification",
-                    nullifier,
-                    merkleRoot,
-                    context,
-                }
-            }
-
-            // Step 3: Validate Merkle root is current
-            const rootIsCurrent = await this.isMerkleRootCurrent(merkleRoot)
-            if (!rootIsCurrent) {
-                return {
-                    valid: false,
-                    reason: "Merkle root does not match current tree state",
-                    nullifier,
-                    merkleRoot,
-                    context,
-                }
-            }
-
             // Step 4: Mark nullifier with CORRECT values (not dummy data)
+            // REVIEW: Use consistent timestamp type (number, not string)
             await nullifierRepo.save({
                 nullifierHash: nullifier,
                 blockNumber: metadata?.blockNumber || 0,
-                timestamp: Date.now().toString(),
+                timestamp: Date.now(),
                 transactionHash: metadata?.transactionHash || "",
             })
 

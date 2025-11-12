@@ -166,38 +166,42 @@ try {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
 
-    const cdnResponse = await fetch(cdnVKeyUrl, {
-        signal: controller.signal,
-    })
-    clearTimeout(timeoutId)
+    try {
+        const cdnResponse = await fetch(cdnVKeyUrl, {
+            signal: controller.signal,
+        })
 
-    if (!cdnResponse.ok) {
-        throw new Error(`CDN returned status ${cdnResponse.status}`)
+        if (!cdnResponse.ok) {
+            throw new Error(`CDN returned status ${cdnResponse.status}`)
+        }
+
+        const cdnVKey = await cdnResponse.json()
+
+        // Load local verification key
+        const localVKeyPath = join(process.cwd(), "src/features/zk/keys/verification_key_merkle.json")
+        const localVKey = JSON.parse(readFileSync(localVKeyPath, "utf-8"))
+
+        // Compare structure
+        const protocolMatch = cdnVKey.protocol === localVKey.protocol
+        const curveMatch = cdnVKey.curve === localVKey.curve
+        const nPublicMatch = cdnVKey.nPublic === localVKey.nPublic
+
+        console.log("  CDN vs Local verification key:")
+        console.log(`    Protocol match: ${protocolMatch ? "✅" : "❌"} (${cdnVKey.protocol})`)
+        console.log(`    Curve match: ${curveMatch ? "✅" : "❌"} (${cdnVKey.curve})`)
+        console.log(`    nPublic match: ${nPublicMatch ? "✅" : "❌"} (${cdnVKey.nPublic})`)
+
+        const keysMatch = protocolMatch && curveMatch && nPublicMatch
+        console.log(`  CDN and local keys ${keysMatch ? "✅ match" : "❌ differ"}`)
+
+        if (keysMatch) {
+            console.log("  ✅ CDN is serving the correct verification key")
+        }
+        testResults.cdnSync = keysMatch
+    } finally {
+        // REVIEW: CRITICAL FIX - Always clear timeout to prevent resource leak
+        clearTimeout(timeoutId)
     }
-
-    const cdnVKey = await cdnResponse.json()
-
-    // Load local verification key
-    const localVKeyPath = join(process.cwd(), "src/features/zk/keys/verification_key_merkle.json")
-    const localVKey = JSON.parse(readFileSync(localVKeyPath, "utf-8"))
-
-    // Compare structure
-    const protocolMatch = cdnVKey.protocol === localVKey.protocol
-    const curveMatch = cdnVKey.curve === localVKey.curve
-    const nPublicMatch = cdnVKey.nPublic === localVKey.nPublic
-
-    console.log("  CDN vs Local verification key:")
-    console.log(`    Protocol match: ${protocolMatch ? "✅" : "❌"} (${cdnVKey.protocol})`)
-    console.log(`    Curve match: ${curveMatch ? "✅" : "❌"} (${cdnVKey.curve})`)
-    console.log(`    nPublic match: ${nPublicMatch ? "✅" : "❌"} (${cdnVKey.nPublic})`)
-
-    const keysMatch = protocolMatch && curveMatch && nPublicMatch
-    console.log(`  CDN and local keys ${keysMatch ? "✅ match" : "❌ differ"}`)
-
-    if (keysMatch) {
-        console.log("  ✅ CDN is serving the correct verification key")
-    }
-    testResults.cdnSync = keysMatch
 } catch (error) {
     console.log(`  ⚠️  CDN check failed: ${error}`)
 }

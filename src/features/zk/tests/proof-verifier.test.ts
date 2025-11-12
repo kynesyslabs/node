@@ -61,7 +61,7 @@ describe("ProofVerifier", () => {
                     pi_c: [],
                     protocol: "groth16",
                 },
-                publicSignals: ["only_one"], // Invalid: needs at least 2
+                publicSignals: ["only_one"], // Invalid: requires exactly 3 elements (nullifier, merkle_root, context)
             }
 
             const result = await verifier.verifyIdentityAttestation(invalidAttestation)

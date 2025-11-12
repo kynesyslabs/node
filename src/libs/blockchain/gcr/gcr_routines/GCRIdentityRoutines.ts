@@ -637,6 +637,13 @@ export default class GCRIdentityRoutines {
             }
         }
 
+        // REVIEW: CRITICAL FIX - Normalize commitment hash to prevent duplicates
+        // Remove 0x prefix and convert hex to lowercase for consistent storage
+        // This prevents "0x1234..." and "1234..." from being stored as separate records
+        const normalizedCommitment = isValidHex
+            ? payload.commitment_hash.toLowerCase().replace(/^0x/, "")
+            : payload.commitment_hash
+
         // REVIEW: MEDIUM FIX - Add provider field validation
         if (
             !payload.provider ||
@@ -667,7 +674,7 @@ export default class GCRIdentityRoutines {
         if (!simulate) {
             try {
                 await commitmentRepo.save({
-                    commitmentHash: payload.commitment_hash,
+                    commitmentHash: normalizedCommitment,
                     leafIndex: -1, // Placeholder, will be updated during Merkle tree insertion
                     provider: payload.provider,
                     blockNumber: 0, // Will be updated during block commit
@@ -676,7 +683,7 @@ export default class GCRIdentityRoutines {
                 })
 
                 log.info(
-                    `✅ ZK commitment stored: ${payload.commitment_hash.slice(0, 10)}... (provider: ${payload.provider})`,
+                    `✅ ZK commitment stored: ${normalizedCommitment.slice(0, 10)}... (provider: ${payload.provider})`,
                 )
             } catch (error: any) {
                 // Handle primary key constraint violation (commitment already exists)
@@ -746,6 +753,24 @@ export default class GCRIdentityRoutines {
         const dataSource = db.getDataSource()
         const verifier = new ProofVerifier(dataSource)
 
+        // REVIEW: HIGH FIX - Validate env configuration BEFORE transaction to avoid wasting resources
+        // Get configurable points from environment (default: 10)
+        const zkAttestationPoints = parseInt(
+            process.env.ZK_ATTESTATION_POINTS || "10",
+            10,
+        )
+
+        // Validate environment variable before starting transaction
+        if (isNaN(zkAttestationPoints) || zkAttestationPoints < 0) {
+            log.error(
+                `Invalid ZK_ATTESTATION_POINTS configuration: ${process.env.ZK_ATTESTATION_POINTS}`,
+            )
+            return {
+                success: false,
+                message: "System configuration error: invalid attestation points",
+            }
+        }
+
         // REVIEW: CRITICAL FIX - Perform verification and points awarding atomically within transaction
         // This ensures nullifier marking uses correct values and prevents dirty data
         if (!simulate) {
@@ -789,24 +814,6 @@ export default class GCRIdentityRoutines {
                 // - This is intentional: points reward the transaction submission, not identity disclosure
                 // - For fully private identities, users can choose not to submit attestation transactions
                 const account = await ensureGCRForUser(editOperation.account)
-
-                // Get configurable points from environment (default: 10)
-                const zkAttestationPoints = parseInt(
-                    process.env.ZK_ATTESTATION_POINTS || "10",
-                    10,
-                )
-
-                // Validate environment variable
-                if (isNaN(zkAttestationPoints) || zkAttestationPoints < 0) {
-                    await queryRunner.rollbackTransaction()
-                    log.error(
-                        `Invalid ZK_ATTESTATION_POINTS configuration: ${process.env.ZK_ATTESTATION_POINTS}`,
-                    )
-                    return {
-                        success: false,
-                        message: "System configuration error: invalid attestation points",
-                    }
-                }
 
                 const zkAttestationEntry = {
                     date: new Date().toISOString(),

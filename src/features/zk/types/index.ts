@@ -54,7 +54,7 @@ export interface MerkleProofResponse {
         /** Sibling hashes along the path from leaf to root */
         siblings: string[]
         /** Path indices (0 = left, 1 = right) */
-        pathIndices: number[]
+        path_indices: number[]
         /** Root hash */
         root: string
         /** Leaf hash (the commitment) */
@@ -91,20 +91,37 @@ export interface NullifierCheckResponse {
 /**
  * ZK Circuit Input
  * Input to the identity proof circuit
+ *
+ * @security CRITICAL - This type contains highly sensitive cryptographic material
+ * @warning NEVER log, transmit, or store these values in plaintext
+ * @warning NEVER include in API responses or error messages
+ * @warning Handle with extreme care - exposure compromises user anonymity
  */
 export interface IdentityProofCircuitInput {
-    /** Provider ID (private) */
+    /**
+     * Provider ID (circuit input: private witness)
+     * @security CRITICAL - Do not log or expose
+     */
     provider_id: string
-    /** User secret (private) */
+    /**
+     * User secret (circuit input: private witness)
+     * @security CRITICAL - Do not log or expose
+     */
     secret: string
-    /** Context for nullifier generation (public) */
+    /** Context for nullifier generation (circuit input: public) */
     context: string
-    /** Current Merkle root (public) */
+    /** Current Merkle root (circuit input: public) */
     merkle_root: string
-    /** Merkle proof path elements (private) */
-    pathElements: string[]
-    /** Merkle proof path indices (private) */
-    pathIndices: number[]
+    /**
+     * Merkle proof path elements (circuit input: private witness)
+     * @security Sensitive - Part of user's identity proof
+     */
+    path_elements: string[]
+    /**
+     * Merkle proof path indices (circuit input: private witness)
+     * @security Sensitive - Part of user's identity proof
+     */
+    path_indices: number[]
 }
 
 /**

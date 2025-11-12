@@ -13,7 +13,7 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from "fs"
 import { execSync } from "child_process"
 import { join } from "path"
-import { createHash } from "crypto"
+import { createHash, randomBytes } from "crypto"
 
 const KEYS_DIR = "src/features/zk/keys"
 const CIRCUITS_DIR = "src/features/zk/circuits"
@@ -173,10 +173,8 @@ async function generateKeys(circuitName: string) {
     // REVIEW: Add random contribution to create distinct gamma/delta
     log("  → Adding random contribution for production security...", "yellow")
     try {
-        // Generate random entropy
-        const entropy = Array.from({length: 32}, () =>
-            Math.floor(Math.random() * 256).toString(16).padStart(2, '0')
-        ).join('')
+        // REVIEW: CRITICAL FIX - Use cryptographically secure random entropy
+        const entropy = randomBytes(32).toString("hex")
 
         execSync(
             `npx snarkjs zkey contribute ${zkeyPath0} ${zkeyPath1} --name="ProductionContribution" -e="${entropy}"`,
@@ -199,7 +197,7 @@ async function generateKeys(circuitName: string) {
         log(`    → ${vkeyPath}`, "green")
 
         // Verify gamma ≠ delta
-        const vkContent = JSON.parse(readFileSync(vkeyPath, 'utf-8'))
+        const vkContent = JSON.parse(readFileSync(vkeyPath, "utf-8"))
         const gamma = JSON.stringify(vkContent.vk_gamma_2)
         const delta = JSON.stringify(vkContent.vk_delta_2)
 

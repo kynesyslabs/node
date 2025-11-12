@@ -65,6 +65,7 @@ async function updateMerkleTreeWithManager(
             },
             order: {
                 timestamp: "ASC", // Process in deterministic order
+                commitmentHash: "ASC", // REVIEW: Break timestamp ties deterministically
             },
         })
 
