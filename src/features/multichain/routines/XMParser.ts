@@ -91,8 +91,7 @@ class XMParser {
             const validatedPath = validateFilePath(filePath)
 
             if (!fs.existsSync(validatedPath)) {
-                console.log("The file does not exist.")
-                return null
+                throw new Error(`File not found: ${filePath}`)
             }
 
             const script = fs.readFileSync(validatedPath, "utf8")
