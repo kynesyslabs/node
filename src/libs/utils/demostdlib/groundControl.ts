@@ -8,11 +8,64 @@
 */
 
 import * as fs from "fs"
+import * as path from "path"
 import http from "node:http"
 import https from "node:https"
 import { PeerManager } from "src/libs/peer"
 import required, { RequiredOutcome } from "src/utilities/required"
 import { getSharedState } from "src/utilities/sharedState"
+
+/**
+ * Validates and sanitizes file paths to prevent directory traversal attacks
+ * @param filePath - The file path to validate
+ * @returns The validated absolute path
+ * @throws Error if the path is invalid or contains malicious patterns
+ */
+function validateFilePath(filePath: string): string {
+    if (!filePath || typeof filePath !== "string") {
+        throw new Error("Invalid file path: path must be a non-empty string")
+    }
+
+    // Check for null bytes (security risk)
+    if (filePath.includes("\0")) {
+        throw new Error("Invalid file path: null bytes are not allowed")
+    }
+
+    // Normalize the path to resolve any '..' or '.' segments
+    const normalizedPath = path.normalize(filePath)
+
+    // Resolve to absolute path
+    const absolutePath = path.resolve(normalizedPath)
+
+    // Check if the normalized path contains directory traversal patterns
+    // This catches attempts to escape via ../ even after normalization
+    if (normalizedPath.includes("..")) {
+        throw new Error(
+            "Invalid file path: directory traversal patterns are not allowed",
+        )
+    }
+
+    // Additional check: ensure the resolved absolute path doesn't traverse to sensitive system directories
+    const sensitivePatterns = [
+        "/etc/passwd",
+        "/etc/shadow",
+        "/proc/",
+        "/sys/",
+        "\\windows\\system32",
+        "\\windows\\system",
+    ]
+
+    const lowerPath = absolutePath.toLowerCase()
+    for (const pattern of sensitivePatterns) {
+        if (lowerPath.includes(pattern.toLowerCase())) {
+            throw new Error(
+                "Invalid file path: access to system directories is not allowed",
+            )
+        }
+    }
+
+    return absolutePath
+}
 
 export default class GroundControl {
     static host: string
@@ -69,10 +122,15 @@ export default class GroundControl {
             } else {
                 // Else we can start da server
                 try {
+                    // Validate file paths to prevent directory traversal attacks
+                    const validatedKeyPath = validateFilePath(keys.key)
+                    const validatedCertPath = validateFilePath(keys.cert)
+                    const validatedCaPath = validateFilePath(keys.ca)
+
                     GroundControl.options = {
-                        key: fs.readFileSync(keys.key),
-                        cert: fs.readFileSync(keys.cert),
-                        ca: fs.readFileSync(keys.ca),
+                        key: fs.readFileSync(validatedKeyPath),
+                        cert: fs.readFileSync(validatedCertPath),
+                        ca: fs.readFileSync(validatedCaPath),
                     }
                     GroundControl.server = https.createServer(
                         GroundControl.options,

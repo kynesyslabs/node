@@ -1,5 +1,6 @@
 // INFO In this module is offloaded the parsing of XM requests
 import * as fs from "fs"
+import * as path from "path"
 import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 import { IOperation, XMScript } from "@kynesyslabs/demosdk/types"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
@@ -30,15 +31,76 @@ function stringify(data: any) {
     )
 }
 
+/**
+ * Validates and sanitizes file paths to prevent directory traversal attacks
+ * @param filePath - The file path to validate
+ * @returns The validated absolute path
+ * @throws Error if the path is invalid or contains malicious patterns
+ */
+function validateFilePath(filePath: string): string {
+    if (!filePath || typeof filePath !== "string") {
+        throw new Error("Invalid file path: path must be a non-empty string")
+    }
+
+    // Check for null bytes (security risk)
+    if (filePath.includes("\0")) {
+        throw new Error("Invalid file path: null bytes are not allowed")
+    }
+
+    // Normalize the path to resolve any '..' or '.' segments
+    const normalizedPath = path.normalize(filePath)
+
+    // Resolve to absolute path
+    const absolutePath = path.resolve(normalizedPath)
+
+    // Check if the normalized path contains directory traversal patterns
+    // This catches attempts to escape via ../ even after normalization
+    if (normalizedPath.includes("..")) {
+        throw new Error(
+            "Invalid file path: directory traversal patterns are not allowed",
+        )
+    }
+
+    // Additional check: ensure the resolved absolute path doesn't traverse to sensitive system directories
+    const sensitivePatterns = [
+        "/etc/passwd",
+        "/etc/shadow",
+        "/proc/",
+        "/sys/",
+        "\\windows\\system32",
+        "\\windows\\system",
+    ]
+
+    const lowerPath = absolutePath.toLowerCase()
+    for (const pattern of sensitivePatterns) {
+        if (lowerPath.includes(pattern.toLowerCase())) {
+            throw new Error(
+                "Invalid file path: access to system directories is not allowed",
+            )
+        }
+    }
+
+    return absolutePath
+}
+
 class XMParser {
     // INFO Same as below but with file support
-    static async loadFile(path: string): Promise<XMScript> {
-        if (!fs.existsSync(path)) {
-            console.log("The file does not exist.")
-            return null
+    static async loadFile(filePath: string): Promise<XMScript> {
+        try {
+            // Validate the file path to prevent directory traversal attacks
+            const validatedPath = validateFilePath(filePath)
+
+            if (!fs.existsSync(validatedPath)) {
+                console.log("The file does not exist.")
+                return null
+            }
+
+            const script = fs.readFileSync(validatedPath, "utf8")
+            return await XMParser.load(script)
+        } catch (error) {
+            console.error("[XMParser] Security error:", error.message)
+            throw error
         }
-        const script = fs.readFileSync(path, "utf8")
-        return await XMParser.load(script)
     }
 
     // INFO Transforming a string in a XMScript
