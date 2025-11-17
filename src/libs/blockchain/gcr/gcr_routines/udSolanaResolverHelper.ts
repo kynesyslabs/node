@@ -1,9 +1,10 @@
 import { AnchorProvider, Program } from "@coral-xyz/anchor"
 import Wallet from "@coral-xyz/anchor/dist/cjs/nodewallet"
-import { PublicKey, Connection, Keypair, type Commitment } from "@solana/web3.js"
+import { PublicKey, Connection, Keypair, type Commitment, clusterApiUrl } from "@solana/web3.js"
 import { createHash } from "crypto"
 import UnsSolIdl from "../../UDTypes/uns_sol.json" with { type: "json" }
 import { UnsSol } from "../../UDTypes/uns_sol"
+import log from "src/utilities/logger"
 
 // ============================================================================
 // Types and Interfaces
@@ -173,7 +174,7 @@ export class SolanaDomainResolver {
    */
   constructor(config: ResolverConfig = {}) {
     this.config = {
-      rpcUrl: config.rpcUrl || process.env.SOLANA_RPC || "https://solana-rpc.publicnode.com",
+      rpcUrl: config.rpcUrl || process.env.SOLANA_RPC || clusterApiUrl("mainnet-beta"),
       commitment: config.commitment || "confirmed",
     }
     this.unsProgramId = new PublicKey(UnsSolIdl.address)
@@ -302,7 +303,7 @@ export class SolanaDomainResolver {
       const provider = new AnchorProvider(connection, wallet, {
         commitment: this.config.commitment,
       })
-      this.program = new Program(UnsSolIdl as any, this.unsProgramId, provider) as Program<UnsSol>
+      this.program = new Program(UnsSolIdl as any,provider) as Program<UnsSol>
       return this.program
     } catch (error) {
       throw new ConnectionError(
@@ -469,7 +470,7 @@ export class SolanaDomainResolver {
       (key) => typeof key === "string" && key.trim() !== "",
     )
 
-    try {
+    // try {
       const program = await this.getProgram()
       const sldPda = this.deriveSldPda(trimmedLabel, trimmedTld)
       const domainPropertiesPda = this.deriveDomainPropertiesPda(sldPda)
@@ -478,7 +479,10 @@ export class SolanaDomainResolver {
       let domainProperties
       try {
         domainProperties = await program.account.domainProperties.fetch(domainPropertiesPda)
+        log.debug("domainProperties: " + JSON.stringify(domainProperties))
+
       } catch (error) {
+        console.error("domainProperties fetch error: ", error)
         return {
           domain,
           exists: false,
@@ -522,15 +526,15 @@ export class SolanaDomainResolver {
         recordsVersion: Number(domainProperties.recordsVersion),
         records,
       }
-    } catch (error) {
-      return {
-        domain,
-        exists: false,
-        sldPda: this.deriveSldPda(trimmedLabel, trimmedTld).toString(),
-        records: [],
-        error: error instanceof Error ? error.message : "Unknown error occurred",
-      }
-    }
+    // } catch (error) {
+    //   return {
+    //     domain,
+    //     exists: false,
+    //     sldPda: this.deriveSldPda(trimmedLabel, trimmedTld).toString(),
+    //     records: [],
+    //     error: error instanceof Error ? error.message : "Unknown error occurred",
+    //   }
+    // }
   }
 
   /**

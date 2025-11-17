@@ -1,7 +1,11 @@
 import ensureGCRForUser from "./ensureGCRForUser"
 import log from "@/utilities/logger"
 import { UDIdentityAssignPayload } from "@kynesyslabs/demosdk/build/types/abstraction"
-import { EVMDomainResolution, SignableAddress, UnifiedDomainResolution } from "@kynesyslabs/demosdk/types"
+import {
+    EVMDomainResolution,
+    SignableAddress,
+    UnifiedDomainResolution,
+} from "@kynesyslabs/demosdk/types"
 import { ethers } from "ethers"
 import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
 import { detectSignatureType } from "./signatureDetector"
@@ -68,7 +72,9 @@ export class UDIdentityManager {
         evmResolution: EVMDomainResolution,
         registryType: "UNS" | "CNS",
     ): UnifiedDomainResolution {
-        const authorizedAddresses = this.extractSignableAddresses(evmResolution.records)
+        const authorizedAddresses = this.extractSignableAddresses(
+            evmResolution.records,
+        )
 
         return {
             domain: evmResolution.domain,
@@ -110,7 +116,8 @@ export class UDIdentityManager {
             metadata: {
                 solana: {
                     sldPda: solanaResolution.sldPda,
-                    domainPropertiesPda: solanaResolution.domainPropertiesPda || "",
+                    domainPropertiesPda:
+                        solanaResolution.domainPropertiesPda || "",
                     recordsVersion: solanaResolution.recordsVersion || 0,
                 },
             },
@@ -162,7 +169,9 @@ export class UDIdentityManager {
             // Detect signature type from address format
             const signatureType = detectSignatureType(address)
             if (!signatureType) {
-                log.debug(`Skipping unrecognized address format: ${address} (${recordKey})`)
+                log.debug(
+                    `Skipping unrecognized address format: ${address} (${recordKey})`,
+                )
                 continue
             }
 
@@ -196,7 +205,7 @@ export class UDIdentityManager {
         registryType: "UNS" | "CNS",
     ): Promise<UnifiedDomainResolution | null> {
         try {
-            const provider = new ethers.JsonRpcProvider(rpcUrl)
+            const provider = new ethers.providers.JsonRpcBatchProvider(rpcUrl)
             const registry = new ethers.Contract(
                 registryAddress,
                 registryAbi,
@@ -214,11 +223,17 @@ export class UDIdentityManager {
             }
 
             // Fetch all records from resolver
-            const resolver = new ethers.Contract(resolverAddress, resolverAbi, provider)
+            const resolver = new ethers.Contract(
+                resolverAddress,
+                resolverAbi,
+                provider,
+            )
             const records = await this.fetchDomainRecords(resolver, tokenId)
 
             log.debug(
-                `Domain ${domain} resolved on ${networkName} ${registryType}: owner=${owner}, records=${Object.keys(records).filter(k => records[k]).length}/${UD_RECORD_KEYS.length}`,
+                `Domain ${domain} resolved on ${networkName} ${registryType}: owner=${owner}, records=${
+                    Object.keys(records).filter(k => records[k]).length
+                }/${UD_RECORD_KEYS.length}`,
             )
 
             // Convert to unified format
@@ -230,11 +245,15 @@ export class UDIdentityManager {
                 resolver: resolverAddress,
                 records,
             }
+
             return this.evmToUnified(evmResolution, registryType)
         } catch (error) {
             log.debug(
-                `${networkName} ${registryType} lookup failed for ${domain}: ${error instanceof Error ? error.message : String(error)}`,
+                `${networkName} ${registryType} lookup failed for ${domain}: ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
             )
+
             return null
         }
     }
@@ -258,55 +277,82 @@ export class UDIdentityManager {
     public static async resolveUDDomain(
         domain: string,
     ): Promise<UnifiedDomainResolution> {
-        try {
-            // Convert domain to tokenId using namehash algorithm
-            const tokenId = ethers.namehash(domain)
+        // Convert domain to tokenId using namehash algorithm
+        const tokenId = ethers.utils.namehash(domain)
 
-            // REFACTORED: Try EVM networks in priority order
-            // Network priority: Polygon → Base → Sonic → Ethereum UNS → Ethereum CNS
-            const evmNetworks = [
-                { name: "polygon" as const, rpc: "https://polygon-rpc.com", registry: polygonUnsRegistryAddress, type: "UNS" as const },
-                { name: "base" as const, rpc: "https://mainnet.base.org", registry: baseUnsRegistryAddress, type: "UNS" as const },
-                { name: "sonic" as const, rpc: "https://rpc.soniclabs.com", registry: sonicUnsRegistryAddress, type: "UNS" as const },
-                { name: "ethereum" as const, rpc: "https://eth.llamarpc.com", registry: ethereumUnsRegistryAddress, type: "UNS" as const },
-                { name: "ethereum" as const, rpc: "https://eth.llamarpc.com", registry: ethereumCnsRegistryAddress, type: "CNS" as const },
-            ]
+        // REFACTORED: Try EVM networks in priority order
+        // Network priority: Polygon → Base → Sonic → Ethereum UNS → Ethereum CNS
+        const evmNetworks = [
+            {
+                name: "polygon" as const,
+                rpc: "https://polygon-rpc.com",
+                registry: polygonUnsRegistryAddress,
+                type: "UNS" as const,
+            },
+            {
+                name: "base" as const,
+                rpc: "https://mainnet.base.org",
+                registry: baseUnsRegistryAddress,
+                type: "UNS" as const,
+            },
+            {
+                name: "sonic" as const,
+                rpc: "https://rpc.soniclabs.com",
+                registry: sonicUnsRegistryAddress,
+                type: "UNS" as const,
+            },
+            {
+                name: "ethereum" as const,
+                rpc: "https://eth.llamarpc.com",
+                registry: ethereumUnsRegistryAddress,
+                type: "UNS" as const,
+            },
+            {
+                name: "ethereum" as const,
+                rpc: "https://eth.llamarpc.com",
+                registry: ethereumCnsRegistryAddress,
+                type: "CNS" as const,
+            },
+        ]
 
-            for (const network of evmNetworks) {
-                const result = await this.tryEvmNetwork(
+        const evmResults = await Promise.allSettled(
+            evmNetworks.map(network =>
+                this.tryEvmNetwork(
                     domain,
                     tokenId,
                     network.rpc,
                     network.registry,
                     network.name,
                     network.type,
-                )
+                ),
+            ),
+        )
 
-                if (result !== null) {
-                    return result
-                }
+        for (const result of evmResults) {
+            if (result.status === "fulfilled" && result.value !== null) {
+                return result.value
             }
+        }
 
-            // PHASE 3: All EVM networks failed, try Solana fallback
-            log.debug(`All EVM networks failed for ${domain}, trying Solana`)
+        // PHASE 3: All EVM networks failed, try Solana fallback
+        log.debug(`All EVM networks failed for ${domain}, trying Solana`)
 
-            try {
-                const solanaResolver = new SolanaDomainResolver()
-                const solanaResult = await solanaResolver.resolveDomain(domain, UD_RECORD_KEYS)
+        const solanaResolver = new SolanaDomainResolver()
+        const solanaResult = await solanaResolver.resolveDomain(
+            domain,
+            UD_RECORD_KEYS,
+        )
+        console.log("solanaResult: ", solanaResult)
 
-                if (solanaResult.exists) {
-                    log.debug(`Domain ${domain} resolved on Solana: records=${solanaResult.records.filter(r => r.found).length}/${UD_RECORD_KEYS.length}`)
-                    return this.solanaToUnified(solanaResult)
-                } else {
-                    throw new Error(solanaResult.error || "Domain not found on Solana")
-                }
-            } catch (solanaError) {
-                log.debug(`Solana lookup failed for ${domain}: ${solanaError}`)
-                throw new Error(`Domain ${domain} not found on any network (EVM or Solana)`)
-            }
-        } catch (error) {
-            log.error(`Error resolving UD domain ${domain}: ${error}`)
-            throw new Error(`Failed to resolve domain ${domain}: ${error}`)
+        if (solanaResult.exists) {
+            log.debug(
+                `Domain ${domain} resolved on Solana: records=${
+                    solanaResult.records.filter(r => r.found).length
+                }/${UD_RECORD_KEYS.length}`,
+            )
+            return this.solanaToUnified(solanaResult)
+        } else {
+            throw new Error(solanaResult.error || "Domain not found on Solana")
         }
     }
 
@@ -328,8 +374,15 @@ export class UDIdentityManager {
     ): Promise<{ success: boolean; message: string }> {
         try {
             // Phase 5: Updated to use signingAddress + signatureType
-            const { domain, signingAddress, signatureType, signature, signedData, network, registryType } =
-                payload.payload
+            const {
+                domain,
+                signingAddress,
+                signatureType,
+                signature,
+                signedData,
+                network,
+                registryType,
+            } = payload.payload
 
             // Step 1: Resolve domain to get all authorized addresses
             const resolution = await this.resolveUDDomain(domain)
@@ -367,19 +420,24 @@ export class UDIdentityManager {
 
             // Step 5: Find the authorized address that matches the signing address
             // SECURITY: Solana addresses are case-sensitive (base58), EVM addresses are case-insensitive
-            const matchingAddress = resolution.authorizedAddresses.find((auth) => {
-                // Solana addresses are case-sensitive (base58 encoding)
-                if (auth.signatureType === "solana") {
-                    return auth.address === signingAddress
-                }
-                // EVM addresses are case-insensitive
-                return auth.address.toLowerCase() === signingAddress.toLowerCase()
-            })
+            const matchingAddress = resolution.authorizedAddresses.find(
+                auth => {
+                    // Solana addresses are case-sensitive (base58 encoding)
+                    if (auth.signatureType === "solana") {
+                        return auth.address === signingAddress
+                    }
+                    // EVM addresses are case-insensitive
+                    return (
+                        auth.address.toLowerCase() ===
+                        signingAddress.toLowerCase()
+                    )
+                },
+            )
 
             if (!matchingAddress) {
                 // Use original casing in error message
                 const authorizedList = resolution.authorizedAddresses
-                    .map((a) => `${a.address} (${a.recordKey})`)
+                    .map(a => `${a.address} (${a.recordKey})`)
                     .join(", ")
                 return {
                     success: false,
@@ -412,8 +470,12 @@ export class UDIdentityManager {
                 const match = signedData.match(demosIdentityRegex)
 
                 // Normalize both values by removing 0x prefix and lowercasing for comparison
-                const normalizedMatch = match?.[1]?.replace(/^0x/i, "").toLowerCase()
-                const normalizedSender = sender.replace(/^0x/i, "").toLowerCase()
+                const normalizedMatch = match?.[1]
+                    ?.replace(/^0x/i, "")
+                    .toLowerCase()
+                const normalizedSender = sender
+                    .replace(/^0x/i, "")
+                    .toLowerCase()
 
                 if (!match || normalizedMatch !== normalizedSender) {
                     return {
@@ -466,9 +528,15 @@ export class UDIdentityManager {
         try {
             if (authorizedAddress.signatureType === "evm") {
                 // EVM signature verification using ethers
-                const recoveredAddress = ethers.verifyMessage(signedData, signature)
+                const recoveredAddress = ethers.verifyMessage(
+                    signedData,
+                    signature,
+                )
 
-                if (recoveredAddress.toLowerCase() !== authorizedAddress.address.toLowerCase()) {
+                if (
+                    recoveredAddress.toLowerCase() !==
+                    authorizedAddress.address.toLowerCase()
+                ) {
                     return {
                         success: false,
                         message: `EVM signature verification failed: signed by ${recoveredAddress}, expected ${authorizedAddress.address}`,
@@ -477,7 +545,6 @@ export class UDIdentityManager {
 
                 log.debug(`EVM signature verified: ${recoveredAddress}`)
                 return { success: true, message: "EVM signature valid" }
-
             } else if (authorizedAddress.signatureType === "solana") {
                 // Solana signature verification using nacl
                 // Solana uses base58 encoding for addresses and signatures
@@ -485,7 +552,9 @@ export class UDIdentityManager {
                     // Decode base58 signature and public key to Uint8Array
                     const signatureBytes = bs58.decode(signature)
                     const messageBytes = new TextEncoder().encode(signedData)
-                    const publicKeyBytes = bs58.decode(authorizedAddress.address)
+                    const publicKeyBytes = bs58.decode(
+                        authorizedAddress.address,
+                    )
 
                     // Validate byte lengths for Solana
                     if (signatureBytes.length !== 64) {
@@ -515,16 +584,16 @@ export class UDIdentityManager {
                         }
                     }
 
-                    log.debug(`Solana signature verified: ${authorizedAddress.address}`)
+                    log.debug(
+                        `Solana signature verified: ${authorizedAddress.address}`,
+                    )
                     return { success: true, message: "Solana signature valid" }
-
                 } catch (error) {
                     return {
                         success: false,
                         message: `Solana signature format error: ${error}`,
                     }
                 }
-
             } else {
                 return {
                     success: false,
