@@ -48,6 +48,7 @@ import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import Chain from "../chain"
 import { Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
+import GCREscrowRoutines from "./gcr_routines/GCREscrowRoutines"
 import { Referrals } from "@/features/incentive/referrals"
 
 export type GetNativeStatusOptions = {
@@ -270,6 +271,12 @@ export default class HandleGCR {
                 )
             case "identity":
                 return GCRIdentityRoutines.apply(
+                    editOperation,
+                    repositories.main as Repository<GCRMain>,
+                    simulate,
+                )
+            case "escrow":
+                return GCREscrowRoutines.apply(
                     editOperation,
                     repositories.main as Repository<GCRMain>,
                     simulate,
