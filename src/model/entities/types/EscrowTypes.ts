@@ -4,11 +4,11 @@
 export interface EscrowData {
     claimableBy: {
         platform: "twitter" | "github" | "telegram"
-        username: string  // e.g., "@bob" or "octocat"
+        username: string // e.g., "@bob" or "octocat"
     }
     balance: bigint
     deposits: EscrowDeposit[]
-    expiryTimestamp: number  // Unix timestamp in milliseconds
+    expiryTimestamp: number // Unix timestamp in milliseconds
     createdAt: number
 }
 
@@ -16,10 +16,10 @@ export interface EscrowData {
  * A single deposit into an escrow
  */
 export interface EscrowDeposit {
-    from: string      // Sender's Ed25519 public key (hex)
+    from: string // Sender's Ed25519 public key (hex)
     amount: bigint
     timestamp: number
-    message?: string  // Optional memo from sender
+    message?: string // Optional memo from sender
 }
 
 /**
@@ -29,7 +29,7 @@ export interface EscrowQueryResult {
     escrowAddress: string
     exists: boolean
     data?: EscrowData
-    claimable: boolean  // Whether caller can claim this
+    claimable: boolean // Whether caller can claim this
     expired: boolean
 }
 
@@ -39,7 +39,7 @@ export interface EscrowQueryResult {
 export interface ClaimableEscrow {
     platform: "twitter" | "github" | "telegram"
     username: string
-    balance: string  // Stringified bigint
+    balance: string // Stringified bigint
     escrowAddress: string
     deposits: Array<{
         from: string
