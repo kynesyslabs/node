@@ -678,3 +678,174 @@ export default class ServerHandlers {
         return { extra, requireReply, response }
     }
 }
+
+// SECTION Escrow RPC Handlers
+
+import GCREscrowRoutines from "@/libs/blockchain/gcr/gcr_routines/GCREscrowRoutines"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import Datasource from "@/model/datasource"
+import { ClaimableEscrow } from "@/model/entities/types/EscrowTypes"
+
+/**
+ * RPC: Get escrow balance for a specific social identity
+ */
+export async function handleGetEscrowBalance(params: {
+    platform: string
+    username: string
+}) {
+    const { platform, username } = params
+
+    if (!platform || !username) {
+        throw new Error("Missing platform or username")
+    }
+
+    const escrowAddress = GCREscrowRoutines.getEscrowAddress(platform, username)
+    const db = await Datasource.getInstance()
+    const repo = db.getDataSource().getRepository(GCRMain)
+
+    const account = await repo.findOneBy({ pubkey: escrowAddress })
+
+    if (!account || !account.escrows || !account.escrows[escrowAddress]) {
+        return {
+            escrowAddress,
+            exists: false,
+            balance: "0",
+            deposits: [],
+            expiryTimestamp: 0,
+            expired: false,
+        }
+    }
+
+    const escrow = account.escrows[escrowAddress]
+
+    return {
+        escrowAddress,
+        exists: true,
+        balance: escrow.balance.toString(),
+        deposits: escrow.deposits.map(d => ({
+            from: d.from,
+            amount: d.amount.toString(),
+            timestamp: d.timestamp,
+            message: d.message,
+        })),
+        expiryTimestamp: escrow.expiryTimestamp,
+        expired: Date.now() > escrow.expiryTimestamp,
+    }
+}
+
+/**
+ * RPC: Get all escrows claimable by a Demos address
+ */
+export async function handleGetClaimableEscrows(params: {
+    address: string
+}): Promise<ClaimableEscrow[]> {
+    const { address } = params
+
+    if (!address) {
+        throw new Error("Missing address")
+    }
+
+    const db = await Datasource.getInstance()
+    const repo = db.getDataSource().getRepository(GCRMain)
+
+    const account = await repo.findOneBy({ pubkey: address })
+
+    if (!account || !account.identities || !account.identities.web2) {
+        return []
+    }
+
+    const claimable: ClaimableEscrow[] = []
+
+    // Check each proven Web2 identity
+    for (const [platform, identities] of Object.entries(
+        account.identities.web2,
+    )) {
+        if (!Array.isArray(identities)) continue
+
+        for (const identity of identities) {
+            const username = identity.username
+
+            // Check if escrow exists for this identity
+            const escrowAddress = GCREscrowRoutines.getEscrowAddress(
+                platform,
+                username,
+            )
+            const escrowAccount = await repo.findOneBy({
+                pubkey: escrowAddress,
+            })
+
+            if (escrowAccount?.escrows?.[escrowAddress]) {
+                const escrow = escrowAccount.escrows[escrowAddress]
+
+                claimable.push({
+                    platform: platform as "twitter" | "github" | "telegram",
+                    username,
+                    balance: escrow.balance.toString(),
+                    escrowAddress,
+                    deposits: escrow.deposits.map(d => ({
+                        from: d.from,
+                        amount: d.amount.toString(),
+                        timestamp: d.timestamp,
+                        message: d.message,
+                    })),
+                    expiryTimestamp: escrow.expiryTimestamp,
+                    expired: Date.now() > escrow.expiryTimestamp,
+                })
+            }
+        }
+    }
+
+    return claimable
+}
+
+/**
+ * RPC: Get all escrows created by a specific address (sender)
+ */
+export async function handleGetSentEscrows(params: { sender: string }) {
+    const { sender } = params
+
+    if (!sender) {
+        throw new Error("Missing sender address")
+    }
+
+    const db = await Datasource.getInstance()
+    const repo = db.getDataSource().getRepository(GCRMain)
+
+    // Note: This is inefficient for large datasets - consider adding an index in production
+    const allAccounts = await repo.find()
+
+    const sentEscrows = []
+
+    for (const account of allAccounts) {
+        if (!account.escrows) continue
+
+        for (const [escrowAddr, escrow] of Object.entries(account.escrows)) {
+            const senderDeposits =
+                escrow.deposits?.filter(d => d.from === sender) || []
+
+            if (senderDeposits.length > 0) {
+                const totalSent = senderDeposits.reduce(
+                    (sum, d) => sum + d.amount,
+                    0n,
+                )
+
+                sentEscrows.push({
+                    platform: escrow.claimableBy.platform,
+                    username: escrow.claimableBy.username,
+                    escrowAddress: escrowAddr,
+                    totalSent: totalSent.toString(),
+                    deposits: senderDeposits.map(d => ({
+                        amount: d.amount.toString(),
+                        timestamp: d.timestamp,
+                        message: d.message,
+                    })),
+                    totalEscrowBalance: escrow.balance.toString(),
+                    expired: Date.now() > escrow.expiryTimestamp,
+                    expiryTimestamp: escrow.expiryTimestamp,
+                })
+            }
+        }
+    }
+
+    return sentEscrows
+}

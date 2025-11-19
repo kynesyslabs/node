@@ -11,7 +11,11 @@ import {
 import log from "src/utilities/logger"
 import sharedState, { getSharedState } from "src/utilities/sharedState"
 import { PeerManager } from "../peer"
-import ServerHandlers from "./endpointHandlers"
+import ServerHandlers, {
+    handleGetEscrowBalance,
+    handleGetClaimableEscrows,
+    handleGetSentEscrows,
+} from "./endpointHandlers"
 import { AuthMessage, manageAuth } from "./manageAuth"
 import manageConsensusRoutines from "./manageConsensusRoutines"
 import manageGCRRoutines from "./manageGCRRoutines"
@@ -298,6 +302,75 @@ async function processPayload(
                 },
                 require_reply: false,
                 extra: null,
+            }
+        }
+
+        case "get_escrow_balance": {
+            try {
+                const response = await handleGetEscrowBalance(
+                    payload.params[0],
+                )
+                return {
+                    result: 200,
+                    response,
+                    require_reply: false,
+                    extra: null,
+                }
+            } catch (error) {
+                log.error(
+                    "[RPC Call] Error in get_escrow_balance: " + error,
+                )
+                return {
+                    result: 400,
+                    response: error.message || "Error querying escrow balance",
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+        }
+
+        case "get_claimable_escrows": {
+            try {
+                const response = await handleGetClaimableEscrows(
+                    payload.params[0],
+                )
+                return {
+                    result: 200,
+                    response,
+                    require_reply: false,
+                    extra: null,
+                }
+            } catch (error) {
+                log.error(
+                    "[RPC Call] Error in get_claimable_escrows: " + error,
+                )
+                return {
+                    result: 400,
+                    response:
+                        error.message || "Error querying claimable escrows",
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+        }
+
+        case "get_sent_escrows": {
+            try {
+                const response = await handleGetSentEscrows(payload.params[0])
+                return {
+                    result: 200,
+                    response,
+                    require_reply: false,
+                    extra: null,
+                }
+            } catch (error) {
+                log.error("[RPC Call] Error in get_sent_escrows: " + error)
+                return {
+                    result: 400,
+                    response: error.message || "Error querying sent escrows",
+                    require_reply: false,
+                    extra: null,
+                }
             }
         }
 
