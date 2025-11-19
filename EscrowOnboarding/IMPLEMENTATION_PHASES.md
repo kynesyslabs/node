@@ -464,9 +464,11 @@ async function testExpiry() {
 
 ## Performance Considerations (Phase 4)
 
-### `get_sent_escrows` Optimization
+### ⚠️ CRITICAL: Performance Warnings
 
-**Current implementation** does a full table scan - acceptable for MVP but inefficient for production.
+#### `get_sent_escrows` - Full Table Scan
+
+**Current implementation** does a full table scan - acceptable for testnet/MVP but **WILL CAUSE TIMEOUTS** in production with 10k+ accounts.
 
 **Production optimization options**:
 

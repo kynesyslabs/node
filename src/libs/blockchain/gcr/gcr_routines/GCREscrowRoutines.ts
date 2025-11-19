@@ -1,12 +1,17 @@
-import { GCREdit } from "@kynesyslabs/demosdk/types"
+import { GCREdit, GCREditEscrow } from "@kynesyslabs/demosdk/types"
 import { Repository } from "typeorm"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../handleGCR"
+import HandleGCR from "../handleGCR"
 import Hashing from "@/libs/crypto/hashing"
 import IdentityManager from "./identityManager"
 import ensureGCRForUser from "./ensureGCRForUser"
 import log from "@/utilities/logger"
 import { EscrowData, EscrowDeposit } from "@/model/entities/types/EscrowTypes"
+
+// Constants for escrow configuration
+const DEFAULT_EXPIRY_DAYS = 30
+const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 export default class GCREscrowRoutines {
     /**
@@ -33,7 +38,7 @@ export default class GCREscrowRoutines {
      * @returns Success/failure result
      */
     static async applyEscrowDeposit(
-        editOperation: any,
+        editOperation: GCREditEscrow,
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -73,8 +78,7 @@ export default class GCREscrowRoutines {
         })
 
         if (!escrowAccount) {
-            const handleGCR = (await import("../handleGCR")).default
-            escrowAccount = await handleGCR.createAccount(escrowAddress)
+            escrowAccount = await HandleGCR.createAccount(escrowAddress)
         }
 
         // Initialize escrows object if needed
@@ -83,7 +87,7 @@ export default class GCREscrowRoutines {
         // Create new escrow or update existing
         if (!escrowAccount.escrows[escrowAddress]) {
             // New escrow
-            const expiryMs = (expiryDays || 30) * 24 * 60 * 60 * 1000
+            const expiryMs = (expiryDays || DEFAULT_EXPIRY_DAYS) * MS_PER_DAY
             escrowAccount.escrows[escrowAddress] = {
                 claimableBy: {
                     platform: platform as "twitter" | "github" | "telegram",
@@ -138,13 +142,16 @@ export default class GCREscrowRoutines {
      * of the social identity via the existing Web2 verification flow.
      * All validators in consensus independently verify this.
      *
+     * TODO: Race condition - if balance GCREdit fails after escrow deletion,
+     * funds could be lost. Consider using database transaction or claimed status field.
+     *
      * @param editOperation - GCREdit with type "escrow", operation "claim"
      * @param gcrMainRepository - Database repository
      * @param simulate - If true, don't persist changes
      * @returns Success/failure result with claimed amount
      */
     static async applyEscrowClaim(
-        editOperation: any,
+        editOperation: GCREditEscrow,
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
@@ -277,7 +284,7 @@ export default class GCREscrowRoutines {
      * @returns Success/failure result
      */
     static async applyEscrowRefund(
-        editOperation: any,
+        editOperation: GCREditEscrow,
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {

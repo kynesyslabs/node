@@ -735,6 +735,9 @@ export async function handleGetEscrowBalance(params: {
 
 /**
  * RPC: Get all escrows claimable by a Demos address
+ *
+ * TODO: N+1 query problem - queries DB for each identity in loop.
+ * Consider batching queries for better performance.
  */
 export async function handleGetClaimableEscrows(params: {
     address: string
@@ -756,6 +759,7 @@ export async function handleGetClaimableEscrows(params: {
 
     const claimable: ClaimableEscrow[] = []
 
+    // TODO: Optimize - N+1 query problem, batch these queries
     // Check each proven Web2 identity
     for (const [platform, identities] of Object.entries(
         account.identities.web2,
@@ -800,6 +804,11 @@ export async function handleGetClaimableEscrows(params: {
 
 /**
  * RPC: Get all escrows created by a specific address (sender)
+ *
+ * PERFORMANCE WARNING: This endpoint performs a full table scan.
+ * With 10k+ accounts, queries may take 5-10 seconds or timeout.
+ * TODO: Add pagination and/or database index for production use.
+ * Recommended: CREATE INDEX idx_gcr_escrows ON gcr_main USING gin (escrows);
  */
 export async function handleGetSentEscrows(params: { sender: string }) {
     const { sender } = params
@@ -811,7 +820,7 @@ export async function handleGetSentEscrows(params: { sender: string }) {
     const db = await Datasource.getInstance()
     const repo = db.getDataSource().getRepository(GCRMain)
 
-    // Note: This is inefficient for large datasets - consider adding an index in production
+    // TODO: Performance - full table scan, add index or pagination for production
     const allAccounts = await repo.find()
 
     const sentEscrows = []
