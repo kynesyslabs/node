@@ -685,6 +685,7 @@ import GCREscrowRoutines from "@/libs/blockchain/gcr/gcr_routines/GCREscrowRouti
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import Datasource from "@/model/datasource"
 import { ClaimableEscrow } from "@/model/entities/types/EscrowTypes"
+import { In } from "typeorm"
 
 /**
  * RPC: Get escrow balance for a specific social identity
@@ -736,8 +737,7 @@ export async function handleGetEscrowBalance(params: {
 /**
  * RPC: Get all escrows claimable by a Demos address
  *
- * TODO: N+1 query problem - queries DB for each identity in loop.
- * Consider batching queries for better performance.
+ * Optimized to use batch queries instead of N+1 pattern.
  */
 export async function handleGetClaimableEscrows(params: {
     address: string
@@ -757,10 +757,12 @@ export async function handleGetClaimableEscrows(params: {
         return []
     }
 
-    const claimable: ClaimableEscrow[] = []
+    // Collect all escrow addresses first (avoid N+1 queries)
+    const escrowAddressMap: Map<
+        string,
+        { platform: string; username: string }
+    > = new Map()
 
-    // TODO: Optimize - N+1 query problem, batch these queries
-    // Check each proven Web2 identity
     for (const [platform, identities] of Object.entries(
         account.identities.web2,
     )) {
@@ -768,34 +770,55 @@ export async function handleGetClaimableEscrows(params: {
 
         for (const identity of identities) {
             const username = identity.username
-
-            // Check if escrow exists for this identity
             const escrowAddress = GCREscrowRoutines.getEscrowAddress(
                 platform,
                 username,
             )
-            const escrowAccount = await repo.findOneBy({
-                pubkey: escrowAddress,
-            })
+            escrowAddressMap.set(escrowAddress, { platform, username })
+        }
+    }
 
-            if (escrowAccount?.escrows?.[escrowAddress]) {
-                const escrow = escrowAccount.escrows[escrowAddress]
+    // Batch query all escrow accounts at once (fixes N+1 problem)
+    const escrowAddresses = Array.from(escrowAddressMap.keys())
 
-                claimable.push({
-                    platform: platform as "twitter" | "github" | "telegram",
-                    username,
-                    balance: escrow.balance.toString(),
-                    escrowAddress,
-                    deposits: escrow.deposits.map(d => ({
-                        from: d.from,
-                        amount: d.amount.toString(),
-                        timestamp: d.timestamp,
-                        message: d.message,
-                    })),
-                    expiryTimestamp: escrow.expiryTimestamp,
-                    expired: Date.now() > escrow.expiryTimestamp,
-                })
+    if (escrowAddresses.length === 0) {
+        return []
+    }
+
+    const escrowAccounts = await repo.find({
+        where: { pubkey: In(escrowAddresses) },
+    })
+
+    // Build claimable array from batched results
+    const claimable: ClaimableEscrow[] = []
+
+    for (const escrowAccount of escrowAccounts) {
+        const escrowAddress = escrowAccount.pubkey
+
+        if (escrowAccount.escrows?.[escrowAddress]) {
+            const escrow = escrowAccount.escrows[escrowAddress]
+            const identity = escrowAddressMap.get(escrowAddress)
+            if (!identity) continue
+
+            // Skip claimed escrows
+            if (escrow.claimed) {
+                continue
             }
+
+            claimable.push({
+                platform: identity.platform as "twitter" | "github" | "telegram",
+                username: identity.username,
+                balance: escrow.balance.toString(),
+                escrowAddress,
+                deposits: escrow.deposits.map(d => ({
+                    from: d.from,
+                    amount: d.amount.toString(),
+                    timestamp: d.timestamp,
+                    message: d.message,
+                })),
+                expiryTimestamp: escrow.expiryTimestamp,
+                expired: Date.now() > escrow.expiryTimestamp,
+            })
         }
     }
 

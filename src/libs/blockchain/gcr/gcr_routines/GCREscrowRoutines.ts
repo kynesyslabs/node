@@ -188,6 +188,20 @@ export default class GCREscrowRoutines {
 
         const escrow = escrowAccount.escrows[escrowAddress]
 
+        // Check if already claimed (prevents race condition)
+        if (escrow.claimed) {
+            const claimedAt = escrow.claimedAt
+                ? new Date(escrow.claimedAt).toISOString()
+                : "unknown time"
+            log.warning(
+                `[EscrowClaim] ✗ Escrow already claimed by ${escrow.claimedBy} at ${claimedAt}`,
+            )
+            return {
+                success: false,
+                message: `Escrow already claimed by ${escrow.claimedBy}`,
+            }
+        }
+
         // CRITICAL SECURITY CHECK: Verify claimant has proven ownership of social identity
         // This uses the existing Web2 identity verification system (GCRIdentityRoutines)
         // All validators independently check this condition
@@ -248,13 +262,13 @@ export default class GCREscrowRoutines {
             }
         }
 
-        // Delete escrow (funds will be transferred via separate balance GCREdit)
-        delete escrowAccount.escrows[escrowAddress]
-
-        // Clean up empty escrows object
-        if (Object.keys(escrowAccount.escrows).length === 0) {
-            escrowAccount.escrows = {}
-        }
+        // Mark as claimed (prevents race condition - don't delete yet)
+        // Funds will be transferred via separate balance GCREdit
+        // If that fails, escrow remains claimed and prevents double-claim
+        escrow.claimed = true
+        escrow.claimedBy = claimant
+        escrow.claimedAt = Date.now()
+        escrow.balance = 0n // Zero out balance to prevent double-spend
 
         // Persist changes
         if (!simulate) {

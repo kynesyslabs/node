@@ -10,6 +10,10 @@ export interface EscrowData {
     deposits: EscrowDeposit[]
     expiryTimestamp: number // Unix timestamp in milliseconds
     createdAt: number
+    // Claimed status to prevent race conditions
+    claimed?: boolean
+    claimedBy?: string // Address that claimed the escrow
+    claimedAt?: number // Unix timestamp when claimed
 }
 
 /**
