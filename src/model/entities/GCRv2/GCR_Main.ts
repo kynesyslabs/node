@@ -7,6 +7,7 @@ import {
     PrimaryColumn,
 } from "typeorm"
 import type { StoredIdentities } from "../types/IdentityTypes"
+import type { EscrowData } from "../types/EscrowTypes"
 // Define the shape of your JSON data
 
 @Entity("gcr_main")
@@ -52,6 +53,10 @@ export class GCRMain {
             referredAt: string
             pointsAwarded: number
         }>
+    }
+    @Column({ type: "jsonb", name: "escrows", default: () => "'{}'" })
+    escrows: {
+        [escrowAddress: string]: EscrowData
     }
     @Column({ type: "boolean", name: "flagged", default: false })
     flagged: boolean
