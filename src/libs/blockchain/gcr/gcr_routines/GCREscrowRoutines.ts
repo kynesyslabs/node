@@ -132,9 +132,16 @@ export default class GCREscrowRoutines {
         escrowAccount.escrows[escrowAddress].balance += BigInt(amount)
         escrowAccount.escrows[escrowAddress].deposits.push(deposit)
 
-        // REVIEW: Persist both accounts atomically
+        // REVIEW: Persist both accounts atomically in transaction
         if (!simulate) {
-            await gcrMainRepository.save([senderAccount, escrowAccount])
+            await gcrMainRepository.manager.transaction(
+                async transactionalEntityManager => {
+                    await transactionalEntityManager.save([
+                        senderAccount,
+                        escrowAccount,
+                    ])
+                },
+            )
         }
 
         log.info(
@@ -293,9 +300,16 @@ export default class GCREscrowRoutines {
         // Credit claimant's account
         claimantAccount.balance += claimedAmount
 
-        // REVIEW: Persist both accounts atomically
+        // REVIEW: Persist both accounts atomically in transaction
         if (!simulate) {
-            await gcrMainRepository.save([escrowAccount, claimantAccount])
+            await gcrMainRepository.manager.transaction(
+                async transactionalEntityManager => {
+                    await transactionalEntityManager.save([
+                        escrowAccount,
+                        claimantAccount,
+                    ])
+                },
+            )
         }
 
         log.info(
@@ -348,6 +362,14 @@ export default class GCREscrowRoutines {
 
         const escrow = escrowAccount.escrows[escrowAddress]
 
+        // REVIEW: Check if escrow was already claimed (prevents double-spend)
+        if (escrow.claimed) {
+            return {
+                success: false,
+                message: `Escrow was already claimed by ${escrow.claimedBy}. Refunds are not available for claimed escrows.`,
+            }
+        }
+
         // Check escrow is expired
         if (Date.now() <= escrow.expiryTimestamp) {
             return {
@@ -396,9 +418,16 @@ export default class GCREscrowRoutines {
             delete escrowAccount.escrows[escrowAddress]
         }
 
-        // REVIEW: Persist both accounts atomically
+        // REVIEW: Persist both accounts atomically in transaction
         if (!simulate) {
-            await gcrMainRepository.save([refunderAccount, escrowAccount])
+            await gcrMainRepository.manager.transaction(
+                async transactionalEntityManager => {
+                    await transactionalEntityManager.save([
+                        refunderAccount,
+                        escrowAccount,
+                    ])
+                },
+            )
         }
 
         log.info(`[EscrowRefund] ✓ ${refunder} refunded ${refundAmount} DEM`)

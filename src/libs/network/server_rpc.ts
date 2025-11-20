@@ -322,7 +322,10 @@ async function processPayload(
                 )
                 return {
                     result: 400,
-                    response: error.message || "Error querying escrow balance",
+                    response:
+                        error instanceof Error
+                            ? error.message
+                            : "Error querying escrow balance",
                     require_reply: false,
                     extra: null,
                 }
@@ -347,7 +350,9 @@ async function processPayload(
                 return {
                     result: 400,
                     response:
-                        error.message || "Error querying claimable escrows",
+                        error instanceof Error
+                            ? error.message
+                            : "Error querying claimable escrows",
                     require_reply: false,
                     extra: null,
                 }
@@ -367,7 +372,10 @@ async function processPayload(
                 log.error("[RPC Call] Error in get_sent_escrows: " + error)
                 return {
                     result: 400,
-                    response: error.message || "Error querying sent escrows",
+                    response:
+                        error instanceof Error
+                            ? error.message
+                            : "Error querying sent escrows",
                     require_reply: false,
                     extra: null,
                 }

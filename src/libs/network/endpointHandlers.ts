@@ -842,11 +842,14 @@ export async function handleGetClaimableEscrows(params: {
  *
  * PERFORMANCE WARNING: This endpoint performs a full table scan.
  * With 10k+ accounts, queries may take 5-10 seconds or timeout.
- * TODO: Add pagination and/or database index for production use.
  * Recommended: CREATE INDEX idx_gcr_escrows ON gcr_main USING gin (escrows);
  */
-export async function handleGetSentEscrows(params: { sender: string }) {
-    const { sender } = params
+export async function handleGetSentEscrows(params: {
+    sender: string
+    limit?: number
+    offset?: number
+}) {
+    const { sender, limit = 100, offset = 0 } = params
 
     if (!sender) {
         throw new Error("Missing sender address")
@@ -855,8 +858,15 @@ export async function handleGetSentEscrows(params: { sender: string }) {
     const db = await Datasource.getInstance()
     const repo = db.getDataSource().getRepository(GCRMain)
 
-    // TODO: Performance - full table scan, add index or pagination for production
-    const allAccounts = await repo.find()
+    // REVIEW: Capture timestamp once for consistency
+    const nowTimestamp = Date.now()
+
+    // REVIEW: Added pagination to mitigate DoS risk from full table scan
+    // TODO: Still scans records, needs GIN index for optimal performance
+    const allAccounts = await repo.find({
+        take: limit,
+        skip: offset,
+    })
 
     const sentEscrows = []
 
@@ -889,7 +899,7 @@ export async function handleGetSentEscrows(params: { sender: string }) {
                         message: d.message,
                     })),
                     totalEscrowBalance: escrow.balance.toString(),
-                    expired: Date.now() > escrow.expiryTimestamp,
+                    expired: nowTimestamp > escrow.expiryTimestamp,
                     expiryTimestamp: escrow.expiryTimestamp,
                 })
             }
