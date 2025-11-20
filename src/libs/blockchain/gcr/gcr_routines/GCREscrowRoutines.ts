@@ -27,6 +27,12 @@ export default class GCREscrowRoutines {
         if (!platform?.trim() || !username?.trim()) {
             throw new Error("Platform and username must be non-empty strings")
         }
+        // REVIEW: Prevent delimiter collision attacks
+        if (platform.includes(":") || username.includes(":")) {
+            throw new Error(
+                "Platform and username cannot contain ':' character",
+            )
+        }
         // Normalize to lowercase for case-insensitivity
         const identity = `${platform}:${username}`.toLowerCase()
         // Use SHA3-256 for deterministic address generation
@@ -59,6 +65,14 @@ export default class GCREscrowRoutines {
 
         if (amount <= 0) {
             return { success: false, message: "Escrow amount must be positive" }
+        }
+
+        // REVIEW: Validate amount is an integer to prevent precision issues
+        if (!Number.isInteger(amount)) {
+            return {
+                success: false,
+                message: "Escrow amount must be an integer",
+            }
         }
 
         if (!["twitter", "github", "telegram"].includes(platform)) {
@@ -111,6 +125,23 @@ export default class GCREscrowRoutines {
                 deposits: [],
                 expiryTimestamp: Date.now() + expiryMs,
                 createdAt: Date.now(),
+            }
+        } else {
+            // REVIEW: Existing escrow - check not expired or claimed
+            const existingEscrow = escrowAccount.escrows[escrowAddress]
+            if (Date.now() > existingEscrow.expiryTimestamp) {
+                return {
+                    success: false,
+                    message: `Cannot deposit to expired escrow. Expired on ${new Date(
+                        existingEscrow.expiryTimestamp,
+                    ).toISOString()}`,
+                }
+            }
+            if (existingEscrow.claimed) {
+                return {
+                    success: false,
+                    message: `Cannot deposit to claimed escrow. Claimed by ${existingEscrow.claimedBy}`,
+                }
             }
         }
 
@@ -240,8 +271,12 @@ export default class GCREscrowRoutines {
         )
 
         const hasProof = identities.some((id: any) => {
-            // Case-insensitive username comparison
-            return id.username.toLowerCase() === username.toLowerCase()
+            // REVIEW: Case-insensitive username comparison with null safety
+            return (
+                id?.username &&
+                typeof id.username === "string" &&
+                id.username.toLowerCase() === username.toLowerCase()
+            )
         })
 
         if (!hasProof) {

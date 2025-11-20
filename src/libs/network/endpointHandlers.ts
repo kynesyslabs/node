@@ -700,37 +700,47 @@ export async function handleGetEscrowBalance(params: {
         throw new Error("Missing platform or username")
     }
 
-    const escrowAddress = GCREscrowRoutines.getEscrowAddress(platform, username)
-    const db = await Datasource.getInstance()
-    const repo = db.getDataSource().getRepository(GCRMain)
+    try {
+        const escrowAddress = GCREscrowRoutines.getEscrowAddress(
+            platform,
+            username,
+        )
+        const db = await Datasource.getInstance()
+        const repo = db.getDataSource().getRepository(GCRMain)
 
-    const account = await repo.findOneBy({ pubkey: escrowAddress })
+        const account = await repo.findOneBy({ pubkey: escrowAddress })
 
-    if (!account || !account.escrows || !account.escrows[escrowAddress]) {
+        if (!account || !account.escrows || !account.escrows[escrowAddress]) {
+            return {
+                escrowAddress,
+                exists: false,
+                balance: "0",
+                deposits: [],
+                expiryTimestamp: 0,
+                expired: false,
+            }
+        }
+
+        const escrow = account.escrows[escrowAddress]
+
         return {
             escrowAddress,
-            exists: false,
-            balance: "0",
-            deposits: [],
-            expiryTimestamp: 0,
-            expired: false,
+            exists: true,
+            balance: escrow.balance.toString(),
+            deposits: escrow.deposits.map(d => ({
+                from: d.from,
+                amount: d.amount.toString(),
+                timestamp: d.timestamp,
+                message: d.message,
+            })),
+            expiryTimestamp: escrow.expiryTimestamp,
+            expired: Date.now() > escrow.expiryTimestamp,
         }
-    }
-
-    const escrow = account.escrows[escrowAddress]
-
-    return {
-        escrowAddress,
-        exists: true,
-        balance: escrow.balance.toString(),
-        deposits: escrow.deposits.map(d => ({
-            from: d.from,
-            amount: d.amount.toString(),
-            timestamp: d.timestamp,
-            message: d.message,
-        })),
-        expiryTimestamp: escrow.expiryTimestamp,
-        expired: Date.now() > escrow.expiryTimestamp,
+    } catch (error) {
+        log.error(
+            `[handleGetEscrowBalance] Failed for ${platform}:${username} - ${error}`,
+        )
+        throw new Error("Failed to retrieve escrow balance")
     }
 }
 
@@ -748,14 +758,15 @@ export async function handleGetClaimableEscrows(params: {
         throw new Error("Missing address")
     }
 
-    const db = await Datasource.getInstance()
-    const repo = db.getDataSource().getRepository(GCRMain)
+    try {
+        const db = await Datasource.getInstance()
+        const repo = db.getDataSource().getRepository(GCRMain)
 
-    const account = await repo.findOneBy({ pubkey: address })
+        const account = await repo.findOneBy({ pubkey: address })
 
-    if (!account || !account.identities || !account.identities.web2) {
-        return []
-    }
+        if (!account || !account.identities || !account.identities.web2) {
+            return []
+        }
 
     // Collect all escrow addresses first (avoid N+1 queries)
     const escrowAddressMap: Map<
@@ -834,7 +845,13 @@ export async function handleGetClaimableEscrows(params: {
         }
     }
 
-    return claimable
+        return claimable
+    } catch (error) {
+        log.error(
+            `[handleGetClaimableEscrows] Failed for address ${address} - ${error}`,
+        )
+        throw new Error("Failed to retrieve claimable escrows")
+    }
 }
 
 /**
@@ -855,11 +872,12 @@ export async function handleGetSentEscrows(params: {
         throw new Error("Missing sender address")
     }
 
-    const db = await Datasource.getInstance()
-    const repo = db.getDataSource().getRepository(GCRMain)
+    try {
+        const db = await Datasource.getInstance()
+        const repo = db.getDataSource().getRepository(GCRMain)
 
-    // REVIEW: Capture timestamp once for consistency
-    const nowTimestamp = Date.now()
+        // REVIEW: Capture timestamp once for consistency
+        const nowTimestamp = Date.now()
 
     // REVIEW: Added pagination to mitigate DoS risk from full table scan
     // TODO: Still scans records, needs GIN index for optimal performance
@@ -906,5 +924,11 @@ export async function handleGetSentEscrows(params: {
         }
     }
 
-    return sentEscrows
+        return sentEscrows
+    } catch (error) {
+        log.error(
+            `[handleGetSentEscrows] Failed for sender ${sender} - ${error}`,
+        )
+        throw new Error("Failed to retrieve sent escrows")
+    }
 }
