@@ -789,6 +789,13 @@ export async function handleGetClaimableEscrows(params: {
         where: { pubkey: In(escrowAddresses) },
     })
 
+    // REVIEW: Helper function to validate platform type
+    const isValidPlatform = (
+        platform: string,
+    ): platform is "twitter" | "github" | "telegram" => {
+        return ["twitter", "github", "telegram"].includes(platform)
+    }
+
     // Build claimable array from batched results
     const claimable: ClaimableEscrow[] = []
 
@@ -805,8 +812,13 @@ export async function handleGetClaimableEscrows(params: {
                 continue
             }
 
+            // REVIEW: Skip invalid platforms instead of type assertion
+            if (!isValidPlatform(identity.platform)) {
+                continue
+            }
+
             claimable.push({
-                platform: identity.platform as "twitter" | "github" | "telegram",
+                platform: identity.platform,
                 username: identity.username,
                 balance: escrow.balance.toString(),
                 escrowAddress,
@@ -860,6 +872,11 @@ export async function handleGetSentEscrows(params: { sender: string }) {
                     (sum, d) => sum + d.amount,
                     0n,
                 )
+
+                // REVIEW: Add defensive check for claimableBy
+                if (!escrow.claimableBy?.platform || !escrow.claimableBy?.username) {
+                    continue
+                }
 
                 sentEscrows.push({
                     platform: escrow.claimableBy.platform,

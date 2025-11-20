@@ -23,6 +23,10 @@ export default class GCREscrowRoutines {
      * @returns Hex-encoded escrow address
      */
     static getEscrowAddress(platform: string, username: string): string {
+        // REVIEW: Input validation to prevent hash collisions from invalid inputs
+        if (!platform?.trim() || !username?.trim()) {
+            throw new Error("Platform and username must be non-empty strings")
+        }
         // Normalize to lowercase for case-insensitivity
         const identity = `${platform}:${username}`.toLowerCase()
         // Use SHA3-256 for deterministic address generation
@@ -72,6 +76,16 @@ export default class GCREscrowRoutines {
                 ` → escrow address: ${escrowAddress}`,
         )
 
+        // REVIEW: Get sender's account and verify balance
+        const senderAccount = await ensureGCRForUser(sender, gcrMainRepository)
+
+        if (senderAccount.balance < BigInt(amount)) {
+            return {
+                success: false,
+                message: `Insufficient balance: has ${senderAccount.balance}, needs ${amount}`,
+            }
+        }
+
         // Get or create escrow account
         let escrowAccount = await gcrMainRepository.findOneBy({
             pubkey: escrowAddress,
@@ -111,12 +125,16 @@ export default class GCREscrowRoutines {
             deposit.message = message
         }
 
+        // REVIEW: Deduct from sender's balance
+        senderAccount.balance -= BigInt(amount)
+
+        // Credit escrow balance
         escrowAccount.escrows[escrowAddress].balance += BigInt(amount)
         escrowAccount.escrows[escrowAddress].deposits.push(deposit)
 
-        // Persist changes
+        // REVIEW: Persist both accounts atomically
         if (!simulate) {
-            await gcrMainRepository.save(escrowAccount)
+            await gcrMainRepository.save([senderAccount, escrowAccount])
         }
 
         log.info(
@@ -262,17 +280,22 @@ export default class GCREscrowRoutines {
             }
         }
 
-        // Mark as claimed (prevents race condition - don't delete yet)
-        // Funds will be transferred via separate balance GCREdit
-        // If that fails, escrow remains claimed and prevents double-claim
+        // REVIEW: Get claimant's account
+        const claimantAccount = await ensureGCRForUser(claimant, gcrMainRepository)
+
+        // REVIEW: Transfer funds atomically
+        // Mark as claimed (prevents race condition)
         escrow.claimed = true
         escrow.claimedBy = claimant
         escrow.claimedAt = Date.now()
-        escrow.balance = 0n // Zero out balance to prevent double-spend
+        escrow.balance = 0n // Zero out escrow balance
 
-        // Persist changes
+        // Credit claimant's account
+        claimantAccount.balance += claimedAmount
+
+        // REVIEW: Persist both accounts atomically
         if (!simulate) {
-            await gcrMainRepository.save(escrowAccount)
+            await gcrMainRepository.save([escrowAccount, claimantAccount])
         }
 
         log.info(
@@ -358,6 +381,12 @@ export default class GCREscrowRoutines {
             return { success: false, message: "No refundable amount" }
         }
 
+        // REVIEW: Get refunder's account
+        const refunderAccount = await ensureGCRForUser(refunder, gcrMainRepository)
+
+        // REVIEW: Credit refund to refunder's account
+        refunderAccount.balance += refundAmount
+
         // Update escrow (remove refunder's deposits)
         escrow.deposits = escrow.deposits.filter(d => d.from !== refunder)
         escrow.balance -= refundAmount
@@ -367,9 +396,9 @@ export default class GCREscrowRoutines {
             delete escrowAccount.escrows[escrowAddress]
         }
 
-        // Persist changes
+        // REVIEW: Persist both accounts atomically
         if (!simulate) {
-            await gcrMainRepository.save(escrowAccount)
+            await gcrMainRepository.save([refunderAccount, escrowAccount])
         }
 
         log.info(`[EscrowRefund] ✓ ${refunder} refunded ${refundAmount} DEM`)
@@ -404,26 +433,19 @@ export default class GCREscrowRoutines {
             }
         }
 
-        let operation = editOperation.operation
+        const operation = editOperation.operation
 
-        // Handle rollbacks by reversing operation
+        // REVIEW: Rollbacks are not supported for escrow operations
+        // Proper rollback would require storing full state history and
+        // complex validation logic. Until implemented, explicitly reject rollbacks
+        // to prevent consensus failures from inconsistent rollback handling.
         if (editOperation.isRollback) {
-            // Rollback logic
-            switch (operation) {
-                case "deposit":
-                    // Rollback deposit = refund
-                    operation = "refund"
-                    break
-                case "claim":
-                    // Rollback claim = re-deposit (restore escrow)
-                    // This is complex and may need special handling
-                    log.warning("[Escrow] Claim rollback not fully implemented")
-                    operation = "deposit"
-                    break
-                case "refund":
-                    // Rollback refund = re-deposit
-                    operation = "deposit"
-                    break
+            log.error(
+                `[Escrow] Rollback attempted for ${operation} operation - rollbacks not supported`,
+            )
+            return {
+                success: false,
+                message: "Escrow rollbacks are not supported. State restoration would require full history tracking.",
             }
         }
 
