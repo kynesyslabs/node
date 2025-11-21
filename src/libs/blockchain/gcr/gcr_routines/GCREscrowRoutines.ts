@@ -8,10 +8,19 @@ import IdentityManager from "./identityManager"
 import ensureGCRForUser from "./ensureGCRForUser"
 import log from "@/utilities/logger"
 import { EscrowData, EscrowDeposit } from "@/model/entities/types/EscrowTypes"
+import {
+    SUPPORTED_PLATFORMS,
+    SupportedPlatform,
+} from "@/model/entities/types/IdentityTypes"
 
 // Constants for escrow configuration
 const DEFAULT_EXPIRY_DAYS = 30
+const MIN_EXPIRY_DAYS = 1
+const MAX_EXPIRY_DAYS = 365 // 1 year maximum to prevent fund locking
 const MS_PER_DAY = 24 * 60 * 60 * 1000
+const MAX_BALANCE = BigInt("1000000000000000000000") // 1 sextillion DEM maximum
+const MAX_PLATFORM_LENGTH = 20
+const MAX_USERNAME_LENGTH = 100
 
 export default class GCREscrowRoutines {
     private static parseAmount(value?: string | number | bigint): bigint {
@@ -39,18 +48,32 @@ export default class GCREscrowRoutines {
      * @returns Hex-encoded escrow address
      */
     static getEscrowAddress(platform: string, username: string): string {
-        // REVIEW: Input validation to prevent hash collisions from invalid inputs
+        // Input validation to prevent hash collisions from invalid inputs
         if (!platform?.trim() || !username?.trim()) {
             throw new Error("Platform and username must be non-empty strings")
         }
-        // REVIEW: Prevent delimiter collision attacks
+
+        // Length validation to prevent DoS attacks via large strings
+        if (platform.length > MAX_PLATFORM_LENGTH) {
+            throw new Error(
+                `Platform name too long (max ${MAX_PLATFORM_LENGTH} characters)`,
+            )
+        }
+        if (username.length > MAX_USERNAME_LENGTH) {
+            throw new Error(
+                `Username too long (max ${MAX_USERNAME_LENGTH} characters)`,
+            )
+        }
+
+        // Prevent delimiter collision attacks
         if (platform.includes(":") || username.includes(":")) {
             throw new Error(
                 "Platform and username cannot contain ':' character",
             )
         }
-        // Normalize to lowercase for case-insensitivity
-        const identity = `${platform}:${username}`.toLowerCase()
+
+        // Normalize to lowercase and Unicode NFKC to prevent hash collision attacks
+        const identity = `${platform}:${username}`.toLowerCase().normalize("NFKC")
         // Use SHA3-256 for deterministic address generation
         return Hashing.sha3_256(identity)
     }
@@ -91,10 +114,10 @@ export default class GCREscrowRoutines {
             }
         }
 
-        if (!["twitter", "github", "telegram"].includes(platform)) {
+        if (!SUPPORTED_PLATFORMS.includes(platform as SupportedPlatform)) {
             return {
                 success: false,
-                message: `Unsupported platform: ${platform}`,
+                message: `Unsupported platform: ${platform}. Supported: ${SUPPORTED_PLATFORMS.join(", ")}`,
             }
         }
 
@@ -130,8 +153,17 @@ export default class GCREscrowRoutines {
 
         // Create new escrow or update existing
         if (!escrowAccount.escrows[escrowAddress]) {
-            // New escrow
-            const expiryMs = (expiryDays || DEFAULT_EXPIRY_DAYS) * MS_PER_DAY
+            // New escrow - validate expiry to prevent fund locking attacks
+            const requestedExpiry = expiryDays || DEFAULT_EXPIRY_DAYS
+
+            if (requestedExpiry < MIN_EXPIRY_DAYS || requestedExpiry > MAX_EXPIRY_DAYS) {
+                return {
+                    success: false,
+                    message: `Expiry must be between ${MIN_EXPIRY_DAYS} and ${MAX_EXPIRY_DAYS} days`,
+                }
+            }
+
+            const expiryMs = requestedExpiry * MS_PER_DAY
             escrowAccount.escrows[escrowAddress] = {
                 claimableBy: {
                     platform: platform as "twitter" | "github" | "telegram",
@@ -172,14 +204,23 @@ export default class GCREscrowRoutines {
             deposit.message = message
         }
 
-        // REVIEW: Deduct from sender's balance
+        // Deduct from sender's balance
         senderAccount.balance -= BigInt(amount)
 
-        // Credit escrow balance
+        // Credit escrow balance with overflow protection
         const previousBalance = this.parseAmount(
             escrowAccount.escrows[escrowAddress].balance,
         )
         const newBalance = previousBalance + BigInt(amount)
+
+        // Prevent balance overflow attacks
+        if (newBalance > MAX_BALANCE) {
+            return {
+                success: false,
+                message: `Escrow balance would exceed maximum limit of ${MAX_BALANCE} DEM`,
+            }
+        }
+
         escrowAccount.escrows[escrowAddress].balance = this.formatAmount(
             newBalance,
         )
@@ -344,10 +385,18 @@ export default class GCREscrowRoutines {
             }
         }
 
-        // REVIEW: Get claimant's account
+        // Get claimant's account
         const claimantAccount = await ensureGCRForUser(claimant, gcrMainRepository)
 
-        // REVIEW: Transfer funds atomically
+        // SECURITY: Prevent flagged/banned accounts from claiming escrow funds
+        if (claimantAccount.flagged) {
+            return {
+                success: false,
+                message: "Account is flagged and cannot claim escrow funds. Please contact support.",
+            }
+        }
+
+        // Transfer funds atomically
         // Mark as claimed (prevents race condition)
         escrow.claimed = true
         escrow.claimedBy = claimant

@@ -12,6 +12,9 @@ import type { EscrowData } from "../types/EscrowTypes"
 
 @Entity("gcr_main")
 @Index("idx_gcr_main_pubkey", ["pubkey"])
+@Index("idx_gcr_escrows", ["escrows"], { using: "GIN" }) // JSONB index for faster escrow lookups
+@Index("idx_gcr_points", ["points"], { using: "GIN" })   // JSONB index for faster point queries
+@Index("idx_gcr_flagged", ["flagged"])                    // Boolean index for faster flagged account checks
 export class GCRMain {
     @PrimaryColumn({ type: "text", name: "pubkey" })
     pubkey: string

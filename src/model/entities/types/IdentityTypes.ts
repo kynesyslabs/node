@@ -1,5 +1,20 @@
 import { Web2GCRData } from "@kynesyslabs/demosdk/types"
 
+/**
+ * Supported social platforms for escrow and identity verification
+ */
+export enum SupportedPlatform {
+    TWITTER = "twitter",
+    GITHUB = "github",
+    TELEGRAM = "telegram",
+    DISCORD = "discord",
+}
+
+/**
+ * Array of all supported platform values for validation
+ */
+export const SUPPORTED_PLATFORMS = Object.values(SupportedPlatform)
+
 export interface SavedXmIdentity {
     // NOTE: We don't store the message here
     // The signed message is the ed25519 address (with 0x prefix) of the sender which can
