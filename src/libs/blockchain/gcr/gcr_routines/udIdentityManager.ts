@@ -119,6 +119,7 @@ export class UDIdentityManager {
                     domainPropertiesPda:
                         solanaResolution.domainPropertiesPda || "",
                     recordsVersion: solanaResolution.recordsVersion || 0,
+                    owner: solanaResolution.owner,
                 },
             },
         }
@@ -386,13 +387,15 @@ export class UDIdentityManager {
 
             // Step 1: Resolve domain to get all authorized addresses
             const resolution = await this.resolveUDDomain(domain)
-
             log.debug(
                 `Verifying UD domain ${domain}: signing_address=${signingAddress}, signature_type=${signatureType}, network=${resolution.network}, authorized_addresses=${resolution.authorizedAddresses.length}`,
             )
 
+            const isOwner =
+                signingAddress === resolution.metadata[signatureType].owner
+
             // Step 2: Check if domain has any authorized addresses
-            if (resolution.authorizedAddresses.length === 0) {
+            if (resolution.authorizedAddresses.length === 0 && !isOwner) {
                 return {
                     success: false,
                     message: `Domain ${domain} has no authorized addresses in records`,
@@ -420,8 +423,16 @@ export class UDIdentityManager {
 
             // Step 5: Find the authorized address that matches the signing address
             // SECURITY: Solana addresses are case-sensitive (base58), EVM addresses are case-insensitive
-            const matchingAddress = resolution.authorizedAddresses.find(
-                auth => {
+            let matchingAddress: SignableAddress | null = null
+
+            if (isOwner) {
+                matchingAddress = {
+                    address: signingAddress,
+                    signatureType: signatureType,
+                    recordKey: "",
+                }
+            } else {
+                matchingAddress = resolution.authorizedAddresses.find(auth => {
                     // Solana addresses are case-sensitive (base58 encoding)
                     if (auth.signatureType === "solana") {
                         return auth.address === signingAddress
@@ -431,8 +442,8 @@ export class UDIdentityManager {
                         auth.address.toLowerCase() ===
                         signingAddress.toLowerCase()
                     )
-                },
-            )
+                })
+            }
 
             if (!matchingAddress) {
                 // Use original casing in error message
@@ -528,7 +539,7 @@ export class UDIdentityManager {
         try {
             if (authorizedAddress.signatureType === "evm") {
                 // EVM signature verification using ethers
-                const recoveredAddress = ethers.verifyMessage(
+                const recoveredAddress = ethers.utils.verifyMessage(
                     signedData,
                     signature,
                 )

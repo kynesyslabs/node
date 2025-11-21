@@ -2,7 +2,11 @@
 
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../handleGCR"
-import { GCREdit, Web2GCRData } from "@kynesyslabs/demosdk/types"
+import {
+    GCREdit,
+    UDIdentityAssignPayload,
+    Web2GCRData,
+} from "@kynesyslabs/demosdk/types"
 import { Repository } from "typeorm"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import ensureGCRForUser from "./ensureGCRForUser"
@@ -540,29 +544,19 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const {
-            domain,
-            signingAddress,
-            signatureType,
-            signature,
-            publicKey,
-            timestamp,
-            signedData,
-            network,
-            registryType,
-        } = editOperation.data
+        simulate = false
+        const payload = editOperation.data as UDIdentityAssignPayload["payload"]
 
         // REVIEW: Validate required fields presence
         if (
-            !domain ||
-            !signingAddress ||
-            !signatureType ||
-            !signature ||
-            !publicKey ||
-            !timestamp ||
-            !signedData ||
-            !network ||
-            !registryType
+            !payload.domain ||
+            !payload.signingAddress ||
+            !payload.signature ||
+            !payload.publicKey ||
+            !payload.timestamp ||
+            !payload.signedData ||
+            !payload.network ||
+            !payload.registryType
         ) {
             return {
                 success: false,
@@ -571,63 +565,53 @@ export default class GCRIdentityRoutines {
         }
 
         // Validate enum fields have allowed values
-        const validSignatureTypes = ["evm", "solana"]
         const validNetworks = ["polygon", "base", "sonic", "ethereum", "solana"]
         const validRegistryTypes = ["UNS", "CNS"]
 
-        if (!validSignatureTypes.includes(signatureType)) {
+        if (!validNetworks.includes(payload.network)) {
             return {
                 success: false,
-                message: `Invalid signatureType: ${signatureType}. Must be "evm" or "solana"`,
+                message: `Invalid network: ${
+                    payload.network
+                }. Must be one of: ${validNetworks.join(", ")}`,
             }
         }
-        if (!validNetworks.includes(network)) {
+        if (!validRegistryTypes.includes(payload.registryType)) {
             return {
                 success: false,
-                message: `Invalid network: ${network}. Must be one of: ${validNetworks.join(", ")}`,
-            }
-        }
-        if (!validRegistryTypes.includes(registryType)) {
-            return {
-                success: false,
-                message: `Invalid registryType: ${registryType}. Must be "UNS" or "CNS"`,
+                message: `Invalid registryType: ${payload.registryType}. Must be "UNS" or "CNS"`,
             }
         }
 
         // Validate timestamp is a valid positive number
-        if (typeof timestamp !== "number" || isNaN(timestamp) || timestamp <= 0) {
+        if (
+            typeof payload.timestamp !== "number" ||
+            isNaN(payload.timestamp) ||
+            payload.timestamp <= 0
+        ) {
             return {
                 success: false,
-                message: `Invalid timestamp: ${timestamp}. Must be a positive number (epoch milliseconds)`,
+                message: `Invalid timestamp: ${payload.timestamp}. Must be a positive number (epoch milliseconds)`,
             }
         }
 
         const accountGCR = await ensureGCRForUser(editOperation.account)
-
         accountGCR.identities.ud = accountGCR.identities.ud || []
 
         // Check if domain already exists for this account
         const domainExists = accountGCR.identities.ud.some(
-            (id: SavedUdIdentity) => id.domain.toLowerCase() === domain.toLowerCase(),
+            (id: SavedUdIdentity) =>
+                id.domain.toLowerCase() === payload.domain.toLowerCase(),
         )
 
         if (domainExists) {
-            return { success: false, message: "Domain already linked to this account" }
+            return {
+                success: false,
+                message: "Domain already linked to this account",
+            }
         }
 
-        const data: SavedUdIdentity = {
-            domain: domain.toLowerCase(), // Normalize to lowercase for consistency
-            signingAddress,
-            signatureType,
-            signature,
-            publicKey,
-            timestamp,
-            signedData,
-            network,
-            registryType,
-        }
-
-        accountGCR.identities.ud.push(data)
+        accountGCR.identities.ud.push(payload)
 
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
@@ -637,20 +621,22 @@ export default class GCRIdentityRoutines {
              */
             const isFirst = await this.isFirstConnection(
                 "ud",
-                { domain },
+                { domain: payload.domain },
                 gcrMainRepository,
                 editOperation.account,
             )
+            console.log("isFirst: ", isFirst)
 
             /**
              * Award incentive points for UD domain linking
              */
             if (isFirst) {
-                await IncentiveManager.udDomainLinked(
+                const res = await IncentiveManager.udDomainLinked(
                     accountGCR.pubkey,
-                    domain,
+                    payload.domain,
                     editOperation.referralCode,
                 )
+                log.debug("points award res: " + JSON.stringify(res, null, 2))
             }
         }
 
@@ -684,7 +670,8 @@ export default class GCRIdentityRoutines {
         }
 
         const domainExists = accountGCR.identities.ud.some(
-            (id: SavedUdIdentity) => id.domain.toLowerCase() === domain.toLowerCase(),
+            (id: SavedUdIdentity) =>
+                id.domain.toLowerCase() === domain.toLowerCase(),
         )
 
         if (!domainExists) {
@@ -692,7 +679,8 @@ export default class GCRIdentityRoutines {
         }
 
         accountGCR.identities.ud = accountGCR.identities.ud.filter(
-            (id: SavedUdIdentity) => id.domain.toLowerCase() !== domain.toLowerCase(),
+            (id: SavedUdIdentity) =>
+                id.domain.toLowerCase() !== domain.toLowerCase(),
         )
 
         if (!simulate) {
@@ -701,10 +689,7 @@ export default class GCRIdentityRoutines {
             /**
              * Deduct incentive points for UD domain unlinking
              */
-            await IncentiveManager.udDomainUnlinked(
-                accountGCR.pubkey,
-                domain,
-            )
+            await IncentiveManager.udDomainUnlinked(accountGCR.pubkey, domain)
         }
 
         return { success: true, message: "UD identity removed" }

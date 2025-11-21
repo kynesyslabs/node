@@ -312,6 +312,76 @@ export class SolanaDomainResolver {
     }
   }
 
+  /**
+   * Get the owner (token holder) of a Solana domain
+   *
+   * Solana UD domains are SPL Token-2022 NFTs where:
+   * - The SLD PDA serves as the mint address
+   * - The owner is whoever holds the token in their wallet
+   *
+   * This method uses getTokenLargestAccounts() which is optimized for NFTs (supply=1)
+   * and returns the holder's address by parsing the token account data.
+   *
+   * @private
+   * @async
+   * @param {PublicKey} sldPda - The SLD PDA (which is the mint address)
+   * @returns {Promise<string | undefined>} The owner's Solana address, or undefined if not found
+   */
+  private async getTokenOwner(sldPda: PublicKey): Promise<string | undefined> {
+    try {
+      const program = await this.getProgram()
+      const connection = program.provider.connection
+
+      // Get the largest token account holders for this mint (NFT should have only 1)
+      const tokenAccounts = await connection.getTokenLargestAccounts(sldPda)
+
+      if (tokenAccounts.value.length === 0) {
+        log.debug(`No token accounts found for mint ${sldPda.toString()}`)
+        return undefined
+      }
+
+      // Get parsed account info to extract owner
+      const tokenAccountInfo = await connection.getParsedAccountInfo(
+        tokenAccounts.value[0].address,
+      )
+
+      // Try to extract owner from parsed data
+      if (
+        tokenAccountInfo.value &&
+        "parsed" in tokenAccountInfo.value.data &&
+        tokenAccountInfo.value.data.parsed.info &&
+        tokenAccountInfo.value.data.parsed.info.owner
+      ) {
+        const owner = tokenAccountInfo.value.data.parsed.info.owner
+        log.debug(`Found domain owner via parsed data: ${owner}`)
+        return owner
+      }
+
+      // Fallback: parse raw token account data
+      if (tokenAccountInfo.value && "data" in tokenAccountInfo.value.data) {
+        const accountInfo = await connection.getAccountInfo(tokenAccounts.value[0].address)
+
+        if (accountInfo && accountInfo.data.length >= 64) {
+          // SPL Token account layout: mint (32 bytes) + owner (32 bytes) + ...
+          const ownerBytes = accountInfo.data.slice(32, 64)
+          const owner = new PublicKey(ownerBytes).toString()
+          log.debug(`Found domain owner via raw data: ${owner}`)
+          return owner
+        }
+      }
+
+      log.debug(`Could not extract owner from token account ${tokenAccounts.value[0].address.toString()}`)
+      return undefined
+    } catch (error) {
+      log.debug(
+        `Failed to fetch owner for domain with mint ${sldPda.toString()}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+      return undefined
+    }
+  }
+
   // ==========================================================================
   // Public API Methods
   // ==========================================================================
@@ -492,8 +562,8 @@ export class SolanaDomainResolver {
         }
       }
 
-      // Fetch all records (empty array is valid - returns domain properties only)
-      const records: RecordResult[] = await Promise.all(
+      // Fetch all records and owner in parallel for better performance
+      const recordsPromise = Promise.all(
         validRecordKeys.map(async (recordKey) => {
           try {
             const recordPda = this.deriveRecordPda(
@@ -518,12 +588,19 @@ export class SolanaDomainResolver {
         }),
       )
 
+      // Fetch owner and records concurrently
+      const [records, owner] = await Promise.all([
+        recordsPromise,
+        this.getTokenOwner(sldPda),
+      ])
+
       return {
         domain,
         exists: true,
         sldPda: sldPda.toString(),
         domainPropertiesPda: domainPropertiesPda.toString(),
         recordsVersion: Number(domainProperties.recordsVersion),
+        owner,
         records,
       }
     // } catch (error) {
