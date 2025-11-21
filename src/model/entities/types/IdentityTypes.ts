@@ -1,5 +1,23 @@
 import { Web2GCRData } from "@kynesyslabs/demosdk/types"
 
+export interface NomisWalletIdentity {
+    chain: string
+    subchain: string
+    address: string
+    score: number
+    scoreType: number
+    mintedScore?: number | null
+    lastSyncedAt: string
+    metadata?: {
+        referralCode?: string
+        referrerCode?: string
+        deadline?: number
+        nonce?: number
+        apiVersion?: string
+        [key: string]: unknown
+    }
+}
+
 export interface SavedXmIdentity {
     // NOTE: We don't store the message here
     // The signed message is the ed25519 address (with 0x prefix) of the sender which can
@@ -40,5 +58,10 @@ export type StoredIdentities = {
         // A mapping of the algorithm identifier a list of the signature and address objects
         // eg. falcon: [{address: "pubkey1", signature: "signature1"}, {address: "pubkey2", signature: "signature2"}]
         [algorithm: string]: SavedPqcIdentity[]
+    }
+    nomis?: {
+        [chain: string]: {
+            [subchain: string]: NomisWalletIdentity[]
+        }
     }
 }
