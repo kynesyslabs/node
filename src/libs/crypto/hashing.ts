@@ -23,4 +23,28 @@ export default class Hashing {
     static sha256Bytes(bytes: Uint8Array) {
         return crypto.createHash("sha256").update(bytes).digest("hex")
     }
+
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    static sha3_256(message: string | Uint8Array) {
+        return crypto
+            .createHash("sha3-256")
+            .update(Hashing.normalizeInput(message))
+            .digest("hex")
+    }
+
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    static sha3_512(message: string | Uint8Array) {
+        return crypto
+            .createHash("sha3-512")
+            .update(Hashing.normalizeInput(message))
+            .digest("hex")
+    }
+
+    private static normalizeInput(message: string | Uint8Array) {
+        if (typeof message === "string") {
+            return Buffer.from(message, "utf8")
+        }
+
+        return Buffer.from(message)
+    }
 }

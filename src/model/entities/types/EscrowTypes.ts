@@ -6,7 +6,7 @@ export interface EscrowData {
         platform: "twitter" | "github" | "telegram"
         username: string // e.g., "@bob" or "octocat"
     }
-    balance: bigint
+    balance: string // Stringified bigint for JSONB compatibility
     deposits: EscrowDeposit[]
     expiryTimestamp: number // Unix timestamp in milliseconds
     createdAt: number
@@ -21,7 +21,7 @@ export interface EscrowData {
  */
 export interface EscrowDeposit {
     from: string // Sender's Ed25519 public key (hex)
-    amount: bigint
+    amount: string // Stringified bigint
     timestamp: number
     message?: string // Optional memo from sender
 }

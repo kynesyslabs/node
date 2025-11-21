@@ -876,53 +876,85 @@ export async function handleGetSentEscrows(params: {
         const db = await Datasource.getInstance()
         const repo = db.getDataSource().getRepository(GCRMain)
 
+        const normalizedLimit = limit && limit > 0 ? limit : 100
+        const normalizedOffset = offset && offset > 0 ? offset : 0
+
         // REVIEW: Capture timestamp once for consistency
         const nowTimestamp = Date.now()
+        const sentEscrows = []
+        let skippedMatches = 0
+        const batchSize = 500
+        let accountOffset = 0
 
-    // REVIEW: Added pagination to mitigate DoS risk from full table scan
-    // TODO: Still scans records, needs GIN index for optimal performance
-    const allAccounts = await repo.find({
-        take: limit,
-        skip: offset,
-    })
+        while (sentEscrows.length < normalizedLimit) {
+            const accounts = await repo.find({
+                order: { pubkey: "ASC" },
+                take: batchSize,
+                skip: accountOffset,
+            })
 
-    const sentEscrows = []
+            if (accounts.length === 0) {
+                break
+            }
 
-    for (const account of allAccounts) {
-        if (!account.escrows) continue
+            accountOffset += accounts.length
 
-        for (const [escrowAddr, escrow] of Object.entries(account.escrows)) {
-            const senderDeposits =
-                escrow.deposits?.filter(d => d.from === sender) || []
+            for (const account of accounts) {
+                if (!account.escrows) continue
 
-            if (senderDeposits.length > 0) {
-                const totalSent = senderDeposits.reduce(
-                    (sum, d) => sum + d.amount,
-                    0n,
-                )
+                for (const [escrowAddr, escrow] of Object.entries(
+                    account.escrows,
+                )) {
+                    const senderDeposits =
+                        escrow.deposits?.filter(d => d.from === sender) || []
 
-                // REVIEW: Add defensive check for claimableBy
-                if (!escrow.claimableBy?.platform || !escrow.claimableBy?.username) {
-                    continue
+                    if (senderDeposits.length === 0) {
+                        continue
+                    }
+
+                    if (
+                        !escrow.claimableBy?.platform ||
+                        !escrow.claimableBy?.username
+                    ) {
+                        continue
+                    }
+
+                    const totalSent = senderDeposits.reduce((sum, d) => {
+                        return sum + BigInt(d.amount ?? "0")
+                    }, 0n)
+
+                    const record = {
+                        platform: escrow.claimableBy.platform,
+                        username: escrow.claimableBy.username,
+                        escrowAddress: escrowAddr,
+                        totalSent: totalSent.toString(),
+                        deposits: senderDeposits.map(d => ({
+                            amount: d.amount.toString(),
+                            timestamp: d.timestamp,
+                            message: d.message,
+                        })),
+                        totalEscrowBalance: escrow.balance.toString(),
+                        expired: nowTimestamp > escrow.expiryTimestamp,
+                        expiryTimestamp: escrow.expiryTimestamp,
+                    }
+
+                    if (skippedMatches < normalizedOffset) {
+                        skippedMatches += 1
+                        continue
+                    }
+
+                    sentEscrows.push(record)
+
+                    if (sentEscrows.length >= normalizedLimit) {
+                        break
+                    }
                 }
 
-                sentEscrows.push({
-                    platform: escrow.claimableBy.platform,
-                    username: escrow.claimableBy.username,
-                    escrowAddress: escrowAddr,
-                    totalSent: totalSent.toString(),
-                    deposits: senderDeposits.map(d => ({
-                        amount: d.amount.toString(),
-                        timestamp: d.timestamp,
-                        message: d.message,
-                    })),
-                    totalEscrowBalance: escrow.balance.toString(),
-                    expired: nowTimestamp > escrow.expiryTimestamp,
-                    expiryTimestamp: escrow.expiryTimestamp,
-                })
+                if (sentEscrows.length >= normalizedLimit) {
+                    break
+                }
             }
         }
-    }
 
         return sentEscrows
     } catch (error) {

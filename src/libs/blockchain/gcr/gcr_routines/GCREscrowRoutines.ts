@@ -14,6 +14,22 @@ const DEFAULT_EXPIRY_DAYS = 30
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 export default class GCREscrowRoutines {
+    private static parseAmount(value?: string | number | bigint): bigint {
+        if (value === undefined) {
+            return 0n
+        }
+
+        if (typeof value === "bigint") {
+            return value
+        }
+
+        return BigInt(value)
+    }
+
+    private static formatAmount(value: bigint): string {
+        return value.toString()
+    }
+
     /**
      * Computes deterministic escrow address from platform:username
      * This is a pure function - same input always produces same output
@@ -121,7 +137,7 @@ export default class GCREscrowRoutines {
                     platform: platform as "twitter" | "github" | "telegram",
                     username,
                 },
-                balance: 0n,
+                balance: "0",
                 deposits: [],
                 expiryTimestamp: Date.now() + expiryMs,
                 createdAt: Date.now(),
@@ -148,7 +164,7 @@ export default class GCREscrowRoutines {
         // Add deposit
         const deposit: EscrowDeposit = {
             from: sender,
-            amount: BigInt(amount),
+            amount: BigInt(amount).toString(),
             timestamp: Date.now(),
         }
 
@@ -160,7 +176,13 @@ export default class GCREscrowRoutines {
         senderAccount.balance -= BigInt(amount)
 
         // Credit escrow balance
-        escrowAccount.escrows[escrowAddress].balance += BigInt(amount)
+        const previousBalance = this.parseAmount(
+            escrowAccount.escrows[escrowAddress].balance,
+        )
+        const newBalance = previousBalance + BigInt(amount)
+        escrowAccount.escrows[escrowAddress].balance = this.formatAmount(
+            newBalance,
+        )
         escrowAccount.escrows[escrowAddress].deposits.push(deposit)
 
         // REVIEW: Persist both accounts atomically in transaction
@@ -313,7 +335,7 @@ export default class GCREscrowRoutines {
         }
 
         // Get claimed amount
-        const claimedAmount = escrow.balance
+        const claimedAmount = this.parseAmount(escrow.balance)
 
         if (claimedAmount <= 0n) {
             return {
@@ -330,7 +352,7 @@ export default class GCREscrowRoutines {
         escrow.claimed = true
         escrow.claimedBy = claimant
         escrow.claimedAt = Date.now()
-        escrow.balance = 0n // Zero out escrow balance
+        escrow.balance = this.formatAmount(0n) // Zero out escrow balance
 
         // Credit claimant's account
         claimantAccount.balance += claimedAmount
@@ -430,7 +452,7 @@ export default class GCREscrowRoutines {
             d => d.from === refunder,
         )
         const refundAmount = refunderDeposits.reduce(
-            (sum, d) => sum + d.amount,
+            (sum, d) => sum + this.parseAmount(d.amount),
             0n,
         )
 
@@ -446,7 +468,9 @@ export default class GCREscrowRoutines {
 
         // Update escrow (remove refunder's deposits)
         escrow.deposits = escrow.deposits.filter(d => d.from !== refunder)
-        escrow.balance -= refundAmount
+        const recalculatedBalance = this.parseAmount(escrow.balance)
+        const remainingBalance = recalculatedBalance - refundAmount
+        escrow.balance = this.formatAmount(remainingBalance > 0n ? remainingBalance : 0n)
 
         // If no deposits left, delete escrow
         if (escrow.deposits.length === 0) {
