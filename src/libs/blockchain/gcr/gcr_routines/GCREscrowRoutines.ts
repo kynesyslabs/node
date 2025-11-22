@@ -1,4 +1,7 @@
-import { GCREdit, GCREditEscrow } from "@kynesyslabs/demosdk/types"
+import { GCREdit } from "@kynesyslabs/demosdk/types"
+
+// REVIEW: Extract escrow-specific type from GCREdit union since GCREditEscrow is not exported
+type GCREditEscrow = Extract<GCREdit, { type: "escrow" }>
 import { Repository } from "typeorm"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../handleGCR"
@@ -21,6 +24,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 const MAX_BALANCE = BigInt("1000000000000000000000") // 1 sextillion DEM maximum
 const MAX_PLATFORM_LENGTH = 20
 const MAX_USERNAME_LENGTH = 100
+const MAX_DEPOSITS_PER_ESCROW = 1000 // Prevent DoS via unbounded deposits array
 
 export default class GCREscrowRoutines {
     private static parseAmount(value?: string | number | bigint): bigint {
@@ -102,15 +106,19 @@ export default class GCREscrowRoutines {
             }
         }
 
-        if (amount <= 0) {
-            return { success: false, message: "Escrow amount must be positive" }
-        }
-
-        // REVIEW: Validate amount is an integer to prevent precision issues
-        if (!Number.isInteger(amount)) {
+        // REVIEW: Validate amount is positive and can be converted to BigInt
+        try {
+            const amountBigInt = BigInt(amount)
+            if (amountBigInt <= 0n) {
+                return {
+                    success: false,
+                    message: "Escrow amount must be positive",
+                }
+            }
+        } catch (e) {
             return {
                 success: false,
-                message: "Escrow amount must be an integer",
+                message: "Invalid amount format - must be a valid integer",
             }
         }
 
@@ -129,128 +137,164 @@ export default class GCREscrowRoutines {
                 ` → escrow address: ${escrowAddress}`,
         )
 
-        // REVIEW: Get sender's account and verify balance
-        const senderAccount = await ensureGCRForUser(sender, gcrMainRepository)
+        // REVIEW: Capture timestamp once for consistency across the operation
+        const currentTimestamp = Date.now()
 
-        if (senderAccount.balance < BigInt(amount)) {
-            return {
-                success: false,
-                message: `Insufficient balance: has ${senderAccount.balance}, needs ${amount}`,
-            }
-        }
+        // REVIEW: Execute entire deposit operation in a transaction with locking
+        // to prevent race conditions from concurrent deposits
+        const result = await gcrMainRepository.manager.transaction(
+            async transactionalEntityManager => {
+                // Get sender's account with pessimistic write lock
+                const senderAccount = await transactionalEntityManager.findOne(
+                    GCRMain,
+                    {
+                        where: { pubkey: sender },
+                        lock: { mode: "pessimistic_write" },
+                    },
+                )
 
-        // Get or create escrow account
-        let escrowAccount = await gcrMainRepository.findOneBy({
-            pubkey: escrowAddress,
-        })
-
-        if (!escrowAccount) {
-            escrowAccount = await HandleGCR.createAccount(escrowAddress)
-        }
-
-        // Initialize escrows object if needed
-        escrowAccount.escrows = escrowAccount.escrows || {}
-
-        // Create new escrow or update existing
-        if (!escrowAccount.escrows[escrowAddress]) {
-            // New escrow - validate expiry to prevent fund locking attacks
-            const requestedExpiry = expiryDays || DEFAULT_EXPIRY_DAYS
-
-            if (requestedExpiry < MIN_EXPIRY_DAYS || requestedExpiry > MAX_EXPIRY_DAYS) {
-                return {
-                    success: false,
-                    message: `Expiry must be between ${MIN_EXPIRY_DAYS} and ${MAX_EXPIRY_DAYS} days`,
+                if (!senderAccount) {
+                    throw new Error("Sender account not found")
                 }
-            }
 
-            const expiryMs = requestedExpiry * MS_PER_DAY
-            escrowAccount.escrows[escrowAddress] = {
-                claimableBy: {
-                    platform: platform as "twitter" | "github" | "telegram",
-                    username,
-                },
-                balance: "0",
-                deposits: [],
-                expiryTimestamp: Date.now() + expiryMs,
-                createdAt: Date.now(),
-            }
-        } else {
-            // REVIEW: Existing escrow - check not expired or claimed
-            const existingEscrow = escrowAccount.escrows[escrowAddress]
-            if (Date.now() > existingEscrow.expiryTimestamp) {
-                return {
-                    success: false,
-                    message: `Cannot deposit to expired escrow. Expired on ${new Date(
-                        existingEscrow.expiryTimestamp,
-                    ).toISOString()}`,
+                if (senderAccount.balance < BigInt(amount)) {
+                    throw new Error(
+                        `Insufficient balance: has ${senderAccount.balance}, needs ${amount}`,
+                    )
                 }
-            }
-            if (existingEscrow.claimed) {
-                return {
-                    success: false,
-                    message: `Cannot deposit to claimed escrow. Claimed by ${existingEscrow.claimedBy}`,
+
+                // Get or create escrow account with pessimistic write lock
+                let escrowAccount = await transactionalEntityManager.findOne(
+                    GCRMain,
+                    {
+                        where: { pubkey: escrowAddress },
+                        lock: { mode: "pessimistic_write" },
+                    },
+                )
+
+                if (!escrowAccount) {
+                    // Create account inside transaction to prevent orphaned accounts
+                    escrowAccount = await HandleGCR.createAccount(escrowAddress)
+                    await transactionalEntityManager.save(escrowAccount)
                 }
-            }
-        }
 
-        // Add deposit
-        const deposit: EscrowDeposit = {
-            from: sender,
-            amount: BigInt(amount).toString(),
-            timestamp: Date.now(),
-        }
+                // Initialize escrows object if needed
+                escrowAccount.escrows = escrowAccount.escrows || {}
 
-        if (message) {
-            deposit.message = message
-        }
+                // Create new escrow or update existing
+                if (!escrowAccount.escrows[escrowAddress]) {
+                    // New escrow - validate expiry to prevent fund locking attacks
+                    const requestedExpiry = expiryDays || DEFAULT_EXPIRY_DAYS
 
-        // Deduct from sender's balance
-        senderAccount.balance -= BigInt(amount)
+                    if (
+                        requestedExpiry < MIN_EXPIRY_DAYS ||
+                        requestedExpiry > MAX_EXPIRY_DAYS
+                    ) {
+                        throw new Error(
+                            `Expiry must be between ${MIN_EXPIRY_DAYS} and ${MAX_EXPIRY_DAYS} days`,
+                        )
+                    }
 
-        // Credit escrow balance with overflow protection
-        const previousBalance = this.parseAmount(
-            escrowAccount.escrows[escrowAddress].balance,
-        )
-        const newBalance = previousBalance + BigInt(amount)
+                    const expiryMs = requestedExpiry * MS_PER_DAY
+                    escrowAccount.escrows[escrowAddress] = {
+                        claimableBy: {
+                            platform: platform as
+                                | "twitter"
+                                | "github"
+                                | "telegram",
+                            username,
+                        },
+                        balance: "0",
+                        deposits: [],
+                        expiryTimestamp: currentTimestamp + expiryMs,
+                        createdAt: currentTimestamp,
+                    }
+                } else {
+                    // REVIEW: Existing escrow - check not expired or claimed
+                    const existingEscrow = escrowAccount.escrows[escrowAddress]
+                    if (currentTimestamp > existingEscrow.expiryTimestamp) {
+                        throw new Error(
+                            `Cannot deposit to expired escrow. Expired on ${new Date(
+                                existingEscrow.expiryTimestamp,
+                            ).toISOString()}`,
+                        )
+                    }
+                    if (existingEscrow.claimed) {
+                        throw new Error(
+                            `Cannot deposit to claimed escrow. Claimed by ${existingEscrow.claimedBy}`,
+                        )
+                    }
+                }
 
-        // Prevent balance overflow attacks
-        if (newBalance > MAX_BALANCE) {
-            return {
-                success: false,
-                message: `Escrow balance would exceed maximum limit of ${MAX_BALANCE} DEM`,
-            }
-        }
+                // REVIEW: Check deposits limit to prevent DoS attacks
+                if (
+                    escrowAccount.escrows[escrowAddress].deposits.length >=
+                    MAX_DEPOSITS_PER_ESCROW
+                ) {
+                    throw new Error(
+                        `Escrow has reached maximum of ${MAX_DEPOSITS_PER_ESCROW} deposits. ` +
+                            "Please wait for claim or expiry.",
+                    )
+                }
 
-        escrowAccount.escrows[escrowAddress].balance = this.formatAmount(
-            newBalance,
-        )
-        escrowAccount.escrows[escrowAddress].deposits.push(deposit)
+                // Add deposit
+                const deposit: EscrowDeposit = {
+                    from: sender,
+                    amount: BigInt(amount).toString(),
+                    timestamp: currentTimestamp,
+                }
 
-        // REVIEW: Persist both accounts atomically in transaction
-        if (!simulate) {
-            await gcrMainRepository.manager.transaction(
-                async transactionalEntityManager => {
+                if (message) {
+                    deposit.message = message
+                }
+
+                // Deduct from sender's balance
+                senderAccount.balance -= BigInt(amount)
+
+                // Credit escrow balance with overflow protection
+                const previousBalance = this.parseAmount(
+                    escrowAccount.escrows[escrowAddress].balance,
+                )
+                const newBalance = previousBalance + BigInt(amount)
+
+                // Prevent balance overflow attacks
+                if (newBalance > MAX_BALANCE) {
+                    throw new Error(
+                        `Escrow balance would exceed maximum limit of ${MAX_BALANCE} DEM`,
+                    )
+                }
+
+                escrowAccount.escrows[escrowAddress].balance =
+                    this.formatAmount(newBalance)
+                escrowAccount.escrows[escrowAddress].deposits.push(deposit)
+
+                // REVIEW: Persist both accounts atomically in transaction (only if not simulating)
+                if (!simulate) {
                     await transactionalEntityManager.save([
                         senderAccount,
                         escrowAccount,
                     ])
-                },
-            )
-        }
+                }
+
+                // Return result data
+                return {
+                    escrowAddress,
+                    newBalance: escrowAccount.escrows[
+                        escrowAddress
+                    ].balance.toString(),
+                }
+            },
+        )
 
         log.info(
             `[EscrowDeposit] ✓ Deposited ${amount} DEM to ${platform}:${username}. ` +
-                `Total escrow balance: ${escrowAccount.escrows[escrowAddress].balance}`,
+                `Total escrow balance: ${result.newBalance}`,
         )
 
         return {
             success: true,
             message: `Deposited ${amount} to escrow for ${platform}:${username}`,
-            response: {
-                escrowAddress,
-                newBalance:
-                    escrowAccount.escrows[escrowAddress].balance.toString(),
-            },
+            response: result,
         }
     }
 
@@ -260,9 +304,6 @@ export default class GCREscrowRoutines {
      * CRITICAL: This validates that the claimant has proven ownership
      * of the social identity via the existing Web2 verification flow.
      * All validators in consensus independently verify this.
-     *
-     * TODO: Race condition - if balance GCREdit fails after escrow deletion,
-     * funds could be lost. Consider using database transaction or claimed status field.
      *
      * @param editOperation - GCREdit with type "escrow", operation "claim"
      * @param gcrMainRepository - Database repository
@@ -289,35 +330,18 @@ export default class GCREscrowRoutines {
                 ` → escrow address: ${escrowAddress}`,
         )
 
-        // Check escrow exists
-        const escrowAccount = await gcrMainRepository.findOneBy({
-            pubkey: escrowAddress,
-        })
+        // REVIEW: Capture timestamp once for consistency across the operation
+        const currentTimestamp = Date.now()
 
-        if (
-            !escrowAccount ||
-            !escrowAccount.escrows ||
-            !escrowAccount.escrows[escrowAddress]
-        ) {
+        // REVIEW: Check flagged status EARLY to avoid wasting resources
+        const claimantAccount = await ensureGCRForUser(claimant)
+
+        // SECURITY: Prevent flagged/banned accounts from claiming escrow funds
+        if (claimantAccount.flagged) {
             return {
                 success: false,
-                message: `No escrow found for ${platform}:${username}`,
-            }
-        }
-
-        const escrow = escrowAccount.escrows[escrowAddress]
-
-        // Check if already claimed (prevents race condition)
-        if (escrow.claimed) {
-            const claimedAt = escrow.claimedAt
-                ? new Date(escrow.claimedAt).toISOString()
-                : "unknown time"
-            log.warning(
-                `[EscrowClaim] ✗ Escrow already claimed by ${escrow.claimedBy} at ${claimedAt}`,
-            )
-            return {
-                success: false,
-                message: `Escrow already claimed by ${escrow.claimedBy}`,
+                message:
+                    "Account is flagged and cannot claim escrow funds. Please contact support.",
             }
         }
 
@@ -332,6 +356,17 @@ export default class GCREscrowRoutines {
             claimant,
             platform,
         )
+
+        // REVIEW: Add null/undefined check to prevent crash
+        if (!identities || !Array.isArray(identities)) {
+            log.warning(
+                `[EscrowClaim] ✗ No identities found for ${claimant} on ${platform}`,
+            )
+            return {
+                success: false,
+                message: `No verified identities found for ${platform}. Please link your account first.`,
+            }
+        }
 
         const hasProof = identities.some((id: any) => {
             // REVIEW: Case-insensitive username comparison with null safety
@@ -358,77 +393,108 @@ export default class GCREscrowRoutines {
             `[EscrowClaim] ✓ Identity verified: ${claimant} owns ${platform}:${username}`,
         )
 
-        // Check expiry
-        if (Date.now() > escrow.expiryTimestamp) {
-            log.warning(
-                `[EscrowClaim] ✗ Escrow expired at ${new Date(
-                    escrow.expiryTimestamp,
-                )}`,
-            )
-            return {
-                success: false,
-                message:
-                    `Escrow expired on ${new Date(
-                        escrow.expiryTimestamp,
-                    ).toISOString()}. ` +
-                    "Original depositors can reclaim funds.",
-            }
-        }
+        // REVIEW: Execute claim in a transaction with locking to prevent double-claim race condition
+        const result = await gcrMainRepository.manager.transaction(
+            async transactionalEntityManager => {
+                // Get escrow account with pessimistic write lock
+                const escrowAccount =
+                    await transactionalEntityManager.findOne(GCRMain, {
+                        where: { pubkey: escrowAddress },
+                        lock: { mode: "pessimistic_write" },
+                    })
 
-        // Get claimed amount
-        const claimedAmount = this.parseAmount(escrow.balance)
+                if (
+                    !escrowAccount ||
+                    !escrowAccount.escrows ||
+                    !escrowAccount.escrows[escrowAddress]
+                ) {
+                    throw new Error(
+                        `No escrow found for ${platform}:${username}`,
+                    )
+                }
 
-        if (claimedAmount <= 0n) {
-            return {
-                success: false,
-                message: "Escrow has zero balance",
-            }
-        }
+                const escrow = escrowAccount.escrows[escrowAddress]
 
-        // Get claimant's account
-        const claimantAccount = await ensureGCRForUser(claimant, gcrMainRepository)
+                // Check if already claimed (prevents race condition - now under lock)
+                if (escrow.claimed) {
+                    const claimedAt = escrow.claimedAt
+                        ? new Date(escrow.claimedAt).toISOString()
+                        : "unknown time"
+                    log.warning(
+                        `[EscrowClaim] ✗ Escrow already claimed by ${escrow.claimedBy} at ${claimedAt}`,
+                    )
+                    throw new Error(
+                        `Escrow already claimed by ${escrow.claimedBy}`,
+                    )
+                }
 
-        // SECURITY: Prevent flagged/banned accounts from claiming escrow funds
-        if (claimantAccount.flagged) {
-            return {
-                success: false,
-                message: "Account is flagged and cannot claim escrow funds. Please contact support.",
-            }
-        }
+                // Check expiry using consistent timestamp
+                if (currentTimestamp > escrow.expiryTimestamp) {
+                    log.warning(
+                        `[EscrowClaim] ✗ Escrow expired at ${new Date(
+                            escrow.expiryTimestamp,
+                        )}`,
+                    )
+                    throw new Error(
+                        `Escrow expired on ${new Date(
+                            escrow.expiryTimestamp,
+                        ).toISOString()}. ` +
+                            "Original depositors can reclaim funds.",
+                    )
+                }
 
-        // Transfer funds atomically
-        // Mark as claimed (prevents race condition)
-        escrow.claimed = true
-        escrow.claimedBy = claimant
-        escrow.claimedAt = Date.now()
-        escrow.balance = this.formatAmount(0n) // Zero out escrow balance
+                // Get claimed amount
+                const claimedAmount = this.parseAmount(escrow.balance)
 
-        // Credit claimant's account
-        claimantAccount.balance += claimedAmount
+                if (claimedAmount <= 0n) {
+                    throw new Error("Escrow has zero balance")
+                }
 
-        // REVIEW: Persist both accounts atomically in transaction
-        if (!simulate) {
-            await gcrMainRepository.manager.transaction(
-                async transactionalEntityManager => {
+                // Get claimant's account with lock
+                const lockedClaimantAccount =
+                    await transactionalEntityManager.findOne(GCRMain, {
+                        where: { pubkey: claimant },
+                        lock: { mode: "pessimistic_write" },
+                    })
+
+                if (!lockedClaimantAccount) {
+                    throw new Error("Claimant account not found")
+                }
+
+                // REVIEW: Only modify state if not simulating
+                if (!simulate) {
+                    // Transfer funds atomically
+                    // Mark as claimed (prevents race condition)
+                    escrow.claimed = true
+                    escrow.claimedBy = claimant
+                    escrow.claimedAt = currentTimestamp
+                    escrow.balance = this.formatAmount(0n) // Zero out escrow balance
+
+                    // Credit claimant's account
+                    lockedClaimantAccount.balance += claimedAmount
+
+                    // Persist both accounts atomically in transaction
                     await transactionalEntityManager.save([
                         escrowAccount,
-                        claimantAccount,
+                        lockedClaimantAccount,
                     ])
-                },
-            )
-        }
+                }
+
+                return {
+                    amount: claimedAmount.toString(),
+                    escrowAddress,
+                }
+            },
+        )
 
         log.info(
-            `[EscrowClaim] ✓ ${claimant} claimed ${claimedAmount} DEM from ${platform}:${username}`,
+            `[EscrowClaim] ✓ ${claimant} claimed ${result.amount} DEM from ${platform}:${username}`,
         )
 
         return {
             success: true,
-            message: `Claimed ${claimedAmount} DEM from ${platform}:${username}`,
-            response: {
-                amount: claimedAmount.toString(),
-                escrowAddress,
-            },
+            message: `Claimed ${result.amount} DEM from ${platform}:${username}`,
+            response: result,
         }
     }
 
@@ -457,95 +523,138 @@ export default class GCREscrowRoutines {
             `[EscrowRefund] ${refunder} attempting to refund ${platform}:${username}`,
         )
 
-        // Check escrow exists
-        const escrowAccount = await gcrMainRepository.findOneBy({
-            pubkey: escrowAddress,
-        })
+        // REVIEW: Capture timestamp once for consistency
+        const currentTimestamp = Date.now()
 
-        if (!escrowAccount || !escrowAccount.escrows?.[escrowAddress]) {
-            return { success: false, message: "Escrow not found" }
-        }
+        // REVIEW: Execute refund in a transaction with locking to prevent race condition
+        const result = await gcrMainRepository.manager.transaction(
+            async transactionalEntityManager => {
+                // Get escrow account with pessimistic write lock
+                const escrowAccount =
+                    await transactionalEntityManager.findOne(GCRMain, {
+                        where: { pubkey: escrowAddress },
+                        lock: { mode: "pessimistic_write" },
+                    })
 
-        const escrow = escrowAccount.escrows[escrowAddress]
+                if (!escrowAccount || !escrowAccount.escrows?.[escrowAddress]) {
+                    throw new Error("Escrow not found")
+                }
 
-        // REVIEW: Check if escrow was already claimed (prevents double-spend)
-        if (escrow.claimed) {
-            return {
-                success: false,
-                message: `Escrow was already claimed by ${escrow.claimedBy}. Refunds are not available for claimed escrows.`,
-            }
-        }
+                const escrow = escrowAccount.escrows[escrowAddress]
 
-        // Check escrow is expired
-        if (Date.now() <= escrow.expiryTimestamp) {
-            return {
-                success: false,
-                message: `Escrow not yet expired. Expires: ${new Date(
-                    escrow.expiryTimestamp,
-                ).toISOString()}`,
-            }
-        }
+                // REVIEW: Check if escrow was already claimed (prevents double-spend)
+                if (escrow.claimed) {
+                    throw new Error(
+                        `Escrow was already claimed by ${escrow.claimedBy}. Refunds are not available for claimed escrows.`,
+                    )
+                }
 
-        // Verify refunder is one of the original depositors
-        const isDepositor = escrow.deposits.some(d => d.from === refunder)
+                // Check escrow is expired using consistent timestamp
+                if (currentTimestamp <= escrow.expiryTimestamp) {
+                    throw new Error(
+                        `Escrow not yet expired. Expires: ${new Date(
+                            escrow.expiryTimestamp,
+                        ).toISOString()}`,
+                    )
+                }
 
-        if (!isDepositor) {
-            return {
-                success: false,
-                message: "Only original depositors can claim refunds",
-            }
-        }
+                // Verify refunder is one of the original depositors
+                const isDepositor = escrow.deposits.some(
+                    d => d.from === refunder,
+                )
 
-        // Calculate refunder's portion
-        const refunderDeposits = escrow.deposits.filter(
-            d => d.from === refunder,
-        )
-        const refundAmount = refunderDeposits.reduce(
-            (sum, d) => sum + this.parseAmount(d.amount),
-            0n,
-        )
+                if (!isDepositor) {
+                    throw new Error(
+                        "Only original depositors can claim refunds",
+                    )
+                }
 
-        if (refundAmount <= 0n) {
-            return { success: false, message: "No refundable amount" }
-        }
+                // Calculate refunder's portion
+                const refunderDeposits = escrow.deposits.filter(
+                    d => d.from === refunder,
+                )
+                const refundAmount = refunderDeposits.reduce(
+                    (sum, d) => sum + this.parseAmount(d.amount),
+                    0n,
+                )
 
-        // REVIEW: Get refunder's account
-        const refunderAccount = await ensureGCRForUser(refunder, gcrMainRepository)
+                if (refundAmount <= 0n) {
+                    throw new Error("No refundable amount")
+                }
 
-        // REVIEW: Credit refund to refunder's account
-        refunderAccount.balance += refundAmount
+                // Get refunder's account with lock
+                const refunderAccount =
+                    await transactionalEntityManager.findOne(GCRMain, {
+                        where: { pubkey: refunder },
+                        lock: { mode: "pessimistic_write" },
+                    })
 
-        // Update escrow (remove refunder's deposits)
-        escrow.deposits = escrow.deposits.filter(d => d.from !== refunder)
-        const recalculatedBalance = this.parseAmount(escrow.balance)
-        const remainingBalance = recalculatedBalance - refundAmount
-        escrow.balance = this.formatAmount(remainingBalance > 0n ? remainingBalance : 0n)
+                if (!refunderAccount) {
+                    throw new Error("Refunder account not found")
+                }
 
-        // If no deposits left, delete escrow
-        if (escrow.deposits.length === 0) {
-            delete escrowAccount.escrows[escrowAddress]
-        }
+                // REVIEW: Only modify state if not simulating
+                if (!simulate) {
+                    // REVIEW: Verify balance integrity BEFORE refund to detect accounting drift
+                    const actualBalance = escrow.deposits.reduce(
+                        (sum, d) => sum + this.parseAmount(d.amount),
+                        0n,
+                    )
+                    const storedBalance = this.parseAmount(escrow.balance)
 
-        // REVIEW: Persist both accounts atomically in transaction
-        if (!simulate) {
-            await gcrMainRepository.manager.transaction(
-                async transactionalEntityManager => {
+                    if (actualBalance !== storedBalance) {
+                        log.error(
+                            "[EscrowRefund] ACCOUNTING MISMATCH: " +
+                                `Stored balance ${storedBalance} != Sum of deposits ${actualBalance}. ` +
+                                `Escrow: ${escrowAddress}`,
+                        )
+                        throw new Error(
+                            "CRITICAL: Escrow accounting mismatch detected. " +
+                                `Stored: ${storedBalance}, Actual: ${actualBalance}. ` +
+                                "Please contact support.",
+                        )
+                    }
+
+                    // Credit refund to refunder's account
+                    refunderAccount.balance += refundAmount
+
+                    // Update escrow (remove refunder's deposits)
+                    escrow.deposits = escrow.deposits.filter(
+                        d => d.from !== refunder,
+                    )
+
+                    // Recalculate balance from remaining deposits (ensures accuracy)
+                    const refundedBalance = escrow.deposits.reduce(
+                        (sum, d) => sum + this.parseAmount(d.amount),
+                        0n,
+                    )
+
+                    escrow.balance = this.formatAmount(refundedBalance)
+
+                    // If no deposits left, delete escrow
+                    if (escrow.deposits.length === 0) {
+                        delete escrowAccount.escrows[escrowAddress]
+                    }
+
+                    // Persist both accounts atomically in transaction
                     await transactionalEntityManager.save([
                         refunderAccount,
                         escrowAccount,
                     ])
-                },
-            )
-        }
+                }
 
-        log.info(`[EscrowRefund] ✓ ${refunder} refunded ${refundAmount} DEM`)
+                return {
+                    amount: refundAmount.toString(),
+                }
+            },
+        )
+
+        log.info(`[EscrowRefund] ✓ ${refunder} refunded ${result.amount} DEM`)
 
         return {
             success: true,
-            message: `Refunded ${refundAmount} DEM from expired escrow`,
-            response: {
-                amount: refundAmount.toString(),
-            },
+            message: `Refunded ${result.amount} DEM from expired escrow`,
+            response: result,
         }
     }
 

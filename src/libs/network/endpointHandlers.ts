@@ -687,6 +687,12 @@ import Datasource from "@/model/datasource"
 import { ClaimableEscrow } from "@/model/entities/types/EscrowTypes"
 import { In } from "typeorm"
 
+// Constants for pagination and validation
+const MAX_LIMIT = 1000 // Maximum records per request
+const MAX_ACCOUNTS_TO_SCAN = 50000 // Maximum accounts to scan in handleGetSentEscrows
+const MAX_PLATFORM_LENGTH = 20
+const MAX_USERNAME_LENGTH = 100
+
 /**
  * RPC: Get escrow balance for a specific social identity
  */
@@ -696,14 +702,35 @@ export async function handleGetEscrowBalance(params: {
 }) {
     const { platform, username } = params
 
+    // REVIEW: Input validation to prevent attacks
     if (!platform || !username) {
         throw new Error("Missing platform or username")
     }
 
+    if (typeof platform !== "string" || typeof username !== "string") {
+        throw new Error("Platform and username must be strings")
+    }
+
+    if (platform.length > MAX_PLATFORM_LENGTH) {
+        throw new Error(
+            `Platform name too long (max ${MAX_PLATFORM_LENGTH} characters)`,
+        )
+    }
+
+    if (username.length > MAX_USERNAME_LENGTH) {
+        throw new Error(
+            `Username too long (max ${MAX_USERNAME_LENGTH} characters)`,
+        )
+    }
+
+    if (platform.includes(":") || username.includes(":")) {
+        throw new Error("Invalid characters in platform or username")
+    }
+
     try {
         const escrowAddress = GCREscrowRoutines.getEscrowAddress(
-            platform,
-            username,
+            platform.trim(),
+            username.trim(),
         )
         const db = await Datasource.getInstance()
         const repo = db.getDataSource().getRepository(GCRMain)
@@ -876,7 +903,11 @@ export async function handleGetSentEscrows(params: {
         const db = await Datasource.getInstance()
         const repo = db.getDataSource().getRepository(GCRMain)
 
-        const normalizedLimit = limit && limit > 0 ? limit : 100
+        // REVIEW: Cap limit to MAX_LIMIT to prevent DoS
+        const normalizedLimit = Math.min(
+            limit && limit > 0 ? limit : 100,
+            MAX_LIMIT,
+        )
         const normalizedOffset = offset && offset > 0 ? offset : 0
 
         // REVIEW: Capture timestamp once for consistency
@@ -886,7 +917,11 @@ export async function handleGetSentEscrows(params: {
         const batchSize = 500
         let accountOffset = 0
 
-        while (sentEscrows.length < normalizedLimit) {
+        // REVIEW: Add max scan limit to prevent unbounded loop
+        while (
+            sentEscrows.length < normalizedLimit &&
+            accountOffset < MAX_ACCOUNTS_TO_SCAN
+        ) {
             const accounts = await repo.find({
                 order: { pubkey: "ASC" },
                 take: batchSize,
@@ -919,8 +954,24 @@ export async function handleGetSentEscrows(params: {
                         continue
                     }
 
+                    // REVIEW: Add error handling for corrupted deposit amounts
                     const totalSent = senderDeposits.reduce((sum, d) => {
-                        return sum + BigInt(d.amount ?? "0")
+                        if (!d.amount || typeof d.amount !== "string") {
+                            log.error(
+                                `[handleGetSentEscrows] Missing or invalid amount in deposit from ${d.from}`,
+                            )
+                            return sum
+                        }
+
+                        try {
+                            return sum + BigInt(d.amount)
+                        } catch (error) {
+                            log.error(
+                                `[handleGetSentEscrows] Cannot parse amount "${d.amount}" as BigInt. ` +
+                                    `From: ${d.from}, Timestamp: ${d.timestamp}. Skipping corrupted deposit.`,
+                            )
+                            return sum
+                        }
                     }, 0n)
 
                     const record = {
