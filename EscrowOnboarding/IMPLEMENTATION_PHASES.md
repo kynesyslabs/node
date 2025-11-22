@@ -104,35 +104,48 @@ export async function handleGetClaimableEscrows(params: {
 
     const claimable: ClaimableEscrow[] = []
 
-    // Check each proven Web2 identity
+    // Collect all potential escrow addresses and their identity details
+    const identityLookups = []
     for (const [platform, identities] of Object.entries(account.identities.web2)) {
-        if (!Array.isArray(identities)) continue
+        if (!Array.isArray(identities)) continue;
 
         for (const identity of identities) {
-            const username = identity.username
-
-            // Check if escrow exists for this identity
-            const escrowAddress = GCREscrowRoutines.getEscrowAddress(platform, username)
-            const escrowAccount = await repo.findOneBy({ pubkey: escrowAddress })
-
-            if (escrowAccount?.escrows?.[escrowAddress]) {
-                const escrow = escrowAccount.escrows[escrowAddress]
-
-                claimable.push({
-                    platform: platform as "twitter" | "github" | "telegram",
-                    username,
-                    balance: escrow.balance.toString(),
-                    escrowAddress,
-                    deposits: escrow.deposits.map(d => ({
-                        from: d.from,
-                        amount: d.amount.toString(),
-                        timestamp: d.timestamp,
-                        message: d.message,
-                    })),
-                    expiryTimestamp: escrow.expiryTimestamp,
-                    expired: Date.now() > escrow.expiryTimestamp,
-                })
+            if (identity.username) {
+                const escrowAddress = GCREscrowRoutines.getEscrowAddress(platform, identity.username);
+                identityLookups.push({ platform, username: identity.username, escrowAddress });
             }
+        }
+    }
+
+    if (identityLookups.length === 0) {
+        return [];
+    }
+
+    // Fetch all escrow accounts in a single query
+    const escrowAddresses = identityLookups.map(lookup => lookup.escrowAddress);
+    const escrowAccounts = await repo.find({ where: { pubkey: In(escrowAddresses) } });
+
+    const escrowAccountMap = new Map(escrowAccounts.map(acc => [acc.pubkey, acc]));
+
+    // Process the results
+    for (const lookup of identityLookups) {
+        const escrowAccount = escrowAccountMap.get(lookup.escrowAddress);
+        if (escrowAccount?.escrows?.[lookup.escrowAddress]) {
+            const escrow = escrowAccount.escrows[lookup.escrowAddress];
+            claimable.push({
+                platform: lookup.platform as "twitter" | "github" | "telegram",
+                username: lookup.username,
+                balance: escrow.balance.toString(),
+                escrowAddress: lookup.escrowAddress,
+                deposits: escrow.deposits.map(d => ({
+                    from: d.from,
+                    amount: d.amount.toString(),
+                    timestamp: d.timestamp,
+                    message: d.message,
+                })),
+                expiryTimestamp: escrow.expiryTimestamp,
+                expired: Date.now() > escrow.expiryTimestamp,
+            });
         }
     }
 
