@@ -955,24 +955,27 @@ export async function handleGetSentEscrows(params: {
                     }
 
                     // REVIEW: Add error handling for corrupted deposit amounts
-                    const totalSent = senderDeposits.reduce((sum, d) => {
-                        if (!d.amount || typeof d.amount !== "string") {
-                            log.error(
-                                `[handleGetSentEscrows] Missing or invalid amount in deposit from ${d.from}`,
-                            )
-                            return sum
-                        }
+                    const MAX_DEPOSITS_PER_ESCROW = 1000; // Align with consensus constant
+                    const totalSent = senderDeposits
+                        .slice(0, MAX_DEPOSITS_PER_ESCROW) // Cap iteration to prevent DoS
+                        .reduce((sum, d) => {
+                            if (!d.amount || typeof d.amount !== "string") {
+                                log.error(
+                                    `[handleGetSentEscrows] Missing or invalid amount in deposit from ${d.from}`,
+                                )
+                                return sum
+                            }
 
-                        try {
-                            return sum + BigInt(d.amount)
-                        } catch (error) {
-                            log.error(
-                                `[handleGetSentEscrows] Cannot parse amount "${d.amount}" as BigInt. ` +
-                                    `From: ${d.from}, Timestamp: ${d.timestamp}. Skipping corrupted deposit.`,
-                            )
-                            return sum
-                        }
-                    }, 0n)
+                            try {
+                                return sum + BigInt(d.amount)
+                            } catch (error) {
+                                log.error(
+                                    `[handleGetSentEscrows] Cannot parse amount "${d.amount}" as BigInt. ` +
+                                        `From: ${d.from}, Timestamp: ${d.timestamp}. Skipping corrupted deposit.`,
+                                )
+                                return sum
+                            }
+                        }, 0n)
 
                     const record = {
                         platform: escrow.claimableBy.platform,
