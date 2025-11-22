@@ -685,6 +685,7 @@ import GCREscrowRoutines from "@/libs/blockchain/gcr/gcr_routines/GCREscrowRouti
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import Datasource from "@/model/datasource"
 import { ClaimableEscrow } from "@/model/entities/types/EscrowTypes"
+import { SUPPORTED_PLATFORMS } from "@/model/entities/types/IdentityTypes"
 import { In } from "typeorm"
 
 // Constants for pagination and validation
@@ -692,6 +693,7 @@ const MAX_LIMIT = 1000 // Maximum records per request
 const MAX_ACCOUNTS_TO_SCAN = 50000 // Maximum accounts to scan in handleGetSentEscrows
 const MAX_PLATFORM_LENGTH = 20
 const MAX_USERNAME_LENGTH = 100
+const MAX_DEPOSITS_PER_ESCROW = 1000 // Align with consensus constant
 
 /**
  * RPC: Get escrow balance for a specific social identity
@@ -830,8 +832,8 @@ export async function handleGetClaimableEscrows(params: {
     // REVIEW: Helper function to validate platform type
     const isValidPlatform = (
         platform: string,
-    ): platform is "twitter" | "github" | "telegram" => {
-        return ["twitter", "github", "telegram"].includes(platform)
+    ): platform is "twitter" | "github" | "telegram" | "discord" => {
+        return SUPPORTED_PLATFORMS.includes(platform as any)
     }
 
     // Build claimable array from batched results
