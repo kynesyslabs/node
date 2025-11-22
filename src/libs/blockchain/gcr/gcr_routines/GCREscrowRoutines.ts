@@ -25,6 +25,8 @@ const MAX_BALANCE = BigInt("1000000000000000000000") // 1 sextillion DEM maximum
 const MAX_PLATFORM_LENGTH = 20
 const MAX_USERNAME_LENGTH = 100
 const MAX_DEPOSITS_PER_ESCROW = 1000 // Prevent DoS via unbounded deposits array
+const MAX_MESSAGE_LENGTH = 500 // REVIEW: Prevent storage DoS attacks via unbounded message field
+const MIN_FIRST_DEPOSIT = BigInt("1000") // REVIEW: Prevent expiry inheritance griefing attacks (1000 DEM minimum)
 
 export default class GCREscrowRoutines {
     private static parseAmount(value?: string | number | bigint): bigint {
@@ -129,6 +131,14 @@ export default class GCREscrowRoutines {
             }
         }
 
+        // REVIEW: Validate message length to prevent storage DoS attacks
+        if (message && message.length > MAX_MESSAGE_LENGTH) {
+            return {
+                success: false,
+                message: `Message too long (max ${MAX_MESSAGE_LENGTH} characters)`,
+            }
+        }
+
         // Compute deterministic escrow address
         const escrowAddress = this.getEscrowAddress(platform, username)
 
@@ -192,6 +202,15 @@ export default class GCREscrowRoutines {
                     ) {
                         throw new Error(
                             `Expiry must be between ${MIN_EXPIRY_DAYS} and ${MAX_EXPIRY_DAYS} days`,
+                        )
+                    }
+
+                    // REVIEW: Prevent expiry inheritance griefing attacks by requiring minimum first deposit
+                    // Without this, attacker could deposit 1 DEM with long expiry, then victim deposits 1M DEM
+                    // inheriting the long expiry, locking their funds
+                    if (BigInt(amount) < MIN_FIRST_DEPOSIT) {
+                        throw new Error(
+                            `First deposit must be at least ${MIN_FIRST_DEPOSIT} DEM to prevent griefing attacks`,
                         )
                     }
 
@@ -461,6 +480,15 @@ export default class GCREscrowRoutines {
                     throw new Error("Claimant account not found")
                 }
 
+                // REVIEW: Prevent balance overflow on claim (same as deposit check)
+                const newClaimantBalance =
+                    lockedClaimantAccount.balance + claimedAmount
+                if (newClaimantBalance > MAX_BALANCE) {
+                    throw new Error(
+                        `Claim would exceed maximum balance limit of ${MAX_BALANCE} DEM`,
+                    )
+                }
+
                 // REVIEW: Only modify state if not simulating
                 if (!simulate) {
                     // Transfer funds atomically
@@ -471,7 +499,7 @@ export default class GCREscrowRoutines {
                     escrow.balance = this.formatAmount(0n) // Zero out escrow balance
 
                     // Credit claimant's account
-                    lockedClaimantAccount.balance += claimedAmount
+                    lockedClaimantAccount.balance = newClaimantBalance
 
                     // Persist both accounts atomically in transaction
                     await transactionalEntityManager.save([
