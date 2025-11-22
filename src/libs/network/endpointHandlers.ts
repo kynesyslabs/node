@@ -957,7 +957,6 @@ export async function handleGetSentEscrows(params: {
                     }
 
                     // REVIEW: Add error handling for corrupted deposit amounts
-                    const MAX_DEPOSITS_PER_ESCROW = 1000; // Align with consensus constant
                     const totalSent = senderDeposits
                         .slice(0, MAX_DEPOSITS_PER_ESCROW) // Cap iteration to prevent DoS
                         .reduce((sum, d) => {
