@@ -3,7 +3,7 @@
  */
 export interface EscrowData {
     claimableBy: {
-        platform: "twitter" | "github" | "telegram"
+        platform: "twitter" | "github" | "telegram" | "discord"
         username: string // e.g., "@bob" or "octocat"
     }
     balance: string // Stringified bigint for JSONB compatibility
@@ -41,7 +41,7 @@ export interface EscrowQueryResult {
  * Claimable escrow list item
  */
 export interface ClaimableEscrow {
-    platform: "twitter" | "github" | "telegram"
+    platform: "twitter" | "github" | "telegram" | "discord"
     username: string
     balance: string // Stringified bigint
     escrowAddress: string
