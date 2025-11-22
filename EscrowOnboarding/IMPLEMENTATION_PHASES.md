@@ -152,19 +152,25 @@ export async function handleGetSentEscrows(params: { sender: string }) {
     const db = await Datasource.getInstance()
     const repo = db.getDataSource().getRepository(GCRMain)
 
-    // Note: This is inefficient for large datasets - consider adding an index in production
-    const allAccounts = await repo.find()
+    // This query requires a GIN index on the 'escrows' JSONB column for performance.
+    // The query finds all GCRMain entities where the 'escrows' object contains at least
+    // one deposit from the specified sender.
+    const accountsWithSentEscrows = await repo.createQueryBuilder("gcr")
+        .where(`gcr.escrows @> :query`, {
+            query: JSON.stringify({ deposits: [{ from: sender }] })
+        })
+        .getMany();
 
-    const sentEscrows = []
+    const sentEscrows = [];
 
-    for (const account of allAccounts) {
-        if (!account.escrows) continue
+    for (const account of accountsWithSentEscrows) {
+        if (!account.escrows) continue;
 
         for (const [escrowAddr, escrow] of Object.entries(account.escrows)) {
-            const senderDeposits = escrow.deposits?.filter(d => d.from === sender) || []
+            const senderDeposits = escrow.deposits?.filter(d => d.from === sender) || [];
 
             if (senderDeposits.length > 0) {
-                const totalSent = senderDeposits.reduce((sum, d) => sum + d.amount, 0n)
+                const totalSent = senderDeposits.reduce((sum, d) => sum + BigInt(d.amount), 0n);
 
                 sentEscrows.push({
                     platform: escrow.claimableBy.platform,
@@ -179,7 +185,7 @@ export async function handleGetSentEscrows(params: { sender: string }) {
                     totalEscrowBalance: escrow.balance.toString(),
                     expired: Date.now() > escrow.expiryTimestamp,
                     expiryTimestamp: escrow.expiryTimestamp,
-                })
+                });
             }
         }
     }
