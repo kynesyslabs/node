@@ -220,7 +220,8 @@ export default class GCREscrowRoutines {
                             platform: platform as
                                 | "twitter"
                                 | "github"
-                                | "telegram",
+                                | "telegram"
+                                | "discord",
                             username,
                         },
                         balance: "0",
