@@ -150,7 +150,21 @@ escrow.balance = this.formatAmount(refundedBalance)
 **Issue**:
 ```typescript
 const totalSent = senderDeposits.reduce((sum, d) => {
-    return sum + BigInt(d.amount ?? "0")  // ❌ No try-catch
+    try {
+        // Ensure amount is a string before parsing
+        if (typeof d.amount === 'string') {
+            return sum + BigInt(d.amount);
+        }
+        log.warning(
+            `[handleGetSentEscrows] Invalid or missing amount type for deposit. Skipping.`,
+        );
+        return sum;
+    } catch (error) {
+        log.error(
+            `[handleGetSentEscrows] Failed to parse amount "${d.amount}" as BigInt. Skipping.`,
+        );
+        return sum; // Skip corrupted deposit instead of crashing
+    }
 }, 0n)
 ```
 
