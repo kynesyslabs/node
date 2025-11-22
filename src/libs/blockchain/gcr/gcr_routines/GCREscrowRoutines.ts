@@ -688,6 +688,271 @@ export default class GCREscrowRoutines {
     }
 
     /**
+     * Rollback a deposit operation (inverse: remove deposit, refund sender)
+     *
+     * @param editOperation - Original deposit operation to rollback
+     * @param gcrMainRepository - Database repository
+     * @param simulate - If true, don't persist changes
+     * @returns Success/failure result
+     */
+    static async rollbackEscrowDeposit(
+        editOperation: GCREditEscrow,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { sender, platform, username, amount } = editOperation.data
+
+        if (!sender || !platform || !username || !amount) {
+            return {
+                success: false,
+                message: "Missing required fields for deposit rollback",
+            }
+        }
+
+        const escrowAddress = this.getEscrowAddress(platform, username)
+        const currentTimestamp = Date.now()
+
+        log.info(
+            `[EscrowDepositRollback] Rolling back deposit of ${amount} DEM from ${sender} to ${platform}:${username}`,
+        )
+
+        const result = await gcrMainRepository.manager.transaction(
+            async transactionalEntityManager => {
+                // Get both accounts with locks
+                const [senderAccount, escrowAccount] = await Promise.all([
+                    transactionalEntityManager.findOne(GCRMain, {
+                        where: { pubkey: sender },
+                        lock: { mode: "pessimistic_write" },
+                    }),
+                    transactionalEntityManager.findOne(GCRMain, {
+                        where: { pubkey: escrowAddress },
+                        lock: { mode: "pessimistic_write" },
+                    }),
+                ])
+
+                if (!senderAccount) {
+                    throw new Error("Sender account not found for rollback")
+                }
+
+                if (
+                    !escrowAccount ||
+                    !escrowAccount.escrows?.[escrowAddress]
+                ) {
+                    throw new Error(
+                        "Escrow account not found for deposit rollback",
+                    )
+                }
+
+                const escrow = escrowAccount.escrows[escrowAddress]
+                const depositAmount = BigInt(amount)
+
+                // Find and remove the most recent deposit from this sender with matching amount
+                const depositIndex = [...escrow.deposits]
+                    .reverse()
+                    .findIndex(
+                        d =>
+                            d.from === sender &&
+                            this.parseAmount(d.amount) === depositAmount,
+                    )
+
+                if (depositIndex === -1) {
+                    throw new Error(
+                        `No matching deposit found from ${sender} with amount ${amount} to rollback`,
+                    )
+                }
+
+                // Convert reverse index to actual index
+                const actualIndex = escrow.deposits.length - 1 - depositIndex
+
+                // Remove the deposit
+                escrow.deposits.splice(actualIndex, 1)
+
+                // Recalculate escrow balance from remaining deposits
+                const newEscrowBalance = escrow.deposits.reduce(
+                    (sum, d) => sum + this.parseAmount(d.amount),
+                    0n,
+                )
+
+                escrow.balance = this.formatAmount(newEscrowBalance)
+
+                // Refund sender
+                senderAccount.balance += depositAmount
+
+                if (!simulate) {
+                    await transactionalEntityManager.save([
+                        senderAccount,
+                        escrowAccount,
+                    ])
+                }
+
+                return {
+                    rolledBack: amount,
+                    newEscrowBalance: escrow.balance,
+                }
+            },
+        )
+
+        log.info(
+            `[EscrowDepositRollback] ✓ Rolled back ${amount} DEM deposit. New escrow balance: ${result.newEscrowBalance}`,
+        )
+
+        return {
+            success: true,
+            message: `Rolled back deposit of ${amount} DEM`,
+            response: result,
+        }
+    }
+
+    /**
+     * Rollback a claim operation (inverse: restore escrow balance, deduct from claimant)
+     *
+     * @param editOperation - Original claim operation to rollback
+     * @param gcrMainRepository - Database repository
+     * @param simulate - If true, don't persist changes
+     * @returns Success/failure result
+     */
+    static async rollbackEscrowClaim(
+        editOperation: GCREditEscrow,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { claimant, platform, username } = editOperation.data
+
+        if (!claimant || !platform || !username) {
+            return {
+                success: false,
+                message: "Missing required fields for claim rollback",
+            }
+        }
+
+        const escrowAddress = this.getEscrowAddress(platform, username)
+
+        log.info(
+            `[EscrowClaimRollback] Rolling back claim by ${claimant} for ${platform}:${username}`,
+        )
+
+        const result = await gcrMainRepository.manager.transaction(
+            async transactionalEntityManager => {
+                // Get both accounts with locks
+                const [escrowAccount, claimantAccount] = await Promise.all([
+                    transactionalEntityManager.findOne(GCRMain, {
+                        where: { pubkey: escrowAddress },
+                        lock: { mode: "pessimistic_write" },
+                    }),
+                    transactionalEntityManager.findOne(GCRMain, {
+                        where: { pubkey: claimant },
+                        lock: { mode: "pessimistic_write" },
+                    }),
+                ])
+
+                if (
+                    !escrowAccount ||
+                    !escrowAccount.escrows?.[escrowAddress]
+                ) {
+                    throw new Error("Escrow not found for claim rollback")
+                }
+
+                if (!claimantAccount) {
+                    throw new Error("Claimant account not found for rollback")
+                }
+
+                const escrow = escrowAccount.escrows[escrowAddress]
+
+                // Verify this was actually claimed by this claimant
+                if (!escrow.claimed || escrow.claimedBy !== claimant) {
+                    throw new Error(
+                        `Escrow was not claimed by ${claimant}, cannot rollback claim`,
+                    )
+                }
+
+                // Recalculate original claimed amount from deposits
+                const claimedAmount = escrow.deposits.reduce(
+                    (sum, d) => sum + this.parseAmount(d.amount),
+                    0n,
+                )
+
+                // Verify claimant has sufficient balance to return
+                if (claimantAccount.balance < claimedAmount) {
+                    throw new Error(
+                        "Claimant has insufficient balance to rollback claim. " +
+                            `Has: ${claimantAccount.balance}, needs: ${claimedAmount}`,
+                    )
+                }
+
+                // Restore escrow state
+                escrow.claimed = false
+                escrow.claimedBy = undefined
+                escrow.claimedAt = undefined
+                escrow.balance = this.formatAmount(claimedAmount)
+
+                // Deduct from claimant
+                claimantAccount.balance -= claimedAmount
+
+                if (!simulate) {
+                    await transactionalEntityManager.save([
+                        escrowAccount,
+                        claimantAccount,
+                    ])
+                }
+
+                return {
+                    amount: claimedAmount.toString(),
+                    restored: true,
+                }
+            },
+        )
+
+        log.info(
+            `[EscrowClaimRollback] ✓ Rolled back claim of ${result.amount} DEM`,
+        )
+
+        return {
+            success: true,
+            message: `Rolled back claim of ${result.amount} DEM from ${platform}:${username}`,
+            response: result,
+        }
+    }
+
+    /**
+     * Rollback a refund operation (inverse: restore deposits to escrow, deduct from refunder)
+     *
+     * @param editOperation - Original refund operation to rollback
+     * @param gcrMainRepository - Database repository
+     * @param simulate - If true, don't persist changes
+     * @returns Success/failure result
+     */
+    static async rollbackEscrowRefund(
+        editOperation: GCREditEscrow,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { refunder, platform, username } = editOperation.data
+
+        if (!refunder || !platform || !username) {
+            return {
+                success: false,
+                message: "Missing required fields for refund rollback",
+            }
+        }
+
+        const escrowAddress = this.getEscrowAddress(platform, username)
+
+        log.info(
+            `[EscrowRefundRollback] Rolling back refund by ${refunder} for ${platform}:${username}`,
+        )
+
+        // PROBLEM: We need the original deposits that were refunded to restore them
+        // But the original refund operation removed them from the escrow
+        // We need to track what was refunded to be able to rollback properly
+
+        return {
+            success: false,
+            message:
+                "Refund rollback not fully implemented - requires tracking removed deposits in original operation",
+        }
+    }
+
+    /**
      * Main entry point for escrow GCREdit operations
      * Routes to appropriate handler based on operation type
      *
@@ -710,21 +975,43 @@ export default class GCREscrowRoutines {
 
         const operation = editOperation.operation
 
-        // REVIEW: Rollbacks are not supported for escrow operations
-        // Proper rollback would require storing full state history and
-        // complex validation logic. Until implemented, explicitly reject rollbacks
-        // to prevent consensus failures from inconsistent rollback handling.
+        // REVIEW: Handle rollbacks by performing inverse operations
         if (editOperation.isRollback) {
-            log.error(
-                `[Escrow] Rollback attempted for ${operation} operation - rollbacks not supported`,
+            log.info(
+                `[Escrow] Rolling back ${operation} operation for ${editOperation.data.platform}:${editOperation.data.username}`,
             )
-            return {
-                success: false,
-                message: "Escrow rollbacks are not supported. State restoration would require full history tracking.",
+            // Route to rollback handlers
+            switch (operation) {
+                case "deposit":
+                    return this.rollbackEscrowDeposit(
+                        editOperation,
+                        gcrMainRepository,
+                        simulate,
+                    )
+
+                case "claim":
+                    return this.rollbackEscrowClaim(
+                        editOperation,
+                        gcrMainRepository,
+                        simulate,
+                    )
+
+                case "refund":
+                    return this.rollbackEscrowRefund(
+                        editOperation,
+                        gcrMainRepository,
+                        simulate,
+                    )
+
+                default:
+                    return {
+                        success: false,
+                        message: `Cannot rollback unsupported escrow operation: ${operation}`,
+                    }
             }
         }
 
-        // Route to appropriate handler
+        // Route to appropriate forward handler
         switch (operation) {
             case "deposit":
                 return this.applyEscrowDeposit(
