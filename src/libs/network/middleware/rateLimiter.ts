@@ -57,17 +57,28 @@ export class RateLimiter {
      * Prevents memory exhaustion from IP rotation attacks
      */
     private enforceSizeLimit(): void {
-        if (this.ipRequests.size >= this.MAX_IP_ENTRIES) {
-            // Evict oldest non-blocked entry (LRU strategy)
-            for (const [ip, data] of this.ipRequests.entries()) {
-                if (!data.blocked) {
-                    this.ipRequests.delete(ip)
-                    log.warning(
-                        `[Rate Limiter] Evicted IP ${ip} (size limit: ${this.MAX_IP_ENTRIES})`,
-                    )
-                    break
-                }
+        if (this.ipRequests.size < this.MAX_IP_ENTRIES) {
+            return;
+        }
+
+        // Evict oldest non-blocked entry (LRU strategy)
+        for (const [ip, data] of this.ipRequests.entries()) {
+            if (!data.blocked) {
+                this.ipRequests.delete(ip);
+                log.warning(
+                    `[Rate Limiter] Evicted IP ${ip} (size limit: ${this.MAX_IP_ENTRIES})`,
+                );
+                return;
             }
+        }
+
+        // Fallback: If all entries are blocked, evict the oldest one to prevent DoS.
+        const oldestIp = this.ipRequests.keys().next().value;
+        if (oldestIp) {
+            this.ipRequests.delete(oldestIp);
+            log.warning(
+                `[Rate Limiter] All tracked IPs are blocked. Evicted oldest blocked IP ${oldestIp} to allow new connections.`,
+            );
         }
     }
 
