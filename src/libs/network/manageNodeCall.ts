@@ -15,6 +15,7 @@ import getBlockByNumber from "./routines/nodecalls/getBlockByNumber"
 import getBlockByHash from "./routines/nodecalls/getBlockByHash"
 import getBlocks from "./routines/nodecalls/getBlocks"
 import getTransactions from "./routines/nodecalls/getTransactions"
+import getTxsByHashes from "./routines/nodecalls/getTxsByHashes"
 import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
@@ -140,6 +141,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "error"
             }
             break
+        case "getTxsByHashes":
+            return await getTxsByHashes(data)
         case "getMempool":
             response.response = await Mempool.getMempool()
             break
@@ -245,7 +248,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             response.result = tweet ? 200 : 400
             if (tweet) {
                 const data = {
-                    id: tweet.id,
+                    id: (tweet as any).id,
                     created_at: tweet.created_at,
                     text: tweet.text,
                     username: tweet.author.screen_name,

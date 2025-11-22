@@ -208,6 +208,7 @@ async function getRemoteBlock(peer: Peer, blockNumber: number) {
 
     return null
 }
+
 /**
  * Verify if our last block is coherent with the same block from the peer.
  *
@@ -249,182 +250,241 @@ async function verifyLastBlockIntegrity(
     return lastSyncedBlock.hash === ourLastBlockHash
 }
 
-async function downloadBlock(peer: Peer, blockToAsk: number) {
-    log.debug("Downloading block: " + blockToAsk)
-    const blockRequest: RPCRequest = {
+/**
+ * Download and process a batch of blocks from a peer
+ *
+ * @param peer - The peer to download blocks from
+ * @param startBlock - The first block number to download
+ * @param endBlock - The last block number to download (inclusive)
+ * @returns True if all blocks were downloaded and processed successfully
+ */
+async function batchDownloadBlocks(
+    peer: Peer,
+    startBlock: number,
+    endBlock: number,
+): Promise<boolean> {
+    const batchSize = getSharedState.batchSyncBlockSize
+    const totalBlocks = endBlock - startBlock + 1
+    const limit = Math.min(totalBlocks, batchSize)
+
+    log.info(
+        `[batchDownloadBlocks] Fetching ${limit} blocks from ${startBlock} to ${
+            startBlock + limit - 1
+        }`,
+    )
+
+    // Fetch batch of blocks
+    const blocksRequest: RPCRequest = {
         method: "nodeCall",
         params: [
             {
-                message: "getBlockByNumber",
-                data: { blockNumber: blockToAsk.toString() },
+                message: "getBlocks",
+                data: { start: startBlock + limit, limit },
                 muid: null,
             },
         ],
     }
 
-    const blockResponse = await peer.longCall(blockRequest, false, 250, 3, [
+    const blocksResponse = await peer.longCall(blocksRequest, false, 250, 3, [
         404,
     ])
-    log.debug("Block response: " + blockResponse.result)
 
-    // INFO: Handle max retries reached
-    if (blockResponse.result === 400) {
-        log.info("[fastSync] Peer is offline")
-        // TODO: Test this!
+    // Handle errors
+    if (blocksResponse.result === 400) {
+        log.error("[batchDownloadBlocks] Peer is offline")
         throw new PeerUnreachableError("Peer is offline")
     }
 
-    if (blockResponse.result === 404) {
-        log.info("[fastSync] Block not found")
-        throw new BlockNotFoundError("Block not found")
+    if (blocksResponse.result === 404) {
+        log.error("[batchDownloadBlocks] Blocks not found")
+        throw new BlockNotFoundError("Blocks not found")
     }
 
-    if (blockResponse.result === 200) {
-        console.log(
-            "[fastSync] Block response received for block: " + blockToAsk,
+    if (blocksResponse.result !== 200) {
+        log.error(
+            `[batchDownloadBlocks] Unexpected response: ${blocksResponse.result}`,
         )
-        const block = blockResponse.response as Block
+        return false
+    }
 
-        if (!block) {
-            log.error("[downloadBlock] Block not received")
-            return false
-        }
+    const blocks = blocksResponse.response as Block[]
+    log.debug(
+        "[batchDownloadBlocks] Blocks: " +
+            JSON.stringify(
+                blocks.map(block => block.number),
+                null,
+                2,
+            ),
+    )
 
-        log.info("[downloadBlock] Block received: " + block.hash)
+    if (!blocks || blocks.length === 0) {
+        log.error("[batchDownloadBlocks] No blocks received")
+        return false
+    }
+
+    log.info(`[batchDownloadBlocks] Received ${blocks.length} blocks`)
+
+    // Fetch all transactions for all blocks in batch
+    log.info("[batchDownloadBlocks] Fetching transactions for batch")
+    const txMap = await askTxsForBlocksBatch(blocks, peer)
+    log.info(
+        `[batchDownloadBlocks] Fetched ${
+            Object.keys(txMap).length
+        } unique transactions`,
+    )
+
+    // Process each block in order
+    for (const block of blocks.sort((a, b) => a.number - b.number)) {
+        log.debug(`[batchDownloadBlocks] Processing block ${block.number}`)
+        const blockTxs = block.content.ordered_transactions
+            .map(txHash => txMap[txHash])
+            .filter(tx => !!tx)
+
+        // Insert block
         await Chain.insertBlock(block, [], null, false)
-        log.debug("Block inserted successfully")
-        log.debug("Last block number: " + getSharedState.lastBlockNumber + " Last block hash: " + getSharedState.lastBlockHash)
-        log.info(
-            "[fastSync] Block inserted successfully at the head of the chain!",
+        log.debug(
+            `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
         )
 
-        // REVIEW Merge the peerlist
-        log.info("[fastSync] Merging peers from block: " + block.hash)
+        // Merge peerlist
         const mergedPeerlist = await mergePeerlist(block)
-        log.info("[fastSync] Merged peers from block: " + mergedPeerlist)
-        // REVIEW Parse the txs hashes in the block
-        log.info("[fastSync] Asking for transactions in the block", true)
-        const txs = await askTxsForBlock(block, peer)
-        log.info("[fastSync] Transactions received: " + txs.length, true)
+        log.debug(
+            `[batchDownloadBlocks] Merged ${mergedPeerlist.length} peers from block ${block.number}`,
+        )
 
-        // ! Sync the native tables
-        await syncGCRTables(txs)
+        log.debug(
+            `[batchDownloadBlocks] Processing ${blockTxs.length} transactions for block ${block.number}`,
+        )
 
-        // REVIEW Insert the txs into the transactions database table
-        if (txs.length > 0) {
-            log.info(
-                "[fastSync] Inserting transactions into the database",
-                true,
-            )
-            const success = await Chain.insertTransactions(txs)
-            if (success) {
-                log.info("[fastSync] Transactions inserted successfully")
-                return true
+        // Sync GCR tables
+        await syncGCRTables(blockTxs)
+
+        // Insert transactions
+        if (blockTxs.length > 0) {
+            const success = await Chain.insertTransactions(blockTxs)
+            if (!success) {
+                log.error(
+                    `[batchDownloadBlocks] Failed to insert transactions for block ${block.number}`,
+                )
+                return false
             }
-
-            log.error("[fastSync] Transactions insertion failed")
-            return false
         }
-
-        log.info("[fastSync] No transactions in the block")
-        return true
-
-        // ? We might want a rollback function here if something goes wrong
     }
 
-    return false
+    log.info(
+        `[batchDownloadBlocks] Successfully processed batch of ${blocks.length} blocks`,
+    )
+    return true
 }
 
 /**
  * Wait for the next block to be generated and download it
  *
- * @param peer - The peer to wait for the next block
  * @returns True if the block was downloaded successfully, false otherwise
  */
-async function waitForNextBlock() {
+async function waitForNextBlock(): Promise<boolean> {
     log.debug("[waitForNextBlock] Waiting for next block")
 
     while (getSharedState.lastBlockNumber >= latestBlock()) {
         await sleep(250)
     }
 
-    log.debug("[waitForNextBlock] NEXT BLOCK GENERATED. DOWNLOADING...")
-    return await downloadBlock(
-        highestBlockPeer(),
-        getSharedState.lastBlockNumber + 1,
+    const nextBlock = getSharedState.lastBlockNumber + 1
+    log.debug(
+        `[waitForNextBlock] NEXT BLOCK GENERATED. DOWNLOADING block ${nextBlock}...`,
     )
+
+    try {
+        return await batchDownloadBlocks(
+            highestBlockPeer(),
+            nextBlock,
+            nextBlock,
+        )
+    } catch (error) {
+        log.error(
+            `[waitForNextBlock] Failed to download next block: ${
+                error instanceof Error ? error.message : "Unknown error"
+            }`,
+        )
+        return false
+    }
 }
 
 /**
- * Request the blocks from the peer
+ * Request blocks from peers using batch download strategy
  *
- * @param peer - The peer to request the blocks from
- * @returns True if the blocks were requested successfully, false otherwise
+ * @returns True if the blocks were synced successfully, false otherwise
  */
-async function requestBlocks() {
-    // REVIEW: lowest or highest?
-    // Sync the blocks one by one starting from the lowest block number that we do not have
-    // ? Way more error handling needed
-    // console.error(
-    //     "[fastSync] Syncing blocks from peer: " + JSON.stringify(peer),
-    // )
-
-    // if (!peerManager.getPeer(peer.identity)) {
-    //     log.error("[fastSync] Peer not found")
-    //     return false
-    // }
+async function requestBlocks(): Promise<boolean> {
     const seenPeers = new Set<string>()
     let peer = highestBlockPeer()
 
-    while (getSharedState.lastBlockNumber <= latestBlock()) {
-        const blockToAsk = getSharedState.lastBlockNumber + 1
-        // log.debug("[fastSync] Sleeping for 1 second")
-        // await sleep(250)
+    while (getSharedState.lastBlockNumber < latestBlock()) {
+        const startBlock = getSharedState.lastBlockNumber + 1
+        const endBlock = latestBlock()
+        const blocksToSync = endBlock - startBlock + 1
+
+        log.info(
+            `[requestBlocks] Need to sync ${blocksToSync} blocks (${startBlock} to ${endBlock})`,
+        )
+
         try {
-            await downloadBlock(peer, blockToAsk)
+            // Download batch of blocks
+            await batchDownloadBlocks(peer, startBlock, endBlock)
+            log.info(
+                `[requestBlocks] Batch sync completed. Current block: ${getSharedState.lastBlockNumber}`,
+            )
         } catch (error) {
-            // INFO: Handle chain head reached
+            // Handle chain head reached
             if (error instanceof BlockNotFoundError) {
-                log.info("[fastSync] Block not found")
+                log.info(
+                    "[requestBlocks] Reached end of available blocks on peer",
+                )
                 break
             }
 
+            // Handle peer unreachable - switch to next peer
             if (error instanceof PeerUnreachableError) {
                 log.debug(
-                    "[fastSync] Peer " +
-                        peer.identity +
-                        " is unreachable. Switching to the next peer.",
+                    `[requestBlocks] Peer ${peer.identity} is unreachable. Switching to next peer.`,
                 )
                 seenPeers.add(peer.identity)
 
+                // Find alternative peers with highest block
                 const highestBlockPeers = peerManager
                     .getAll()
                     .filter(p => p.sync.block === latestBlock())
                     .filter(p => !seenPeers.has(p.identity))
 
                 log.info(
-                    "[fastSync] Highest block peers: " +
-                        JSON.stringify(
-                            highestBlockPeers.map(p => p.connection.string),
-                            null,
-                            2,
-                        ),
+                    `[requestBlocks] Available highest block peers: ${highestBlockPeers.length}`,
                 )
 
                 if (highestBlockPeers.length === 0) {
-                    log.error("[fastSync] No more peers to try")
+                    log.error("[requestBlocks] No more peers available to sync")
                     return false
                 }
 
-                log.info(
-                    "[fastSync] Switched to peer: " +
-                        highestBlockPeers[0].connection.string,
-                )
                 peer = highestBlockPeers[0]
+                log.info(
+                    `[requestBlocks] Switched to peer: ${peer.connection.string}`,
+                )
+
+                // Retry the current batch with new peer
+                continue
             }
+
+            // Unknown error - log and break
+            log.error(
+                `[requestBlocks] Unexpected error during batch sync: ${
+                    error instanceof Error ? error.message : "Unknown error"
+                }`,
+            )
+            return false
         }
     }
 
+    log.info("[requestBlocks] Block sync completed successfully")
     return true
 }
 
@@ -446,31 +506,53 @@ export async function syncGCRTables(
     return [null, true]
 }
 
-// Helper function to ask for the transactions in a block
-export async function askTxsForBlock(
-    block: Block,
+// Helper function to ask for transactions in batches
+export async function askTxsForBlocksBatch(
+    blocks: Block[],
     peer: Peer,
-): Promise<Transaction[]> {
-    const txsHashes = block.content.ordered_transactions
-    const txs = []
-    for (const txHash of txsHashes) {
+): Promise<Record<string, Transaction>> {
+    // Extract all unique transaction hashes from all blocks
+    const allTxHashes = blocks.flatMap(
+        block => block.content.ordered_transactions,
+    )
+
+    // Remove duplicates
+    const uniqueTxHashes = [...new Set(allTxHashes)]
+
+    // Fetch transactions in batches
+    const batchSize = getSharedState.batchSyncTxSize
+    const txMap = {}
+
+    for (let i = 0; i < uniqueTxHashes.length; i += batchSize) {
+        const batch = uniqueTxHashes.slice(i, i + batchSize)
+
         const txRequest: RPCRequest = {
             method: "nodeCall",
             params: [
                 {
-                    message: "getTxByHash",
-                    data: { hash: txHash },
+                    message: "getTxsByHashes",
+                    data: { hashes: batch },
                     muid: null,
                 },
             ],
         }
+
         const txResponse = await peer.call(txRequest, false)
+
         if (txResponse.result === 200) {
-            const tx = txResponse.response as Transaction
-            txs.push(tx)
+            const transactions = txResponse.response as Transaction[]
+            // Build hash -> transaction map
+            transactions.forEach(tx => {
+                txMap[tx.hash] = tx
+            })
+        } else {
+            log.error(
+                "[askTxsForBlocksBatch] Failed to fetch batch of transactions",
+            )
         }
     }
-    return txs
+
+    return txMap
 }
 
 // Helper function to merge the peerlist from the last block

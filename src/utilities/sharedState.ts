@@ -31,7 +31,7 @@ export default class SharedState {
     referenceBlockRoom = 1
     shardSize = parseInt(process.env.SHARD_SIZE) || 4
     mainLoopSleepTime = parseInt(process.env.MAIN_LOOP_SLEEP_TIME) || 1000 // 1 second
- 
+
     // NOTE See calibrateTime.ts for this value
     timestampCorrection = 0
 
@@ -61,6 +61,13 @@ export default class SharedState {
     // Sync
     fastSyncCount = 0
     _syncStatus = false
+
+    // Batch sync configuration
+    batchSyncBlockSize = 50 // Number of blocks to fetch per batch sync request
+    batchSyncTxSize = 50 // Number of transactions to fetch per batch sync request
+    batchSyncTxLimit = 50 // Maximum number of transactions to send back per batch request
+    batchSyncBlockLimit = 50 // Maximum number of blocks to send back per batch request
+
     set syncStatus(synced: boolean) {
         this._syncStatus = synced
         // INFO: Update our peer object when we get a new sync status
