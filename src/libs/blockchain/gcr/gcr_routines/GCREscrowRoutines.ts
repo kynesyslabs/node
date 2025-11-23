@@ -715,17 +715,24 @@ export default class GCREscrowRoutines {
 
         const result = await gcrMainRepository.manager.transaction(
             async transactionalEntityManager => {
-                // Get both accounts with locks
-                const [senderAccount, escrowAccount] = await Promise.all([
-                    transactionalEntityManager.findOne(GCRMain, {
+                // SECURITY: Acquire locks sequentially to prevent deadlocks
+                // REVIEW: Concurrent lock acquisition with Promise.all can cause deadlocks
+                // when different transactions acquire locks in different orders
+                const senderAccount = await transactionalEntityManager.findOne(
+                    GCRMain,
+                    {
                         where: { pubkey: sender },
                         lock: { mode: "pessimistic_write" },
-                    }),
-                    transactionalEntityManager.findOne(GCRMain, {
+                    },
+                )
+
+                const escrowAccount = await transactionalEntityManager.findOne(
+                    GCRMain,
+                    {
                         where: { pubkey: escrowAddress },
                         lock: { mode: "pessimistic_write" },
-                    }),
-                ])
+                    },
+                )
 
                 if (!senderAccount) {
                     throw new Error("Sender account not found for rollback")
@@ -830,17 +837,24 @@ export default class GCREscrowRoutines {
 
         const result = await gcrMainRepository.manager.transaction(
             async transactionalEntityManager => {
-                // Get both accounts with locks
-                const [escrowAccount, claimantAccount] = await Promise.all([
-                    transactionalEntityManager.findOne(GCRMain, {
+                // SECURITY: Acquire locks sequentially to prevent deadlocks
+                // REVIEW: Concurrent lock acquisition with Promise.all can cause deadlocks
+                // when different transactions acquire locks in different orders
+                const escrowAccount = await transactionalEntityManager.findOne(
+                    GCRMain,
+                    {
                         where: { pubkey: escrowAddress },
                         lock: { mode: "pessimistic_write" },
-                    }),
-                    transactionalEntityManager.findOne(GCRMain, {
+                    },
+                )
+
+                const claimantAccount = await transactionalEntityManager.findOne(
+                    GCRMain,
+                    {
                         where: { pubkey: claimant },
                         lock: { mode: "pessimistic_write" },
-                    }),
-                ])
+                    },
+                )
 
                 if (
                     !escrowAccount ||
