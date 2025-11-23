@@ -183,9 +183,25 @@ export default class GCREscrowRoutines {
                 )
 
                 if (!escrowAccount) {
-                    // Create account inside transaction to prevent orphaned accounts
-                    escrowAccount = await HandleGCR.createAccount(escrowAddress)
-                    await transactionalEntityManager.save(escrowAccount)
+                    try {
+                        // Create account inside transaction to prevent orphaned accounts
+                        escrowAccount = await HandleGCR.createAccount(escrowAddress)
+                        await transactionalEntityManager.save(escrowAccount)
+                    } catch (error: any) {
+                        // Handle race condition: another transaction created the account
+                        if (error.code === '23505') { // Postgres unique violation
+                            escrowAccount = await transactionalEntityManager.findOne(
+                                GCRMain,
+                                {
+                                    where: { pubkey: escrowAddress },
+                                    lock: { mode: "pessimistic_write" },
+                                }
+                            )
+                            if (!escrowAccount) throw new Error("Account creation race condition")
+                        } else {
+                            throw error
+                        }
+                    }
                 }
 
                 // Initialize escrows object if needed
@@ -641,8 +657,16 @@ export default class GCREscrowRoutines {
                         )
                     }
 
+                    // REVIEW: Prevent balance overflow on refund (same as deposit/claim checks)
+                    const newRefunderBalance = refunderAccount.balance + refundAmount
+                    if (newRefunderBalance > MAX_BALANCE) {
+                        throw new Error(
+                            `Refund would exceed maximum balance limit of ${MAX_BALANCE} DEM`,
+                        )
+                    }
+
                     // Credit refund to refunder's account
-                    refunderAccount.balance += refundAmount
+                    refunderAccount.balance = newRefunderBalance
 
                     // Update escrow (remove refunder's deposits)
                     escrow.deposits = escrow.deposits.filter(
