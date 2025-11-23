@@ -55,30 +55,40 @@ export class RateLimiter {
     /**
      * Enforce maximum IP entries limit using LRU eviction
      * Prevents memory exhaustion from IP rotation attacks
+     * REVIEW: Uses while loop to handle bursts that add multiple IPs
      */
     private enforceSizeLimit(): void {
-        if (this.ipRequests.size < this.MAX_IP_ENTRIES) {
-            return;
-        }
+        // Evict entries repeatedly until we are strictly under the limit
+        while (this.ipRequests.size >= this.MAX_IP_ENTRIES) {
+            let evicted = false
 
-        // Evict oldest non-blocked entry (LRU strategy)
-        for (const [ip, data] of this.ipRequests.entries()) {
-            if (!data.blocked) {
-                this.ipRequests.delete(ip);
-                log.warning(
-                    `[Rate Limiter] Evicted IP ${ip} (size limit: ${this.MAX_IP_ENTRIES})`,
-                );
-                return;
+            // Try to evict the oldest non-blocked entry first (LRU strategy)
+            for (const [ip, data] of this.ipRequests.entries()) {
+                if (!data.blocked) {
+                    this.ipRequests.delete(ip)
+                    log.warning(
+                        `[Rate Limiter] Evicted IP ${ip} (size limit: ${this.MAX_IP_ENTRIES})`,
+                    )
+                    evicted = true
+                    break
+                }
             }
-        }
 
-        // Fallback: If all entries are blocked, evict the oldest one to prevent DoS.
-        const oldestIp = this.ipRequests.keys().next().value;
-        if (oldestIp) {
-            this.ipRequests.delete(oldestIp);
-            log.warning(
-                `[Rate Limiter] All tracked IPs are blocked. Evicted oldest blocked IP ${oldestIp} to allow new connections.`,
-            );
+            if (evicted) {
+                continue
+            }
+
+            // Fallback: If all tracked entries are blocked, evict the oldest one
+            const oldestIp = this.ipRequests.keys().next().value
+            if (oldestIp) {
+                this.ipRequests.delete(oldestIp)
+                log.warning(
+                    `[Rate Limiter] All tracked IPs are blocked. Evicted oldest blocked IP ${oldestIp} to allow new connections.`,
+                )
+            } else {
+                // Nothing to evict; break to prevent infinite loop
+                break
+            }
         }
     }
 
