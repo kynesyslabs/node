@@ -268,14 +268,12 @@ export default class GCREscrowRoutines {
                     deposit.message = message
                 }
 
-                // Deduct from sender's balance
-                senderAccount.balance -= BigInt(amount)
-
-                // Credit escrow balance with overflow protection
+                // REVIEW: Calculate prospective changes without mutating state (for simulate mode)
+                const amountBig = BigInt(amount)
                 const previousBalance = this.parseAmount(
                     escrowAccount.escrows[escrowAddress].balance,
                 )
-                const newBalance = previousBalance + BigInt(amount)
+                const newBalance = previousBalance + amountBig
 
                 // Prevent balance overflow attacks
                 if (newBalance > MAX_BALANCE) {
@@ -284,24 +282,27 @@ export default class GCREscrowRoutines {
                     )
                 }
 
-                escrowAccount.escrows[escrowAddress].balance =
-                    this.formatAmount(newBalance)
-                escrowAccount.escrows[escrowAddress].deposits.push(deposit)
-
-                // REVIEW: Persist both accounts atomically in transaction (only if not simulating)
+                // REVIEW: Apply mutations only when persisting (not during simulation)
                 if (!simulate) {
+                    // Deduct from sender's balance
+                    senderAccount.balance -= amountBig
+
+                    // Credit escrow balance
+                    escrowAccount.escrows[escrowAddress].balance =
+                        this.formatAmount(newBalance)
+                    escrowAccount.escrows[escrowAddress].deposits.push(deposit)
+
+                    // Persist both accounts atomically in transaction
                     await transactionalEntityManager.save([
                         senderAccount,
                         escrowAccount,
                     ])
                 }
 
-                // Return result data
+                // Return result data (same regardless of simulation)
                 return {
                     escrowAddress,
-                    newBalance: escrowAccount.escrows[
-                        escrowAddress
-                    ].balance.toString(),
+                    newBalance: this.formatAmount(newBalance),
                 }
             },
         )
