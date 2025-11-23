@@ -183,9 +183,25 @@ export default class GCREscrowRoutines {
                 )
 
                 if (!escrowAccount) {
-                    // Create account inside transaction to prevent orphaned accounts
-                    escrowAccount = await HandleGCR.createAccount(escrowAddress)
-                    await transactionalEntityManager.save(escrowAccount)
+                    try {
+                        // Create account inside transaction to prevent orphaned accounts
+                        escrowAccount = await HandleGCR.createAccount(escrowAddress)
+                        await transactionalEntityManager.save(escrowAccount)
+                    } catch (error: any) {
+                        // Handle race condition: another transaction created the account
+                        if (error.code === '23505') { // Postgres unique violation
+                            escrowAccount = await transactionalEntityManager.findOne(
+                                GCRMain,
+                                {
+                                    where: { pubkey: escrowAddress },
+                                    lock: { mode: "pessimistic_write" },
+                                }
+                            )
+                            if (!escrowAccount) throw new Error("Account creation race condition")
+                        } else {
+                            throw error
+                        }
+                    }
                 }
 
                 // Initialize escrows object if needed
