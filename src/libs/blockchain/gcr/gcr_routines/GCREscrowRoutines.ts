@@ -661,8 +661,16 @@ export default class GCREscrowRoutines {
                         )
                     }
 
+                    // REVIEW: Prevent balance overflow on refund (same as deposit/claim checks)
+                    const newRefunderBalance = refunderAccount.balance + refundAmount
+                    if (newRefunderBalance > MAX_BALANCE) {
+                        throw new Error(
+                            `Refund would exceed maximum balance limit of ${MAX_BALANCE} DEM`,
+                        )
+                    }
+
                     // Credit refund to refunder's account
-                    refunderAccount.balance += refundAmount
+                    refunderAccount.balance = newRefunderBalance
 
                     // Update escrow (remove refunder's deposits)
                     escrow.deposits = escrow.deposits.filter(
