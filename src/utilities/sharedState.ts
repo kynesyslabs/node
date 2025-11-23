@@ -244,6 +244,11 @@ export default class SharedState {
             // "genesis": { maxRequests: 100, windowMs: 60000 },
             // "rate_limit_stats": { maxRequests: 50, windowMs: 60000 },
             // "rate_limit_unblock": { maxRequests: 5, windowMs: 60000 },
+
+            // SECURITY: Escrow operation rate limits to prevent DoS attacks
+            escrow_deposit: { maxRequests: 10, windowMs: 60000 }, // 10 deposits per minute
+            escrow_claim: { maxRequests: 5, windowMs: 60000 },    // 5 claims per minute
+            escrow_refund: { maxRequests: 5, windowMs: 60000 },   // 5 refunds per minute
         },
         txPerBlock: 4,
     }

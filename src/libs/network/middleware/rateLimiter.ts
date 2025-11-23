@@ -37,6 +37,9 @@ export class RateLimiter {
     private static instance: RateLimiter
     private local_ips = ["127.0.0.1", "localhost"]
 
+    // SECURITY: Maximum IP entries to prevent memory exhaustion attacks
+    private readonly MAX_IP_ENTRIES = 100000 // 100K IPs max (~5MB memory)
+
     constructor(config: RateLimitConfig) {
         this.config = config
 
@@ -47,6 +50,46 @@ export class RateLimiter {
         }, 15 * 60 * 1000)
 
         this.loadIPs()
+    }
+
+    /**
+     * Enforce maximum IP entries limit using LRU eviction
+     * Prevents memory exhaustion from IP rotation attacks
+     * REVIEW: Uses while loop to handle bursts that add multiple IPs
+     */
+    private enforceSizeLimit(): void {
+        // Evict entries repeatedly until we are strictly under the limit
+        while (this.ipRequests.size >= this.MAX_IP_ENTRIES) {
+            let evicted = false
+
+            // Try to evict the oldest non-blocked entry first (LRU strategy)
+            for (const [ip, data] of this.ipRequests.entries()) {
+                if (!data.blocked) {
+                    this.ipRequests.delete(ip)
+                    log.warning(
+                        `[Rate Limiter] Evicted IP ${ip} (size limit: ${this.MAX_IP_ENTRIES})`,
+                    )
+                    evicted = true
+                    break
+                }
+            }
+
+            if (evicted) {
+                continue
+            }
+
+            // Fallback: If all tracked entries are blocked, evict the oldest one
+            const oldestIp = this.ipRequests.keys().next().value
+            if (oldestIp) {
+                this.ipRequests.delete(oldestIp)
+                log.warning(
+                    `[Rate Limiter] All tracked IPs are blocked. Evicted oldest blocked IP ${oldestIp} to allow new connections.`,
+                )
+            } else {
+                // Nothing to evict; break to prevent infinite loop
+                break
+            }
+        }
     }
 
     private cleanup(): void {
@@ -257,6 +300,12 @@ export class RateLimiter {
             const now = Date.now()
             const method = this.getMethodFromRequest(req)
             const limit = this.getLimitForMethod(method)
+
+            // SECURITY: Enforce size limit before adding new IP (prevents memory exhaustion)
+            const isNewIP = !this.ipRequests.has(clientIP)
+            if (isNewIP) {
+                this.enforceSizeLimit()
+            }
 
             const ipData = this.ipRequests.get(clientIP) || {
                 count: 0,

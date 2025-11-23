@@ -32,26 +32,23 @@ export class PointSystem {
 
     /**
      * Get user's identities directly from the GCR
+     * PERFORMANCE: Single database query instead of 4 sequential queries (N+1 fix)
      */
     private async getUserIdentitiesFromGCR(userId: string): Promise<{
         linkedWallets: string[]
         linkedSocials: { twitter?: string; github?: string; discord?: string }
     }> {
-        const xmIdentities = await IdentityManager.getIdentities(userId)
-        const twitterIdentities = await IdentityManager.getWeb2Identities(
-            userId,
-            "twitter",
-        )
+        // PERFORMANCE FIX: Fetch all identities in a single query
+        const allIdentities = await IdentityManager.getIdentities(userId)
 
-        const githubIdentities = await IdentityManager.getWeb2Identities(
-            userId,
-            "github",
-        )
+        // Extract XM identities (was: separate query #1)
+        const xmIdentities = allIdentities
 
-        const discordIdentities = await IdentityManager.getWeb2Identities(
-            userId,
-            "discord",
-        )
+        // Extract Web2 identities from the single query result
+        // (was: separate queries #2, #3, #4)
+        const twitterIdentities = allIdentities?.web2?.twitter || []
+        const githubIdentities = allIdentities?.web2?.github || []
+        const discordIdentities = allIdentities?.web2?.discord || []
 
         const linkedWallets: string[] = []
 

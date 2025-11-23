@@ -678,3 +678,344 @@ export default class ServerHandlers {
         return { extra, requireReply, response }
     }
 }
+
+// SECTION Escrow RPC Handlers
+
+import GCREscrowRoutines from "@/libs/blockchain/gcr/gcr_routines/GCREscrowRoutines"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import Datasource from "@/model/datasource"
+import { ClaimableEscrow } from "@/model/entities/types/EscrowTypes"
+import { SUPPORTED_PLATFORMS } from "@/model/entities/types/IdentityTypes"
+import { In } from "typeorm"
+
+// Constants for pagination and validation
+const MAX_LIMIT = 1000 // Maximum records per request
+const MAX_ACCOUNTS_TO_SCAN = 50000 // Maximum accounts to scan in handleGetSentEscrows
+const MAX_PLATFORM_LENGTH = 20
+const MAX_USERNAME_LENGTH = 100
+const MAX_DEPOSITS_PER_ESCROW = 1000 // Align with consensus constant
+
+/**
+ * RPC: Get escrow balance for a specific social identity
+ */
+export async function handleGetEscrowBalance(params: {
+    platform: string
+    username: string
+}) {
+    const { platform, username } = params
+
+    // REVIEW: Input validation to prevent attacks
+    if (!platform || !username) {
+        throw new Error("Missing platform or username")
+    }
+
+    if (typeof platform !== "string" || typeof username !== "string") {
+        throw new Error("Platform and username must be strings")
+    }
+
+    if (platform.length > MAX_PLATFORM_LENGTH) {
+        throw new Error(
+            `Platform name too long (max ${MAX_PLATFORM_LENGTH} characters)`,
+        )
+    }
+
+    if (username.length > MAX_USERNAME_LENGTH) {
+        throw new Error(
+            `Username too long (max ${MAX_USERNAME_LENGTH} characters)`,
+        )
+    }
+
+    if (platform.includes(":") || username.includes(":")) {
+        throw new Error("Invalid characters in platform or username")
+    }
+
+    try {
+        const escrowAddress = GCREscrowRoutines.getEscrowAddress(
+            platform.trim(),
+            username.trim(),
+        )
+        const db = await Datasource.getInstance()
+        const repo = db.getDataSource().getRepository(GCRMain)
+
+        const account = await repo.findOneBy({ pubkey: escrowAddress })
+
+        if (!account || !account.escrows || !account.escrows[escrowAddress]) {
+            return {
+                escrowAddress,
+                exists: false,
+                balance: "0",
+                deposits: [],
+                expiryTimestamp: 0,
+                expired: false,
+            }
+        }
+
+        const escrow = account.escrows[escrowAddress]
+
+        return {
+            escrowAddress,
+            exists: true,
+            balance: escrow.balance.toString(),
+            deposits: escrow.deposits.map(d => ({
+                from: d.from,
+                amount: d.amount.toString(),
+                timestamp: d.timestamp,
+                message: d.message,
+            })),
+            expiryTimestamp: escrow.expiryTimestamp,
+            expired: Date.now() > escrow.expiryTimestamp,
+        }
+    } catch (error) {
+        log.error(
+            `[handleGetEscrowBalance] Failed for ${platform}:${username} - ${error}`,
+        )
+        throw new Error("Failed to retrieve escrow balance")
+    }
+}
+
+/**
+ * RPC: Get all escrows claimable by a Demos address
+ *
+ * Optimized to use batch queries instead of N+1 pattern.
+ */
+export async function handleGetClaimableEscrows(params: {
+    address: string
+}): Promise<ClaimableEscrow[]> {
+    const { address } = params
+
+    if (!address) {
+        throw new Error("Missing address")
+    }
+
+    try {
+        const db = await Datasource.getInstance()
+        const repo = db.getDataSource().getRepository(GCRMain)
+
+        const account = await repo.findOneBy({ pubkey: address })
+
+        if (!account || !account.identities || !account.identities.web2) {
+            return []
+        }
+
+    // Collect all escrow addresses first (avoid N+1 queries)
+    const escrowAddressMap: Map<
+        string,
+        { platform: string; username: string }
+    > = new Map()
+
+    for (const [platform, identities] of Object.entries(
+        account.identities.web2,
+    )) {
+        if (!Array.isArray(identities)) continue
+
+        for (const identity of identities) {
+            const username = identity.username
+            const escrowAddress = GCREscrowRoutines.getEscrowAddress(
+                platform,
+                username,
+            )
+            escrowAddressMap.set(escrowAddress, { platform, username })
+        }
+    }
+
+    // Batch query all escrow accounts at once (fixes N+1 problem)
+    const escrowAddresses = Array.from(escrowAddressMap.keys())
+
+    if (escrowAddresses.length === 0) {
+        return []
+    }
+
+    const escrowAccounts = await repo.find({
+        where: { pubkey: In(escrowAddresses) },
+    })
+
+    // REVIEW: Helper function to validate platform type
+    const isValidPlatform = (
+        platform: string,
+    ): platform is "twitter" | "github" | "telegram" | "discord" => {
+        return SUPPORTED_PLATFORMS.includes(platform as any)
+    }
+
+    // Build claimable array from batched results
+    const claimable: ClaimableEscrow[] = []
+
+    for (const escrowAccount of escrowAccounts) {
+        const escrowAddress = escrowAccount.pubkey
+
+        if (escrowAccount.escrows?.[escrowAddress]) {
+            const escrow = escrowAccount.escrows[escrowAddress]
+            const identity = escrowAddressMap.get(escrowAddress)
+            if (!identity) continue
+
+            // Skip claimed escrows
+            if (escrow.claimed) {
+                continue
+            }
+
+            // REVIEW: Skip invalid platforms instead of type assertion
+            if (!isValidPlatform(identity.platform)) {
+                continue
+            }
+
+            claimable.push({
+                platform: identity.platform,
+                username: identity.username,
+                balance: escrow.balance.toString(),
+                escrowAddress,
+                deposits: escrow.deposits.map(d => ({
+                    from: d.from,
+                    amount: d.amount.toString(),
+                    timestamp: d.timestamp,
+                    message: d.message,
+                })),
+                expiryTimestamp: escrow.expiryTimestamp,
+                expired: Date.now() > escrow.expiryTimestamp,
+            })
+        }
+    }
+
+        return claimable
+    } catch (error) {
+        log.error(
+            `[handleGetClaimableEscrows] Failed for address ${address} - ${error}`,
+        )
+        throw new Error("Failed to retrieve claimable escrows")
+    }
+}
+
+/**
+ * RPC: Get all escrows created by a specific address (sender)
+ *
+ * PERFORMANCE WARNING: This endpoint performs a full table scan.
+ * With 10k+ accounts, queries may take 5-10 seconds or timeout.
+ * Recommended: CREATE INDEX idx_gcr_escrows ON gcr_main USING gin (escrows);
+ */
+export async function handleGetSentEscrows(params: {
+    sender: string
+    limit?: number
+    offset?: number
+}) {
+    const { sender, limit = 100, offset = 0 } = params
+
+    if (!sender) {
+        throw new Error("Missing sender address")
+    }
+
+    try {
+        const db = await Datasource.getInstance()
+        const repo = db.getDataSource().getRepository(GCRMain)
+
+        // REVIEW: Cap limit to MAX_LIMIT to prevent DoS
+        const normalizedLimit = Math.min(
+            limit && limit > 0 ? limit : 100,
+            MAX_LIMIT,
+        )
+        const normalizedOffset = offset && offset > 0 ? offset : 0
+
+        // REVIEW: Capture timestamp once for consistency
+        const nowTimestamp = Date.now()
+        const sentEscrows = []
+        let skippedMatches = 0
+        const batchSize = 500
+        let accountOffset = 0
+
+        // REVIEW: Add max scan limit to prevent unbounded loop
+        while (
+            sentEscrows.length < normalizedLimit &&
+            accountOffset < MAX_ACCOUNTS_TO_SCAN
+        ) {
+            const accounts = await repo.find({
+                order: { pubkey: "ASC" },
+                take: batchSize,
+                skip: accountOffset,
+            })
+
+            if (accounts.length === 0) {
+                break
+            }
+
+            accountOffset += accounts.length
+
+            for (const account of accounts) {
+                if (!account.escrows) continue
+
+                for (const [escrowAddr, escrow] of Object.entries(
+                    account.escrows,
+                )) {
+                    const senderDeposits =
+                        escrow.deposits?.filter(d => d.from === sender) || []
+
+                    if (senderDeposits.length === 0) {
+                        continue
+                    }
+
+                    if (
+                        !escrow.claimableBy?.platform ||
+                        !escrow.claimableBy?.username
+                    ) {
+                        continue
+                    }
+
+                    // REVIEW: Add error handling for corrupted deposit amounts
+                    const totalSent = senderDeposits
+                        .slice(0, MAX_DEPOSITS_PER_ESCROW) // Cap iteration to prevent DoS
+                        .reduce((sum, d) => {
+                            if (!d.amount || typeof d.amount !== "string") {
+                                log.error(
+                                    `[handleGetSentEscrows] Missing or invalid amount in deposit from ${d.from}`,
+                                )
+                                return sum
+                            }
+
+                            try {
+                                return sum + BigInt(d.amount)
+                            } catch (error) {
+                                log.error(
+                                    `[handleGetSentEscrows] Cannot parse amount "${d.amount}" as BigInt. ` +
+                                        `From: ${d.from}, Timestamp: ${d.timestamp}. Skipping corrupted deposit.`,
+                                )
+                                return sum
+                            }
+                        }, 0n)
+
+                    const record = {
+                        platform: escrow.claimableBy.platform,
+                        username: escrow.claimableBy.username,
+                        escrowAddress: escrowAddr,
+                        totalSent: totalSent.toString(),
+                        deposits: senderDeposits.map(d => ({
+                            amount: d.amount.toString(),
+                            timestamp: d.timestamp,
+                            message: d.message,
+                        })),
+                        totalEscrowBalance: escrow.balance.toString(),
+                        expired: nowTimestamp > escrow.expiryTimestamp,
+                        expiryTimestamp: escrow.expiryTimestamp,
+                    }
+
+                    if (skippedMatches < normalizedOffset) {
+                        skippedMatches += 1
+                        continue
+                    }
+
+                    sentEscrows.push(record)
+
+                    if (sentEscrows.length >= normalizedLimit) {
+                        break
+                    }
+                }
+
+                if (sentEscrows.length >= normalizedLimit) {
+                    break
+                }
+            }
+        }
+
+        return sentEscrows
+    } catch (error) {
+        log.error(
+            `[handleGetSentEscrows] Failed for sender ${sender} - ${error}`,
+        )
+        throw new Error("Failed to retrieve sent escrows")
+    }
+}
