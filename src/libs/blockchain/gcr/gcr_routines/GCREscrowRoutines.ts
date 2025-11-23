@@ -78,8 +78,8 @@ export default class GCREscrowRoutines {
             )
         }
 
-        // Normalize to lowercase and Unicode NFKC to prevent hash collision attacks
-        const identity = `${platform}:${username}`.toLowerCase().normalize("NFKC")
+        // Trim, normalize to lowercase and Unicode NFKC to prevent hash collision attacks
+        const identity = `${platform.trim()}:${username.trim()}`.toLowerCase().normalize("NFKC")
         // Use SHA3-256 for deterministic address generation
         return Hashing.sha3_256(identity)
     }
