@@ -354,18 +354,6 @@ export default class GCREscrowRoutines {
         // REVIEW: Capture timestamp once for consistency across the operation
         const currentTimestamp = Date.now()
 
-        // REVIEW: Check flagged status EARLY to avoid wasting resources
-        const claimantAccount = await ensureGCRForUser(claimant)
-
-        // SECURITY: Prevent flagged/banned accounts from claiming escrow funds
-        if (claimantAccount.flagged) {
-            return {
-                success: false,
-                message:
-                    "Account is flagged and cannot claim escrow funds. Please contact support.",
-            }
-        }
-
         // CRITICAL SECURITY CHECK: Verify claimant has proven ownership of social identity
         // This uses the existing Web2 identity verification system (GCRIdentityRoutines)
         // All validators independently check this condition
@@ -480,6 +468,14 @@ export default class GCREscrowRoutines {
 
                 if (!lockedClaimantAccount) {
                     throw new Error("Claimant account not found")
+                }
+
+                // SECURITY: Prevent flagged/banned accounts from claiming escrow funds
+                // REVIEW: Check INSIDE transaction after lock to prevent TOCTOU race condition
+                if (lockedClaimantAccount.flagged) {
+                    throw new Error(
+                        "Account is flagged and cannot claim escrow funds. Please contact support.",
+                    )
                 }
 
                 // REVIEW: Prevent balance overflow on claim (same as deposit check)
