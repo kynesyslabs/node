@@ -550,6 +550,7 @@ export default class GCRIdentityRoutines {
         if (
             !payload.domain ||
             !payload.signingAddress ||
+            !payload.signatureType ||
             !payload.signature ||
             !payload.publicKey ||
             !payload.timestamp ||

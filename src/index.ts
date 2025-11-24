@@ -370,7 +370,7 @@ async function main() {
         }
         term.yellow("[MAIN] ✅ Starting the background loop\n")
         // ANCHOR Starting the main loop
-        // mainLoop() // Is an async function so running without waiting send that to the background
+        mainLoop() // Is an async function so running without waiting send that to the background
     }
 }
 

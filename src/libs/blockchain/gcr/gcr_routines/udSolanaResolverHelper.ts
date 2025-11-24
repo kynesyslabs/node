@@ -257,15 +257,17 @@ export class SolanaDomainResolver {
     recordKey: string,
     version = this.defaultVersion,
   ): PublicKey {
+    const bigIntRecordVersion = BigInt(recordVersion)
+
     // Validate recordVersion before BigInt conversion to prevent TypeError
-    if (!Number.isInteger(recordVersion) || recordVersion < 0) {
+    if (bigIntRecordVersion < BigInt(0)) {
       throw new Error(
-        `Invalid record version: ${recordVersion}. Must be a non-negative integer.`,
+        `Invalid record version: ${bigIntRecordVersion}. Must be a non-negative integer.`,
       )
     }
 
     const versionBuffer = Buffer.alloc(8)
-    versionBuffer.writeBigUInt64LE(BigInt(recordVersion.toString()))
+    versionBuffer.writeBigUInt64LE(bigIntRecordVersion)
 
     const [userRecordPda] = PublicKey.findProgramAddressSync(
       [

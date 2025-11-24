@@ -246,7 +246,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             response.result = tweet ? 200 : 400
             if (tweet) {
                 const data = {
-                    id: tweet.id,
+                    id: (tweet as any).id,
                     created_at: tweet.created_at,
                     text: tweet.text,
                     username: tweet.author.screen_name,
@@ -265,7 +265,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             break
         }
 
-        case "resolveWeb3Domain": {
+        case "resolveUdDomain": {
             try {
                 const res = await UDIdentityManager.resolveUDDomain(data.domain)
 
