@@ -1,8 +1,10 @@
 import express from "express"
+import helmet from "helmet"
 
 import { ActivityPubStorage } from "./fedistore"
 
 const app = express()
+app.use(helmet())
 
 let connected = false
 let database: ActivityPubStorage
