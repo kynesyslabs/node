@@ -1,17 +1,19 @@
-import ensureGCRForUser from "./ensureGCRForUser"
+import { ethers } from "ethers"
+
 import log from "@/utilities/logger"
-import { UDIdentityAssignPayload } from "@kynesyslabs/demosdk/build/types/abstraction"
+import IdentityManager from "./identityManager"
+import ensureGCRForUser from "./ensureGCRForUser"
+import { detectSignatureType } from "./signatureDetector"
+import { SolanaDomainResolver } from "./udSolanaResolverHelper"
+import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
+
 import {
     EVMDomainResolution,
     SignableAddress,
+    UDIdentityAssignPayload,
     UnifiedDomainResolution,
 } from "@kynesyslabs/demosdk/types"
-import { ethers } from "ethers"
-import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
-import { detectSignatureType } from "./signatureDetector"
-import { SolanaDomainResolver } from "./udSolanaResolverHelper"
-import nacl from "tweetnacl"
-import bs58 from "bs58"
+import { SOLANA } from "@kynesyslabs/demosdk/xmcore"
 
 /**
  * UDIdentityManager - Handles Unstoppable Domains identity verification and storage
@@ -391,8 +393,10 @@ export class UDIdentityManager {
                 `Verifying UD domain ${domain}: signing_address=${signingAddress}, signature_type=${signatureType}, network=${resolution.network}, authorized_addresses=${resolution.authorizedAddresses.length}`,
             )
 
-            const isOwner =
-                signingAddress === resolution.metadata[signatureType].owner
+            const isOwner = !!(
+                signingAddress ===
+                (resolution.metadata[signatureType] || {}).owner
+            )
 
             // Step 2: Check if domain has any authorized addresses
             if (resolution.authorizedAddresses.length === 0 && !isOwner) {
@@ -429,7 +433,7 @@ export class UDIdentityManager {
                 matchingAddress = {
                     address: signingAddress,
                     signatureType: signatureType,
-                    recordKey: "",
+                    recordKey: "domain.owner",
                 }
             } else {
                 matchingAddress = resolution.authorizedAddresses.find(auth => {
@@ -510,9 +514,20 @@ export class UDIdentityManager {
                 `UD identity verified for domain ${domain}: signed by ${matchingAddress.address} (${matchingAddress.signatureType}) via ${resolution.network} ${resolution.registryType} registry`,
             )
 
+            const isOwnerLinked = await this.checkOwnerLinkedWallets(
+                sender,
+                domain,
+                signingAddress,
+                resolution,
+            )
+
             return {
                 success: true,
-                message: `Verified ownership of ${domain} via ${matchingAddress.signatureType} signature from ${matchingAddress.recordKey}`,
+                message:
+                    `Verified ownership of ${domain} via ${matchingAddress.signatureType} signature from ${matchingAddress.recordKey}. ` +
+                    (!isOwnerLinked
+                        ? "Domain not owned by any of the linked wallets, won't award points"
+                        : "Awarding points"),
             }
         } catch (error) {
             log.error(`Error verifying UD payload: ${error}`)
@@ -554,70 +569,103 @@ export class UDIdentityManager {
                     }
                 }
 
-                log.debug(`EVM signature verified: ${recoveredAddress}`)
                 return { success: true, message: "EVM signature valid" }
-            } else if (authorizedAddress.signatureType === "solana") {
+            }
+
+            if (authorizedAddress.signatureType === "solana") {
                 // Solana signature verification using nacl
                 // Solana uses base58 encoding for addresses and signatures
-                try {
-                    // Decode base58 signature and public key to Uint8Array
-                    const signatureBytes = bs58.decode(signature)
-                    const messageBytes = new TextEncoder().encode(signedData)
-                    const publicKeyBytes = bs58.decode(
-                        authorizedAddress.address,
-                    )
+                const solana = new SOLANA(null)
+                const isValid = await solana.verifyMessage(
+                    signedData,
+                    signature,
+                    authorizedAddress.address,
+                )
 
-                    // Validate byte lengths for Solana
-                    if (signatureBytes.length !== 64) {
-                        return {
-                            success: false,
-                            message: `Invalid Solana signature length: expected 64 bytes, got ${signatureBytes.length}`,
-                        }
-                    }
-                    if (publicKeyBytes.length !== 32) {
-                        return {
-                            success: false,
-                            message: `Invalid Solana public key length: expected 32 bytes, got ${publicKeyBytes.length}`,
-                        }
-                    }
-
-                    // Verify signature using nacl
-                    const isValid = nacl.sign.detached.verify(
-                        messageBytes,
-                        signatureBytes,
-                        publicKeyBytes,
-                    )
-
-                    if (!isValid) {
-                        return {
-                            success: false,
-                            message: `Solana signature verification failed for address ${authorizedAddress.address}`,
-                        }
-                    }
-
-                    log.debug(
-                        `Solana signature verified: ${authorizedAddress.address}`,
-                    )
-                    return { success: true, message: "Solana signature valid" }
-                } catch (error) {
+                if (!isValid) {
                     return {
                         success: false,
-                        message: `Solana signature format error: ${error}`,
+                        message: `Solana signature verification failed for address ${authorizedAddress.address}`,
                     }
                 }
-            } else {
-                return {
-                    success: false,
-                    message: `Unsupported signature type: ${authorizedAddress.signatureType}`,
-                }
+
+                return { success: true, message: "Solana signature valid" }
+            }
+
+            return {
+                success: false,
+                message: `Unsupported signature type: ${authorizedAddress.signatureType}`,
             }
         } catch (error) {
-            log.error(`Error verifying signature: ${error}`)
+            log.error(`Error verifying UD domain signature: ${error}`)
             return {
                 success: false,
                 message: `Signature verification error: ${error}`,
             }
         }
+    }
+
+    /**
+     * Check if the owner is linked to the signer
+     *
+     * @param address - The Demos address
+     * @param domain - The UD domain
+     * @param resolutionData - The resolution data (optional)
+     * @returns True if the owner is linked to the signer, false otherwise
+     */
+    static async checkOwnerLinkedWallets(
+        address: string,
+        domain: string,
+        signer: string,
+        resolutionData?: UnifiedDomainResolution,
+        identities?: Record<string, Record<string, Record<string, any>[]>>,
+    ): Promise<boolean> {
+        if (!resolutionData) {
+            resolutionData = await this.resolveUDDomain(domain)
+        }
+
+        if (!identities) {
+            identities = await IdentityManager.getIdentities(address, "xm")
+        }
+
+        const accounts: Set<string> = new Set()
+
+        // TODO: Refactor after updating GCR xm map to use "chain.subchain" format
+        for (const chainType in identities) {
+            for (const network in identities[chainType]) {
+                if (network !== "mainnet") {
+                    continue
+                }
+
+                for (const identity of identities[chainType][network]) {
+                    if (identity.address) {
+                        accounts.add(identity.address)
+                    }
+                }
+            }
+        }
+
+        // INFO: Check if a connected record is connected to demos account
+        for (const address of resolutionData.authorizedAddresses) {
+            if (accounts.has(address.address)) {
+                return true
+            }
+        }
+
+        const network = detectSignatureType(signer)
+        if (!network) {
+            throw new Error("Invalid signer address format")
+        }
+
+        // INFO: Return true if the domain owner is linked
+        if (
+            resolutionData.metadata[network].owner === signer &&
+            accounts.has(signer)
+        ) {
+            return true
+        }
+
+        return false
     }
 
     /**

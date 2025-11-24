@@ -141,11 +141,13 @@ export class IncentiveManager {
     static async udDomainLinked(
         userId: string,
         domain: string,
+        signingAddress: string,
         referralCode?: string,
     ): Promise<RPCResponse> {
         return await this.pointSystem.awardUdDomainPoints(
             userId,
             domain,
+            signingAddress,
             referralCode,
         )
     }

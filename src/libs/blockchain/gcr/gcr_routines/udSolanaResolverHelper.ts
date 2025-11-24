@@ -50,6 +50,8 @@ export interface DomainResolutionResult {
   recordsVersion?: number;
   /** Array of record resolution results */
   records: RecordResult[];
+  /** The owner of the domain */
+  owner?: string;
   /** Any error that occurred during resolution */
   error?: string;
 }
@@ -174,7 +176,7 @@ export class SolanaDomainResolver {
    */
   constructor(config: ResolverConfig = {}) {
     this.config = {
-      rpcUrl: config.rpcUrl || process.env.SOLANA_RPC || clusterApiUrl("mainnet-beta"),
+      rpcUrl: config.rpcUrl || process.env.SOLANA_RPC || "https://britta-qyzo1g-fast-mainnet.helius-rpc.com/",
       commitment: config.commitment || "confirmed",
     }
     this.unsProgramId = new PublicKey(UnsSolIdl.address)

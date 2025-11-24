@@ -1004,6 +1004,7 @@ export class PointSystem {
     async awardUdDomainPoints(
         userId: string,
         domain: string,
+        signingAddress: string,
         referralCode?: string,
     ): Promise<RPCResponse> {
         try {
@@ -1043,7 +1044,8 @@ export class PointSystem {
             // SECURITY: Verify domain exists in GCR identities to prevent race conditions
             // This prevents concurrent transactions from awarding points before domain is removed
             const domainInIdentities = account.identities.ud?.some(
-                (id: SavedUdIdentity) => id.domain.toLowerCase() === normalizedDomain,
+                (id: SavedUdIdentity) =>
+                    id.domain.toLowerCase() === normalizedDomain,
             )
             if (!domainInIdentities) {
                 return {
@@ -1058,42 +1060,13 @@ export class PointSystem {
                 }
             }
 
-            // SECURITY: Verify domain ownership before allowing points award
-            const { linkedWallets } = await this.getUserIdentitiesFromGCR(userId)
-
-            // Resolve domain to get current authorized addresses from blockchain
-            let domainResolution
-            try {
-                domainResolution = await UDIdentityManager.resolveUDDomain(normalizedDomain)
-            } catch (error) {
-                log.warning(`Failed to resolve UD domain ${normalizedDomain} during award: ${error}`)
-                return {
-                    result: 400,
-                    response: {
-                        pointsAwarded: 0,
-                        totalPoints: userPointsWithIdentities.totalPoints,
-                        message: `Cannot verify ownership: domain ${normalizedDomain} is not resolvable`,
-                    },
-                    require_reply: false,
-                    extra: { error: error instanceof Error ? error.message : String(error) },
-                }
-            }
-
-            // Extract wallet addresses from linkedWallets (format: "chain:address")
-            const userWalletAddresses = linkedWallets.map(wallet => {
-                const parts = wallet.split(":")
-                return parts.length > 1 ? parts[1] : wallet
-            })
-
-            // Check if any user wallet matches an authorized address for the domain
-            const isOwner = domainResolution.authorizedAddresses.some(authAddr => {
-                return userWalletAddresses.some(userAddr => {
-                    if (authAddr.signatureType === "solana") {
-                        return authAddr.address === userAddr
-                    }
-                    return authAddr.address.toLowerCase() === userAddr.toLowerCase()
-                })
-            })
+            const isOwner = await UDIdentityManager.checkOwnerLinkedWallets(
+                userId,
+                normalizedDomain,
+                signingAddress,
+                null,
+                account.identities.xm,
+            )
 
             if (!isOwner) {
                 return {
@@ -1125,7 +1098,9 @@ export class PointSystem {
                 response: {
                     pointsAwarded: pointValue,
                     totalPoints: updatedPoints.totalPoints,
-                    message: `Points awarded for linking ${isDemosDomain ? ".demos" : "UD"} domain`,
+                    message: `Points awarded for linking ${
+                        isDemosDomain ? ".demos" : "UD"
+                    } domain`,
                 },
                 require_reply: false,
                 extra: {},
@@ -1172,12 +1147,12 @@ export class PointSystem {
             // Check if user has points for this domain to deduct
             const account = await ensureGCRForUser(userId)
             const udDomains = account.points.breakdown?.udDomains || {}
-            const hasDomainPoints = normalizedDomain in udDomains && udDomains[normalizedDomain] > 0
+            const hasDomainPoints =
+                normalizedDomain in udDomains && udDomains[normalizedDomain] > 0
 
             if (!hasDomainPoints) {
-                const userPointsWithIdentities = await this.getUserPointsInternal(
-                    userId,
-                )
+                const userPointsWithIdentities =
+                    await this.getUserPointsInternal(userId)
                 return {
                     result: 200,
                     response: {
@@ -1191,7 +1166,12 @@ export class PointSystem {
             }
 
             // Deduct points by updating the GCR
-            await this.addPointsToGCR(userId, -pointValue, "udDomains", normalizedDomain)
+            await this.addPointsToGCR(
+                userId,
+                -pointValue,
+                "udDomains",
+                normalizedDomain,
+            )
 
             // Get updated points
             const updatedPoints = await this.getUserPointsInternal(userId)
@@ -1201,7 +1181,9 @@ export class PointSystem {
                 response: {
                     pointsDeducted: pointValue,
                     totalPoints: updatedPoints.totalPoints,
-                    message: `Points deducted for unlinking ${isDemosDomain ? ".demos" : "UD"} domain`,
+                    message: `Points deducted for unlinking ${
+                        isDemosDomain ? ".demos" : "UD"
+                    } domain`,
                 },
                 require_reply: false,
                 extra: {},

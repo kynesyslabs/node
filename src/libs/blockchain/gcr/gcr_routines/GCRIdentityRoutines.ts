@@ -544,7 +544,6 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        simulate = false
         const payload = editOperation.data as UDIdentityAssignPayload["payload"]
 
         // REVIEW: Validate required fields presence
@@ -625,18 +624,17 @@ export default class GCRIdentityRoutines {
                 gcrMainRepository,
                 editOperation.account,
             )
-            console.log("isFirst: ", isFirst)
 
             /**
              * Award incentive points for UD domain linking
              */
             if (isFirst) {
-                const res = await IncentiveManager.udDomainLinked(
+                await IncentiveManager.udDomainLinked(
                     accountGCR.pubkey,
                     payload.domain,
+                    payload.signingAddress,
                     editOperation.referralCode,
                 )
-                log.debug("points award res: " + JSON.stringify(res, null, 2))
             }
         }
 
