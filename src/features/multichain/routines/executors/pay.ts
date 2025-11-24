@@ -135,7 +135,7 @@ async function genericJsonRpcPay(
         let signedTx = operation.task.signedPayloads[0]
 
         signedTx = validateIfUint8Array(signedTx)
-        
+
         // INFO: Send payload and return the result
         const result = await instance.sendTransaction(signedTx)
         console.log("[XMScript Parser] Generic JSON RPC Pay: result: ")
@@ -223,22 +223,49 @@ async function handleXRPLPay(
     console.log("[XMScript Parser] Ripple Pay: connected to the XRP network")
 
     try {
-        console.log("[XMScript Parser]: debugging operation")
-        console.log(operation.task)
-        console.log(JSON.stringify(operation.task))
-        const result = await xrplInstance.sendTransaction(
-            operation.task.signedPayloads[0],
-        )
-        console.log("[XMScript Parser] Ripple Pay: result: ")
-        console.log(result)
+        const signedTx = operation.task.signedPayloads[0]
 
-        return result
-    } catch (error) {
-        console.log("[XMScript Parser] Ripple Pay: error: ")
-        console.log(error)
+        // Submit transaction and wait for validation
+        const res = await xrplInstance.provider.submitAndWait(signedTx.tx_blob)
+
+        const txResult = res.result.meta?.TransactionResult || res.result.engine_result
+        const txHash = res.result.hash
+
+        // Handle successful transactions
+        if (txResult === 'tesSUCCESS') {
+            return {
+                result: "success",
+                hash: txHash,
+            }
+        }
+
+        // Handle already submitted or queued transactions
+        if (txResult === 'temREDUNDANT' || txResult === 'terQUEUED') {
+            return {
+                result: "success",
+                hash: signedTx.hash || txHash,
+            }
+        }
+
+        // Handle applied transactions (tec codes indicate transaction was applied but claimed a fee)
+        if (txResult?.startsWith('tec')) {
+            return {
+                result: "success",
+                hash: txHash,
+            }
+        }
+
+        // Transaction failed
         return {
             result: "error",
-            error: error,
+            error: `${txResult}: ${res.result.engine_result_message || 'Unknown error'}`,
+            hash: txHash,
+        }
+    } catch (error) {
+        console.log("[XMScript Parser] Ripple Pay: error:", error)
+        return {
+            result: "error",
+            error: error.toString(),
         }
     }
 }
