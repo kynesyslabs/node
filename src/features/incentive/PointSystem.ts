@@ -4,10 +4,12 @@ import Datasource from "../../model/datasource"
 import HandleGCR from "@/libs/blockchain/gcr/handleGCR"
 import { RPCResponse, Web2GCRData } from "@kynesyslabs/demosdk/types"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import { UserPoints } from "@kynesyslabs/demosdk/abstraction"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Twitter } from "@/libs/identity/tools/twitter"
+import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentityManager"
+import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
+import { UserPoints } from "@kynesyslabs/demosdk/abstraction"
 
 const pointValues = {
     LINK_WEB3_WALLET: 0.5,
@@ -16,6 +18,8 @@ const pointValues = {
     LINK_TELEGRAM: 1,
     FOLLOW_DEMOS: 1,
     LINK_DISCORD: 1,
+    LINK_UD_DOMAIN_DEMOS: 3,
+    LINK_UD_DOMAIN: 1,
 }
 
 export class PointSystem {
@@ -140,6 +144,7 @@ export class PointSystem {
                     discord:
                         account.points.breakdown?.socialAccounts?.discord ?? 0,
                 },
+                udDomains: account.points.breakdown?.udDomains || {},
                 referrals: account.points.breakdown?.referrals || 0,
                 demosFollow: account.points.breakdown?.demosFollow || 0,
             },
@@ -157,7 +162,7 @@ export class PointSystem {
     private async addPointsToGCR(
         userId: string,
         points: number,
-        type: "web3Wallets" | "socialAccounts",
+        type: "web3Wallets" | "socialAccounts" | "udDomains",
         platform: string,
         referralCode?: string,
         twitterUserId?: string,
@@ -196,6 +201,15 @@ export class PointSystem {
                 account.points.breakdown.web3Wallets[platform] || 0
             account.points.breakdown.web3Wallets[platform] =
                 oldChainPoints + points
+        } else if (type === "udDomains") {
+            // Explicitly initialize udDomains if undefined
+            if (!account.points.breakdown.udDomains) {
+                account.points.breakdown.udDomains = {}
+            }
+            const oldDomainPoints =
+                account.points.breakdown.udDomains[platform] || 0
+            account.points.breakdown.udDomains[platform] =
+                oldDomainPoints + points
         }
         account.points.lastUpdated = new Date()
 
@@ -981,6 +995,213 @@ export class PointSystem {
             return {
                 result: 500,
                 response: "Error deducting points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Award points for linking an Unstoppable Domain
+     * @param userId The user's Demos address
+     * @param domain The UD domain (e.g., "john.crypto", "alice.demos")
+     * @param referralCode Optional referral code
+     * @returns RPCResponse
+     */
+    async awardUdDomainPoints(
+        userId: string,
+        domain: string,
+        signingAddress: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        try {
+            // Normalize domain to lowercase for case-insensitive comparison
+            // SECURITY: Prevents point farming by linking same domain with different cases
+            const normalizedDomain = domain.toLowerCase()
+
+            // Determine point value based on TLD
+            const isDemosDomain = normalizedDomain.endsWith(".demos")
+            const pointValue = isDemosDomain
+                ? pointValues.LINK_UD_DOMAIN_DEMOS
+                : pointValues.LINK_UD_DOMAIN
+
+            // Get current points and check for duplicate domain linking
+            const userPointsWithIdentities = await this.getUserPointsInternal(
+                userId,
+            )
+
+            // Check if this specific domain is already linked
+            const account = await ensureGCRForUser(userId)
+            const udDomains = account.points.breakdown?.udDomains || {}
+            const domainAlreadyLinked = normalizedDomain in udDomains
+
+            if (domainAlreadyLinked) {
+                return {
+                    result: 200,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "UD domain points already awarded",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            // SECURITY: Verify domain exists in GCR identities to prevent race conditions
+            // This prevents concurrent transactions from awarding points before domain is removed
+            const domainInIdentities = account.identities.ud?.some(
+                (id: SavedUdIdentity) =>
+                    id.domain.toLowerCase() === normalizedDomain,
+            )
+            if (!domainInIdentities) {
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: `Cannot award points: domain ${normalizedDomain} not found in GCR identities`,
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            const isOwner = await UDIdentityManager.checkOwnerLinkedWallets(
+                userId,
+                normalizedDomain,
+                signingAddress,
+                null,
+                account.identities.xm,
+            )
+
+            if (!isOwner) {
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: `Cannot award points: domain ${normalizedDomain} is not owned by any of your linked wallets`,
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            // Award points by updating the GCR
+            await this.addPointsToGCR(
+                userId,
+                pointValue,
+                "udDomains",
+                normalizedDomain,
+                referralCode,
+            )
+
+            // Get updated points
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsAwarded: pointValue,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: `Points awarded for linking ${
+                        isDemosDomain ? ".demos" : "UD"
+                    } domain`,
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error awarding UD domain points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Deduct points for unlinking an Unstoppable Domain
+     * @param userId The user's Demos address
+     * @param domain The UD domain (e.g., "john.crypto", "alice.demos")
+     * @returns RPCResponse
+     */
+    async deductUdDomainPoints(
+        userId: string,
+        domain: string,
+    ): Promise<RPCResponse> {
+        try {
+            // Normalize domain to lowercase for case-insensitive comparison
+            // SECURITY: Ensures consistent lookup regardless of input case
+            const normalizedDomain = domain.toLowerCase()
+
+            // Determine point value based on TLD
+            const isDemosDomain = normalizedDomain.endsWith(".demos")
+            const pointValue = isDemosDomain
+                ? pointValues.LINK_UD_DOMAIN_DEMOS
+                : pointValues.LINK_UD_DOMAIN
+
+            // PERFORMANCE OPTIMIZATION: Skip ownership verification on unlinking
+            // Domain removal from GCR identities already requires ownership proof
+            // via signature verification in GCRIdentityRoutines, making this redundant.
+            // This saves ~200-500ms per unlink operation (blockchain resolution time).
+
+            // Check if user has points for this domain to deduct
+            const account = await ensureGCRForUser(userId)
+            const udDomains = account.points.breakdown?.udDomains || {}
+            const hasDomainPoints =
+                normalizedDomain in udDomains && udDomains[normalizedDomain] > 0
+
+            if (!hasDomainPoints) {
+                const userPointsWithIdentities =
+                    await this.getUserPointsInternal(userId)
+                return {
+                    result: 200,
+                    response: {
+                        pointsDeducted: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "No UD domain points to deduct",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            // Deduct points by updating the GCR
+            await this.addPointsToGCR(
+                userId,
+                -pointValue,
+                "udDomains",
+                normalizedDomain,
+            )
+
+            // Get updated points
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsDeducted: pointValue,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: `Points deducted for unlinking ${
+                        isDemosDomain ? ".demos" : "UD"
+                    } domain`,
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error deducting UD domain points",
                 require_reply: false,
                 extra: {
                     error:

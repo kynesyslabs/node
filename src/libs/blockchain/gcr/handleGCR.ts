@@ -498,6 +498,7 @@ export default class HandleGCR {
             xm: {},
             web2: {},
             pqc: {},
+            ud: [],
         }
 
         account.assignedTxs = []

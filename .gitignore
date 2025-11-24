@@ -149,6 +149,11 @@ docs/src
 src/features/bridges/EVMSmartContract/docs
 src/features/bridges/LiquidityTank_UserGuide.md
 local_tests
+docs/storage_features
+temp
+STORAGE_PROGRAMS_SPEC.md
+local_tests/
+claudedocs
 claudedocs
 docs/storage_features
 temp
