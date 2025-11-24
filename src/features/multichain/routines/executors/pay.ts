@@ -230,8 +230,9 @@ async function handleXRPLPay(
 
         const txResult = res.result.meta?.TransactionResult || res.result.engine_result
         const txHash = res.result.hash
+        const resultMessage = res.result.engine_result_message || ''
 
-        // Handle successful transactions
+        // Only tesSUCCESS indicates actual success
         if (txResult === 'tesSUCCESS') {
             return {
                 result: "success",
@@ -239,27 +240,56 @@ async function handleXRPLPay(
             }
         }
 
-        // Handle already submitted or queued transactions
-        if (txResult === 'temREDUNDANT' || txResult === 'terQUEUED') {
-            return {
-                result: "success",
-                hash: signedTx.hash || txHash,
-            }
-        }
-
-        // Handle applied transactions (tec codes indicate transaction was applied but claimed a fee)
+        // tec* codes: Transaction failed but fee was charged
+        // The transaction was applied to ledger but did not achieve its intended purpose
+        // Example: tecUNFUNDED_PAYMENT, tecINSUF_FEE, tecPATH_DRY
         if (txResult?.startsWith('tec')) {
             return {
-                result: "success",
+                result: "error",
+                error: `Transaction failed (fee charged): ${txResult} - ${resultMessage}`,
                 hash: txHash,
+                extra: { code: txResult, validated: res.result.validated }
             }
         }
 
-        // Transaction failed
+        // tem* codes: Malformed transaction (not applied to ledger)
+        // Example: temREDUNDANT (sending to self), temBAD_FEE, temINVALID
+        if (txResult?.startsWith('tem')) {
+            return {
+                result: "error",
+                error: `Malformed transaction: ${txResult} - ${resultMessage}`,
+                hash: txHash,
+                extra: { code: txResult, validated: res.result.validated }
+            }
+        }
+
+        // ter* codes: Provisional/retryable result (not final)
+        // Example: terQUEUED (transaction queued for future ledger)
+        if (txResult?.startsWith('ter')) {
+            return {
+                result: "error",
+                error: `Transaction provisional/queued: ${txResult} - ${resultMessage}`,
+                hash: txHash,
+                extra: { code: txResult, validated: res.result.validated }
+            }
+        }
+
+        // tef* codes: Local failure (not applied to ledger)
+        // Example: tefPAST_SEQ, tefMAX_LEDGER, tefFAILURE
+        if (txResult?.startsWith('tef')) {
+            return {
+                result: "error",
+                error: `Transaction rejected: ${txResult} - ${resultMessage}`,
+                hash: txHash,
+                extra: { code: txResult, validated: res.result.validated }
+            }
+        }
+
         return {
             result: "error",
-            error: `${txResult}: ${res.result.engine_result_message || 'Unknown error'}`,
+            error: `Unknown transaction result: ${txResult} - ${resultMessage}`,
             hash: txHash,
+            extra: { code: txResult, validated: res.result.validated }
         }
     } catch (error) {
         console.log("[XMScript Parser] Ripple Pay: error:", error)
