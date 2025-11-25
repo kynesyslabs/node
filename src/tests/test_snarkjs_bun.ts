@@ -38,7 +38,7 @@ async function testVerification() {
 
         // REVIEW: Generate public signals array with correct size based on vKey
         const publicSignals = Array.from({ length: expectedSignalsCount }, (_, i) =>
-            (12345 + i * 55555).toString()
+            (12345 + i * 55555).toString(),
         )
 
         console.log("🔍 Calling snarkjs.groth16.verify...")
