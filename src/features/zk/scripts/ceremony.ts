@@ -80,17 +80,26 @@ function warn(message: string) {
 }
 
 /**
- * REVIEW: Extract participant address from publickey_ed25519_* file
+ * REVIEW: Extract participant address from publickey_* file
  * Ensures all participants are identified by their public key address
- * Format: publickey_ed25519_0x<address> (no extension)
+ * Supports: publickey_ed25519_0x<address> or publickey_0x<address> (no extension)
  */
 function getParticipantName(): string {
-    // Find all publickey_ed25519_* files in root (no extension)
-    const files = readdirSync(".")
+    // Find all publickey_* files in root (no extension)
+    // Prefer ed25519 format if both exist
+    const ed25519Files = readdirSync(".")
         .filter(f => f.startsWith("publickey_ed25519_") && f !== "publickey_ed25519_")
 
+    const genericFiles = readdirSync(".")
+        .filter(f => f.startsWith("publickey_") &&
+                     !f.startsWith("publickey_ed25519_") &&
+                     f !== "publickey_")
+
+    // Prefer ed25519 files if available
+    const files = ed25519Files.length > 0 ? ed25519Files : genericFiles
+
     if (files.length === 0) {
-        error("No publickey_ed25519_* file found in repository root!")
+        error("No publickey_* file found in repository root! (looking for publickey_ed25519_* or publickey_*)")
     }
 
     if (files.length > 1) {
@@ -98,11 +107,19 @@ function getParticipantName(): string {
         warn(`Using first one: ${files[0]}`)
     }
 
-    // Extract address from filename: publickey_ed25519_0x<address> -> 0x<address>
+    // Extract address from filename
     const filename = files[0]
-    const address = filename.replace(/^publickey_ed25519_/, "")
+    let address: string
 
-    if (!address || address === "publickey_ed25519_") {
+    if (filename.startsWith("publickey_ed25519_")) {
+        // publickey_ed25519_0x<address> -> 0x<address>
+        address = filename.replace(/^publickey_ed25519_/, "")
+    } else {
+        // publickey_0x<address> -> 0x<address>
+        address = filename.replace(/^publickey_/, "")
+    }
+
+    if (!address || address.startsWith("publickey")) {
         error(`Invalid public key filename format: ${filename}`)
     }
 
