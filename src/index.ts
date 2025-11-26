@@ -29,13 +29,11 @@ import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
-import { serverRpcBun } from "./libs/network/server_rpc"
-import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { RelayRetryService } from "./libs/network/dtr/relayRetryService"
 import { L2PSHashService } from "./libs/l2ps/L2PSHashService"
-import Chain from "./libs/blockchain/chain"
+import { L2PSBatchAggregator } from "./libs/l2ps/L2PSBatchAggregator"
+import ParallelNetworks from "./libs/l2ps/parallelNetworks"
 
-const term = terminalkit.terminal
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
 
 dotenv.config()
@@ -378,13 +376,20 @@ async function main() {
         term.yellow("[MAIN] ✅ Starting the background loop\n")
         // ANCHOR Starting the main loop
         mainLoop() // Is an async function so running without waiting send that to the background
-        
+
         // Start DTR relay retry service after background loop initialization
         // The service will wait for syncStatus to be true before actually processing
         if (getSharedState.PROD) {
             console.log("[DTR] Initializing relay retry service (will start after sync)")
             // Service will check syncStatus internally before processing
             RelayRetryService.getInstance().start()
+        }
+
+        // Load L2PS networks configuration
+        try {
+            await ParallelNetworks.getInstance().loadAllL2PS()
+        } catch (error) {
+            console.error("[L2PS] Failed to load L2PS networks:", error)
         }
 
         // Start L2PS hash generation service (for L2PS participating nodes)
@@ -396,6 +401,15 @@ async function main() {
                 console.log(`[L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`)
             } catch (error) {
                 console.error("[L2PS] Failed to start hash generation service:", error)
+            }
+
+            // Start L2PS batch aggregation service (completes the private loop)
+            try {
+                const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
+                await l2psBatchAggregator.start()
+                console.log(`[L2PS] Batch aggregation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`)
+            } catch (error) {
+                console.error("[L2PS] Failed to start batch aggregation service:", error)
             }
         } else {
             console.log("[L2PS] No L2PS networks joined, hash service not started")
@@ -409,14 +423,20 @@ process.on("SIGINT", () => {
     if (getSharedState.PROD) {
         RelayRetryService.getInstance().stop()
     }
-    
-    // Stop L2PS hash service if running
+
+    // Stop L2PS services if running
+    try {
+        L2PSBatchAggregator.getInstance().stop()
+    } catch (error) {
+        console.error("[L2PS] Error stopping batch aggregator:", error)
+    }
+
     try {
         L2PSHashService.getInstance().stop()
     } catch (error) {
         console.error("[L2PS] Error stopping hash service:", error)
     }
-    
+
     process.exit(0)
 })
 
@@ -425,14 +445,20 @@ process.on("SIGTERM", () => {
     if (getSharedState.PROD) {
         RelayRetryService.getInstance().stop()
     }
-    
-    // Stop L2PS hash service if running
+
+    // Stop L2PS services if running
+    try {
+        L2PSBatchAggregator.getInstance().stop()
+    } catch (error) {
+        console.error("[L2PS] Error stopping batch aggregator:", error)
+    }
+
     try {
         L2PSHashService.getInstance().stop()
     } catch (error) {
         console.error("[L2PS] Error stopping hash service:", error)
     }
-    
+
     process.exit(0)
 })
 

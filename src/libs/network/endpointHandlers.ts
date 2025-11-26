@@ -16,7 +16,8 @@ import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool_v2"
 import L2PSHashes from "@/libs/blockchain/l2ps_hashes"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
-import { L2PSTransaction, Transaction } from "@kynesyslabs/demosdk/types"
+import { Transaction } from "@kynesyslabs/demosdk/types"
+import type { L2PSTransaction } from "@/types/sdk-workarounds"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import handleL2PS from "./routines/transactions/handleL2PS"
@@ -52,6 +53,9 @@ import { L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
+
+// TEMPORARY: Define SubnetPayload until proper export is available
+type SubnetPayload = any
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
 
 // REVIEW: PR Fix #12 - Interface for L2PS hash update payload with proper type safety
@@ -119,11 +123,12 @@ export default class ServerHandlers {
                 gcredit.txhash = ""
             })
             // Hashing both the gcredits
-            const gcrEditsHash = Hashing.sha256(JSON.stringify(gcrEdits))
+            const gcrEditsString = JSON.stringify(gcrEdits)
+            const txGcrEditsString = JSON.stringify(tx.content.gcr_edits)
+            
+            const gcrEditsHash = Hashing.sha256(gcrEditsString)
             console.log("gcrEditsHash: " + gcrEditsHash)
-            const txGcrEditsHash = Hashing.sha256(
-                JSON.stringify(tx.content.gcr_edits),
-            )
+            const txGcrEditsHash = Hashing.sha256(txGcrEditsString)
             console.log("txGcrEditsHash: " + txGcrEditsHash)
             const comparison = txGcrEditsHash == gcrEditsHash
             if (!comparison) {
@@ -320,6 +325,29 @@ export default class ServerHandlers {
                     tx as L2PSTransaction,
                 )
                 result.response = subnetResult
+                break
+
+            case "l2psEncryptedTx":
+                // Handle encrypted L2PS transactions
+                // These are routed to the L2PS mempool via handleSubnetTx (which calls handleL2PS)
+                console.log("[handleExecuteTransaction] Processing L2PS Encrypted Tx")
+                var l2psResult = await ServerHandlers.handleSubnetTx(
+                    tx as L2PSTransaction,
+                )
+                result.response = l2psResult
+                // If successful, we don't want to add this to the main mempool
+                // The handleL2PS routine takes care of adding it to the L2PS mempool
+                if (l2psResult.result === 200) {
+                    result.success = true
+                    // Prevent adding to main mempool by returning early or setting a flag?
+                    // The current logic adds to mempool if result.success is true.
+                    // We need to avoid that for L2PS txs as they are private.
+                    
+                    // Hack: We return here to avoid the main mempool logic below
+                    return result
+                } else {
+                    result.success = false
+                }
                 break
 
             case "web2Request": {

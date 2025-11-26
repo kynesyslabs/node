@@ -10,7 +10,8 @@ import {
     L2PSConfig,
     L2PSEncryptedPayload,
 } from "@kynesyslabs/demosdk/l2ps"
-import { L2PSTransaction, Transaction, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import { Transaction, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import type { L2PSTransaction } from "@/types/sdk-workarounds"
 import { getSharedState } from "@/utilities/sharedState"
 
 /**
@@ -51,6 +52,28 @@ interface L2PSNodeConfig {
     enabled: boolean
     /** Whether the L2PS node should start automatically */
     auto_start?: boolean
+}
+
+function hexFileToBytes(value: string, label: string): string {
+    if (!value) {
+        throw new Error(`${label} is empty`)
+    }
+
+    const cleaned = value.trim().replace(/^0x/, "").replace(/\s+/g, "")
+
+    if (cleaned.length === 0) {
+        throw new Error(`${label} is empty`)
+    }
+
+    if (cleaned.length % 2 !== 0) {
+        throw new Error(`${label} hex length must be even`)
+    }
+
+    if (!/^[0-9a-fA-F]+$/.test(cleaned)) {
+        throw new Error(`${label} contains non-hex characters`)
+    }
+
+    return forge.util.hexToBytes(cleaned)
 }
 
 /**
@@ -159,10 +182,13 @@ export default class ParallelNetworks {
             throw new Error(`L2PS key files not found for ${uid}`)
         }
 
-        const privateKey = fs.readFileSync(privateKeyPath, "utf8").trim()
-        const iv = fs.readFileSync(ivPath, "utf8").trim()
+        const privateKeyHex = fs.readFileSync(privateKeyPath, "utf8").trim()
+        const ivHex = fs.readFileSync(ivPath, "utf8").trim()
 
-        const l2ps = await L2PS.create(privateKey, iv)
+        const privateKeyBytes = hexFileToBytes(privateKeyHex, `${uid} private key`)
+        const ivBytes = hexFileToBytes(ivHex, `${uid} IV`)
+
+        const l2ps = await L2PS.create(privateKeyBytes, ivBytes)
         const l2psConfig: L2PSConfig = {
             uid: nodeConfig.uid,
             config: nodeConfig.config,
@@ -242,10 +268,10 @@ export default class ParallelNetworks {
         senderIdentity?: any,
     ): Promise<Transaction> {
         const l2ps = await this.loadL2PS(uid)
-        const encryptedTx = l2ps.encryptTx(tx, senderIdentity)
+        const encryptedTx = await l2ps.encryptTx(tx, senderIdentity)
 
         // REVIEW: PR Fix - Sign encrypted transaction with node's private key
-        const sharedState = getSharedState()
+        const sharedState = getSharedState
         const signature = await ucrypto.sign(
             sharedState.signingAlgorithm,
             new TextEncoder().encode(JSON.stringify(encryptedTx.content)),

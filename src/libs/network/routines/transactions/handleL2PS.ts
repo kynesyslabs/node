@@ -1,4 +1,5 @@
-import type { BlockContent, L2PSTransaction } from "@kynesyslabs/demosdk/types"
+import type { BlockContent } from "@kynesyslabs/demosdk/types"
+import type { L2PSTransaction } from "@/types/sdk-workarounds"
 import Chain from "src/libs/blockchain/chain"
 import Transaction from "src/libs/blockchain/transaction"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"

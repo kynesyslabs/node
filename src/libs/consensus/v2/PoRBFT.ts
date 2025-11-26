@@ -385,6 +385,12 @@ async function applyGCREditsFromMergedMempool(
         }
 
         const txGCREdits = tx.content.gcr_edits
+        // Skip transactions that don't have GCR edits (e.g., l2psBatch)
+        if (!txGCREdits || !Array.isArray(txGCREdits) || txGCREdits.length === 0) {
+            // These transactions are valid but don't modify GCR state
+            successfulTxs.push(tx.hash)
+            continue
+        }
         // 2. Apply the GCREdits to the state for each tx
         for (const gcrEdit of txGCREdits) {
             const applyResult = await HandleGCR.apply(gcrEdit, tx)

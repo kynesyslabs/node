@@ -1,5 +1,5 @@
 import { Entity, PrimaryColumn, Column, Index } from "typeorm"
-import { L2PSTransaction } from "@kynesyslabs/demosdk/types"
+import type { L2PSTransaction } from "@/types/sdk-workarounds"
 
 /**
  * L2PS Mempool Entity
@@ -24,10 +24,9 @@ export class L2PSMempoolTx {
      * L2PS network identifier
      * @example "network_1", "private_subnet_alpha"
      */
-    @Index()
-    @Index(["l2ps_uid", "timestamp"])
-    @Index(["l2ps_uid", "status"])
-    @Index(["l2ps_uid", "block_number"])
+    @Index("IDX_L2PS_UID_TIMESTAMP", ["l2ps_uid", "timestamp"])
+    @Index("IDX_L2PS_UID_STATUS", ["l2ps_uid", "status"])
+    @Index("IDX_L2PS_UID_BLOCK", ["l2ps_uid", "block_number"])
     @Column("text") 
     l2ps_uid: string
 

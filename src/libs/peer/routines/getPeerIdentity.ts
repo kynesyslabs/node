@@ -10,9 +10,107 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { NodeCall } from "src/libs/network/manageNodeCall"
-import Transmission from "../../communications/transmission"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import Peer from "../Peer"
-import { getSharedState } from "src/utilities/sharedState"
+
+type BufferPayload = {
+    type: "Buffer"
+    data: number[]
+}
+
+type IdentityEnvelope = {
+    publicKey?: string
+    data?: number[] | string
+}
+
+function asHexString(value: string): string | null {
+    const trimmed = value.trim()
+    const parts = trimmed.includes(":") ? trimmed.split(":", 2) : [null, trimmed]
+    const rawWithoutPrefix = parts[1]
+
+    if (!rawWithoutPrefix) {
+        return null
+    }
+
+    const hasPrefix = rawWithoutPrefix.startsWith("0x") || rawWithoutPrefix.startsWith("0X")
+    const candidate = hasPrefix ? rawWithoutPrefix.slice(2) : rawWithoutPrefix
+
+    if (!/^[0-9a-fA-F]+$/.test(candidate)) {
+        return null
+    }
+
+    return `0x${candidate.toLowerCase()}`
+}
+
+function normalizeIdentity(raw: unknown): string | null {
+    if (!raw) {
+        return null
+    }
+
+    if (typeof raw === "string") {
+        return asHexString(raw)
+    }
+
+    if (raw instanceof Uint8Array) {
+        return uint8ArrayToHex(raw).toLowerCase()
+    }
+
+    if (ArrayBuffer.isView(raw)) {
+        const view = raw as ArrayBufferView
+        const bytes =
+            view instanceof Uint8Array
+                ? view
+                : new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
+        return uint8ArrayToHex(bytes).toLowerCase()
+    }
+
+    if (raw instanceof ArrayBuffer) {
+        return uint8ArrayToHex(new Uint8Array(raw)).toLowerCase()
+    }
+
+    if (Array.isArray(raw) && raw.every(item => typeof item === "number")) {
+        return uint8ArrayToHex(Uint8Array.from(raw)).toLowerCase()
+    }
+
+    const maybeBuffer = raw as Partial<BufferPayload>
+    if (maybeBuffer?.type === "Buffer" && Array.isArray(maybeBuffer.data)) {
+        return uint8ArrayToHex(
+            Uint8Array.from(maybeBuffer.data),
+        ).toLowerCase()
+    }
+
+    const maybeEnvelope = raw as IdentityEnvelope
+    if (typeof maybeEnvelope?.publicKey === "string") {
+        return asHexString(maybeEnvelope.publicKey)
+    }
+
+    if (
+        typeof maybeEnvelope?.data === "string" ||
+        Array.isArray(maybeEnvelope?.data)
+    ) {
+        return normalizeIdentity(maybeEnvelope.data)
+    }
+
+    return null
+}
+
+function normalizeExpectedIdentity(expectedKey: string): string | null {
+    if (!expectedKey) {
+        return null
+    }
+
+    const normalized = asHexString(expectedKey)
+    if (normalized) {
+        return normalized
+    }
+
+    // In some cases keys might arrive already normalized but without the 0x prefix
+    if (/^[0-9a-fA-F]+$/.test(expectedKey)) {
+        return `0x${expectedKey.toLowerCase()}`
+    }
+
+    return null
+}
 
 // proxy method
 export async function verifyPeer(
@@ -50,22 +148,39 @@ export default async function getPeerIdentity(
     // Response management
     if (response.result === 200) {
         console.log("[PEER AUTHENTICATION] Received response")
-        //console.log(response[1].identity.toString("hex"))
         console.log(response.response)
-        if (response.response === expectedKey) {
+
+        const receivedIdentity = normalizeIdentity(response.response)
+        const expectedIdentity = normalizeExpectedIdentity(expectedKey)
+
+        if (!receivedIdentity) {
+            console.log(
+                "[PEER AUTHENTICATION] Unable to normalize identity payload",
+            )
+            return null
+        }
+
+        if (!expectedIdentity) {
+            console.log(
+                "[PEER AUTHENTICATION] Unable to normalize expected identity",
+            )
+            return null
+        }
+
+        if (receivedIdentity === expectedIdentity) {
             console.log("[PEER AUTHENTICATION] Identity is the expected one")
         } else {
             console.log(
                 "[PEER AUTHENTICATION] Identity is not the expected one",
             )
             console.log("Expected: ")
-            console.log(expectedKey)
+            console.log(expectedIdentity)
             console.log("Received: ")
-            console.log(response.response)
+            console.log(receivedIdentity)
             return null
         }
         // Adding the property to the peer
-        peer.identity = response.response // Identity is now known
+        peer.identity = receivedIdentity // Identity is now known
         peer.status.online = true // Peer is now online
         peer.status.ready = true // Peer is now ready
         peer.status.timestamp = new Date().getTime()

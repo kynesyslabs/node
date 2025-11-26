@@ -54,13 +54,15 @@ import {
     ImPublicKeyRequestMessage,
 } from "./types/IMMessage"
 import Transaction from "@/libs/blockchain/transaction"
+import Chain from "@/libs/blockchain/chain"
 import {
     signedObject,
     SerializedSignedObject,
-    SerializedEncryptedObject,
     ucrypto,
 } from "@kynesyslabs/demosdk/encryption"
 import Mempool from "@/libs/blockchain/mempool_v2"
+
+import type { SerializedEncryptedObject } from "@/types/sdk-workarounds"
 import { Cryptography } from "@kynesyslabs/demosdk/encryption"
 import { UnifiedCrypto } from "@kynesyslabs/demosdk/encryption"
 import Hashing from "@/libs/crypto/hashing"
@@ -656,7 +658,11 @@ export class SignalingServer {
             // Add to mempool
             // REVIEW: PR Fix #13 - Add error handling for blockchain storage consistency
             try {
-                await Mempool.addTransaction(transaction)
+                const referenceBlock = await Chain.getLastBlockNumber()
+                await Mempool.addTransaction({
+                    ...transaction,
+                    reference_block: referenceBlock,
+                })
                 // REVIEW: PR Fix #6 - Only increment nonce after successful mempool addition
                 this.senderNonces.set(senderId, nonce)
             } catch (error: any) {

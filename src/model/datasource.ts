@@ -23,6 +23,8 @@ import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs.js"
 import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
 import { GCRTracker } from "./entities/GCR/GCRTracker.js"
 import { OfflineMessage } from "./entities/OfflineMessages"
+import { L2PSHash } from "./entities/L2PSHashes.js"
+import { L2PSMempoolTx } from "./entities/L2PSMempool.js"
 
 export const dataSource = new DataSource({
     type: "postgres",
@@ -44,6 +46,8 @@ export const dataSource = new DataSource({
         GlobalChangeRegistry,
         GCRTracker,
         GCRMain,
+        L2PSHash,
+        L2PSMempoolTx,
     ],
     synchronize: true,
     logging: false,
@@ -76,6 +80,8 @@ class Datasource {
                 GCRTracker,
                 GCRMain,
                 OfflineMessage,
+                L2PSHash,
+                L2PSMempoolTx,
             ],
             synchronize: true, // set this to false in production
             logging: false,
