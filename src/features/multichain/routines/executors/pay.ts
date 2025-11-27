@@ -93,6 +93,10 @@ export default async function handlePayOperation(
             result = await handleAptosPayRest(operation)
             break
 
+        case "tron":
+            result = await genericJsonRpcPay(multichain.TRON, rpcUrl, operation)
+            break
+
         default:
             result = {
                 result: "error",
@@ -135,7 +139,7 @@ async function genericJsonRpcPay(
         let signedTx = operation.task.signedPayloads[0]
 
         signedTx = validateIfUint8Array(signedTx)
-        
+
         // INFO: Send payload and return the result
         const result = await instance.sendTransaction(signedTx)
         console.log("[XMScript Parser] Generic JSON RPC Pay: result: ")

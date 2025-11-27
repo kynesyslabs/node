@@ -13,6 +13,7 @@ import {
     NEAR,
     SOLANA,
     TON,
+    TRON,
     XRPL,
     BTC,
 } from "@kynesyslabs/demosdk/xm-localsdk"
@@ -42,6 +43,7 @@ const chains: { [key: string]: typeof DefaultChain } = {
     evm: EVM,
     egld: MULTIVERSX,
     ton: TON,
+    tron: TRON,
     xrpl: XRPL,
     ibc: IBC,
     near: NEAR,
@@ -50,7 +52,7 @@ const chains: { [key: string]: typeof DefaultChain } = {
 }
 
 export default class IdentityManager {
-    constructor() {}
+    constructor() { }
 
     // Infer identity from a valid write transaction
     static async inferIdentityFromWrite(
@@ -143,6 +145,15 @@ export default class IdentityManager {
         // SECTION: SOLANA Checks
         // INFO: Check if the subchain is mainnet
         if (chain === "solana" && subchain !== "mainnet") {
+            return {
+                ...response,
+                message: "Failed: Testnet addresses are not supported",
+            }
+        }
+
+        // SECTION: TRON Checks
+        // INFO: Check if the subchain is mainnet
+        if (chain === "tron" && subchain !== "mainnet") {
             return {
                 ...response,
                 message: "Failed: Testnet addresses are not supported",
@@ -276,11 +287,10 @@ export default class IdentityManager {
 
         return {
             success: true,
-            message: `Signature proof${
-                payloads.length > 1 ? "s" : ""
-            } verified. ${JSON.stringify(
-                payloads.map(p => p.algorithm),
-            )} identities assigned`,
+            message: `Signature proof${payloads.length > 1 ? "s" : ""
+                } verified. ${JSON.stringify(
+                    payloads.map(p => p.algorithm),
+                )} identities assigned`,
         }
     }
 
