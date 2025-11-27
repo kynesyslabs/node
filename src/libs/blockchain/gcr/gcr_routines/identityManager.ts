@@ -142,18 +142,10 @@ export default class IdentityManager {
         //     }
         // }
 
-        // SECTION: SOLANA Checks
-        // INFO: Check if the subchain is mainnet
-        if (chain === "solana" && subchain !== "mainnet") {
-            return {
-                ...response,
-                message: "Failed: Testnet addresses are not supported",
-            }
-        }
-
-        // SECTION: TRON Checks
-        // INFO: Check if the subchain is mainnet
-        if (chain === "tron" && subchain !== "mainnet") {
+        // SECTION: Mainnet-only chain checks
+        // INFO: Some chains only support mainnet for identity management
+        const mainnetOnlyChains = ["solana", "tron"]
+        if (mainnetOnlyChains.includes(chain) && subchain !== "mainnet") {
             return {
                 ...response,
                 message: "Failed: Testnet addresses are not supported",

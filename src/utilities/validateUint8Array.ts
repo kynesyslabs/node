@@ -6,9 +6,9 @@ export default function validateIfUint8Array(input: unknown): Uint8Array | unkno
 
     // Type guard: check if input is a record-like object with numeric integer keys and number values
     if (typeof input === "object" && input !== null) {
-        // Skip conversion for transaction objects that have a signature property
-        // (e.g., TRON transactions which are objects, not Uint8Arrays)
-        if ('signature' in input || 'txID' in input || 'raw_data' in input) {
+        // Skip conversion for transaction objects that are not meant to be Uint8Arrays (e.g. TRON)
+        const isTronTx = 'signature' in input && 'txID' in input && 'raw_data' in input
+        if (isTronTx) {
             return input
         }
 
