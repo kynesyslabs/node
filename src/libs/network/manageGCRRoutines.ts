@@ -48,6 +48,13 @@ export default async function manageGCRRoutines(
             )
             break
 
+        case "getUDIdentities":
+            response.response = await IdentityManager.getIdentities(
+                params[0],
+                "ud",
+            )
+            break
+
         case "getPoints":
             response.response = await IncentiveManager.getPoints(params[0])
             break

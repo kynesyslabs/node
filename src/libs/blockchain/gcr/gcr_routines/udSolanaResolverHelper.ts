@@ -5,6 +5,7 @@ import { createHash } from "crypto"
 import UnsSolIdl from "../../UDTypes/uns_sol.json" with { type: "json" }
 import { UnsSol } from "../../UDTypes/uns_sol"
 import log from "src/utilities/logger"
+import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 
 // ============================================================================
 // Types and Interfaces
@@ -176,7 +177,7 @@ export class SolanaDomainResolver {
    */
   constructor(config: ResolverConfig = {}) {
     this.config = {
-      rpcUrl: config.rpcUrl || process.env.SOLANA_RPC || "https://britta-qyzo1g-fast-mainnet.helius-rpc.com/",
+      rpcUrl: config.rpcUrl || process.env.SOLANA_RPC || chainProviders.solana.mainnet,
       commitment: config.commitment || "confirmed",
     }
     this.unsProgramId = new PublicKey(UnsSolIdl.address)

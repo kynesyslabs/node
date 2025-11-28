@@ -1,8 +1,10 @@
 import type { IOperation } from "@kynesyslabs/demosdk/types"
-import { EVM } from "@kynesyslabs/demosdk/xm-localsdk"
+import { EVM, SOLANA } from "@kynesyslabs/demosdk/xm-localsdk"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 import log from "@/utilities/logger"
 import handleAptosContractWrite from "./aptos_contract_write"
+import { genericJsonRpcPay } from "./pay"
+import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 
 async function handleEVMContractWrite(operation: IOperation, chainID: number) {
     // NOTE: Logic is similar to handleEVMPay
@@ -21,6 +23,15 @@ async function handleEVMContractWrite(operation: IOperation, chainID: number) {
     )
 }
 
+async function handleSolanaContractWrite(operation: IOperation) {
+    // The operation contains the signed transaction - reuse genericJsonRpcPay
+    return await genericJsonRpcPay(
+        SOLANA,
+        chainProviders.solana[operation.subchain],
+        operation,
+    )
+}
+
 export default async function handleContractWrite(
     operation: IOperation,
     chainID: number,
@@ -32,6 +43,8 @@ export default async function handleContractWrite(
     switch (operation.chain) {
         case "aptos":
             return await handleAptosContractWrite(operation)
+        case "solana":
+            return await handleSolanaContractWrite(operation)
         default:
             return {
                 result: "error",

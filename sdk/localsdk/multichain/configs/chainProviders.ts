@@ -13,7 +13,7 @@ export const chainProviders = {
         testnet: "https://testnet-api.multiversx.com",
     },
     solana: {
-        mainnet: "https://api.mainnet-beta.solana.com/",
+        mainnet: "https://britta-qyzo1g-fast-mainnet.helius-rpc.com",
         testnet: "https://api.testnet.solana.com",
         devnet: "https://api.devnet.solana.com",
     },
@@ -43,7 +43,7 @@ export const chainProviders = {
     },
     aptos: {
         mainnet: "https://fullnode.mainnet.aptoslabs.com/v1",
-        testnet: "https://fullnode.testnet.aptoslabs.com/v1", 
+        testnet: "https://fullnode.testnet.aptoslabs.com/v1",
         devnet: "https://fullnode.devnet.aptoslabs.com/v1",
     },
 }
