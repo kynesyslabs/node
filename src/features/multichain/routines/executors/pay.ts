@@ -112,7 +112,7 @@ export default async function handlePayOperation(
  * @param rpc_url The RPC URL for the chain
  * @param operation The operation to be executed
  */
-async function genericJsonRpcPay(
+export async function genericJsonRpcPay(
     sdk: any,
     rpcUrl: string,
     operation: IOperation,
@@ -133,9 +133,8 @@ async function genericJsonRpcPay(
 
     try {
         let signedTx = operation.task.signedPayloads[0]
-
         signedTx = validateIfUint8Array(signedTx)
-        
+
         // INFO: Send payload and return the result
         const result = await instance.sendTransaction(signedTx)
         console.log("[XMScript Parser] Generic JSON RPC Pay: result: ")
