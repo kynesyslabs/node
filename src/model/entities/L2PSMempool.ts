@@ -27,8 +27,17 @@ export class L2PSMempoolTx {
     @Index("IDX_L2PS_UID_TIMESTAMP", ["l2ps_uid", "timestamp"])
     @Index("IDX_L2PS_UID_STATUS", ["l2ps_uid", "status"])
     @Index("IDX_L2PS_UID_BLOCK", ["l2ps_uid", "block_number"])
+    @Index("IDX_L2PS_UID_SEQUENCE", ["l2ps_uid", "sequence_number"])
     @Column("text") 
     l2ps_uid: string
+
+    /**
+     * Sequence number within the L2PS network for ordering
+     * Auto-incremented per l2ps_uid to ensure deterministic transaction order
+     * @example 1, 2, 3... or timestamp-based sequence like 1697049600, 1697049601...
+     */
+    @Column("bigint", { default: "0" })
+    sequence_number: string
 
     /**
      * Hash of the original transaction before encryption

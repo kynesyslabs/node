@@ -6,7 +6,6 @@ import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import { Hashing, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { getNetworkTimestamp } from "@/libs/utils/calibrateTime"
-import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
 
 /**
  * L2PS Batch Payload Interface
@@ -362,8 +361,7 @@ export class L2PSBatchAggregator {
      * Creates a transaction of type 'l2psBatch' and submits it to the main
      * mempool for inclusion in the next block.
      * 
-     * @param l2psUid - L2PS network identifier
-     * @param batchPayload - Encrypted batch payload
+     * @param batchPayload - Encrypted batch payload (includes l2ps_uid)
      * @returns true if submission was successful
      */
     private async submitBatchToMempool(batchPayload: L2PSBatchPayload): Promise<boolean> {
@@ -379,16 +377,9 @@ export class L2PSBatchAggregator {
             // Get node's public key as hex string for 'from' field
             const nodeIdentityHex = uint8ArrayToHex(sharedState.keypair.publicKey as Uint8Array)
 
-            // Get current nonce for the node's identity account
-            let currentNonce = 1
-            try {
-                const accountState = await ensureGCRForUser(nodeIdentityHex)
-                currentNonce = (accountState?.nonce ?? 0) + 1
-                log.debug(`[L2PS Batch Aggregator] Got nonce ${currentNonce} for ${nodeIdentityHex}`)
-            } catch (nonceError: any) {
-                log.warning(`[L2PS Batch Aggregator] Could not get nonce, using 1: ${nonceError.message}`)
-                currentNonce = 1
-            }
+            // Use timestamp as nonce for batch transactions
+            // This ensures uniqueness and proper ordering without requiring GCR account
+            const batchNonce = Date.now()
 
             // Create batch transaction content
             const transactionContent = {
@@ -398,7 +389,7 @@ export class L2PSBatchAggregator {
                 from_ed25519_address: nodeIdentityHex,
                 amount: 0,
                 timestamp: getNetworkTimestamp(),
-                nonce: currentNonce,
+                nonce: batchNonce,
                 fee: 0,
                 data: ["l2psBatch", batchPayload],
                 transaction_fee: {

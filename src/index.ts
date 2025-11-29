@@ -399,20 +399,16 @@ async function main() {
                 const l2psHashService = L2PSHashService.getInstance()
                 await l2psHashService.start()
                 console.log(`[L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`)
-            } catch (error) {
-                console.error("[L2PS] Failed to start hash generation service:", error)
-            }
 
-            // Start L2PS batch aggregation service (completes the private loop)
-            try {
+                // Start L2PS batch aggregator (batches transactions and submits to main mempool)
                 const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
                 await l2psBatchAggregator.start()
-                console.log(`[L2PS] Batch aggregation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`)
+                console.log(`[L2PS] Batch aggregator service started`)
             } catch (error) {
-                console.error("[L2PS] Failed to start batch aggregation service:", error)
+                console.error("[L2PS] Failed to start L2PS services:", error)
             }
         } else {
-            console.log("[L2PS] No L2PS networks joined, hash service not started")
+            console.log("[L2PS] No L2PS networks joined, L2PS services not started")
         }
     }
 }
@@ -426,15 +422,10 @@ process.on("SIGINT", () => {
 
     // Stop L2PS services if running
     try {
+        L2PSHashService.getInstance().stop()
         L2PSBatchAggregator.getInstance().stop()
     } catch (error) {
-        console.error("[L2PS] Error stopping batch aggregator:", error)
-    }
-
-    try {
-        L2PSHashService.getInstance().stop()
-    } catch (error) {
-        console.error("[L2PS] Error stopping hash service:", error)
+        console.error("[L2PS] Error stopping L2PS services:", error)
     }
 
     process.exit(0)
@@ -448,15 +439,10 @@ process.on("SIGTERM", () => {
 
     // Stop L2PS services if running
     try {
+        L2PSHashService.getInstance().stop()
         L2PSBatchAggregator.getInstance().stop()
     } catch (error) {
-        console.error("[L2PS] Error stopping batch aggregator:", error)
-    }
-
-    try {
-        L2PSHashService.getInstance().stop()
-    } catch (error) {
-        console.error("[L2PS] Error stopping hash service:", error)
+        console.error("[L2PS] Error stopping L2PS services:", error)
     }
 
     process.exit(0)
