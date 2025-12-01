@@ -17,7 +17,7 @@ export class SignatureVerifier {
     static async verify(
         auth: AuthBlock,
         header: OmniMessageHeader,
-        payload: Buffer
+        payload: Buffer,
     ): Promise<VerificationResult> {
         // 1. Validate algorithm
         if (!this.isSupportedAlgorithm(auth.algorithm)) {
@@ -42,7 +42,7 @@ export class SignatureVerifier {
             auth.identity,
             header,
             payload,
-            auth.timestamp
+            auth.timestamp,
         )
 
         // 4. Verify signature
@@ -50,7 +50,7 @@ export class SignatureVerifier {
             auth.algorithm,
             auth.identity,
             dataToVerify,
-            auth.signature
+            auth.signature,
         )
 
         if (!signatureValid) {
@@ -95,7 +95,7 @@ export class SignatureVerifier {
         identity: Buffer,
         header: OmniMessageHeader,
         payload: Buffer,
-        timestamp: number
+        timestamp: number,
     ): Buffer {
         switch (mode) {
             case SignatureMode.SIGN_PUBKEY:
@@ -142,7 +142,7 @@ export class SignatureVerifier {
         algorithm: SignatureAlgorithm,
         publicKey: Buffer,
         data: Buffer,
-        signature: Buffer
+        signature: Buffer,
     ): Promise<boolean> {
         switch (algorithm) {
             case SignatureAlgorithm.ED25519:
@@ -167,7 +167,7 @@ export class SignatureVerifier {
     private static async verifyEd25519(
         publicKey: Buffer,
         data: Buffer,
-        signature: Buffer
+        signature: Buffer,
     ): Promise<boolean> {
         try {
             // Validate key and signature lengths
@@ -195,8 +195,8 @@ export class SignatureVerifier {
      * Uses same format as existing HTTP authentication
      */
     private static derivePeerIdentity(publicKey: Buffer): string {
-        // For ed25519: identity is hex-encoded public key
-        // This matches existing Peer.identity format
-        return publicKey.toString("hex")
+        // REVIEW: For ed25519: identity is 0x-prefixed hex-encoded public key
+        // This matches existing Peer.identity format and PeerManager lookup
+        return "0x" + publicKey.toString("hex")
     }
 }
