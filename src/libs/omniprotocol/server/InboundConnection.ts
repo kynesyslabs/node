@@ -103,9 +103,37 @@ export class InboundConnection extends EventEmitter {
      * Handle a complete decoded message
      */
     private async handleMessage(message: ParsedOmniMessage): Promise<void> {
+        // REVIEW: Debug logging for peer identity tracking
         console.log(
             `[InboundConnection] ${this.connectionId} received opcode 0x${message.header.opcode.toString(16)}`,
         )
+        console.log(
+            `[InboundConnection] state=${this.state}, peerIdentity=${this.peerIdentity || "null"}`,
+        )
+        if (message.auth) {
+            console.log(
+                `[InboundConnection] auth.identity=${message.auth.identity ? "0x" + message.auth.identity.toString("hex") : "null"}`,
+            )
+        }
+
+        // REVIEW: Extract peer identity from auth block for ANY authenticated message
+        // This allows the connection to be authenticated by any message with valid auth,
+        // not just hello_peer (0x01). This is essential for stateless request patterns
+        // where clients send authenticated requests without explicit handshake.
+        if (message.auth && message.auth.identity && !this.peerIdentity) {
+            this.peerIdentity = "0x" + message.auth.identity.toString("hex")
+            this.state = "AUTHENTICATED"
+
+            if (this.authTimer) {
+                clearTimeout(this.authTimer)
+                this.authTimer = null
+            }
+
+            this.emit("authenticated", this.peerIdentity)
+            console.log(
+                `[InboundConnection] ${this.connectionId} authenticated via auth block as ${this.peerIdentity}`,
+            )
+        }
 
         // Check rate limits
         if (this.rateLimiter) {
@@ -162,25 +190,8 @@ export class InboundConnection extends EventEmitter {
             // Send response back to client
             await this.sendResponse(message.header.sequence, responsePayload)
 
-            // If this was hello_peer and succeeded, mark as authenticated
-            if (message.header.opcode === 0x01 && this.state === "PENDING_AUTH") {
-                // Extract peer identity from auth block
-                if (message.auth && message.auth.identity) {
-                    // REVIEW: Use 0x prefix to match PeerManager identity format
-                    this.peerIdentity = "0x" + message.auth.identity.toString("hex")
-                    this.state = "AUTHENTICATED"
-
-                    if (this.authTimer) {
-                        clearTimeout(this.authTimer)
-                        this.authTimer = null
-                    }
-
-                    this.emit("authenticated", this.peerIdentity)
-                    console.log(
-                        `[InboundConnection] ${this.connectionId} authenticated as ${this.peerIdentity}`,
-                    )
-                }
-            }
+            // Note: Authentication is now handled at the top of this method
+            // for ANY message with a valid auth block, not just hello_peer
         } catch (error) {
             console.error(
                 `[InboundConnection] ${this.connectionId} handler error:`,
