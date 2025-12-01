@@ -65,6 +65,17 @@ export interface ProposeBlockHashRequestPayload {
     proposer: string
 }
 
+// REVIEW: Client-side encoder for proposeBlockHash requests
+export function encodeProposeBlockHashRequest(
+    payload: ProposeBlockHashRequestPayload,
+): Buffer {
+    return Buffer.concat([
+        encodeHexBytes(payload.blockHash ?? ""),
+        encodeStringMap(payload.validationData ?? {}),
+        encodeHexBytes(payload.proposer ?? ""),
+    ])
+}
+
 export function decodeProposeBlockHashRequest(
     buffer: Buffer,
 ): ProposeBlockHashRequestPayload {
@@ -182,6 +193,17 @@ export interface SetValidatorPhaseRequestPayload {
     blockRef: bigint
 }
 
+// REVIEW: Client-side encoder for setValidatorPhase requests
+export function encodeSetValidatorPhaseRequest(
+    payload: SetValidatorPhaseRequestPayload,
+): Buffer {
+    return Buffer.concat([
+        PrimitiveEncoder.encodeUInt8(payload.phase),
+        encodeHexBytes(payload.seed ?? ""),
+        PrimitiveEncoder.encodeUInt64(payload.blockRef ?? BigInt(0)),
+    ])
+}
+
 export function decodeSetValidatorPhaseRequest(
     buffer: Buffer,
 ): SetValidatorPhaseRequestPayload {
@@ -225,10 +247,58 @@ export function encodeSetValidatorPhaseResponse(
     ])
 }
 
+// REVIEW: Client-side decoder for setValidatorPhase responses
+export function decodeSetValidatorPhaseResponse(
+    buffer: Buffer,
+): SetValidatorPhaseResponsePayload {
+    let offset = 0
+
+    const status = PrimitiveDecoder.decodeUInt16(buffer, offset)
+    offset += status.bytesRead
+
+    const greenlight = PrimitiveDecoder.decodeBoolean(buffer, offset)
+    offset += greenlight.bytesRead
+
+    const timestamp = PrimitiveDecoder.decodeUInt64(buffer, offset)
+    offset += timestamp.bytesRead
+
+    const blockRef = PrimitiveDecoder.decodeUInt64(buffer, offset)
+    offset += blockRef.bytesRead
+
+    const metadataBytes = PrimitiveDecoder.decodeVarBytes(buffer, offset)
+    offset += metadataBytes.bytesRead
+
+    let metadata: unknown = null
+    try {
+        metadata = JSON.parse(metadataBytes.value.toString("utf8"))
+    } catch {
+        metadata = null
+    }
+
+    return {
+        status: status.value,
+        greenlight: greenlight.value,
+        timestamp: timestamp.value,
+        blockRef: blockRef.value,
+        metadata,
+    }
+}
+
 export interface GreenlightRequestPayload {
     blockRef: bigint
     timestamp: bigint
     phase: number
+}
+
+// REVIEW: Client-side encoder for greenlight requests
+export function encodeGreenlightRequest(
+    payload: GreenlightRequestPayload,
+): Buffer {
+    return Buffer.concat([
+        PrimitiveEncoder.encodeUInt64(payload.blockRef ?? BigInt(0)),
+        PrimitiveEncoder.encodeUInt64(payload.timestamp ?? BigInt(0)),
+        PrimitiveEncoder.encodeUInt8(payload.phase ?? 0),
+    ])
 }
 
 export function decodeGreenlightRequest(
@@ -264,6 +334,24 @@ export function encodeGreenlightResponse(
         PrimitiveEncoder.encodeUInt16(payload.status),
         PrimitiveEncoder.encodeBoolean(payload.accepted ?? false),
     ])
+}
+
+// REVIEW: Client-side decoder for greenlight responses
+export function decodeGreenlightResponse(
+    buffer: Buffer,
+): GreenlightResponsePayload {
+    let offset = 0
+
+    const status = PrimitiveDecoder.decodeUInt16(buffer, offset)
+    offset += status.bytesRead
+
+    const accepted = PrimitiveDecoder.decodeBoolean(buffer, offset)
+    offset += accepted.bytesRead
+
+    return {
+        status: status.value,
+        accepted: accepted.value,
+    }
 }
 
 export interface BlockTimestampResponsePayload {
