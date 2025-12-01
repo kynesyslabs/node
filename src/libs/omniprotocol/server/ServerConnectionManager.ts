@@ -67,7 +67,7 @@ export class ServerConnectionManager extends EventEmitter {
         console.log(`[ServerConnectionManager] Closing ${this.connections.size} connections...`)
 
         const closePromises = Array.from(this.connections.values()).map(conn =>
-            conn.close()
+            conn.close(),
         )
 
         await Promise.allSettled(closePromises)
@@ -173,7 +173,7 @@ export class ServerConnectionManager extends EventEmitter {
 
             if (toRemove.length > 0) {
                 console.log(
-                    `[ServerConnectionManager] Cleaned up ${toRemove.length} connections`
+                    `[ServerConnectionManager] Cleaned up ${toRemove.length} connections`,
                 )
             }
         }, 60000) // Run every minute

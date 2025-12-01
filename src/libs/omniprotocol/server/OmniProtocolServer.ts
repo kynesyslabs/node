@@ -22,7 +22,7 @@ export class OmniProtocolServer extends EventEmitter {
     private server: NetServer | null = null
     private connectionManager: ServerConnectionManager
     private config: ServerConfig
-    private isRunning: boolean = false
+    private isRunning = false
     private rateLimiter: RateLimiter
 
     constructor(config: Partial<ServerConfig> = {}) {
@@ -93,10 +93,10 @@ export class OmniProtocolServer extends EventEmitter {
                     this.isRunning = true
                     this.emit("listening", this.config.port)
                     console.log(
-                        `[OmniProtocolServer] Listening on ${this.config.host}:${this.config.port}`
+                        `[OmniProtocolServer] Listening on ${this.config.host}:${this.config.port}`,
                     )
                     resolve()
-                }
+                },
             )
 
             this.server.once("error", reject)
@@ -146,7 +146,7 @@ export class OmniProtocolServer extends EventEmitter {
         const rateLimitResult = this.rateLimiter.checkConnection(ipAddress)
         if (!rateLimitResult.allowed) {
             console.warn(
-                `[OmniProtocolServer] Rate limit exceeded for ${remoteAddress}: ${rateLimitResult.reason}`
+                `[OmniProtocolServer] Rate limit exceeded for ${remoteAddress}: ${rateLimitResult.reason}`,
             )
             socket.destroy()
             this.emit("connection_rejected", remoteAddress, "rate_limit")
@@ -157,7 +157,7 @@ export class OmniProtocolServer extends EventEmitter {
         // Check if we're at capacity
         if (this.connectionManager.getConnectionCount() >= this.config.maxConnections) {
             console.warn(
-                `[OmniProtocolServer] Connection limit reached, rejecting ${remoteAddress}`
+                `[OmniProtocolServer] Connection limit reached, rejecting ${remoteAddress}`,
             )
             socket.destroy()
             this.emit("connection_rejected", remoteAddress, "capacity")
@@ -180,7 +180,7 @@ export class OmniProtocolServer extends EventEmitter {
         } catch (error) {
             console.error(
                 `[OmniProtocolServer] Failed to handle connection from ${remoteAddress}:`,
-                error
+                error,
             )
             this.rateLimiter.removeConnection(ipAddress)
             socket.destroy()

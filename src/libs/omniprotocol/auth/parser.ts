@@ -14,21 +14,21 @@ export class AuthBlockParser {
         // Algorithm (1 byte)
         const { value: algorithm, bytesRead: algBytes } = PrimitiveDecoder.decodeUInt8(
             buffer,
-            pos
+            pos,
         )
         pos += algBytes
 
         // Signature Mode (1 byte)
         const { value: signatureMode, bytesRead: modeBytes } = PrimitiveDecoder.decodeUInt8(
             buffer,
-            pos
+            pos,
         )
         pos += modeBytes
 
         // Timestamp (8 bytes)
         const { value: timestamp, bytesRead: tsBytes } = PrimitiveDecoder.decodeUInt64(
             buffer,
-            pos
+            pos,
         )
         pos += tsBytes
 

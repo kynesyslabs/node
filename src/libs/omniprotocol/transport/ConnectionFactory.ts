@@ -22,7 +22,7 @@ export class ConnectionFactory {
      */
     createConnection(
         peerIdentity: string,
-        connectionString: string
+        connectionString: string,
     ): PeerConnection | TLSConnection {
         const parsed = parseConnectionString(connectionString)
 
@@ -30,17 +30,17 @@ export class ConnectionFactory {
         if (parsed.protocol === "tls" || parsed.protocol === "tcps") {
             if (!this.tlsConfig) {
                 throw new Error(
-                    "TLS connection requested but TLS config not provided to factory"
+                    "TLS connection requested but TLS config not provided to factory",
                 )
             }
 
             console.log(
-                `[ConnectionFactory] Creating TLS connection to ${peerIdentity} at ${parsed.host}:${parsed.port}`
+                `[ConnectionFactory] Creating TLS connection to ${peerIdentity} at ${parsed.host}:${parsed.port}`,
             )
             return new TLSConnection(peerIdentity, connectionString, this.tlsConfig)
         } else {
             console.log(
-                `[ConnectionFactory] Creating TCP connection to ${peerIdentity} at ${parsed.host}:${parsed.port}`
+                `[ConnectionFactory] Creating TCP connection to ${peerIdentity} at ${parsed.host}:${parsed.port}`,
             )
             return new PeerConnection(peerIdentity, connectionString)
         }

@@ -30,7 +30,7 @@ export async function dispatchOmniMessage<TPayload = unknown>(
         if (!options.message.auth) {
             throw new OmniProtocolError(
                 `Authentication required for opcode ${descriptor.name} (0x${opcode.toString(16)})`,
-                0xf401 // Unauthorized
+                0xf401, // Unauthorized
             )
         }
 
@@ -38,13 +38,13 @@ export async function dispatchOmniMessage<TPayload = unknown>(
         const verificationResult = await SignatureVerifier.verify(
             options.message.auth,
             options.message.header,
-            options.message.payload as Buffer
+            options.message.payload as Buffer,
         )
 
         if (!verificationResult.valid) {
             throw new OmniProtocolError(
                 `Authentication failed for opcode ${descriptor.name}: ${verificationResult.error}`,
-                0xf401 // Unauthorized
+                0xf401, // Unauthorized
             )
         }
 

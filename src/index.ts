@@ -362,11 +362,11 @@ async function main() {
                     // TLS configuration
                     tls: {
                         enabled: process.env.OMNI_TLS_ENABLED === "true",
-                        mode: (process.env.OMNI_TLS_MODE as 'self-signed' | 'ca') || 'self-signed',
-                        certPath: process.env.OMNI_CERT_PATH || './certs/node-cert.pem',
-                        keyPath: process.env.OMNI_KEY_PATH || './certs/node-key.pem',
+                        mode: (process.env.OMNI_TLS_MODE as "self-signed" | "ca") || "self-signed",
+                        certPath: process.env.OMNI_CERT_PATH || "./certs/node-cert.pem",
+                        keyPath: process.env.OMNI_KEY_PATH || "./certs/node-key.pem",
                         caPath: process.env.OMNI_CA_PATH,
-                        minVersion: (process.env.OMNI_TLS_MIN_VERSION as 'TLSv1.2' | 'TLSv1.3') || 'TLSv1.3',
+                        minVersion: (process.env.OMNI_TLS_MIN_VERSION as "TLSv1.2" | "TLSv1.3") || "TLSv1.3",
                     },
                     // Rate limiting configuration
                     rateLimit: {
@@ -380,6 +380,12 @@ async function main() {
                 console.log(
                     `[MAIN] ✅ OmniProtocol server started on port ${indexState.OMNI_PORT}`,
                 )
+
+                // REVIEW: Initialize OmniProtocol client adapter for outbound peer communication
+                // Use OMNI_ONLY mode for testing, OMNI_PREFERRED for production gradual rollout
+                const omniMode = (process.env.OMNI_MODE as "HTTP_ONLY" | "OMNI_PREFERRED" | "OMNI_ONLY") || "OMNI_ONLY"
+                getSharedState.initOmniProtocol(omniMode)
+                console.log(`[MAIN] ✅ OmniProtocol client adapter initialized with mode: ${omniMode}`)
             } catch (error) {
                 console.log("[MAIN] ⚠️  Failed to start OmniProtocol server:", error)
                 // Continue without OmniProtocol (failsafe - falls back to HTTP)

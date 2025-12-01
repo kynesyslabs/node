@@ -10,6 +10,8 @@ import * as ntpClient from "ntp-client"
 import { Peer, PeerManager } from "src/libs/peer"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { PeerOmniAdapter } from "src/libs/omniprotocol/integration/peerAdapter"
+import type { MigrationMode } from "src/libs/omniprotocol/types/config"
 
 dotenv.config()
 
@@ -45,6 +47,10 @@ export default class SharedState {
     startingConsensus = false
     isSignalingServerStarted = false
     isMCPServerStarted = false
+    isOmniProtocolEnabled = false
+
+    // OmniProtocol adapter for peer communication
+    private _omniAdapter: PeerOmniAdapter | null = null
 
     // Running as a node (is false when running specific modules like the signaling server)
     runningAsNode = true
@@ -258,6 +264,61 @@ export default class SharedState {
         }
         return info
     }
+
+    // SECTION OmniProtocol Integration
+    /**
+     * Initialize the OmniProtocol adapter with the specified migration mode
+     * @param mode Migration mode: HTTP_ONLY, OMNI_PREFERRED, or OMNI_ONLY
+     */
+    public initOmniProtocol(mode: MigrationMode = "OMNI_PREFERRED"): void {
+        if (this._omniAdapter) {
+            console.log("[SharedState] OmniProtocol adapter already initialized")
+            return
+        }
+        this._omniAdapter = new PeerOmniAdapter()
+        this._omniAdapter.migrationMode = mode
+        this.isOmniProtocolEnabled = true
+        console.log(`[SharedState] OmniProtocol adapter initialized with mode: ${mode}`)
+    }
+
+    /**
+     * Get the OmniProtocol adapter instance
+     */
+    public get omniAdapter(): PeerOmniAdapter | null {
+        return this._omniAdapter
+    }
+
+    /**
+     * Check if OmniProtocol should be used for a specific peer
+     * @param peerIdentity The peer's public key identity
+     */
+    public shouldUseOmniProtocol(peerIdentity: string): boolean {
+        if (!this.isOmniProtocolEnabled || !this._omniAdapter) {
+            return false
+        }
+        return this._omniAdapter.shouldUseOmni(peerIdentity)
+    }
+
+    /**
+     * Mark a peer as supporting OmniProtocol
+     * @param peerIdentity The peer's public key identity
+     */
+    public markPeerOmniCapable(peerIdentity: string): void {
+        if (this._omniAdapter) {
+            this._omniAdapter.markOmniPeer(peerIdentity)
+        }
+    }
+
+    /**
+     * Mark a peer as HTTP-only (fallback after OmniProtocol failure)
+     * @param peerIdentity The peer's public key identity
+     */
+    public markPeerHttpOnly(peerIdentity: string): void {
+        if (this._omniAdapter) {
+            this._omniAdapter.markHttpPeer(peerIdentity)
+        }
+    }
+    // !SECTION OmniProtocol Integration
 }
 
 // REVIEW Experimental singleton elegant approach

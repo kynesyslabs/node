@@ -29,14 +29,14 @@ jest.mock("@kynesyslabs/demosdk/build/multichain/localsdk", () => ({
     default: {},
 }))
 
-let DEFAULT_OMNIPROTOCOL_CONFIG: typeof import("src/libs/omniprotocol/types/config")
-    ["DEFAULT_OMNIPROTOCOL_CONFIG"]
-let PeerOmniAdapter: typeof import("src/libs/omniprotocol/integration/peerAdapter")
-    ["default"]
+let DEFAULT_OMNIPROTOCOL_CONFIG: typeof import("src/libs/omniprotocol/types/config").DEFAULT_OMNIPROTOCOL_CONFIG
+let PeerOmniAdapterClass: typeof import("src/libs/omniprotocol/integration/peerAdapter").PeerOmniAdapter
 
 beforeAll(async () => {
-    ({ DEFAULT_OMNIPROTOCOL_CONFIG } = await import("src/libs/omniprotocol/types/config"))
-    ;({ default: PeerOmniAdapter } = await import("src/libs/omniprotocol/integration/peerAdapter"))
+    const configModule = await import("src/libs/omniprotocol/types/config")
+    const adapterModule = await import("src/libs/omniprotocol/integration/peerAdapter")
+    DEFAULT_OMNIPROTOCOL_CONFIG = configModule.DEFAULT_OMNIPROTOCOL_CONFIG
+    PeerOmniAdapterClass = adapterModule.PeerOmniAdapter
 })
 
 const createMockPeer = () => {
@@ -58,10 +58,10 @@ const createMockPeer = () => {
 }
 
 describe("PeerOmniAdapter", () => {
-    let adapter: PeerOmniAdapter
+    let adapter: InstanceType<typeof PeerOmniAdapterClass>
 
     beforeEach(() => {
-        adapter = new PeerOmniAdapter({
+        adapter = new PeerOmniAdapterClass({
             config: DEFAULT_OMNIPROTOCOL_CONFIG,
         })
     })

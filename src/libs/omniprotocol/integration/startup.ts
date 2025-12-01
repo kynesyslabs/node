@@ -24,11 +24,11 @@ export interface OmniServerConfig {
     connectionTimeout?: number
     tls?: {
         enabled?: boolean
-        mode?: 'self-signed' | 'ca'
+        mode?: "self-signed" | "ca"
         certPath?: string
         keyPath?: string
         caPath?: string
-        minVersion?: 'TLSv1.2' | 'TLSv1.3'
+        minVersion?: "TLSv1.2" | "TLSv1.3"
     }
     rateLimit?: Partial<RateLimitConfig>
 }
@@ -39,7 +39,7 @@ export interface OmniServerConfig {
  * @returns OmniProtocolServer or TLSServer instance, or null if disabled
  */
 export async function startOmniProtocolServer(
-    config: OmniServerConfig = {}
+    config: OmniServerConfig = {},
 ): Promise<OmniProtocolServer | TLSServer | null> {
     // Check if enabled (default: false for now until fully tested)
     if (config.enabled === false) {
@@ -72,12 +72,12 @@ export async function startOmniProtocolServer(
             // Build TLS config
             const tlsConfig: TLSConfig = {
                 enabled: true,
-                mode: config.tls.mode ?? 'self-signed',
+                mode: config.tls.mode ?? "self-signed",
                 certPath,
                 keyPath,
                 caPath: config.tls.caPath,
                 rejectUnauthorized: false, // Custom verification
-                minVersion: config.tls.minVersion ?? 'TLSv1.3',
+                minVersion: config.tls.minVersion ?? "TLSv1.3",
                 requestCert: true,
                 trustedFingerprints: new Map(),
             }
@@ -119,18 +119,18 @@ export async function startOmniProtocolServer(
 
         serverInstance.on("connection_rejected", (remoteAddress, reason) => {
             log.warn(
-                `[OmniProtocol] ❌ Connection rejected from ${remoteAddress}: ${reason}`
+                `[OmniProtocol] ❌ Connection rejected from ${remoteAddress}: ${reason}`,
             )
         })
 
         serverInstance.on("rate_limit_exceeded", (ipAddress, result) => {
             log.warn(
-                `[OmniProtocol] ⚠️  Rate limit exceeded for ${ipAddress}: ${result.reason} (${result.currentCount}/${result.limit})`
+                `[OmniProtocol] ⚠️  Rate limit exceeded for ${ipAddress}: ${result.reason} (${result.currentCount}/${result.limit})`,
             )
         })
 
         serverInstance.on("error", (error) => {
-            log.error(`[OmniProtocol] Server error:`, error)
+            log.error("[OmniProtocol] Server error:", error)
         })
 
         // Start server
