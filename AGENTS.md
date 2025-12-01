@@ -22,6 +22,7 @@ bd ready --json
 ```bash
 bd create "Issue title" -t bug|feature|task -p 0-4 --json
 bd create "Issue title" -p 1 --deps discovered-from:bd-123 --json
+bd create "Subtask" --parent <epic-id> --json  # Hierarchical subtask (gets ID like epic-id.1)
 ```
 
 **Claim and update:**
@@ -121,6 +122,11 @@ history/
 - Preserves planning history for archeological research
 - Reduces noise when browsing the project
 
+### CLI Help
+
+Run `bd <command> --help` to see all available flags for any command.
+For example: `bd create --help` shows `--parent`, `--deps`, `--assignee`, etc.
+
 ### Important Rules
 
 - Use bd for ALL task tracking
@@ -128,6 +134,7 @@ history/
 - Link discovered work with `discovered-from` dependencies
 - Check `bd ready` before asking "what should I work on?"
 - Store AI planning docs in `history/` directory
+- Run `bd <cmd> --help` to discover available flags
 - Do NOT create markdown TODO lists
 - Do NOT use external issue trackers
 - Do NOT duplicate tracking systems
