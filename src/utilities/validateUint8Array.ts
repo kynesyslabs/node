@@ -6,10 +6,10 @@ export default function validateIfUint8Array(input: unknown): Uint8Array | unkno
 
     // Handle hex strings
     if (typeof input === "string") {
-        // Check if it's a valid hex string (even length, only hex chars)
-        const isHex = /^[0-9a-fA-F]+$/.test(input) && input.length % 2 === 0
-        if (isHex && input.length > 0) {
-            return Buffer.from(input, "hex")
+        const hexString = input.startsWith("0x") ? input.slice(2) : input
+        const isHex = /^[0-9a-fA-F]+$/.test(hexString) && hexString.length % 2 === 0
+        if (isHex) {
+            return Buffer.from(hexString, "hex")
         }
 
         return input
