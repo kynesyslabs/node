@@ -59,8 +59,8 @@ export const handlePeerlistSync: OmniHandler = async () => {
     })
 }
 
-export const handleNodeCall: OmniHandler = async ({ message }) => {
-    if (!message.payload || message.payload.length === 0) {
+export const handleNodeCall: OmniHandler = async ({ message, context }) => {
+    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
     return encodeNodeCallResponse({
         status: 400,
         value: null,
@@ -69,16 +69,56 @@ export const handleNodeCall: OmniHandler = async ({ message }) => {
     })
     }
 
-    const request = decodeNodeCallRequest(message.payload)
-    const { default: manageNodeCall } = await import("src/libs/network/manageNodeCall")
+    const request = decodeNodeCallRequest(message.payload as Buffer)
 
+    // REVIEW: Handle consensus_routine envelope format
+    // Format: { method: "consensus_routine", params: [{ method: "setValidatorPhase", params: [...] }] }
+    if (request.method === "consensus_routine") {
+        const { default: manageConsensusRoutines } = await import(
+            "src/libs/network/manageConsensusRoutines"
+        )
+
+        // Extract the inner consensus method from params[0]
+        const consensusPayload = request.params[0]
+        if (!consensusPayload || typeof consensusPayload !== "object") {
+            return encodeNodeCallResponse({
+                status: 400,
+                value: "Invalid consensus_routine payload",
+                requireReply: false,
+                extra: null,
+            })
+        }
+
+        // Call manageConsensusRoutines with sender identity and payload
+        const response = await manageConsensusRoutines(
+            context.peerIdentity ?? "",
+            consensusPayload,
+        )
+
+        return encodeNodeCallResponse({
+            status: response.result,
+            value: response.response,
+            requireReply: response.require_reply ?? false,
+            extra: response.extra ?? null,
+        })
+    }
+
+    const { manageNodeCall } = await import("src/libs/network/manageNodeCall")
+
+    // REVIEW: The HTTP API uses "nodeCall" as method with actual RPC in params[0]
+    // Format: { method: "nodeCall", params: [{ message: "getPeerlist", data: ..., muid: ... }] }
     const params = request.params
-    const data = params.length === 0 ? {} : params.length === 1 ? params[0] : params
+    const innerCall = params.length > 0 && typeof params[0] === "object" ? params[0] : null
+
+    // If this is a nodeCall envelope, unwrap it
+    const actualMessage = innerCall?.message ?? request.method
+    const actualData = innerCall?.data ?? (params.length === 0 ? {} : params.length === 1 ? params[0] : params)
+    const actualMuid = innerCall?.muid ?? ""
 
     const response = await manageNodeCall({
-        message: request.method,
-        data,
-        muid: "",
+        message: actualMessage,
+        data: actualData,
+        muid: actualMuid,
     })
 
     return encodeNodeCallResponse({
