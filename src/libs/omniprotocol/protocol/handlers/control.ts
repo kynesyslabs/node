@@ -71,6 +71,27 @@ export const handleNodeCall: OmniHandler = async ({ message, context }) => {
 
     const request = decodeNodeCallRequest(message.payload as Buffer)
 
+    // REVIEW: Handle top-level RPC methods that are NOT nodeCall messages
+    // These are routed to ServerHandlers directly, not manageNodeCall
+    // Format: { method: "mempool", params: [{ data: [...] }] }
+    if (request.method === "mempool") {
+        const { default: ServerHandlers } = await import("src/libs/network/endpointHandlers")
+        const log = await import("src/utilities/logger").then(m => m.default)
+
+        log.info(`[handleNodeCall] mempool merge request from peer: "${context.peerIdentity}"`)
+
+        // ServerHandlers.handleMempool expects content with .data property
+        const content = request.params[0] ?? { data: [] }
+        const response = await ServerHandlers.handleMempool(content)
+
+        return encodeNodeCallResponse({
+            status: response.result ?? 200,
+            value: response.response,
+            requireReply: response.requireReply ?? false,
+            extra: response.extra ?? null,
+        })
+    }
+
     // REVIEW: Handle consensus_routine envelope format
     // Format: { method: "consensus_routine", params: [{ method: "setValidatorPhase", params: [...] }] }
     if (request.method === "consensus_routine") {
@@ -88,6 +109,10 @@ export const handleNodeCall: OmniHandler = async ({ message, context }) => {
                 extra: null,
             })
         }
+
+        // REVIEW: Debug logging for peer identity lookup
+        console.log(`[handleNodeCall] consensus_routine from peer: "${context.peerIdentity}"`)
+        console.log(`[handleNodeCall] isAuthenticated: ${context.isAuthenticated}`)
 
         // Call manageConsensusRoutines with sender identity and payload
         const response = await manageConsensusRoutines(
