@@ -38,7 +38,7 @@ export class InboundConnection extends EventEmitter {
     constructor(
         socket: Socket,
         connectionId: string,
-        config: InboundConnectionConfig
+        config: InboundConnectionConfig,
     ) {
         super()
         this.socket = socket
@@ -75,7 +75,7 @@ export class InboundConnection extends EventEmitter {
         this.authTimer = setTimeout(() => {
             if (this.state === "PENDING_AUTH") {
                 console.warn(
-                    `[InboundConnection] ${this.connectionId} authentication timeout`
+                    `[InboundConnection] ${this.connectionId} authentication timeout`,
                 )
                 this.close()
             }
@@ -104,7 +104,7 @@ export class InboundConnection extends EventEmitter {
      */
     private async handleMessage(message: ParsedOmniMessage): Promise<void> {
         console.log(
-            `[InboundConnection] ${this.connectionId} received opcode 0x${message.header.opcode.toString(16)}`
+            `[InboundConnection] ${this.connectionId} received opcode 0x${message.header.opcode.toString(16)}`,
         )
 
         // Check rate limits
@@ -115,13 +115,13 @@ export class InboundConnection extends EventEmitter {
             const ipResult = this.rateLimiter.checkIPRequest(ipAddress)
             if (!ipResult.allowed) {
                 console.warn(
-                    `[InboundConnection] ${this.connectionId} IP rate limit exceeded: ${ipResult.reason}`
+                    `[InboundConnection] ${this.connectionId} IP rate limit exceeded: ${ipResult.reason}`,
                 )
                 // Send error response
                 await this.sendErrorResponse(
                     message.header.sequence,
                     0xf429, // Too Many Requests
-                    ipResult.reason || "Rate limit exceeded"
+                    ipResult.reason || "Rate limit exceeded",
                 )
                 return
             }
@@ -131,13 +131,13 @@ export class InboundConnection extends EventEmitter {
                 const identityResult = this.rateLimiter.checkIdentityRequest(this.peerIdentity)
                 if (!identityResult.allowed) {
                     console.warn(
-                        `[InboundConnection] ${this.connectionId} identity rate limit exceeded: ${identityResult.reason}`
+                        `[InboundConnection] ${this.connectionId} identity rate limit exceeded: ${identityResult.reason}`,
                     )
                     // Send error response
                     await this.sendErrorResponse(
                         message.header.sequence,
                         0xf429, // Too Many Requests
-                        identityResult.reason || "Rate limit exceeded"
+                        identityResult.reason || "Rate limit exceeded",
                     )
                     return
                 }
@@ -166,7 +166,8 @@ export class InboundConnection extends EventEmitter {
             if (message.header.opcode === 0x01 && this.state === "PENDING_AUTH") {
                 // Extract peer identity from auth block
                 if (message.auth && message.auth.identity) {
-                    this.peerIdentity = message.auth.identity.toString("hex")
+                    // REVIEW: Use 0x prefix to match PeerManager identity format
+                    this.peerIdentity = "0x" + message.auth.identity.toString("hex")
                     this.state = "AUTHENTICATED"
 
                     if (this.authTimer) {
@@ -176,21 +177,21 @@ export class InboundConnection extends EventEmitter {
 
                     this.emit("authenticated", this.peerIdentity)
                     console.log(
-                        `[InboundConnection] ${this.connectionId} authenticated as ${this.peerIdentity}`
+                        `[InboundConnection] ${this.connectionId} authenticated as ${this.peerIdentity}`,
                     )
                 }
             }
         } catch (error) {
             console.error(
                 `[InboundConnection] ${this.connectionId} handler error:`,
-                error
+                error,
             )
 
             // Send error response
             const errorPayload = Buffer.from(
                 JSON.stringify({
                     error: String(error),
-                })
+                }),
             )
             await this.sendResponse(message.header.sequence, errorPayload)
         }
@@ -214,7 +215,7 @@ export class InboundConnection extends EventEmitter {
                 if (error) {
                     console.error(
                         `[InboundConnection] ${this.connectionId} write error:`,
-                        error
+                        error,
                     )
                     reject(error)
                 } else {
@@ -230,7 +231,7 @@ export class InboundConnection extends EventEmitter {
     private async sendErrorResponse(
         sequence: number,
         errorCode: number,
-        errorMessage: string
+        errorMessage: string,
     ): Promise<void> {
         // Create error payload: 2 bytes error code + error message
         const messageBuffer = Buffer.from(errorMessage, "utf8")
