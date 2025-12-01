@@ -267,7 +267,7 @@ export class MessageFramer {
         header: OmniMessageHeader,
         payload: Buffer,
         auth?: AuthBlock | null,
-        flags?: number
+        flags?: number,
     ): Buffer {
         // Determine flags
         const flagsByte = flags !== undefined ? flags : (auth ? 0x01 : 0x00)

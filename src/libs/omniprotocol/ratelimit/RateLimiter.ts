@@ -124,7 +124,7 @@ export class RateLimiter {
         return this.checkRequest(
             ipAddress,
             RateLimitType.IP,
-            this.config.maxRequestsPerSecondPerIP
+            this.config.maxRequestsPerSecondPerIP,
         )
     }
 
@@ -139,7 +139,7 @@ export class RateLimiter {
         return this.checkRequest(
             identity,
             RateLimitType.IDENTITY,
-            this.config.maxRequestsPerSecondPerIdentity
+            this.config.maxRequestsPerSecondPerIdentity,
         )
     }
 
@@ -149,7 +149,7 @@ export class RateLimiter {
     private checkRequest(
         key: string,
         type: RateLimitType,
-        maxRequests: number
+        maxRequests: number,
     ): RateLimitResult {
         const entry = this.getOrCreateEntry(key, type)
         const now = Date.now()
@@ -214,7 +214,7 @@ export class RateLimiter {
      */
     private getOrCreateEntry(
         key: string,
-        type: RateLimitType
+        type: RateLimitType,
     ): RateLimitEntry {
         const map = type === RateLimitType.IP ? this.ipLimits : this.identityLimits
 
@@ -303,7 +303,7 @@ export class RateLimiter {
     /**
      * Manually block an IP or identity
      */
-    blockKey(key: string, type: RateLimitType, durationMs: number = 3600000): void {
+    blockKey(key: string, type: RateLimitType, durationMs = 3600000): void {
         const entry = this.getOrCreateEntry(key, type)
         entry.blocked = true
         entry.blockExpiry = Date.now() + durationMs

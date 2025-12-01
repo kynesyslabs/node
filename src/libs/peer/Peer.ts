@@ -215,6 +215,32 @@ export default class Peer {
         request: RPCRequest,
         isAuthenticated = true,
     ): Promise<RPCResponse> {
+        // REVIEW: Check if OmniProtocol should be used for this peer
+        if (getSharedState.isOmniProtocolEnabled && getSharedState.omniAdapter) {
+            try {
+                const response = await getSharedState.omniAdapter.adaptCall(
+                    this,
+                    request,
+                    isAuthenticated,
+                )
+                return response
+            } catch (error) {
+                log.warning(
+                    `[Peer] OmniProtocol adaptCall failed, falling back to HTTP: ${error}`,
+                )
+                // Fall through to HTTP call below
+            }
+        }
+
+        // HTTP fallback / default path
+        return this.httpCall(request, isAuthenticated)
+    }
+
+    // REVIEW: Extracted HTTP call logic for reuse and fallback
+    async httpCall(
+        request: RPCRequest,
+        isAuthenticated = true,
+    ): Promise<RPCResponse> {
         log.info(
             "[RPC Call] [" +
                 request.method +

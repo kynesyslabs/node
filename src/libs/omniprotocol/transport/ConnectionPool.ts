@@ -7,7 +7,7 @@ import type {
     ConnectionInfo,
     ConnectionState,
 } from "./types"
-import { PoolCapacityError } from "./types"
+import { PoolCapacityError } from "../types/errors"
 
 /**
  * ConnectionPool manages persistent TCP connections to multiple peer nodes
@@ -183,7 +183,7 @@ export class ConnectionPool {
                 payload,
                 privateKey,
                 publicKey,
-                options
+                options,
             )
             this.release(connection)
             return response

@@ -13,7 +13,7 @@ const generateKeyPair = promisify(crypto.generateKeyPair)
 export async function generateSelfSignedCert(
     certPath: string,
     keyPath: string,
-    options: CertificateGenerationOptions = {}
+    options: CertificateGenerationOptions = {},
 ): Promise<{ certPath: string; keyPath: string }> {
     const {
         commonName = `omni-node-${Date.now()}`,
@@ -78,14 +78,14 @@ IP.1 = 127.0.0.1
         // Generate self-signed certificate using openssl
         execSync(
             `openssl req -new -x509 -key "${keyPath}" -out "${certPath}" -days ${validityDays} -config "${configPath}"`,
-            { stdio: "pipe" }
+            { stdio: "pipe" },
         )
 
         // Clean up temp files
         if (fs.existsSync(configPath)) fs.unlinkSync(configPath)
         if (fs.existsSync(csrPath)) fs.unlinkSync(csrPath)
 
-        console.log(`[TLS] Certificate generated successfully`)
+        console.log("[TLS] Certificate generated successfully")
         console.log(`[TLS] Certificate: ${certPath}`)
         console.log(`[TLS] Private key: ${keyPath}`)
 
@@ -156,7 +156,7 @@ export async function verifyCertificateValidity(certPath: string): Promise<boole
 
         return true
     } catch (error) {
-        console.error(`[TLS] Certificate verification failed:`, error)
+        console.error("[TLS] Certificate verification failed:", error)
         return false
     }
 }
@@ -168,7 +168,7 @@ export async function getCertificateExpiryDays(certPath: string): Promise<number
     const certInfo = await loadCertificate(certPath)
     const now = new Date()
     const daysUntilExpiry = Math.floor(
-        (certInfo.validTo.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+        (certInfo.validTo.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
     )
     return daysUntilExpiry
 }

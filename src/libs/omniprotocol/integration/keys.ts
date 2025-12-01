@@ -9,8 +9,13 @@ import { getSharedState } from "src/utilities/sharedState"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
 /**
- * Get the node's Ed25519 private key as Buffer
- * @returns Private key buffer or null if not available
+ * Get the node's Ed25519 private key as Buffer (32-byte seed)
+ *
+ * NOTE: node-forge stores Ed25519 private keys as 64 bytes (seed + public key concatenated),
+ * but @noble/ed25519 expects just the 32-byte seed for signing.
+ * This function extracts the 32-byte seed from the 64-byte private key.
+ *
+ * @returns Private key seed buffer (32 bytes) or null if not available
  */
 export function getNodePrivateKey(): Buffer | null {
     try {
@@ -21,18 +26,32 @@ export function getNodePrivateKey(): Buffer | null {
             return null
         }
 
+        let privateKeyBuffer: Buffer
+
         // Convert Uint8Array to Buffer
         if (keypair.privateKey instanceof Uint8Array) {
-            return Buffer.from(keypair.privateKey)
+            privateKeyBuffer = Buffer.from(keypair.privateKey)
+        } else if (Buffer.isBuffer(keypair.privateKey)) {
+            privateKeyBuffer = keypair.privateKey
+        } else {
+            console.warn("[OmniProtocol] Private key is in unexpected format")
+            return null
         }
 
-        // If already a Buffer
-        if (Buffer.isBuffer(keypair.privateKey)) {
-            return keypair.privateKey
+        // REVIEW: node-forge Ed25519 private keys are 64 bytes (32-byte seed + 32-byte public key)
+        // @noble/ed25519 expects just the 32-byte seed for signing
+        if (privateKeyBuffer.length === 64) {
+            // Extract first 32 bytes (the seed)
+            return privateKeyBuffer.subarray(0, 32)
+        } else if (privateKeyBuffer.length === 32) {
+            // Already the correct size
+            return privateKeyBuffer
+        } else {
+            console.warn(
+                `[OmniProtocol] Unexpected private key length: ${privateKeyBuffer.length} bytes (expected 32 or 64)`,
+            )
+            return null
         }
-
-        console.warn("[OmniProtocol] Private key is in unexpected format")
-        return null
     } catch (error) {
         console.error("[OmniProtocol] Error getting node private key:", error)
         return null
@@ -115,7 +134,7 @@ export function validateNodeKeys(): boolean {
 
     if (!validPublicKey || !validPrivateKey) {
         console.warn(
-            `[OmniProtocol] Invalid key sizes: publicKey=${publicKey.length} bytes, privateKey=${privateKey.length} bytes`
+            `[OmniProtocol] Invalid key sizes: publicKey=${publicKey.length} bytes, privateKey=${privateKey.length} bytes`,
         )
         return false
     }

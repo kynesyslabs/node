@@ -22,7 +22,7 @@ export interface TLSInitResult {
  * - Warns about expiring certificates
  */
 export async function initializeTLSCertificates(
-    certDir?: string
+    certDir?: string,
 ): Promise<TLSInitResult> {
     // Default cert directory
     const defaultCertDir = path.join(process.cwd(), "certs")
@@ -51,7 +51,7 @@ export async function initializeTLSCertificates(
             const expiryDays = await getCertificateExpiryDays(certPath)
             if (expiryDays < 30) {
                 console.warn(
-                    `[TLS] ⚠️  Certificate expires in ${expiryDays} days - consider renewal`
+                    `[TLS] ⚠️  Certificate expires in ${expiryDays} days - consider renewal`,
                 )
             } else {
                 console.log(`[TLS] Certificate valid for ${expiryDays} more days`)

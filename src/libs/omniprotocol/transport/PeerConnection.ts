@@ -13,11 +13,12 @@ import type {
     ConnectionInfo,
     ParsedConnectionString,
 } from "./types"
+import { parseConnectionString } from "./types"
 import {
-    parseConnectionString,
     ConnectionTimeoutError,
     AuthenticationError,
-} from "./types"
+    SigningError,
+} from "../types/errors"
 
 /**
  * PeerConnection manages a single TCP connection to a peer node
@@ -211,7 +212,15 @@ export class PeerConnection {
         const dataToSign = Buffer.concat([msgIdBuf, payloadHash])
 
         // Sign with Ed25519
-        const signature = await ed25519.sign(dataToSign, privateKey)
+        let signature: Uint8Array
+        try {
+            signature = await ed25519.sign(dataToSign, privateKey)
+        } catch (error) {
+            throw new SigningError(
+                `Ed25519 signing failed (privateKey length: ${privateKey.length} bytes): ${error instanceof Error ? error.message : error}`,
+                error instanceof Error ? error : undefined,
+            )
+        }
 
         // Build auth block
         const auth: AuthBlock = {

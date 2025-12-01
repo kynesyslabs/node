@@ -107,35 +107,12 @@ export interface ParsedConnectionString {
     port: number
 }
 
-/**
- * Error thrown when connection pool is at capacity
- */
-export class PoolCapacityError extends Error {
-    constructor(message: string) {
-        super(message)
-        this.name = "PoolCapacityError"
-    }
-}
-
-/**
- * Error thrown when connection times out
- */
-export class ConnectionTimeoutError extends Error {
-    constructor(message: string) {
-        super(message)
-        this.name = "ConnectionTimeoutError"
-    }
-}
-
-/**
- * Error thrown when authentication fails
- */
-export class AuthenticationError extends Error {
-    constructor(message: string) {
-        super(message)
-        this.name = "AuthenticationError"
-    }
-}
+// REVIEW: Re-export centralized error classes from types/errors.ts for backward compatibility
+export {
+    PoolCapacityError,
+    ConnectionTimeoutError,
+    AuthenticationError,
+} from "../types/errors"
 
 /**
  * Parse connection string into components

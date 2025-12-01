@@ -16,7 +16,7 @@ export class TLSConnection extends PeerConnection {
     constructor(
         peerIdentity: string,
         connectionString: string,
-        tlsConfig: TLSConfig
+        tlsConfig: TLSConfig,
     ) {
         super(peerIdentity, connectionString)
         this.tlsConfig = tlsConfig
@@ -33,7 +33,7 @@ export class TLSConnection extends PeerConnection {
     async connect(options: ConnectionOptions = {}): Promise<void> {
         if (this.getState() !== "UNINITIALIZED" && this.getState() !== "CLOSED") {
             throw new Error(
-                `Cannot connect from state ${this.getState()}, must be UNINITIALIZED or CLOSED`
+                `Cannot connect from state ${this.getState()}, must be UNINITIALIZED or CLOSED`,
             )
         }
 
@@ -102,7 +102,7 @@ export class TLSConnection extends PeerConnection {
                 const protocol = socket.getProtocol()
                 const cipher = socket.getCipher()
                 console.log(
-                    `[TLSConnection] Connected with TLS ${protocol} using ${cipher?.name || "unknown cipher"}`
+                    `[TLSConnection] Connected with TLS ${protocol} using ${cipher?.name || "unknown cipher"}`,
                 )
 
                 resolve()
@@ -124,7 +124,7 @@ export class TLSConnection extends PeerConnection {
         // Check if TLS handshake succeeded
         if (!socket.authorized && this.tlsConfig.rejectUnauthorized) {
             console.error(
-                `[TLSConnection] Unauthorized server: ${socket.authorizationError}`
+                `[TLSConnection] Unauthorized server: ${socket.authorizationError}`,
             )
             return false
         }
@@ -144,7 +144,7 @@ export class TLSConnection extends PeerConnection {
             if (trustedFingerprint) {
                 if (trustedFingerprint !== fingerprint) {
                     console.error(
-                        `[TLSConnection] Certificate fingerprint mismatch for ${this.peerIdentity}`
+                        `[TLSConnection] Certificate fingerprint mismatch for ${this.peerIdentity}`,
                     )
                     console.error(`  Expected: ${trustedFingerprint}`)
                     console.error(`  Got: ${fingerprint}`)
@@ -152,16 +152,16 @@ export class TLSConnection extends PeerConnection {
                 }
 
                 console.log(
-                    `[TLSConnection] Verified trusted certificate: ${fingerprint.substring(0, 16)}...`
+                    `[TLSConnection] Verified trusted certificate: ${fingerprint.substring(0, 16)}...`,
                 )
             } else {
                 // No trusted fingerprint stored - this is the first connection
                 // Log the fingerprint so it can be pinned
                 console.warn(
-                    `[TLSConnection] No trusted fingerprint for ${this.peerIdentity}`
+                    `[TLSConnection] No trusted fingerprint for ${this.peerIdentity}`,
                 )
                 console.warn(`  Server certificate fingerprint: ${fingerprint}`)
-                console.warn(`  Add to trustedFingerprints to pin this certificate`)
+                console.warn("  Add to trustedFingerprints to pin this certificate")
 
                 // In strict mode, reject unknown certificates
                 if (this.tlsConfig.rejectUnauthorized) {
@@ -171,7 +171,7 @@ export class TLSConnection extends PeerConnection {
             }
 
             // Log certificate details
-            console.log(`[TLSConnection] Server certificate:`)
+            console.log("[TLSConnection] Server certificate:")
             console.log(`  Subject: ${cert.subject.CN}`)
             console.log(`  Issuer: ${cert.issuer.CN}`)
             console.log(`  Valid from: ${cert.valid_from}`)
@@ -187,7 +187,7 @@ export class TLSConnection extends PeerConnection {
     addTrustedFingerprint(fingerprint: string): void {
         this.trustedFingerprints.set(this.peerIdentity, fingerprint)
         console.log(
-            `[TLSConnection] Added trusted fingerprint for ${this.peerIdentity}: ${fingerprint.substring(0, 16)}...`
+            `[TLSConnection] Added trusted fingerprint for ${this.peerIdentity}: ${fingerprint.substring(0, 16)}...`,
         )
     }
 

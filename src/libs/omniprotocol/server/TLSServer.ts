@@ -26,7 +26,7 @@ export class TLSServer extends EventEmitter {
     private server: tls.Server | null = null
     private connectionManager: ServerConnectionManager
     private config: TLSServerConfig
-    private isRunning: boolean = false
+    private isRunning = false
     private trustedFingerprints: Map<string, string> = new Map()
     private rateLimiter: RateLimiter
 
@@ -127,10 +127,10 @@ export class TLSServer extends EventEmitter {
                     this.isRunning = true
                     this.emit("listening", this.config.port)
                     console.log(
-                        `[TLSServer] 🔒 Listening on ${this.config.host}:${this.config.port} (TLS ${this.config.tls.minVersion})`
+                        `[TLSServer] 🔒 Listening on ${this.config.host}:${this.config.port} (TLS ${this.config.tls.minVersion})`,
                     )
                     resolve()
-                }
+                },
             )
 
             this.server.once("error", reject)
@@ -150,7 +150,7 @@ export class TLSServer extends EventEmitter {
         const rateLimitResult = this.rateLimiter.checkConnection(ipAddress)
         if (!rateLimitResult.allowed) {
             console.warn(
-                `[TLSServer] Rate limit exceeded for ${remoteAddress}: ${rateLimitResult.reason}`
+                `[TLSServer] Rate limit exceeded for ${remoteAddress}: ${rateLimitResult.reason}`,
             )
             socket.destroy()
             this.emit("connection_rejected", remoteAddress, "rate_limit")
@@ -161,7 +161,7 @@ export class TLSServer extends EventEmitter {
         // Verify TLS connection is authorized
         if (!socket.authorized && this.config.tls.rejectUnauthorized) {
             console.warn(
-                `[TLSServer] Unauthorized TLS connection from ${remoteAddress}: ${socket.authorizationError}`
+                `[TLSServer] Unauthorized TLS connection from ${remoteAddress}: ${socket.authorizationError}`,
             )
             socket.destroy()
             this.emit("connection_rejected", remoteAddress, "unauthorized")
@@ -173,7 +173,7 @@ export class TLSServer extends EventEmitter {
             const peerCert = socket.getPeerCertificate()
             if (!peerCert || !peerCert.fingerprint256) {
                 console.warn(
-                    `[TLSServer] No client certificate from ${remoteAddress}`
+                    `[TLSServer] No client certificate from ${remoteAddress}`,
                 )
                 socket.destroy()
                 this.emit("connection_rejected", remoteAddress, "no_cert")
@@ -184,12 +184,12 @@ export class TLSServer extends EventEmitter {
             if (this.trustedFingerprints.size > 0) {
                 const fingerprint = peerCert.fingerprint256
                 const isTrusted = Array.from(this.trustedFingerprints.values()).includes(
-                    fingerprint
+                    fingerprint,
                 )
 
                 if (!isTrusted) {
                     console.warn(
-                        `[TLSServer] Untrusted certificate from ${remoteAddress}: ${fingerprint}`
+                        `[TLSServer] Untrusted certificate from ${remoteAddress}: ${fingerprint}`,
                     )
                     socket.destroy()
                     this.emit("connection_rejected", remoteAddress, "untrusted_cert")
@@ -197,7 +197,7 @@ export class TLSServer extends EventEmitter {
                 }
 
                 console.log(
-                    `[TLSServer] Verified trusted certificate: ${fingerprint.substring(0, 16)}...`
+                    `[TLSServer] Verified trusted certificate: ${fingerprint.substring(0, 16)}...`,
                 )
             }
         }
@@ -205,7 +205,7 @@ export class TLSServer extends EventEmitter {
         // Check connection limit
         if (this.connectionManager.getConnectionCount() >= this.config.maxConnections) {
             console.warn(
-                `[TLSServer] Connection limit reached, rejecting ${remoteAddress}`
+                `[TLSServer] Connection limit reached, rejecting ${remoteAddress}`,
             )
             socket.destroy()
             this.emit("connection_rejected", remoteAddress, "capacity")
@@ -220,7 +220,7 @@ export class TLSServer extends EventEmitter {
         const protocol = socket.getProtocol()
         const cipher = socket.getCipher()
         console.log(
-            `[TLSServer] TLS ${protocol} with ${cipher?.name || "unknown cipher"}`
+            `[TLSServer] TLS ${protocol} with ${cipher?.name || "unknown cipher"}`,
         )
 
         // Register connection with rate limiter
@@ -233,7 +233,7 @@ export class TLSServer extends EventEmitter {
         } catch (error) {
             console.error(
                 `[TLSServer] Failed to handle connection from ${remoteAddress}:`,
-                error
+                error,
             )
             this.rateLimiter.removeConnection(ipAddress)
             socket.destroy()
@@ -277,7 +277,7 @@ export class TLSServer extends EventEmitter {
     addTrustedFingerprint(peerIdentity: string, fingerprint: string): void {
         this.trustedFingerprints.set(peerIdentity, fingerprint)
         console.log(
-            `[TLSServer] Added trusted fingerprint for ${peerIdentity}: ${fingerprint.substring(0, 16)}...`
+            `[TLSServer] Added trusted fingerprint for ${peerIdentity}: ${fingerprint.substring(0, 16)}...`,
         )
     }
 
