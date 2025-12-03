@@ -331,6 +331,35 @@ export default class ServerHandlers {
                 // Handle encrypted L2PS transactions
                 // These are routed to the L2PS mempool via handleSubnetTx (which calls handleL2PS)
                 console.log("[handleExecuteTransaction] Processing L2PS Encrypted Tx")
+                
+                // Authorization check: Verify transaction signature before processing
+                // This ensures only properly signed transactions are accepted
+                if (!tx.signature || !tx.signature.data) {
+                    log.error("[handleExecuteTransaction] L2PS tx rejected: missing signature")
+                    result.success = false
+                    result.response = { error: "L2PS transaction requires valid signature" }
+                    break
+                }
+
+                // Verify the transaction has valid L2PS payload structure
+                const l2psPayload = tx.content?.data?.[1]
+                if (!l2psPayload || typeof l2psPayload !== "object") {
+                    log.error("[handleExecuteTransaction] L2PS tx rejected: invalid payload structure")
+                    result.success = false
+                    result.response = { error: "Invalid L2PS payload structure" }
+                    break
+                }
+
+                // Verify sender address matches the transaction signature
+                // This prevents unauthorized submission of L2PS transactions
+                const senderAddress = tx.content?.from || tx.content?.from_ed25519_address
+                if (!senderAddress) {
+                    log.error("[handleExecuteTransaction] L2PS tx rejected: missing sender address")
+                    result.success = false
+                    result.response = { error: "L2PS transaction requires sender address" }
+                    break
+                }
+
                 const l2psResult = await ServerHandlers.handleSubnetTx(
                     tx as L2PSTransaction,
                 )

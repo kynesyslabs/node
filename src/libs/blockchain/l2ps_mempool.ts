@@ -10,13 +10,18 @@ import log from "@/utilities/logger"
 /**
  * L2PS Transaction Status Constants
  * 
- * Lifecycle: pending → processed → batched → confirmed → (deleted)
+ * Lifecycle: pending → processed → executed → batched → confirmed → (deleted)
+ *            pending → processed → failed (on execution error)
  */
 export const L2PS_STATUS = {
     /** Transaction received but not yet validated/decrypted */
     PENDING: "pending",
-    /** Transaction decrypted and validated, ready for batching */
+    /** Transaction decrypted and validated, ready for execution */
     PROCESSED: "processed",
+    /** Transaction successfully executed within L2PS network */
+    EXECUTED: "executed",
+    /** Transaction execution failed (invalid nonce, insufficient balance, etc.) */
+    FAILED: "failed",
     /** Transaction included in a batch, awaiting block confirmation */
     BATCHED: "batched",
     /** Batch containing this transaction has been included in a block */
@@ -483,13 +488,15 @@ export default class L2PSMempool {
         try {
             await this.ensureInitialized()
 
-            const cutoffTimestamp = Date.now() - olderThanMs
+            const cutoffTimestamp = (Date.now() - olderThanMs).toString()
 
+            // Use CAST to ensure numeric comparison instead of lexicographic string comparison
+            // This prevents incorrect ordering and retention behavior
             const result = await this.repo
                 .createQueryBuilder()
                 .delete()
                 .from(L2PSMempoolTx)
-                .where("timestamp < :cutoff", { cutoff: cutoffTimestamp.toString() })
+                .where("CAST(timestamp AS BIGINT) < CAST(:cutoff AS BIGINT)", { cutoff: cutoffTimestamp })
                 .andWhere("status = :status", { status })
                 .execute()
 
