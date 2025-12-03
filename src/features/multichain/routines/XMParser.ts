@@ -37,8 +37,8 @@ class XMParser {
             console.log("The file does not exist.")
             return null
         }
-        if (path.includes('..')) {
-            throw new Error("Invalid file path");
+        if (path.includes("..")) {
+            throw new Error("Invalid file path")
         }
         const script = fs.readFileSync(path, "utf8")
         return await XMParser.load(script)
