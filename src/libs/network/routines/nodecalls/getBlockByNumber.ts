@@ -1,3 +1,4 @@
+import { Blocks } from "@/model/entities/Blocks"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
 
@@ -15,8 +16,18 @@ export default async function getBlockByNumber(
             require_reply: false,
         }
     } else {
-        console.log("[SERVER] Received getBlockByNumber: " + data.blockNumber)
-        const block = await Chain.getBlockByNumber(data.blockNumber)
+        console.log("[SERVER] Received getBlockByNumber: " + blockNumber)
+
+        let block: Blocks
+        if (blockNumber === 0) {
+            // @ts-ignore
+            block = {
+                number: 0,
+                hash: await Chain.getGenesisBlockHash(),
+            }
+        } else {
+            block = await Chain.getBlockByNumber(blockNumber)
+        }
 
         if (block) {
             return {

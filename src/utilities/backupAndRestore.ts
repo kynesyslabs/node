@@ -1,6 +1,8 @@
 import { Client } from "pg"
 import * as fs from "fs"
 import * as path from "path"
+import * as dotenv from "dotenv"
+dotenv.config()
 
 interface UserBalance {
     id: number
@@ -15,13 +17,14 @@ interface OutputData {
     genesis_balances: [string, number][]
 }
 
-async function dumpUserBalances(): Promise<void> {
+async function dumpUserData(): Promise<void> {
+    console.log("PG_PORT: " + process.env.PG_PORT)
     // Database connection configuration
     const dbConfig = {
         user: "demosuser",
         password: "demospassword",
         host: "127.0.0.1",
-        port: 5332,
+        port: process.env.PG_PORT,
         database: "demos", // Assuming this is the database name
         table: "gcr_main",
     }
@@ -35,32 +38,33 @@ async function dumpUserBalances(): Promise<void> {
         await client.connect()
         console.log("Connected successfully!")
 
-        // Query to get all fields for users with positive balance
-        const query = `
-      SELECT *
-      FROM ${dbConfig.table}
-      WHERE balance > 0
-      ORDER BY balance DESC
-    `
+        // Query to get all fields for users (minus faucet addresses)
+        // TODO: REMOVE THE WHERE CLAUSE AFTER FIRST RESTORE
+        const query = `SELECT * FROM ${dbConfig.table} WHERE balance < 10000000000000`
 
         // Execute the query
         console.log("Executing query...")
-        const result = await client.query(query)
-        console.log(`Found ${result.rows.length} users with positive balance.`)
+        let result
+        try {
+            result = await client.query(query)
+            console.log(
+                `Found ${result.rows.length} users with positive balance.`,
+            )
+        } catch (error) {
+            console.error("Error dumping GCR table:", error.toString())
+        }
 
-        // Process the results to add genesis_balance field
-        const userBalances: UserBalance[] = result.rows.map(row => {
-            // Add genesis_balance field to each record as an actual array
-            return {
-                ...row,
-                genesis_balance: [row.pubkey, row.balance],
-            }
-        })
+        if (!result) {
+            return
+        }
+
+        const userBalances = result.rows
 
         // Extract all genesis_balance entries into a separate array
-        const genesisBalances: [string, number][] = userBalances.map(
-            user => user.genesis_balance,
-        )
+        const genesisBalances: [string, number][] = userBalances.map(user => [
+            user.pubkey,
+            user.balance,
+        ])
 
         // Create the output data structure
         const outputData: OutputData = {
@@ -82,7 +86,7 @@ async function dumpUserBalances(): Promise<void> {
         )
 
         // Write the data to a JSON file
-        fs.writeFileSync(
+        await fs.promises.writeFile(
             outputPath,
             JSON.stringify(outputData, null, 2),
             "utf8",
@@ -99,6 +103,4 @@ async function dumpUserBalances(): Promise<void> {
 }
 
 // Execute the function
-dumpUserBalances()
-    .then(() => console.log("Balance dump completed successfully."))
-    .catch(error => console.error("Failed to dump balances:", error))
+await dumpUserData()

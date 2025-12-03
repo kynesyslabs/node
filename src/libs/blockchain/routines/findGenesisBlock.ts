@@ -10,47 +10,77 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import * as fs from "fs"
+import log from "@/utilities/logger"
 import Chain from "src/libs/blockchain/chain"
+import { BeforeFindGenesisHooks } from "./beforeFindGenesisHooks"
+
+function getLatestGCRRecoveryData() {
+    if (!process.env.RESTORE) {
+        return null
+    }
+
+    const path = "output/"
+
+    // return the file with the latest timestamp
+    try {
+        const files = fs.readdirSync(path)
+        const latestFile = files.sort((a, b) => {
+            const timeA = fs.statSync(path + a).mtime.getTime()
+            const timeB = fs.statSync(path + b).mtime.getTime()
+            return timeB - timeA
+        })[0]
+
+        return JSON.parse(fs.readFileSync(path + latestFile, "utf8"))
+    } catch (error) {
+        return null
+    }
+}
 
 export default async function findGenesisBlock() {
-    console.log("[GENESIS] Looking for the genesis block...")
-    const genesisBlockQuery = await Chain.getGenesisBlock()
-    console.log("[GENESIS] Received genesis search query")
-    //console.log(genesis_block_q)
-    let genesisBlock
-    if (!genesisBlockQuery) {
-        console.log("[GENESIS] No genesis block found.")
-        genesisBlock = null
-    } else {
-        genesisBlock = genesisBlockQuery
+    // INFO: Maintenance hooks here!
+    // await new BeforeFindGenesisHooks().awardDemosFollowPoints()
+
+    log.info("[GENESIS] Looking for the genesis block...")
+    const genesisBlockHash = await Chain.getGenesisBlockHash()
+    if (genesisBlockHash) {
+        log.info("[GENESIS] Genesis block found. Hash: " + genesisBlockHash)
+        return
     }
-    // console.log(genesis_block)
-    // throw new Error("genesis block found")
-    if (!genesisBlock) {
-        console.log("[BOOTSTRAP] Initializing the genesis block\n")
-        if (!fs.existsSync("data/genesis.json")) {
-            // Exit if there are no genesis block
-            console.log("No genesis block found, exiting")
-            // eslint-disable-next-line no-undef
-            process.exit(-5)
+
+    if (!fs.existsSync("data/genesis.json")) {
+        log.error("[GENESIS] No genesis block found, exiting")
+        process.exit(1)
+    }
+
+    // Loading the genesis block
+    let genesisData = JSON.parse(fs.readFileSync("data/genesis.json", "utf8"))
+
+    if (typeof genesisData === "string") {
+        genesisData = JSON.parse(genesisData)
+    }
+
+    const recoveryGenesis = getLatestGCRRecoveryData()
+
+    if (recoveryGenesis) {
+        const finalBalances = {}
+
+        for (const entry of genesisData["balances"]) {
+            const [address, balance] = entry
+            finalBalances[address] = balance
         }
-        console.log("[BOOTSTRAP] Loading the genesis block\n")
-        // Loading the genesis block
-        const genesisData = JSON.parse(
-            fs.readFileSync("data/genesis.json", "utf8"),
-        )
-        console.log("[BOOTSTRAP] Loaded the genesis block\n")
-        // console.log("imported genesis json data")
-        // console.log(genesis_data)
-        // throw new Error()
-        // Adding the genesis block to the chain
-        console.log("[BOOTSTRAP] Adding the genesis block to the chain\n")
-        const genesisHash = await Chain.generateGenesisBlock(genesisData)
-        console.log("[BOOTSTRAP] Genesis block created: " + genesisHash + "\n")
-        genesisBlock = await Chain.getGenesisBlock()
-    } else {
-        console.log("Genesis block found: ")
+
+        genesisData["users"] = recoveryGenesis["users"]
+
+        // add recoveryGenesis["genesis_balances"] to genesisData["balances"]
+        // (replacing the ones that are already in genesisData["balances"])
+        for (const entry of recoveryGenesis["genesis_balances"]) {
+            const [address, balance] = entry
+            finalBalances[address] = balance
+        }
+
+        genesisData["balances"] = Object.entries(finalBalances)
     }
-    console.log(genesisBlock)
-    console.log(genesisBlock.hash)
+
+    // Adding the genesis block to the chain
+    return await Chain.generateGenesisBlock(genesisData)
 }

@@ -41,8 +41,27 @@ export default class PeerManager {
 
     // Loading the peer list from the demos_peer.json
     loadPeerList() {
-        const rawPeerList = fs.readFileSync(getSharedState.peerListFile, "utf8")
+        let rawPeerList = "{}"
+
+        try {
+            rawPeerList = fs.readFileSync(getSharedState.peerListFile, "utf8")
+        } catch (error) {
+            // INFO: Skip no file error
+            if (!(error instanceof Error && error.message.includes("ENOENT"))) {
+                // INFO: Crash for debugging purposes
+                console.error("[PeerManager] Error loading peer list: " + error)
+                process.exit(1)
+            }
+        }
+
         const peerList = JSON.parse(rawPeerList)
+
+        // INFO: If this peer is not in peer list, add it
+        if (!peerList[getSharedState.publicKeyHex]) {
+            peerList[getSharedState.publicKeyHex] =
+                getSharedState.connectionString
+        }
+
         // Creating a peer object for each peer in the peer list, assigning the connection string and adding it to the peer list
         for (const peer in peerList) {
             const peerObject = this.createNewPeer(peer)
@@ -167,6 +186,8 @@ export default class PeerManager {
     }
 
     addPeer(peer: Peer) {
+        log.info("[PEERMANAGER] Adding peer: " + JSON.stringify(peer, null, 2))
+        log.info("[PEERMANAGER] Adding peer: " + peer.identity)
         log.info("[PEERMANAGER] Adding peer", false)
         if (peer.identity === "placeholder") {
             log.warning(
@@ -192,7 +213,7 @@ export default class PeerManager {
             const { block, status } = existingPeer.sync
             const { timestamp, ready, online } = existingPeer.status
 
-            // INFO: When overwriting an existing peer, only update properties
+            // INFO: When overwriting an existing peer, info update properties
             // if the new peer has data && data is more recent
             if (
                 peer.sync.block > block ||

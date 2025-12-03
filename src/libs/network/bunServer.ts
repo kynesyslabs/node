@@ -1,10 +1,12 @@
 import { Server } from "bun"
 import { Headers } from "node-fetch"
+import log from "@/utilities/logger"
 
 export type Handler = (req: Request) => Promise<Response> | Response
 export type Middleware = (
     req: Request,
     next: () => Promise<Response>,
+    server?: Server,
 ) => Promise<Response>
 
 export class BunServer {
@@ -12,7 +14,7 @@ export class BunServer {
     private middlewares: Middleware[] = []
     private port: number
     private hostname: string
-    private server: Server | null = null
+    public server: Server | null = null
 
     constructor(port: number, hostname = "0.0.0.0") {
         this.port = port
@@ -41,33 +43,43 @@ export class BunServer {
         this.routes.get(method)?.set(path, handler)
     }
 
-    private async handleRequest(req: Request): Promise<Response> {
+    private async handleRequest(
+        req: Request,
+        server?: Server,
+    ): Promise<Response> {
         const url = new URL(req.url)
         const method = req.method
         const path = url.pathname
 
-        // Apply middlewares
-        let response: Response | null = null
-        for (const middleware of this.middlewares) {
-            response = await middleware(req, async () => {
-                const routeHandler = this.routes.get(method)?.get(path)
-                if (routeHandler) {
-                    return await routeHandler(req)
-                }
-                return new Response("Not Found", { status: 404 })
-            })
-            if (response) break
+        // Create the final handler (route handler)
+        const finalHandler = async (): Promise<Response> => {
+            const routeHandler = this.routes.get(method)?.get(path)
+            if (routeHandler) {
+                return await routeHandler(req)
+            }
+            return new Response("Not Found", { status: 404 })
         }
 
-        return response || new Response("Not Found", { status: 404 })
+        // Build middleware chain from right to left (last to first)
+        let handler = finalHandler
+        for (let i = this.middlewares.length - 1; i >= 0; i--) {
+            const middleware = this.middlewares[i]
+            const nextHandler = handler
+            handler = async () => {
+                return await middleware(req, nextHandler, server)
+            }
+        }
+
+        // Execute the complete chain
+        return await handler()
     }
 
     start(): Server {
         this.server = Bun.serve({
             port: this.port,
             hostname: this.hostname,
-            fetch: async req => {
-                return await this.handleRequest(req)
+            fetch: async (req, server) => {
+                return await this.handleRequest(req, server)
             },
         })
         return this.server

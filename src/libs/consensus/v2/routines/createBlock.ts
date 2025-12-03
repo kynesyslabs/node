@@ -8,6 +8,7 @@ import Peer from "src/libs/peer/Peer"
 import hashGCRTables from "src/libs/blockchain/gcr/gcr_routines/hashGCR"
 import getCommonValidatorSeed from "./getCommonValidatorSeed"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+
 export async function createBlock(
     orderedTransactions: Transaction[],
     commonValidatorSeed: string,

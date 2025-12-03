@@ -1,11 +1,6 @@
-import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import Datasource from "src/model/datasource"
-
-// import Block from "../../block"
-// import Chain from "../../chain"
-// import GCR from "../../gcr/gcr"
-// import Genesis from "../../types/genesisTypes"
-// import { OperationResult } from "../executeOperations"
+import ensureGCRForUser from "./ensureGCRForUser"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 
 // TODO Implement other properties of the GCR object to be fetched and set from the database
 
@@ -24,37 +19,9 @@ async function setBalance(
     publicKey: string,
     balance: bigint,
 ): Promise<[boolean, string]> {
-    const rawData: GCRMain = {
-        assignedTxs: [],
-        identities: {
-            xm: {},
-            web2: {},
-            pqc: {},
-        },
-        balance: BigInt(balance),
-        nonce: 0,
-        pubkey: publicKey,
-        points: {
-            totalPoints: 0,
-            breakdown: {
-                web3Wallets: {},
-                socialAccounts: {
-                    twitter: 0,
-                    github: 0,
-                    discord: 0,
-                },
-            },
-            lastUpdated: new Date(),
-        },
-    }
-
     const db = await Datasource.getInstance()
     const gcrRepository = db.getDataSource().getRepository(GCRMain)
-    let gcrSearch = await gcrRepository.findOneBy({ pubkey: publicKey })
-
-    if (!gcrSearch) {
-        gcrSearch = rawData
-    }
+    const gcrSearch = await ensureGCRForUser(publicKey)
 
     // Keeping the things we need and just updating the balance
     const gcrUpdate = gcrSearch

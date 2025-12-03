@@ -48,6 +48,7 @@ import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import Chain from "../chain"
 import { Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
+import { Referrals } from "@/features/incentive/referrals"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -466,20 +467,43 @@ export default class HandleGCR {
     }
 
     // Create methods
-    public static createAccount = async (pubkey: string) => {
+    /**
+     * Creates a new GCRMain account.
+     * If fillData is provided, the account will be created with the provided data.
+     *
+     * @param pubkey The public key of the account
+     * @param fillData Optional data to fill in the account
+     * @returns The created GCRMain account
+     */
+    public static createAccount = async (
+        pubkey: string,
+        fillData: Record<string, any> = {},
+    ) => {
+        if (
+            !pubkey ||
+            typeof pubkey !== "string" ||
+            pubkey.trim().length === 0
+        ) {
+            throw new Error("Invalid public key provided")
+        }
+
         const db = await Datasource.getInstance()
         const dataSource = db.getDataSource()
         const repository = dataSource.getRepository(GCRMain)
         const account = new GCRMain()
+
         account.pubkey = pubkey
-        account.balance = 0n
-        account.identities = {
+        account.balance = fillData["balance"] || 0n
+        account.identities = fillData["identities"] || {
             xm: {},
             web2: {},
+            pqc: {},
+            ud: [],
         }
+
         account.assignedTxs = []
-        account.nonce = 0
-        account.points = {
+        account.nonce = fillData["nonce"] || 0
+        account.points = fillData["points"] || {
             totalPoints: 0,
             breakdown: {
                 web3Wallets: {},
@@ -488,9 +512,24 @@ export default class HandleGCR {
                     github: 0,
                     discord: 0,
                 },
+                referrals: 0,
+                demosFollow: 0,
             },
             lastUpdated: new Date(),
         }
+
+        account.referralInfo = fillData["referralInfo"] || {
+            totalReferrals: 0,
+            referralCode: Referrals.generateReferralCode(pubkey),
+            referrals: [],
+            referredBy: null,
+        }
+        account.flagged = fillData["flagged"] || false
+        account.flaggedReason = fillData["flaggedReason"] || ""
+        account.reviewed = fillData["reviewed"] || false
+        account.createdAt = fillData["createdAt"] || new Date()
+        account.updatedAt = fillData["updatedAt"] || new Date()
+
         return await repository.save(account)
     }
 }
