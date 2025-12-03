@@ -62,7 +62,7 @@ import {
 } from "@kynesyslabs/demosdk/encryption"
 import Mempool from "@/libs/blockchain/mempool_v2"
 
-import type { SerializedEncryptedObject } from "@/types/sdk-workarounds"
+import type { SerializedEncryptedObject } from "@kynesyslabs/demosdk/types"
 import { Cryptography } from "@kynesyslabs/demosdk/encryption"
 import { UnifiedCrypto } from "@kynesyslabs/demosdk/encryption"
 import Hashing from "@/libs/crypto/hashing"

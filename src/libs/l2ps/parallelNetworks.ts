@@ -11,7 +11,7 @@ import {
     L2PSEncryptedPayload,
 } from "@kynesyslabs/demosdk/l2ps"
 import { Transaction, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
-import type { L2PSTransaction } from "@/types/sdk-workarounds"
+import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 
 /**

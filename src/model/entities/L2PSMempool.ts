@@ -1,5 +1,5 @@
 import { Entity, PrimaryColumn, Column, Index } from "typeorm"
-import type { L2PSTransaction } from "@/types/sdk-workarounds"
+import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
 
 /**
  * L2PS Mempool Entity
@@ -11,6 +11,10 @@ import type { L2PSTransaction } from "@/types/sdk-workarounds"
  * @entity l2ps_mempool
  */
 @Entity("l2ps_mempool")
+@Index("IDX_L2PS_UID_TIMESTAMP", ["l2ps_uid", "timestamp"])
+@Index("IDX_L2PS_UID_STATUS", ["l2ps_uid", "status"])
+@Index("IDX_L2PS_UID_BLOCK", ["l2ps_uid", "block_number"])
+@Index("IDX_L2PS_UID_SEQUENCE", ["l2ps_uid", "sequence_number"])
 export class L2PSMempoolTx {
     /**
      * Primary key: Hash of the encrypted L2PS transaction wrapper
@@ -24,10 +28,6 @@ export class L2PSMempoolTx {
      * L2PS network identifier
      * @example "network_1", "private_subnet_alpha"
      */
-    @Index("IDX_L2PS_UID_TIMESTAMP", ["l2ps_uid", "timestamp"])
-    @Index("IDX_L2PS_UID_STATUS", ["l2ps_uid", "status"])
-    @Index("IDX_L2PS_UID_BLOCK", ["l2ps_uid", "block_number"])
-    @Index("IDX_L2PS_UID_SEQUENCE", ["l2ps_uid", "sequence_number"])
     @Column("text") 
     l2ps_uid: string
 

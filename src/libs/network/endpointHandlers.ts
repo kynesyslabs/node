@@ -17,7 +17,7 @@ import Mempool from "src/libs/blockchain/mempool_v2"
 import L2PSHashes from "@/libs/blockchain/l2ps_hashes"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
 import { Transaction } from "@kynesyslabs/demosdk/types"
-import type { L2PSTransaction } from "@/types/sdk-workarounds"
+import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import handleL2PS from "./routines/transactions/handleL2PS"
@@ -327,11 +327,11 @@ export default class ServerHandlers {
                 result.response = subnetResult
                 break
 
-            case "l2psEncryptedTx":
+            case "l2psEncryptedTx": {
                 // Handle encrypted L2PS transactions
                 // These are routed to the L2PS mempool via handleSubnetTx (which calls handleL2PS)
                 console.log("[handleExecuteTransaction] Processing L2PS Encrypted Tx")
-                var l2psResult = await ServerHandlers.handleSubnetTx(
+                const l2psResult = await ServerHandlers.handleSubnetTx(
                     tx as L2PSTransaction,
                 )
                 result.response = l2psResult
@@ -339,16 +339,13 @@ export default class ServerHandlers {
                 // The handleL2PS routine takes care of adding it to the L2PS mempool
                 if (l2psResult.result === 200) {
                     result.success = true
-                    // Prevent adding to main mempool by returning early or setting a flag?
-                    // The current logic adds to mempool if result.success is true.
-                    // We need to avoid that for L2PS txs as they are private.
-                    
-                    // Hack: We return here to avoid the main mempool logic below
+                    // Return early to avoid adding L2PS transactions to main mempool
                     return result
                 } else {
                     result.success = false
                 }
                 break
+            }
 
             case "web2Request": {
                 payload = tx.content.data[1] as IWeb2Payload
