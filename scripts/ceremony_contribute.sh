@@ -446,12 +446,27 @@ log_warn "This will generate cryptographic randomness - DO NOT INTERRUPT!"
 echo ""
 
 # Run the ceremony script using Node 20+ (required for tsx)
-# Load nvm if available and use Node 20
-if [ -s "$HOME/.nvm/nvm.sh" ]; then
-    source "$HOME/.nvm/nvm.sh"
-    nvm install 20 --lts 2>/dev/null || true
-    nvm use 20 --lts 2>/dev/null || nvm use node
+# Install nvm if not available
+if [ ! -s "$HOME/.nvm/nvm.sh" ]; then
+    log_info "nvm not found, installing..."
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+
+    # Load nvm into current shell
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+    [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+
+    log_success "nvm installed"
 fi
+
+# Load nvm and use Node 20
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
+# Install and use Node 20
+log_info "Ensuring Node 20 is available..."
+nvm install 20 2>/dev/null || true
+nvm use 20 2>/dev/null || nvm use node
 
 # Verify Node version is 20+
 NODE_MAJOR=$(node --version | cut -d'.' -f1 | tr -d 'v')
@@ -459,10 +474,9 @@ if [ "$NODE_MAJOR" -lt 20 ]; then
     log_error "Node.js 20+ is required for the ceremony script"
     log_info "Current version: $(node --version)"
     log_info ""
-    log_info "Please install Node 20+ using nvm:"
-    log_info "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
-    log_info "  source ~/.nvm/nvm.sh"
+    log_info "Please manually install Node 20+:"
     log_info "  nvm install 20"
+    log_info "  nvm use 20"
     log_info ""
     log_info "Then re-run this script."
     exit 1
