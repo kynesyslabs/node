@@ -161,7 +161,7 @@ async function generateKeys(circuitName: string) {
     log("  → Generating initial proving key (phase 0)...", "yellow")
     try {
         execSync(
-            `bunx snarkjs groth16 setup ${r1csPath} ${ptauPath} ${zkeyPath0}`,
+            `npx snarkjs groth16 setup ${r1csPath} ${ptauPath} ${zkeyPath0}`,
             { stdio: "inherit" },
         )
         log("  ✓ Initial proving key generated", "green")
@@ -177,7 +177,7 @@ async function generateKeys(circuitName: string) {
         const entropy = randomBytes(32).toString("hex")
 
         execSync(
-            `bunx snarkjs zkey contribute ${zkeyPath0} ${zkeyPath1} --name="ProductionContribution" -e="${entropy}"`,
+            `npx snarkjs zkey contribute ${zkeyPath0} ${zkeyPath1} --name="ProductionContribution" -e="${entropy}"`,
             { stdio: "inherit" },
         )
         log("  ✓ Contribution added (gamma and delta are now distinct)", "green")
@@ -190,7 +190,7 @@ async function generateKeys(circuitName: string) {
     log("  → Exporting verification key from contributed zkey...", "yellow")
     try {
         execSync(
-            `bunx snarkjs zkey export verificationkey ${zkeyPath1} ${vkeyPath}`,
+            `npx snarkjs zkey export verificationkey ${zkeyPath1} ${vkeyPath}`,
             { stdio: "inherit" },
         )
         log("  ✓ Verification key exported", "green")
