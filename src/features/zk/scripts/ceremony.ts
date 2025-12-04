@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * ZK-SNARK Trusted Setup Ceremony - Multi-Party Contribution System
  *
@@ -23,8 +23,8 @@ import { execSync } from "child_process"
 import { join } from "path"
 import { createHash, randomBytes } from "crypto"
 
-// npx path - use full path to node to avoid bun intercepting the call
-const NPX = "/usr/bin/node /usr/local/lib/node_modules/npx/index.js"
+// npx command - just use npx directly, node can find it properly
+const NPX = "npx"
 
 // Ceremony configuration
 const CEREMONY_DIR = "zk_ceremony"
