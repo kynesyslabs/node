@@ -408,6 +408,9 @@ export class TUIManager extends EventEmitter {
      * This prevents external libraries from corrupting the TUI display
      */
     private interceptConsole(): void {
+        // Prevent double-interception
+        if (this.originalConsole) return
+
         // Store original methods
         this.originalConsole = {
             log: console.log,
@@ -421,7 +424,7 @@ export class TUIManager extends EventEmitter {
         console.log = (...args: unknown[]) => {
             const message = args.map(a => String(a)).join(" ")
             const { category, cleanMessage } = this.extractCategoryFromMessage(message)
-            this.logger.info(category, `[console.log] ${cleanMessage}`)
+            this.logger.debug(category, `[console.log] ${cleanMessage}`)
         }
 
         console.error = (...args: unknown[]) => {
