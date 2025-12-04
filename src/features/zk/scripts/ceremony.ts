@@ -23,8 +23,8 @@ import { execSync } from "child_process"
 import { join } from "path"
 import { createHash, randomBytes } from "crypto"
 
-// npx path - hardcoded for reliability
-const NPX = "/usr/local/bin/npx"
+// npx path - use node to execute npx since it's a JS script with shebang
+const NPX = "node /usr/local/bin/npx"
 
 // Ceremony configuration
 const CEREMONY_DIR = "zk_ceremony"
