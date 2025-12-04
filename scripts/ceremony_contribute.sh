@@ -219,6 +219,36 @@ fi
 
 log_success "Bun is available"
 
+# Check npx is installed (needed for snarkjs commands)
+if ! command -v npx &> /dev/null; then
+    log_error "npx is not installed!"
+    log_info ""
+    log_info "npx is required for ZK ceremony operations (snarkjs)."
+    log_info ""
+
+    if confirm "Do you want to install npm (which includes npx) now?"; then
+        log_info "Installing npm..."
+        sudo apt update && sudo apt install npm -y
+
+        if ! command -v npx &> /dev/null; then
+            log_error "npm installation failed!"
+            log_info "Please install manually: sudo apt install npm"
+            exit 1
+        fi
+
+        log_success "npm (with npx) installed successfully!"
+    else
+        log_info ""
+        log_info "To install npm manually, run:"
+        log_info "  sudo apt install npm"
+        log_info ""
+        log_info "Then re-run this script."
+        exit 1
+    fi
+fi
+
+log_success "npx is available"
+
 # =============================================================================
 # Identity Check
 # =============================================================================
