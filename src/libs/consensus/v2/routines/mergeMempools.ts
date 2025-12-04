@@ -1,6 +1,5 @@
 import { RPCResponse, Transaction } from "@kynesyslabs/demosdk/types"
 import Mempool from "src/libs/blockchain/mempool_v2"
-import { MempoolData } from "src/libs/blockchain/mempool"
 import { Peer } from "src/libs/peer"
 import log from "src/utilities/logger"
 

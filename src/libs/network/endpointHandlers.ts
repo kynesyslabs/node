@@ -60,6 +60,7 @@ import {
 import { IdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
+import { DTRManager } from "./dtr/relayRetryService"
 /* // ! Note: this will be removed once demosWork is in place
 import {
     NativePayload,
@@ -418,59 +419,50 @@ export default class ServerHandlers {
 
             // REVIEW We add the transaction to the mempool
             // DTR: Check if we should relay instead of storing locally (Production only)
+            log.debug("PROD: " + getSharedState.PROD)
             if (getSharedState.PROD) {
-                const isValidator = await isValidatorForNextBlock()
-                
-                if (!isValidator) {
-                    console.log("[DTR] Non-validator node: attempting relay to all validators")
-                    try {
-                        const { commonValidatorSeed } = await getCommonValidatorSeed()
-                        const validators = await getShard(commonValidatorSeed)
-                        const availableValidators = validators
-                            .filter(v => v.status.online && v.sync.status)
-                            .sort(() => Math.random() - 0.5) // Random order for load balancing
-                        
-                        console.log(`[DTR] Found ${availableValidators.length} available validators, trying all`)
-                        
-                        // Try ALL validators in random order
-                        for (let i = 0; i < availableValidators.length; i++) {
-                            try {
-                                const validator = availableValidators[i]
-                                console.log(`[DTR] Attempting relay ${i + 1}/${availableValidators.length} to validator ${validator.identity.substring(0, 8)}...`)
-                                
-                                const relayResult = await validator.call({
-                                    method: "nodeCall",
-                                    params: [{
-                                        type: "RELAY_TX",
-                                        data: { transaction: queriedTx, validityData: validatedData },
-                                    }],
-                                }, true)
-                                
-                                if (relayResult.result === 200) {
-                                    console.log(`[DTR] Successfully relayed to validator ${validator.identity.substring(0, 8)}...`)
-                                    result.success = true
-                                    result.response = { message: "Transaction relayed to validator" }
-                                    result.require_reply = false
-                                    return result
-                                }
-                                
-                                console.log(`[DTR] Validator ${validator.identity.substring(0, 8)}... rejected: ${relayResult.response}`)
-                                
-                            } catch (error: any) {
-                                console.log(`[DTR] Validator ${availableValidators[i].identity.substring(0, 8)}... error: ${error.message}`)
-                                continue // Try next validator
+                const { isValidator, validators } =
+                    await isValidatorForNextBlock()
+
+                // if (!isValidator) {
+                if (true) {
+                    log.debug(
+                        "[DTR] Non-validator node: attempting relay to all validators",
+                    )
+                    const availableValidators = validators.sort(
+                        () => Math.random() - 0.5,
+                    ) // Random order for load balancing
+
+                    log.debug(
+                        `[DTR] Found ${availableValidators.length} available validators, trying all`,
+                    )
+
+                    // Try ALL validators in random order
+                    const results = await Promise.allSettled(
+                        availableValidators.map(validator =>
+                            DTRManager.relayTransaction(
+                                validator,
+                                validatedData,
+                            ),
+                        ),
+                    )
+
+                    for (const result of results) {
+                        if (result.status === "fulfilled") {
+                            const response = result.value
+                            log.debug("response: " + JSON.stringify(response))
+
+                            if (response.result == 200) {
+                                continue
                             }
+
+                            // TODO: Handle response codes individually
+                            DTRManager.validityDataCache.set(
+                                response.extra.peer,
+                                validatedData,
+                            )
                         }
-                        
-                        console.log("[DTR] All validators failed, storing locally for background retry")
-                        
-                    } catch (relayError) {
-                        console.log("[DTR] Relay system error, storing locally:", relayError)
                     }
-                    
-                    // Store ValidityData in shared state for retry service
-                    getSharedState.validityDataCache.set(queriedTx.hash, validatedData)
-                    console.log(`[DTR] Stored ValidityData for ${queriedTx.hash} in memory cache for retry service`)
                 }
             }
 
@@ -563,7 +555,8 @@ export default class ServerHandlers {
     }
 
     // NOTE If we receive a SubnetPayload, we use handleL2PS to register the transaction
-    static async handleSubnetTx(content: any) { // TODO Add proper type when l2ps is implemented correctly
+    static async handleSubnetTx(content: any) {
+        // TODO Add proper type when l2ps is implemented correctly
         let response: RPCResponse = _.cloneDeep(emptyResponse)
         const payload: L2PSRegisterTxMessage = {
             type: "registerTx",

@@ -1,15 +1,19 @@
 import getShard from "./getShard"
-import getCommonValidatorSeed from "./getCommonValidatorSeed"
+import { Peer } from "@/libs/peer"
 import { getSharedState } from "@/utilities/sharedState"
+import getCommonValidatorSeed from "./getCommonValidatorSeed"
 
-// Single function - reuses existing logic
-export default async function isValidatorForNextBlock(): Promise<boolean> {
-    try {
-        const { commonValidatorSeed } = await getCommonValidatorSeed()
-        const validators = await getShard(commonValidatorSeed)
-        const ourIdentity = getSharedState.identity.ed25519.publicKey.toString("hex")
-        return validators.some(peer => peer.identity === ourIdentity)
-    } catch {
-        return false // Conservative fallback
+export default async function isValidatorForNextBlock(): Promise<{
+    isValidator: boolean
+    validators: Peer[]
+}> {
+    const { commonValidatorSeed } = await getCommonValidatorSeed()
+    const validators = await getShard(commonValidatorSeed)
+
+    return {
+        isValidator: validators.some(
+            peer => peer.identity === getSharedState.publicKeyHex,
+        ),
+        validators,
     }
 }
