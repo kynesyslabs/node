@@ -8,6 +8,8 @@
 import terminalKit from "terminal-kit"
 import { EventEmitter } from "events"
 import { CategorizedLogger, LogCategory, LogEntry } from "./CategorizedLogger"
+import { getSharedState } from "@/utilities/sharedState"
+import { PeerManager } from "@/libs/peer"
 
 const term = terminalKit.terminal
 
@@ -854,6 +856,28 @@ export class TUIManager extends EventEmitter {
         return { ...this.nodeInfo }
     }
 
+    /**
+     * Check if we're running in standalone mode (no real peers to sync with)
+     * Returns true if: no peers, or only localhost/127.0.0.1 peers
+     */
+    private checkIfStandalone(): boolean {
+        try {
+            const peers = PeerManager.getInstance().getPeers()
+            if (peers.length === 0) return true
+
+            // Check if all peers are localhost
+            const nonLocalPeers = peers.filter(peer => {
+                const connStr = peer.connection?.string?.toLowerCase() || ""
+                return !connStr.includes("localhost") && !connStr.includes("127.0.0.1")
+            })
+
+            return nonLocalPeers.length === 0
+        } catch {
+            // If we can't get peers, assume standalone
+            return true
+        }
+    }
+
     // SECTION Rendering
 
     /**
@@ -945,26 +969,35 @@ export class TUIManager extends EventEmitter {
         term.gray("Port: ")
         term.brightWhite(String(this.nodeInfo.port))
 
-        // Line 7: Peers
+        // Line 7: Peers (read live from PeerManager)
         term.moveTo(infoStartX, 7)
         term.yellow("👥 ")
         term.gray("Peers: ")
-        term.brightWhite(String(this.nodeInfo.peersCount))
+        let livePeersCount = 0
+        try {
+            livePeersCount = PeerManager.getInstance().getPeers().length
+        } catch {
+            livePeersCount = this.nodeInfo.peersCount
+        }
+        term.brightWhite(String(livePeersCount))
 
-        // Line 8: Block
+        // Line 8: Block (read live from sharedState)
         term.moveTo(infoStartX, 8)
         term.yellow("📦 ")
         term.gray("Block: ")
-        term.brightWhite("#" + String(this.nodeInfo.blockNumber))
+        const liveBlockNumber = getSharedState.lastBlockNumber ?? this.nodeInfo.blockNumber
+        term.brightWhite("#" + String(liveBlockNumber))
 
-        // Line 9: Sync status
+        // Line 9: Sync status (read live from sharedState)
         term.moveTo(infoStartX, 9)
         term.yellow("🔄 ")
         term.gray("Sync: ")
-        if (this.nodeInfo.isSynced) {
+        const liveSyncStatus = getSharedState.syncStatus
+        const isStandalone = this.checkIfStandalone()
+        if (liveSyncStatus) {
             term.bgGreen.black(" ✓ SYNCED ")
-        } else if (this.nodeInfo.peersCount === 0) {
-            // No peers - we're standalone, can't really sync
+        } else if (isStandalone) {
+            // Only localhost peer or no peers - we're standalone
             term.bgCyan.black(" ◆ STANDALONE ")
         } else {
             term.bgYellow.black(" ... SYNCING ")
