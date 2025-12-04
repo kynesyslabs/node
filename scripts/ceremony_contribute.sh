@@ -449,25 +449,10 @@ cd ..
 
 log_step "STEP 9/9: Cleanup and Restore"
 
-# Save attestation file before cleanup
-if [ -n "$ATTESTATION_FILE" ] && [ -f "$CEREMONY_DIR/$ATTESTATION_FILE" ]; then
-    SAVED_ATTESTATION="attestation_$(date +%Y%m%d_%H%M%S).txt"
-    cp "$CEREMONY_DIR/$ATTESTATION_FILE" "$SAVED_ATTESTATION"
-    log_success "Attestation saved to: $SAVED_ATTESTATION"
-fi
-
-# Ask about cleanup
-echo ""
-log_warn "SECURITY REMINDER: You should delete the local ceremony directory"
-log_warn "to ensure your entropy cannot be recovered."
-echo ""
-
-if confirm "Delete the ceremony directory now? (Recommended for security)"; then
-    rm -rf "$CEREMONY_DIR"
-    log_success "Ceremony directory deleted"
-else
-    log_warn "Remember to delete $CEREMONY_DIR after your PR is merged!"
-fi
+# Clean up ceremony directory (security requirement)
+log_info "Cleaning up ceremony directory (security requirement)..."
+rm -rf "$CEREMONY_DIR"
+log_success "Ceremony directory deleted"
 
 # Return to original branch
 log_info "Returning to original branch: $ORIGINAL_BRANCH"
@@ -491,17 +476,11 @@ echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━
 echo ""
 echo -e "  ${CYAN}Your Address:${NC}      $PUBKEY_ADDRESS"
 echo -e "  ${CYAN}PR Status:${NC}         ${PR_URL:-Pending manual creation}"
-if [ -n "$SAVED_ATTESTATION" ]; then
-echo -e "  ${CYAN}Attestation:${NC}       $SAVED_ATTESTATION"
-fi
 echo -e "  ${CYAN}Current Branch:${NC}    $(git branch --show-current)"
 echo ""
 echo -e "${YELLOW}Next Steps:${NC}"
 echo "  1. Wait for the maintainer to review and merge your PR"
 echo "  2. Once merged, your contribution is part of the ceremony!"
-if [ -d "$CEREMONY_DIR" ]; then
-echo "  3. Remember to delete $CEREMONY_DIR after merge"
-fi
 echo ""
 echo -e "${GREEN}Thank you for contributing to the Demos Network security!${NC}"
 echo ""
