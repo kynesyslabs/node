@@ -622,7 +622,12 @@ export class TUIManager extends EventEmitter {
             case "ENTER":
                 // Execute command
                 this.executeCommand(this.cmdInput)
-                this.cmdHistory.push(this.cmdInput)
+                if (this.cmdInput.trim()) {
+                    this.cmdHistory.push(this.cmdInput)
+                    if (this.cmdHistory.length > 100) { // Limit history size
+                        this.cmdHistory.shift()
+                    }
+                }
                 this.cmdHistoryIndex = this.cmdHistory.length
                 this.cmdInput = ""
                 this.render()
