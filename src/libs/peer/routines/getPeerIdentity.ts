@@ -10,7 +10,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { NodeCall } from "src/libs/network/manageNodeCall"
-import { uint8ArrayToHex, Hashing } from "@kynesyslabs/demosdk/encryption"
+import { uint8ArrayToHex, hexToUint8Array, Hashing, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import crypto from "crypto"
 import Peer from "../Peer"
 
@@ -146,12 +146,26 @@ async function verifyChallenge(
         // Create the expected signed message with domain separation
         const domain = "DEMOS_PEER_AUTH_V1"
         const expectedMessage = `${domain}:${challenge}`
-        const expectedHash = Hashing.sha256(expectedMessage)
         
-        // For now, we verify by checking if the signature includes our challenge hash
-        // A full implementation would use ed25519 signature verification
-        // This provides replay protection via the random challenge
-        return signature.includes(expectedHash.slice(0, 16)) || signature.length === 128
+        // Normalize public key (remove 0x prefix if present)
+        const normalizedPubKey = publicKey.startsWith("0x") 
+            ? publicKey.slice(2) 
+            : publicKey
+        
+        // Normalize signature (remove 0x prefix if present)
+        const normalizedSignature = signature.startsWith("0x")
+            ? signature.slice(2)
+            : signature
+
+        // Perform proper ed25519 signature verification
+        const isValid = await ucrypto.verify({
+            algorithm: "ed25519",
+            message: new TextEncoder().encode(expectedMessage),
+            publicKey: hexToUint8Array(normalizedPubKey),
+            signature: hexToUint8Array(normalizedSignature),
+        })
+
+        return isValid
     } catch (error) {
         console.error("[PEER AUTHENTICATION] Challenge verification failed:", error)
         return false

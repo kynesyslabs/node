@@ -84,6 +84,7 @@ export default class SharedState {
 
     // SECTION L2PS
     l2psJoinedUids: string[] = [] // UIDs of the L2PS networks that are joined to the node (loaded from the data directory)
+    l2psBatchNonce: number = 0 // Persistent nonce for L2PS batch transactions
 
     // SECTION shared state variables
     shard: Peer[]

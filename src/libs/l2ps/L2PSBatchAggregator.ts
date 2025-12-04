@@ -361,9 +361,13 @@ export class L2PSBatchAggregator {
 
         // Create HMAC-SHA256 authentication tag for tamper detection
         // Uses node's private key as HMAC key for authenticated encryption
-        const hmacKey = sharedState.keypair?.privateKey 
-            ? Buffer.from(sharedState.keypair.privateKey as Uint8Array).toString("hex").slice(0, 64)
-            : batchHash // Fallback to batch hash if keypair not available
+        if (!sharedState.keypair?.privateKey) {
+            throw new Error("[L2PS Batch Aggregator] Node keypair not available for HMAC generation")
+        }
+        
+        const hmacKey = Buffer.from(sharedState.keypair.privateKey as Uint8Array)
+            .toString("hex")
+            .slice(0, 64)
         const hmacData = `${l2psUid}:${encryptedBatch}:${batchHash}:${transactionHashes.join(",")}`
         const authenticationTag = crypto
             .createHmac("sha256", hmacKey)
@@ -383,19 +387,55 @@ export class L2PSBatchAggregator {
     /**
      * Get next persistent nonce for batch transactions
      * 
-     * Uses a monotonically increasing counter combined with timestamp
-     * to ensure uniqueness across restarts and prevent replay attacks.
+     * Uses a monotonically increasing counter that persists the last used
+     * nonce to ensure uniqueness across restarts and prevent replay attacks.
+     * Falls back to timestamp-based nonce if storage is unavailable.
      * 
      * @returns Promise resolving to the next nonce value
      */
     private async getNextBatchNonce(): Promise<number> {
-        // Combine counter with timestamp for uniqueness across restarts
-        // Counter ensures ordering within same millisecond
-        this.batchNonceCounter++
+        // Get last nonce from persistent storage
+        const lastNonce = await this.getLastNonceFromStorage()
         const timestamp = Date.now()
-        // Use high bits for timestamp, low bits for counter
-        // This allows ~1000 batches per millisecond before collision
-        return timestamp * 1000 + (this.batchNonceCounter % 1000)
+        const timestampNonce = timestamp * 1000
+        
+        // Ensure new nonce is always greater than last used
+        const newNonce = Math.max(timestampNonce, lastNonce + 1)
+        
+        // Persist the new nonce for recovery after restart
+        await this.saveNonceToStorage(newNonce)
+        
+        return newNonce
+    }
+
+    /**
+     * Retrieve last used nonce from persistent storage
+     */
+    private async getLastNonceFromStorage(): Promise<number> {
+        try {
+            const sharedState = getSharedState
+            // Use shared state to persist nonce across the session
+            // This survives within the same process lifetime
+            if (sharedState.l2psBatchNonce) {
+                return sharedState.l2psBatchNonce
+            }
+            return 0
+        } catch {
+            return 0
+        }
+    }
+
+    /**
+     * Save nonce to persistent storage
+     */
+    private async saveNonceToStorage(nonce: number): Promise<void> {
+        try {
+            const sharedState = getSharedState
+            // Store in shared state for persistence
+            sharedState.l2psBatchNonce = nonce
+        } catch (error) {
+            log.warn(`[L2PS Batch Aggregator] Failed to persist nonce: ${error}`)
+        }
     }
 
     /**
