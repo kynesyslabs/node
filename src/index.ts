@@ -14,11 +14,9 @@ import net from "net"
 import * as fs from "fs"
 import "reflect-metadata"
 import * as dotenv from "dotenv"
-import terminalkit from "terminal-kit"
-
 import { Peer } from "./libs/peer"
 import { PeerManager } from "./libs/peer"
-import log from "src/utilities/logger"
+import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import Chain from "./libs/blockchain/chain"
 import mainLoop from "./utilities/mainLoop"
 import { serverRpcBun } from "./libs/network/server_rpc"
@@ -32,13 +30,13 @@ import { SignalingServer } from "./features/InstantMessagingProtocol/signalingSe
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
 
 dotenv.config()
-const term = terminalkit.terminal
 
 // NOTE This is a global variable that will be used to store the warmup routine and the index needed variables
 const indexState: {
     OVERRIDE_PORT: number | null
     OVERRIDE_IS_TESTER: boolean | null
     COMMANDLINE_MODE: boolean | null
+    TUI_ENABLED: boolean
     RPC_FEE: number
     SERVER_PORT: number
     SIGNALING_SERVER_PORT: number
@@ -50,10 +48,12 @@ const indexState: {
     MCP_SERVER_PORT: number
     MCP_ENABLED: boolean
     mcpServer: any
+    tuiManager: TUIManager | null
 } = {
     OVERRIDE_PORT: null,
     OVERRIDE_IS_TESTER: null,
     COMMANDLINE_MODE: null,
+    TUI_ENABLED: true, // TUI enabled by default, use --no-tui to disable
     RPC_FEE: 10,
     SERVER_PORT: 0,
     SIGNALING_SERVER_PORT: 0,
@@ -65,6 +65,7 @@ const indexState: {
     MCP_SERVER_PORT: 0,
     MCP_ENABLED: true,
     mcpServer: null,
+    tuiManager: null,
 }
 
 // SECTION Preparation methods
@@ -72,18 +73,18 @@ const indexState: {
 // ANCHOR Calibrating the time
 async function calibrateTime() {
     await getTimestampCorrection()
-    console.log("Timestamp correction: " + getSharedState.timestampCorrection)
-    console.log("Network timestamp: " + getNetworkTimestamp())
+    log.info("[SYNC] Timestamp correction: " + getSharedState.timestampCorrection)
+    log.info("[SYNC] Network timestamp: " + getNetworkTimestamp())
 }
 // ANCHOR Routine to handle parameters in advanced mode
 async function digestArguments() {
     const args = process.argv
     if (args.length > 3) {
-        console.log("digest arguments")
+        log.debug("[MAIN] Digesting arguments")
         for (let i = 3; i < args.length; i++) {
             // Handle simple commands
             if (!args[i].includes("=")) {
-                console.log("cmd: " + args[i])
+                log.info("[MAIN] cmd: " + args[i])
                 process.exit(0)
             }
             // Handle configurations
@@ -91,24 +92,28 @@ async function digestArguments() {
             // NOTE These are all the parameters supported
             switch (param[0]) {
                 case "port":
-                    console.log("Overriding port")
+                    log.info("[MAIN] Overriding port")
                     indexState.OVERRIDE_PORT = parseInt(param[1])
                     break
                 case "peerfile":
                     log.warning(
-                        "WARNING: Overriding peer list file is not supported anymore (see PeerManager)",
+                        "[PEER] Overriding peer list file is not supported anymore (see PeerManager)",
                     )
                     break
                 case "tester":
-                    console.log("Starting in tester mode")
+                    log.info("[MAIN] Starting in tester mode")
                     indexState.OVERRIDE_IS_TESTER = true
                     break
                 case "cli":
-                    console.log("Starting in cli mode")
+                    log.info("[MAIN] Starting in cli mode")
                     indexState.COMMANDLINE_MODE = true
                     break
+                case "no-tui":
+                    log.info("[MAIN] TUI disabled, using scrolling log output")
+                    indexState.TUI_ENABLED = false
+                    break
                 default:
-                    console.log("Invalid parameter: " + param)
+                    log.warning("[MAIN] Invalid parameter: " + param)
             }
         }
     }
@@ -198,14 +203,14 @@ async function warmup() {
         process.env.EXPOSED_URL || "http://localhost:" + indexState.SERVER_PORT
     /* !SECTION Environment variables loading and configuration */
 
-    console.log("= Configured environment variables = \n")
-    console.log("PG_PORT: " + indexState.PG_PORT)
-    console.log("RPC_FEE: " + indexState.RPC_FEE)
-    console.log("SERVER_PORT: " + indexState.SERVER_PORT)
-    console.log("SIGNALING_SERVER_PORT: " + indexState.SIGNALING_SERVER_PORT)
-    console.log("MCP_SERVER_PORT: " + indexState.MCP_SERVER_PORT)
-    console.log("MCP_ENABLED: " + indexState.MCP_ENABLED)
-    console.log("= End of Configuration = \n")
+    log.info("[MAIN] = Configured environment variables =")
+    log.info("[MAIN] PG_PORT: " + indexState.PG_PORT)
+    log.info("[MAIN] RPC_FEE: " + indexState.RPC_FEE)
+    log.info("[MAIN] SERVER_PORT: " + indexState.SERVER_PORT)
+    log.info("[MAIN] SIGNALING_SERVER_PORT: " + indexState.SIGNALING_SERVER_PORT)
+    log.info("[MAIN] MCP_SERVER_PORT: " + indexState.MCP_SERVER_PORT)
+    log.info("[MAIN] MCP_ENABLED: " + indexState.MCP_ENABLED)
+    log.info("[MAIN] = End of Configuration =")
     // Configure the logs directory
     log.setLogsDir(indexState.SERVER_PORT)
     // ? REVIEW Starting the server_rpc: should we keep this async?
@@ -214,7 +219,7 @@ async function warmup() {
     //server_rpc()
     serverRpcBun()
     indexState.peerManager = PeerManager.getInstance()
-    console.log("[MAIN] peerManager started")
+    log.info("[MAIN] peerManager started")
 
     // Digest the arguments
     await digestArguments()
@@ -232,12 +237,12 @@ async function preMainLoop() {
     // INFO: Initialize Unified Crypto with ed25519 private key
     getSharedState.keypair = await getSharedState.identity.loadIdentity()
 
-    term.green("[BOOTSTRAP] Our identity is ready\n")
+    log.info("[BOOTSTRAP] Our identity is ready")
     // Log identity
     const publicKeyHex = uint8ArrayToHex(
         getSharedState.keypair.publicKey as Uint8Array,
     )
-    term.green("\n[MAIN] 🔗 WE ARE " + publicKeyHex + " 🔗 \n")
+    log.info("[MAIN] 🔗 WE ARE " + publicKeyHex + " 🔗")
     // Creating ourselves as a peer // ? Should this be removed in production?
     const ourselves = "http://127.0.0.1:" + indexState.SERVER_PORT
     getSharedState.connectionString = ourselves
@@ -252,44 +257,44 @@ async function preMainLoop() {
     // ANCHOR Preparing the peer manager and loading the peer list
     PeerManager.getInstance().loadPeerList()
     indexState.PeerList = PeerManager.getInstance().getPeers()
-    term.green("[BOOTSTRAP] Loaded a list of peers:\n")
+    log.info("[PEER] Loaded a list of peers:")
 
     for (const peer of indexState.PeerList) {
-        console.log(peer.identity + " @ " + peer.connection.string)
+        log.info("[PEER] " + peer.identity + " @ " + peer.connection.string)
     }
 
     // ANCHOR Getting the public IP to check if we're online
     try {
         await getSharedState.identity.getPublicIP()
-        term.green("IP: " + getSharedState.identity.publicIP + "\n")
+        log.info("[NETWORK] IP: " + getSharedState.identity.publicIP)
     } catch (e) {
-        console.log(e)
-        term.yellow("[WARN] {OFFLINE?} Failed to get public IP\n")
+        log.debug("[NETWORK] " + e)
+        log.warning("[NETWORK] {OFFLINE?} Failed to get public IP")
     }
 
     // ANCHOR Looking for the genesis block
-    term.yellow("[BOOTSTRAP] Looking for the genesis block\n")
+    log.info("[BOOTSTRAP] Looking for the genesis block")
     // INFO Now ensuring we have an initialized chain or initializing the genesis block
     await findGenesisBlock()
     await loadGenesisIdentities()
-    term.green("[GENESIS] 🖥️ Found the genesis block\n")
+    log.info("[CHAIN] 🖥️ Found the genesis block")
 
     // Loading the peers
     //PeerList.push(ourselves)
 
     // ANCHOR Bootstrapping the peers
-    term.yellow("[BOOTSTRAP] 🌐 Bootstrapping peers...\n")
-    console.log(indexState.PeerList)
+    log.info("[PEER] 🌐 Bootstrapping peers...")
+    log.debug("[PEER] Peer list: " + JSON.stringify(indexState.PeerList.map(p => p.identity)))
     await peerBootstrap(indexState.PeerList)
     // ? Remove the following code if it's not needed: indexState.peerManager.addPeer(peer) is called within peerBootstrap (hello_peer routines)
     /*for (const peer of peerList) {
         peerManager.addPeer(peer)
     }*/
 
-    term.green(
-        "[BOOTSTRAP] 🌐 Peers loaded (" +
+    log.info(
+        "[PEER] 🌐 Peers loaded (" +
             indexState.peerManager.getPeers().length +
-            ")\n",
+            ")",
     )
     // INFO: Set initial last block data
     const lastBlock = await Chain.getLastBlock()
@@ -299,18 +304,68 @@ async function preMainLoop() {
 
 // ANCHOR Entry point
 async function main() {
+    // Check for --no-tui flag early (before warmup processes args fully)
+    if (process.argv.includes("no-tui") || process.argv.includes("--no-tui")) {
+        indexState.TUI_ENABLED = false
+    }
+
+    // Initialize TUI if enabled
+    if (indexState.TUI_ENABLED) {
+        try {
+            indexState.tuiManager = TUIManager.getInstance()
+            // Enable TUI mode in logger (suppresses direct terminal output)
+            CategorizedLogger.getInstance().enableTuiMode()
+            // Start the TUI
+            await indexState.tuiManager.start()
+            // Set initial node info
+            indexState.tuiManager.updateNodeInfo({
+                version: "1.0.0",
+                status: "starting",
+                publicKey: "Loading...",
+                port: 0,
+                peersCount: 0,
+                blockNumber: 0,
+                isSynced: false,
+            })
+        } catch (error) {
+            console.error("Failed to start TUI, falling back to standard output:", error)
+            indexState.TUI_ENABLED = false
+        }
+    }
+
     await Chain.setup()
     // INFO Warming up the node (including arguments digesting)
     await warmup()
+
+    // Update TUI with port info after warmup
+    if (indexState.TUI_ENABLED && indexState.tuiManager) {
+        indexState.tuiManager.updateNodeInfo({
+            port: indexState.SERVER_PORT,
+        })
+    }
+
     // INFO Calibrating the time at the start of the node
     await calibrateTime()
     // INFO Preparing the main loop
     await preMainLoop()
 
+    // Update TUI with identity and chain info after preMainLoop
+    if (indexState.TUI_ENABLED && indexState.tuiManager) {
+        const publicKeyHex = uint8ArrayToHex(
+            getSharedState.keypair.publicKey as Uint8Array,
+        )
+        indexState.tuiManager.updateNodeInfo({
+            publicKey: publicKeyHex.slice(0, 16) + "...",
+            peersCount: indexState.peerManager.getPeers().length,
+            blockNumber: getSharedState.lastBlockNumber,
+            status: "syncing",
+        })
+    }
+
     // ANCHOR Based on the above methods, we can now start the main loop
     // Checking for listening mode
     if (indexState.peerManager.getPeers().length < 1) {
-        console.log("[WARNING] 🔍 No peers detected, listening...")
+        log.warning("[PEER] 🔍 No peers detected, listening...")
         indexState.enough_peers = false
     }
     // TODO Enough_peers will be shared between modules so that can be checked async
@@ -330,9 +385,9 @@ async function main() {
         )
         if (signalingServer) {
             getSharedState.isSignalingServerStarted = true
-            console.log("[MAIN] Signaling server started")
+            log.info("[NETWORK] Signaling server started")
         } else {
-            console.log("[MAIN] Failed to start the signaling server")
+            log.error("[NETWORK] Failed to start the signaling server")
             process.exit(1)
         }
 
@@ -359,16 +414,25 @@ async function main() {
 
                 indexState.mcpServer = mcpServer
                 getSharedState.isMCPServerStarted = true
-                console.log(
-                    `[MAIN] MCP server started on port ${indexState.MCP_SERVER_PORT}`,
+                log.info(
+                    `[MCP] MCP server started on port ${indexState.MCP_SERVER_PORT}`,
                 )
             } catch (error) {
-                console.log("[MAIN] Failed to start MCP server:", error)
+                log.error("[MCP] Failed to start MCP server: " + error)
                 getSharedState.isMCPServerStarted = false
                 // Continue without MCP (failsafe)
             }
         }
-        term.yellow("[MAIN] ✅ Starting the background loop\n")
+        log.info("[MAIN] ✅ Starting the background loop")
+
+        // Update TUI status to running
+        if (indexState.TUI_ENABLED && indexState.tuiManager) {
+            indexState.tuiManager.updateNodeInfo({
+                status: "running",
+                isSynced: getSharedState.syncStatus,
+            })
+        }
+
         // ANCHOR Starting the main loop
         mainLoop() // Is an async function so running without waiting send that to the background
     }
