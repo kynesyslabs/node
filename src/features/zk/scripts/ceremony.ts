@@ -152,8 +152,8 @@ function loadCeremonyState(): CeremonyState | null {
     try {
         const content = readFileSync(STATE_FILE, "utf-8")
         return JSON.parse(content)
-    } catch (error) {
-        warn(`Failed to parse ceremony state: ${error}`)
+    } catch (err) {
+        warn(`Failed to parse ceremony state: ${err}`)
         return null
     }
 }
@@ -246,10 +246,10 @@ async function initCeremony() {
     try {
         execSync(
             `${NPX} snarkjs groth16 setup ${R1CS_PATH} ${PTAU_FILE} ${key0Path}`,
-            { stdio: "inherit" },
+            { stdio: "inherit", shell: "/bin/bash" },
         )
         success("Initial key generated")
-    } catch (error) {
+    } catch (err) {
         error("Failed to generate initial key")
     }
 
@@ -350,10 +350,10 @@ async function contributeCeremony() {
     try {
         execSync(
             `${NPX} snarkjs zkey contribute ${inputKeyPath} ${outputKeyPath} --name="${participantName}" -e="${entropy}"`,
-            { stdio: "inherit" },
+            { stdio: "inherit", shell: "/bin/bash" },
         )
         success("Contribution added successfully")
-    } catch (error) {
+    } catch (err) {
         error("Failed to add contribution")
     }
 
@@ -446,10 +446,10 @@ async function finalizeCeremony() {
     try {
         execSync(
             `${NPX} snarkjs zkey export verificationkey ${finalKeyPath} ${FINAL_VKEY_PATH}`,
-            { stdio: "inherit" },
+            { stdio: "inherit", shell: "/bin/bash" },
         )
         success("Verification key exported")
-    } catch (error) {
+    } catch (err) {
         error("Failed to export verification key")
     }
 
