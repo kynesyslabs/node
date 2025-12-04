@@ -421,7 +421,7 @@ export class TUIManager extends EventEmitter {
         console.log = (...args: unknown[]) => {
             const message = args.map(a => String(a)).join(" ")
             const { category, cleanMessage } = this.extractCategoryFromMessage(message)
-            this.logger.debug(category, `[console.log] ${cleanMessage}`)
+            this.logger.info(category, `[console.log] ${cleanMessage}`)
         }
 
         console.error = (...args: unknown[]) => {
