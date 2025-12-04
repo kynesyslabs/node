@@ -23,6 +23,39 @@ import { execSync } from "child_process"
 import { join } from "path"
 import { createHash, randomBytes } from "crypto"
 
+// Find npx executable path (handles PATH issues in subprocesses)
+function findNpx(): string {
+    const possiblePaths = [
+        "/usr/bin/npx",
+        "/usr/local/bin/npx",
+        "/opt/homebrew/bin/npx",
+        process.env.HOME + "/.npm-global/bin/npx",
+        process.env.HOME + "/.nvm/versions/node/*/bin/npx",
+    ]
+
+    // First try which command
+    try {
+        const npxPath = execSync("which npx", { encoding: "utf-8" }).trim()
+        if (npxPath && existsSync(npxPath)) {
+            return npxPath
+        }
+    } catch {
+        // which failed, try known paths
+    }
+
+    // Try known paths
+    for (const p of possiblePaths) {
+        if (existsSync(p)) {
+            return p
+        }
+    }
+
+    // Fallback to just "npx" and hope PATH works
+    return "npx"
+}
+
+const NPX = findNpx()
+
 // Ceremony configuration
 const CEREMONY_DIR = "zk_ceremony"
 const KEYS_DIR = join(CEREMONY_DIR, "keys")
@@ -242,7 +275,7 @@ async function initCeremony() {
 
     try {
         execSync(
-            `npx snarkjs groth16 setup ${R1CS_PATH} ${PTAU_FILE} ${key0Path}`,
+            `${NPX} snarkjs groth16 setup ${R1CS_PATH} ${PTAU_FILE} ${key0Path}`,
             { stdio: "inherit" },
         )
         success("Initial key generated")
@@ -346,7 +379,7 @@ async function contributeCeremony() {
 
     try {
         execSync(
-            `npx snarkjs zkey contribute ${inputKeyPath} ${outputKeyPath} --name="${participantName}" -e="${entropy}"`,
+            `${NPX} snarkjs zkey contribute ${inputKeyPath} ${outputKeyPath} --name="${participantName}" -e="${entropy}"`,
             { stdio: "inherit" },
         )
         success("Contribution added successfully")
@@ -442,7 +475,7 @@ async function finalizeCeremony() {
 
     try {
         execSync(
-            `npx snarkjs zkey export verificationkey ${finalKeyPath} ${FINAL_VKEY_PATH}`,
+            `${NPX} snarkjs zkey export verificationkey ${finalKeyPath} ${FINAL_VKEY_PATH}`,
             { stdio: "inherit" },
         )
         success("Verification key exported")
