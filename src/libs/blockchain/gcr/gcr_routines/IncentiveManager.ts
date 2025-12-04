@@ -3,7 +3,7 @@ import { PointSystem } from "@/features/incentive/PointSystem"
 
 /**
  * This class is used to manage the incentives for the user.
- * It is used to award points to the user for linking their wallet, Twitter account, and GitHub account.
+ * It is used to award points to the user for linking their wallet, Twitter account, GitHub account, Discord, and UD domains.
  * It is also used to get the points for the user.
  */
 export class IncentiveManager {
@@ -133,5 +133,32 @@ export class IncentiveManager {
      */
     static async discordUnlinked(userId: string): Promise<RPCResponse> {
         return await this.pointSystem.deductDiscordPoints(userId)
+    }
+
+    /**
+     * Hook to be called after UD domain linking
+     */
+    static async udDomainLinked(
+        userId: string,
+        domain: string,
+        signingAddress: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.awardUdDomainPoints(
+            userId,
+            domain,
+            signingAddress,
+            referralCode,
+        )
+    }
+
+    /**
+     * Hook to be called after UD domain unlinking
+     */
+    static async udDomainUnlinked(
+        userId: string,
+        domain: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.deductUdDomainPoints(userId, domain)
     }
 }
