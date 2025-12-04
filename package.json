@@ -24,6 +24,7 @@
         "upgrade_deps:force": "ncu -u && yarn",
         "keygen": "tsx -r tsconfig-paths/register src/libs/utils/keyMaker.ts",
         "show:pubkey": "tsx -r tsconfig-paths/register src/libs/utils/showPubkey.ts",
+        "ceremony:contribute": "bash scripts/ceremony_contribute.sh",
         "test:chains": "jest --testMatch '**/tests/**/*.ts' --testPathIgnorePatterns src/* tests/utils/* tests/**/_template*  --verbose",
         "restore": "bun run src/utilities/backupAndRestore.ts",
         "typeorm": "typeorm-ts-node-esm",
