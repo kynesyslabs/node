@@ -429,12 +429,11 @@ export class CategorizedLogger extends EventEmitter {
     private appendToFile(filename: string, content: string): void {
         const filepath = path.join(this.config.logsDir, filename)
 
-        try {
-            fs.appendFileSync(filepath, content)
-        } catch (err) {
-            // Silently fail file writes to avoid recursion
+        fs.promises.appendFile(filepath, content).catch(err => {
+            // Silently fail file writes to avoid recursion.
+            // Using the original console.error to bypass TUI interception.
             console.error(`Failed to write to log file: ${filepath}`, err)
-        }
+        })
     }
 
     /**
