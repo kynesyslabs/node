@@ -445,15 +445,8 @@ log_info "Running ceremony contribution..."
 log_warn "This will generate cryptographic randomness - DO NOT INTERRUPT!"
 echo ""
 
-# Run the ceremony script
-# Try multiple methods for compatibility across different Node versions
-if node --version | grep -q "v2[0-9]"; then
-    # Node 20+ uses --import
-    node --import tsx src/features/zk/scripts/ceremony.ts contribute
-else
-    # Node 18/19 - try ts-node as tsx has compatibility issues
-    npx ts-node --esm src/features/zk/scripts/ceremony.ts contribute
-fi
+# Run the ceremony script using tsx CLI directly (works across Node versions)
+npx --yes tsx@4.7.0 src/features/zk/scripts/ceremony.ts contribute
 
 log_success "Contribution completed!"
 
