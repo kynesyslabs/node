@@ -62,7 +62,7 @@ EXAMPLES:
     ./run -n                       # Skip git update (for development)
 
 SYSTEM REQUIREMENTS:
-    - 8GB RAM minimum (12GB recommended)
+    - 4GB RAM minimum (8GB recommended)
     - 4+ CPU cores
     - Docker and Docker Compose
     - Bun runtime
@@ -77,10 +77,31 @@ EOF
 check_system_requirements() {
     echo "🔍 Checking system requirements..."
     log_verbose "Platform detected: $PLATFORM_NAME"
-    
+
     local failed_requirements=0
     local warnings=0
-    
+
+    # Load requirements from .requirements file if it exists
+    local MIN_RAM=4
+    local SUGGESTED_RAM=8
+    if [ -f ".requirements" ]; then
+        log_verbose "Loading requirements from .requirements file"
+        # Source the file to get the values
+        while IFS='=' read -r key value; do
+            # Skip comments and empty lines
+            [[ "$key" =~ ^#.*$ ]] && continue
+            [[ -z "$key" ]] && continue
+            # Remove any whitespace
+            key=$(echo "$key" | tr -d ' ')
+            value=$(echo "$value" | tr -d ' ')
+            case "$key" in
+                "MIN_RAM") MIN_RAM=$value ;;
+                "SUGGESTED_RAM") SUGGESTED_RAM=$value ;;
+            esac
+        done < .requirements
+        log_verbose "Loaded MIN_RAM=$MIN_RAM, SUGGESTED_RAM=$SUGGESTED_RAM"
+    fi
+
     # Check RAM
     log_verbose "Checking RAM requirements"
     if [ "$PLATFORM_NAME" = "macOS" ]; then
@@ -96,12 +117,12 @@ check_system_requirements() {
         ram_gb=0
         warnings=$((warnings + 1))
     fi
-    
-    if [ $ram_gb -lt 8 ]; then
-        echo "❌ Insufficient RAM: ${ram_gb}GB (minimum: 8GB)"
+
+    if [ $ram_gb -lt $MIN_RAM ]; then
+        echo "❌ Insufficient RAM: ${ram_gb}GB (minimum: ${MIN_RAM}GB)"
         failed_requirements=$((failed_requirements + 1))
-    elif [ $ram_gb -lt 12 ]; then
-        echo "⚠️  RAM below recommended: ${ram_gb}GB (recommended: 12GB)"
+    elif [ $ram_gb -lt $SUGGESTED_RAM ]; then
+        echo "⚠️  RAM below recommended: ${ram_gb}GB (recommended: ${SUGGESTED_RAM}GB)"
         warnings=$((warnings + 1))
     else
         echo "✅ RAM: ${ram_gb}GB"
@@ -311,11 +332,34 @@ check_system_requirements
 if [ "$GIT_PULL" = true ]; then
     echo "🔄 Updating repository..."
     log_verbose "Running git pull to get latest changes"
+
+    # Store package.json hash before pull to detect changes
+    PACKAGE_HASH_BEFORE=""
+    if [ -f "package.json" ]; then
+        PACKAGE_HASH_BEFORE=$(md5sum package.json 2>/dev/null || md5 -q package.json 2>/dev/null)
+    fi
+
     if ! git pull; then
         echo "⚠️  Warning: Git pull failed, continuing with current version"
         log_verbose "Git pull failed but continuing - might be in development mode"
     else
         echo "✅ Repository updated successfully"
+
+        # Check if package.json changed after pull
+        PACKAGE_HASH_AFTER=""
+        if [ -f "package.json" ]; then
+            PACKAGE_HASH_AFTER=$(md5sum package.json 2>/dev/null || md5 -q package.json 2>/dev/null)
+        fi
+
+        if [ "$PACKAGE_HASH_BEFORE" != "$PACKAGE_HASH_AFTER" ] && [ -n "$PACKAGE_HASH_AFTER" ]; then
+            echo "📦 package.json changed, updating dependencies..."
+            log_verbose "Detected package.json change, running bun install"
+            if ! bun install; then
+                echo "❌ Failed to install dependencies"
+                exit 1
+            fi
+            echo "✅ Dependencies updated successfully"
+        fi
     fi
 fi
 
