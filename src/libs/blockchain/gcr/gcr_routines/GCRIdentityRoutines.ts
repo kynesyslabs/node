@@ -8,7 +8,9 @@ import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import ensureGCRForUser from "./ensureGCRForUser"
 import Hashing from "@/libs/crypto/hashing"
 import {
+    NomisWalletIdentity,
     PqcIdentityEdit,
+    SavedNomisIdentity,
     SavedXmIdentity,
 } from "@/model/entities/types/IdentityTypes"
 import log from "@/utilities/logger"
@@ -677,6 +679,20 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
+            case "nomisadd":
+                result = await this.applyNomisIdentityUpsert(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "nomisremove":
+                result = await this.applyNomisIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
             default:
                 result = {
                     success: false,
@@ -688,7 +704,7 @@ export default class GCRIdentityRoutines {
     }
 
     private static async isFirstConnection(
-        type: "twitter" | "github" | "web3" | "telegram" | "discord",
+        type: "twitter" | "github" | "web3" | "telegram" | "discord" | "nomis",
         data: {
             userId?: string // for twitter/github/discord
             chain?: string // for web3
@@ -698,7 +714,7 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         currentAccount?: string,
     ): Promise<boolean> {
-        if (type !== "web3") {
+        if (type !== "web3" && type !== "nomis") {
             const queryTemplate = `
             EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'${type}', '[]'::jsonb)) as ${type}_id WHERE ${type}_id->>'userId' = :userId)
         `
@@ -774,11 +790,22 @@ export default class GCRIdentityRoutines {
         const addressToCheck =
             data.chain === "evm" ? data.address.toLowerCase() : data.address
 
+        const rootKey = type === "web3" ? "xm" : "nomis"
+
         const result = await gcrMainRepository
             .createQueryBuilder("gcr")
             .where(
-                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)",
+                `
+                EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements(
+                        COALESCE(gcr.identities->:rootKey->:chain->:subchain, '[]'::jsonb)
+                    ) AS item
+                    WHERE item->>'address' = :address
+                )
+                `,
                 {
+                    rootKey,
                     chain: data.chain,
                     subchain: data.subchain,
                     address: addressToCheck,
@@ -792,5 +819,147 @@ export default class GCRIdentityRoutines {
          */
         return !result
         // }
+    }
+
+    private static normalizeNomisAddress(
+        chain: string,
+        address: string,
+    ): string {
+        if (chain === "evm") {
+            return address.trim().toLowerCase()
+        }
+
+        return address.trim()
+    }
+
+    static async applyNomisIdentityUpsert(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const {
+            chain,
+            subchain,
+            address,
+            score,
+            scoreType,
+            mintedScore,
+            metadata,
+            lastSyncedAt,
+        } = editOperation.data
+
+        if (!chain || !subchain || !address || !score) {
+            return { success: false, message: "Invalid Nomis identity payload" }
+        }
+
+        const normalizedAddress = this.normalizeNomisAddress(chain, address)
+
+        const isFirst = await this.isFirstConnection(
+            "nomis",
+            {
+                chain: chain,
+                subchain: subchain,
+                address: normalizedAddress,
+            },
+            gcrMainRepository,
+            editOperation.account,
+        )
+
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+
+        accountGCR.identities.nomis = accountGCR.identities.nomis || {}
+        accountGCR.identities.nomis[chain] =
+            accountGCR.identities.nomis[chain] || {}
+        accountGCR.identities.nomis[chain][subchain] =
+            accountGCR.identities.nomis[chain][subchain] || []
+
+        const chainBucket = accountGCR.identities.nomis[chain][subchain]
+
+        const filtered = chainBucket.filter(existing => {
+            const existingAddress = this.normalizeNomisAddress(
+                chain,
+                existing.address,
+            )
+            return existingAddress !== normalizedAddress
+        })
+
+        const record: SavedNomisIdentity = {
+            address: normalizedAddress,
+            score,
+            scoreType,
+            mintedScore: mintedScore ?? null,
+            lastSyncedAt: lastSyncedAt || new Date().toISOString(),
+            metadata,
+        }
+
+        filtered.push(record)
+        accountGCR.identities.nomis[chain][subchain] = filtered
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            if (isFirst) {
+                await IncentiveManager.nomisLinked(
+                    accountGCR.pubkey,
+                    chain,
+                    editOperation.referralCode,
+                )
+            }
+        }
+
+        return { success: true, message: "Nomis identity upserted" }
+    }
+
+    static async applyNomisIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const identity = editOperation.data as NomisWalletIdentity
+
+        if (!identity?.chain || !identity?.subchain || !identity?.address) {
+            return { success: false, message: "Invalid Nomis identity payload" }
+        }
+
+        const normalizedAddress = this.normalizeNomisAddress(
+            identity.chain,
+            identity.address,
+        )
+
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+
+        const chainBucket =
+            accountGCR.identities.nomis?.[identity.chain]?.[identity.subchain]
+
+        if (!Array.isArray(chainBucket)) {
+            return { success: false, message: "Nomis identity not found" }
+        }
+
+        const exists = chainBucket.some(existing => {
+            const existingAddress = this.normalizeNomisAddress(
+                identity.chain,
+                existing.address,
+            )
+            return existingAddress === normalizedAddress
+        })
+
+        if (!exists) {
+            return { success: false, message: "Nomis identity not found" }
+        }
+
+        accountGCR.identities.nomis[identity.chain][identity.subchain] =
+            chainBucket.filter(existing => {
+                const existingAddress = this.normalizeNomisAddress(
+                    identity.chain,
+                    existing.address,
+                )
+                return existingAddress !== normalizedAddress
+            })
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+        }
+
+        return { success: true, message: "Nomis identity removed" }
     }
 }

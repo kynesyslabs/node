@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosResponse } from "axios"
 import log from "@/utilities/logger"
+import { NomisImportOptions } from "../providers/nomisIdentityProvider"
 
 export interface NomisWalletScorePayload {
     address: string
@@ -44,7 +45,8 @@ interface NomisApiResponse<T> {
     data: T
 }
 
-const DEFAULT_BASE_URL = process.env.NOMIS_API_BASE_URL || "https://api.nomis.cc"
+const DEFAULT_BASE_URL =
+    process.env.NOMIS_API_BASE_URL || "https://api.nomis.cc"
 const DEFAULT_SCORE_TYPE = Number(process.env.NOMIS_DEFAULT_SCORE_TYPE || 0)
 const DEFAULT_DEADLINE_OFFSET_SECONDS = Number(
     process.env.NOMIS_DEFAULT_DEADLINE_OFFSET_SECONDS || 3600,
@@ -66,11 +68,11 @@ export class NomisApiClient {
         }
 
         if (process.env.NOMIS_API_KEY) {
-            headers["x-api-key"] = process.env.NOMIS_API_KEY
+            headers["X-API-Key"] = process.env.NOMIS_API_KEY
         }
 
-        if (process.env.NOMIS_API_TOKEN) {
-            headers.Authorization = `Bearer ${process.env.NOMIS_API_TOKEN}`
+        if (process.env.NOMIS_CLIENT_ID) {
+            headers["X-ClientId"] = process.env.NOMIS_CLIENT_ID
         }
 
         this.http = axios.create({
@@ -78,14 +80,6 @@ export class NomisApiClient {
             timeout: Number(process.env.NOMIS_API_TIMEOUT_MS || 10_000),
             headers,
         })
-
-        this.useMockData = this.shouldUseMockData()
-
-        if (this.useMockData) {
-            log.info(
-                "[NomisApiClient] Running in mock mode – API key/token missing. Set NOMIS_USE_MOCKS=false after configuring credentials.",
-            )
-        }
     }
 
     static getInstance(): NomisApiClient {
@@ -98,34 +92,55 @@ export class NomisApiClient {
 
     async getWalletScore(
         address: string,
-        options: NomisScoreRequestOptions = {},
+        options: NomisImportOptions = {},
     ): Promise<NomisWalletScorePayload> {
         if (!address) {
             throw new Error("Wallet address is required to fetch Nomis score")
         }
 
-        const normalized = address.trim().toLowerCase()
+        const timeout = 30000
+        const chain = options.chain ?? "evm"
 
-        const params = {
-            scoreType: options.scoreType ?? this.defaultScoreType,
-            nonce: options.nonce ?? 0,
-            deadline: options.deadline ?? this.computeDeadline(),
-        }
+        const normalized =
+            chain === "evm" ? address.trim().toLowerCase() : address
 
-        if (this.useMockData) {
-            return this.buildMockScore(normalized, params)
+        const params = new URLSearchParams()
+
+        let url: string
+
+        if (chain === "evm") {
+            const scoredChains = [1, 10, 56, 137, 5000, 8453, 42161, 59144]
+
+            params.set(
+                "scoreType",
+                String(options.scoreType ?? this.defaultScoreType),
+            )
+            params.set("nonce", String(options.nonce ?? 0))
+            params.set(
+                "deadline",
+                String(options.deadline ?? this.computeDeadline()),
+            )
+
+            scoredChains.forEach(ch => {
+                params.append("ScoredChains", String(ch))
+            })
+
+            url = `/api/v1/crosschain-score/wallet/${normalized}/score`
+        } else {
+            url = `/api/v1/solana/wallet/${normalized}/score`
         }
 
         let response: AxiosResponse<NomisApiResponse<NomisWalletScorePayload>>
 
         try {
-            response = await this.http.get(
-                `/api/v1/ethereum/wallet/${normalized}/score`,
-                { params },
-            )
+            if (chain === "evm") {
+                response = await this.http.get(url, { params, timeout })
+            } else {
+                response = await this.http.get(url, { timeout })
+            }
         } catch (error) {
             log.error(
-                `[NomisApiClient] Failed to fetch score for ${normalized}: ${error}`,
+                `[NomisApiClient] Failed to fetch score for ${chain}: ${normalized}: ${error}`,
             )
             throw error
         }
@@ -140,55 +155,5 @@ export class NomisApiClient {
 
     private computeDeadline(): number {
         return Math.floor(Date.now() / 1000) + this.defaultDeadlineOffset
-    }
-
-    private shouldUseMockData(): boolean {
-        const explicitFlag = process.env.NOMIS_USE_MOCKS?.toLowerCase()
-
-        if (explicitFlag === "true") {
-            return true
-        }
-
-        if (explicitFlag === "false") {
-            return false
-        }
-
-        return !process.env.NOMIS_API_KEY && !process.env.NOMIS_API_TOKEN
-    }
-
-    private buildMockScore(
-        address: string,
-        params: { scoreType: number; nonce: number; deadline: number },
-    ): NomisWalletScorePayload {
-        const baseScore = this.deriveDeterministicScore(address)
-
-        return {
-            address,
-            score: baseScore,
-            scoreType: params.scoreType,
-            referralCode: "MOCK",
-            referrerCode: undefined,
-            mintData: {
-                mintedScore: Number(baseScore.toFixed(2)),
-                deadline: params.deadline,
-            },
-            stats: {
-                scoredAt: new Date().toISOString(),
-                walletAge: 365,
-                totalTransactions: 42,
-                nativeBalanceUSD: baseScore * 10,
-                walletTurnoverUSD: baseScore * 25,
-            },
-        }
-    }
-
-    private deriveDeterministicScore(address: string): number {
-        const seed = Array.from(address).reduce((acc, char, idx) => {
-            const code = char.charCodeAt(0)
-            return (acc + code * (idx + 1)) % 10_000
-        }, 0)
-
-        const normalizedScore = (seed % 1_000) / 10 // 0 - 100 range with one decimal
-        return Number(normalizedScore.toFixed(2))
     }
 }

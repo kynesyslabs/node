@@ -8,6 +8,7 @@ import { UserPoints } from "@kynesyslabs/demosdk/abstraction"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Twitter } from "@/libs/identity/tools/twitter"
+import { NomisWalletIdentity } from "@/model/entities/types/IdentityTypes"
 
 const pointValues = {
     LINK_WEB3_WALLET: 0.5,
@@ -16,6 +17,7 @@ const pointValues = {
     LINK_TELEGRAM: 1,
     FOLLOW_DEMOS: 1,
     LINK_DISCORD: 1,
+    LINK_NOMIS_SCORE: 0.5,
 }
 
 export class PointSystem {
@@ -36,8 +38,9 @@ export class PointSystem {
     private async getUserIdentitiesFromGCR(userId: string): Promise<{
         linkedWallets: string[]
         linkedSocials: { twitter?: string; github?: string; discord?: string }
+        linkedNomis: NomisWalletIdentity[]
     }> {
-        const xmIdentities = await IdentityManager.getIdentities(userId)
+        const identities = await IdentityManager.getIdentities(userId)
         const twitterIdentities = await IdentityManager.getWeb2Identities(
             userId,
             "twitter",
@@ -55,19 +58,19 @@ export class PointSystem {
 
         const linkedWallets: string[] = []
 
-        if (xmIdentities?.xm) {
-            const chains = Object.keys(xmIdentities.xm)
+        if (identities?.xm) {
+            const chains = Object.keys(identities.xm)
 
             for (const chain of chains) {
-                const subChains = xmIdentities.xm[chain]
+                const subChains = identities.xm[chain]
                 const subChainKeys = Object.keys(subChains)
 
                 for (const subChain of subChainKeys) {
-                    const identities = subChains[subChain]
+                    const xmIdentities = subChains[subChain]
 
-                    if (Array.isArray(identities)) {
-                        identities.forEach(identity => {
-                            const walletId = `${chain}:${identity.address}`
+                    if (Array.isArray(xmIdentities)) {
+                        xmIdentities.forEach(xmIdentity => {
+                            const walletId = `${chain}:${xmIdentity.address}`
                             linkedWallets.push(walletId)
                         })
                     }
@@ -75,7 +78,36 @@ export class PointSystem {
             }
         }
 
-        const linkedSocials: { twitter?: string; github?: string; discord?: string } = {}
+        let linkedNomis: NomisWalletIdentity[] = []
+
+        if (identities?.nomis) {
+            const nomisChains = Object.keys(identities.nomis)
+
+            for (const chain of nomisChains) {
+                const subChains = identities.nomis[chain]
+                const subChainKeys = Object.keys(subChains)
+
+                for (const subChain of subChainKeys) {
+                    const nomisIdentities = subChains[subChain]
+
+                    if (Array.isArray(nomisIdentities)) {
+                        const mapped = nomisIdentities.map(nomisIdentity => ({
+                            chain,
+                            subchain: subChain,
+                            ...nomisIdentity,
+                        }))
+
+                        linkedNomis.push(...mapped)
+                    }
+                }
+            }
+        }
+
+        const linkedSocials: {
+            twitter?: string
+            github?: string
+            discord?: string
+        } = {}
 
         if (Array.isArray(twitterIdentities) && twitterIdentities.length > 0) {
             linkedSocials.twitter = twitterIdentities[0].username
@@ -89,7 +121,7 @@ export class PointSystem {
             linkedSocials.discord = discordIdentities[0].username
         }
 
-        return { linkedWallets, linkedSocials }
+        return { linkedWallets, linkedSocials, linkedNomis }
     }
 
     /**
@@ -105,7 +137,7 @@ export class PointSystem {
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
         let account = await gcrMainRepository.findOneBy({ pubkey: userIdStr })
 
-        const { linkedWallets, linkedSocials } =
+        const { linkedWallets, linkedSocials, linkedNomis } =
             await this.getUserIdentitiesFromGCR(userIdStr)
 
         if (!account) {
@@ -142,9 +174,11 @@ export class PointSystem {
                 },
                 referrals: account.points.breakdown?.referrals || 0,
                 demosFollow: account.points.breakdown?.demosFollow || 0,
+                nomisScores: account.points.breakdown?.nomisScores || {},
             },
             linkedWallets,
             linkedSocials,
+            linkedNomisIdentities: linkedNomis,
             lastUpdated: account.points.lastUpdated || new Date(),
             flagged: account.flagged || null,
             flaggedReason: account.flaggedReason || null,
@@ -157,7 +191,7 @@ export class PointSystem {
     private async addPointsToGCR(
         userId: string,
         points: number,
-        type: "web3Wallets" | "socialAccounts",
+        type: "web3Wallets" | "socialAccounts" | "nomisScores",
         platform: string,
         referralCode?: string,
         twitterUserId?: string,
@@ -173,6 +207,7 @@ export class PointSystem {
             socialAccounts: { twitter: 0, github: 0, telegram: 0, discord: 0 },
             referrals: 0,
             demosFollow: 0,
+            nomisScores: {},
         }
 
         const oldTotal = account.points.totalPoints || 0
@@ -195,6 +230,13 @@ export class PointSystem {
             const oldChainPoints =
                 account.points.breakdown.web3Wallets[platform] || 0
             account.points.breakdown.web3Wallets[platform] =
+                oldChainPoints + points
+        } else if (type === "nomisScores") {
+            account.points.breakdown.nomisScores =
+                account.points.breakdown.nomisScores || {}
+            const oldChainPoints =
+                account.points.breakdown.nomisScores[platform] || 0
+            account.points.breakdown.nomisScores[platform] =
                 oldChainPoints + points
         }
         account.points.lastUpdated = new Date()
@@ -981,6 +1023,182 @@ export class PointSystem {
             return {
                 result: 500,
                 response: "Error deducting points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Award points for linking a Nomis score
+     * @param userId The user's Demos address
+     * @param chain The Nomis score chain type: "evm" | "solana"
+     * @param referralCode Optional referral code
+     * @returns RPCResponse
+     */
+    async awardNomisScorePoints(
+        userId: string,
+        chain: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        let nomisScoreAlreadyLinkedForChain = false
+
+        const invalidChainMessage =
+            "Invalid Nomis chain. Allowed values are 'evm' and 'solana'."
+        const nomisScoreAlreadyLinkedMessage = `A Nomis score for ${chain} is already linked.`
+        const validChains = ["evm", "solana"]
+
+        try {
+            if (!validChains.includes(chain)) {
+                return {
+                    result: 400,
+                    response: invalidChainMessage,
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+
+            const userPointsWithIdentities = await this.getUserPointsInternal(
+                userId,
+            )
+
+            if (!userPointsWithIdentities.linkedSocials.twitter) {
+                return {
+                    result: 400,
+                    response: "Twitter account not linked. Not awarding points",
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+
+            if (chain === "evm") {
+                const hasEvmWallet =
+                    userPointsWithIdentities.linkedWallets.some(w =>
+                        w.startsWith("evm:"),
+                    )
+
+                if (!hasEvmWallet) {
+                    return {
+                        result: 400,
+                        response:
+                            "EVM wallet not linked. Cannot award crosschain Nomis points",
+                        require_reply: false,
+                        extra: null,
+                    }
+                }
+            }
+
+            if (chain === "solana") {
+                const hasSolWallet =
+                    userPointsWithIdentities.linkedWallets.some(w =>
+                        w.startsWith("solana:"),
+                    )
+
+                if (!hasSolWallet) {
+                    return {
+                        result: 400,
+                        response:
+                            "Solana wallet not linked. Cannot award Solana Nomis points",
+                        require_reply: false,
+                        extra: null,
+                    }
+                }
+            }
+
+            const existingNomisScoreOnChain =
+                userPointsWithIdentities.breakdown.nomisScores?.[chain]
+
+            if (existingNomisScoreOnChain != null) {
+                nomisScoreAlreadyLinkedForChain = true
+            }
+
+            await this.addPointsToGCR(
+                userId,
+                pointValues.LINK_NOMIS_SCORE,
+                "nomisScores",
+                chain,
+                referralCode,
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: nomisScoreAlreadyLinkedForChain ? 400 : 200,
+                response: {
+                    pointsAwarded: !nomisScoreAlreadyLinkedForChain
+                        ? pointValues.LINK_NOMIS_SCORE
+                        : 0,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: nomisScoreAlreadyLinkedForChain
+                        ? nomisScoreAlreadyLinkedMessage
+                        : `Points awarded for linking Nomis score on ${chain}`,
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error awarding Nomis score points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Deduct points for unlinking a Nomis score
+     * @param userId The user's Demos address
+     * @param chain The Nomis score chain type: "evm" | "solana"
+     * @returns RPCResponse
+     */
+    async deductNomisScorePoints(
+        userId: string,
+        chain: string,
+    ): Promise<RPCResponse> {
+        const validChains = ["evm", "solana"]
+        const invalidChainMessage =
+            "Invalid Nomis chain. Allowed values are 'evm' and 'solana'."
+
+        try {
+            if (!validChains.includes(chain)) {
+                return {
+                    result: 400,
+                    response: invalidChainMessage,
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+
+            await this.addPointsToGCR(
+                userId,
+                -pointValues.LINK_NOMIS_SCORE,
+                "nomisScores",
+                chain,
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsDeducted: pointValues.LINK_NOMIS_SCORE,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: `Points deducted for unlinking Nomis score on ${chain}`,
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error deducting Nomis score points",
                 require_reply: false,
                 extra: {
                     error:

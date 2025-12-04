@@ -1,10 +1,10 @@
-import Datasource from "@/model/datasource"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
 import log from "@/utilities/logger"
-import { NomisWalletIdentity } from "@/model/entities/types/IdentityTypes"
-import GCRIdentityRoutines from "@/libs/blockchain/gcr/gcr_routines/GCRIdentityRoutines"
-import { GCREditIdentity } from "@kynesyslabs/demosdk/types"
+import {
+    NomisWalletIdentity,
+    SavedNomisIdentity,
+} from "@/model/entities/types/IdentityTypes"
 import {
     NomisApiClient,
     NomisScoreRequestOptions,
@@ -17,6 +17,8 @@ export interface NomisImportOptions extends NomisScoreRequestOptions {
     chain?: string
     subchain?: string
     forceRefresh?: boolean
+    signature?: string
+    timestamp?: number
 }
 
 export class NomisIdentityProvider {
@@ -24,7 +26,7 @@ export class NomisIdentityProvider {
         pubkey: string,
         walletAddress: string,
         options: NomisImportOptions = {},
-    ): Promise<NomisIdentitySummary> {
+    ): Promise<SavedNomisIdentity> {
         const chain = options.chain || "evm"
         const subchain = options.subchain || "mainnet"
         const normalizedWallet = this.normalizeAddress(walletAddress, chain)
@@ -51,12 +53,13 @@ export class NomisIdentityProvider {
         }
 
         const apiClient = NomisApiClient.getInstance()
-        const payload = await apiClient.getWalletScore(normalizedWallet, options)
+        const payload = await apiClient.getWalletScore(
+            normalizedWallet,
+            options,
+        )
 
         const identityRecord = this.buildIdentityRecord(
             payload,
-            chain,
-            subchain,
             normalizedWallet,
             options,
         )
@@ -64,7 +67,9 @@ export class NomisIdentityProvider {
         return identityRecord
     }
 
-    static async listIdentities(pubkey: string): Promise<NomisIdentitySummary[]> {
+    static async listIdentities(
+        pubkey: string,
+    ): Promise<NomisIdentitySummary[]> {
         const account = await ensureGCRForUser(pubkey)
         return this.flattenIdentities(account)
     }
@@ -91,14 +96,10 @@ export class NomisIdentityProvider {
 
     private static buildIdentityRecord(
         payload: NomisWalletScorePayload,
-        chain: string,
-        subchain: string,
         walletAddress: string,
-        options: NomisScoreRequestOptions,
-    ): NomisWalletIdentity {
+        options: NomisImportOptions,
+    ): SavedNomisIdentity {
         return {
-            chain,
-            subchain,
             address: walletAddress,
             score: payload.score,
             scoreType: payload.scoreType ?? options.scoreType ?? 0,
@@ -108,7 +109,8 @@ export class NomisIdentityProvider {
                 referralCode: payload.referralCode,
                 referrerCode: payload.referrerCode,
                 deadline:
-                    payload.mintData?.deadline ?? payload.migrationData?.deadline,
+                    payload.mintData?.deadline ??
+                    payload.migrationData?.deadline,
                 nonce: options.nonce,
             },
         }
@@ -150,7 +152,7 @@ export class NomisIdentityProvider {
         chain: string,
         subchain: string,
         walletAddress: string,
-    ): NomisWalletIdentity | undefined {
+    ): SavedNomisIdentity | undefined {
         const nomisIdentities = account.identities.nomis || {}
         const normalizedWallet = this.normalizeAddress(walletAddress, chain)
         return nomisIdentities?.[chain]?.[subchain]?.find(identity => {

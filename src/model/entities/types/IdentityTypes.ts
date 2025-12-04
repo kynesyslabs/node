@@ -28,6 +28,21 @@ export interface SavedXmIdentity {
     timestamp: number
     signedData: string
 }
+export interface SavedNomisIdentity {
+    address: string
+    score: number
+    scoreType: number
+    mintedScore?: number | null
+    lastSyncedAt: string
+    metadata?: {
+        referralCode?: string
+        referrerCode?: string
+        deadline?: number
+        nonce?: number
+        apiVersion?: string
+        [key: string]: unknown
+    }
+}
 
 /**
  * The PQC identity saved in the GCR
@@ -61,7 +76,7 @@ export type StoredIdentities = {
     }
     nomis?: {
         [chain: string]: {
-            [subchain: string]: NomisWalletIdentity[]
+            [subchain: string]: SavedNomisIdentity[]
         }
     }
 }
