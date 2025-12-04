@@ -445,8 +445,31 @@ log_info "Running ceremony contribution..."
 log_warn "This will generate cryptographic randomness - DO NOT INTERRUPT!"
 echo ""
 
-# Run the ceremony script using tsx CLI directly (works across Node versions)
-npx --yes tsx@4.7.0 src/features/zk/scripts/ceremony.ts contribute
+# Run the ceremony script using Node 20+ (required for tsx)
+# Load nvm if available and use Node 20
+if [ -s "$HOME/.nvm/nvm.sh" ]; then
+    source "$HOME/.nvm/nvm.sh"
+    nvm install 20 --lts 2>/dev/null || true
+    nvm use 20 --lts 2>/dev/null || nvm use node
+fi
+
+# Verify Node version is 20+
+NODE_MAJOR=$(node --version | cut -d'.' -f1 | tr -d 'v')
+if [ "$NODE_MAJOR" -lt 20 ]; then
+    log_error "Node.js 20+ is required for the ceremony script"
+    log_info "Current version: $(node --version)"
+    log_info ""
+    log_info "Please install Node 20+ using nvm:"
+    log_info "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
+    log_info "  source ~/.nvm/nvm.sh"
+    log_info "  nvm install 20"
+    log_info ""
+    log_info "Then re-run this script."
+    exit 1
+fi
+
+log_info "Using Node $(node --version)"
+npx tsx src/features/zk/scripts/ceremony.ts contribute
 
 log_success "Contribution completed!"
 
