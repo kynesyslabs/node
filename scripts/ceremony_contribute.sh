@@ -445,8 +445,8 @@ log_info "Running ceremony contribution..."
 log_warn "This will generate cryptographic randomness - DO NOT INTERRUPT!"
 echo ""
 
-# Run the ceremony script
-bun run zk:ceremony contribute
+# Run the ceremony script (using npx tsx directly to avoid bun subprocess issues)
+npx tsx src/features/zk/scripts/ceremony.ts contribute
 
 log_success "Contribution completed!"
 
