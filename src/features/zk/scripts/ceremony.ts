@@ -242,7 +242,7 @@ async function initCeremony() {
 
     try {
         execSync(
-            `npx snarkjs groth16 setup ${R1CS_PATH} ${PTAU_FILE} ${key0Path}`,
+            `bunx snarkjs groth16 setup ${R1CS_PATH} ${PTAU_FILE} ${key0Path}`,
             { stdio: "inherit" },
         )
         success("Initial key generated")
@@ -346,7 +346,7 @@ async function contributeCeremony() {
 
     try {
         execSync(
-            `npx snarkjs zkey contribute ${inputKeyPath} ${outputKeyPath} --name="${participantName}" -e="${entropy}"`,
+            `bunx snarkjs zkey contribute ${inputKeyPath} ${outputKeyPath} --name="${participantName}" -e="${entropy}"`,
             { stdio: "inherit" },
         )
         success("Contribution added successfully")
@@ -442,7 +442,7 @@ async function finalizeCeremony() {
 
     try {
         execSync(
-            `npx snarkjs zkey export verificationkey ${finalKeyPath} ${FINAL_VKEY_PATH}`,
+            `bunx snarkjs zkey export verificationkey ${finalKeyPath} ${FINAL_VKEY_PATH}`,
             { stdio: "inherit" },
         )
         success("Verification key exported")

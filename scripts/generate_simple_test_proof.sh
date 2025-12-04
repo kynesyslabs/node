@@ -32,14 +32,14 @@ echo "   Context: $CONTEXT"
 
 # Generate witness
 echo "🧮 Generating witness..."
-npx snarkjs wtns calculate \
+bunx snarkjs wtns calculate \
   src/features/zk/circuits/identity_js/identity.wasm \
   test_input_simple.json \
   test_witness_simple.wtns
 
 # Generate proof
 echo "🔐 Generating proof..."
-npx snarkjs groth16 prove \
+bunx snarkjs groth16 prove \
   src/features/zk/keys/identity_0000.zkey \
   test_witness_simple.wtns \
   test_proof_simple.json \
@@ -51,7 +51,7 @@ echo "   Public signals: test_public_simple.json"
 
 # Verify it works
 echo "🔍 Verifying proof..."
-npx snarkjs groth16 verify \
+bunx snarkjs groth16 verify \
   src/features/zk/keys/verification_key.json \
   test_public_simple.json \
   test_proof_simple.json
