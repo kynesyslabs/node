@@ -120,7 +120,7 @@ const TAG_TO_CATEGORY: Record<string, LogCategory> = {
  * Extract tag from message like "[MAIN] Starting..." -> "MAIN"
  */
 function extractTag(message: string): { tag: string | null; cleanMessage: string } {
-    const match = message.match(/^\[([A-Z0-9_ ]+)\]\s*(.*)$/i)
+    const match = message.match(/^\[([A-Za-z0-9_ ]+)\]\s*(.*)$/i)
     if (match) {
         return { tag: match[1].toUpperCase(), cleanMessage: match[2] }
     }

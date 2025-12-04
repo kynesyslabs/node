@@ -325,6 +325,85 @@ export class TUIManager extends EventEmitter {
     }
 
     /**
+     * Extract tag from message and infer category (same logic as LegacyLoggerAdapter)
+     */
+    private extractCategoryFromMessage(message: string): { category: LogCategory; cleanMessage: string } {
+        // Tag to category mapping (mirrors LegacyLoggerAdapter)
+        const TAG_TO_CATEGORY: Record<string, LogCategory> = {
+            // PEER - Peer management
+            PEER: "PEER",
+            PEERROUTINE: "PEER",
+            PEERGOSSIP: "PEER",
+            PEERMANAGER: "PEER",
+            "PEER TIMESYNC": "PEER",
+            "PEER AUTHENTICATION": "PEER",
+            "PEER RECHECK": "PEER",
+            "PEER CONNECTION": "PEER",
+            PEERBOOTSTRAP: "PEER",
+            "PEER BOOTSTRAP": "PEER",
+            // NETWORK
+            RPC: "NETWORK",
+            SERVER: "NETWORK",
+            HTTP: "NETWORK",
+            SERVERHANDLER: "NETWORK",
+            "SERVER ERROR": "NETWORK",
+            "SOCKET CONNECTOR": "NETWORK",
+            NETWORK: "NETWORK",
+            PING: "NETWORK",
+            TRANSMISSION: "NETWORK",
+            // CHAIN
+            CHAIN: "CHAIN",
+            BLOCK: "CHAIN",
+            MEMPOOL: "CHAIN",
+            "TX RECEIVED": "CHAIN",
+            TRANSACTION: "CHAIN",
+            // SYNC
+            SYNC: "SYNC",
+            MAINLOOP: "SYNC",
+            "MAIN LOOP": "SYNC",
+            // CONSENSUS
+            CONSENSUS: "CONSENSUS",
+            PORBFT: "CONSENSUS",
+            POR: "CONSENSUS",
+            "SECRETARY ROUTINE": "CONSENSUS",
+            "SECRETARY MANAGER": "CONSENSUS",
+            WAITER: "CONSENSUS",
+            PROVER: "CONSENSUS",
+            VERIFIER: "CONSENSUS",
+            // IDENTITY
+            GCR: "IDENTITY",
+            IDENTITY: "IDENTITY",
+            UD: "IDENTITY",
+            DECRYPTION: "IDENTITY",
+            // MCP
+            MCP: "MCP",
+            // MULTICHAIN
+            XM: "MULTICHAIN",
+            MULTICHAIN: "MULTICHAIN",
+            CROSSCHAIN: "MULTICHAIN",
+            "XM EXECUTE": "MULTICHAIN",
+            L2PS: "MULTICHAIN",
+            PROTOCOL: "MULTICHAIN",
+            // DAHR
+            DAHR: "DAHR",
+            WEB2: "DAHR",
+            ACTIVITYPUB: "DAHR",
+            IM: "DAHR",
+        }
+
+        // Try to extract tag from message like "[PeerManager] ..."
+        const match = message.match(/^\[([A-Za-z0-9_ ]+)\]\s*(.*)$/i)
+        if (match) {
+            const tag = match[1].toUpperCase()
+            const cleanMessage = match[2]
+            const category = TAG_TO_CATEGORY[tag] ?? "CORE"
+            return { category, cleanMessage }
+        }
+
+        return { category: "CORE", cleanMessage: message }
+    }
+
+    /**
      * Intercept console methods to route through TUI logger
      * This prevents external libraries from corrupting the TUI display
      */
@@ -338,30 +417,35 @@ export class TUIManager extends EventEmitter {
             debug: console.debug,
         }
 
-        // Replace with TUI-safe versions that route to the logger
+        // Replace with TUI-safe versions that route to the logger with category detection
         console.log = (...args: unknown[]) => {
             const message = args.map(a => String(a)).join(" ")
-            this.logger.debug("CORE", `[console.log] ${message}`)
+            const { category, cleanMessage } = this.extractCategoryFromMessage(message)
+            this.logger.debug(category, `[console.log] ${cleanMessage}`)
         }
 
         console.error = (...args: unknown[]) => {
             const message = args.map(a => String(a)).join(" ")
-            this.logger.error("CORE", `[console.error] ${message}`)
+            const { category, cleanMessage } = this.extractCategoryFromMessage(message)
+            this.logger.error(category, `[console.error] ${cleanMessage}`)
         }
 
         console.warn = (...args: unknown[]) => {
             const message = args.map(a => String(a)).join(" ")
-            this.logger.warning("CORE", `[console.warn] ${message}`)
+            const { category, cleanMessage } = this.extractCategoryFromMessage(message)
+            this.logger.warning(category, `[console.warn] ${cleanMessage}`)
         }
 
         console.info = (...args: unknown[]) => {
             const message = args.map(a => String(a)).join(" ")
-            this.logger.info("CORE", `[console.info] ${message}`)
+            const { category, cleanMessage } = this.extractCategoryFromMessage(message)
+            this.logger.info(category, `[console.info] ${cleanMessage}`)
         }
 
         console.debug = (...args: unknown[]) => {
             const message = args.map(a => String(a)).join(" ")
-            this.logger.debug("CORE", `[console.debug] ${message}`)
+            const { category, cleanMessage } = this.extractCategoryFromMessage(message)
+            this.logger.debug(category, `[console.debug] ${cleanMessage}`)
         }
     }
 
