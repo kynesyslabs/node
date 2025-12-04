@@ -15,6 +15,9 @@ import { execSync } from "child_process"
 import { join } from "path"
 import { createHash, randomBytes } from "crypto"
 
+// npx path - hardcoded to /usr/bin/npx for reliability
+const NPX = "/usr/bin/npx"
+
 const KEYS_DIR = "src/features/zk/keys"
 const CIRCUITS_DIR = "src/features/zk/circuits"
 const PTAU_FILE = "powersOfTau28_hez_final_14.ptau"
@@ -161,7 +164,7 @@ async function generateKeys(circuitName: string) {
     log("  → Generating initial proving key (phase 0)...", "yellow")
     try {
         execSync(
-            `npx snarkjs groth16 setup ${r1csPath} ${ptauPath} ${zkeyPath0}`,
+            `${NPX} snarkjs groth16 setup ${r1csPath} ${ptauPath} ${zkeyPath0}`,
             { stdio: "inherit" },
         )
         log("  ✓ Initial proving key generated", "green")
@@ -177,7 +180,7 @@ async function generateKeys(circuitName: string) {
         const entropy = randomBytes(32).toString("hex")
 
         execSync(
-            `npx snarkjs zkey contribute ${zkeyPath0} ${zkeyPath1} --name="ProductionContribution" -e="${entropy}"`,
+            `${NPX} snarkjs zkey contribute ${zkeyPath0} ${zkeyPath1} --name="ProductionContribution" -e="${entropy}"`,
             { stdio: "inherit" },
         )
         log("  ✓ Contribution added (gamma and delta are now distinct)", "green")
@@ -190,7 +193,7 @@ async function generateKeys(circuitName: string) {
     log("  → Exporting verification key from contributed zkey...", "yellow")
     try {
         execSync(
-            `npx snarkjs zkey export verificationkey ${zkeyPath1} ${vkeyPath}`,
+            `${NPX} snarkjs zkey export verificationkey ${zkeyPath1} ${vkeyPath}`,
             { stdio: "inherit" },
         )
         log("  ✓ Verification key exported", "green")

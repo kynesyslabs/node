@@ -23,45 +23,8 @@ import { execSync } from "child_process"
 import { join } from "path"
 import { createHash, randomBytes } from "crypto"
 
-// Find npx executable path (handles PATH issues in subprocesses)
-function findNpx(): string {
-    const possiblePaths = [
-        "/usr/bin/npx",
-        "/usr/local/bin/npx",
-        "/opt/homebrew/bin/npx",
-        process.env.HOME + "/.npm-global/bin/npx",
-        "/usr/share/npm/bin/npx",
-    ]
-
-    // First try which command with explicit PATH
-    try {
-        const npxPath = execSync("which npx", {
-            encoding: "utf-8",
-            env: { ...process.env, PATH: "/usr/bin:/usr/local/bin:/bin:" + (process.env.PATH || "") }
-        }).trim()
-        if (npxPath && existsSync(npxPath)) {
-            return npxPath
-        }
-    } catch {
-        // which failed, try known paths
-    }
-
-    // Try known paths
-    for (const p of possiblePaths) {
-        if (existsSync(p)) {
-            return p
-        }
-    }
-
-    // Last resort: error out with helpful message
-    console.error("\x1b[31m✗ Could not find npx!\x1b[0m")
-    console.error("\x1b[36mℹ Please ensure npm is installed: sudo apt install npm\x1b[0m")
-    console.error("\x1b[36mℹ Then verify with: which npx\x1b[0m")
-    process.exit(1)
-}
-
-const NPX = findNpx()
-console.log(`\x1b[36mℹ Using npx from: ${NPX}\x1b[0m`)
+// npx path - hardcoded to /usr/bin/npx for reliability
+const NPX = "/usr/bin/npx"
 
 // Ceremony configuration
 const CEREMONY_DIR = "zk_ceremony"
