@@ -137,9 +137,61 @@ fi
 # Check GitHub CLI is installed and authenticated
 if ! command -v gh &> /dev/null; then
     log_error "GitHub CLI (gh) is not installed!"
-    log_info "Install it from: https://cli.github.com/"
-    log_info "Then run: gh auth login"
-    exit 1
+    log_info ""
+    log_info "Installing GitHub CLI for Debian/Ubuntu..."
+    log_info ""
+
+    if confirm "Do you want to install GitHub CLI now?"; then
+        log_info "Adding GitHub CLI repository..."
+
+        # Install prerequisites
+        (type -p wget >/dev/null || (sudo apt update && sudo apt-get install wget -y)) && \
+        sudo mkdir -p -m 755 /etc/apt/keyrings && \
+        out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg && \
+        cat $out | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && \
+        sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
+        sudo apt update && \
+        sudo apt install gh -y
+
+        if ! command -v gh &> /dev/null; then
+            log_error "GitHub CLI installation failed!"
+            log_info "Please install manually from: https://cli.github.com/"
+            exit 1
+        fi
+
+        log_success "GitHub CLI installed successfully!"
+        log_info ""
+        log_info "Now you need to authenticate with GitHub."
+        log_info "Running: gh auth login"
+        log_info ""
+
+        gh auth login
+
+        if ! gh auth status &> /dev/null; then
+            log_error "GitHub authentication failed or was cancelled."
+            log_info "Please run 'gh auth login' manually and try again."
+            exit 1
+        fi
+
+        log_success "GitHub CLI authenticated!"
+    else
+        log_info ""
+        log_info "To install GitHub CLI manually on Debian/Ubuntu, run:"
+        log_info ""
+        echo -e "${CYAN}(type -p wget >/dev/null || (sudo apt update && sudo apt-get install wget -y)) && \\
+sudo mkdir -p -m 755 /etc/apt/keyrings && \\
+out=\$(mktemp) && wget -nv -O\$out https://cli.github.com/packages/githubcli-archive-keyring.gpg && \\
+cat \$out | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && \\
+sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \\
+echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \\
+sudo apt update && \\
+sudo apt install gh -y${NC}"
+        log_info ""
+        log_info "Then run: gh auth login"
+        log_info "And re-run this script."
+        exit 1
+    fi
 fi
 
 if ! gh auth status &> /dev/null; then
