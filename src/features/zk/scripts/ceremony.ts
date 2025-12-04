@@ -23,8 +23,9 @@ import { execSync } from "child_process"
 import { join } from "path"
 import { createHash, randomBytes } from "crypto"
 
-// npx path - hardcoded to /usr/bin/npx for reliability
-const NPX = "/usr/bin/npx"
+// Use plain 'npx' - let the shell resolve it via PATH
+// The shell: "/bin/bash" option in execSync ensures proper PATH resolution
+const NPX = "npx"
 
 // Ceremony configuration
 const CEREMONY_DIR = "zk_ceremony"
@@ -246,7 +247,7 @@ async function initCeremony() {
     try {
         execSync(
             `${NPX} snarkjs groth16 setup ${R1CS_PATH} ${PTAU_FILE} ${key0Path}`,
-            { stdio: "inherit", shell: "/bin/bash" },
+            { stdio: "inherit", shell: "/bin/bash", env: process.env },
         )
         success("Initial key generated")
     } catch (err) {
@@ -350,7 +351,7 @@ async function contributeCeremony() {
     try {
         execSync(
             `${NPX} snarkjs zkey contribute ${inputKeyPath} ${outputKeyPath} --name="${participantName}" -e="${entropy}"`,
-            { stdio: "inherit", shell: "/bin/bash" },
+            { stdio: "inherit", shell: "/bin/bash", env: process.env },
         )
         success("Contribution added successfully")
     } catch (err) {
@@ -446,7 +447,7 @@ async function finalizeCeremony() {
     try {
         execSync(
             `${NPX} snarkjs zkey export verificationkey ${finalKeyPath} ${FINAL_VKEY_PATH}`,
-            { stdio: "inherit", shell: "/bin/bash" },
+            { stdio: "inherit", shell: "/bin/bash", env: process.env },
         )
         success("Verification key exported")
     } catch (err) {
