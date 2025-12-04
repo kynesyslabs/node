@@ -23,9 +23,8 @@ import { execSync } from "child_process"
 import { join } from "path"
 import { createHash, randomBytes } from "crypto"
 
-// Use plain 'npx' - let the shell resolve it via PATH
-// The shell: "/bin/bash" option in execSync ensures proper PATH resolution
-const NPX = "npx"
+// npx path - hardcoded for reliability
+const NPX = "/usr/local/bin/npx"
 
 // Ceremony configuration
 const CEREMONY_DIR = "zk_ceremony"
