@@ -31,7 +31,7 @@
         "zk:compile": "circom2 src/features/zk/circuits/identity.circom --r1cs --wasm --sym -o src/features/zk/circuits/ -l node_modules",
         "zk:compile:merkle": "circom2 src/features/zk/circuits/identity_with_merkle.circom --r1cs --wasm --sym -o src/features/zk/circuits/ -l node_modules",
         "zk:test": "bun test src/features/zk/tests/",
-        "zk:ceremony": "tsx -r tsconfig-paths/register src/features/zk/scripts/ceremony.ts"
+        "zk:ceremony": "bun run src/features/zk/scripts/ceremony.ts"
     },
     "devDependencies": {
         "@types/bun": "^1.2.10",

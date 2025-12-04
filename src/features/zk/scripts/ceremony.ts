@@ -1,4 +1,4 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env bun
 /**
  * ZK-SNARK Trusted Setup Ceremony - Multi-Party Contribution System
  *
