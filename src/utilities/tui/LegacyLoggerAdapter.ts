@@ -293,6 +293,8 @@ export default class LegacyLoggerAdapter {
     /**
      * Only mode (legacy API) - suppresses most logs
      */
+    private static originalLog: typeof console.log | null = null
+
     static only(message: string, padWithNewLines = false): void {
         if (!this.LOG_ONLY_ENABLED) {
             this.logger.debug("CORE", "[LOG ONLY ENABLED]")
@@ -301,6 +303,7 @@ export default class LegacyLoggerAdapter {
             // Suppress console.log in legacy mode
             // Note: In TUI mode this won't matter as output is controlled
             if (!this.logger.isTuiMode()) {
+                this.originalLog = console.log
                 console.log = () => {}
             }
         }
@@ -317,6 +320,14 @@ export default class LegacyLoggerAdapter {
 
         // Also emit to TUI
         this.logger.info("CORE", message)
+    }
+
+    static disableOnlyMode(): void {
+        if (this.LOG_ONLY_ENABLED && this.originalLog) {
+            console.log = this.originalLog
+            this.originalLog = null
+        }
+        this.LOG_ONLY_ENABLED = false
     }
 
     /**
