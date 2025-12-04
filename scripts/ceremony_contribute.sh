@@ -230,9 +230,14 @@ if ! command -v npx &> /dev/null; then
         log_info "Installing npm..."
         sudo apt update && sudo apt install npm -y
 
+        # Refresh PATH to pick up newly installed npm/npx
+        hash -r 2>/dev/null || true
+        export PATH="/usr/bin:$PATH"
+
         if ! command -v npx &> /dev/null; then
             log_error "npm installation failed!"
             log_info "Please install manually: sudo apt install npm"
+            log_info "Then re-run this script."
             exit 1
         fi
 
