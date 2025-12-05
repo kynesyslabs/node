@@ -41,7 +41,12 @@ export interface NodeCall {
     muid: string
 }
 
-// REVIEW Is this module too big?
+/**
+ * Dispatches an incoming NodeCall message to the appropriate handler and produces an RPCResponse.
+ *
+ * @param content - NodeCall containing `message` (the RPC action to perform), `data` (payload for the action), and `muid` (message unique id)
+ * @returns An RPCResponse containing the numeric status, the response payload for the requested action, and optional `extra` diagnostic data
+ */
 export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
     // Basic Node API handling logic
     // ...
