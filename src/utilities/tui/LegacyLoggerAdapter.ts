@@ -11,7 +11,7 @@
  */
 
 import { CategorizedLogger } from "./CategorizedLogger"
-import { TAG_TO_CATEGORY } from "./tagCategories"
+import { TAG_TO_CATEGORY, type LogCategory } from "./tagCategories"
 import { getSharedState } from "@/utilities/sharedState"
 import fs from "fs"
 
