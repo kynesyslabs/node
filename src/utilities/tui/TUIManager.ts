@@ -203,6 +203,10 @@ export class TUIManager extends EventEmitter {
     private cmdHistoryIndex = -1
     private isCmdMode = false
 
+    // Terminal event listener references (for cleanup in stop())
+    private keyListener: ((key: string) => void) | null = null
+    private resizeListener: ((width: number, height: number) => void) | null = null
+
     private constructor(config: TUIConfig = {}) {
         super()
         this.config = {
@@ -307,6 +311,16 @@ export class TUIManager extends EventEmitter {
         if (this.refreshInterval) {
             clearInterval(this.refreshInterval)
             this.refreshInterval = null
+        }
+
+        // Remove terminal event listeners to prevent accumulation across start/stop cycles
+        if (this.keyListener) {
+            term.off("key", this.keyListener)
+            this.keyListener = null
+        }
+        if (this.resizeListener) {
+            term.off("resize", this.resizeListener)
+            this.resizeListener = null
         }
 
         // Restore console methods before terminal restore
@@ -428,9 +442,10 @@ export class TUIManager extends EventEmitter {
      * Setup keyboard and mouse input handlers
      */
     private setupInputHandlers(): void {
-        term.on("key", (key: string) => {
+        this.keyListener = (key: string) => {
             this.handleKeyPress(key)
-        })
+        }
+        term.on("key", this.keyListener)
     }
 
     /**
@@ -678,12 +693,13 @@ export class TUIManager extends EventEmitter {
      * Setup terminal resize handler
      */
     private setupResizeHandler(): void {
-        term.on("resize", (width: number, height: number) => {
+        this.resizeListener = (width: number, height: number) => {
             this.width = width
             this.height = height
             this.logAreaHeight = this.height - HEADER_HEIGHT - TAB_HEIGHT - FOOTER_HEIGHT
             this.render()
-        })
+        }
+        term.on("resize", this.resizeListener)
     }
 
     // SECTION Tab Management
