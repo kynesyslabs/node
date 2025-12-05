@@ -124,6 +124,13 @@ export class L2PSProof {
     transactions_hash: string
 
     /**
+     * Individual transaction hashes from L2PS mempool
+     * Used to update mempool status to 'confirmed' after proof application
+     */
+    @Column("jsonb", { default: "[]" })
+    transaction_hashes: string[]
+
+    /**
      * Error message if proof was rejected
      */
     @Column("text", { nullable: true })

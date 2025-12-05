@@ -1,4 +1,4 @@
-import L2PSMempool, { L2PS_STATUS, L2PSStatus } from "@/libs/blockchain/l2ps_mempool"
+import L2PSMempool, { L2PS_STATUS } from "@/libs/blockchain/l2ps_mempool"
 import { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
 import Mempool from "@/libs/blockchain/mempool_v2"
 import SharedState from "@/utilities/sharedState"
@@ -71,7 +71,7 @@ export class L2PSBatchAggregator {
     private readonly MAX_BATCH_SIZE = 100
     
     /** Cleanup interval - remove batched transactions older than this (1 hour) */
-    private readonly CLEANUP_AGE_MS = 60 * 60 * 1000
+    private readonly CLEANUP_AGE_MS = 5 * 60 * 1000 // 5 minutes - confirmed txs can be cleaned up quickly
 
     /** Domain separator for batch transaction signatures */
     private readonly SIGNATURE_DOMAIN = "L2PS_BATCH_TX_V1"
@@ -226,7 +226,7 @@ export class L2PSBatchAggregator {
     /**
      * Main aggregation logic - collect, batch, and submit transactions
      * 
-     * 1. Fetches all processed transactions from L2PS mempool
+     * 1. Fetches all executed transactions from L2PS mempool
      * 2. Groups transactions by L2PS UID
      * 3. Creates encrypted batch for each group
      * 4. Submits batches to main mempool
@@ -234,21 +234,21 @@ export class L2PSBatchAggregator {
      */
     private async aggregateAndSubmitBatches(): Promise<void> {
         try {
-            // Get all processed transactions ready for batching
-            const processedTransactions = await L2PSMempool.getByStatus(
-                L2PS_STATUS.PROCESSED,
+            // Get all executed transactions ready for batching
+            const executedTransactions = await L2PSMempool.getByStatus(
+                L2PS_STATUS.EXECUTED,
                 this.MAX_BATCH_SIZE * 10, // Allow for multiple L2PS networks
             )
 
-            if (processedTransactions.length === 0) {
-                log.debug("[L2PS Batch Aggregator] No processed transactions to batch")
+            if (executedTransactions.length === 0) {
+                log.debug("[L2PS Batch Aggregator] No executed transactions to batch")
                 return
             }
 
-            log.info(`[L2PS Batch Aggregator] Found ${processedTransactions.length} transactions to batch`)
+            log.info(`[L2PS Batch Aggregator] Found ${executedTransactions.length} transactions to batch`)
 
             // Group transactions by L2PS UID
-            const groupedByUID = this.groupTransactionsByUID(processedTransactions)
+            const groupedByUID = this.groupTransactionsByUID(executedTransactions)
 
             // Process each L2PS network's transactions
             for (const [l2psUid, transactions] of Object.entries(groupedByUID)) {
@@ -434,7 +434,7 @@ export class L2PSBatchAggregator {
             // Store in shared state for persistence
             sharedState.l2psBatchNonce = nonce
         } catch (error) {
-            log.warn(`[L2PS Batch Aggregator] Failed to persist nonce: ${error}`)
+            log.warning(`[L2PS Batch Aggregator] Failed to persist nonce: ${error}`)
         }
     }
 
@@ -531,22 +531,22 @@ export class L2PSBatchAggregator {
     }
 
     /**
-     * Cleanup old batched transactions
+     * Cleanup old confirmed transactions
      * 
-     * Removes transactions that have been in 'batched' status for longer
+     * Removes transactions that have been in 'confirmed' status for longer
      * than the cleanup age threshold. This prevents the L2PS mempool from
      * growing indefinitely.
      */
     private async cleanupOldBatchedTransactions(): Promise<void> {
         try {
             const deleted = await L2PSMempool.cleanupByStatus(
-                L2PS_STATUS.BATCHED,
+                L2PS_STATUS.CONFIRMED,
                 this.CLEANUP_AGE_MS,
             )
 
             if (deleted > 0) {
                 this.stats.cleanedUpTransactions += deleted
-                log.info(`[L2PS Batch Aggregator] Cleaned up ${deleted} old batched transactions`)
+                log.info(`[L2PS Batch Aggregator] Cleaned up ${deleted} old confirmed transactions`)
             }
 
         } catch (error: any) {

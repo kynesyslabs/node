@@ -47,10 +47,9 @@ export type L2PSStatus = typeof L2PS_STATUS[keyof typeof L2PS_STATUS]
  */
 export default class L2PSMempool {
     /** TypeORM repository for L2PS mempool transactions */
-    // REVIEW: PR Fix - Added | null to type annotation for type safety
     public static repo: Repository<L2PSMempoolTx> | null = null
 
-    /** REVIEW: PR Fix - Promise lock for lazy initialization to prevent race conditions */
+    /** Promise lock for lazy initialization to prevent race conditions */
     private static initPromise: Promise<void> | null = null
 
     /**
@@ -72,14 +71,12 @@ export default class L2PSMempool {
 
     /**
      * Ensure repository is initialized before use (lazy initialization with locking)
-     * REVIEW: PR Fix - Async lazy initialization to prevent race conditions
      * @throws {Error} If initialization fails
      */
     private static async ensureInitialized(): Promise<void> {
         if (this.repo) return
 
         if (!this.initPromise) {
-            // REVIEW: PR Fix #1 - Clear initPromise on failure to allow retry
             this.initPromise = this.init().catch((error) => {
                 this.initPromise = null  // Clear promise on failure
                 throw error
@@ -121,7 +118,6 @@ export default class L2PSMempool {
             await this.ensureInitialized()
 
             // Check if original transaction already processed (duplicate detection)
-            // REVIEW: PR Fix #8 - Consistent error handling for duplicate checks
             const alreadyExists = await this.existsByOriginalHash(originalHash)
             if (alreadyExists) {
                 return {
@@ -141,7 +137,6 @@ export default class L2PSMempool {
             }
 
             // Determine block number (following main mempool pattern)
-            // REVIEW: PR Fix #7 - Add validation for block number edge cases
             let blockNumber: number
             const manager = SecretaryManager.getInstance()
             const shardBlockRef = manager?.shard?.blockRef
@@ -169,7 +164,6 @@ export default class L2PSMempool {
             }
 
             // Save to L2PS mempool
-            // REVIEW: PR Fix #2 - Store timestamp as string for bigint column
             await this.repo.save({
                 hash: encryptedTx.hash,
                 l2ps_uid: l2psUid,
@@ -292,9 +286,7 @@ export default class L2PSMempool {
 
         } catch (error: any) {
             log.error(`[L2PS Mempool] Error generating hash for UID ${l2psUid}, block ${blockNumber}:`, error)
-            // REVIEW: PR Fix #5 - Return truly deterministic error hash (removed Date.now() for reproducibility)
-            // Algorithm: SHA256("L2PS_ERROR_" + l2psUid + blockSuffix)
-            // This ensures the same error conditions always produce the same hash
+            // Return deterministic error hash
             const blockSuffix = blockNumber !== undefined ? `_BLOCK_${blockNumber}` : "_ALL"
             return Hashing.sha256(`L2PS_ERROR_${l2psUid}${blockSuffix}`)
         }
@@ -319,7 +311,6 @@ export default class L2PSMempool {
         try {
             await this.ensureInitialized()
 
-            // REVIEW: PR Fix #2 - Store timestamp as numeric for correct comparison
             const result = await this.repo.update(
                 { hash },
                 { status, timestamp: Date.now().toString() },
@@ -524,7 +515,6 @@ export default class L2PSMempool {
             return await this.repo.exists({ where: { original_hash: originalHash } })
         } catch (error: any) {
             log.error(`[L2PS Mempool] Error checking original hash ${originalHash}:`, error)
-            // REVIEW: PR Fix #3 - Throw error instead of returning false to prevent duplicates on DB errors
             throw error
         }
     }
@@ -542,7 +532,6 @@ export default class L2PSMempool {
             return await this.repo.exists({ where: { hash } })
         } catch (error: any) {
             log.error(`[L2PS Mempool] Error checking hash ${hash}:`, error)
-            // REVIEW: PR Fix #3 - Throw error instead of returning false to prevent duplicates on DB errors
             throw error
         }
     }
@@ -581,7 +570,6 @@ export default class L2PSMempool {
         try {
             await this.ensureInitialized()
 
-            // REVIEW: PR Fix #2 - Use string timestamp for bigint column comparison
             const cutoffTimestamp = (Date.now() - olderThanMs).toString()
 
             const result = await this.repo
@@ -589,12 +577,12 @@ export default class L2PSMempool {
                 .delete()
                 .from(L2PSMempoolTx)
                 .where("CAST(timestamp AS BIGINT) < CAST(:cutoff AS BIGINT)", { cutoff: cutoffTimestamp })
-                .andWhere("status = :status", { status: L2PS_STATUS.PROCESSED })
+                .andWhere("status = :status", { status: L2PS_STATUS.CONFIRMED })
                 .execute()
 
             const deletedCount = result.affected || 0
             if (deletedCount > 0) {
-                log.info(`[L2PS Mempool] Cleaned up ${deletedCount} old transactions`)
+                log.info(`[L2PS Mempool] Cleaned up ${deletedCount} old confirmed transactions`)
             }
             return deletedCount
 
@@ -669,6 +657,3 @@ export default class L2PSMempool {
         }
     }
 }
-
-// REVIEW: PR Fix - Removed auto-init to prevent race conditions
-// Initialization now happens lazily on first use via ensureInitialized()

@@ -27,7 +27,7 @@ export class L2PSHashService {
     /** Interval timer for hash generation cycles */
     private intervalId: NodeJS.Timeout | null = null
 
-    // REVIEW: PR Fix #13 - Private constructor enforces singleton pattern
+    /** Private constructor enforces singleton pattern */
     private constructor() {}
     
     /** Reentrancy protection flag - prevents overlapping operations */
@@ -46,12 +46,11 @@ export class L2PSHashService {
         failedCycles: 0,
         skippedCycles: 0,
         totalHashesGenerated: 0,
-        successfulRelays: 0,  // REVIEW: PR Fix #Medium3 - Renamed from totalRelayAttempts for clarity
+        successfulRelays: 0,
         lastCycleTime: 0,
         averageCycleTime: 0,
     }
 
-    // REVIEW: PR Fix #Medium1 - Reuse Demos instance instead of creating new one each cycle
     /** Shared Demos SDK instance for creating transactions */
     private demos: Demos | null = null
 
@@ -96,7 +95,7 @@ export class L2PSHashService {
             averageCycleTime: 0,
         }
 
-        // REVIEW: PR Fix #Medium1 - Initialize Demos instance once for reuse
+        // Initialize Demos instance once for reuse
         this.demos = new Demos()
 
         // Start the interval timer
@@ -222,9 +221,9 @@ export class L2PSHashService {
             // Generate consolidated hash for this L2PS UID
             const consolidatedHash = await L2PSMempool.getHashForL2PS(l2psUid)
 
-            // REVIEW: PR Fix - Validate hash generation succeeded
+            // Validate hash generation succeeded
             if (!consolidatedHash || consolidatedHash.length === 0) {
-                log.warn(`[L2PS Hash Service] Invalid hash generated for L2PS ${l2psUid}, skipping`)
+                log.warning(`[L2PS Hash Service] Invalid hash generated for L2PS ${l2psUid}, skipping`)
                 return
             }
 
@@ -238,7 +237,6 @@ export class L2PSHashService {
                 return
             }
 
-            // REVIEW: PR Fix #Medium1 - Reuse initialized Demos instance
             // Create L2PS hash update transaction using SDK
             if (!this.demos) {
                 throw new Error("[L2PS Hash Service] Demos instance not initialized - service not started properly")
@@ -256,7 +254,6 @@ export class L2PSHashService {
             // Note: Self-directed transaction will automatically trigger DTR routing
             await this.relayToValidators(hashUpdateTx)
 
-            // REVIEW: PR Fix #Medium3 - Track successful relays (only incremented after successful relay)
             this.stats.successfulRelays++
 
             log.debug(`[L2PS Hash Service] Generated hash for ${l2psUid}: ${consolidatedHash} (${transactionCount} txs)`)

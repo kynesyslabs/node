@@ -100,6 +100,7 @@ export default class L2PSProofManager {
      * @param gcrEdits - GCR edits that should be applied to L1
      * @param affectedAccounts - Accounts affected by these edits
      * @param transactionCount - Number of L2PS transactions in this proof
+     * @param transactionHashes - Individual transaction hashes from L2PS mempool
      * @returns Proof creation result
      */
     static async createProof(
@@ -107,7 +108,8 @@ export default class L2PSProofManager {
         l1BatchHash: string,
         gcrEdits: GCREdit[],
         affectedAccounts: string[],
-        transactionCount: number = 1
+        transactionCount: number = 1,
+        transactionHashes: string[] = []
     ): Promise<ProofCreationResult> {
         try {
             const repo = await this.getRepo()
@@ -146,7 +148,8 @@ export default class L2PSProofManager {
                 affected_accounts: affectedAccounts,
                 status: "pending" as L2PSProofStatus,
                 transaction_count: transactionCount,
-                transactions_hash: transactionsHash
+                transactions_hash: transactionsHash,
+                transaction_hashes: transactionHashes
             })
 
             const saved = await repo.save(proofEntity)

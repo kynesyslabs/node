@@ -179,12 +179,15 @@ export default class L2PSTransactionExecutor {
 
             if (!simulate && gcrEdits.length > 0) {
                 // Create proof that will be applied at consensus
+                // l1BatchHash is the encrypted tx hash from mempool
+                const transactionHashes = [l1BatchHash]
                 const proofResult = await L2PSProofManager.createProof(
                     l2psUid,
                     l1BatchHash,
                     gcrEdits,
                     [...new Set(affectedAccounts)],
-                    1 // transaction count
+                    transactionHashes.length,
+                    transactionHashes
                 )
 
                 if (!proofResult.success) {

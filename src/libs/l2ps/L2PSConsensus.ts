@@ -17,7 +17,9 @@
 import L2PSProofManager from "./L2PSProofManager"
 import { L2PSProof } from "@/model/entities/L2PSProofs"
 import HandleGCR, { GCRResult } from "@/libs/blockchain/gcr/handleGCR"
-import type { GCREdit } from "@kynesyslabs/demosdk/types"
+import Chain from "@/libs/blockchain/chain"
+import { Hashing } from "@kynesyslabs/demosdk/encryption"
+import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import log from "@/utilities/logger"
 
 /**
@@ -34,6 +36,8 @@ export interface L2PSConsensusResult {
     totalEditsApplied: number
     /** All affected accounts */
     affectedAccounts: string[]
+    /** L1 batch transaction hashes created */
+    l1BatchTxHashes: string[]
     /** Details of each proof application */
     proofResults: {
         proofId: number
@@ -72,6 +76,7 @@ export default class L2PSConsensus {
             proofsFailed: 0,
             totalEditsApplied: 0,
             affectedAccounts: [],
+            l1BatchTxHashes: [],
             proofResults: []
         }
 
@@ -103,6 +108,44 @@ export default class L2PSConsensus {
 
             // Deduplicate affected accounts
             result.affectedAccounts = [...new Set(result.affectedAccounts)]
+
+            // Process successfully applied proofs
+            if (!simulate && result.proofsApplied > 0) {
+                const appliedProofs = pendingProofs.filter(proof => 
+                    result.proofResults.find(r => r.proofId === proof.id)?.success
+                )
+
+                // Collect transaction hashes from applied proofs for cleanup
+                const confirmedTxHashes: string[] = []
+                for (const proof of appliedProofs) {
+                    // Use transaction_hashes if available, otherwise fallback to l1_batch_hash
+                    if (proof.transaction_hashes && proof.transaction_hashes.length > 0) {
+                        confirmedTxHashes.push(...proof.transaction_hashes)
+                        log.debug(`[L2PS Consensus] Proof ${proof.id} has ${proof.transaction_hashes.length} tx hashes`)
+                    } else if (proof.l1_batch_hash) {
+                        // Fallback: l1_batch_hash is the encrypted tx hash in mempool
+                        confirmedTxHashes.push(proof.l1_batch_hash)
+                        log.debug(`[L2PS Consensus] Proof ${proof.id} using l1_batch_hash as fallback: ${proof.l1_batch_hash.slice(0, 20)}...`)
+                    } else {
+                        log.warning(`[L2PS Consensus] Proof ${proof.id} has no transaction hashes to remove`)
+                    }
+                }
+                
+                // Remove confirmed transactions from mempool immediately (like L1 mempool)
+                if (confirmedTxHashes.length > 0) {
+                    const deleted = await L2PSMempool.deleteByHashes(confirmedTxHashes)
+                    log.info(`[L2PS Consensus] Removed ${deleted} confirmed transactions from mempool`)
+                }
+
+                // Create L1 batch transaction (optional, for traceability)
+                const batchTxHash = await this.createL1BatchTransaction(
+                    appliedProofs,
+                    blockNumber
+                )
+                if (batchTxHash) {
+                    result.l1BatchTxHashes.push(batchTxHash)
+                }
+            }
 
             result.message = `Applied ${result.proofsApplied}/${pendingProofs.length} L2PS proofs with ${result.totalEditsApplied} GCR edits`
             
@@ -217,6 +260,88 @@ export default class L2PSConsensus {
                 await L2PSProofManager.markProofRejected(proof.id, proofResult.message)
             }
             return proofResult
+        }
+    }
+
+    /**
+     * Create a single unified L1 batch transaction for all L2PS proofs in this block
+     * This makes L2PS activity visible on L1 while keeping content encrypted
+     * 
+     * @param proofs - Array of all applied proofs (may span multiple L2PS UIDs)
+     * @param blockNumber - Block number where proofs were applied
+     * @returns L1 batch transaction hash or null on failure
+     */
+    private static async createL1BatchTransaction(
+        proofs: L2PSProof[],
+        blockNumber: number
+    ): Promise<string | null> {
+        try {
+            // Group proofs by L2PS UID for the summary
+            const l2psNetworks = [...new Set(proofs.map(p => p.l2ps_uid))]
+            const totalTransactions = proofs.reduce((sum, p) => sum + p.transaction_count, 0)
+            const allAffectedAccounts = [...new Set(proofs.flatMap(p => p.affected_accounts))]
+
+            // Create unified batch payload (only hashes and metadata, not actual content)
+            const batchPayload = {
+                block_number: blockNumber,
+                l2ps_networks: l2psNetworks,
+                proof_count: proofs.length,
+                proof_hashes: proofs.map(p => p.transactions_hash).sort(),
+                transaction_count: totalTransactions,
+                affected_accounts_count: allAffectedAccounts.length,
+                timestamp: Date.now()
+            }
+
+            // Generate deterministic hash for this batch
+            const batchHash = Hashing.sha256(JSON.stringify({
+                blockNumber,
+                proofHashes: batchPayload.proof_hashes,
+                l2psNetworks: l2psNetworks.sort()
+            }))
+
+            // Create single L1 transaction for all L2PS activity in this block
+            // Using raw object to avoid strict type checking (l2psBatch is a system-only type)
+            const l1BatchTx = {
+                type: "l2psBatch",
+                hash: `0x${batchHash}`,
+                signature: {
+                    type: "ed25519",
+                    data: "" // System-generated, no actual signature needed
+                },
+                content: {
+                    type: "l2psBatch",
+                    from: "l2ps:consensus", // System sender for L2PS batch
+                    to: "l2ps:batch",
+                    amount: 0,
+                    nonce: blockNumber,
+                    timestamp: Date.now(),
+                    data: ["l2psBatch", {
+                        block_number: blockNumber,
+                        l2ps_networks: l2psNetworks,
+                        proof_count: proofs.length,
+                        transaction_count: totalTransactions,
+                        affected_accounts_count: allAffectedAccounts.length,
+                        // Encrypted batch hash - no actual transaction content visible
+                        batch_hash: batchHash,
+                        encrypted_summary: Hashing.sha256(JSON.stringify(batchPayload))
+                    }]
+                }
+            }
+
+            // Insert into L1 transactions table
+            const success = await Chain.insertTransaction(l1BatchTx as any, "confirmed")
+            
+            if (success) {
+                log.info(`[L2PS Consensus] Created L1 batch tx ${l1BatchTx.hash} for block ${blockNumber} (${l2psNetworks.length} networks, ${proofs.length} proofs, ${totalTransactions} txs)`)
+                return l1BatchTx.hash
+            } else {
+                log.error(`[L2PS Consensus] Failed to insert L1 batch tx for block ${blockNumber}`)
+                return null
+            }
+
+        } catch (error: any) {
+            log.error(`[L2PS Consensus] Error creating L1 batch tx: ${error.message}`)
+            return null
         }
     }
 
