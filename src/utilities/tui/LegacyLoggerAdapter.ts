@@ -207,12 +207,13 @@ export default class LegacyLoggerAdapter {
             }
         }
 
-        // Always show "only" messages
+        // Always show "only" messages using the original console.log
+        // (console.log may have been overwritten to a no-op above)
         const timestamp = new Date().toISOString()
         const logEntry = `[ONLY] [${timestamp}] ${message}`
 
-        if (!this.logger.isTuiMode()) {
-            console.log(
+        if (!this.logger.isTuiMode() && this.originalLog) {
+            this.originalLog(
                 `\x1b[1m\x1b[36m${logEntry}\x1b[0m${padWithNewLines ? "\n\n\n\n\n" : ""}`,
             )
         }
