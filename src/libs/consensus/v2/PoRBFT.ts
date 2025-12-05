@@ -23,8 +23,7 @@ import {
     NotInShardError,
 } from "src/exceptions"
 import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
-import { GCREdit } from "@kynesyslabs/demosdk/types"
-import { Waiter } from "@/utilities/waiter"
+import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 
 /* INFO
 # Semaphore system
@@ -149,6 +148,16 @@ export async function consensusRoutine(): Promise<void> {
             }
         }
 
+        // INFO: CONSENSUS ACTION 4b: Apply pending L2PS proofs to L1 state
+        // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
+        const l2psResult = await L2PSConsensus.applyPendingProofs(blockRef, false)
+        if (l2psResult.proofsApplied > 0) {
+            log.info(`[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`)
+        }
+        if (l2psResult.proofsFailed > 0) {
+            log.warning(`[consensusRoutine] ${l2psResult.proofsFailed} L2PS proofs failed verification`)
+        }
+
         // REVIEW Re-merge the mempools anyway to get the correct mempool from the whole shard
         // const mempool = await mergeAndOrderMempools(manager.shard.members)
 
@@ -238,6 +247,9 @@ export async function consensusRoutine(): Promise<void> {
             }
             await rollbackGCREditsFromTxs(txsToRollback)
             await Mempool.removeTransactionsByHashes(successfulTxs)
+
+            // Also rollback any L2PS proofs that were applied
+            await L2PSConsensus.rollbackProofsForBlock(blockRef)
 
             return
         }

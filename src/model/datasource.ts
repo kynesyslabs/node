@@ -25,6 +25,8 @@ import { GCRTracker } from "./entities/GCR/GCRTracker.js"
 import { OfflineMessage } from "./entities/OfflineMessages"
 import { L2PSHash } from "./entities/L2PSHashes.js"
 import { L2PSMempoolTx } from "./entities/L2PSMempool.js"
+import { L2PSTransaction } from "./entities/L2PSTransactions.js"
+import { L2PSProof } from "./entities/L2PSProofs.js"
 
 export const dataSource = new DataSource({
     type: "postgres",
@@ -48,6 +50,8 @@ export const dataSource = new DataSource({
         GCRMain,
         L2PSHash,
         L2PSMempoolTx,
+        L2PSTransaction,
+        L2PSProof,
     ],
     synchronize: true,
     logging: false,
@@ -82,6 +86,8 @@ class Datasource {
                 OfflineMessage,
                 L2PSHash,
                 L2PSMempoolTx,
+                L2PSTransaction,
+                L2PSProof,
             ],
             synchronize: true, // set this to false in production
             logging: false,

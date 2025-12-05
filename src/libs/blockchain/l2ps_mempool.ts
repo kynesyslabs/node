@@ -490,8 +490,6 @@ export default class L2PSMempool {
 
             const cutoffTimestamp = (Date.now() - olderThanMs).toString()
 
-            // Use CAST to ensure numeric comparison instead of lexicographic string comparison
-            // This prevents incorrect ordering and retention behavior
             const result = await this.repo
                 .createQueryBuilder()
                 .delete()

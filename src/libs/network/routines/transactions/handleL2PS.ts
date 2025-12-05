@@ -8,6 +8,8 @@ import _ from "lodash"
 import { L2PS, L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
+import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
+import log from "@/utilities/logger"
 /* NOTE
 - Each l2ps is a list of nodes that are part of the l2ps
 - Each l2ps partecipant has the private key of the l2ps (or equivalent)
@@ -134,15 +136,55 @@ export default async function handleL2PS(
         return response
     }
     
-    // TODO Is the execution to be delegated to the l2ps nodes? As it cannot be done by the consensus as it will be in the future for the other txs
+    // Execute the decrypted transaction within the L2PS network (unified state)
+    // This validates against L1 state and generates proofs (GCR edits applied at consensus)
+    let executionResult
+    try {
+        // Use the encrypted transaction hash as the L1 batch hash reference
+        // The actual L1 batch hash will be set when the batch is submitted
+        const l1BatchHash = l2psTx.hash // Temporary - will be updated when batched
+        executionResult = await L2PSTransactionExecutor.execute(
+            l2psUid,
+            decryptedTx,
+            l1BatchHash,
+            false // not a simulation - create proof
+        )
+    } catch (error) {
+        log.error(`[handleL2PS] Execution error: ${error instanceof Error ? error.message : "Unknown error"}`)
+        // Update mempool status to failed
+        await L2PSMempool.updateStatus(originalHash, "failed")
+        response.result = 500
+        response.response = false
+        response.extra = `L2PS transaction execution failed: ${error instanceof Error ? error.message : "Unknown error"}`
+        return response
+    }
+
+    if (!executionResult.success) {
+        // Update mempool status to failed
+        await L2PSMempool.updateStatus(originalHash, "failed")
+        response.result = 400
+        response.response = false
+        response.extra = `L2PS transaction execution failed: ${executionResult.message}`
+        return response
+    }
+
+    // Update mempool status to executed
+    await L2PSMempool.updateStatus(originalHash, "executed")
+
     response.result = 200
     response.response = {
-        message: "L2PS transaction processed and stored",
+        message: "L2PS transaction validated - proof created for consensus",
         encrypted_hash: l2psTx.hash,
         original_hash: originalHash,
         l2ps_uid: l2psUid,
         // REVIEW: PR Fix #4 - Return only hash for verification, not full plaintext (preserves L2PS privacy)
-        decrypted_tx_hash: decryptedTx.hash, // Hash only for verification, not full plaintext
+        decrypted_tx_hash: decryptedTx.hash,
+        execution: {
+            success: executionResult.success,
+            message: executionResult.message,
+            affected_accounts: executionResult.affected_accounts,
+            proof_id: executionResult.proof_id // ID of proof to be applied at consensus
+        }
     }
     return response
 }
