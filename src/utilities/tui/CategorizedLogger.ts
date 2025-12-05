@@ -9,6 +9,9 @@ import { EventEmitter } from "events"
 import fs from "fs"
 import path from "path"
 
+// Capture original console.error at module initialization to avoid TUI interception/recursion
+const originalConsoleError = console.error.bind(console)
+
 // SECTION Types and Interfaces
 
 /**
@@ -431,8 +434,8 @@ export class CategorizedLogger extends EventEmitter {
 
         fs.promises.appendFile(filepath, content).catch(err => {
             // Silently fail file writes to avoid recursion.
-            // Using the original console.error to bypass TUI interception.
-            console.error(`Failed to write to log file: ${filepath}`, err)
+            // Using the captured original console.error to bypass TUI interception.
+            originalConsoleError(`Failed to write to log file: ${filepath}`, err)
         })
     }
 
