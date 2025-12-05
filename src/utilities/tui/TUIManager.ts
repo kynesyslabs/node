@@ -8,6 +8,7 @@
 import terminalKit from "terminal-kit"
 import { EventEmitter } from "events"
 import { CategorizedLogger, LogCategory, LogEntry } from "./CategorizedLogger"
+import { TAG_TO_CATEGORY } from "./tagCategories"
 import { getSharedState } from "@/utilities/sharedState"
 import { PeerManager } from "@/libs/peer"
 
@@ -325,72 +326,9 @@ export class TUIManager extends EventEmitter {
     }
 
     /**
-     * Extract tag from message and infer category (same logic as LegacyLoggerAdapter)
+     * Extract tag from message and infer category using shared TAG_TO_CATEGORY mapping
      */
     private extractCategoryFromMessage(message: string): { category: LogCategory; cleanMessage: string } {
-        // Tag to category mapping (mirrors LegacyLoggerAdapter)
-        const TAG_TO_CATEGORY: Record<string, LogCategory> = {
-            // PEER - Peer management
-            PEER: "PEER",
-            PEERROUTINE: "PEER",
-            PEERGOSSIP: "PEER",
-            PEERMANAGER: "PEER",
-            "PEER TIMESYNC": "PEER",
-            "PEER AUTHENTICATION": "PEER",
-            "PEER RECHECK": "PEER",
-            "PEER CONNECTION": "PEER",
-            PEERBOOTSTRAP: "PEER",
-            "PEER BOOTSTRAP": "PEER",
-            // NETWORK
-            RPC: "NETWORK",
-            SERVER: "NETWORK",
-            HTTP: "NETWORK",
-            SERVERHANDLER: "NETWORK",
-            "SERVER ERROR": "NETWORK",
-            "SOCKET CONNECTOR": "NETWORK",
-            NETWORK: "NETWORK",
-            PING: "NETWORK",
-            TRANSMISSION: "NETWORK",
-            // CHAIN
-            CHAIN: "CHAIN",
-            BLOCK: "CHAIN",
-            MEMPOOL: "CHAIN",
-            "TX RECEIVED": "CHAIN",
-            TRANSACTION: "CHAIN",
-            // SYNC
-            SYNC: "SYNC",
-            MAINLOOP: "SYNC",
-            "MAIN LOOP": "SYNC",
-            // CONSENSUS
-            CONSENSUS: "CONSENSUS",
-            PORBFT: "CONSENSUS",
-            POR: "CONSENSUS",
-            "SECRETARY ROUTINE": "CONSENSUS",
-            "SECRETARY MANAGER": "CONSENSUS",
-            WAITER: "CONSENSUS",
-            PROVER: "CONSENSUS",
-            VERIFIER: "CONSENSUS",
-            // IDENTITY
-            GCR: "IDENTITY",
-            IDENTITY: "IDENTITY",
-            UD: "IDENTITY",
-            DECRYPTION: "IDENTITY",
-            // MCP
-            MCP: "MCP",
-            // MULTICHAIN
-            XM: "MULTICHAIN",
-            MULTICHAIN: "MULTICHAIN",
-            CROSSCHAIN: "MULTICHAIN",
-            "XM EXECUTE": "MULTICHAIN",
-            L2PS: "MULTICHAIN",
-            PROTOCOL: "MULTICHAIN",
-            // DAHR
-            DAHR: "DAHR",
-            WEB2: "DAHR",
-            ACTIVITYPUB: "DAHR",
-            IM: "DAHR",
-        }
-
         // Try to extract tag from message like "[PeerManager] ..."
         const match = message.match(/^\[([A-Za-z0-9_ ]+)\]\s*(.*)$/i)
         if (match) {
