@@ -340,13 +340,15 @@ export class TUIManager extends EventEmitter {
     }
 
     /**
-     * Extract tag from message and infer category using shared TAG_TO_CATEGORY mapping
+     * Extract tag from message and infer category using shared TAG_TO_CATEGORY mapping.
+     * Regex uses {1,50} limit to prevent ReDoS from unbounded backtracking.
      */
     private extractCategoryFromMessage(message: string): { category: LogCategory; cleanMessage: string } {
         // Try to extract tag from message like "[PeerManager] ..."
-        const match = message.match(/^\[([A-Za-z0-9_ ]+)\]\s*(.*)$/i)
+        // Limit tag to 50 chars max to prevent ReDoS
+        const match = message.match(/^\[([A-Za-z0-9_ ]{1,50})\]\s*(.*)$/i)
         if (match) {
-            const tag = match[1].toUpperCase()
+            const tag = match[1].trim().toUpperCase()
             const cleanMessage = match[2]
             const category = TAG_TO_CATEGORY[tag] ?? "CORE"
             return { category, cleanMessage }

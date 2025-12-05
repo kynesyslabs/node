@@ -17,11 +17,15 @@ import fs from "fs"
 
 /**
  * Extract tag from message like "[MAIN] Starting..." -> "MAIN"
+ * Regex is designed to avoid ReDoS by:
+ * - Using {1,50} limit on tag length instead of unbounded +
+ * - Ensuring no overlapping quantifiers that cause backtracking
  */
 function extractTag(message: string): { tag: string | null; cleanMessage: string } {
-    const match = message.match(/^\[([A-Za-z0-9_ ]+)\]\s*(.*)$/i)
+    // Limit tag to 50 chars max to prevent ReDoS, tags are typically short (e.g., "PEER BOOTSTRAP")
+    const match = message.match(/^\[([A-Za-z0-9_ ]{1,50})\]\s*(.*)$/i)
     if (match) {
-        return { tag: match[1].toUpperCase(), cleanMessage: match[2] }
+        return { tag: match[1].trim().toUpperCase(), cleanMessage: match[2] }
     }
     return { tag: null, cleanMessage: message }
 }
