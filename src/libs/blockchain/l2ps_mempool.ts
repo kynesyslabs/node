@@ -588,7 +588,7 @@ export default class L2PSMempool {
                 .createQueryBuilder()
                 .delete()
                 .from(L2PSMempoolTx)
-                .where("timestamp < :cutoff", { cutoff: cutoffTimestamp })
+                .where("CAST(timestamp AS BIGINT) < CAST(:cutoff AS BIGINT)", { cutoff: cutoffTimestamp })
                 .andWhere("status = :status", { status: L2PS_STATUS.PROCESSED })
                 .execute()
 

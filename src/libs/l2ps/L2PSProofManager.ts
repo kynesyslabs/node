@@ -112,9 +112,9 @@ export default class L2PSProofManager {
         try {
             const repo = await this.getRepo()
 
-            // Generate transactions hash from GCR edits
+            // Generate transactions hash from GCR edits (deterministic)
             const transactionsHash = Hashing.sha256(
-                JSON.stringify({ l2psUid, gcrEdits, timestamp: Date.now() })
+                deterministicStringify({ l2psUid, l1BatchHash, gcrEdits })
             )
 
             // Create placeholder proof (will be real ZK proof later)
@@ -198,8 +198,8 @@ export default class L2PSProofManager {
     static async getProofsForBlock(blockNumber: number): Promise<L2PSProof[]> {
         const repo = await this.getRepo()
 
-        // Get all pending proofs that haven't been applied
-        // Proofs are applied in order of creation
+        // TODO: Filter proofs by target_block_number when block-specific batching is implemented
+        // For now, returns all pending proofs in creation order (blockNumber reserved for future use)
         return repo.find({
             where: {
                 status: "pending" as L2PSProofStatus

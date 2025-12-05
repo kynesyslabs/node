@@ -125,7 +125,7 @@ export default class L2PSTransactionExecutor {
             const affectedAccounts: string[] = []
 
             switch (tx.content.type) {
-                case "native":
+                case "native": {
                     const nativeResult = await this.handleNativeTransaction(tx, simulate)
                     if (!nativeResult.success) {
                         return nativeResult
@@ -133,6 +133,7 @@ export default class L2PSTransactionExecutor {
                     gcrEdits.push(...(nativeResult.gcr_edits || []))
                     affectedAccounts.push(...(nativeResult.affected_accounts || []))
                     break
+                }
 
                 case "demoswork":
                     if (tx.content.gcr_edits && tx.content.gcr_edits.length > 0) {
@@ -234,13 +235,13 @@ export default class L2PSTransactionExecutor {
         const affectedAccounts: string[] = []
 
         switch (nativePayload.nativeOperation) {
-            case "send":
+            case "send": {
                 const [to, amount] = nativePayload.args as [string, number]
                 const sender = tx.content.from as string
 
-                // Validate amount
-                if (amount <= 0) {
-                    return { success: false, message: "Invalid amount: must be positive" }
+                // Validate amount (type check and positive)
+                if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+                    return { success: false, message: "Invalid amount: must be a positive number" }
                 }
 
                 // Check sender balance in L1 state
@@ -280,14 +281,16 @@ export default class L2PSTransactionExecutor {
                 
                 log.info(`[L2PS Executor] Validated transfer: ${sender.slice(0, 16)}... -> ${to.slice(0, 16)}...: ${amount}`)
                 break
+            }
 
-            default:
+            default: {
                 log.info(`[L2PS Executor] Unknown native operation: ${nativePayload.nativeOperation}`)
                 return {
                     success: true,
                     message: `Native operation '${nativePayload.nativeOperation}' not implemented`,
                     affected_accounts: [tx.content.from as string]
                 }
+            }
         }
 
         return {
@@ -305,10 +308,11 @@ export default class L2PSTransactionExecutor {
         edit: GCREdit,
         simulate: boolean
     ): Promise<L2PSExecutionResult> {
-        const repo = await this.getL1Repo()
+        // Ensure init is called before validation
+        await this.init()
 
         switch (edit.type) {
-            case "balance":
+            case "balance": {
                 const account = await this.getOrCreateL1Account(edit.account as string)
                 
                 if (edit.operation === "remove") {
@@ -321,6 +325,7 @@ export default class L2PSTransactionExecutor {
                     }
                 }
                 break
+            }
 
             case "nonce":
                 // Nonce edits are always valid (just increment)
@@ -388,8 +393,12 @@ export default class L2PSTransactionExecutor {
         if (l1BlockNumber) updateData.l1_block_number = l1BlockNumber
         if (message) updateData.execution_message = message
 
-        await txRepo.update({ hash: txHash }, updateData)
-        log.info(`[L2PS Executor] Updated tx ${txHash.slice(0, 16)}... status to ${status}`)
+        const result = await txRepo.update({ hash: txHash }, updateData)
+        if (result.affected === 0) {
+            log.warning(`[L2PS Executor] No transaction found with hash ${txHash.slice(0, 16)}...`)
+        } else {
+            log.info(`[L2PS Executor] Updated tx ${txHash.slice(0, 16)}... status to ${status}`)
+        }
     }
 
     /**

@@ -151,8 +151,8 @@ export default async function handleL2PS(
         )
     } catch (error) {
         log.error(`[handleL2PS] Execution error: ${error instanceof Error ? error.message : "Unknown error"}`)
-        // Update mempool status to failed
-        await L2PSMempool.updateStatus(originalHash, "failed")
+        // Update mempool status to failed (use encrypted tx hash, not originalHash)
+        await L2PSMempool.updateStatus(l2psTx.hash, "failed")
         response.result = 500
         response.response = false
         response.extra = `L2PS transaction execution failed: ${error instanceof Error ? error.message : "Unknown error"}`
@@ -160,16 +160,16 @@ export default async function handleL2PS(
     }
 
     if (!executionResult.success) {
-        // Update mempool status to failed
-        await L2PSMempool.updateStatus(originalHash, "failed")
+        // Update mempool status to failed (use encrypted tx hash, not originalHash)
+        await L2PSMempool.updateStatus(l2psTx.hash, "failed")
         response.result = 400
         response.response = false
         response.extra = `L2PS transaction execution failed: ${executionResult.message}`
         return response
     }
 
-    // Update mempool status to executed
-    await L2PSMempool.updateStatus(originalHash, "executed")
+    // Update mempool status to executed (use encrypted tx hash)
+    await L2PSMempool.updateStatus(l2psTx.hash, "executed")
 
     response.result = 200
     response.response = {
