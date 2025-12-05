@@ -479,7 +479,7 @@ export class TUIManager extends EventEmitter {
             case "7":
             case "8":
             case "9":
-                this.setActiveTab(parseInt(key))
+                this.setActiveTab(Number.parseInt(key, 10))
                 break
 
             case "-":
