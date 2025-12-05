@@ -566,76 +566,101 @@ export class TUIManager extends EventEmitter {
     }
 
     /**
-     * Handle CMD tab input
+     * Handle CMD tab input - delegates to specific handlers to reduce complexity
      */
     private handleCmdInput(key: string): void {
         switch (key) {
             case "ESCAPE":
-                // Exit CMD mode without executing
-                this.isCmdMode = false
-                this.cmdInput = ""
-                this.render()
+                this.handleCmdEscape()
                 break
-
             case "ENTER":
-                // Execute command
-                this.executeCommand(this.cmdInput)
-                if (this.cmdInput.trim()) {
-                    this.cmdHistory.push(this.cmdInput)
-                    if (this.cmdHistory.length > 100) { // Limit history size
-                        this.cmdHistory.shift()
-                    }
-                }
-                this.cmdHistoryIndex = this.cmdHistory.length
-                this.cmdInput = ""
-                this.render()
+                this.handleCmdEnter()
                 break
-
             case "BACKSPACE":
-                // Delete last character
-                this.cmdInput = this.cmdInput.slice(0, -1)
-                this.render()
+                this.handleCmdBackspace()
                 break
-
             case "UP":
-                // Previous command in history
-                if (this.cmdHistoryIndex > 0) {
-                    this.cmdHistoryIndex--
-                    this.cmdInput = this.cmdHistory[this.cmdHistoryIndex] || ""
-                    this.render()
-                }
+                this.handleCmdHistoryUp()
                 break
-
             case "DOWN":
-                // Next command in history
-                if (this.cmdHistoryIndex < this.cmdHistory.length - 1) {
-                    this.cmdHistoryIndex++
-                    this.cmdInput = this.cmdHistory[this.cmdHistoryIndex] || ""
-                } else {
-                    this.cmdHistoryIndex = this.cmdHistory.length
-                    this.cmdInput = ""
-                }
-                this.render()
+                this.handleCmdHistoryDown()
                 break
-
             case "CTRL_C":
-                // Exit CMD mode or quit
-                if (this.cmdInput.length > 0) {
-                    this.cmdInput = ""
-                    this.render()
-                } else {
-                    this.handleQuit()
-                }
+                this.handleCmdCtrlC()
                 break
-
             default:
-                // Add character to input (only printable characters)
-                if (key.length === 1 && key.charCodeAt(0) >= 32) {
-                    this.cmdInput += key
-                    this.render()
-                }
+                this.handleCmdCharInput(key)
                 break
         }
+    }
+
+    /** Exit CMD mode without executing */
+    private handleCmdEscape(): void {
+        this.isCmdMode = false
+        this.cmdInput = ""
+        this.render()
+    }
+
+    /** Execute command and add to history */
+    private handleCmdEnter(): void {
+        this.executeCommand(this.cmdInput)
+        this.addToHistory(this.cmdInput)
+        this.cmdHistoryIndex = this.cmdHistory.length
+        this.cmdInput = ""
+        this.render()
+    }
+
+    /** Add command to history with size limit */
+    private addToHistory(command: string): void {
+        if (!command.trim()) return
+        this.cmdHistory.push(command)
+        if (this.cmdHistory.length > 100) {
+            this.cmdHistory.shift()
+        }
+    }
+
+    /** Delete last character */
+    private handleCmdBackspace(): void {
+        this.cmdInput = this.cmdInput.slice(0, -1)
+        this.render()
+    }
+
+    /** Navigate to previous command in history */
+    private handleCmdHistoryUp(): void {
+        if (this.cmdHistoryIndex <= 0) return
+        this.cmdHistoryIndex--
+        this.cmdInput = this.cmdHistory[this.cmdHistoryIndex] ?? ""
+        this.render()
+    }
+
+    /** Navigate to next command in history */
+    private handleCmdHistoryDown(): void {
+        if (this.cmdHistoryIndex < this.cmdHistory.length - 1) {
+            this.cmdHistoryIndex++
+            this.cmdInput = this.cmdHistory[this.cmdHistoryIndex] ?? ""
+        } else {
+            this.cmdHistoryIndex = this.cmdHistory.length
+            this.cmdInput = ""
+        }
+        this.render()
+    }
+
+    /** Handle Ctrl+C - clear input or quit */
+    private handleCmdCtrlC(): void {
+        if (this.cmdInput.length > 0) {
+            this.cmdInput = ""
+            this.render()
+        } else {
+            this.handleQuit()
+        }
+    }
+
+    /** Add printable character to input */
+    private handleCmdCharInput(key: string): void {
+        const isPrintable = key.length === 1 && key.charCodeAt(0) >= 32
+        if (!isPrintable) return
+        this.cmdInput += key
+        this.render()
     }
 
     /**
