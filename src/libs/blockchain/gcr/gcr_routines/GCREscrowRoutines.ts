@@ -29,6 +29,109 @@ const MAX_MESSAGE_LENGTH = 500 // REVIEW: Prevent storage DoS attacks via unboun
 const MIN_FIRST_DEPOSIT = BigInt("1000") // REVIEW: Prevent expiry inheritance griefing attacks (1000 DEM minimum)
 
 export default class GCREscrowRoutines {
+    /**
+     * Gets an existing escrow account or creates a new one within a transaction.
+     * Handles race conditions from concurrent account creation.
+     */
+    private static async getOrCreateEscrowAccount(
+        transactionalEntityManager: any,
+        escrowAddress: string,
+    ): Promise<GCRMain> {
+        let escrowAccount = await transactionalEntityManager.findOne(GCRMain, {
+            where: { pubkey: escrowAddress },
+            lock: { mode: "pessimistic_write" },
+        })
+
+        if (!escrowAccount) {
+            try {
+                escrowAccount = await HandleGCR.createAccount(escrowAddress)
+                await transactionalEntityManager.save(escrowAccount)
+            } catch (error: any) {
+                // Handle race condition: another transaction created the account
+                if (error.code === "23505") {
+                    // Postgres unique violation
+                    escrowAccount = await transactionalEntityManager.findOne(
+                        GCRMain,
+                        {
+                            where: { pubkey: escrowAddress },
+                            lock: { mode: "pessimistic_write" },
+                        },
+                    )
+                    if (!escrowAccount) {
+                        throw new Error("Account creation race condition")
+                    }
+                } else {
+                    throw error
+                }
+            }
+        }
+
+        // Initialize escrows object if needed
+        escrowAccount.escrows = escrowAccount.escrows || {}
+        return escrowAccount
+    }
+
+    /**
+     * Initializes a new escrow entry with validated expiry settings.
+     * Returns the escrow data object to be assigned.
+     */
+    private static createNewEscrowData(
+        platform: string,
+        username: string,
+        expiryDays: number | undefined,
+        amount: string | number,
+        currentTimestamp: number,
+    ): EscrowData {
+        const requestedExpiry = expiryDays || DEFAULT_EXPIRY_DAYS
+
+        if (requestedExpiry < MIN_EXPIRY_DAYS || requestedExpiry > MAX_EXPIRY_DAYS) {
+            throw new Error(
+                `Expiry must be between ${MIN_EXPIRY_DAYS} and ${MAX_EXPIRY_DAYS} days`,
+            )
+        }
+
+        // Prevent expiry inheritance griefing attacks by requiring minimum first deposit
+        if (BigInt(amount) < MIN_FIRST_DEPOSIT) {
+            throw new Error(
+                `First deposit must be at least ${MIN_FIRST_DEPOSIT} DEM to prevent griefing attacks`,
+            )
+        }
+
+        const expiryMs = requestedExpiry * MS_PER_DAY
+        return {
+            claimableBy: {
+                platform: platform as "twitter" | "github" | "telegram" | "discord",
+                username,
+            },
+            balance: "0",
+            deposits: [],
+            expiryTimestamp: currentTimestamp + expiryMs,
+            createdAt: currentTimestamp,
+        }
+    }
+
+    /**
+     * Validates that an existing escrow can accept new deposits.
+     * Throws if escrow is expired or already claimed.
+     */
+    private static validateExistingEscrowForDeposit(
+        escrow: EscrowData,
+        currentTimestamp: number,
+    ): void {
+        if (currentTimestamp > escrow.expiryTimestamp) {
+            throw new Error(
+                `Cannot deposit to expired escrow. Expired on ${new Date(
+                    escrow.expiryTimestamp,
+                ).toISOString()}`,
+            )
+        }
+        if (escrow.claimed) {
+            throw new Error(
+                `Cannot deposit to claimed escrow. Claimed by ${escrow.claimedBy}`,
+            )
+        }
+    }
+
     private static parseAmount(value?: string | number | bigint): bigint {
         if (value === undefined) {
             return 0n
@@ -174,92 +277,25 @@ export default class GCREscrowRoutines {
                 }
 
                 // Get or create escrow account with pessimistic write lock
-                let escrowAccount = await transactionalEntityManager.findOne(
-                    GCRMain,
-                    {
-                        where: { pubkey: escrowAddress },
-                        lock: { mode: "pessimistic_write" },
-                    },
+                const escrowAccount = await this.getOrCreateEscrowAccount(
+                    transactionalEntityManager,
+                    escrowAddress,
                 )
 
-                if (!escrowAccount) {
-                    try {
-                        // Create account inside transaction to prevent orphaned accounts
-                        escrowAccount = await HandleGCR.createAccount(escrowAddress)
-                        await transactionalEntityManager.save(escrowAccount)
-                    } catch (error: any) {
-                        // Handle race condition: another transaction created the account
-                        if (error.code === '23505') { // Postgres unique violation
-                            escrowAccount = await transactionalEntityManager.findOne(
-                                GCRMain,
-                                {
-                                    where: { pubkey: escrowAddress },
-                                    lock: { mode: "pessimistic_write" },
-                                }
-                            )
-                            if (!escrowAccount) throw new Error("Account creation race condition")
-                        } else {
-                            throw error
-                        }
-                    }
-                }
-
-                // Initialize escrows object if needed
-                escrowAccount.escrows = escrowAccount.escrows || {}
-
-                // Create new escrow or update existing
+                // Create new escrow or validate existing one
                 if (!escrowAccount.escrows[escrowAddress]) {
-                    // New escrow - validate expiry to prevent fund locking attacks
-                    const requestedExpiry = expiryDays || DEFAULT_EXPIRY_DAYS
-
-                    if (
-                        requestedExpiry < MIN_EXPIRY_DAYS ||
-                        requestedExpiry > MAX_EXPIRY_DAYS
-                    ) {
-                        throw new Error(
-                            `Expiry must be between ${MIN_EXPIRY_DAYS} and ${MAX_EXPIRY_DAYS} days`,
-                        )
-                    }
-
-                    // REVIEW: Prevent expiry inheritance griefing attacks by requiring minimum first deposit
-                    // Without this, attacker could deposit 1 DEM with long expiry, then victim deposits 1M DEM
-                    // inheriting the long expiry, locking their funds
-                    if (BigInt(amount) < MIN_FIRST_DEPOSIT) {
-                        throw new Error(
-                            `First deposit must be at least ${MIN_FIRST_DEPOSIT} DEM to prevent griefing attacks`,
-                        )
-                    }
-
-                    const expiryMs = requestedExpiry * MS_PER_DAY
-                    escrowAccount.escrows[escrowAddress] = {
-                        claimableBy: {
-                            platform: platform as
-                                | "twitter"
-                                | "github"
-                                | "telegram"
-                                | "discord",
-                            username,
-                        },
-                        balance: "0",
-                        deposits: [],
-                        expiryTimestamp: currentTimestamp + expiryMs,
-                        createdAt: currentTimestamp,
-                    }
+                    escrowAccount.escrows[escrowAddress] = this.createNewEscrowData(
+                        platform,
+                        username,
+                        expiryDays,
+                        amount,
+                        currentTimestamp,
+                    )
                 } else {
-                    // REVIEW: Existing escrow - check not expired or claimed
-                    const existingEscrow = escrowAccount.escrows[escrowAddress]
-                    if (currentTimestamp > existingEscrow.expiryTimestamp) {
-                        throw new Error(
-                            `Cannot deposit to expired escrow. Expired on ${new Date(
-                                existingEscrow.expiryTimestamp,
-                            ).toISOString()}`,
-                        )
-                    }
-                    if (existingEscrow.claimed) {
-                        throw new Error(
-                            `Cannot deposit to claimed escrow. Claimed by ${existingEscrow.claimedBy}`,
-                        )
-                    }
+                    this.validateExistingEscrowForDeposit(
+                        escrowAccount.escrows[escrowAddress],
+                        currentTimestamp,
+                    )
                 }
 
                 // REVIEW: Check deposits limit to prevent DoS attacks
