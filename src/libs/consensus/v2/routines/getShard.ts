@@ -5,6 +5,12 @@ import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 import Chain from "src/libs/blockchain/chain"
 
+/**
+ * Retrieve the current list of online peers.
+ *
+ * @param seed - Seed intended for deterministic shard selection; currently not used and has no effect
+ * @returns An array of peers that are currently considered online
+ */
 export default async function getShard(seed: string): Promise<Peer[]> {
     // ! we need to get the peers from the last 3 blocks too
     const allPeers = await PeerManager.getInstance().getOnlinePeers()

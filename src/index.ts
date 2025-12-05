@@ -298,7 +298,16 @@ async function preMainLoop() {
     getSharedState.lastBlockHash = lastBlock.hash
 }
 
-// ANCHOR Entry point
+/**
+ * Bootstraps the node and starts its network services and background managers.
+ *
+ * Performs chain setup, warmup, time calibration, and pre-main-loop initialization; then ensures peer availability, starts the signaling server, optionally starts the MCP server, and initializes the DTR relay retry service when running in production.
+ *
+ * Side effects:
+ * - May call process.exit(1) if the signaling server fails to start.
+ * - Sets shared-state flags such as `isSignalingServerStarted` and `isMCPServerStarted`.
+ * - Starts background services (MCP server and DTRManager) when configured.
+ */
 async function main() {
     await Chain.setup()
     // INFO Warming up the node (including arguments digesting)
