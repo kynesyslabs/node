@@ -175,6 +175,12 @@ if ! command -v gh &> /dev/null; then
         fi
 
         log_success "GitHub CLI authenticated!"
+
+        # Configure git user for commits
+        log_info "Configuring git user..."
+        git config --global user.email "demos@node.id"
+        git config --global user.name "demos"
+        log_success "Git user configured"
     else
         log_info ""
         log_info "To install GitHub CLI manually on Debian/Ubuntu, run:"
