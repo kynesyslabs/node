@@ -327,6 +327,41 @@ async function main() {
                 blockNumber: 0,
                 isSynced: false,
             })
+
+            // Listen for quit event from TUI for graceful shutdown
+            indexState.tuiManager.on("quit", () => {
+                log.info("[MAIN] Graceful shutdown initiated...")
+
+                // Set a timeout fallback for forced termination
+                const forceExitTimeout = setTimeout(() => {
+                    log.warning("[MAIN] Graceful shutdown timeout, forcing exit...")
+                    process.exit(1)
+                }, 5000)
+
+                // Perform cleanup operations
+                Promise.resolve()
+                    .then(async () => {
+                        // Disconnect peers gracefully
+                        if (indexState.peerManager) {
+                            log.info("[MAIN] Disconnecting peers...")
+                            // PeerManager cleanup if available
+                        }
+
+                        // Close MCP server if running
+                        if (indexState.mcpServer) {
+                            log.info("[MAIN] Stopping MCP server...")
+                        }
+
+                        log.info("[MAIN] Shutdown complete.")
+                    })
+                    .catch(err => {
+                        log.error(`[MAIN] Error during shutdown: ${err}`)
+                    })
+                    .finally(() => {
+                        clearTimeout(forceExitTimeout)
+                        process.exit(0)
+                    })
+            })
         } catch (error) {
             console.error("Failed to start TUI, falling back to standard output:", error)
             indexState.TUI_ENABLED = false

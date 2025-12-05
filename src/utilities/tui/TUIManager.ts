@@ -665,12 +665,13 @@ export class TUIManager extends EventEmitter {
     }
 
     /**
-     * Handle quit request - stop TUI and exit process
+     * Handle quit request - stop TUI and emit quit event for graceful shutdown.
+     * Application-level code should listen for the "quit" event to perform
+     * cleanup (flush writes, close connections) before calling process.exit().
      */
     private handleQuit(): void {
-        this.emit("quit")
         this.stop()
-        process.exit(0)
+        this.emit("quit")
     }
 
     /**
