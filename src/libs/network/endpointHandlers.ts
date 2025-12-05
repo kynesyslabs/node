@@ -696,6 +696,67 @@ const MAX_USERNAME_LENGTH = 100
 const MAX_DEPOSITS_PER_ESCROW = 1000 // Align with consensus constant
 
 /**
+ * Calculates total sent amount from deposits with error handling for corrupted data.
+ * Returns 0n if all deposits are invalid.
+ */
+function calculateTotalSentFromDeposits(
+    deposits: Array<{ from: string; amount: string; timestamp: number }>,
+): bigint {
+    return deposits.slice(0, MAX_DEPOSITS_PER_ESCROW).reduce((sum, d) => {
+        if (!d.amount || typeof d.amount !== "string") {
+            log.error(
+                `[handleGetSentEscrows] Missing or invalid amount in deposit from ${d.from}`,
+            )
+            return sum
+        }
+
+        try {
+            return sum + BigInt(d.amount)
+        } catch (error) {
+            log.error(
+                `[handleGetSentEscrows] Cannot parse amount "${d.amount}" as BigInt. ` +
+                    `From: ${d.from}, Timestamp: ${d.timestamp}. Skipping corrupted deposit.`,
+            )
+            return sum
+        }
+    }, 0n)
+}
+
+/**
+ * Builds a sent escrow record from escrow data and sender deposits.
+ */
+function buildSentEscrowRecord(
+    escrow: {
+        claimableBy: { platform: string; username: string }
+        balance: { toString(): string }
+        expiryTimestamp: number
+    },
+    escrowAddr: string,
+    senderDeposits: Array<{
+        amount: { toString(): string }
+        timestamp: number
+        message?: string
+    }>,
+    totalSent: bigint,
+    nowTimestamp: number,
+) {
+    return {
+        platform: escrow.claimableBy.platform,
+        username: escrow.claimableBy.username,
+        escrowAddress: escrowAddr,
+        totalSent: totalSent.toString(),
+        deposits: senderDeposits.map(d => ({
+            amount: d.amount.toString(),
+            timestamp: d.timestamp,
+            message: d.message,
+        })),
+        totalEscrowBalance: escrow.balance.toString(),
+        expired: nowTimestamp > escrow.expiryTimestamp,
+        expiryTimestamp: escrow.expiryTimestamp,
+    }
+}
+
+/**
  * RPC: Get escrow balance for a specific social identity
  */
 export async function handleGetEscrowBalance(params: {
@@ -942,67 +1003,29 @@ export async function handleGetSentEscrows(params: {
                 for (const [escrowAddr, escrow] of Object.entries(
                     account.escrows,
                 )) {
+                    // Skip escrows without sender deposits or valid claimableBy
                     const senderDeposits =
                         escrow.deposits?.filter(d => d.from === sender) || []
+                    if (senderDeposits.length === 0) continue
+                    if (!escrow.claimableBy?.platform || !escrow.claimableBy?.username) continue
 
-                    if (senderDeposits.length === 0) {
-                        continue
-                    }
-
-                    if (
-                        !escrow.claimableBy?.platform ||
-                        !escrow.claimableBy?.username
-                    ) {
-                        continue
-                    }
-
-                    // REVIEW: Add error handling for corrupted deposit amounts
-                    const totalSent = senderDeposits
-                        .slice(0, MAX_DEPOSITS_PER_ESCROW) // Cap iteration to prevent DoS
-                        .reduce((sum, d) => {
-                            if (!d.amount || typeof d.amount !== "string") {
-                                log.error(
-                                    `[handleGetSentEscrows] Missing or invalid amount in deposit from ${d.from}`,
-                                )
-                                return sum
-                            }
-
-                            try {
-                                return sum + BigInt(d.amount)
-                            } catch (error) {
-                                log.error(
-                                    `[handleGetSentEscrows] Cannot parse amount "${d.amount}" as BigInt. ` +
-                                        `From: ${d.from}, Timestamp: ${d.timestamp}. Skipping corrupted deposit.`,
-                                )
-                                return sum
-                            }
-                        }, 0n)
-
-                    const record = {
-                        platform: escrow.claimableBy.platform,
-                        username: escrow.claimableBy.username,
-                        escrowAddress: escrowAddr,
-                        totalSent: totalSent.toString(),
-                        deposits: senderDeposits.map(d => ({
-                            amount: d.amount.toString(),
-                            timestamp: d.timestamp,
-                            message: d.message,
-                        })),
-                        totalEscrowBalance: escrow.balance.toString(),
-                        expired: nowTimestamp > escrow.expiryTimestamp,
-                        expiryTimestamp: escrow.expiryTimestamp,
-                    }
-
+                    // Handle pagination offset
                     if (skippedMatches < normalizedOffset) {
                         skippedMatches += 1
                         continue
                     }
 
-                    sentEscrows.push(record)
+                    const totalSent = calculateTotalSentFromDeposits(senderDeposits)
+                    const record = buildSentEscrowRecord(
+                        escrow,
+                        escrowAddr,
+                        senderDeposits,
+                        totalSent,
+                        nowTimestamp,
+                    )
 
-                    if (sentEscrows.length >= normalizedLimit) {
-                        break
-                    }
+                    sentEscrows.push(record)
+                    if (sentEscrows.length >= normalizedLimit) break
                 }
 
                 if (sentEscrows.length >= normalizedLimit) {
