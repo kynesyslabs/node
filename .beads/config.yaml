@@ -1,3 +1,4 @@
+sync-branch: beads-sync
 # Beads Configuration File
 # This file configures default behavior for all bd commands in this repository
 # All settings can also be set via environment variables (BD_* prefix)
