@@ -333,34 +333,41 @@ if [ "$GIT_PULL" = true ]; then
     echo "🔄 Updating repository..."
     log_verbose "Running git pull to get latest changes"
 
-    # Store package.json hash before pull to detect changes
-    PACKAGE_HASH_BEFORE=""
-    if [ -f "package.json" ]; then
-        PACKAGE_HASH_BEFORE=$(md5sum package.json 2>/dev/null || md5 -q package.json 2>/dev/null)
-    fi
+    # Attempt git pull, handle conflicts
+    PULL_OUTPUT=$(git pull 2>&1)
+    PULL_EXIT_CODE=$?
 
-    if ! git pull; then
-        echo "⚠️  Warning: Git pull failed, continuing with current version"
-        log_verbose "Git pull failed but continuing - might be in development mode"
-    else
-        echo "✅ Repository updated successfully"
-
-        # Check if package.json changed after pull
-        PACKAGE_HASH_AFTER=""
-        if [ -f "package.json" ]; then
-            PACKAGE_HASH_AFTER=$(md5sum package.json 2>/dev/null || md5 -q package.json 2>/dev/null)
-        fi
-
-        if [ "$PACKAGE_HASH_BEFORE" != "$PACKAGE_HASH_AFTER" ] && [ -n "$PACKAGE_HASH_AFTER" ]; then
-            echo "📦 package.json changed, updating dependencies..."
-            log_verbose "Detected package.json change, running bun install"
-            if ! bun install; then
-                echo "❌ Failed to install dependencies"
+    if [ $PULL_EXIT_CODE -ne 0 ]; then
+        # Check if the conflict is ONLY about package.json (stash issue)
+        if echo "$PULL_OUTPUT" | grep -qE "package\.json" && ! echo "$PULL_OUTPUT" | grep -vE "package\.json|error:|CONFLICT|stash|overwritten" | grep -qE "\.ts|\.js|\.md|\.json"; then
+            echo "⚠️  package.json conflict detected, stashing and retrying..."
+            log_verbose "Stashing local changes to package.json"
+            git stash
+            if ! git pull; then
+                echo "❌ Git pull failed even after stashing"
                 exit 1
             fi
-            echo "✅ Dependencies updated successfully"
+            echo "✅ Repository updated after stashing package.json"
+        else
+            # Hard exit on any other git pull failure
+            echo "❌ Git pull failed:"
+            echo "$PULL_OUTPUT"
+            echo ""
+            echo "💡 Please resolve git conflicts manually and try again"
+            exit 1
         fi
+    else
+        echo "✅ Repository updated successfully"
     fi
+
+    # Always run bun install after successful git pull
+    echo "📦 Installing dependencies..."
+    log_verbose "Running bun install after git pull"
+    if ! bun install; then
+        echo "❌ Failed to install dependencies"
+        exit 1
+    fi
+    echo "✅ Dependencies installed successfully"
 fi
 
 
