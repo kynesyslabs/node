@@ -680,6 +680,13 @@ log_success "Ceremony directory deleted"
 log_info "Returning to original branch: $ORIGINAL_BRANCH"
 git checkout "$ORIGINAL_BRANCH"
 
+# If we're on testnet, pull latest changes
+if [ "$ORIGINAL_BRANCH" = "testnet" ]; then
+    log_info "Pulling latest testnet changes..."
+    git pull origin testnet
+    log_success "testnet is up to date"
+fi
+
 # Restore stashed changes if we stashed them
 if [ "$STASHED_CHANGES" = true ]; then
     log_info "Restoring stashed changes..."
