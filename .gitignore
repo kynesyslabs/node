@@ -170,3 +170,11 @@ src/features/bridges/EVMSmartContract/foundry.lock
 src/features/bridges/EVMSmartContract/artifacts
 .serena-backup/cache/typescript
 PR_COMMENTS
+local_tests
+omniprotocol_fixtures_scripts
+attestation_20251204_125424.txt
+captraf.sh
+http-capture-1762006580.pcap
+http-capture-1762008909.pcap
+http-traffic.json
+prop_agent
