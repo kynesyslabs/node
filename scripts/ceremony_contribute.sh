@@ -227,34 +227,52 @@ log_success "Bun is available"
 
 # Check npx is installed (needed for snarkjs commands)
 if ! command -v npx &> /dev/null; then
-    log_error "npx is not installed!"
-    log_info ""
+    log_warn "npx is not installed!"
     log_info "npx is required for ZK ceremony operations (snarkjs)."
     log_info ""
 
-    if confirm "Do you want to install npm (which includes npx) now?"; then
-        log_info "Installing npm..."
-        sudo apt update && sudo apt install npm -y
+    # Try mise first if available
+    if command -v mise &> /dev/null; then
+        log_info "Found mise, attempting to install Node 20..."
+        mise use -g node@20
 
-        # Refresh PATH to pick up newly installed npm/npx
+        # Refresh PATH to pick up mise-installed node/npx
         hash -r 2>/dev/null || true
-        export PATH="/usr/bin:$PATH"
+        eval "$(mise env)" 2>/dev/null || true
 
-        if ! command -v npx &> /dev/null; then
-            log_error "npm installation failed!"
-            log_info "Please install manually: sudo apt install npm"
+        if command -v npx &> /dev/null; then
+            log_success "Node 20 (with npx) installed via mise!"
+        else
+            log_warn "mise installation didn't provide npx, falling back to apt..."
+        fi
+    fi
+
+    # Fall back to apt if npx still not available
+    if ! command -v npx &> /dev/null; then
+        if confirm "Do you want to install npm (which includes npx) via apt now?"; then
+            log_info "Installing npm..."
+            sudo apt update && sudo apt install npm -y
+
+            # Refresh PATH to pick up newly installed npm/npx
+            hash -r 2>/dev/null || true
+            export PATH="/usr/bin:$PATH"
+
+            if ! command -v npx &> /dev/null; then
+                log_error "npm installation failed!"
+                log_info "Please install manually: sudo apt install npm"
+                log_info "Then re-run this script."
+                exit 1
+            fi
+
+            log_success "npm (with npx) installed successfully!"
+        else
+            log_info ""
+            log_info "To install npm manually, run:"
+            log_info "  sudo apt install npm"
+            log_info ""
             log_info "Then re-run this script."
             exit 1
         fi
-
-        log_success "npm (with npx) installed successfully!"
-    else
-        log_info ""
-        log_info "To install npm manually, run:"
-        log_info "  sudo apt install npm"
-        log_info ""
-        log_info "Then re-run this script."
-        exit 1
     fi
 fi
 
@@ -289,11 +307,14 @@ log_success "Identity file found and valid"
 
 log_step "STEP 3/9: Public Key File"
 
-# Look for existing publickey_ed25519_* file
+# Look for existing publickey file (try ed25519 format first, then legacy format)
 PUBKEY_FILE=$(ls publickey_ed25519_* 2>/dev/null | head -1 || true)
+if [ -z "$PUBKEY_FILE" ]; then
+    PUBKEY_FILE=$(ls publickey_* 2>/dev/null | head -1 || true)
+fi
 
 if [ -z "$PUBKEY_FILE" ]; then
-    log_warn "No publickey_ed25519_* file found"
+    log_warn "No publickey_* or publickey_ed25519_* file found"
     log_info "Generating public key from identity..."
 
     # Generate pubkey using our show:pubkey script
@@ -326,8 +347,10 @@ else
     PUBKEY_ADDRESS=$(cat "$PUBKEY_FILE")
 fi
 
-# Extract address from filename for branch naming
+# Extract address from filename for branch naming (support both formats)
 if [[ "$PUBKEY_FILE" =~ publickey_ed25519_(0x[a-fA-F0-9]+) ]]; then
+    PUBKEY_ADDRESS="${BASH_REMATCH[1]}"
+elif [[ "$PUBKEY_FILE" =~ publickey_(0x[a-fA-F0-9]+) ]]; then
     PUBKEY_ADDRESS="${BASH_REMATCH[1]}"
 fi
 
