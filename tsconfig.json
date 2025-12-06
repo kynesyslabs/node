@@ -3,7 +3,8 @@
     "compilerOptions": {
         "paths": {
             "@/*": ["src/*"],
-            //"@kynesyslabs/demosdk/*": ["../sdks/src/*"]
-        }
+            "@kynesyslabs/demosdk/*": ["../sdks/src/*"]
+        },
     },
+    "references": [{ "path": "../sdks/tsconfig.json" }]
 }

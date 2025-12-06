@@ -57,4 +57,7 @@ export class Transactions {
 
     @Column("integer", { name: "additionalFee" })
     additionalFee: number
+
+    @Column("jsonb", { name: "extra", nullable: true })
+    extra: Record<string, any> | null
 }

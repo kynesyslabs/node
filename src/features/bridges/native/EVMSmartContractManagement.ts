@@ -1,12 +1,26 @@
-import { Contract, Transaction, WebSocketProvider } from "ethers"
+import {
+    Contract,
+    Transaction,
+    WebSocketProvider,
+    solidityPackedKeccak256,
+} from "ethers"
 
+import {
+    NativeBridge,
+    NativeBridgeOperationCompiled,
+    NativeBridgeSupportedStablecoin,
+} from "@kynesyslabs/demosdk/bridge"
 import log from "@/utilities/logger"
+import Chain from "@/libs/blockchain/chain"
 import { Waiter } from "src/utilities/waiter"
 import { JsonConfig } from "@/utilities/JsonConfig"
 import { EVM } from "@kynesyslabs/demosdk/xm-localsdk"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
-import Chain from "@/libs/blockchain/chain"
+import {
+    SupportedChain,
+    SupportedStablecoin,
+} from "@kynesyslabs/demosdk/bridge/nativeBridgeTypes"
 
 interface TankConfig {
     address: string
@@ -84,6 +98,9 @@ export class EVMSmartContractManagement {
         chainKey: string,
         tankAddress: string,
     ): Promise<void> {
+        log.debug(
+            "initializing tank: " + chainKey + " with tank: " + tankAddress,
+        )
         const [_chainType, chainName, subchain] = chainKey.split(".")
         if (!chainName || !subchain) {
             throw new Error(
@@ -100,6 +117,8 @@ export class EVMSmartContractManagement {
         }
 
         const bridgePrivateKey = JsonConfig.getBridgePrivateKey(chainKey)
+        log.debug("bridgePrivateKey: " + bridgePrivateKey)
+
         if (!bridgePrivateKey) {
             log.error(`Bridge private key not found for ${chainKey}`)
             process.exit(1)
@@ -110,6 +129,8 @@ export class EVMSmartContractManagement {
         const evmInstance = new EVM(rpcUrl, chainId)
         await evmInstance.connect()
         await evmInstance.connectWallet(bridgePrivateKey)
+
+        log.debug("public key: " + evmInstance.getAddress())
 
         log.info(
             `Connected to ${chainKey} with address ${evmInstance.wallet.address}`,
@@ -217,7 +238,7 @@ export class EVMSmartContractManagement {
      * @param chainKey Chain identifier (e.g., "eth.sepolia")
      * @returns USDC balance as string
      */
-    public async getUSDCBalance(chainKey: string): Promise<string> {
+    public async getUSDCBalance(chainKey: string): Promise<bigint> {
         const tankConfig = this.tanks.get(chainKey)
         if (!tankConfig) {
             throw new Error(`Tank not found for chain: ${chainKey}`)
@@ -225,16 +246,15 @@ export class EVMSmartContractManagement {
 
         try {
             // Get USDC contract address for this chain
-            const usdcContracts = JsonConfig.getUsdcContracts()
-            const usdcAddress = usdcContracts[chainKey.replace(".", ".")]
+            const usdcContracts = JsonConfig.getStableCoinContracts("usdc")
+            const usdcAddress = usdcContracts[chainKey]
 
             if (!usdcAddress) {
                 throw new Error(`USDC contract not configured for ${chainKey}`)
             }
 
             // Get balance from tank contract
-            const balance = await tankConfig.contract.getBalance(usdcAddress)
-            return balance.toString()
+            return await tankConfig.contract.getBalance(usdcAddress)
         } catch (error) {
             log.error(`Failed to get USDC balance for ${chainKey}:` + error)
             throw error
@@ -409,16 +429,20 @@ export class EVMSmartContractManagement {
 
     /**
      * Execute USDC withdrawal from tank (called by consensus)
+     * @param bridgeId Bridge ID
      * @param chainKey Chain identifier
      * @param recipient Recipient address
+     * @param tokenName Token name
      * @param amount Amount in USDC smallest units
-     * @param signerPrivateKeys Array of shard member private keys
+     *
+     * @returns Withdrawal transaction hash
      */
     public async executeWithdrawal(
+        bridgeId: string,
         chainKey: string,
         recipient: string,
-        amount: string,
-        signerPrivateKeys: string[],
+        tokenName: NativeBridgeSupportedStablecoin,
+        amount: bigint,
     ): Promise<string> {
         const fname = "[executeWithdrawal]"
         log.info(
@@ -427,10 +451,11 @@ export class EVMSmartContractManagement {
 
         // Use the new gasless withdrawal method
         return await this.executeGaslessWithdrawal(
+            bridgeId,
             chainKey,
             recipient,
+            tokenName,
             amount,
-            signerPrivateKeys,
         )
     }
 
@@ -443,15 +468,13 @@ export class EVMSmartContractManagement {
      * @returns Validation result
      */
     public async verifyDeposit(
-        chainKey: string,
         txHash: string,
-        expectedAmount: string,
-        expectedSender: string,
+        compiled: NativeBridgeOperationCompiled,
     ): Promise<{
         valid: boolean
-        actualAmount?: string
-        actualSender?: string
     }> {
+        const chainKey = compiled.content.operation.from.chain
+
         const tankConfig = this.tanks.get(chainKey)
         if (!tankConfig) {
             log.error(`Tank not found for chain: ${chainKey}`)
@@ -466,27 +489,42 @@ export class EVMSmartContractManagement {
             return { valid: false }
         }
 
+        const bridge = new NativeBridge(null, tankConfig.evmInstance as any)
+
+        // NOTE: This should never throw an error
+        // because this same method is called during the broadcast step
+        try {
+            return bridge.verifyDepositTx(
+                receipt as any,
+                { response: compiled } as any,
+            )
+        } catch (error) {
+            // INFO: In case of error, die for debugging!
+            console.error(error)
+            process.exit(1)
+        }
+
         // Parse logs for USDC transfer to tank
         // This would need proper log parsing based on USDC transfer events
         // Simplified validation for now
-        const tankAddress = tankConfig.address.toLowerCase()
-        const hasTransferToTank = receipt.logs.some(
-            (log: any) =>
-                log.address?.toLowerCase().includes("usdc") &&
-                log.topics?.some((topic: string) =>
-                    topic.toLowerCase().includes(tankAddress.slice(2)),
-                ),
-        )
+        // const tankAddress = tankConfig.address.toLowerCase()
+        // const hasTransferToTank = receipt.logs.some(
+        //     (log: any) =>
+        //         log.address?.toLowerCase().includes("usdc") &&
+        //         log.topics?.some((topic: string) =>
+        //             topic.toLowerCase().includes(tankAddress.slice(2)),
+        //         ),
+        // )
 
-        if (hasTransferToTank) {
-            return {
-                valid: true,
-                actualAmount: expectedAmount, // Would extract from logs
-                actualSender: expectedSender, // Would extract from logs
-            }
-        }
+        // if (hasTransferToTank) {
+        //     return {
+        //         valid: true,
+        //         actualAmount: expectedAmount, // Would extract from logs
+        //         actualSender: expectedSender, // Would extract from logs
+        //     }
+        // }
 
-        return { valid: false }
+        // return { valid: false }
     }
 
     /**
@@ -585,7 +623,7 @@ export class EVMSmartContractManagement {
      * @returns Transaction hash
      */
     public async executeGaslessDeposit(
-        chainKey: string,
+        chainKey: SupportedStablecoin,
         userAddress: string,
         amount: string,
         userSignature: string,
@@ -603,7 +641,7 @@ export class EVMSmartContractManagement {
 
         try {
             // Get USDC address for this chain (TODO: make this configurable)
-            const usdcAddress = this.getUSDCAddress(chainKey)
+            const usdcAddress = JsonConfig.getStableCoinContracts(chainKey)
 
             // Execute gasless deposit via contract
             const tx = await tankConfig.contract.depositUSDCToTank(
@@ -683,62 +721,83 @@ export class EVMSmartContractManagement {
 
     /**
      * Execute gasless withdrawal using meta-transaction pattern
+     * @param bridgeId Bridge ID
      * @param chainKey Chain identifier
      * @param recipient Withdrawal recipient address
      * @param amount Amount to withdraw
-     * @param signerPrivateKeys Shard private keys for multisig
-     * @returns Proposal ID for tracking
+     *
+     * @returns Withdrawal transaction hash
      */
     public async executeGaslessWithdrawal(
+        bridgeId: string,
         chainKey: string,
         recipient: string,
-        amount: string,
-        signerPrivateKeys: string[],
+        tokenName: NativeBridgeSupportedStablecoin,
+        amount: bigint,
     ): Promise<string> {
         const fname = "[executeGaslessWithdrawal]"
-        log.info(
+        log.debug(
             `${fname} Executing gasless withdrawal on ${chainKey} to ${recipient}`,
         )
 
         const tankConfig = this.tanks.get(chainKey)
+        const { contract, evmInstance } = tankConfig
         if (!tankConfig) {
-            throw new Error(`Tank not found for chain: ${chainKey}`)
+            log.error(`Tank not found for chain: ${chainKey}`)
+            process.exit(1)
         }
 
         try {
             // REVIEW: Updated to use multisig pattern instead of non-existent executeMetaTransaction
             // Generate unique proposal ID for this withdrawal
-            const proposalId = `0x${Date.now().toString(16).padStart(64, "0")}`
+            // const proposalId = `0x${Date.now().toString(16).padStart(64, "0")}`
 
             // Execute multisig transfer using existing multisig functionality
-            const usdcAddress = this.getUSDCAddress(chainKey)
-            const nonce = Date.now()
-
-            // First signer initiates the multisig transfer
-            await tankConfig.evmInstance.connectWallet(signerPrivateKeys[0])
-            await tankConfig.contract.multisigTransfer(
-                proposalId,
-                usdcAddress,
-                recipient,
-                amount,
+            const usdcAddress = JsonConfig.getContractAddress(
+                tokenName,
+                chainKey,
             )
 
-            // Additional signers approve the transfer (2/3 majority needed)
-            for (let i = 1; i < Math.min(2, signerPrivateKeys.length); i++) {
-                await tankConfig.evmInstance.connectWallet(signerPrivateKeys[i])
-                await tankConfig.contract.multisigTransfer(
-                    proposalId,
-                    usdcAddress,
-                    recipient,
-                    amount,
-                )
+            const tx = await evmInstance.writeToContract(
+                contract,
+                "multisigTransfer",
+                [bridgeId, usdcAddress, recipient, amount, 0],
+                {
+                    gasLimit: 400_000,
+                    gasPrice: 1.8,
+                    maxFeePerGas: 1.8,
+                    maxPriorityFeePerGas: 1.8,
+                },
+            )
+
+            const txhash = Transaction.from(tx).hash
+            log.debug("Multisig txhash: " + txhash)
+
+            const response = await evmInstance.sendSignedTransaction(tx)
+            log.debug("Multisig response: " + JSON.stringify(response, null, 2))
+
+            if (response.result === "error") {
+                log.error(`${fname} Failed to execute gasless withdrawal`)
+                log.error("RESPONSE: " + JSON.stringify(response, null, 2))
+                process.exit(1)
             }
 
-            log.info(
-                `${fname} ✅ Gasless withdrawal completed with proposal: ${proposalId}`,
-            )
-            return proposalId
+            log.debug("RESPONSE: " + JSON.stringify(response, null, 2))
+            // const receipt = await evmInstance.provider.waitForTransaction(
+            //     response.hash,
+            // )
+
+            // if (!receipt || !receipt.logs || receipt.status !== 1) {
+            //     log.error("Failed to execute gasless withdrawal")
+            //     log.error("RECEIPT: " + JSON.stringify(receipt, null, 2))
+            //     process.exit(1)
+            // }
+
+            return response.hash
         } catch (error) {
+            console.error(error)
+            process.exit(1)
+
             log.error(`${fname} Failed to execute gasless withdrawal: ${error}`)
             throw new Error(
                 `Failed to execute gasless withdrawal: ${error.toString()}`,
@@ -873,27 +932,47 @@ export class EVMSmartContractManagement {
         }
     }
 
-    /**
-     * Get USDC contract address for a given chain
-     * @param chainKey Chain identifier
-     * @returns USDC contract address
-     */
-    private getUSDCAddress(chainKey: string): string {
-        // TODO: Make this configurable via JsonConfig
-        const usdcAddresses: { [key: string]: string } = {
-            "eth.sepolia": "0xA0b86a33E6417A8B6C8Ac3a0E9e0c4A27A4E0F2c", // Mock USDC on Sepolia
-            "eth.mainnet": "0xA0b86a33E6417A8B6C8Ac3a0E9e0c4A27A4E0F2c", // Real USDC on Ethereum
-            "polygon.amoy": "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582", // Mock USDC on Polygon Amoy
-            "polygon.mainnet": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174", // Real USDC on Polygon
+    public async validateBridgeId(
+        bridgeId: string,
+        chain: SupportedChain,
+    ): Promise<{
+        valid: boolean
+        message: string
+    }> {
+        const tankConfig = this.tanks.get(chain)
+
+        if (!tankConfig) {
+            return {
+                valid: false,
+                message: `Tank not found for chain: ${chain}`,
+            }
         }
 
-        const address = usdcAddresses[chainKey]
-        if (!address) {
-            throw new Error(
-                `USDC address not configured for chain: ${chainKey}`,
-            )
+        const contract = tankConfig.contract
+
+        // [approvalCount, deadline, executed, expired]
+        type ProposalStatus = [bigint, bigint, boolean, boolean]
+
+        // Derive bytes32 proposalId from bridgeId and contract address to match _generateProposalId
+        const contractAddress = await contract.getAddress()
+        const proposalId = solidityPackedKeccak256(
+            ["string", "string", "address"],
+            ["MULTISIG_PROPOSAL", bridgeId, contractAddress],
+        )
+
+        const [_approvalCount, deadline, _executed, _expired] =
+            (await contract.checkProposalStatus(proposalId)) as ProposalStatus
+
+        if (deadline !== 0n) {
+            return {
+                valid: false,
+                message: `Bridge operation: ${bridgeId} has already been submitted.`,
+            }
         }
 
-        return address
+        return {
+            valid: true,
+            message: `Bridge ID not found: ${bridgeId}`,
+        }
     }
 }

@@ -1,5 +1,8 @@
 import * as fs from "fs"
 import log from "../utilities/logger"
+import { NativeBridgeSupportedStablecoin } from "@kynesyslabs/demosdk/bridge"
+import { SupportedChain } from "@kynesyslabs/demosdk/bridge/nativeBridgeTypes"
+import { getSharedState } from "./sharedState"
 
 export class JsonConfig {
     static readonly USDC_CONTRACTS_PATH = "config/usdcContracts.json"
@@ -31,12 +34,46 @@ export class JsonConfig {
      *
      * @returns USDC contracts configuration object
      */
-    static getUsdcContracts(): {
-        [key: string]: {
-            [key: string]: string
+    static getStableCoinContracts(): {
+        [token: string]: {
+            [chain: SupportedChain]: string
         }
-    } {
-        return this.readJsonFromFile(this.USDC_CONTRACTS_PATH)
+    }
+    static getStableCoinContracts(token: "all"): {
+        [token: string]: {
+            [chain: SupportedChain]: string
+        }
+    }
+    static getStableCoinContracts(token: NativeBridgeSupportedStablecoin): {
+        [chain: SupportedChain]: string
+    }
+    static getStableCoinContracts(
+        token: NativeBridgeSupportedStablecoin | "all" = "all",
+    ):
+        | {
+              [token: string]: {
+                  [chain: SupportedChain]: string
+              }
+          }
+        | {
+              [chain: SupportedChain]: string
+          } {
+        const stableCoinContracts = this.readJsonFromFile(
+            this.USDC_CONTRACTS_PATH,
+        )
+        if (token === "all") {
+            return stableCoinContracts
+        }
+
+        return stableCoinContracts[token]
+    }
+
+    static getContractAddress(
+        token: NativeBridgeSupportedStablecoin,
+        chainKey: string,
+    ): string | null {
+        const usdcContracts = this.getStableCoinContracts(token)
+        return usdcContracts[chainKey] || null
     }
 
     /**
@@ -44,12 +81,9 @@ export class JsonConfig {
      *
      * @returns Provider URLs configuration object
      */
-    static getProviderUrls(): {
-        [key: string]: {
-            [key: string]: string
-        }
-    } {
-        return this.readJsonFromFile(this.PROVIDER_URLS_PATH)
+    static getProviderUrl(chainKey: string): string {
+        const providerUrls = this.readJsonFromFile(this.PROVIDER_URLS_PATH)
+        return providerUrls[chainKey] || null
     }
 
     /**
@@ -95,11 +129,14 @@ export class JsonConfig {
         }
 
         const bridgeKeys = this.readJsonFromFile(this.BRIDGE_KEYS_PATH)
-        if (!bridgeKeys[chainKey]) {
-            return null
+        if (!bridgeKeys[getSharedState.publicKeyHex]) {
+            log.error(
+                `Bridge private key for ${getSharedState.exposedUrl} (${getSharedState.publicKeyHex}) not found`,
+            )
+            process.exit(1)
         }
 
-        return bridgeKeys[chainKey]
+        return bridgeKeys[getSharedState.publicKeyHex][chainKey] || null
     }
 
     /**
