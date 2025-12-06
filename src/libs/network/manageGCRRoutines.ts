@@ -3,6 +3,9 @@ import _ from "lodash"
 import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
 import { emptyResponse } from "./server_rpc"
 import { IncentiveManager } from "../blockchain/gcr/gcr_routines/IncentiveManager"
+import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
+import { Referrals } from "@/features/incentive/referrals"
+import GCR from "../blockchain/gcr/gcr"
 
 interface GCRRoutinePayload {
     method: string
@@ -13,7 +16,7 @@ export default async function manageGCRRoutines(
     sender: string,
     payload: GCRRoutinePayload,
 ): Promise<RPCResponse> {
-    const response = _.cloneDeep(emptyResponse)
+    let response = _.cloneDeep(emptyResponse)
     response.result = 200
     // Handle the payload
     const { method, params } = payload
@@ -45,11 +48,65 @@ export default async function manageGCRRoutines(
             )
             break
 
-        case "getPoints":
-            response.response = await IncentiveManager.getPoints(
+        case "getUDIdentities":
+            response.response = await IdentityManager.getIdentities(
                 params[0],
+                "ud",
             )
             break
+
+        case "getPoints":
+            response.response = await IncentiveManager.getPoints(params[0])
+            break
+
+        case "getTopAccountsByPoints":
+            response = await GCR.getTopAccountsByPoints()
+            break
+
+        case "getReferralInfo": {
+            const account = await ensureGCRForUser(params[0])
+            response.response = account.referralInfo
+            break
+        }
+
+        case "validateReferralCode": {
+            const account = await Referrals.findAccountByReferralCode(params[0])
+            response.response = {
+                isValid: account !== null,
+                referrerPubkey: account?.pubkey || null,
+                message: account
+                    ? "Referral code is valid"
+                    : "Referral code is invalid",
+            }
+            break
+        }
+
+        case "getAccountByIdentity": {
+            const identity = params[0]
+
+            if (!identity) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "No identity specified" }
+                break
+            }
+
+            response.response = await GCR.getAccountByIdentity(identity)
+            break
+        }
+
+        // case "getAccountByTelegramUsername": {
+        //     const username = params[0]
+
+        //     if (!username) {
+        //         response.result = 400
+        //         response.response = "No username specified"
+        //         break
+        //     }
+
+        //     response.response = await GCR.getAccountByTelegramUsername(username)
+        //     break
+        // }
 
         // SECTION Web2 Identity Management
 

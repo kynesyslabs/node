@@ -6,10 +6,11 @@ import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 
 import handlePayOperation from "./executors/pay"
 import handleContractRead from "./executors/contract_read"
+import handleContractWrite from "./executors/contract_write"
+import handleBalanceQuery from "./executors/balance_query"
 
 // NOTE We define multichain into global so that we can use it later
 global.multichain = multichain
-
 
 // NOTE: We receive the operations as:
 /*
@@ -20,12 +21,24 @@ multichain_operation: {
 }
 */
 
+/**
+ * JSON.stringify data with bigints converted to strings
+ */
+function stringify(data: any) {
+    return JSON.stringify(data, (_, v) =>
+        typeof v === "bigint" ? v.toString() : v,
+    )
+}
+
 class XMParser {
     // INFO Same as below but with file support
     static async loadFile(path: string): Promise<XMScript> {
         if (!fs.existsSync(path)) {
             console.log("The file does not exist.")
             return null
+        }
+        if (path.includes('..')) {
+            throw new Error("Invalid file path");
         }
         const script = fs.readFileSync(path, "utf8")
         return await XMParser.load(script)
@@ -50,33 +63,34 @@ class XMParser {
     }
 
     // INFO This returns the results of the execution of the XMScript
-    static async execute(fullscript: XMScript): Promise<any> {
+    static async execute(fullscript: XMScript): Promise<{
+        [operationId: string]: {
+            result: string
+            error?: string
+        }
+    }> {
         const results = {}
         let name: string, operation: IOperation
         // Iterating over the operations
         // TODO Enforce order
-        for (
-            let id = 0;
-            id < Object.keys(fullscript.operations).length;
-            id++
-        ) {
+        for (let id = 0; id < Object.keys(fullscript.operations).length; id++) {
             try {
-                name = Object.keys(fullscript.operations)[
-                    id
-                ]
+                name = Object.keys(fullscript.operations)[id]
                 console.log("[" + name + "] ")
                 operation = fullscript.operations[name]
                 console.log("[XMParser]: full script operation")
                 console.log(fullscript)
                 console.log("[XMParser]: partial operation")
                 console.log(operation)
-                results[name] = await XMParser.executeOperation(operation)
+                const result = await XMParser.executeOperation(operation)
+                results[name] = stringify(result)
                 console.log("[RESULT]: " + results[name])
             } catch (e) {
                 console.log("[XM EXECUTE] Error: " + e)
-                results[name] = { result: "error", error: e }
+                results[name] = { result: "error", error: e.toString() }
             }
         }
+
         return results // REVIEW Is the type ok?
     }
 
@@ -123,6 +137,11 @@ class XMParser {
             // INFO Read contract task
             case "contract_read":
                 return await handleContractRead(operation, chainID)
+            case "contract_write": {
+                return await handleContractWrite(operation, chainID)
+            }
+            case "balance_query":
+                return await handleBalanceQuery(operation, chainID)
 
             default:
                 return {

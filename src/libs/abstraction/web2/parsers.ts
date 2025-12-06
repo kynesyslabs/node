@@ -8,6 +8,12 @@ export abstract class Web2ProofParser {
             "https://gist.githubusercontent.com",
         ],
         twitter: ["https://x.com", "https://twitter.com"],
+        discord: [
+            "https://discord.com/channels",
+            "https://ptb.discord.com/channels",
+            "https://canary.discord.com/channels",
+            "https://discordapp.com/channels",
+        ],
     }
 
     constructor() {}

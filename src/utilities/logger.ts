@@ -86,7 +86,7 @@ export default class Logger {
         )
     }
 
-    static custom(
+    static async custom(
         logfile: string,
         message: string,
         logToTerminal = true,
@@ -105,7 +105,7 @@ export default class Logger {
             fs.rmSync(this.LOG_CUSTOM_PREFIX + logfile + ".log", {
                 force: true,
             })
-            fs.writeFileSync(this.LOG_CUSTOM_PREFIX + logfile + ".log", "")
+            await fs.promises.writeFile(this.LOG_CUSTOM_PREFIX + logfile + ".log", "")
         }
         this.writeAsync(this.LOG_CUSTOM_PREFIX + logfile + ".log", logEntry)
     }

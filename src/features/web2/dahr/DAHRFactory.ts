@@ -9,16 +9,17 @@ const term = terminalKit.terminal
 export class DAHRFactory {
     private static _instance: DAHRFactory
     private _dahrs: Map<string, { dahr: DAHR; lastAccess: number }> = new Map()
-    private readonly _maxAge: number = 2 * 60 * 60 * 1000 // 2 hours
+    private readonly _maxAge: number = 24 * 60 * 60 * 1000 // 24 hours in milliseconds
 
     /**
      * Private constructor to prevent direct object creation.
      */
-    private cleanupExpired(): void {
+    private async cleanupExpired(): Promise<void> {
         const now = Date.now()
         let cleanedCount = 0
-        for (const [sessionId, { lastAccess }] of this._dahrs) {
+        for (const [sessionId, { dahr, lastAccess }] of this._dahrs) {
             if (now - lastAccess > this._maxAge) {
+                await dahr.stopProxy()
                 this._dahrs.delete(sessionId)
                 cleanedCount++
             }
@@ -47,8 +48,8 @@ export class DAHRFactory {
      * @param {IWeb2Request} web2Request - The Web2 request to handle.
      * @returns {DAHR} The DAHR instance.
      */
-    createDAHR(web2Request: IWeb2Request): DAHR {
-        this.cleanupExpired()
+    async createDAHR(web2Request: IWeb2Request): Promise<DAHR> {
+        await this.cleanupExpired()
         const newDAHR = new DAHR(web2Request)
         const sessionId = newDAHR.sessionId // Get the sessionId from the DAHR instance
         term.yellow(
@@ -74,42 +75,5 @@ export class DAHRFactory {
         term.yellow(`[DAHRFactory] No DAHR found for sessionId: ${sessionId}\n`)
 
         return undefined
-    }
-
-    /**
-     * Delete a DAHR instance by sessionId.
-     * @param {string} sessionId - The session ID.
-     */
-    deleteDAHR(sessionId: string): void {
-        if (this._dahrs.has(sessionId)) {
-            this._dahrs.delete(sessionId)
-            console.log(
-                `DAHR with sessionId ${sessionId} removed successfully.`,
-            )
-        } else {
-            console.log(`No DAHR found with sessionId ${sessionId}.`)
-        }
-    }
-
-    /**
-     * Get all DAHR instances.
-     * @returns {Array<[string, DAHR]>} An array of [sessionId, DAHR] pairs.
-     */
-    getAllDAHRs(): Array<[string, DAHR]> {
-        return Array.from(this._dahrs.entries()).map(
-            ([sessionId, { dahr }]) => [sessionId, dahr],
-        )
-    }
-
-    /**
-     * Get all DAHR instances for a specific session.
-     * @param {string} sessionId - The session ID.
-     * @returns {Array<[string, DAHR]>} An array of [sessionId, DAHR] pairs.
-     */
-    getUserDAHRs(sessionId: string): Array<[string, DAHR]> {
-        return Array.from(this._dahrs.entries())
-            // eslint-disable-next-line @typescript-eslint/naming-convention, @typescript-eslint/no-unused-vars
-            .filter(([_, { dahr }]) => dahr.sessionId === sessionId)
-            .map(([sessionId, { dahr }]) => [sessionId, dahr])
     }
 }

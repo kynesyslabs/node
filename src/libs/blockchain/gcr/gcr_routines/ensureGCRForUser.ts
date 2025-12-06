@@ -1,10 +1,22 @@
 // ! TODO: This method should create the GCR for a user if it doesn't exist
 
-import Datasource from "src/model/datasource"
-import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import HandleGCR from "../handleGCR"
+import Datasource from "src/model/datasource"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-export default async function ensureGCRForUser(pubkey: string): Promise<GCRMain> {
+import { validateEd25519Address } from "@kynesyslabs/demosdk/utils"
+
+export default async function ensureGCRForUser(
+    pubkey: string,
+): Promise<GCRMain> {
+    if (!pubkey.startsWith("0x")) {
+        pubkey = `0x${pubkey}`
+    }
+
+    const isValidPubKey = validateEd25519Address(pubkey)
+    if (!isValidPubKey) {
+        throw new Error("Invalid public key")
+    }
+
     // TODO Create the GCR for the user if it doesn't exist
     // TODO Create the GCR extended for the user if it doesn't exist
     const db = await Datasource.getInstance()

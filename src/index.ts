@@ -10,35 +10,30 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import "reflect-metadata"
-
-import * as dotenv from "dotenv"
+import net from "net"
 import * as fs from "fs"
-
-import { getSharedState } from "./utilities/sharedState"
-import { server_rpc } from "./libs/network" // NOTE This is started in warmup
+import "reflect-metadata"
+import * as dotenv from "dotenv"
 import terminalkit from "terminal-kit"
 
-import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
-// import * as eiows from 'eiows';
-import { PeerManager } from "./libs/peer"
-// import commandLine from "./utilities/commandLine"
-import peerBootstrap from "./libs/peer/routines/peerBootstrap"
-import groundControl from "./libs/utils/demostdlib/groundControl"
-import mainLoop from "./utilities/mainLoop"
-import log from "src/utilities/logger"
 import { Peer } from "./libs/peer"
+import { PeerManager } from "./libs/peer"
+import log from "src/utilities/logger"
+import Chain from "./libs/blockchain/chain"
+import mainLoop from "./utilities/mainLoop"
+import { serverRpcBun } from "./libs/network/server_rpc"
+import { getSharedState } from "./utilities/sharedState"
+import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
-import net from "net"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
-import { serverRpcBun } from "./libs/network/server_rpc"
-import { hexToUint8Array, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-import { RelayRetryService } from "./libs/network/dtr/relayRetryService"
-
-const term = terminalkit.terminal
+import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
+import { DTRManager } from "./libs/network/dtr/relayRetryService"
 
 dotenv.config()
+const term = terminalkit.terminal
 
 // NOTE This is a global variable that will be used to store the warmup routine and the index needed variables
 const indexState: {
@@ -53,6 +48,9 @@ const indexState: {
     enough_peers: boolean
     PeerList: Peer[]
     peerManager: PeerManager
+    MCP_SERVER_PORT: number
+    MCP_ENABLED: boolean
+    mcpServer: any
 } = {
     OVERRIDE_PORT: null,
     OVERRIDE_IS_TESTER: null,
@@ -65,6 +63,9 @@ const indexState: {
     enough_peers: true,
     PeerList: [],
     peerManager: null,
+    MCP_SERVER_PORT: 0,
+    MCP_ENABLED: true,
+    mcpServer: null,
 }
 
 // SECTION Preparation methods
@@ -155,11 +156,6 @@ async function warmup() {
     log.info("[MAIN] Starting the node")
 
     indexState.enough_peers = true // ? Review this
-    // INFO Loading the known peers
-    if (!fs.existsSync("./demos_peerlist.json")) {
-        indexState.enough_peers = false
-        console.log("No peers found, listening for peers...")
-    }
 
     // ANCHOR Overrides
     indexState.OVERRIDE_PORT = null
@@ -188,6 +184,14 @@ async function warmup() {
     indexState.SIGNALING_SERVER_PORT = await getNextAvailablePort(
         indexState.SIGNALING_SERVER_PORT,
     )
+
+    // MCP Server configuration
+    indexState.MCP_SERVER_PORT = parseInt(process.env.RPC_MCP_PORT, 10) || 0
+    if (indexState.MCP_SERVER_PORT == 0) {
+        indexState.MCP_SERVER_PORT =
+            parseInt(process.env.MCP_SERVER_PORT, 10) || 3001
+    }
+    indexState.MCP_ENABLED = process.env.MCP_ENABLED !== "false"
     // Setting the server port to the shared state
     getSharedState.serverPort = indexState.SERVER_PORT
     // Exposed URL
@@ -200,6 +204,8 @@ async function warmup() {
     console.log("RPC_FEE: " + indexState.RPC_FEE)
     console.log("SERVER_PORT: " + indexState.SERVER_PORT)
     console.log("SIGNALING_SERVER_PORT: " + indexState.SIGNALING_SERVER_PORT)
+    console.log("MCP_SERVER_PORT: " + indexState.MCP_SERVER_PORT)
+    console.log("MCP_ENABLED: " + indexState.MCP_ENABLED)
     console.log("= End of Configuration = \n")
     // Configure the logs directory
     log.setLogsDir(indexState.SERVER_PORT)
@@ -224,34 +230,25 @@ async function preMainLoop() {
     getSharedState.serverPort = indexState.SERVER_PORT // Sharing this with any module that needs it
     getSharedState.rpcFee = indexState.RPC_FEE
 
-    // ANCHOR The whole first part of main ensures the environment is ready to run
-    await getSharedState.identity.ensureIdentity() // ? Should we generate the identity option based too? (see SERVER_PORT and others    )
     // INFO: Initialize Unified Crypto with ed25519 private key
-    await ucrypto.generateAllIdentities(
-        getSharedState.identity.ed25519.privateKey as Uint8Array,
-    )
-    getSharedState.keypair = await ucrypto.getIdentity(
-        getSharedState.signingAlgorithm,
-    )
+    getSharedState.keypair = await getSharedState.identity.loadIdentity()
 
-    // const id = getSharedState.identity
     term.green("[BOOTSTRAP] Our identity is ready\n")
     // Log identity
-    const publicKeyHex = uint8ArrayToHex(getSharedState.keypair.publicKey as Uint8Array)
-    term.green(
-        "\n[MAIN] 🔗 WE ARE " + publicKeyHex + " 🔗 \n",
+    const publicKeyHex = uint8ArrayToHex(
+        getSharedState.keypair.publicKey as Uint8Array,
     )
+    term.green("\n[MAIN] 🔗 WE ARE " + publicKeyHex + " 🔗 \n")
     // Creating ourselves as a peer // ? Should this be removed in production?
     const ourselves = "http://127.0.0.1:" + indexState.SERVER_PORT
     getSharedState.connectionString = ourselves
     log.info("Our connection string is: " + ourselves)
     // And saves the public key file
-    fs.writeFileSync(
+    await fs.promises.writeFile(
         "publickey_" + getSharedState.signingAlgorithm + "_" + publicKeyHex,
         publicKeyHex + "\n",
     )
     log.info("Our public key is: " + publicKeyHex)
-
 
     // ANCHOR Preparing the peer manager and loading the peer list
     PeerManager.getInstance().loadPeerList()
@@ -275,6 +272,7 @@ async function preMainLoop() {
     term.yellow("[BOOTSTRAP] Looking for the genesis block\n")
     // INFO Now ensuring we have an initialized chain or initializing the genesis block
     await findGenesisBlock()
+    await loadGenesisIdentities()
     term.green("[GENESIS] 🖥️ Found the genesis block\n")
 
     // Loading the peers
@@ -294,10 +292,24 @@ async function preMainLoop() {
             indexState.peerManager.getPeers().length +
             ")\n",
     )
+    // INFO: Set initial last block data
+    const lastBlock = await Chain.getLastBlock()
+    getSharedState.lastBlockNumber = lastBlock.number
+    getSharedState.lastBlockHash = lastBlock.hash
 }
 
-// ANCHOR Entry point
+/**
+ * Bootstraps the node and starts its network services and background managers.
+ *
+ * Performs chain setup, warmup, time calibration, and pre-main-loop initialization; then ensures peer availability, starts the signaling server, optionally starts the MCP server, and initializes the DTR relay retry service when running in production.
+ *
+ * Side effects:
+ * - May call process.exit(1) if the signaling server fails to start.
+ * - Sets shared-state flags such as `isSignalingServerStarted` and `isMCPServerStarted`.
+ * - Starts background services (MCP server and DTRManager) when configured.
+ */
 async function main() {
+    await Chain.setup()
     // INFO Warming up the node (including arguments digesting)
     await warmup()
     // INFO Calibrating the time at the start of the node
@@ -333,16 +345,51 @@ async function main() {
             console.log("[MAIN] Failed to start the signaling server")
             process.exit(1)
         }
+
+        // Start MCP server (failsafe)
+        if (indexState.MCP_ENABLED) {
+            try {
+                const { createDemosMCPServer, createDemosNetworkTools } =
+                    await import("./features/mcp")
+
+                indexState.MCP_SERVER_PORT = await getNextAvailablePort(
+                    indexState.MCP_SERVER_PORT,
+                )
+
+                const mcpServer = createDemosMCPServer({
+                    transport: "sse",
+                    port: indexState.MCP_SERVER_PORT,
+                    host: "localhost",
+                })
+
+                const tools = createDemosNetworkTools()
+                tools.forEach(tool => mcpServer.registerTool(tool))
+
+                await mcpServer.start()
+
+                indexState.mcpServer = mcpServer
+                getSharedState.isMCPServerStarted = true
+                console.log(
+                    `[MAIN] MCP server started on port ${indexState.MCP_SERVER_PORT}`,
+                )
+            } catch (error) {
+                console.log("[MAIN] Failed to start MCP server:", error)
+                getSharedState.isMCPServerStarted = false
+                // Continue without MCP (failsafe)
+            }
+        }
         term.yellow("[MAIN] ✅ Starting the background loop\n")
         // ANCHOR Starting the main loop
-        mainLoop() // Is an async function so running without waiting send that to the background
-        
+        // mainLoop() // Is an async function so running without waiting send that to the background
+
         // Start DTR relay retry service after background loop initialization
         // The service will wait for syncStatus to be true before actually processing
         if (getSharedState.PROD) {
-            console.log("[DTR] Initializing relay retry service (will start after sync)")
+            console.log(
+                "[DTR] Initializing relay retry service (will start after sync)",
+            )
             // Service will check syncStatus internally before processing
-            RelayRetryService.getInstance().start()
+            DTRManager.getInstance().start()
         }
     }
 }
@@ -351,7 +398,7 @@ async function main() {
 process.on("SIGINT", () => {
     console.log("[DTR] Received SIGINT, shutting down gracefully...")
     if (getSharedState.PROD) {
-        RelayRetryService.getInstance().stop()
+        DTRManager.getInstance().stop()
     }
     process.exit(0)
 })
@@ -359,7 +406,7 @@ process.on("SIGINT", () => {
 process.on("SIGTERM", () => {
     console.log("[DTR] Received SIGTERM, shutting down gracefully...")
     if (getSharedState.PROD) {
-        RelayRetryService.getInstance().stop()
+        DTRManager.getInstance().stop()
     }
     process.exit(0)
 })
