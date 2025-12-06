@@ -153,3 +153,17 @@ claudedocs
 docs/storage_features
 temp
 STORAGE_PROGRAMS_SPEC.md
+omniprotocol_fixtures_scripts
+BUGS_AND_SECURITY_REPORT.md
+CEREMONY_COORDINATION.md
+PR_REVIEW_COMPREHENSIVE.md
+PR_REVIEW_RAW.md
+REVIEWER_QUESTIONS_ANSWERED.md
+ZK_CEREMONY_GIT_WORKFLOW.md
+ZK_CEREMONY_GUIDE.md
+attestation_20251204_125424.txt
+captraf.sh
+http-capture-1762006580.pcap
+http-capture-1762008909.pcap
+http-traffic.json
+prop_agent
