@@ -75,6 +75,59 @@ confirm() {
     esac
 }
 
+# Run apt command with docker conflict auto-fix
+run_apt() {
+    local apt_output
+    local apt_exit_code
+
+    apt_output=$(sudo apt "$@" 2>&1)
+    apt_exit_code=$?
+
+    if [ $apt_exit_code -ne 0 ]; then
+        # Check for docker Signed-By conflict
+        if echo "$apt_output" | grep -q "Conflicting values set for option Signed-By"; then
+            log_warn "Docker apt source conflict detected, fixing..."
+            sudo rm -f /etc/apt/sources.list.d/docker.sources 2>/dev/null || true
+            sudo rm -f /etc/apt/sources.list.d/docker.list 2>/dev/null || true
+            sudo apt update
+            # Retry the original command
+            sudo apt "$@"
+            return $?
+        else
+            echo "$apt_output"
+            return $apt_exit_code
+        fi
+    else
+        echo "$apt_output"
+        return 0
+    fi
+}
+
+# Run bun install with permission error auto-fix
+run_bun_install() {
+    local bun_output
+    local bun_exit_code
+
+    bun_output=$(bun install 2>&1)
+    bun_exit_code=$?
+
+    if [ $bun_exit_code -ne 0 ]; then
+        # Check for permission/authorization errors
+        if echo "$bun_output" | grep -qiE "permission|EACCES|authorization|denied"; then
+            log_warn "Permission error detected, cleaning node_modules and retrying..."
+            sudo rm -rf node_modules
+            bun install
+            return $?
+        else
+            echo "$bun_output"
+            return $bun_exit_code
+        fi
+    else
+        echo "$bun_output"
+        return 0
+    fi
+}
+
 cleanup_on_error() {
     log_error "An error occurred. Attempting to restore original state..."
 
@@ -112,6 +165,15 @@ trap cleanup_on_error ERR
 
 log_step "STEP 1/9: Pre-flight Checks"
 
+# Get sudo authorization upfront so we don't have to ask later
+log_info "Requesting sudo authorization (may be needed later)..."
+sudo -v || {
+    log_error "sudo authorization failed or was denied"
+    log_info "Some operations may require sudo. Please ensure you have sudo access."
+    exit 1
+}
+log_success "sudo authorization obtained"
+
 # Check we're in the node repository root
 if [ ! -f "package.json" ] || ! grep -q "demos-node-software" package.json 2>/dev/null; then
     log_error "This script must be run from the demos node repository root!"
@@ -145,14 +207,16 @@ if ! command -v gh &> /dev/null; then
         log_info "Adding GitHub CLI repository..."
 
         # Install prerequisites
-        (type -p wget >/dev/null || (sudo apt update && sudo apt-get install wget -y)) && \
-        sudo mkdir -p -m 755 /etc/apt/keyrings && \
-        out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg && \
-        cat $out | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && \
-        sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
-        sudo apt update && \
-        sudo apt install gh -y
+        if ! type -p wget >/dev/null; then
+            run_apt update && run_apt install wget -y
+        fi
+        sudo mkdir -p -m 755 /etc/apt/keyrings
+        out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg
+        cat $out | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
+        sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+        run_apt update
+        run_apt install gh -y
 
         if ! command -v gh &> /dev/null; then
             log_error "GitHub CLI installation failed!"
@@ -251,7 +315,7 @@ if ! command -v npx &> /dev/null; then
     if ! command -v npx &> /dev/null; then
         if confirm "Do you want to install npm (which includes npx) via apt now?"; then
             log_info "Installing npm..."
-            sudo apt update && sudo apt install npm -y
+            run_apt update && run_apt install npm -y
 
             # Refresh PATH to pick up newly installed npm/npx
             hash -r 2>/dev/null || true
@@ -387,7 +451,7 @@ log_success "Switched to zk_ids branch"
 # Install dependencies if needed
 if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules" ]; then
     log_info "Installing dependencies..."
-    bun install
+    run_bun_install
 fi
 
 # =============================================================================
