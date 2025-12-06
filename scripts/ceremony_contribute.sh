@@ -174,6 +174,11 @@ sudo -v || {
 }
 log_success "sudo authorization obtained"
 
+# Run apt update early to catch docker conflict and other issues upfront
+log_info "Updating apt cache..."
+run_apt update >/dev/null 2>&1 || true
+log_success "apt cache updated"
+
 # Check we're in the node repository root
 if [ ! -f "package.json" ] || ! grep -q "demos-node-software" package.json 2>/dev/null; then
     log_error "This script must be run from the demos node repository root!"
