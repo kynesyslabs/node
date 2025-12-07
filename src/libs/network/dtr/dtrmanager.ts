@@ -10,9 +10,14 @@ import {
     SigningAlgorithm,
     ValidityData,
 } from "@kynesyslabs/demosdk/types"
-import { Hashing, hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import {
+    Hashing,
+    hexToUint8Array,
+    ucrypto,
+} from "@kynesyslabs/demosdk/encryption"
 
 import TxUtils from "../../blockchain/transaction"
+import { Waiter } from "@/utilities/waiter"
 
 /**
  * DTR (Distributed Transaction Routing) Relay Retry Service
@@ -46,6 +51,10 @@ export class DTRManager {
             DTRManager.instance = new DTRManager()
         }
         return DTRManager.instance
+    }
+
+    static get isWaitingForBlock(): boolean {
+        return Waiter.isWaiting(Waiter.keys.DTR_WAIT_FOR_BLOCK)
     }
 
     /**
@@ -195,28 +204,31 @@ export class DTRManager {
      *
      * @returns RPCResponse
      */
-    public static async relayTransaction(
+    public static async relayTransactions(
         validator: Peer,
-        validityData: ValidityData,
+        payload: ValidityData[],
     ): Promise<RPCResponse> {
         try {
             log.debug(
                 "[DTR] Attempting to relay transaction to validator: " +
                     validator.identity,
             )
-            log.debug("[DTR] ValidityData: " + JSON.stringify(validityData))
+            log.debug("[DTR] ValidityData: " + JSON.stringify(payload))
 
-            const res = await validator.call(
+            const res = await validator.longCall(
                 {
                     method: "nodeCall",
                     params: [
                         {
                             message: "RELAY_TX",
-                            data: { validityData },
+                            data: payload,
                         },
                     ],
                 },
                 true,
+                250,
+                4,
+                [400, 403], // Allowed error response codes
             )
 
             return {
@@ -350,6 +362,21 @@ export class DTRManager {
         )
     }
 
+    static async receiveRelayedTransactions(
+        payloads: ValidityData[],
+    ): Promise<RPCResponse> {
+        const response = await Promise.all(
+            payloads.map(payload => this.receiveRelayedTransaction(payload)),
+        )
+
+        return {
+            result: 200,
+            response,
+            extra: null,
+            require_reply: false,
+        }
+    }
+
     /**
      * Receives a relayed transaction from a validator
      *
@@ -361,11 +388,37 @@ export class DTRManager {
         const response: RPCResponse = {
             result: 200,
             response: null,
-            extra: null,
+            extra: {
+                txhash: validityData.data.transaction.hash,
+            },
             require_reply: false,
         }
 
         try {
+            if (getSharedState.inConsensusLoop) {
+                log.only("[receiveRelayedTransaction] in consensus loop, adding tx in cache: " + validityData.data.transaction.hash)
+                DTRManager.validityDataCache.set(
+                    validityData.data.transaction.hash,
+                    validityData,
+                )
+
+                // INFO: Start the relay waiter
+                if (!DTRManager.isWaitingForBlock) {
+                    log.only("[receiveRelayedTransaction] not waiting for block, starting relay")
+                    DTRManager.waitForBlockThenRelay()
+                }
+
+                log.only("[receiveRelayedTransaction] returning success")
+                return {
+                    success: true,
+                    response: {
+                        message: "Transaction relayed to validators",
+                    },
+                    extra: null,
+                    require_reply: false,
+                }
+            }
+
             // 1. Verify we are actually a validator for next block
             const isValidator = await isValidatorForNextBlock()
             if (!isValidator) {
@@ -549,6 +602,53 @@ export class DTRManager {
                 response: {
                     message: "FAILED: Error processing relayed transaction",
                 },
+            }
+        }
+    }
+
+    static async waitForBlockThenRelay() {
+        log.only("Enter: waitForBlockThenRelay")
+        const cvsa: string = await Waiter.wait(Waiter.keys.DTR_WAIT_FOR_BLOCK)
+        log.only("waitForBlockThenRelay resolved. CVSA: " + cvsa)
+
+        // relay transactions here
+        const txs = Array.from(DTRManager.validityDataCache.values())
+
+        log.only("Transaction found: " + txs.length)
+        const validators = await getShard(cvsa)
+        log.only(
+            "Validators found: " +
+                JSON.stringify(validators.map(v => v.connection.string)),
+        )
+
+        // if we're up next, keep the transactions
+        if (validators.some(v => v.identity === getSharedState.publicKeyHex)) {
+            log.only("We're up next, keeping transactions")
+            return await Promise.all(
+                txs.map(tx =>
+                    Mempool.addTransaction({
+                        ...tx.data.transaction,
+                        reference_block: tx.data.reference_block,
+                    }),
+                ),
+            )
+        }
+
+        log.only("Relaying transactions to validators")
+        const nodeResults = await Promise.all(
+            validators.map(validator => this.relayTransactions(validator, txs)),
+        )
+
+        for (const result of nodeResults) {
+            log.only("result: " + JSON.stringify(result))
+
+            if (result.result === 200) {
+                for (const txres of result.response) {
+                    if (txres.result == 200) {
+                        log.only("deleting tx: " + txres.extra.txhash)
+                        DTRManager.validityDataCache.delete(txres.extra.txhash)
+                    }
+                }
             }
         }
     }

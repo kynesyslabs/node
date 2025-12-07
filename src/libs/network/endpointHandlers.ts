@@ -60,7 +60,7 @@ import {
 import { IdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
-import { DTRManager } from "./dtr/relayRetryService"
+import { DTRManager } from "./dtr/dtrmanager"
 /* // ! Note: this will be removed once demosWork is in place
 import {
     NativePayload,
@@ -424,33 +424,31 @@ export default class ServerHandlers {
                 const { isValidator, validators } =
                     await isValidatorForNextBlock()
 
-                // if (!isValidator) {
-                if (true) {
-                    log.debug(
+                if (!isValidator) {
+                    log.only(
                         "[DTR] Non-validator node: attempting relay to all validators",
                     )
                     const availableValidators = validators.sort(
                         () => Math.random() - 0.5,
                     ) // Random order for load balancing
 
-                    log.debug(
+                    log.only(
                         `[DTR] Found ${availableValidators.length} available validators, trying all`,
                     )
 
                     // Try ALL validators in random order
                     const results = await Promise.allSettled(
                         availableValidators.map(validator =>
-                            DTRManager.relayTransaction(
-                                validator,
+                            DTRManager.relayTransactions(validator, [
                                 validatedData,
-                            ),
+                            ]),
                         ),
                     )
 
                     for (const result of results) {
                         if (result.status === "fulfilled") {
                             const response = result.value
-                            log.debug("response: " + JSON.stringify(response))
+                            log.only("response: " + JSON.stringify(response))
 
                             if (response.result == 200) {
                                 continue
@@ -463,7 +461,41 @@ export default class ServerHandlers {
                             )
                         }
                     }
+
+                    return {
+                        success: true,
+                        response: {
+                            message: "Transaction relayed to validators",
+                        },
+                        extra: null,
+                        require_reply: false,
+                    }
                 }
+
+                if (getSharedState.inConsensusLoop) {
+                    log.only("in consensus loop, setting tx in cache: " + queriedTx.hash)
+                    DTRManager.validityDataCache.set(
+                        queriedTx.hash,
+                        validatedData,
+                    )
+
+                    // INFO: Start the relay waiter
+                    if (!DTRManager.isWaitingForBlock) {
+                        log.only("not waiting for block, starting relay")
+                        DTRManager.waitForBlockThenRelay()
+                    }
+
+                    return {
+                        success: true,
+                        response: {
+                            message: "Transaction relayed to validators",
+                        },
+                        extra: null,
+                        require_reply: false,
+                    }
+                }
+
+                log.only("👀 not in consensus loop, adding tx to mempool: " + queriedTx.hash)
             }
 
             // Proceeding with the mempool addition (either we are a validator or this is a fallback)

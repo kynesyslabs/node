@@ -320,25 +320,21 @@ export default class Chain {
         position?: number,
         cleanMempool = true,
     ): Promise<Blocks> {
-        log.info(
+        log.only(
             "[insertBlock] Attempting to insert a block with hash: " +
                 block.hash,
         )
         // Convert the transactions strings back to Transaction objects
-        log.info("[insertBlock] Extracting transactions from block")
+        log.only("[insertBlock] Extracting transactions from block")
         // ! FIXME The below fails when a tx like a web2Request is inserted
         const orderedTransactionsHashes = block.content.ordered_transactions
-        log.info(JSON.stringify(orderedTransactionsHashes))
-        // Fetch transaction entities from the repository based on ordered transaction hashes
-        const transactionEntities = await Mempool.getTransactionsByHashes(
-            orderedTransactionsHashes,
+        log.only(
+            "[insertBlock] Ordered transactions hashes: " +
+                JSON.stringify(orderedTransactionsHashes),
         )
+        // Fetch transaction entities from the repository based on ordered transaction hashes
 
         const newBlock = new Blocks()
-        log.info("[CHAIN] reading hash")
-        log.info(JSON.stringify(transactionEntities))
-        log.info("[CHAIN] bork")
-
         newBlock.hash = block.hash
         newBlock.number = block.number
         newBlock.proposer = block.proposer
@@ -347,9 +343,7 @@ export default class Chain {
         newBlock.validation_data = block.validation_data
         newBlock.content = block.content
         newBlock.status = "confirmed"
-        newBlock.content.ordered_transactions = transactionEntities.map(
-            tx => tx.hash,
-        )
+        newBlock.content.ordered_transactions = orderedTransactionsHashes
 
         // Check if the position is provided and if a block with that position exists
         let existingBlock = null
@@ -402,10 +396,20 @@ export default class Chain {
                 "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
             )
             // REVIEW We then add the transactions to the Transactions repository
+            const transactionEntities = await Mempool.getTransactionsByHashes(
+                orderedTransactionsHashes,
+            )
+
+            log.only(
+                "[insertBlock] Transaction entities: " +
+                    JSON.stringify(transactionEntities.map(tx => tx.hash)),
+            )
+
             for (let i = 0; i < transactionEntities.length; i++) {
                 const tx = transactionEntities[i]
                 await this.insertTransaction(tx)
             }
+
             // REVIEW And we clean the mempool
             if (cleanMempool) {
                 await Mempool.removeTransactionsByHashes(

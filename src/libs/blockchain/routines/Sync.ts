@@ -25,7 +25,6 @@ import {
     Transaction,
 } from "@kynesyslabs/demosdk/types"
 import { BlockNotFoundError, PeerUnreachableError } from "src/exceptions"
-import GCR from "../gcr/gcr"
 import HandleGCR from "../gcr/handleGCR"
 
 const term = terminalkit.terminal
@@ -379,7 +378,7 @@ async function requestBlocks() {
     while (getSharedState.lastBlockNumber <= latestBlock()) {
         const blockToAsk = getSharedState.lastBlockNumber + 1
         // log.debug("[fastSync] Sleeping for 1 second")
-        // await sleep(250)
+        await sleep(250)
         try {
             await downloadBlock(peer, blockToAsk)
         } catch (error) {

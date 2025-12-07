@@ -32,8 +32,7 @@ import {
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
-import { PeerManager } from "../peer"
-import { DTRManager } from "./dtr/relayRetryService"
+import { DTRManager } from "./dtr/dtrmanager"
 
 export interface NodeCall {
     message: string
@@ -109,8 +108,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "getLastBlockHash":
             response.response = await Chain.getLastBlockHash()
             break
-        case "getBlockByNumber":
+        case "getBlockByNumber": {
             return await getBlockByNumber(data)
+        }
         case "getBlocks":
             return await getBlocks(data)
         case "getTransactions":
@@ -474,8 +474,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         // INFO For real, nothing here to be seen
         // REVIEW DTR: Handle relayed transactions from non-validator nodes
         case "RELAY_TX":
-            return await DTRManager.receiveRelayedTransaction(
-                data.validityData as ValidityData,
+            return await DTRManager.receiveRelayedTransactions(
+                data as ValidityData[],
             )
         case "hots":
             console.log("[SERVER] Received hots")

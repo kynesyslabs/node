@@ -14,8 +14,9 @@ import Chain from "src/libs/blockchain/chain"
 export default async function getShard(seed: string): Promise<Peer[]> {
     // ! we need to get the peers from the last 3 blocks too
     const allPeers = await PeerManager.getInstance().getOnlinePeers()
-    return allPeers
-    const peers = allPeers.filter(peer => peer.status.online && peer.sync.status)
+    const peers = allPeers.filter(
+        peer => peer.status.online && peer.sync.status,
+    )
 
     // Select up to 10 peers from the list using the seed as a source of randomness
     let maxShardSize = getSharedState.shardSize
