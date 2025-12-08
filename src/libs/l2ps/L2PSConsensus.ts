@@ -23,6 +23,17 @@ import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import log from "@/utilities/logger"
 
 /**
+ * Result of applying a single proof
+ */
+interface ProofResult {
+    proofId: number
+    l2psUid: string
+    success: boolean
+    message: string
+    editsApplied: number
+}
+
+/**
  * Result of applying L2PS proofs at consensus
  */
 export interface L2PSConsensusResult {
@@ -39,13 +50,7 @@ export interface L2PSConsensusResult {
     /** L1 batch transaction hashes created */
     l1BatchTxHashes: string[]
     /** Details of each proof application */
-    proofResults: {
-        proofId: number
-        l2psUid: string
-        success: boolean
-        message: string
-        editsApplied: number
-    }[]
+    proofResults: ProofResult[]
 }
 
 /**
@@ -56,14 +61,53 @@ export interface L2PSConsensusResult {
 export default class L2PSConsensus {
     
     /**
+     * Collect transaction hashes from applied proofs for mempool cleanup
+     */
+    private static collectTransactionHashes(appliedProofs: L2PSProof[]): string[] {
+        const confirmedTxHashes: string[] = []
+        for (const proof of appliedProofs) {
+            if (proof.transaction_hashes && proof.transaction_hashes.length > 0) {
+                confirmedTxHashes.push(...proof.transaction_hashes)
+                log.debug(`[L2PS Consensus] Proof ${proof.id} has ${proof.transaction_hashes.length} tx hashes`)
+            } else if (proof.l1_batch_hash) {
+                confirmedTxHashes.push(proof.l1_batch_hash)
+                log.debug(`[L2PS Consensus] Proof ${proof.id} using l1_batch_hash as fallback`)
+            } else {
+                log.warning(`[L2PS Consensus] Proof ${proof.id} has no transaction hashes to remove`)
+            }
+        }
+        return confirmedTxHashes
+    }
+
+    /**
+     * Process applied proofs - cleanup mempool and create L1 batch
+     */
+    private static async processAppliedProofs(
+        pendingProofs: L2PSProof[],
+        proofResults: ProofResult[],
+        blockNumber: number,
+        result: L2PSConsensusResult
+    ): Promise<void> {
+        const appliedProofs = pendingProofs.filter(proof => 
+            proofResults.find(r => r.proofId === proof.id)?.success
+        )
+
+        // Remove confirmed transactions from mempool
+        const confirmedTxHashes = this.collectTransactionHashes(appliedProofs)
+        if (confirmedTxHashes.length > 0) {
+            const deleted = await L2PSMempool.deleteByHashes(confirmedTxHashes)
+            log.info(`[L2PS Consensus] Removed ${deleted} confirmed transactions from mempool`)
+        }
+
+        // Create L1 batch transaction
+        const batchTxHash = await this.createL1BatchTransaction(appliedProofs, blockNumber)
+        if (batchTxHash) {
+            result.l1BatchTxHashes.push(batchTxHash)
+        }
+    }
+
+    /**
      * Apply all pending L2PS proofs at consensus time
-     * 
-     * This is called from PoRBFT.ts during the consensus routine,
-     * similar to how regular GCR edits are applied.
-     * 
-     * @param blockNumber - Current block number being forged
-     * @param simulate - If true, verify proofs but don't apply edits
-     * @returns Result of proof applications
      */
     static async applyPendingProofs(
         blockNumber: number,
@@ -81,7 +125,6 @@ export default class L2PSConsensus {
         }
 
         try {
-            // Get all pending proofs
             const pendingProofs = await L2PSProofManager.getProofsForBlock(blockNumber)
 
             if (pendingProofs.length === 0) {
@@ -106,49 +149,14 @@ export default class L2PSConsensus {
                 }
             }
 
-            // Deduplicate affected accounts
             result.affectedAccounts = [...new Set(result.affectedAccounts)]
 
             // Process successfully applied proofs
             if (!simulate && result.proofsApplied > 0) {
-                const appliedProofs = pendingProofs.filter(proof => 
-                    result.proofResults.find(r => r.proofId === proof.id)?.success
-                )
-
-                // Collect transaction hashes from applied proofs for cleanup
-                const confirmedTxHashes: string[] = []
-                for (const proof of appliedProofs) {
-                    // Use transaction_hashes if available, otherwise fallback to l1_batch_hash
-                    if (proof.transaction_hashes && proof.transaction_hashes.length > 0) {
-                        confirmedTxHashes.push(...proof.transaction_hashes)
-                        log.debug(`[L2PS Consensus] Proof ${proof.id} has ${proof.transaction_hashes.length} tx hashes`)
-                    } else if (proof.l1_batch_hash) {
-                        // Fallback: l1_batch_hash is the encrypted tx hash in mempool
-                        confirmedTxHashes.push(proof.l1_batch_hash)
-                        log.debug(`[L2PS Consensus] Proof ${proof.id} using l1_batch_hash as fallback: ${proof.l1_batch_hash.slice(0, 20)}...`)
-                    } else {
-                        log.warning(`[L2PS Consensus] Proof ${proof.id} has no transaction hashes to remove`)
-                    }
-                }
-                
-                // Remove confirmed transactions from mempool immediately (like L1 mempool)
-                if (confirmedTxHashes.length > 0) {
-                    const deleted = await L2PSMempool.deleteByHashes(confirmedTxHashes)
-                    log.info(`[L2PS Consensus] Removed ${deleted} confirmed transactions from mempool`)
-                }
-
-                // Create L1 batch transaction (optional, for traceability)
-                const batchTxHash = await this.createL1BatchTransaction(
-                    appliedProofs,
-                    blockNumber
-                )
-                if (batchTxHash) {
-                    result.l1BatchTxHashes.push(batchTxHash)
-                }
+                await this.processAppliedProofs(pendingProofs, result.proofResults, blockNumber, result)
             }
 
             result.message = `Applied ${result.proofsApplied}/${pendingProofs.length} L2PS proofs with ${result.totalEditsApplied} GCR edits`
-            
             log.info(`[L2PS Consensus] ${result.message}`)
 
             return result
@@ -164,18 +172,75 @@ export default class L2PSConsensus {
     /**
      * Apply a single proof's GCR edits to L1 state
      */
+    /**
+     * Create mock transaction for GCR edit application
+     */
+    private static createMockTx(proof: L2PSProof, editAccount: string) {
+        return {
+            hash: proof.transactions_hash,
+            content: {
+                type: "l2ps",
+                from: editAccount,
+                to: editAccount,
+                timestamp: Date.now()
+            }
+        }
+    }
+
+    /**
+     * Rollback previously applied edits on failure
+     */
+    private static async rollbackEdits(
+        proof: L2PSProof,
+        editResults: GCRResult[],
+        mockTx: any
+    ): Promise<void> {
+        for (let i = editResults.length - 2; i >= 0; i--) {
+            if (editResults[i].success) {
+                const rollbackEdit = { ...proof.gcr_edits[i], isRollback: true }
+                await HandleGCR.apply(rollbackEdit, mockTx, true, false)
+            }
+        }
+    }
+
+    /**
+     * Apply GCR edits from a proof
+     */
+    private static async applyGCREdits(
+        proof: L2PSProof,
+        simulate: boolean,
+        proofResult: ProofResult
+    ): Promise<boolean> {
+        const editResults: GCRResult[] = []
+        
+        for (const edit of proof.gcr_edits) {
+            const editAccount = 'account' in edit ? edit.account as string : proof.affected_accounts[0] || ''
+            const mockTx = this.createMockTx(proof, editAccount)
+
+            const editResult = await HandleGCR.apply(edit, mockTx as any, false, simulate)
+            editResults.push(editResult)
+
+            if (!editResult.success) {
+                proofResult.message = `GCR edit failed: ${editResult.message}`
+                if (!simulate) {
+                    await this.rollbackEdits(proof, editResults, mockTx)
+                    await L2PSProofManager.markProofRejected(proof.id, proofResult.message)
+                }
+                return false
+            }
+
+            proofResult.editsApplied++
+        }
+
+        return true
+    }
+
     private static async applyProof(
         proof: L2PSProof,
         blockNumber: number,
         simulate: boolean
-    ): Promise<{
-        proofId: number
-        l2psUid: string
-        success: boolean
-        message: string
-        editsApplied: number
-    }> {
-        const proofResult = {
+    ): Promise<ProofResult> {
+        const proofResult: ProofResult = {
             proofId: proof.id,
             l2psUid: proof.l2ps_uid,
             success: false,
@@ -184,7 +249,7 @@ export default class L2PSConsensus {
         }
 
         try {
-            // Step 1: Verify the proof
+            // Verify the proof
             const isValid = await L2PSProofManager.verifyProof(proof)
             if (!isValid) {
                 proofResult.message = "Proof verification failed"
@@ -194,62 +259,19 @@ export default class L2PSConsensus {
                 return proofResult
             }
 
-            // Step 2: Apply each GCR edit to L1 state
-            const editResults: GCRResult[] = []
-            
-            for (const edit of proof.gcr_edits) {
-                // Get account from edit (for balance/nonce edits)
-                const editAccount = 'account' in edit ? edit.account as string : proof.affected_accounts[0] || ''
-                
-                // Create a mock transaction for HandleGCR.apply
-                const mockTx = {
-                    hash: proof.transactions_hash,
-                    content: {
-                        type: "l2ps",
-                        from: editAccount,
-                        to: editAccount,
-                        timestamp: Date.now()
-                    }
-                }
-
-                const editResult = await HandleGCR.apply(
-                    edit,
-                    mockTx as any,
-                    false, // not rollback
-                    simulate
-                )
-
-                editResults.push(editResult)
-
-                if (!editResult.success) {
-                    proofResult.message = `GCR edit failed: ${editResult.message}`
-                    
-                    // If any edit fails, we need to rollback previous edits
-                    if (!simulate) {
-                        // Rollback already applied edits
-                        for (let i = editResults.length - 2; i >= 0; i--) {
-                            if (editResults[i].success) {
-                                const rollbackEdit = { ...proof.gcr_edits[i], isRollback: true }
-                                await HandleGCR.apply(rollbackEdit, mockTx as any, true, false)
-                            }
-                        }
-                        
-                        await L2PSProofManager.markProofRejected(proof.id, proofResult.message)
-                    }
-                    return proofResult
-                }
-
-                proofResult.editsApplied++
+            // Apply GCR edits
+            const success = await this.applyGCREdits(proof, simulate, proofResult)
+            if (!success) {
+                return proofResult
             }
 
-            // Step 3: Mark proof as applied
+            // Mark proof as applied
             if (!simulate) {
                 await L2PSProofManager.markProofApplied(proof.id, blockNumber)
             }
 
             proofResult.success = true
             proofResult.message = `Applied ${proofResult.editsApplied} GCR edits`
-
             log.info(`[L2PS Consensus] Proof ${proof.id} applied successfully: ${proofResult.editsApplied} edits`)
 
             return proofResult

@@ -120,89 +120,17 @@ export default class L2PSTransactionExecutor {
             log.info(`[L2PS Executor] Processing tx ${tx.hash} from L2PS ${l2psUid} (type: ${tx.content.type})`)
             
             // Generate GCR edits based on transaction type
-            // These edits are validated against L1 state but NOT applied yet
-            const gcrEdits: GCREdit[] = []
-            const affectedAccounts: string[] = []
-
-            switch (tx.content.type) {
-                case "native": {
-                    const nativeResult = await this.handleNativeTransaction(tx, simulate)
-                    if (!nativeResult.success) {
-                        return nativeResult
-                    }
-                    gcrEdits.push(...(nativeResult.gcr_edits || []))
-                    affectedAccounts.push(...(nativeResult.affected_accounts || []))
-                    break
-                }
-
-                case "demoswork":
-                    if (tx.content.gcr_edits && tx.content.gcr_edits.length > 0) {
-                        for (const edit of tx.content.gcr_edits) {
-                            const editResult = await this.validateGCREdit(edit, simulate)
-                            if (!editResult.success) {
-                                return editResult
-                            }
-                            gcrEdits.push(edit)
-                        }
-                        affectedAccounts.push(tx.content.from as string)
-                    } else {
-                        return {
-                            success: true,
-                            message: "DemosWork transaction recorded (no GCR edits)",
-                            affected_accounts: [tx.content.from as string]
-                        }
-                    }
-                    break
-
-                default:
-                    if (tx.content.gcr_edits && tx.content.gcr_edits.length > 0) {
-                        for (const edit of tx.content.gcr_edits) {
-                            const editResult = await this.validateGCREdit(edit, simulate)
-                            if (!editResult.success) {
-                                return editResult
-                            }
-                            gcrEdits.push(edit)
-                        }
-                        affectedAccounts.push(tx.content.from as string)
-                    } else {
-                        return {
-                            success: true,
-                            message: `Transaction type '${tx.content.type}' recorded`,
-                            affected_accounts: [tx.content.from as string]
-                        }
-                    }
+            const editsResult = await this.generateGCREdits(tx, simulate)
+            if (!editsResult.success) {
+                return editsResult
             }
 
+            const gcrEdits = editsResult.gcr_edits || []
+            const affectedAccounts = editsResult.affected_accounts || []
+
             // Create proof with GCR edits (if not simulating)
-            let proofId: number | undefined
-            let transactionId: number | undefined
-
             if (!simulate && gcrEdits.length > 0) {
-                // Create proof that will be applied at consensus
-                // l1BatchHash is the encrypted tx hash from mempool
-                const transactionHashes = [l1BatchHash]
-                const proofResult = await L2PSProofManager.createProof(
-                    l2psUid,
-                    l1BatchHash,
-                    gcrEdits,
-                    [...new Set(affectedAccounts)],
-                    transactionHashes.length,
-                    transactionHashes
-                )
-
-                if (!proofResult.success) {
-                    return {
-                        success: false,
-                        message: `Failed to create proof: ${proofResult.message}`
-                    }
-                }
-
-                proofId = proofResult.proof_id
-
-                // Record transaction in l2ps_transactions table
-                transactionId = await this.recordTransaction(l2psUid, tx, l1BatchHash)
-
-                log.info(`[L2PS Executor] Created proof ${proofId} for tx ${tx.hash} with ${gcrEdits.length} GCR edits`)
+                return this.createProofAndRecord(l2psUid, tx, l1BatchHash, gcrEdits, affectedAccounts)
             }
 
             return {
@@ -211,9 +139,7 @@ export default class L2PSTransactionExecutor {
                     ? `Validated: ${gcrEdits.length} GCR edits would be generated`
                     : `Proof created with ${gcrEdits.length} GCR edits (will apply at consensus)`,
                 gcr_edits: gcrEdits,
-                affected_accounts: [...new Set(affectedAccounts)],
-                proof_id: proofId,
-                transaction_id: transactionId
+                affected_accounts: [...new Set(affectedAccounts)]
             }
 
         } catch (error: any) {
@@ -222,6 +148,78 @@ export default class L2PSTransactionExecutor {
                 success: false,
                 message: `Execution failed: ${error.message}`
             }
+        }
+    }
+
+    /**
+     * Generate GCR edits based on transaction type
+     */
+    private static async generateGCREdits(
+        tx: Transaction,
+        simulate: boolean
+    ): Promise<L2PSExecutionResult> {
+        const gcrEdits: GCREdit[] = []
+        const affectedAccounts: string[] = []
+
+        if (tx.content.type === "native") {
+            return this.handleNativeTransaction(tx, simulate)
+        }
+
+        // Handle demoswork and other types with gcr_edits
+        if (tx.content.gcr_edits && tx.content.gcr_edits.length > 0) {
+            for (const edit of tx.content.gcr_edits) {
+                const editResult = await this.validateGCREdit(edit, simulate)
+                if (!editResult.success) {
+                    return editResult
+                }
+                gcrEdits.push(edit)
+            }
+            affectedAccounts.push(tx.content.from as string)
+            return { success: true, message: "GCR edits validated", gcr_edits: gcrEdits, affected_accounts: affectedAccounts }
+        }
+
+        // No GCR edits - just record
+        const message = tx.content.type === "demoswork" 
+            ? "DemosWork transaction recorded (no GCR edits)"
+            : `Transaction type '${tx.content.type}' recorded`
+        return { success: true, message, affected_accounts: [tx.content.from as string] }
+    }
+
+    /**
+     * Create proof and record transaction
+     */
+    private static async createProofAndRecord(
+        l2psUid: string,
+        tx: Transaction,
+        l1BatchHash: string,
+        gcrEdits: GCREdit[],
+        affectedAccounts: string[]
+    ): Promise<L2PSExecutionResult> {
+        const transactionHashes = [l1BatchHash]
+        const proofResult = await L2PSProofManager.createProof(
+            l2psUid,
+            l1BatchHash,
+            gcrEdits,
+            [...new Set(affectedAccounts)],
+            transactionHashes.length,
+            transactionHashes
+        )
+
+        if (!proofResult.success) {
+            return { success: false, message: `Failed to create proof: ${proofResult.message}` }
+        }
+
+        const transactionId = await this.recordTransaction(l2psUid, tx, l1BatchHash)
+
+        log.info(`[L2PS Executor] Created proof ${proofResult.proof_id} for tx ${tx.hash} with ${gcrEdits.length} GCR edits`)
+
+        return {
+            success: true,
+            message: `Proof created with ${gcrEdits.length} GCR edits (will apply at consensus)`,
+            gcr_edits: gcrEdits,
+            affected_accounts: [...new Set(affectedAccounts)],
+            proof_id: proofResult.proof_id,
+            transaction_id: transactionId
         }
     }
 
@@ -237,62 +235,57 @@ export default class L2PSTransactionExecutor {
         const gcrEdits: GCREdit[] = []
         const affectedAccounts: string[] = []
 
-        switch (nativePayload.nativeOperation) {
-            case "send": {
-                const [to, amount] = nativePayload.args as [string, number]
-                const sender = tx.content.from as string
+        if (nativePayload.nativeOperation === "send") {
+            const [to, amount] = nativePayload.args as [string, number]
+            const sender = tx.content.from as string
 
-                // Validate amount (type check and positive)
-                if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
-                    return { success: false, message: "Invalid amount: must be a positive number" }
-                }
-
-                // Check sender balance in L1 state
-                const senderAccount = await this.getOrCreateL1Account(sender)
-                if (BigInt(senderAccount.balance) < BigInt(amount)) {
-                    return {
-                        success: false,
-                        message: `Insufficient L1 balance: has ${senderAccount.balance}, needs ${amount}`
-                    }
-                }
-
-                // Ensure receiver account exists
-                await this.getOrCreateL1Account(to)
-
-                // Generate GCR edits for L1 state change
-                // These will be applied at consensus time
-                gcrEdits.push(
-                    {
-                        type: "balance",
-                        operation: "remove",
-                        account: sender,
-                        amount: amount,
-                        txhash: tx.hash,
-                        isRollback: false
-                    },
-                    {
-                        type: "balance",
-                        operation: "add",
-                        account: to,
-                        amount: amount,
-                        txhash: tx.hash,
-                        isRollback: false
-                    }
-                )
-
-                affectedAccounts.push(sender, to)
-                
-                log.info(`[L2PS Executor] Validated transfer: ${sender.slice(0, 16)}... -> ${to.slice(0, 16)}...: ${amount}`)
-                break
+            // Validate amount (type check and positive)
+            if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+                return { success: false, message: "Invalid amount: must be a positive number" }
             }
 
-            default: {
-                log.info(`[L2PS Executor] Unknown native operation: ${nativePayload.nativeOperation}`)
+            // Check sender balance in L1 state
+            const senderAccount = await this.getOrCreateL1Account(sender)
+            if (BigInt(senderAccount.balance) < BigInt(amount)) {
                 return {
-                    success: true,
-                    message: `Native operation '${nativePayload.nativeOperation}' not implemented`,
-                    affected_accounts: [tx.content.from as string]
+                    success: false,
+                    message: `Insufficient L1 balance: has ${senderAccount.balance}, needs ${amount}`
                 }
+            }
+
+            // Ensure receiver account exists
+            await this.getOrCreateL1Account(to)
+
+            // Generate GCR edits for L1 state change
+            // These will be applied at consensus time
+            gcrEdits.push(
+                {
+                    type: "balance",
+                    operation: "remove",
+                    account: sender,
+                    amount: amount,
+                    txhash: tx.hash,
+                    isRollback: false
+                },
+                {
+                    type: "balance",
+                    operation: "add",
+                    account: to,
+                    amount: amount,
+                    txhash: tx.hash,
+                    isRollback: false
+                }
+            )
+
+            affectedAccounts.push(sender, to)
+            
+            log.info(`[L2PS Executor] Validated transfer: ${sender.slice(0, 16)}... -> ${to.slice(0, 16)}...: ${amount}`)
+        } else {
+            log.info(`[L2PS Executor] Unknown native operation: ${nativePayload.nativeOperation}`)
+            return {
+                success: true,
+                message: `Native operation '${nativePayload.nativeOperation}' not implemented`,
+                affected_accounts: [tx.content.from as string]
             }
         }
 

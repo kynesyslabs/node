@@ -433,7 +433,7 @@ export class L2PSBatchAggregator {
             // Store in shared state for persistence
             sharedState.l2psBatchNonce = nonce
         } catch (error) {
-            log.warning(`[L2PS Batch Aggregator] Failed to persist nonce: ${error}`)
+            log.warning(`[L2PS Batch Aggregator] Failed to persist nonce: ${error instanceof Error ? error.message : String(error)}`)
         }
     }
 
