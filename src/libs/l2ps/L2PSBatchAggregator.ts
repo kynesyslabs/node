@@ -79,18 +79,26 @@ export class L2PSBatchAggregator {
     private readonly batchNonceCounter: number = 0
     
     /** Statistics tracking */
-    private stats = {
-        totalCycles: 0,
-        successfulCycles: 0,
-        failedCycles: 0,
-        skippedCycles: 0,
-        totalBatchesCreated: 0,
-        totalTransactionsBatched: 0,
-        successfulSubmissions: 0,
-        failedSubmissions: 0,
-        cleanedUpTransactions: 0,
-        lastCycleTime: 0,
-        averageCycleTime: 0,
+    private stats = this.createInitialStats()
+
+    /**
+     * Create initial statistics object
+     * Helper to avoid code duplication when resetting stats
+     */
+    private createInitialStats() {
+        return {
+            totalCycles: 0,
+            successfulCycles: 0,
+            failedCycles: 0,
+            skippedCycles: 0,
+            totalBatchesCreated: 0,
+            totalTransactionsBatched: 0,
+            successfulSubmissions: 0,
+            failedSubmissions: 0,
+            cleanedUpTransactions: 0,
+            lastCycleTime: 0,
+            averageCycleTime: 0,
+        }
     }
 
     /**
@@ -122,20 +130,8 @@ export class L2PSBatchAggregator {
         this.isRunning = true
         this.isAggregating = false
 
-        // Reset statistics
-        this.stats = {
-            totalCycles: 0,
-            successfulCycles: 0,
-            failedCycles: 0,
-            skippedCycles: 0,
-            totalBatchesCreated: 0,
-            totalTransactionsBatched: 0,
-            successfulSubmissions: 0,
-            failedSubmissions: 0,
-            cleanedUpTransactions: 0,
-            lastCycleTime: 0,
-            averageCycleTime: 0,
-        }
+        // Reset statistics using helper method
+        this.stats = this.createInitialStats()
 
         // Start the interval timer
         this.intervalId = setInterval(async () => {
@@ -433,7 +429,8 @@ export class L2PSBatchAggregator {
             // Store in shared state for persistence
             sharedState.l2psBatchNonce = nonce
         } catch (error) {
-            log.warning(`[L2PS Batch Aggregator] Failed to persist nonce: ${error instanceof Error ? error.message : String(error)}`)
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+            log.warning(`[L2PS Batch Aggregator] Failed to persist nonce: ${errorMessage}`)
         }
     }
 
@@ -612,7 +609,7 @@ export class L2PSBatchAggregator {
             isRunning: this.isRunning,
             isAggregating: this.isAggregating,
             intervalMs: this.AGGREGATION_INTERVAL,
-            joinedL2PSCount: SharedState.getInstance().l2psJoinedUids?.length || 0,
+            joinedL2PSCount: getSharedState.l2psJoinedUids?.length || 0,
         }
     }
 

@@ -58,7 +58,7 @@ async function decryptAndValidate(
         }
     }
 
-    if (!decryptedTx || !decryptedTx.content || !decryptedTx.content.from) {
+    if (!decryptedTx?.content?.from) {
         return { decryptedTx: null, error: "Invalid decrypted transaction structure" }
     }
 
