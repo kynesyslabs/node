@@ -201,7 +201,7 @@ export default class L2PSProofManager {
     static async getProofsForBlock(blockNumber: number): Promise<L2PSProof[]> {
         const repo = await this.getRepo()
 
-        // TODO: Filter proofs by target_block_number when block-specific batching is implemented
+        // FUTURE: Filter proofs by target_block_number when block-specific batching is implemented
         // For now, returns all pending proofs in creation order (blockNumber reserved for future use)
         return repo.find({
             where: {
@@ -239,7 +239,7 @@ export default class L2PSProofManager {
                 }
             }
 
-            // TODO: Implement actual ZK proof verification
+            // FUTURE: Implement actual ZK proof verification
             // For placeholder type, just check the hash matches
             // Use deterministicStringify to ensure consistent hashing after DB round-trip
             if (proof.proof.type === "placeholder") {

@@ -57,11 +57,10 @@ function normalizeIdentity(raw: unknown): string | null {
     }
 
     if (ArrayBuffer.isView(raw)) {
-        const view = raw as ArrayBufferView
         const bytes =
-            view instanceof Uint8Array
-                ? view
-                : new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
+            raw instanceof Uint8Array
+                ? raw
+                : new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)
         return uint8ArrayToHex(bytes).toLowerCase()
     }
 

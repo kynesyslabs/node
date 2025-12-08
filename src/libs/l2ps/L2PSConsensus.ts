@@ -293,10 +293,11 @@ export default class L2PSConsensus {
             }
 
             // Generate deterministic hash for this batch
+            const sortedL2psNetworks = [...l2psNetworks].sort((a, b) => a.localeCompare(b))
             const batchHash = Hashing.sha256(JSON.stringify({
                 blockNumber,
                 proofHashes: batchPayload.proof_hashes,
-                l2psNetworks: l2psNetworks.sort((a, b) => a.localeCompare(b))
+                l2psNetworks: sortedL2psNetworks
             }))
 
             // Create single L1 transaction for all L2PS activity in this block

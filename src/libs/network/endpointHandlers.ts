@@ -16,8 +16,7 @@ import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool_v2"
 import L2PSHashes from "@/libs/blockchain/l2ps_hashes"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
-import { Transaction } from "@kynesyslabs/demosdk/types"
-import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
+import type { Transaction, L2PSTransaction } from "@kynesyslabs/demosdk/types"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import handleL2PS from "./routines/transactions/handleL2PS"
@@ -54,8 +53,6 @@ import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 
-// TEMPORARY: Define SubnetPayload until proper export is available
-type SubnetPayload = any
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
 
 // REVIEW: PR Fix #12 - Interface for L2PS hash update payload with proper type safety
