@@ -4,6 +4,11 @@ export default function validateIfUint8Array(input: unknown): Uint8Array | unkno
         return input
     }
 
+    // Handle hex string - convert back to Uint8Array
+    if (typeof input === "string" && /^[0-9a-fA-F]+$/.test(input) && input.length % 2 === 0) {
+        return Buffer.from(input, "hex")
+    }
+
     // Type guard: check if input is a record-like object with numeric integer keys and number values
     if (typeof input === "object" && input !== null) {
         // Safely cast to indexable type after basic validation

@@ -84,6 +84,10 @@ export default async function handlePayOperation(
             result = await genericJsonRpcPay(multichain.TON, rpcUrl, operation)
             break
 
+        case "near":
+            result = await genericJsonRpcPay(multichain.NEAR, rpcUrl, operation)
+            break
+
         case "btc":
             result = await genericJsonRpcPay(multichain.BTC, rpcUrl, operation)
             break

@@ -34,8 +34,8 @@ export const chainProviders = {
         testnet: "https://rpc.elgafar-1.stargaze-apis.com",
     },
     near: {
-        mainnet: "https://rpc.near.org",
-        testnet: "https://rpc.testnet.near.org",
+        mainnet: "https://rpc.fastnear.com",
+        testnet: "https://test.rpc.fastnear.com",
     },
     btc: {
         mainnet: "https://blockstream.info/api",
