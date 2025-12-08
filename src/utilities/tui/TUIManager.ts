@@ -546,22 +546,6 @@ export class TUIManager extends EventEmitter {
             case "?":
                 this.showHelp()
                 break
-
-            // Controls (emit events for main app to handle)
-            case "s":
-            case "S":
-                this.emit("command", "start")
-                break
-
-            case "p":
-            case "P":
-                this.emit("command", "pause")
-                break
-
-            case "r":
-            case "R":
-                this.emit("command", "restart")
-                break
         }
     }
 
@@ -817,10 +801,16 @@ export class TUIManager extends EventEmitter {
      * Scroll down one line
      */
     scrollDown(): void {
+        // Don't disable autoScroll when scrolling down - only disable when scrolling UP
+        // This allows users to catch up to new logs by scrolling down
         const maxScroll = Math.max(0, this.filteredLogs.length - this.logAreaHeight)
         const currentOffset = this.getScrollOffset()
         if (currentOffset < maxScroll) {
             this.setScrollOffset(currentOffset + 1)
+            // Re-enable autoScroll if we've scrolled to the bottom
+            if (currentOffset + 1 >= maxScroll) {
+                this.autoScroll = true
+            }
             this.render()
         }
     }
@@ -841,7 +831,12 @@ export class TUIManager extends EventEmitter {
     scrollPageDown(): void {
         const maxScroll = Math.max(0, this.filteredLogs.length - this.logAreaHeight)
         const currentOffset = this.getScrollOffset()
-        this.setScrollOffset(Math.min(maxScroll, currentOffset + this.logAreaHeight))
+        const newOffset = Math.min(maxScroll, currentOffset + this.logAreaHeight)
+        this.setScrollOffset(newOffset)
+        // Re-enable autoScroll if we've scrolled to the bottom
+        if (newOffset >= maxScroll) {
+            this.autoScroll = true
+        }
         this.render()
     }
 
@@ -858,9 +853,10 @@ export class TUIManager extends EventEmitter {
      * Scroll to bottom
      */
     scrollToBottom(): void {
-        this.autoScroll = true
         const maxScroll = Math.max(0, this.filteredLogs.length - this.logAreaHeight)
         this.setScrollOffset(maxScroll)
+        // Re-enable autoScroll when explicitly scrolling to bottom
+        this.autoScroll = true
         this.render()
     }
 
@@ -1309,24 +1305,23 @@ export class TUIManager extends EventEmitter {
         } else {
             term.bgBlue.white(" ⌨ CONTROLS ")
             term.bgGray.black(" ")
-            term.bgGray.brightCyan("[S]")
-            term.bgGray.white("tart ")
-            term.bgGray.brightCyan("[P]")
-            term.bgGray.white("ause ")
-            term.bgGray.brightCyan("[R]")
-            term.bgGray.white("estart ")
-            term.bgGray.brightRed("[Q]")
-            term.bgGray.white("uit ")
-            term.bgGray.black("│ ")
-            term.bgGray.brightGreen("[A]")
-            term.bgGray.white("uto ")
+            // Show autoScroll status indicator
+            if (this.autoScroll) {
+                term.bgGray.brightGreen("[A]")
+                term.bgGray.green("uto:ON ")
+            } else {
+                term.bgGray.yellow("[A]")
+                term.bgGray.gray("uto:OFF ")
+            }
             term.bgGray.brightYellow("[C]")
             term.bgGray.white("lear ")
             term.bgGray.brightMagenta("[H]")
             term.bgGray.white("elp ")
+            term.bgGray.brightRed("[Q]")
+            term.bgGray.white("uit ")
 
             // Fill rest of footer line 1
-            const controlsLen = 80 // approximate
+            const controlsLen = 55 // approximate
             if (controlsLen < this.width) {
                 term.bgGray(" ".repeat(this.width - controlsLen))
             }
