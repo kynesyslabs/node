@@ -23,7 +23,7 @@ function createErrorResponse(response: RPCResponse, code: number, message: strin
  * Validate L2PS transaction structure
  */
 function validateL2PSStructure(l2psTx: L2PSTransaction): string | null {
-    if (!l2psTx.content || !l2psTx.content.data || !l2psTx.content.data[1] || !l2psTx.content.data[1].l2ps_uid) {
+    if (!l2psTx.content?.data?.[1]?.l2ps_uid) {
         return "Invalid L2PS transaction structure: missing l2ps_uid in data payload"
     }
     return null

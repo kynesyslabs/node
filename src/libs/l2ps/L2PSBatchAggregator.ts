@@ -215,7 +215,7 @@ export class L2PSBatchAggregator {
             
         } catch (error: any) {
             this.stats.failedCycles++
-            log.error("[L2PS Batch Aggregator] Aggregation cycle failed:", error)
+            log.error(`[L2PS Batch Aggregator] Aggregation cycle failed: ${error instanceof Error ? error.message : String(error)}`)
             
         } finally {
             this.isAggregating = false
@@ -255,7 +255,7 @@ export class L2PSBatchAggregator {
             }
 
         } catch (error: any) {
-            log.error("[L2PS Batch Aggregator] Error in aggregation:", error)
+            log.error(`[L2PS Batch Aggregator] Error in aggregation: ${error instanceof Error ? error.message : String(error)}`)
             throw error
         }
     }
@@ -319,7 +319,7 @@ export class L2PSBatchAggregator {
             }
 
         } catch (error: any) {
-            log.error(`[L2PS Batch Aggregator] Error processing batch for ${l2psUid}:`, error)
+            log.error(`[L2PS Batch Aggregator] Error processing batch for ${l2psUid}: ${error instanceof Error ? error.message : String(error)}`)
             this.stats.failedSubmissions++
         }
     }
@@ -549,7 +549,7 @@ export class L2PSBatchAggregator {
             }
 
         } catch (error: any) {
-            log.error("[L2PS Batch Aggregator] Error during cleanup:", error)
+            log.error(`[L2PS Batch Aggregator] Error during cleanup: ${error instanceof Error ? error.message : String(error)}`)
         }
     }
 
