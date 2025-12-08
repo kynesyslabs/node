@@ -195,6 +195,8 @@ export class TUIManager extends EventEmitter {
 
     // Filtered logs cache
     private filteredLogs: LogEntry[] = []
+    // Frozen logs snapshot (when autoscroll is disabled)
+    private frozenLogs: LogEntry[] | null = null
 
     // CMD tab state
     private cmdInput = ""
@@ -789,7 +791,12 @@ export class TUIManager extends EventEmitter {
      * Scroll up one line
      */
     scrollUp(): void {
-        this.autoScroll = false
+        // Freeze logs on first manual scroll
+        if (this.autoScroll) {
+            this.autoScroll = false
+            this.frozenLogs = [...this.filteredLogs]
+        }
+        const logsToUse = this.frozenLogs ?? this.filteredLogs
         const currentOffset = this.getScrollOffset()
         if (currentOffset > 0) {
             this.setScrollOffset(currentOffset - 1)
@@ -801,16 +808,11 @@ export class TUIManager extends EventEmitter {
      * Scroll down one line
      */
     scrollDown(): void {
-        // Don't disable autoScroll when scrolling down - only disable when scrolling UP
-        // This allows users to catch up to new logs by scrolling down
-        const maxScroll = Math.max(0, this.filteredLogs.length - this.logAreaHeight)
+        const logsToUse = this.frozenLogs ?? this.filteredLogs
+        const maxScroll = Math.max(0, logsToUse.length - this.logAreaHeight)
         const currentOffset = this.getScrollOffset()
         if (currentOffset < maxScroll) {
             this.setScrollOffset(currentOffset + 1)
-            // Re-enable autoScroll if we've scrolled to the bottom
-            if (currentOffset + 1 >= maxScroll) {
-                this.autoScroll = true
-            }
             this.render()
         }
     }
@@ -819,7 +821,11 @@ export class TUIManager extends EventEmitter {
      * Scroll up one page
      */
     scrollPageUp(): void {
-        this.autoScroll = false
+        // Freeze logs on first manual scroll
+        if (this.autoScroll) {
+            this.autoScroll = false
+            this.frozenLogs = [...this.filteredLogs]
+        }
         const currentOffset = this.getScrollOffset()
         this.setScrollOffset(Math.max(0, currentOffset - this.logAreaHeight))
         this.render()
@@ -829,14 +835,11 @@ export class TUIManager extends EventEmitter {
      * Scroll down one page
      */
     scrollPageDown(): void {
-        const maxScroll = Math.max(0, this.filteredLogs.length - this.logAreaHeight)
+        const logsToUse = this.frozenLogs ?? this.filteredLogs
+        const maxScroll = Math.max(0, logsToUse.length - this.logAreaHeight)
         const currentOffset = this.getScrollOffset()
         const newOffset = Math.min(maxScroll, currentOffset + this.logAreaHeight)
         this.setScrollOffset(newOffset)
-        // Re-enable autoScroll if we've scrolled to the bottom
-        if (newOffset >= maxScroll) {
-            this.autoScroll = true
-        }
         this.render()
     }
 
@@ -844,7 +847,11 @@ export class TUIManager extends EventEmitter {
      * Scroll to top
      */
     scrollToTop(): void {
-        this.autoScroll = false
+        // Freeze logs on first manual scroll
+        if (this.autoScroll) {
+            this.autoScroll = false
+            this.frozenLogs = [...this.filteredLogs]
+        }
         this.setScrollOffset(0)
         this.render()
     }
@@ -853,10 +860,9 @@ export class TUIManager extends EventEmitter {
      * Scroll to bottom
      */
     scrollToBottom(): void {
-        const maxScroll = Math.max(0, this.filteredLogs.length - this.logAreaHeight)
+        const logsToUse = this.frozenLogs ?? this.filteredLogs
+        const maxScroll = Math.max(0, logsToUse.length - this.logAreaHeight)
         this.setScrollOffset(maxScroll)
-        // Re-enable autoScroll when explicitly scrolling to bottom
-        this.autoScroll = true
         this.render()
     }
 
@@ -866,7 +872,13 @@ export class TUIManager extends EventEmitter {
     toggleAutoScroll(): void {
         this.autoScroll = !this.autoScroll
         if (this.autoScroll) {
+            // Re-enable: unfreeze and scroll to bottom
+            this.frozenLogs = null
+            this.updateFilteredLogs()
             this.scrollToBottom()
+        } else {
+            // Disable: freeze current view
+            this.frozenLogs = [...this.filteredLogs]
         }
         this.render()
     }
@@ -877,13 +889,15 @@ export class TUIManager extends EventEmitter {
      * Handle new log entry
      */
     private handleLogEntry(_entry: LogEntry): void {
+        // Always update the live filtered logs
         this.updateFilteredLogs()
 
-        // Auto-scroll to bottom if enabled
+        // Only auto-scroll when enabled (frozen logs handles manual mode)
         if (this.autoScroll) {
             const maxScroll = Math.max(0, this.filteredLogs.length - this.logAreaHeight)
             this.setScrollOffset(maxScroll)
         }
+        // When autoScroll is off, frozenLogs is used for rendering so no action needed
     }
 
     /**
@@ -1129,8 +1143,11 @@ export class TUIManager extends EventEmitter {
         const startY = HEADER_HEIGHT + TAB_HEIGHT + 1
         const currentOffset = this.getScrollOffset()
 
+        // Use frozen logs if in manual scroll mode, otherwise live logs
+        const logsToRender = this.frozenLogs ?? this.filteredLogs
+
         // Get visible logs
-        const visibleLogs = this.filteredLogs.slice(
+        const visibleLogs = logsToRender.slice(
             currentOffset,
             currentOffset + this.logAreaHeight,
         )
@@ -1148,8 +1165,8 @@ export class TUIManager extends EventEmitter {
         }
 
         // Scroll indicator
-        if (this.filteredLogs.length > this.logAreaHeight) {
-            const maxScroll = this.filteredLogs.length - this.logAreaHeight
+        if (logsToRender.length > this.logAreaHeight) {
+            const maxScroll = logsToRender.length - this.logAreaHeight
             const scrollPercent = maxScroll > 0
                 ? Math.round((currentOffset / maxScroll) * 100)
                 : 0
