@@ -4,6 +4,7 @@ PG_PORT=5332
 GIT_PULL=true
 PEER_LIST_FILE="demos_peerlist.json"
 VERBOSE=false
+NO_TUI=false
 
 # Detect platform for cross-platform compatibility
 PLATFORM=$(uname -s)
@@ -51,8 +52,10 @@ OPTIONS:
     -l <path>                      Peer list file (default: demos_peerlist.json)
     -r <runtime>                   Force runtime (bun only - node deprecated)
     -b <true/false>                Restore from backup
+    -t                             Disable TUI (use legacy scrolling logs)
     -v                             Verbose logging
     -h                             Show this help message
+    --no-tui                       Disable TUI (same as -t)
 
 EXAMPLES:
     ./run                          # Start with default settings
@@ -60,6 +63,8 @@ EXAMPLES:
     ./run -c                       # Clean start (fresh database)
     ./run -v                       # Verbose output for troubleshooting
     ./run -n                       # Skip git update (for development)
+    ./run -t                       # Legacy mode (scrolling logs for developers)
+    ./run --no-tui                 # Same as -t
 
 SYSTEM REQUIREMENTS:
     - 4GB RAM minimum (8GB recommended)
@@ -326,8 +331,19 @@ fi
 CLEAN="false"
 PORT=53550
 
+# Handle long options (--no-tui) before getopts
+for arg in "$@"; do
+    case $arg in
+        --no-tui)
+            NO_TUI=true
+            # Remove --no-tui from arguments so getopts doesn't choke on it
+            set -- "${@/--no-tui/}"
+            ;;
+    esac
+done
+
 # Getting arguments
-while getopts "p:d:c:i:n:u:l:r:b:vh" opt; do
+while getopts "p:d:c:i:n:u:l:r:b:tvh" opt; do
     case $opt in
         p) PORT=$OPTARG;;
         d) PG_PORT=$OPTARG;;
@@ -338,6 +354,7 @@ while getopts "p:d:c:i:n:u:l:r:b:vh" opt; do
         u) EXPOSED_URL=$OPTARG;;
         r) RUNTIME=$OPTARG;;
         b) RESTORE=$OPTARG;;
+        t) NO_TUI=true;;
         v) VERBOSE=true;;
         h) show_help; exit 0;;
         *) echo "Invalid option. Use -h for help."; exit 1;;
@@ -414,6 +431,11 @@ elif [ "$CLEAN" = "true" ]; then
     echo "   🧹 Mode: Clean start (fresh database)"
 else
     echo "   ▶️  Mode: Normal start"
+fi
+if [ "$NO_TUI" = true ]; then
+    echo "   📜 Display: Legacy logs (TUI disabled)"
+else
+    echo "   🖥️  Display: TUI (use -t or --no-tui for legacy logs)"
 fi
 log_verbose "Platform: $PLATFORM_NAME"
 log_verbose "Verbose logging enabled"
@@ -622,9 +644,16 @@ echo "💡 Press Ctrl+C to stop the node safely"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
+# Build the final command with optional --no-tui flag
+FINAL_COMMAND="$START_COMMAND"
+if [ "$NO_TUI" = true ]; then
+    FINAL_COMMAND="$START_COMMAND -- --no-tui"
+fi
+
 # Starting the node managing errors
 log_verbose "Starting node with environment: RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE"
-if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE $START_COMMAND; then
+log_verbose "Command: $FINAL_COMMAND"
+if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE $FINAL_COMMAND; then
     if [ "$HAS_BEEN_INTERRUPTED" == "true" ]; then
         echo ""
         echo "✅ Demos Network node stopped successfully"

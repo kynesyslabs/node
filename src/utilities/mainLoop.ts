@@ -231,8 +231,8 @@ async function logCurrentDiagnostics() {
         diagnosticString += "  No network speed data available\n"
     }
 
-    // Print to console
-    console.log(diagnosticString)
+    // Print to debug log
+    log.debug("[MAIN LOOP] " + diagnosticString)
 
     // Log to file using log.custom
     log.custom("diagnostics", diagnosticString, false, true)
