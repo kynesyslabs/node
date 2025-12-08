@@ -286,7 +286,7 @@ export default class L2PSConsensus {
                 block_number: blockNumber,
                 l2ps_networks: l2psNetworks,
                 proof_count: proofs.length,
-                proof_hashes: proofs.map(p => p.transactions_hash).sort(),
+                proof_hashes: proofs.map(p => p.transactions_hash).sort((a, b) => a.localeCompare(b)),
                 transaction_count: totalTransactions,
                 affected_accounts_count: allAffectedAccounts.length,
                 timestamp: Date.now()
@@ -296,7 +296,7 @@ export default class L2PSConsensus {
             const batchHash = Hashing.sha256(JSON.stringify({
                 blockNumber,
                 proofHashes: batchPayload.proof_hashes,
-                l2psNetworks: l2psNetworks.sort()
+                l2psNetworks: l2psNetworks.sort((a, b) => a.localeCompare(b))
             }))
 
             // Create single L1 transaction for all L2PS activity in this block

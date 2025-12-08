@@ -56,7 +56,7 @@ export default class L2PSTransactionExecutor {
      */
     private static async init(): Promise<void> {
         if (this.l1Repo) return
-        if (this.initPromise) {
+        if (this.initPromise !== null) {
             await this.initPromise
             return
         }

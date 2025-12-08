@@ -57,7 +57,7 @@ function hexFileToBytes(value: string, label: string): string {
         throw new Error(`${label} is empty`)
     }
 
-    const cleaned = value.trim().replace(/^0x/, "").replace(/\s+/g, "")
+    const cleaned = value.trim().replace(/^0x/, "").replaceAll(/\s+/g, "")
 
     if (cleaned.length === 0) {
         throw new Error(`${label} is empty`)

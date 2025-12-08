@@ -29,7 +29,7 @@ import log from "@/utilities/logger"
 function deterministicStringify(obj: any): string {
     return JSON.stringify(obj, (key, value) => {
         if (value && typeof value === 'object' && !Array.isArray(value)) {
-            return Object.keys(value).sort().reduce((sorted: any, k) => {
+            return Object.keys(value).sort((a, b) => a.localeCompare(b)).reduce((sorted: any, k) => {
                 sorted[k] = value[k]
                 return sorted
             }, {})
@@ -72,7 +72,7 @@ export default class L2PSProofManager {
      */
     private static async init(): Promise<void> {
         if (this.repo) return
-        if (this.initPromise) {
+        if (this.initPromise !== null) {
             await this.initPromise
             return
         }

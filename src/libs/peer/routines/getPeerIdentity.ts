@@ -10,8 +10,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { NodeCall } from "src/libs/network/manageNodeCall"
-import { uint8ArrayToHex, hexToUint8Array, Hashing, ucrypto } from "@kynesyslabs/demosdk/encryption"
-import crypto from "crypto"
+import { uint8ArrayToHex, hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import crypto from "node:crypto"
 import Peer from "../Peer"
 
 type BufferPayload = {

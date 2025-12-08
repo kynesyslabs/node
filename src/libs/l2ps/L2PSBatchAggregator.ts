@@ -1,7 +1,6 @@
 import L2PSMempool, { L2PS_STATUS } from "@/libs/blockchain/l2ps_mempool"
 import { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
 import Mempool from "@/libs/blockchain/mempool_v2"
-import SharedState from "@/utilities/sharedState"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import { Hashing, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
@@ -77,7 +76,7 @@ export class L2PSBatchAggregator {
     private readonly SIGNATURE_DOMAIN = "L2PS_BATCH_TX_V1"
 
     /** Persistent nonce counter for batch transactions */
-    private batchNonceCounter: number = 0
+    private readonly batchNonceCounter: number = 0
     
     /** Statistics tracking */
     private stats = {
@@ -349,7 +348,7 @@ export class L2PSBatchAggregator {
         }))
 
         // Create deterministic batch hash from sorted transaction hashes
-        const sortedHashes = [...transactionHashes].sort()
+        const sortedHashes = [...transactionHashes].sort((a, b) => a.localeCompare(b))
         const batchHashInput = `L2PS_BATCH_${l2psUid}:${sortedHashes.length}:${sortedHashes.join(",")}`
         const batchHash = Hashing.sha256(batchHashInput)
 

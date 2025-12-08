@@ -334,7 +334,7 @@ export default class ServerHandlers {
                 
                 // Authorization check: Verify transaction signature before processing
                 // This ensures only properly signed transactions are accepted
-                if (!tx.signature || !tx.signature.data) {
+                if (!tx.signature?.data) {
                     log.error("[handleExecuteTransaction] L2PS tx rejected: missing signature")
                     result.success = false
                     result.response = { error: "L2PS transaction requires valid signature" }
