@@ -22,8 +22,8 @@ import {
     NotInShardError,
 } from "src/exceptions"
 import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
-import { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Waiter } from "@/utilities/waiter"
+import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 
 /* INFO
 # Semaphore system
@@ -137,11 +137,9 @@ export async function consensusRoutine(): Promise<void> {
         successfulTxs = successfulTxs.concat(localSuccessfulTxs)
         failedTxs = failedTxs.concat(localFailedTxs)
         log.only("[consensusRoutine] Successful Txs: " + successfulTxs.length)
-        log.only("[consensusRoutine] Failed Txs: " + failedTxs.length)  
+        log.only("[consensusRoutine] Failed Txs: " + failedTxs.length)
         if (failedTxs.length > 0) {
-            log.only(
-                "[consensusRoutine] Failed Txs found, pruning the mempool",
-            )
+            log.only("[consensusRoutine] Failed Txs found, pruning the mempool")
             //  Prune the mempool of the failed txs
             // NOTE The mempool should now be updated with only the successful txs
             for (const tx of failedTxs) {
@@ -155,7 +153,11 @@ export async function consensusRoutine(): Promise<void> {
 
         log.only(
             "[consensusRoutine] mempool: " +
-                JSON.stringify(tempMempool.map(tx => tx.hash), null, 2),
+                JSON.stringify(
+                    tempMempool.map(tx => tx.hash),
+                    null,
+                    2,
+                ),
             true,
         )
 
@@ -184,7 +186,10 @@ export async function consensusRoutine(): Promise<void> {
         // INFO: CONSENSUS ACTION 5: Forge the block
         const block = await forgeBlock(tempMempool, peerlist) // NOTE The GCR hash is calculated here and added to the block
         log.only("[consensusRoutine] Block forged: " + block.hash)
-        log.only("[consensusRoutine] Block transaction count: " + block.content.ordered_transactions.length)
+        log.only(
+            "[consensusRoutine] Block transaction count: " +
+                block.content.ordered_transactions.length,
+        )
         // REVIEW Set last consensus time to the current block timestamp
         getSharedState.lastConsensusTime = block.content.timestamp
 
@@ -202,7 +207,9 @@ export async function consensusRoutine(): Promise<void> {
 
             // INFO: Release DTR transaction relay waiter
             if (Waiter.isWaiting(Waiter.keys.DTR_WAIT_FOR_BLOCK)) {
-                log.only("[consensusRoutine] releasing DTR transaction relay waiter")
+                log.only(
+                    "[consensusRoutine] releasing DTR transaction relay waiter",
+                )
                 const { commonValidatorSeed } = await getCommonValidatorSeed(
                     block,
                 )
@@ -261,6 +268,15 @@ export async function consensusRoutine(): Promise<void> {
         process.exit(1)
     } finally {
         log.only("[consensusRoutine] CONSENSUS ENDED")
+        log.only(
+            "DTR Cache: " +
+                JSON.stringify(
+                    Array.from(DTRManager.validityDataCache.keys()),
+                    null,
+                    2,
+                ),
+        )
+        log.only("DTR Cache size: " + DTRManager.validityDataCache.size)
         cleanupConsensusState()
         manager.endConsensusRoutine()
     }

@@ -112,6 +112,15 @@ export default class Chain {
         return transaction.map(tx => Transaction.fromRawTransaction(tx))
     }
 
+    static async getBlockTransactions(
+        blockHash: string,
+    ): Promise<Transaction[]> {
+        const block = await this.getBlockByHash(blockHash)
+        return await this.getTransactionsFromHashes(
+            block.content.ordered_transactions,
+        )
+    }
+
     // INFO Get the last block number
     static async getLastBlockNumber(): Promise<number> {
         if (!getSharedState.lastBlockNumber) {
@@ -595,17 +604,18 @@ export default class Chain {
     }
 
     // Wrapper for inserting multiple transactions
-    static async insertTransactions(
+    static async insertTransactionsFromSync(
         transactions: Transaction[],
     ): Promise<boolean> {
-        let success = true
         for (const tx of transactions) {
-            success = await this.insertTransaction(tx)
-            if (!success) {
-                return false
+            try {
+                await this.insertTransaction(tx)
+            } catch (error) {
+                console.error("[ChainDB] [ ERROR ]")
             }
         }
-        return success
+
+        return true
     }
     // !SECTION Setters
 

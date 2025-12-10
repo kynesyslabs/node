@@ -292,7 +292,12 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
         log.info("[downloadBlock] Block received: " + block.hash)
         await Chain.insertBlock(block, [], null, false)
         log.debug("Block inserted successfully")
-        log.debug("Last block number: " + getSharedState.lastBlockNumber + " Last block hash: " + getSharedState.lastBlockHash)
+        log.debug(
+            "Last block number: " +
+                getSharedState.lastBlockNumber +
+                " Last block hash: " +
+                getSharedState.lastBlockHash,
+        )
         log.info(
             "[fastSync] Block inserted successfully at the head of the chain!",
         )
@@ -304,10 +309,20 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
         // REVIEW Parse the txs hashes in the block
         log.info("[fastSync] Asking for transactions in the block", true)
         const txs = await askTxsForBlock(block, peer)
-        log.info("[fastSync] Transactions received: " + txs.length, true)
+
+        // Confirm all transactions have been found
+        for (const tx of txs) {
+            if (!block.content.ordered_transactions.includes(tx.hash)) {
+                throw new Error(
+                    `Transaction ${tx.hash} at block #${block.number} not retrieved from peer ${peer.connection.string}`,
+                )
+            }
+        }
 
         // ! Sync the native tables
         await syncGCRTables(txs)
+
+        // find all transactions
 
         // REVIEW Insert the txs into the transactions database table
         if (txs.length > 0) {
@@ -315,14 +330,7 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
                 "[fastSync] Inserting transactions into the database",
                 true,
             )
-            const success = await Chain.insertTransactions(txs)
-            if (success) {
-                log.info("[fastSync] Transactions inserted successfully")
-                return true
-            }
-
-            log.error("[fastSync] Transactions insertion failed")
-            return false
+            await Chain.insertTransactionsFromSync(txs)
         }
 
         log.info("[fastSync] No transactions in the block")
@@ -434,14 +442,22 @@ export async function syncGCRTables(
     // ? Better typing on this return
     // Using the GCREdits in the tx to sync the native tables
     for (const tx of txs) {
-        const result = await HandleGCR.applyToTx(tx)
-        if (!result.success) {
+        try {
+            const result = await HandleGCR.applyToTx(tx)
+            if (!result.success) {
+                log.error(
+                    "[fastSync] GCR edit application failed at tx: " + tx.hash,
+                )
+            }
+        } catch (error) {
             log.error(
-                "[fastSync] GCR edit application failed at tx: " + tx.hash,
+                "[syncGCRTables] Error syncing GCR table for tx: " + tx.hash,
             )
-            return [tx.hash, false]
+            console.error("[SYNC] [ ERROR ]")
+            console.error(error)
         }
     }
+
     return [null, true]
 }
 
@@ -452,24 +468,27 @@ export async function askTxsForBlock(
 ): Promise<Transaction[]> {
     const txsHashes = block.content.ordered_transactions
     const txs = []
-    for (const txHash of txsHashes) {
-        const txRequest: RPCRequest = {
+
+    const res = await peer.longCall(
+        {
             method: "nodeCall",
             params: [
                 {
-                    message: "getTxByHash",
-                    data: { hash: txHash },
-                    muid: null,
+                    message: "getBlockTransactions",
+                    data: { blockHash: block.hash },
                 },
             ],
-        }
-        const txResponse = await peer.call(txRequest, false)
-        if (txResponse.result === 200) {
-            const tx = txResponse.response as Transaction
-            txs.push(tx)
-        }
+        },
+        false,
+        250,
+        3,
+    )
+
+    if (res.result === 200) {
+        return res.response as Transaction[]
     }
-    return txs
+
+    return []
 }
 
 // Helper function to merge the peerlist from the last block

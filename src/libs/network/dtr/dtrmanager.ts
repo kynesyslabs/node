@@ -396,7 +396,10 @@ export class DTRManager {
 
         try {
             if (getSharedState.inConsensusLoop) {
-                log.only("[receiveRelayedTransaction] in consensus loop, adding tx in cache: " + validityData.data.transaction.hash)
+                log.only(
+                    "[receiveRelayedTransaction] in consensus loop, adding tx in cache: " +
+                        validityData.data.transaction.hash,
+                )
                 DTRManager.validityDataCache.set(
                     validityData.data.transaction.hash,
                     validityData,
@@ -404,7 +407,9 @@ export class DTRManager {
 
                 // INFO: Start the relay waiter
                 if (!DTRManager.isWaitingForBlock) {
-                    log.only("[receiveRelayedTransaction] not waiting for block, starting relay")
+                    log.only(
+                        "[receiveRelayedTransaction] not waiting for block, starting relay",
+                    )
                     DTRManager.waitForBlockThenRelay()
                 }
 
@@ -607,9 +612,17 @@ export class DTRManager {
     }
 
     static async waitForBlockThenRelay() {
+        let cvsa: string
         log.only("Enter: waitForBlockThenRelay")
-        const cvsa: string = await Waiter.wait(Waiter.keys.DTR_WAIT_FOR_BLOCK)
-        log.only("waitForBlockThenRelay resolved. CVSA: " + cvsa)
+        try {
+            log.only("waiting for block ...")
+            cvsa = await Waiter.wait(Waiter.keys.DTR_WAIT_FOR_BLOCK, 30_000)
+            log.only("waitForBlockThenRelay resolved. CVSA: " + cvsa)
+        } catch (error) {
+            log.only("exiting ...")
+            console.error("waitForBlockThenRelay error: " + error)
+            process.exit(0)
+        }
 
         // relay transactions here
         const txs = Array.from(DTRManager.validityDataCache.values())
@@ -625,12 +638,17 @@ export class DTRManager {
         if (validators.some(v => v.identity === getSharedState.publicKeyHex)) {
             log.only("We're up next, keeping transactions")
             return await Promise.all(
-                txs.map(tx =>
+                txs.map(tx => {
                     Mempool.addTransaction({
                         ...tx.data.transaction,
                         reference_block: tx.data.reference_block,
-                    }),
-                ),
+                    })
+
+                    // INFO: Remove tx from cache
+                    DTRManager.validityDataCache.delete(
+                        tx.data.transaction.hash,
+                    )
+                }),
             )
         }
 
