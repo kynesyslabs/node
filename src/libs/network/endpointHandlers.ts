@@ -20,7 +20,7 @@ import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import handleL2PS from "./routines/transactions/handleL2PS"
 import { getSharedState } from "src/utilities/sharedState"
-import _ from "lodash"
+import _, { result } from "lodash"
 import terminalKit from "terminal-kit"
 import {
     ExecutionResult,
@@ -718,27 +718,29 @@ export default class ServerHandlers {
         return { extra, requireReply, response }
     }
 
-    static async handleMempool(senderPoolTxs: string[]): Promise<any> {
+    static async handleMempool(txs: Transaction[]): Promise<any> {
         // Basic message handling logic
         // ...
-        log.info("[handleMempool] Received a message")
-        log.info("[handleMempool] Sender pool txs: " + senderPoolTxs.join(", "))
-
-        let difference: Transaction[]
+        let response = {
+            success: false,
+            mempool: [],
+        }
 
         try {
-            difference = await Mempool.getDifference(senderPoolTxs)
-            // response = await Mempool.receive(content.data as Transaction[])
+            response = await Mempool.receive(txs)
         } catch (error) {
             console.error(error)
         }
 
+        const ourId = getSharedState.publicKeyHex
+        const ourDate = new Date().toISOString()
+
         return {
-            result: 200,
-            response: difference,
-            extra: {
-                differenceCount: difference.length,
-            },
+            result: response.success ? 200 : 400,
+            response: response.mempool,
+            extra:
+                (response.success ? "Mempool received" : "Mempool not merged") +
+                ` by: ${ourId} at ${ourDate}`,
             requireReply: false,
         }
     }

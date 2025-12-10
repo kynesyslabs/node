@@ -11,7 +11,7 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
             peer.longCall(
                 {
                     method: "mempool",
-                    params: mempool.map(tx => tx.hash),
+                    params: mempool,
                 },
                 true,
                 250,
@@ -27,13 +27,7 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
         log.info("[mergeMempools] " + JSON.stringify(response, null, 2))
 
         if (response.result === 200) {
-            // INFO: Response contains the difference between the two nodes
-            if (response.response.length > 0) {
-                log.only("🟠 [mergeMempools] Receiving difference: " + response.response.length)
-                await Mempool.receive(response.response as Transaction[])
-            } else {
-                log.only("🟠 [mergeMempools] No difference received")
-            }
+            await Mempool.receive(response.response as Transaction[])
         }
     }
 }
