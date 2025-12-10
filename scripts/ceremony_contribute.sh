@@ -640,8 +640,14 @@ if [ "$NODE_READY" = false ]; then
 fi
 
 log_info "Using Node $(node --version)"
-# Use project's local tsx to avoid version mismatches with npx
-./node_modules/.bin/tsx src/features/zk/scripts/ceremony.ts contribute
+
+# Install tsx globally via bun (local node_modules tsx has issues on some systems)
+log_info "Installing tsx globally..."
+bun install -g tsx
+log_success "tsx installed globally"
+
+# Use global tsx for ceremony execution
+tsx src/features/zk/scripts/ceremony.ts contribute
 
 log_success "Contribution completed!"
 
