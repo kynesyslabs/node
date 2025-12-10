@@ -18,6 +18,7 @@ import {
 
 import TxUtils from "../../blockchain/transaction"
 import { Waiter } from "@/utilities/waiter"
+import Block from "@/libs/blockchain/block"
 
 /**
  * DTR (Distributed Transaction Routing) Relay Retry Service
@@ -53,8 +54,28 @@ export class DTRManager {
         return DTRManager.instance
     }
 
+    static get poolSize(): number {
+        return DTRManager.validityDataCache.size
+    }
+
     static get isWaitingForBlock(): boolean {
         return Waiter.isWaiting(Waiter.keys.DTR_WAIT_FOR_BLOCK)
+    }
+
+    /**
+     * Releases the DTR transaction relay waiter
+     *
+     * @param block - Block to use for the common validator seed.
+     * If not provided, the last block will be used.
+     */
+    static async releaseDTRWaiter(block?: Block) {
+        if (Waiter.isWaiting(Waiter.keys.DTR_WAIT_FOR_BLOCK)) {
+            log.only(
+                "[consensusRoutine] releasing DTR transaction relay waiter",
+            )
+            const { commonValidatorSeed } = await getCommonValidatorSeed(block)
+            Waiter.resolve(Waiter.keys.DTR_WAIT_FOR_BLOCK, commonValidatorSeed)
+        }
     }
 
     /**

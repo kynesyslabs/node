@@ -473,7 +473,10 @@ export default class ServerHandlers {
                 }
 
                 if (getSharedState.inConsensusLoop) {
-                    log.only("in consensus loop, setting tx in cache: " + queriedTx.hash)
+                    log.only(
+                        "in consensus loop, setting tx in cache: " +
+                            queriedTx.hash,
+                    )
                     DTRManager.validityDataCache.set(
                         queriedTx.hash,
                         validatedData,
@@ -495,7 +498,10 @@ export default class ServerHandlers {
                     }
                 }
 
-                log.only("👀 not in consensus loop, adding tx to mempool: " + queriedTx.hash)
+                log.only(
+                    "👀 not in consensus loop, adding tx to mempool: " +
+                        queriedTx.hash,
+                )
             }
 
             // Proceeding with the mempool addition (either we are a validator or this is a fallback)
@@ -712,31 +718,27 @@ export default class ServerHandlers {
         return { extra, requireReply, response }
     }
 
-    static async handleMempool(content: any): Promise<any> {
+    static async handleMempool(senderPoolTxs: string[]): Promise<any> {
         // Basic message handling logic
         // ...
         log.info("[handleMempool] Received a message")
-        log.info(content)
-        let response = {
-            success: false,
-            mempool: [],
-        }
+        log.info("[handleMempool] Sender pool txs: " + senderPoolTxs.join(", "))
+
+        let difference: Transaction[]
 
         try {
-            response = await Mempool.receive(content.data as Transaction[])
+            difference = await Mempool.getDifference(senderPoolTxs)
+            // response = await Mempool.receive(content.data as Transaction[])
         } catch (error) {
             console.error(error)
         }
 
-        const ourId = getSharedState.publicKeyHex
-        const ourDate = new Date().toISOString()
-
         return {
-            result: response.success ? 200 : 400,
-            response: response.mempool,
-            extra:
-                (response.success ? "Mempool received" : "Mempool not merged") +
-                ` by: ${ourId} at ${ourDate}`,
+            result: 200,
+            response: difference,
+            extra: {
+                differenceCount: difference.length,
+            },
             requireReply: false,
         }
     }

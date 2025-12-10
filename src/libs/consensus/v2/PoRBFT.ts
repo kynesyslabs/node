@@ -112,10 +112,7 @@ export async function consensusRoutine(): Promise<void> {
                 ),
         )
 
-        log.only(
-            "[consensusRoutine] mempool merged (aka ordered transactions)",
-            true,
-        )
+        log.only("[consensusRoutine] mempool merged (aka ordered transactions)")
         // INFO: CONSENSUS ACTION 3: Merge the peerlist (skipped)
         // Merge the peerlist
         const peerlist = []
@@ -206,18 +203,7 @@ export async function consensusRoutine(): Promise<void> {
             await finalizeBlock(block, pro)
 
             // INFO: Release DTR transaction relay waiter
-            if (Waiter.isWaiting(Waiter.keys.DTR_WAIT_FOR_BLOCK)) {
-                log.only(
-                    "[consensusRoutine] releasing DTR transaction relay waiter",
-                )
-                const { commonValidatorSeed } = await getCommonValidatorSeed(
-                    block,
-                )
-                Waiter.resolve(
-                    Waiter.keys.DTR_WAIT_FOR_BLOCK,
-                    commonValidatorSeed,
-                )
-            }
+            await DTRManager.releaseDTRWaiter(block)
         } else {
             log.error(
                 `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
@@ -276,7 +262,13 @@ export async function consensusRoutine(): Promise<void> {
                     2,
                 ),
         )
-        log.only("DTR Cache size: " + DTRManager.validityDataCache.size)
+
+        // INFO: If there was a relayed tx past finalize block step, release
+        log.only("DTR Cache size: " + DTRManager.poolSize)
+        if (DTRManager.poolSize > 0) {
+            await DTRManager.releaseDTRWaiter()
+        }
+
         cleanupConsensusState()
         manager.endConsensusRoutine()
     }

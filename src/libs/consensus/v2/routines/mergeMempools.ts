@@ -10,8 +10,8 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
         promises.push(
             peer.longCall(
                 {
-                    method: "mempool", // see server_rpc.ts
-                    params: [{ data: mempool }], // ? If possible, we should send the mempool directly without wrapping it in an object
+                    method: "mempool",
+                    params: mempool.map(tx => tx.hash),
                 },
                 true,
                 250,
@@ -27,7 +27,13 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
         log.info("[mergeMempools] " + JSON.stringify(response, null, 2))
 
         if (response.result === 200) {
-            await Mempool.receive(response.response as Transaction[])
+            // INFO: Response contains the difference between the two nodes
+            if (response.response.length > 0) {
+                log.only("🟠 [mergeMempools] Receiving difference: " + response.response.length)
+                await Mempool.receive(response.response as Transaction[])
+            } else {
+                log.only("🟠 [mergeMempools] No difference received")
+            }
         }
     }
 }
