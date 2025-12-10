@@ -69,6 +69,7 @@ export default async function handlePayOperation(
             break
 
         case "ibc":
+        case "atom":
             result = await genericJsonRpcPay(multichain.IBC, rpcUrl, operation)
             break
 
