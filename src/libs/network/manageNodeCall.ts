@@ -155,6 +155,18 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "error"
             }
             break
+
+        case "getBlockTransactions": {
+            if (!data.blockHash) {
+                response.result = 400
+                response.response = "No block hash specified"
+                break
+            }
+
+            response.response = await Chain.getBlockTransactions(data.blockHash)
+            break
+        }
+
         case "getMempool":
             response.response = await Mempool.getMempool()
             break
