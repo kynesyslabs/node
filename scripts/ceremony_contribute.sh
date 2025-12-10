@@ -640,7 +640,8 @@ if [ "$NODE_READY" = false ]; then
 fi
 
 log_info "Using Node $(node --version)"
-npx tsx src/features/zk/scripts/ceremony.ts contribute
+# Use project's local tsx to avoid version mismatches with npx
+./node_modules/.bin/tsx src/features/zk/scripts/ceremony.ts contribute
 
 log_success "Contribution completed!"
 
