@@ -278,10 +278,8 @@ export default class L2PSTransactionExecutor {
             )
 
             affectedAccounts.push(sender, to)
-            
-            log.info(`[L2PS Executor] Validated transfer: ${sender.slice(0, 16)}... -> ${to.slice(0, 16)}...: ${amount}`)
         } else {
-            log.info(`[L2PS Executor] Unknown native operation: ${nativePayload.nativeOperation}`)
+            log.debug(`[L2PS Executor] Unknown native operation: ${nativePayload.nativeOperation}`)
             return {
                 success: true,
                 message: `Native operation '${nativePayload.nativeOperation}' not implemented`,
@@ -328,7 +326,7 @@ export default class L2PSTransactionExecutor {
                 break
 
             default:
-                log.info(`[L2PS Executor] GCR edit type '${edit.type}' validation skipped`)
+                log.debug(`[L2PS Executor] GCR edit type '${edit.type}' validation skipped`)
         }
 
         return { success: true, message: `Validated ${edit.type} edit` }

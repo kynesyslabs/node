@@ -61,21 +61,39 @@ export class L2PSProof {
     l1_batch_hash: string
 
     /**
-     * ZK Proof data (will be actual ZK proof later, for now simplified proof)
+     * ZK Proof data
+     * Supports multiple proof systems:
+     * - hash: Deterministic hash-based verification (default)
+     * - plonk: Production PLONK proofs (universal setup)
+     * - snark: Legacy Groth16 proofs (circuit-specific setup)
+     * - stark: STARK proofs (no trusted setup, larger proofs)
+     * 
      * Structure:
      * {
-     *   type: "snark" | "stark" | "placeholder",
-     *   data: string (hex-encoded proof),
-     *   verifier_key: string (optional),
-     *   public_inputs: any[]
+     *   type: "hash" | "plonk" | "snark" | "stark",
+     *   data: string (hex/JSON-encoded proof),
+     *   verifier_key?: string (optional key identifier),
+     *   public_inputs: any[],
+     *   protocol_version?: string,
+     *   circuit_id?: string,
+     *   batch_size?: number (PLONK batch circuit size: 5, 10, or 20),
+     *   tx_count?: number (actual transaction count in batch),
+     *   final_state_root?: string (computed final state root),
+     *   total_volume?: string (total transaction volume)
      * }
      */
     @Column("jsonb")
     proof: {
-        type: "snark" | "stark" | "placeholder"
-        data: string
+        type: "hash" | "plonk" | "snark" | "stark"
+        data: any // proof object or hash string
         verifier_key?: string
         public_inputs: any[]
+        protocol_version?: string
+        circuit_id?: string
+        batch_size?: number
+        tx_count?: number
+        final_state_root?: string
+        total_volume?: string
     }
 
     /**

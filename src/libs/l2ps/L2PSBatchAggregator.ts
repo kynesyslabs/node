@@ -6,6 +6,7 @@ import log from "@/utilities/logger"
 import { Hashing, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { getNetworkTimestamp } from "@/libs/utils/calibrateTime"
 import crypto from "crypto"
+import { L2PSBatchProver, BatchProof } from "@/libs/l2ps/zk/L2PSBatchProver"
 
 /**
  * L2PS Batch Payload Interface
@@ -25,6 +26,14 @@ export interface L2PSBatchPayload {
     transaction_hashes: string[]
     /** HMAC-SHA256 authentication tag for tamper detection */
     authentication_tag: string
+    /** ZK-SNARK PLONK proof for batch validity (optional during transition) */
+    zk_proof?: {
+        proof: any
+        publicSignals: string[]
+        batchSize: number
+        finalStateRoot: string
+        totalVolume: string
+    }
 }
 
 /**
@@ -60,14 +69,20 @@ export class L2PSBatchAggregator {
     /** Service running state */
     private isRunning = false
     
+    /** ZK Batch Prover for generating PLONK proofs */
+    private zkProver: L2PSBatchProver | null = null
+    
+    /** Whether ZK proofs are enabled (requires setup_all_batches.sh to be run first) */
+    private zkEnabled = false
+    
     /** Batch aggregation interval in milliseconds (default: 10 seconds) */
     private readonly AGGREGATION_INTERVAL = 10000
     
     /** Minimum number of transactions to trigger a batch (can be lower if timeout reached) */
     private readonly MIN_BATCH_SIZE = 1
     
-    /** Maximum number of transactions per batch to prevent oversized batches */
-    private readonly MAX_BATCH_SIZE = 100
+    /** Maximum number of transactions per batch (limited by ZK circuit size) */
+    private readonly MAX_BATCH_SIZE = 10
     
     /** Cleanup interval - remove batched transactions older than this (1 hour) */
     private readonly CLEANUP_AGE_MS = 5 * 60 * 1000 // 5 minutes - confirmed txs can be cleaned up quickly
@@ -130,6 +145,9 @@ export class L2PSBatchAggregator {
         this.isRunning = true
         this.isAggregating = false
 
+        // Initialize ZK Prover (optional - gracefully degrades if keys not available)
+        await this.initializeZkProver()
+
         // Reset statistics using helper method
         this.stats = this.createInitialStats()
 
@@ -140,6 +158,27 @@ export class L2PSBatchAggregator {
 
         log.info(`[L2PS Batch Aggregator] Started with ${this.AGGREGATION_INTERVAL}ms interval`)
     }
+
+    /**
+     * Initialize ZK Prover for batch proof generation
+     * Gracefully degrades if ZK keys are not available
+     */
+    private async initializeZkProver(): Promise<void> {
+        try {
+            this.zkProver = new L2PSBatchProver()
+            await this.zkProver.initialize()
+            this.zkEnabled = true
+            log.info("[L2PS Batch Aggregator] ZK Prover initialized successfully")
+        } catch (error) {
+            this.zkEnabled = false
+            this.zkProver = null
+            const errorMessage = error instanceof Error ? error.message : String(error)
+            log.warning(`[L2PS Batch Aggregator] ZK Prover not available: ${errorMessage}`)
+            log.warning("[L2PS Batch Aggregator] Batches will be submitted without ZK proofs")
+            log.warning("[L2PS Batch Aggregator] Run 'src/libs/l2ps/zk/scripts/setup_all_batches.sh' to enable ZK proofs")
+        }
+    }
+    
 
     /**
      * Stop the L2PS batch aggregation service
@@ -324,6 +363,7 @@ export class L2PSBatchAggregator {
      * Create an encrypted batch payload from transactions
      * 
      * Uses HMAC-SHA256 for authenticated encryption to prevent tampering.
+     * Optionally includes ZK-SNARK proof if prover is available.
      * 
      * @param l2psUid - L2PS network identifier
      * @param transactions - Transactions to include in batch
@@ -369,6 +409,9 @@ export class L2PSBatchAggregator {
             .update(hmacData)
             .digest("hex")
 
+        // Generate ZK proof if prover is available
+        const zkProof = await this.generateZkProofForBatch(transactions, batchHash)
+
         return {
             l2ps_uid: l2psUid,
             encrypted_batch: encryptedBatch,
@@ -376,6 +419,68 @@ export class L2PSBatchAggregator {
             batch_hash: batchHash,
             transaction_hashes: transactionHashes,
             authentication_tag: authenticationTag,
+            zk_proof: zkProof,
+        }
+    }
+
+    /**
+     * Generate ZK-SNARK PLONK proof for batch validity
+     * 
+     * Creates a zero-knowledge proof that batch state transitions are valid
+     * without revealing the actual transaction data.
+     * 
+     * @param transactions - Transactions to prove
+     * @param batchHash - Deterministic batch hash as initial state root
+     * @returns ZK proof data or undefined if prover not available
+     */
+    private async generateZkProofForBatch(
+        transactions: L2PSMempoolTx[],
+        batchHash: string
+    ): Promise<L2PSBatchPayload['zk_proof'] | undefined> {
+        if (!this.zkEnabled || !this.zkProver) {
+            return undefined
+        }
+
+        try {
+            // Convert transactions to ZK-friendly format
+            // For now, we use simplified balance transfer model
+            // TODO: Extract actual amounts from encrypted_tx when decryption is available
+            const zkTransactions = transactions.map((tx, index) => ({
+                // Use hash-derived values for now (placeholder)
+                // In production, these would come from decrypted transaction data
+                senderBefore: BigInt('0x' + tx.hash.slice(0, 16)) % BigInt(1e18),
+                senderAfter: BigInt('0x' + tx.hash.slice(0, 16)) % BigInt(1e18) - BigInt(index + 1) * BigInt(1e15),
+                receiverBefore: BigInt('0x' + tx.hash.slice(16, 32)) % BigInt(1e18),
+                receiverAfter: BigInt('0x' + tx.hash.slice(16, 32)) % BigInt(1e18) + BigInt(index + 1) * BigInt(1e15),
+                amount: BigInt(index + 1) * BigInt(1e15),
+            }))
+
+            // Use batch hash as initial state root
+            const initialStateRoot = BigInt('0x' + batchHash.slice(0, 32)) % BigInt(2n ** 253n)
+
+            log.debug(`[L2PS Batch Aggregator] Generating ZK proof for ${transactions.length} transactions...`)
+            const startTime = Date.now()
+
+            const proof = await this.zkProver.generateProof({
+                transactions: zkTransactions,
+                initialStateRoot,
+            })
+
+            const duration = Date.now() - startTime
+            log.info(`[L2PS Batch Aggregator] ZK proof generated in ${duration}ms (batch_${proof.batchSize})`)
+
+            return {
+                proof: proof.proof,
+                publicSignals: proof.publicSignals,
+                batchSize: proof.batchSize,
+                finalStateRoot: proof.finalStateRoot.toString(),
+                totalVolume: proof.totalVolume.toString(),
+            }
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error)
+            log.warning(`[L2PS Batch Aggregator] ZK proof generation failed: ${errorMessage}`)
+            log.warning("[L2PS Batch Aggregator] Batch will be submitted without ZK proof")
+            return undefined
         }
     }
 

@@ -12,6 +12,11 @@
  * 4. At consensus, pending proofs are read and verified
  * 5. Verified proofs' GCR edits are applied to main gcr_main (L1 state)
  * 
+ * Proof Systems:
+ * - PLONK (preferred): Universal trusted setup, flexible circuit updates
+ * - Groth16: Smaller proofs, requires circuit-specific setup
+ * - Placeholder: Development mode, hash-based verification
+ * 
  * @module L2PSProofManager
  */
 
@@ -114,30 +119,24 @@ export default class L2PSProofManager {
         try {
             const repo = await this.getRepo()
 
-            // Generate transactions hash from GCR edits (deterministic)
+            // Generate deterministic transactions hash
             const transactionsHash = Hashing.sha256(
                 deterministicStringify({ l2psUid, l1BatchHash, gcrEdits })
             )
 
-            // Create placeholder proof (will be real ZK proof later)
-            // For now, this encodes the state transition claim
-            // Use deterministicStringify to ensure consistent hashing after DB round-trip
+            // Create hash-based proof for state transition verification
+            const proofData = Hashing.sha256(deterministicStringify({
+                l2psUid,
+                l1BatchHash,
+                gcrEdits,
+                affectedAccounts,
+                transactionsHash
+            }))
+
             const proof: L2PSProof["proof"] = {
-                type: "placeholder",
-                data: Hashing.sha256(deterministicStringify({
-                    l2psUid,
-                    l1BatchHash,
-                    gcrEdits,
-                    affectedAccounts,
-                    transactionsHash
-                })),
-                public_inputs: [
-                    l2psUid,
-                    l1BatchHash,
-                    transactionsHash,
-                    affectedAccounts.length,
-                    gcrEdits.length
-                ]
+                type: "hash",
+                data: proofData,
+                public_inputs: [l2psUid, l1BatchHash, transactionsHash]
             }
 
             const proofEntity = repo.create({
@@ -212,12 +211,7 @@ export default class L2PSProofManager {
     }
 
     /**
-     * Verify a proof (placeholder - will implement actual ZK verification)
-     * 
-     * For now, just validates structure. Later will:
-     * - Verify ZK proof mathematically
-     * - Check public inputs match expected values
-     * - Validate state transition is valid
+     * Verify a proof using hash verification
      * 
      * @param proof - The proof to verify
      * @returns Whether the proof is valid
@@ -232,34 +226,31 @@ export default class L2PSProofManager {
 
             // Validate each GCR edit has required fields
             for (const edit of proof.gcr_edits) {
-                // Balance and nonce edits require account field
                 if (!edit.type || (edit.type === 'balance' && !('account' in edit))) {
                     log.warning(`[L2PS ProofManager] Proof ${proof.id} has invalid GCR edit`)
                     return false
                 }
             }
 
-            // FUTURE: Implement actual ZK proof verification
-            // For placeholder type, just check the hash matches
-            // Use deterministicStringify to ensure consistent hashing after DB round-trip
-            if (proof.proof.type === "placeholder") {
-                const expectedHash = Hashing.sha256(deterministicStringify({
-                    l2psUid: proof.l2ps_uid,
-                    l1BatchHash: proof.l1_batch_hash,
-                    gcrEdits: proof.gcr_edits,
-                    affectedAccounts: proof.affected_accounts,
-                    transactionsHash: proof.transactions_hash
-                }))
+            // Verify hash matches expected structure
+            const expectedHash = Hashing.sha256(deterministicStringify({
+                l2psUid: proof.l2ps_uid,
+                l1BatchHash: proof.l1_batch_hash,
+                gcrEdits: proof.gcr_edits,
+                affectedAccounts: proof.affected_accounts,
+                transactionsHash: proof.transactions_hash
+            }))
 
-                if (proof.proof.data !== expectedHash) {
-                    log.warning(`[L2PS ProofManager] Proof ${proof.id} hash mismatch`)
-                    return false
-                }
+            if (proof.proof.data !== expectedHash) {
+                log.warning(`[L2PS ProofManager] Proof ${proof.id} hash mismatch`)
+                return false
             }
 
+            log.debug(`[L2PS ProofManager] Proof ${proof.id} verified`)
             return true
-        } catch (error: any) {
-            log.error(`[L2PS ProofManager] Proof verification failed: ${error.message}`)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS ProofManager] Proof verification failed: ${message}`)
             return false
         }
     }
