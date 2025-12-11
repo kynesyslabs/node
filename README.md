@@ -1,5 +1,7 @@
 # Demos Network Node
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/kynesyslabs/node)
+
 The official node implementation for the Demos Network - a decentralized network enabling secure, cross-chain communication and computation.
 
 ## Overview
