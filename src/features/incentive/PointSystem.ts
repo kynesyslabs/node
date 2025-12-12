@@ -40,6 +40,9 @@ export class PointSystem {
     private async getUserIdentitiesFromGCR(userId: string): Promise<{
         linkedWallets: string[]
         linkedSocials: { twitter?: string; github?: string; discord?: string }
+        linkedUDDomains: {
+            [network: string]: string[]
+        }
     }> {
         const xmIdentities = await IdentityManager.getIdentities(userId)
         const twitterIdentities = await IdentityManager.getWeb2Identities(
@@ -57,7 +60,12 @@ export class PointSystem {
             "discord",
         )
 
+        const udIdentities = await IdentityManager.getUDIdentities(userId)
+
         const linkedWallets: string[] = []
+        const linkedUDDomains: {
+            [network: string]: string[]
+        } = {}
 
         if (xmIdentities?.xm) {
             const chains = Object.keys(xmIdentities.xm)
@@ -79,7 +87,11 @@ export class PointSystem {
             }
         }
 
-        const linkedSocials: { twitter?: string; github?: string; discord?: string } = {}
+        const linkedSocials: {
+            twitter?: string
+            github?: string
+            discord?: string
+        } = {}
 
         if (Array.isArray(twitterIdentities) && twitterIdentities.length > 0) {
             linkedSocials.twitter = twitterIdentities[0].username
@@ -93,7 +105,21 @@ export class PointSystem {
             linkedSocials.discord = discordIdentities[0].username
         }
 
-        return { linkedWallets, linkedSocials }
+        if (Array.isArray(udIdentities) && udIdentities.length > 0) {
+            for (const udIdentity of udIdentities as SavedUdIdentity[]) {
+                const { network, domain } = udIdentity
+
+                if (!linkedUDDomains[network]) {
+                    linkedUDDomains[network] = []
+                }
+
+                if (!linkedUDDomains[network]!.includes(domain)) {
+                    linkedUDDomains[network]!.push(domain)
+                }
+            }
+        }
+
+        return { linkedWallets, linkedSocials, linkedUDDomains }
     }
 
     /**
@@ -109,7 +135,7 @@ export class PointSystem {
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
         let account = await gcrMainRepository.findOneBy({ pubkey: userIdStr })
 
-        const { linkedWallets, linkedSocials } =
+        const { linkedWallets, linkedSocials, linkedUDDomains } =
             await this.getUserIdentitiesFromGCR(userIdStr)
 
         if (!account) {
@@ -150,6 +176,7 @@ export class PointSystem {
             },
             linkedWallets,
             linkedSocials,
+            linkedUDDomains,
             lastUpdated: account.points.lastUpdated || new Date(),
             flagged: account.flagged || null,
             flaggedReason: account.flaggedReason || null,

@@ -326,12 +326,19 @@ export default class IdentityManager {
      * @param key - The key to get the identities of
      * @returns The identities of the address
      */
-    static async getIdentities(address: string, key?: "xm" | "web2" | "pqc" | "ud"): Promise<any> {
+    static async getIdentities(
+        address: string,
+        key?: "xm" | "web2" | "pqc" | "ud",
+    ): Promise<any> {
         const gcr = await ensureGCRForUser(address)
         if (key) {
             return gcr.identities[key]
         }
 
         return gcr.identities
+    }
+
+    static async getUDIdentities(address: string) {
+        return await this.getIdentities(address, "ud")
     }
 }
