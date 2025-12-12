@@ -459,7 +459,12 @@ export class CategorizedLogger extends EventEmitter {
         fs.promises.appendFile(filepath, content)
             .then(() => {
                 // Trigger rotation check (debounced)
-                this.maybeCheckRotation()
+                // Wrapped in try-catch to ensure rotation errors never crash the node
+                try {
+                    this.maybeCheckRotation()
+                } catch {
+                    // Silently ignore rotation check errors
+                }
             })
             .catch(err => {
                 // Silently fail file writes to avoid recursion.
@@ -510,9 +515,15 @@ export class CategorizedLogger extends EventEmitter {
      * Rotate files that exceed the maximum file size
      */
     private async rotateOversizedFiles(): Promise<void> {
-        if (!fs.existsSync(this.config.logsDir)) return
+        let files: string[]
+        try {
+            if (!fs.existsSync(this.config.logsDir)) return
+            files = fs.readdirSync(this.config.logsDir)
+        } catch {
+            // Directory doesn't exist or can't be read - silently return
+            return
+        }
 
-        const files = fs.readdirSync(this.config.logsDir)
         for (const file of files) {
             if (!file.endsWith(".log")) continue
 
@@ -530,37 +541,45 @@ export class CategorizedLogger extends EventEmitter {
 
     /**
      * Truncate a file, keeping only the newest portion
+     * Returns the new file size after truncation
      */
-    private async truncateFile(filepath: string, currentSize: number): Promise<void> {
+    private async truncateFile(filepath: string, currentSize: number): Promise<number> {
         try {
             // Calculate how much to keep (newest 50% of max size)
             const keepSize = Math.floor(this.config.maxFileSize * TRUNCATE_KEEP_RATIO)
             const skipBytes = currentSize - keepSize
 
-            if (skipBytes <= 0) return
+            if (skipBytes <= 0) return currentSize
 
-            // Read the file and keep only the tail
-            const content = await fs.promises.readFile(filepath, "utf-8")
+            // Read the file as a buffer to handle bytes correctly
+            const buffer = await fs.promises.readFile(filepath)
 
-            // Find the first complete line after the skip point
+            // Find the first newline after the skip point (working with bytes)
             let startIndex = skipBytes
-            while (startIndex < content.length && content[startIndex] !== "\n") {
+            while (startIndex < buffer.length && buffer[startIndex] !== 0x0a) { // 0x0a = '\n'
                 startIndex++
             }
             startIndex++ // Skip the newline itself
 
-            if (startIndex >= content.length) {
+            if (startIndex >= buffer.length) {
                 // File is all one line or something weird, just clear it
                 await fs.promises.writeFile(filepath, "")
-                return
+                return 0
             }
 
-            // Write back only the tail portion
-            const tailContent = content.slice(startIndex)
+            // Extract the tail portion as a buffer, then convert to string for the marker
+            const tailBuffer = buffer.subarray(startIndex)
             const rotationMarker = `[${new Date().toISOString()}] [SYSTEM  ] [CORE      ] --- Log rotated (file exceeded ${Math.round(this.config.maxFileSize / 1024 / 1024)}MB limit) ---\n`
-            await fs.promises.writeFile(filepath, rotationMarker + tailContent)
+
+            // Write marker + tail content
+            const markerBuffer = Buffer.from(rotationMarker, "utf-8")
+            const newContent = Buffer.concat([markerBuffer, tailBuffer])
+            await fs.promises.writeFile(filepath, newContent)
+
+            return newContent.length
         } catch (err) {
             originalConsoleError(`Failed to truncate log file: ${filepath}`, err)
+            return currentSize // Return original size on error
         }
     }
 
@@ -568,10 +587,16 @@ export class CategorizedLogger extends EventEmitter {
      * Enforce the total size limit by removing oldest log files
      */
     private async enforceTotalSizeLimit(): Promise<void> {
-        if (!fs.existsSync(this.config.logsDir)) return
+        let files: string[]
+        try {
+            if (!fs.existsSync(this.config.logsDir)) return
+            files = fs.readdirSync(this.config.logsDir)
+        } catch {
+            // Directory doesn't exist or can't be read - silently return
+            return
+        }
 
         // Get all log files with their stats
-        const files = fs.readdirSync(this.config.logsDir)
         const logFiles: Array<{ name: string; path: string; size: number; mtime: number }> = []
         let totalSize = 0
 
@@ -616,8 +641,8 @@ export class CategorizedLogger extends EventEmitter {
             try {
                 // Don't delete, truncate instead to preserve some history
                 if (file.size > this.config.maxFileSize * TRUNCATE_KEEP_RATIO) {
-                    await this.truncateFile(file.path, file.size)
-                    totalSize -= file.size * (1 - TRUNCATE_KEEP_RATIO)
+                    const newSize = await this.truncateFile(file.path, file.size)
+                    totalSize -= (file.size - newSize)
                 } else {
                     // File is small, delete it entirely
                     fs.unlinkSync(file.path)
@@ -641,10 +666,16 @@ export class CategorizedLogger extends EventEmitter {
      * Get current logs directory size in bytes
      */
     getLogsDirSize(): number {
-        if (!this.logsInitialized || !fs.existsSync(this.config.logsDir)) return 0
+        let files: string[]
+        try {
+            if (!this.logsInitialized || !fs.existsSync(this.config.logsDir)) return 0
+            files = fs.readdirSync(this.config.logsDir)
+        } catch {
+            // Directory doesn't exist or can't be read
+            return 0
+        }
 
         let totalSize = 0
-        const files = fs.readdirSync(this.config.logsDir)
         for (const file of files) {
             if (!file.endsWith(".log")) continue
             try {
