@@ -59,7 +59,25 @@ export interface LoggerConfig {
     minLevel?: LogLevel
     /** Categories to show (empty = all) */
     enabledCategories?: LogCategory[]
+    /** Maximum size per log file in bytes (default: 8MB) */
+    maxFileSize?: number
+    /** Maximum total size for all logs in bytes (default: 128MB) */
+    maxTotalSize?: number
 }
+
+// SECTION Log Rotation Constants
+
+/** Default maximum size per log file: 8 MB */
+const DEFAULT_MAX_FILE_SIZE = 8 * 1024 * 1024
+
+/** Default maximum total size for all logs: 128 MB */
+const DEFAULT_MAX_TOTAL_SIZE = 128 * 1024 * 1024
+
+/** How much to keep when truncating a file (keep newest 50%) */
+const TRUNCATE_KEEP_RATIO = 0.5
+
+/** Minimum interval between rotation checks in ms (debounce) */
+const ROTATION_CHECK_INTERVAL = 5000
 
 // SECTION Ring Buffer Implementation
 
@@ -206,6 +224,10 @@ export class CategorizedLogger extends EventEmitter {
     // TUI mode flag - when true, suppress direct terminal output
     private tuiMode = false
 
+    // Log rotation tracking
+    private lastRotationCheck = 0
+    private rotationInProgress = false
+
     private constructor(config: LoggerConfig = {}) {
         super()
         this.config = {
@@ -214,6 +236,8 @@ export class CategorizedLogger extends EventEmitter {
             terminalOutput: config.terminalOutput ?? true,
             minLevel: config.minLevel ?? "debug",
             enabledCategories: config.enabledCategories ?? [],
+            maxFileSize: config.maxFileSize ?? DEFAULT_MAX_FILE_SIZE,
+            maxTotalSize: config.maxTotalSize ?? DEFAULT_MAX_TOTAL_SIZE,
         }
         // Initialize a buffer for each category
         for (const category of ALL_CATEGORIES) {
@@ -427,16 +451,210 @@ export class CategorizedLogger extends EventEmitter {
     }
 
     /**
-     * Append a line to a log file
+     * Append a line to a log file with rotation check
      */
     private appendToFile(filename: string, content: string): void {
         const filepath = path.join(this.config.logsDir, filename)
 
-        fs.promises.appendFile(filepath, content).catch(err => {
-            // Silently fail file writes to avoid recursion.
-            // Using the captured original console.error to bypass TUI interception.
-            originalConsoleError(`Failed to write to log file: ${filepath}`, err)
+        fs.promises.appendFile(filepath, content)
+            .then(() => {
+                // Trigger rotation check (debounced)
+                this.maybeCheckRotation()
+            })
+            .catch(err => {
+                // Silently fail file writes to avoid recursion.
+                // Using the captured original console.error to bypass TUI interception.
+                originalConsoleError(`Failed to write to log file: ${filepath}`, err)
+            })
+    }
+
+    // SECTION Log Rotation Methods
+
+    /**
+     * Check if rotation is needed (debounced to avoid excessive disk operations)
+     */
+    private maybeCheckRotation(): void {
+        const now = Date.now()
+        if (now - this.lastRotationCheck < ROTATION_CHECK_INTERVAL) {
+            return
+        }
+        if (this.rotationInProgress) {
+            return
+        }
+
+        this.lastRotationCheck = now
+        this.performRotationCheck()
+    }
+
+    /**
+     * Perform the actual rotation check
+     */
+    private async performRotationCheck(): Promise<void> {
+        if (!this.logsInitialized) return
+        this.rotationInProgress = true
+
+        try {
+            // Check individual file sizes
+            await this.rotateOversizedFiles()
+
+            // Check total directory size
+            await this.enforceTotalSizeLimit()
+        } catch (err) {
+            originalConsoleError("Log rotation check failed:", err)
+        } finally {
+            this.rotationInProgress = false
+        }
+    }
+
+    /**
+     * Rotate files that exceed the maximum file size
+     */
+    private async rotateOversizedFiles(): Promise<void> {
+        if (!fs.existsSync(this.config.logsDir)) return
+
+        const files = fs.readdirSync(this.config.logsDir)
+        for (const file of files) {
+            if (!file.endsWith(".log")) continue
+
+            const filepath = path.join(this.config.logsDir, file)
+            try {
+                const stats = fs.statSync(filepath)
+                if (stats.size > this.config.maxFileSize) {
+                    await this.truncateFile(filepath, stats.size)
+                }
+            } catch {
+                // Ignore errors for individual files
+            }
+        }
+    }
+
+    /**
+     * Truncate a file, keeping only the newest portion
+     */
+    private async truncateFile(filepath: string, currentSize: number): Promise<void> {
+        try {
+            // Calculate how much to keep (newest 50% of max size)
+            const keepSize = Math.floor(this.config.maxFileSize * TRUNCATE_KEEP_RATIO)
+            const skipBytes = currentSize - keepSize
+
+            if (skipBytes <= 0) return
+
+            // Read the file and keep only the tail
+            const content = await fs.promises.readFile(filepath, "utf-8")
+
+            // Find the first complete line after the skip point
+            let startIndex = skipBytes
+            while (startIndex < content.length && content[startIndex] !== "\n") {
+                startIndex++
+            }
+            startIndex++ // Skip the newline itself
+
+            if (startIndex >= content.length) {
+                // File is all one line or something weird, just clear it
+                await fs.promises.writeFile(filepath, "")
+                return
+            }
+
+            // Write back only the tail portion
+            const tailContent = content.slice(startIndex)
+            const rotationMarker = `[${new Date().toISOString()}] [SYSTEM  ] [CORE      ] --- Log rotated (file exceeded ${Math.round(this.config.maxFileSize / 1024 / 1024)}MB limit) ---\n`
+            await fs.promises.writeFile(filepath, rotationMarker + tailContent)
+        } catch (err) {
+            originalConsoleError(`Failed to truncate log file: ${filepath}`, err)
+        }
+    }
+
+    /**
+     * Enforce the total size limit by removing oldest log files
+     */
+    private async enforceTotalSizeLimit(): Promise<void> {
+        if (!fs.existsSync(this.config.logsDir)) return
+
+        // Get all log files with their stats
+        const files = fs.readdirSync(this.config.logsDir)
+        const logFiles: Array<{ name: string; path: string; size: number; mtime: number }> = []
+        let totalSize = 0
+
+        for (const file of files) {
+            if (!file.endsWith(".log")) continue
+
+            const filepath = path.join(this.config.logsDir, file)
+            try {
+                const stats = fs.statSync(filepath)
+                logFiles.push({
+                    name: file,
+                    path: filepath,
+                    size: stats.size,
+                    mtime: stats.mtime.getTime(),
+                })
+                totalSize += stats.size
+            } catch {
+                // Ignore errors for individual files
+            }
+        }
+
+        // If under limit, nothing to do
+        if (totalSize <= this.config.maxTotalSize) return
+
+        // Sort by modification time (oldest first) for deletion priority
+        // But protect critical files (error.log, critical.log, all.log)
+        const priorityFiles = new Set(["error.log", "critical.log", "all.log"])
+
+        logFiles.sort((a, b) => {
+            // Priority files should be deleted last
+            const aPriority = priorityFiles.has(a.name) ? 1 : 0
+            const bPriority = priorityFiles.has(b.name) ? 1 : 0
+            if (aPriority !== bPriority) return aPriority - bPriority
+            // Otherwise sort by oldest first
+            return a.mtime - b.mtime
         })
+
+        // Delete oldest files until under limit
+        for (const file of logFiles) {
+            if (totalSize <= this.config.maxTotalSize) break
+
+            try {
+                // Don't delete, truncate instead to preserve some history
+                if (file.size > this.config.maxFileSize * TRUNCATE_KEEP_RATIO) {
+                    await this.truncateFile(file.path, file.size)
+                    totalSize -= file.size * (1 - TRUNCATE_KEEP_RATIO)
+                } else {
+                    // File is small, delete it entirely
+                    fs.unlinkSync(file.path)
+                    totalSize -= file.size
+                }
+            } catch {
+                // Ignore errors for individual files
+            }
+        }
+    }
+
+    /**
+     * Force immediate rotation check (for testing or manual trigger)
+     */
+    forceRotationCheck(): Promise<void> {
+        this.lastRotationCheck = 0
+        return this.performRotationCheck()
+    }
+
+    /**
+     * Get current logs directory size in bytes
+     */
+    getLogsDirSize(): number {
+        if (!this.logsInitialized || !fs.existsSync(this.config.logsDir)) return 0
+
+        let totalSize = 0
+        const files = fs.readdirSync(this.config.logsDir)
+        for (const file of files) {
+            if (!file.endsWith(".log")) continue
+            try {
+                const stats = fs.statSync(path.join(this.config.logsDir, file))
+                totalSize += stats.size
+            } catch {
+                // Ignore errors
+            }
+        }
+        return totalSize
     }
 
     /**
