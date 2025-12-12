@@ -346,9 +346,13 @@ export class TUIManager extends EventEmitter {
      * Regex uses {1,50} limit to prevent ReDoS from unbounded backtracking.
      */
     private extractCategoryFromMessage(message: string): { category: LogCategory; cleanMessage: string } {
+        // DEFENSIVE: Ensure message is a string to prevent crashes from non-string inputs
+        // TUI errors must NEVER crash the node
+        const safeMessage = typeof message === "string" ? message : String(message ?? "")
+        
         // Try to extract tag from message like "[PeerManager] ..."
         // Limit tag to 50 chars max to prevent ReDoS
-        const match = message.match(/^\[([A-Za-z0-9_ ]{1,50})\]\s*(.*)$/i)
+        const match = safeMessage.match(/^\[([A-Za-z0-9_ ]{1,50})\]\s*(.*)$/i)
         if (match) {
             const tag = match[1].trim().toUpperCase()
             const cleanMessage = match[2]
@@ -356,7 +360,7 @@ export class TUIManager extends EventEmitter {
             return { category, cleanMessage }
         }
 
-        return { category: "CORE", cleanMessage: message }
+        return { category: "CORE", cleanMessage: safeMessage }
     }
 
     /**
@@ -377,34 +381,55 @@ export class TUIManager extends EventEmitter {
         }
 
         // Replace with TUI-safe versions that route to the logger with category detection
+        // CRITICAL: All handlers wrapped in try-catch - TUI errors must NEVER crash the node
         console.log = (...args: unknown[]) => {
-            const message = args.map(a => String(a)).join(" ")
-            const { category, cleanMessage } = this.extractCategoryFromMessage(message)
-            this.logger.debug(category, `[console.log] ${cleanMessage}`)
+            try {
+                const message = args.map(a => String(a)).join(" ")
+                const { category, cleanMessage } = this.extractCategoryFromMessage(message)
+                this.logger.debug(category, `[console.log] ${cleanMessage}`)
+            } catch {
+                // Silently ignore - TUI errors must never crash the node
+            }
         }
 
         console.error = (...args: unknown[]) => {
-            const message = args.map(a => String(a)).join(" ")
-            const { category, cleanMessage } = this.extractCategoryFromMessage(message)
-            this.logger.error(category, `[console.error] ${cleanMessage}`)
+            try {
+                const message = args.map(a => String(a)).join(" ")
+                const { category, cleanMessage } = this.extractCategoryFromMessage(message)
+                this.logger.error(category, `[console.error] ${cleanMessage}`)
+            } catch {
+                // Silently ignore - TUI errors must never crash the node
+            }
         }
 
         console.warn = (...args: unknown[]) => {
-            const message = args.map(a => String(a)).join(" ")
-            const { category, cleanMessage } = this.extractCategoryFromMessage(message)
-            this.logger.warning(category, `[console.warn] ${cleanMessage}`)
+            try {
+                const message = args.map(a => String(a)).join(" ")
+                const { category, cleanMessage } = this.extractCategoryFromMessage(message)
+                this.logger.warning(category, `[console.warn] ${cleanMessage}`)
+            } catch {
+                // Silently ignore - TUI errors must never crash the node
+            }
         }
 
         console.info = (...args: unknown[]) => {
-            const message = args.map(a => String(a)).join(" ")
-            const { category, cleanMessage } = this.extractCategoryFromMessage(message)
-            this.logger.info(category, `[console.info] ${cleanMessage}`)
+            try {
+                const message = args.map(a => String(a)).join(" ")
+                const { category, cleanMessage } = this.extractCategoryFromMessage(message)
+                this.logger.info(category, `[console.info] ${cleanMessage}`)
+            } catch {
+                // Silently ignore - TUI errors must never crash the node
+            }
         }
 
         console.debug = (...args: unknown[]) => {
-            const message = args.map(a => String(a)).join(" ")
-            const { category, cleanMessage } = this.extractCategoryFromMessage(message)
-            this.logger.debug(category, `[console.debug] ${cleanMessage}`)
+            try {
+                const message = args.map(a => String(a)).join(" ")
+                const { category, cleanMessage } = this.extractCategoryFromMessage(message)
+                this.logger.debug(category, `[console.debug] ${cleanMessage}`)
+            } catch {
+                // Silently ignore - TUI errors must never crash the node
+            }
         }
     }
 
