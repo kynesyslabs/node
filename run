@@ -78,6 +78,80 @@ For support and documentation: https://demos.network
 EOF
 }
 
+# Git origin validation - ensures origin points to official repo
+check_git_origin() {
+    log_verbose "Checking git origin configuration..."
+
+    # Get current origin URL
+    local origin_url=$(git remote get-url origin 2>/dev/null)
+
+    if [ -z "$origin_url" ]; then
+        echo "⚠️  No git origin configured"
+        return 0
+    fi
+
+    # Define valid official origins (both HTTPS and SSH)
+    local valid_https="https://github.com/kynesyslabs/node"
+    local valid_https_git="https://github.com/kynesyslabs/node.git"
+    local valid_ssh="git@github.com:kynesyslabs/node.git"
+    local valid_ssh_alt="git@github.com:kynesyslabs/node"
+
+    # Check if origin is the official repo
+    if [ "$origin_url" = "$valid_https" ] || [ "$origin_url" = "$valid_https_git" ] || \
+       [ "$origin_url" = "$valid_ssh" ] || [ "$origin_url" = "$valid_ssh_alt" ]; then
+        log_verbose "Git origin is correctly set to official repository"
+        return 0
+    fi
+
+    # Origin is not official - likely a fork
+    echo ""
+    echo "⚠️  Git origin mismatch detected!"
+    echo "   Current origin: $origin_url"
+    echo "   Expected origin: $valid_https"
+    echo ""
+    echo "   This can cause 'git pull' to fail if your fork doesn't have the 'testnet' branch."
+    echo ""
+
+    # Check if this is likely a fork (contains github.com and /node)
+    if echo "$origin_url" | grep -qE "github\.com.*node"; then
+        echo "   It looks like you're using a fork of the repository."
+        echo ""
+        read -p "   Would you like to fix the origin to point to the official repo? [Y/n] " -n 1 -r
+        echo ""
+
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            echo "   Skipping git pull for this run (origin unchanged)."
+            echo "   💡 Tip: Use './run -n true' to always skip git pull on custom setups."
+            GIT_PULL=false
+            return 0
+        else
+            echo "   🔧 Updating origin to official repository..."
+
+            # Save the old origin as 'fork' remote if it doesn't exist
+            if ! git remote get-url fork &>/dev/null; then
+                git remote add fork "$origin_url"
+                echo "   💾 Your fork saved as remote 'fork'"
+            fi
+
+            # Update origin to official repo
+            git remote set-url origin "$valid_https"
+            echo "   ✅ Origin updated to: $valid_https"
+
+            # Fetch from new origin
+            echo "   🔄 Fetching from official repository..."
+            git fetch origin
+
+            return 0
+        fi
+    else
+        echo "   Origin doesn't appear to be a GitHub repository."
+        echo "   Skipping git pull for this run."
+        echo "   💡 Tip: Use './run -n true' to always skip git pull on custom setups."
+        GIT_PULL=false
+        return 0
+    fi
+}
+
 # System requirements validation
 check_system_requirements() {
     echo "🔍 Checking system requirements..."
@@ -370,6 +444,11 @@ fi
 # Run system requirements check
 check_system_requirements
 
+# Check git origin configuration (may disable GIT_PULL if fork detected)
+if [ "$GIT_PULL" = true ]; then
+    check_git_origin
+fi
+
 # Perform git pull if GIT_PULL is true
 if [ "$GIT_PULL" = true ]; then
     echo "🔄 Updating repository..."
@@ -395,7 +474,20 @@ if [ "$GIT_PULL" = true ]; then
             echo "❌ Git pull failed:"
             echo "$PULL_OUTPUT"
             echo ""
-            echo "💡 Please resolve git conflicts manually and try again"
+
+            # Check for specific "no such ref" error (common with forks)
+            if echo "$PULL_OUTPUT" | grep -q "no such ref was fetched"; then
+                echo "💡 This error typically occurs when:"
+                echo "   - Your 'origin' remote points to a fork that doesn't have the 'testnet' branch"
+                echo "   - Run 'git remote -v' to check your remotes"
+                echo ""
+                echo "   Quick fixes:"
+                echo "   1. Skip git pull: ./run -n true"
+                echo "   2. Fix origin: git remote set-url origin https://github.com/kynesyslabs/node"
+                echo "   3. Or re-run ./run and choose 'Y' when prompted about the fork"
+            else
+                echo "💡 Please resolve git conflicts manually and try again"
+            fi
             exit 1
         fi
     else
