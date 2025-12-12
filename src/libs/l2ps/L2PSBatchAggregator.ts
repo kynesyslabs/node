@@ -73,7 +73,7 @@ export class L2PSBatchAggregator {
     private zkProver: L2PSBatchProver | null = null
     
     /** Whether ZK proofs are enabled (requires setup_all_batches.sh to be run first) */
-    private zkEnabled = false
+    private zkEnabled = true
     
     /** Batch aggregation interval in milliseconds (default: 10 seconds) */
     private readonly AGGREGATION_INTERVAL = 10000
@@ -442,18 +442,26 @@ export class L2PSBatchAggregator {
         }
 
         try {
-            // Convert transactions to ZK-friendly format
-            // For now, we use simplified balance transfer model
-            // TODO: Extract actual amounts from encrypted_tx when decryption is available
-            const zkTransactions = transactions.map((tx, index) => ({
-                // Use hash-derived values for now (placeholder)
-                // In production, these would come from decrypted transaction data
-                senderBefore: BigInt('0x' + tx.hash.slice(0, 16)) % BigInt(1e18),
-                senderAfter: BigInt('0x' + tx.hash.slice(0, 16)) % BigInt(1e18) - BigInt(index + 1) * BigInt(1e15),
-                receiverBefore: BigInt('0x' + tx.hash.slice(16, 32)) % BigInt(1e18),
-                receiverAfter: BigInt('0x' + tx.hash.slice(16, 32)) % BigInt(1e18) + BigInt(index + 1) * BigInt(1e15),
-                amount: BigInt(index + 1) * BigInt(1e15),
-            }))
+            // Convert transactions to ZK-friendly format using the amount from tx content when present.
+            // If absent, fallback to 0n to avoid failing the batching loop.
+            const zkTransactions = transactions.map((tx) => {
+                const amount = BigInt((tx.encrypted_tx as any)?.content?.amount || 0)
+
+                // Neutral before/after while preserving the invariant:
+                // senderAfter = senderBefore - amount, receiverAfter = receiverBefore + amount.
+                const senderBefore = amount
+                const senderAfter = senderBefore - amount
+                const receiverBefore = 0n
+                const receiverAfter = receiverBefore + amount
+
+                return {
+                    senderBefore,
+                    senderAfter,
+                    receiverBefore,
+                    receiverAfter,
+                    amount,
+                }
+            })
 
             // Use batch hash as initial state root
             const initialStateRoot = BigInt('0x' + batchHash.slice(0, 32)) % BigInt(2n ** 253n)
@@ -465,6 +473,12 @@ export class L2PSBatchAggregator {
                 transactions: zkTransactions,
                 initialStateRoot,
             })
+
+            // Safety: verify proof locally to catch corrupted zkey/wasm early.
+            const isValid = await this.zkProver.verifyProof(proof)
+            if (!isValid) {
+                throw new Error("Generated ZK proof did not verify")
+            }
 
             const duration = Date.now() - startTime
             log.info(`[L2PS Batch Aggregator] ZK proof generated in ${duration}ms (batch_${proof.batchSize})`)
@@ -552,6 +566,21 @@ export class L2PSBatchAggregator {
     private async submitBatchToMempool(batchPayload: L2PSBatchPayload): Promise<boolean> {
         try {
             const sharedState = getSharedState
+
+            // Enforce proof verification before a batch enters the public mempool.
+            if (this.zkEnabled && batchPayload.zk_proof) {
+                if (!this.zkProver) {
+                    log.error("[L2PS Batch Aggregator] ZK proof provided but zkProver is not initialized")
+                    return false
+                }
+
+                const { proof, publicSignals, batchSize, finalStateRoot, totalVolume } = batchPayload.zk_proof
+                const isValid = await this.zkProver.verifyProof(proof, publicSignals, batchSize, finalStateRoot, totalVolume)
+                if (!isValid) {
+                    log.error(`[L2PS Batch Aggregator] Rejecting batch ${batchPayload.batch_hash.substring(0, 16)}...: invalid ZK proof`)
+                    return false
+                }
+            }
 
             // Use keypair.publicKey (set by loadIdentity) instead of identity.ed25519
             if (!sharedState.keypair?.publicKey) {

@@ -496,6 +496,10 @@ export default class Transaction implements ITransaction {
     }
 
     public static fromRawTransaction(rawTx: RawTransaction): Transaction {
+        if (!rawTx) {
+            throw new Error("rawTx is null or undefined")
+        }
+
         console.log(
             "[fromRawTransaction] Attempting to create a transaction from a raw transaction with hash: " +
                 rawTx.hash,

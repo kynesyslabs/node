@@ -73,17 +73,21 @@ export default class Chain {
     // SECTION Getters
 
     // INFO Returns a transaction by its hash
-    static async getTxByHash(hash: string): Promise<Transaction> {
+    static async getTxByHash(hash: string): Promise<Transaction | null> {
         try {
-            return Transaction.fromRawTransaction(
-                await this.transactions.findOneBy({
-                    hash: ILike(hash),
-                }),
-            )
+            const rawTx = await this.transactions.findOneBy({
+                hash: ILike(hash),
+            })
+
+            if (!rawTx) {
+                return null
+            }
+
+            return Transaction.fromRawTransaction(rawTx)
         } catch (error) {
             console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(error))
             console.error(error)
-            throw error // It does not crash the node, as it is caught by the endpoint handler
+            return null
         }
     }
 
