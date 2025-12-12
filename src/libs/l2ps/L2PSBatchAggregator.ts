@@ -575,7 +575,15 @@ export class L2PSBatchAggregator {
                 }
 
                 const { proof, publicSignals, batchSize, finalStateRoot, totalVolume } = batchPayload.zk_proof
-                const isValid = await this.zkProver.verifyProof(proof, publicSignals, batchSize, finalStateRoot, totalVolume)
+
+                const isValid = await this.zkProver.verifyProof({
+                    proof,
+                    publicSignals,
+                    batchSize: batchSize as any,
+                    txCount: batchPayload.transaction_count,
+                    finalStateRoot: BigInt(finalStateRoot),
+                    totalVolume: BigInt(totalVolume),
+                })
                 if (!isValid) {
                     log.error(`[L2PS Batch Aggregator] Rejecting batch ${batchPayload.batch_hash.substring(0, 16)}...: invalid ZK proof`)
                     return false
