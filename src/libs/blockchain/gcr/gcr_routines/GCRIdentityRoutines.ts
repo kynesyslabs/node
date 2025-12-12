@@ -573,8 +573,7 @@ export default class GCRIdentityRoutines {
         if (!validNetworks.includes(payload.network)) {
             return {
                 success: false,
-                message: `Invalid network: ${
-                    payload.network
+                message: `Invalid network: ${payload.network
                     }. Must be one of: ${validNetworks.join(", ")}`,
             }
         }
