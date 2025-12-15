@@ -29,10 +29,6 @@ export const chainProviders = {
         sepolia: "https://rpc.ankr.com/eth_sepolia",
         goerli: "https://ethereum-goerli.publicnode.com",
     },
-    polygon: {
-        mainnet: "https://polygon-rpc.com",
-        amoy: "https://rpc-amoy.polygon.technology",
-    },
     ibc: {
         mainnet: "https://stargaze-rpc.publicnode.com:443",
         testnet: "https://rpc.elgafar-1.stargaze-apis.com",
