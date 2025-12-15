@@ -432,7 +432,7 @@ async function requestBlocks() {
         }
     }
 
-    return latestBlock() - getSharedState.lastBlockNumber <= 1
+    return latestBlock() === getSharedState.lastBlockNumber
 }
 
 // REVIEW Applying GCREdits to the tables
@@ -543,7 +543,7 @@ async function fastSyncRoutine(peers: Peer[] = []) {
         await waitForNextBlock()
     }
 
-    return latestBlock() - getSharedState.lastBlockNumber <= 1
+    return latestBlock() === getSharedState.lastBlockNumber
 }
 
 export async function fastSync(
