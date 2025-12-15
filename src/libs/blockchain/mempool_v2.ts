@@ -73,6 +73,7 @@ export default class Mempool {
 
     public static async addTransaction(
         transaction: Transaction & { reference_block: number },
+        blockRef?: number,
     ) {
         const txExists = await Chain.checkTxExists(transaction.hash)
         if (txExists) {
@@ -90,10 +91,10 @@ export default class Mempool {
             }
         }
 
-        let blockNumber: number
+        let blockNumber: number = blockRef ?? undefined
 
         // INFO: If we're in consensus, move tx to next block
-        if (getSharedState.inConsensusLoop) {
+        if (getSharedState.inConsensusLoop && !blockNumber) {
             blockNumber = SecretaryManager.lastBlockRef + 1
         }
 

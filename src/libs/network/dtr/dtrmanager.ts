@@ -582,10 +582,15 @@ export class DTRManager {
             }
 
             // Add validated transaction to mempool
-            const { confirmationBlock, error } = await Mempool.addTransaction({
-                ...tx,
-                reference_block: validityData.data.reference_block,
-            })
+            const { confirmationBlock, error } = await Mempool.addTransaction(
+                {
+                    ...tx,
+                    reference_block: validityData.data.reference_block,
+                },
+
+                // INFO: Enforce block ref
+                getSharedState.lastBlockNumber + 1,
+            )
 
             log.debug(
                 "[DTR] Relayed tx confirmationBlock: " + confirmationBlock,
