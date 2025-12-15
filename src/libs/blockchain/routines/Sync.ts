@@ -432,7 +432,7 @@ async function requestBlocks() {
         }
     }
 
-    return true
+    return latestBlock() - getSharedState.lastBlockNumber <= 1
 }
 
 // REVIEW Applying GCREdits to the tables
@@ -535,13 +535,15 @@ async function fastSyncRoutine(peers: Peer[] = []) {
         }
     }
 
-    const synced = await requestBlocks()
+    while (!(await requestBlocks())) {
+        await sleep(500)
+    }
 
-    if (synced && getSharedState.fastSyncCount === 0) {
+    if (getSharedState.fastSyncCount === 0) {
         await waitForNextBlock()
     }
 
-    return synced
+    return latestBlock() - getSharedState.lastBlockNumber <= 1
 }
 
 export async function fastSync(
