@@ -86,7 +86,7 @@ export default class ShardManager {
         // Logging the shard
         log.custom(
             "last_shard",
-            JSON.stringify(this.shard, null, 2),
+            JSON.stringify(this.shard),
             false,
             true,
         )
@@ -116,7 +116,7 @@ export default class ShardManager {
         // Logging the shard status
         let dump = ""
         for (const [key, value] of this.shardStatus.entries()) {
-            dump += `${key}: ${JSON.stringify(value, null, 2)}\n`
+            dump += `${key}: ${JSON.stringify(value)}\n`
         }
         log.custom("shard_status_dump", dump, false, true)
         return [true, ""]

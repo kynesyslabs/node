@@ -154,7 +154,7 @@ export async function consensusRoutine(): Promise<void> {
 
         log.info(
             "[consensusRoutine] mempool: " +
-                JSON.stringify(tempMempool, null, 2),
+                JSON.stringify(tempMempool),
             true,
         )
 

@@ -25,7 +25,7 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
 
     for (const response of responses) {
         log.info("[mergeMempools] Received mempool merge response:")
-        log.info("[mergeMempools] " + JSON.stringify(response, null, 2))
+        log.debug("[mergeMempools] " + JSON.stringify(response))
 
         if (response.result === 200) {
             await Mempool.receive(response.response as Transaction[])
