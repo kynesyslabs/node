@@ -457,24 +457,46 @@ export class CategorizedLogger extends EventEmitter {
     /**
      * Append a line to a log file with rotation check
      */
-    private appendToFile(filename: string, content: string): void {
-        const filepath = path.join(this.config.logsDir, filename)
 
-        fs.promises.appendFile(filepath, content)
-            .then(() => {
-                // Trigger rotation check (debounced)
-                // Wrapped in try-catch to ensure rotation errors never crash the node
-                try {
-                    this.maybeCheckRotation()
-                } catch {
-                    // Silently ignore rotation check errors
-                }
+    /**
+     * Get or create a persistent WriteStream for a log file
+     * Streams are cached in fileHandles map for reuse
+     */
+    private getOrCreateStream(filename: string): fs.WriteStream {
+        let stream = this.fileHandles.get(filename)
+        
+        if (!stream || stream.destroyed) {
+            const filepath = path.join(this.config.logsDir, filename)
+            stream = fs.createWriteStream(filepath, { flags: "a" })
+            
+            // Handle stream errors to prevent crashes
+            stream.on("error", (err) => {
+                originalConsoleError(`WriteStream error for ${filename}:`, err)
+                this.fileHandles.delete(filename)
             })
-            .catch(err => {
+            
+            this.fileHandles.set(filename, stream)
+        }
+        
+        return stream
+    }
+
+    private appendToFile(filename: string, content: string): void {
+        const stream = this.getOrCreateStream(filename)
+        
+        stream.write(content, (err) => {
+            if (err) {
                 // Silently fail file writes to avoid recursion.
-                // Using the captured original console.error to bypass TUI interception.
-                originalConsoleError(`Failed to write to log file: ${filepath}`, err)
-            })
+                originalConsoleError(`Failed to write to log file: ${filename}`, err)
+                return
+            }
+            // Trigger rotation check (debounced)
+            try {
+                this.maybeCheckRotation()
+            } catch {
+                // Silently ignore rotation check errors
+            }
+        })
     }
 
     // SECTION Log Rotation Methods
@@ -549,6 +571,14 @@ export class CategorizedLogger extends EventEmitter {
      */
     private async truncateFile(filepath: string, currentSize: number): Promise<number> {
         try {
+            // Close the WriteStream if it exists (must close before truncating)
+            const filename = path.basename(filepath)
+            const stream = this.fileHandles.get(filename)
+            if (stream) {
+                stream.end()
+                this.fileHandles.delete(filename)
+            }
+
             // Calculate how much to keep (newest 50% of max size)
             const keepSize = Math.floor(this.config.maxFileSize * TRUNCATE_KEEP_RATIO)
             const skipBytes = currentSize - keepSize
@@ -706,8 +736,12 @@ export class CategorizedLogger extends EventEmitter {
      * Close all file handles
      */
     private closeFileHandles(): void {
-        for (const stream of this.fileHandles.values()) {
-            stream.close()
+        for (const [filename, stream] of this.fileHandles.entries()) {
+            try {
+                stream.end()
+            } catch {
+                // Ignore errors during cleanup
+            }
         }
         this.fileHandles.clear()
     }
