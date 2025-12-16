@@ -17,7 +17,7 @@ async function loadPeerlistEntries(): Promise<{
     const { default: getPeerlist } = await import(
         "src/libs/network/routines/nodecalls/getPeerlist"
     )
-    const { default: Hashing } = await import("src/libs/crypto/hashing")
+    const { default: hashing } = await import("src/libs/crypto/hashing")
 
     const peers = await getPeerlist()
 
@@ -33,7 +33,7 @@ async function loadPeerlistEntries(): Promise<{
         },
     }))
 
-    const hashHex = Hashing.sha256(JSON.stringify(peers))
+    const hashHex = hashing.sha256(JSON.stringify(peers))
     const hashBuffer = Buffer.from(hashHex, "hex")
 
     return { entries, rawPeers: peers, hashBuffer }
@@ -75,14 +75,14 @@ export const handleNodeCall: OmniHandler = async ({ message, context }) => {
     // These are routed to ServerHandlers directly, not manageNodeCall
     // Format: { method: "mempool", params: [{ data: [...] }] }
     if (request.method === "mempool") {
-        const { default: ServerHandlers } = await import("src/libs/network/endpointHandlers")
+        const { default: serverHandlers } = await import("src/libs/network/endpointHandlers")
         const log = await import("src/utilities/logger").then(m => m.default)
 
         log.info(`[handleNodeCall] mempool merge request from peer: "${context.peerIdentity}"`)
 
         // ServerHandlers.handleMempool expects content with .data property
         const content = request.params[0] ?? { data: [] }
-        const response = await ServerHandlers.handleMempool(content)
+        const response = await serverHandlers.handleMempool(content)
 
         return encodeNodeCallResponse({
             status: response.result ?? 200,

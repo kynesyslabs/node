@@ -23,8 +23,8 @@ import {
 import { errorResponse, encodeResponse } from "./utils"
 
 export const handleGetMempool: OmniHandler = async () => {
-    const { default: Mempool } = await import("src/libs/blockchain/mempool_v2")
-    const mempool = await Mempool.getMempool()
+    const { default: mempoolModule } = await import("src/libs/blockchain/mempool_v2")
+    const mempool = await mempoolModule.getMempool()
 
     const serializedTransactions = mempool.map(tx => encodeTransaction(tx))
 
@@ -39,16 +39,16 @@ export const handleMempoolSync: OmniHandler = async ({ message }) => {
         decodeMempoolSyncRequest(message.payload)
     }
 
-    const { default: Mempool } = await import("src/libs/blockchain/mempool_v2")
-    const { default: Hashing } = await import("src/libs/crypto/hashing")
+    const { default: mempoolModule } = await import("src/libs/blockchain/mempool_v2")
+    const { default: hashing } = await import("src/libs/crypto/hashing")
 
-    const mempool = await Mempool.getMempool()
+    const mempool = await mempoolModule.getMempool()
     const transactionHashesHex = mempool
         .map(tx => (typeof tx.hash === "string" ? tx.hash : ""))
         .filter(Boolean)
         .map(hash => hash.replace(/^0x/, ""))
 
-    const mempoolHashHex = Hashing.sha256(
+    const mempoolHashHex = hashing.sha256(
         JSON.stringify(transactionHashesHex),
     )
 
@@ -135,7 +135,7 @@ export const handleBlockSync: OmniHandler = async ({ message }) => {
     }
 
     const request = decodeBlockSyncRequest(message.payload)
-    const { default: Chain } = await import("src/libs/blockchain/chain")
+    const { default: chain } = await import("src/libs/blockchain/chain")
 
     const start = Number(request.startBlock)
     const end = Number(request.endBlock)
@@ -148,7 +148,7 @@ export const handleBlockSync: OmniHandler = async ({ message }) => {
         return encodeBlockSyncResponse({ status: 400, blocks: [] })
     }
 
-    const blocks = await Chain.getBlocks(start, limit)
+    const blocks = await chain.getBlocks(start, limit)
 
     return encodeBlockSyncResponse({
         status: blocks.length > 0 ? 200 : 404,
@@ -162,12 +162,12 @@ export const handleGetBlocks: OmniHandler = async ({ message }) => {
     }
 
     const request = decodeBlocksRequest(message.payload)
-    const { default: Chain } = await import("src/libs/blockchain/chain")
+    const { default: chain } = await import("src/libs/blockchain/chain")
 
     const startParam = request.startBlock === BigInt(0) ? "latest" : Number(request.startBlock)
     const limit = request.limit === 0 ? 1 : request.limit
 
-    const blocks = await Chain.getBlocks(startParam as any, limit)
+    const blocks = await chain.getBlocks(startParam as any, limit)
 
     return encodeBlocksResponse({
         status: blocks.length > 0 ? 200 : 404,
@@ -184,9 +184,9 @@ export const handleGetBlockByHash: OmniHandler = async ({ message }) => {
     }
 
     const request = decodeBlockHashRequest(message.payload)
-    const { default: Chain } = await import("src/libs/blockchain/chain")
+    const { default: chain } = await import("src/libs/blockchain/chain")
 
-    const block = await Chain.getBlockByHash(`0x${request.hash.toString("hex")}`)
+    const block = await chain.getBlockByHash(`0x${request.hash.toString("hex")}`)
     if (!block) {
         return encodeBlockResponse({
             status: 404,
@@ -209,9 +209,9 @@ export const handleGetTxByHash: OmniHandler = async ({ message }) => {
     }
 
     const request = decodeTransactionHashRequest(message.payload)
-    const { default: Chain } = await import("src/libs/blockchain/chain")
+    const { default: chain } = await import("src/libs/blockchain/chain")
 
-    const tx = await Chain.getTxByHash(`0x${request.hash.toString("hex")}`)
+    const tx = await chain.getTxByHash(`0x${request.hash.toString("hex")}`)
 
     if (!tx) {
         return encodeTransactionEnvelope({
@@ -254,8 +254,8 @@ export const handleMempoolMerge: OmniHandler = async ({ message }) => {
         return encodeMempoolResponse({ status: 400, transactions: [] })
     }
 
-    const { default: Mempool } = await import("src/libs/blockchain/mempool_v2")
-    const result = await Mempool.receive(transactions as any)
+    const { default: mempoolModule } = await import("src/libs/blockchain/mempool_v2")
+    const result = await mempoolModule.receive(transactions as any)
 
     const serializedResponse = (result.mempool ?? []).map(tx =>
         encodeTransaction(tx),

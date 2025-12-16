@@ -93,5 +93,15 @@ module.exports = {
                 "no-console": "off",
             },
         },
+        {
+            // Test files have relaxed naming conventions for mocks and test utilities
+            files: [
+                "tests/**/*.ts",
+                "src/tests/**/*.ts",
+            ],
+            rules: {
+                "@typescript-eslint/naming-convention": "off",
+            },
+        },
     ],
 }
