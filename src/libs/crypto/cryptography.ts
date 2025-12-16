@@ -14,6 +14,7 @@ import { promises as fs } from "fs"
 import forge from "node-forge"
 import { getSharedState } from "src/utilities/sharedState"
 import terminalkit from "terminal-kit"
+import log from "src/utilities/logger"
 
 import { forgeToHex } from "./forgeUtils"
 
