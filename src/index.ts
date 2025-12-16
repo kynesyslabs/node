@@ -50,6 +50,9 @@ const indexState: {
     MCP_ENABLED: boolean
     mcpServer: any
     tuiManager: TUIManager | null
+    OMNI_ENABLED: boolean
+    OMNI_PORT: number
+    omniServer: any
 } = {
     OVERRIDE_PORT: null,
     OVERRIDE_IS_TESTER: null,
@@ -67,6 +70,9 @@ const indexState: {
     MCP_ENABLED: true,
     mcpServer: null,
     tuiManager: null,
+    OMNI_ENABLED: false,
+    OMNI_PORT: 0,
+    omniServer: null,
 }
 
 // SECTION Preparation methods

@@ -1,4 +1,5 @@
 # AI Agent Instructions for Demos Network
+# Demos Network Agent Instructions
 
 ## Issue Tracking with bd (beads)
 
