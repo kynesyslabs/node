@@ -293,7 +293,7 @@ export class MCPServerManager {
             // Handle client disconnect
             req.on("close", () => {
                 log.info("[MCP] SSE client disconnected")
-                sseTransport.close().catch(console.error)
+                sseTransport.close().catch((err) => log.error("[MCP] SSE transport close error:", err))
             })
         })
 

@@ -3,64 +3,65 @@ import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 // import handleAptosContractRead from "./aptos_contract_read"
 import { handleAptosContractReadRest } from "./aptos_contract_read"
+import log from "@/utilities/logger"
 
 export default async function handleContractRead(
     operation: IOperation,
     chainID: number,
 ) {
-    console.log("[XM Method] Read contract")
+    log.debug("[XM Method] Read contract")
     // Mainly EVM but let's let it open for weird chains
     // Workflow: loading the provider url in our configuration, creating an instance, parsing the request
     // and sending back the chain response as it is
     if (operation.is_evm) {
-        // console.log(evmProviders)
+        // log.debug(evmProviders)
         const providerUrl = evmProviders[operation.chain][operation.subchain] // REVIEW Error handling
         const evmInstance = multichain.EVM.createInstance(chainID, providerUrl) // REVIEW We should be connected
-        console.log(
+        log.debug(
             `[XM Method] operation.chain: ${operation.chain}, operation.subchain: ${operation.subchain}`,
         )
-        console.log(`[XM Method]: providerUrl: ${providerUrl}`)
+        log.debug(`[XM Method]: providerUrl: ${providerUrl}`)
         await evmInstance.connect()
-        console.log("params: \n")
-        console.log(operation.task.params)
-        console.log("\n end params: \n")
+        log.debug("params: \n")
+        log.debug(operation.task.params)
+        log.debug("\n end params: \n")
         const params = operation.task.params // REVIEW Error handling
-        console.log("parsed params: " + params)
+        log.debug("parsed params: " + params)
         if (!params.address) {
-            console.log("Missing address")
+            log.debug("Missing address")
             return {
                 result: "error",
                 error: "Missing contract address",
             }
         }
         if (!params.abi) {
-            console.log("Missing ABI")
+            log.debug("Missing ABI")
             return {
                 result: "error",
                 error: "Missing contract ABI",
             }
         }
         if (!params.method) {
-            console.log("Missing contract method")
+            log.debug("Missing contract method")
             return {
                 result: "error",
                 error: "Missing contract method",
             }
         }
         // Getting a contract instance using the evm library
-        console.log("getting contract instance")
+        log.debug("getting contract instance")
         const contractInstance = await evmInstance.getContractInstance(
             params.address,
             params.abi,
         )
         const methodParams = JSON.parse(params.params)
-        console.log("calling SC method: " + params.method)
-        console.log("calling SC with args: " + params.params)
-        console.log("params.params contents:", methodParams)
+        log.debug("calling SC method: " + params.method)
+        log.debug("calling SC with args: " + params.params)
+        log.debug("params.params contents:", methodParams)
         // Convert the object values into an array
         const argsArray = Object.values(methodParams)
         const result = await contractInstance[params.method](...argsArray) // REVIEW Big IF
-        console.log("result from EVM read call received")
+        log.debug("result from EVM read call received")
         //console.log(result.toString())
         //console.log("end result")
         return {

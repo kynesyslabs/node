@@ -81,26 +81,49 @@ module.exports = {
             files: [
                 "src/benchmark.ts",
                 "src/client/**/*.ts",
+                // CLI utilities (both paths)
                 "src/utilities/keyMaker.ts",
                 "src/utilities/showPubkey.ts",
                 "src/utilities/backupAndRestore.ts",
                 "src/utilities/commandLine.ts",
+                "src/utilities/cli_libraries/**/*.ts",
+                "src/utilities/Diagnostic.ts",
+                "src/utilities/evmInfo.ts",
+                "src/libs/utils/keyMaker.ts",
+                "src/libs/utils/showPubkey.ts",
+                // TUI components need console access
+                "src/utilities/tui/**/*.ts",
                 "src/tests/**/*.ts",
-                // CategorizedLogger needs console access for originalConsole* references
-                "src/utilities/tui/CategorizedLogger.ts",
             ],
             rules: {
                 "no-console": "off",
             },
         },
         {
-            // Test files have relaxed naming conventions for mocks and test utilities
+            // Test files, PoC scripts, and fixture scripts where console output is expected
             files: [
                 "tests/**/*.ts",
                 "src/tests/**/*.ts",
+                "**/test.ts",
+                "**/test/*.ts",
+                "**/*_test.ts",
+                "**/*Test.ts",
+                "**/PoC.ts",
+                "**/poc.ts",
+                "omniprotocol_fixtures_scripts/**/*.ts",
+                "local_tests/**/*.ts",
+                "aptos_tests/**/*.ts",
             ],
             rules: {
+                "no-console": "off",
                 "@typescript-eslint/naming-convention": "off",
+            },
+        },
+        {
+            // Main entry point startup/shutdown logs are acceptable
+            files: ["src/index.ts"],
+            rules: {
+                "no-console": "off",
             },
         },
     ],

@@ -12,6 +12,7 @@ import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { PeerOmniAdapter } from "src/libs/omniprotocol/integration/peerAdapter"
 import type { MigrationMode } from "src/libs/omniprotocol/types/config"
+import log from "@/utilities/logger"
 
 dotenv.config()
 
@@ -167,7 +168,7 @@ export default class SharedState {
             }
             return true
         } catch (err) {
-            console.error(err)
+            log.error(err)
             this.currentUTCTime = this.getTimestamp(inSeconds)
             return false
         }
@@ -272,13 +273,13 @@ export default class SharedState {
      */
     public initOmniProtocol(mode: MigrationMode = "OMNI_PREFERRED"): void {
         if (this._omniAdapter) {
-            console.log("[SharedState] OmniProtocol adapter already initialized")
+            log.debug("[SharedState] OmniProtocol adapter already initialized")
             return
         }
         this._omniAdapter = new PeerOmniAdapter()
         this._omniAdapter.migrationMode = mode
         this.isOmniProtocolEnabled = true
-        console.log(`[SharedState] OmniProtocol adapter initialized with mode: ${mode}`)
+        log.info(`[SharedState] OmniProtocol adapter initialized with mode: ${mode}`)
     }
 
     /**

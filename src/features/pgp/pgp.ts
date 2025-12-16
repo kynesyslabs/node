@@ -2,6 +2,7 @@ import forge from "node-forge"
 import * as openpgp from "openpgp"
 import Datasource from "src/model/datasource"
 import { PgpKeyServer } from "src/model/entities/PgpKeyServer"
+import log from "@/utilities/logger"
 
 class PGPClass {
     private static instance: PGPClass
@@ -25,7 +26,7 @@ class PGPClass {
             const pgpKeyServers = await pgpKeyServerRepository.find() // Retrieves all entries
             return pgpKeyServers
         } catch (error) {
-            console.error("Error fetching PGP key server data:", error)
+            log.error("Error fetching PGP key server data:", error)
         }
     }
     // INFO Assigning a new PGP key pair to a user represented by their address

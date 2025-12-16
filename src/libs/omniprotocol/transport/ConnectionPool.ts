@@ -8,6 +8,7 @@ import type {
     ConnectionState,
 } from "./types"
 import { PoolCapacityError } from "../types/errors"
+import log from "@/utilities/logger"
 
 /**
  * ConnectionPool manages persistent TCP connections to multiple peer nodes
@@ -406,7 +407,7 @@ export class ConnectionPool {
         }
 
         if (connectionsToClose.length > 0) {
-            console.debug(
+            log.debug(
                 `[ConnectionPool] Cleaned up ${connectionsToClose.length} idle/dead connections`,
             )
         }

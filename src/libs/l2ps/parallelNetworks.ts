@@ -178,7 +178,7 @@ export class Subnet {
         encryptedTransaction: EncryptedTransaction,
     ): Promise<Transaction> {
         if (!this.keypair || !this.keypair.privateKey) {
-            console.log(
+            log.warning(
                 "[L2PS] Subnet " +
                     this.uid +
                     " has no private key, cannot decrypt transaction",

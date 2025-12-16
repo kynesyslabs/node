@@ -62,6 +62,7 @@ import {
 
 
 import { deserializeUint8Array } from "@kynesyslabs/demosdk/utils" // FIXME Import from the sdk once we can
+import log from "@/utilities/logger"
 /**
  * SignalingServer class that manages peer connections and message routing
  */
@@ -90,7 +91,7 @@ export class SignalingServer {
             },
         })
 
-        console.log(`Signaling server running on port ${port}`)
+        log.info(`Signaling server running on port ${port}`)
     }
 
     /**
@@ -100,7 +101,7 @@ export class SignalingServer {
      * @param details - Additional error details
      */
     private sendError(ws: WebSocket, errorType: ImErrorType, details?: string) {
-        console.log("[IM] Sending an error message: ", errorType, details)
+        log.debug("[IM] Sending an error message: ", errorType, details)
         ws.send(
             JSON.stringify({
                 type: "error",
@@ -118,7 +119,7 @@ export class SignalingServer {
      * @param ws - The new WebSocket connection
      */
     private handleOpen(ws: WebSocket) {
-        console.log("New peer connected")
+        log.info("New peer connected")
     }
 
     /**
@@ -131,7 +132,7 @@ export class SignalingServer {
             if (peer.ws === ws) {
                 this.peers.delete(id)
                 this.broadcastPeerDisconnected(id)
-                console.log(`Peer ${id} disconnected`)
+                log.info(`Peer ${id} disconnected`)
                 break
             }
         }
@@ -163,9 +164,9 @@ export class SignalingServer {
 
             switch (data.type) {
                 case "register":
-                    console.log("[IM] Received a register message")
+                    log.debug("[IM] Received a register message")
                     // Validate the message schema
-                    console.log(data)
+                    log.debug(data)
                     var registerMessage: ImRegisterMessage =
                         data as ImRegisterMessage
                     if (
@@ -180,7 +181,7 @@ export class SignalingServer {
                             "Invalid message schema",
                         )
                     }
-                    console.log("[IM] Register message validated")
+                    log.debug("[IM] Register message validated")
                     // Once we have the data, we can use it
                     this.handleRegister(
                         ws,
@@ -188,7 +189,7 @@ export class SignalingServer {
                         registerMessage.payload.publicKey,
                         registerMessage.payload.verification,
                     ) // REVIEW As this is async, is ok not to await it?
-                    console.log("[IM] Register message handled")
+                    log.debug("[IM] Register message handled")
                     break
                 case "discover":
                     this.handleDiscover(ws)
@@ -217,7 +218,7 @@ export class SignalingServer {
                     break
                 case "debug_question": {
                     // Handle debug message to trigger a question
-                    console.log("[IM] Received debug question request")
+                    log.debug("[IM] Received debug question request")
                     const senderId = this.getPeerIdByWebSocket(ws)
                     if (!senderId) {
                         this.sendError(
@@ -241,7 +242,7 @@ export class SignalingServer {
                     )
             }
         } catch (error) {
-            console.error("Error handling message:", error)
+            log.error("Error handling message:", error)
             this.sendError(
                 ws,
                 ImErrorType.INTERNAL_ERROR,
@@ -275,7 +276,7 @@ export class SignalingServer {
             // Validate public key format
             // Transform the public key to a Uint8Array
             var publicKeyUint8Array = new Uint8Array(publicKey)
-            console.log("[IM] Public key: ", publicKey)
+            log.debug("[IM] Public key: ", publicKey)
             if (publicKeyUint8Array.length === 0) {
                 this.sendError(
                     ws,
@@ -308,7 +309,7 @@ export class SignalingServer {
                 publicKey,
                 signingPublicKey,
             })
-            console.log(`Peer registered with ID: ${clientId}`)
+            log.info(`Peer registered with ID: ${clientId}`)
 
             // Send confirmation to the registering peer
             ws.send(
@@ -318,7 +319,7 @@ export class SignalingServer {
                 }),
             )
         } catch (error) {
-            console.error("Registration error:", error)
+            log.error("Registration error:", error)
             this.sendError(
                 ws,
                 ImErrorType.INTERNAL_ERROR,
@@ -341,7 +342,7 @@ export class SignalingServer {
                 }),
             )
         } catch (error) {
-            console.error("Discovery error:", error)
+            log.error("Discovery error:", error)
             this.sendError(
                 ws,
                 ImErrorType.INTERNAL_ERROR,
@@ -397,7 +398,7 @@ export class SignalingServer {
                 }),
             )
         } catch (error) {
-            console.error("Message routing error:", error)
+            log.error("Message routing error:", error)
             this.sendError(
                 ws,
                 ImErrorType.INTERNAL_ERROR,
@@ -434,7 +435,7 @@ export class SignalingServer {
                 }),
             )
         } catch (error) {
-            console.error("Public key request error:", error)
+            log.error("Public key request error:", error)
             this.sendError(
                 ws,
                 ImErrorType.INTERNAL_ERROR,
@@ -452,7 +453,7 @@ export class SignalingServer {
         try {
             const peer = this.peers.get(peerId)
             if (!peer) {
-                console.error(`Target peer ${peerId} not found`)
+                log.error(`Target peer ${peerId} not found`)
                 return
             }
 
@@ -469,9 +470,9 @@ export class SignalingServer {
                 }),
             )
 
-            console.log(`Question sent to peer ${peerId} with ID ${questionId}`)
+            log.debug(`Question sent to peer ${peerId} with ID ${questionId}`)
         } catch (error) {
-            console.error("Error sending question to peer:", error)
+            log.error("Error sending question to peer:", error)
         }
     }
 
@@ -522,7 +523,7 @@ export class SignalingServer {
                 peer.ws.send(message)
             }
         } catch (error) {
-            console.error("Broadcast error:", error)
+            log.error("Broadcast error:", error)
             // Don't send error here as the peer is already disconnected
         }
     }
@@ -536,7 +537,7 @@ export class SignalingServer {
             try {
                 peer.ws.close()
             } catch (error) {
-                console.error("Error closing peer connection:", error)
+                log.error("Error closing peer connection:", error)
             }
         }
 
@@ -546,7 +547,7 @@ export class SignalingServer {
         // Stop the server
         this.server.stop()
 
-        console.log("Signaling server disconnected")
+        log.info("Signaling server disconnected")
     }
 }
 
