@@ -1456,7 +1456,3 @@ export class TUIManager extends EventEmitter {
         }
     }
 }
-
-// SECTION Default Export
-
-export default TUIManager

@@ -16,22 +16,36 @@ import { getSharedState } from "@/utilities/sharedState"
 import fs from "fs"
 
 /**
+ * Stringify any value for logging - matches console.log behavior
+ */
+function stringify(value: unknown): string {
+    if (typeof value === "string") return value
+    if (value === null) return "null"
+    if (value === undefined) return "undefined"
+    if (value instanceof Error) return `${value.name}: ${value.message}`
+    if (typeof value === "object") {
+        try {
+            return JSON.stringify(value)
+        } catch {
+            return String(value)
+        }
+    }
+    return String(value)
+}
+
+/**
  * Extract tag from message like "[MAIN] Starting..." -> "MAIN"
  * Regex is designed to avoid ReDoS by:
  * - Using {1,50} limit on tag length instead of unbounded +
  * - Ensuring no overlapping quantifiers that cause backtracking
  */
 function extractTag(message: string): { tag: string | null; cleanMessage: string } {
-    // DEFENSIVE: Ensure message is a string to prevent crashes from non-string inputs
-    // This can happen when external code passes unexpected types to logger methods
-    const safeMessage = typeof message === "string" ? message : String(message ?? "")
-    
     // Limit tag to 50 chars max to prevent ReDoS, tags are typically short (e.g., "PEER BOOTSTRAP")
-    const match = safeMessage.match(/^\[([A-Za-z0-9_ ]{1,50})\]\s*(.*)$/i)
+    const match = message.match(/^\[([A-Za-z0-9_ ]{1,50})\]\s*(.*)$/i)
     if (match) {
         return { tag: match[1].trim().toUpperCase(), cleanMessage: match[2] }
     }
-    return { tag: null, cleanMessage: safeMessage }
+    return { tag: null, cleanMessage: message }
 }
 
 /**
@@ -100,79 +114,114 @@ export default class LegacyLoggerAdapter {
 
     /**
      * Info level log (legacy API)
+     * Accepts any type and stringifies automatically (matches console.log behavior)
+     * Second parameter can be boolean (legacy logToTerminal) or additional data to log
      */
-    static info(message: string, logToTerminal = true): void {
+    static info(message: unknown, extra?: unknown): void {
         if (this.LOG_ONLY_ENABLED) return
 
-        const { tag, cleanMessage } = extractTag(message)
-        const category = inferCategory(tag)
-
-        // Temporarily adjust terminal output based on parameter
-        const config = this.logger.getConfig()
-        const prevTerminal = config.terminalOutput
-
-        if (!logToTerminal && !this.logger.isTuiMode()) {
-            // In non-TUI mode, we need to suppress terminal for this call
-            // We'll emit the event but not print
+        let stringified = stringify(message)
+        // If extra is not a boolean, append it to the message (console.log style)
+        if (extra !== undefined && typeof extra !== "boolean") {
+            stringified += " " + stringify(extra)
         }
+        const { tag, cleanMessage } = extractTag(stringified)
+        const category = inferCategory(tag)
 
         this.logger.info(category, cleanMessage)
     }
 
     /**
      * Error level log (legacy API)
+     * Accepts any type and stringifies automatically (matches console.log behavior)
+     * Second parameter can be boolean (legacy logToTerminal) or additional data to log
      */
-    static error(message: string, _logToTerminal = true): void {
-        const { tag, cleanMessage } = extractTag(message)
+    static error(message: unknown, extra?: unknown): void {
+        let stringified = stringify(message)
+        // If extra is not a boolean, append it to the message (console.log style)
+        if (extra !== undefined && typeof extra !== "boolean") {
+            stringified += " " + stringify(extra)
+        }
+        const { tag, cleanMessage } = extractTag(stringified)
         const category = inferCategory(tag)
         this.logger.error(category, cleanMessage)
     }
 
     /**
      * Debug level log (legacy API)
+     * Accepts any type and stringifies automatically (matches console.log behavior)
+     * Second parameter can be boolean (legacy logToTerminal) or additional data to log
      */
-    static debug(message: string, _logToTerminal = true): void {
+    static debug(message: unknown, extra?: unknown): void {
         if (this.LOG_ONLY_ENABLED) return
 
-        const { tag, cleanMessage } = extractTag(message)
+        let stringified = stringify(message)
+        // If extra is not a boolean, append it to the message (console.log style)
+        if (extra !== undefined && typeof extra !== "boolean") {
+            stringified += " " + stringify(extra)
+        }
+        const { tag, cleanMessage } = extractTag(stringified)
         const category = inferCategory(tag)
         this.logger.debug(category, cleanMessage)
     }
 
     /**
      * Warning level log (legacy API)
+     * Accepts any type and stringifies automatically (matches console.log behavior)
+     * Second parameter can be boolean (legacy logToTerminal) or additional data to log
      */
-    static warning(message: string, _logToTerminal = true): void {
+    static warning(message: unknown, extra?: unknown): void {
         if (this.LOG_ONLY_ENABLED) return
 
-        const { tag, cleanMessage } = extractTag(message)
+        let stringified = stringify(message)
+        // If extra is not a boolean, append it to the message (console.log style)
+        if (extra !== undefined && typeof extra !== "boolean") {
+            stringified += " " + stringify(extra)
+        }
+        const { tag, cleanMessage } = extractTag(stringified)
         const category = inferCategory(tag)
         this.logger.warning(category, cleanMessage)
     }
 
     /**
-     * Critical level log (legacy API)
+     * Alias for warning() - for compatibility with code using warn()
      */
-    static critical(message: string, _logToTerminal = true): void {
-        const { tag, cleanMessage } = extractTag(message)
+    static warn(message: unknown, extra?: unknown): void {
+        this.warning(message, extra)
+    }
+
+    /**
+     * Critical level log (legacy API)
+     * Accepts any type and stringifies automatically (matches console.log behavior)
+     * Second parameter can be boolean (legacy logToTerminal) or additional data to log
+     */
+    static critical(message: unknown, extra?: unknown): void {
+        let stringified = stringify(message)
+        // If extra is not a boolean, append it to the message (console.log style)
+        if (extra !== undefined && typeof extra !== "boolean") {
+            stringified += " " + stringify(extra)
+        }
+        const { tag, cleanMessage } = extractTag(stringified)
         const category = inferCategory(tag)
         this.logger.critical(category, cleanMessage)
     }
 
     /**
      * Custom log file (legacy API)
+     * Accepts any type for message and stringifies automatically
      */
     static async custom(
         logfile: string,
-        message: string,
+        message: unknown,
         logToTerminal = true,
         cleanFile = false,
     ): Promise<void> {
         if (this.LOG_ONLY_ENABLED) return
+        const stringifiedMessage = stringify(message)
 
         const customPath = `${this.LOG_CUSTOM_PREFIX}${logfile}.log`
         const timestamp = new Date().toISOString()
-        const logEntry = `[INFO] [${timestamp}] ${message}\n`
+        const logEntry = `[INFO] [${timestamp}] ${stringifiedMessage}\n`
 
         // Clean file if requested
         if (cleanFile) {
@@ -199,10 +248,12 @@ export default class LegacyLoggerAdapter {
 
     /**
      * Only mode (legacy API) - suppresses most logs
+     * Accepts any type for message and stringifies automatically
      */
     private static originalLog: typeof console.log | null = null
 
-    static only(message: string, padWithNewLines = false): void {
+    static only(message: unknown, padWithNewLines = false): void {
+        const stringifiedMessage = stringify(message)
         if (!this.LOG_ONLY_ENABLED) {
             this.logger.debug("CORE", "[LOG ONLY ENABLED]")
             this.LOG_ONLY_ENABLED = true
@@ -218,7 +269,7 @@ export default class LegacyLoggerAdapter {
         // Always show "only" messages using the original console.log
         // (console.log may have been overwritten to a no-op above)
         const timestamp = new Date().toISOString()
-        const logEntry = `[ONLY] [${timestamp}] ${message}`
+        const logEntry = `[ONLY] [${timestamp}] ${stringifiedMessage}`
 
         if (!this.logger.isTuiMode() && this.originalLog) {
             this.originalLog(
@@ -227,7 +278,7 @@ export default class LegacyLoggerAdapter {
         }
 
         // Also emit to TUI
-        this.logger.info("CORE", message)
+        this.logger.info("CORE", stringifiedMessage)
     }
 
     static disableOnlyMode(): void {

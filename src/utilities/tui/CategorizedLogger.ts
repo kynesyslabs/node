@@ -33,6 +33,7 @@ export type LogCategory =
     | "MCP" // MCP server operations
     | "MULTICHAIN" // Cross-chain/XM operations
     | "DAHR" // DAHR-specific operations
+    | "CMD" // Command execution and TUI commands
 
 /**
  * A single log entry
@@ -157,15 +158,6 @@ class RingBuffer<T> {
         this.tail = 0
         this._size = 0
     }
-}
-
-// SECTION Logger Events
-
-export interface LoggerEvents {
-    log: (entry: LogEntry) => void
-    clear: () => void
-    categoryChange: (categories: LogCategory[]) => void
-    levelChange: (level: LogLevel) => void
 }
 
 // SECTION Level Priority Map
