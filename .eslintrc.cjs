@@ -21,7 +21,9 @@ module.exports = {
         // "linebreak-style": ["error", "unix"],
         quotes: ["error", "double"],
         semi: ["error", "never"],
-        // "no-console": "warn",
+        // no-console: warn for all src/ files to encourage CategorizedLogger usage
+        // Excluded files are defined in overrides below
+        "no-console": "warn",
         // no-unused-vars is disabled
         "no-unused-vars": ["off"],
         "no-var": ["off"],
@@ -72,4 +74,24 @@ module.exports = {
             },
         ],
     },
+    // Override no-console for files where console.log is acceptable
+    overrides: [
+        {
+            // Standalone CLI tools and utilities where console output is intended
+            files: [
+                "src/benchmark.ts",
+                "src/client/**/*.ts",
+                "src/utilities/keyMaker.ts",
+                "src/utilities/showPubkey.ts",
+                "src/utilities/backupAndRestore.ts",
+                "src/utilities/commandLine.ts",
+                "src/tests/**/*.ts",
+                // CategorizedLogger needs console access for originalConsole* references
+                "src/utilities/tui/CategorizedLogger.ts",
+            ],
+            rules: {
+                "no-console": "off",
+            },
+        },
+    ],
 }
