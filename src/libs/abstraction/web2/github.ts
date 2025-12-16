@@ -2,6 +2,7 @@ import axios from "axios"
 import { Octokit } from "@octokit/core"
 import { Web2ProofParser } from "./parsers"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import log from "@/utilities/logger"
 
 export class GithubProofParser extends Web2ProofParser {
     private static instance: GithubProofParser
@@ -22,7 +23,7 @@ export class GithubProofParser extends Web2ProofParser {
             const gistId = pathParts[2]
             return { username, gistId }
         } catch (error) {
-            console.error(error)
+            log.error(error)
             throw new Error("Failed to extract gist details")
         }
     }

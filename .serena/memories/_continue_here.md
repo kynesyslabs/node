@@ -12,12 +12,12 @@ All rogue `console.log/warn/error` calls are being migrated to use `CategorizedL
 |-------|----------|----------|--------|-------------|
 | Phase 1 | `node-4w6` | P1 | ✅ CLOSED | Hottest path migrations |
 | Phase 2 | `node-whe` | P1 | ✅ CLOSED | HIGH priority modules |
-| **Phase 3** | `node-9de` | P2 | 🔜 NEXT | MEDIUM priority (Crypto, Identity, Abstraction) |
-| Phase 4 | `node-twi` | P3 | Open | LOW priority (Multichain, IMP, ActivityPub) |
+| Phase 3 | `node-9de` | P2 | ✅ CLOSED | MEDIUM priority (Crypto, Identity, Abstraction) |
+| **Phase 4** | `node-twi` | P3 | 🔜 NEXT | LOW priority (Multichain, IMP, ActivityPub) |
 
-**Next Action**: Start Phase 3
+**Next Action**: Start Phase 4
 ```bash
-bd update node-9de --status in_progress --assignee claude
+bd update node-twi --status in_progress --assignee claude
 ```
 
 **Migration pattern**:
@@ -48,7 +48,7 @@ OmniProtocol custom TCP protocol is **production-ready for controlled deployment
 ```bash
 # Console.log migration
 bd show node-7d8        # Epic overview
-bd show node-9de        # Phase 3 details
+bd show node-twi        # Phase 4 details
 
 # OmniProtocol
 bd show node-99g        # Epic overview
@@ -57,7 +57,10 @@ bd ready                # See unblocked tasks
 
 ## Session Notes (2025-12-16)
 
-Completed Phase 2 of console.log migration:
-- Migrated ~120+ console calls in HIGH priority modules
-- Modules: Consensus, Peer, Network, Blockchain, OmniProtocol
-- Committed and closed `node-whe`
+Completed Phase 3 of console.log migration:
+- Migrated ~24 active console calls in MEDIUM priority modules
+- **Identity**: discord.ts (1 warn), twitter.ts (2 error)
+- **Abstraction**: index.ts (1), github.ts (1), parsers.ts (1)
+- **Crypto**: enigma.ts (1), forgeUtils.ts (2), cryptography.ts (~15)
+- All commented-out console calls left as-is
+- Build passes

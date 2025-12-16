@@ -453,7 +453,7 @@ export class Twitter {
 
             return { username, tweetId }
         } catch (error) {
-            console.error(
+            log.error(
                 `Failed to extract tweet details from URL: ${tweetUrl}`,
             )
             throw new Error(
@@ -569,7 +569,7 @@ export class Twitter {
             )
             return result
         } catch (error) {
-            console.error("Error checking if user is bot:", error)
+            log.error("Error checking if user is bot:", error)
             return undefined
         }
     }

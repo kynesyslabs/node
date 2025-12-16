@@ -250,7 +250,7 @@ export async function verifyWeb2Proof(
             }
         }
     } catch (error: any) {
-        console.error(error)
+        log.error(error)
         return {
             success: false,
             message: error.toString(),
