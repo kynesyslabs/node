@@ -1,59 +1,63 @@
-# OmniProtocol - Current Status (2025-12-01)
+# Current Work Status (2025-12-16)
 
-## Implementation: 90% Complete
+## Active Work Streams
+
+### 1. Console.log Migration Epic (In Progress)
+
+All rogue `console.log/warn/error` calls are being migrated to use `CategorizedLogger` for async buffered output.
+
+**Epic**: `node-7d8` - Console.log Migration to CategorizedLogger
+
+| Phase | Issue ID | Priority | Status | Description |
+|-------|----------|----------|--------|-------------|
+| Phase 1 | `node-4w6` | P1 | ✅ CLOSED | Hottest path migrations |
+| Phase 2 | `node-whe` | P1 | ✅ CLOSED | HIGH priority modules |
+| **Phase 3** | `node-9de` | P2 | 🔜 NEXT | MEDIUM priority (Crypto, Identity, Abstraction) |
+| Phase 4 | `node-twi` | P3 | Open | LOW priority (Multichain, IMP, ActivityPub) |
+
+**Next Action**: Start Phase 3
+```bash
+bd update node-9de --status in_progress --assignee claude
+```
+
+**Migration pattern**:
+```typescript
+import log from "src/utilities/logger"
+console.log → log.info/log.debug
+console.warn → log.warning
+console.error → log.error
+```
+
+### 2. OmniProtocol Status (90% Complete)
 
 OmniProtocol custom TCP protocol is **production-ready for controlled deployment**.
 
-## Task Tracking: Migrated to bd (beads)
+**Epic**: `node-99g` - OmniProtocol remaining 10%
 
-**All remaining work is tracked in bd issue tracker.**
+**Key memories for OmniProtocol**:
+- `omniprotocol_complete_2025_11_11` - Comprehensive implementation status
+- `omniprotocol_wave8_tcp_physical_layer` - TCP layer details
+- `omniprotocol_wave8.1_complete` - Wave 8.1 completion
+- `omniprotocol_session_2025-12-01` - Recent session notes
 
-### Epic: `node-99g` - OmniProtocol: Complete remaining 10% for production readiness
+**What's done**: Auth, TCP Server, TLS, Rate Limiting, 40+ handlers, Node integration
+**What's pending**: Testing, Monitoring, Security audit, Optional features
 
-| ID | Priority | Task |
-|----|----------|------|
-| `node-99g.1` | P0 (Critical) | Testing infrastructure (unit, integration, load tests) |
-| `node-99g.2` | P0 (Critical) | Security audit |
-| `node-99g.3` | P0 (Critical) | Monitoring and observability (Prometheus) |
-| `node-99g.4` | P1 (Important) | Operational documentation |
-| `node-99g.5` | P1 (Important) | Connection health (heartbeat, health checks) |
-| `node-99g.6` | P2 (Optional) | Post-quantum cryptography |
-| `node-99g.7` | P2 (Optional) | Advanced features (push, multiplexing) |
-| `node-99g.8` | P2 (Optional) | Full binary encoding (Wave 8.2) |
+## Quick Commands
 
-### Commands
 ```bash
-# See all OmniProtocol tasks
-bd show node-99g
+# Console.log migration
+bd show node-7d8        # Epic overview
+bd show node-9de        # Phase 3 details
 
-# See ready work
-bd ready --json
-
-# Claim a task
-bd update node-99g.1 --status in_progress
+# OmniProtocol
+bd show node-99g        # Epic overview
+bd ready                # See unblocked tasks
 ```
 
-## Architecture Reference
+## Session Notes (2025-12-16)
 
-For full implementation details, see:
-- **Serena memory**: `omniprotocol_complete_2025_11_11` (comprehensive status)
-- **Specs**: `OmniProtocol/*.md` (01-10 implementation references)
-- **Code**: `src/libs/omniprotocol/`
-
-## What's Complete
-- Authentication (Ed25519 + replay protection)
-- TCP Server (connection management, state machine)
-- TLS/SSL (encryption, auto-cert generation)
-- Rate Limiting (DoS protection)
-- 40+ Protocol Handlers
-- Node Integration
-
-## What's Missing (10%)
-- Testing (CRITICAL - no tests yet)
-- Monitoring (Prometheus integration)
-- Security Audit (before mainnet)
-- Optional: Post-quantum crypto, push messages, binary encoding
-
----
-
-**Next Action**: Run `bd ready` to see unblocked tasks, or `bd show node-99g` for full epic details.
+Completed Phase 2 of console.log migration:
+- Migrated ~120+ console calls in HIGH priority modules
+- Modules: Consensus, Peer, Network, Blockchain, OmniProtocol
+- Committed and closed `node-whe`
