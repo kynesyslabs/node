@@ -119,6 +119,15 @@ async function digestArguments() {
                     log.info("[MAIN] TUI disabled, using scrolling log output")
                     indexState.TUI_ENABLED = false
                     break
+                case "log-level":
+                    const level = param[1]?.toLowerCase()
+                    if (["debug", "info", "warning", "error", "critical"].includes(level)) {
+                        CategorizedLogger.getInstance().setMinLevel(level as "debug" | "info" | "warning" | "error" | "critical")
+                        log.info(`[MAIN] Log level set to: ${level}`)
+                    } else {
+                        log.warning(`[MAIN] Invalid log level: ${param[1]}. Valid: debug, info, warning, error, critical`)
+                    }
+                    break
                 default:
                     log.warning("[MAIN] Invalid parameter: " + param)
             }

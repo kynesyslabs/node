@@ -234,7 +234,7 @@ export class CategorizedLogger extends EventEmitter {
             bufferSize: config.bufferSize ?? 500, // Per-category buffer size
             logsDir: config.logsDir ?? "logs",
             terminalOutput: config.terminalOutput ?? true,
-            minLevel: config.minLevel ?? "debug",
+            minLevel: config.minLevel ?? (process.env.LOG_LEVEL as LogLevel) ?? "info",
             enabledCategories: config.enabledCategories ?? [],
             maxFileSize: config.maxFileSize ?? DEFAULT_MAX_FILE_SIZE,
             maxTotalSize: config.maxTotalSize ?? DEFAULT_MAX_TOTAL_SIZE,
