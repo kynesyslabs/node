@@ -1,4 +1,19 @@
 {
+    "exclude": [
+        "node_modules",
+        "diagrams",
+        "data",
+        "dist",
+        ".github",
+        ".vscode",
+        "postgres_*",
+        "aptos_examples_ts",
+        "local_tests",
+        "aptos_tests",
+        "omniprotocol_fixtures_scripts",
+        "sdk",
+        "tests"
+    ],
     "compilerOptions": {
         "target": "ESNext",
         "module": "ESNext",
