@@ -522,7 +522,7 @@ export class CategorizedLogger extends EventEmitter {
         let files: string[]
         try {
             if (!fs.existsSync(this.config.logsDir)) return
-            files = fs.readdirSync(this.config.logsDir)
+            files = await fs.promises.readdir(this.config.logsDir)
         } catch {
             // Directory doesn't exist or can't be read - silently return
             return
@@ -533,7 +533,7 @@ export class CategorizedLogger extends EventEmitter {
 
             const filepath = path.join(this.config.logsDir, file)
             try {
-                const stats = fs.statSync(filepath)
+                const stats = await fs.promises.stat(filepath)
                 if (stats.size > this.config.maxFileSize) {
                     await this.truncateFile(filepath, stats.size)
                 }
@@ -594,7 +594,7 @@ export class CategorizedLogger extends EventEmitter {
         let files: string[]
         try {
             if (!fs.existsSync(this.config.logsDir)) return
-            files = fs.readdirSync(this.config.logsDir)
+            files = await fs.promises.readdir(this.config.logsDir)
         } catch {
             // Directory doesn't exist or can't be read - silently return
             return
@@ -609,7 +609,7 @@ export class CategorizedLogger extends EventEmitter {
 
             const filepath = path.join(this.config.logsDir, file)
             try {
-                const stats = fs.statSync(filepath)
+                const stats = await fs.promises.stat(filepath)
                 logFiles.push({
                     name: file,
                     path: filepath,
@@ -649,7 +649,7 @@ export class CategorizedLogger extends EventEmitter {
                     totalSize -= (file.size - newSize)
                 } else {
                     // File is small, delete it entirely
-                    fs.unlinkSync(file.path)
+                    await fs.promises.unlink(file.path)
                     totalSize -= file.size
                 }
             } catch {
@@ -669,11 +669,11 @@ export class CategorizedLogger extends EventEmitter {
     /**
      * Get current logs directory size in bytes
      */
-    getLogsDirSize(): number {
+    async getLogsDirSize(): Promise<number> {
         let files: string[]
         try {
             if (!this.logsInitialized || !fs.existsSync(this.config.logsDir)) return 0
-            files = fs.readdirSync(this.config.logsDir)
+            files = await fs.promises.readdir(this.config.logsDir)
         } catch {
             // Directory doesn't exist or can't be read
             return 0
@@ -683,7 +683,7 @@ export class CategorizedLogger extends EventEmitter {
         for (const file of files) {
             if (!file.endsWith(".log")) continue
             try {
-                const stats = fs.statSync(path.join(this.config.logsDir, file))
+                const stats = await fs.promises.stat(path.join(this.config.logsDir, file))
                 totalSize += stats.size
             } catch {
                 // Ignore errors
