@@ -42,7 +42,7 @@ export default async function manageConsensusRoutines(
 
     const peer = PeerManager.getInstance().getPeer(sender)
     log.debug("Sender: " + peer.connection.string)
-    log.debug("Payload: " + JSON.stringify(payload, null, 2))
+    log.debug("Payload: " + JSON.stringify(payload))
     log.debug("-----------------------------")
     let response = _.cloneDeep(emptyResponse)
 
@@ -124,7 +124,7 @@ export default async function manageConsensusRoutines(
             "), cannot proceed with the routine"
 
         log.error("🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒")
-        log.error("Payload: " + JSON.stringify(payload, null, 2))
+        log.error("Payload: " + JSON.stringify(payload))
         log.error(
             "We are not in the shard(" +
                 getSharedState.exposedUrl +
@@ -143,7 +143,7 @@ export default async function manageConsensusRoutines(
 
         log.error(
             "shared state last shard: " +
-                JSON.stringify(sharedStateLastShard, null, 2),
+                JSON.stringify(sharedStateLastShard),
         )
         log.error("last block number: " + getSharedState.lastBlockNumber)
         log.error("🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒🚒")

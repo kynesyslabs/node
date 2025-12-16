@@ -87,7 +87,7 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
 
     log.custom(
         "fastsync_blocknumbers",
-        "Peerlist block numbers: " + JSON.stringify(blockNumbers, null, 2),
+        "Peerlist block numbers: " + JSON.stringify(blockNumbers),
     )
 
     // SECTION: Asking the peers for the last block number
@@ -139,7 +139,7 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     log.custom(
         "fastsync_blocknumbers",
         "Request block numbers: " +
-            JSON.stringify(requestBlockNumbers, null, 2),
+            JSON.stringify(requestBlockNumbers),
     )
 
     // REVIEW Choose the peer with the highest last block number

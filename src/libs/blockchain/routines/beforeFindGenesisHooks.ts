@@ -349,7 +349,7 @@ export class BeforeFindGenesisHooks {
                                 referral.referredUserId,
                         )
                         log.only(
-                            "referral: " + JSON.stringify(referral, null, 2),
+                            "referral: " + JSON.stringify(referral),
                         )
 
                         account.points.totalPoints -= referral.pointsAwarded

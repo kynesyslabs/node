@@ -200,7 +200,7 @@ async function processPayload(
             )
             var res = await ServerHandlers.handleMempool(payload.params[0])
             log.info("[RPC Call] Merged mempool from: " + sender)
-            log.info(JSON.stringify(res, null, 2))
+            log.info(JSON.stringify(res))
             return res
         // REVIEW Peerlist merging
         case "peerlist":
@@ -416,7 +416,7 @@ export async function serverRpcBun() {
 
             log.info(
                 "[RPC Call] Received request: " +
-                    JSON.stringify(payload, null, 2),
+                    JSON.stringify(payload),
                 false,
             )
 
@@ -424,14 +424,14 @@ export async function serverRpcBun() {
             if (!noAuthMethods.includes(payload.method)) {
                 const headers = req.headers
                 log.info(
-                    "[RPC Call] Headers: " + JSON.stringify(headers, null, 2),
+                    "[RPC Call] Headers: " + JSON.stringify(headers),
                     true,
                 )
                 const headerValidation = await validateHeaders(headers)
                 console.log("headerValidation", headerValidation)
                 console.log(
                     "headerValidation: " +
-                        JSON.stringify(headerValidation, null, 2),
+                        JSON.stringify(headerValidation),
                 )
                 if (!headerValidation[0]) {
                     return jsonResponse(

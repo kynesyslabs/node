@@ -23,7 +23,7 @@ export async function manageHelloPeer(
     content: HelloPeerRequest,
     sender: string,
 ): Promise<RPCResponse> {
-    log.debug("[manageHelloPeer] Content: " + JSON.stringify(content, null, 2))
+    log.debug("[manageHelloPeer] Content: " + JSON.stringify(content))
     // Prepare the response
     const response: RPCResponse = _.cloneDeep(emptyResponse)
 
@@ -87,7 +87,7 @@ export async function manageHelloPeer(
 
     log.debug(
         "[Hello Peer Listener] Sender sync data: " +
-            JSON.stringify(peerObject.sync, null, 2),
+            JSON.stringify(peerObject.sync),
     )
 
     const peerManager = PeerManager.getInstance()

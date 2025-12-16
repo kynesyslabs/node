@@ -26,7 +26,7 @@ export async function handleWeb2(
     const sanitizedForLog = sanitizeWeb2RequestForLogging(web2Request)
     log.debug(
         "[PAYLOAD FOR WEB2] [*] Web2 Request: " +
-            JSON.stringify(sanitizedForLog, null, 2),
+            JSON.stringify(sanitizedForLog),
     )
 
     console.log(

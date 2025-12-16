@@ -875,7 +875,7 @@ export default class GCR {
             data: uint8ArrayToHex(signature.signature),
         }
 
-        console.log("tx", JSON.stringify(tx, null, 2))
+        console.log("tx", JSON.stringify(tx))
         return tx
     }
 

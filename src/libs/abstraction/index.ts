@@ -50,7 +50,7 @@ async function verifyTelegramProof(
         const telegramAttestation = payload.proof as TelegramSignedAttestation
         log.info(
             "telegramAttestation" +
-                JSON.stringify(telegramAttestation, null, 2),
+                JSON.stringify(telegramAttestation),
         )
 
         // Validate attestation structure

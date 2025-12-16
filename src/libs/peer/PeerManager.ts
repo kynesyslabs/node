@@ -89,7 +89,7 @@ export default class PeerManager {
     getPeer(identity: string): Peer {
         const peer = this.peerList[identity]
 
-        log.debug("[PeerManager] Peer: " + JSON.stringify(peer, null, 2))
+        log.debug("[PeerManager] Peer: " + JSON.stringify(peer))
 
         return peer
     }
@@ -161,7 +161,7 @@ export default class PeerManager {
         // Flushing the log file and logging the peerlist
         log.custom(
             "peer_list",
-            JSON.stringify(jsonPeerList, null, 2),
+            JSON.stringify(jsonPeerList),
             false,
             true,
         )
@@ -186,7 +186,7 @@ export default class PeerManager {
     }
 
     addPeer(peer: Peer) {
-        log.info("[PEERMANAGER] Adding peer: " + JSON.stringify(peer, null, 2))
+        log.info("[PEERMANAGER] Adding peer: " + JSON.stringify(peer))
         log.info("[PEERMANAGER] Adding peer: " + peer.identity)
         log.info("[PEERMANAGER] Adding peer", false)
         if (peer.identity === "placeholder") {
@@ -195,7 +195,7 @@ export default class PeerManager {
                 true,
             )
             log.info(
-                "[PEERMANAGER] Peer: " + JSON.stringify(peer, null, 2),
+                "[PEERMANAGER] Peer: " + JSON.stringify(peer),
                 false,
             )
             return false
@@ -342,7 +342,7 @@ export default class PeerManager {
 
         log.debug(
             "[Hello Peer] Hello request: " +
-                JSON.stringify(helloRequest, null, 2),
+                JSON.stringify(helloRequest),
         )
         // Not awaiting the response to not block the main thread
         const response = await peer.longCall(
@@ -393,7 +393,7 @@ export default class PeerManager {
 
             log.debug(
                 "[Hello Peer] Final Peer sync data: " +
-                    JSON.stringify(peer.sync, null, 2),
+                    JSON.stringify(peer.sync),
             )
 
             PeerManager.getInstance().addPeer(peer)

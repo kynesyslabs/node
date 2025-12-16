@@ -526,7 +526,7 @@ export class Twitter {
         if (res.status === 200) {
             await fs.promises.writeFile(
                 `data/twitter/${userId}.json`,
-                JSON.stringify(res.data, null, 2),
+                JSON.stringify(res.data),
             )
             return res.data
         } else {
@@ -545,7 +545,7 @@ export class Twitter {
         if (res.status === 200) {
             await fs.promises.writeFile(
                 `data/twitter/${userId}_followers.json`,
-                JSON.stringify(res.data, null, 2),
+                JSON.stringify(res.data),
             )
             return res.data
         } else {

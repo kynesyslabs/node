@@ -107,7 +107,7 @@ async function peersGossipProcess(
         .filter(response => response.result === 200)
         .map(response => {
             log.debug(
-                "[peerGossip] response: " + JSON.stringify(response, null, 2),
+                "[peerGossip] response: " + JSON.stringify(response),
             )
             return response.response.map((peer: Peer) => {
                 const peerInstance = new Peer()

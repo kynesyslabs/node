@@ -45,7 +45,7 @@ export default async function getPeerIdentity(
     })
     console.log(
         "[PEER AUTHENTICATION] Response Received: " +
-            JSON.stringify(response, null, 2),
+            JSON.stringify(response),
     )
     // Response management
     if (response.result === 200) {

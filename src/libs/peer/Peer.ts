@@ -340,7 +340,7 @@ export default class Peer {
                     error,
             )
             log.error("CONNECTION URL: " + connectionUrl)
-            log.error("REQUEST PAYLOAD: " + JSON.stringify(request, null, 2))
+            log.error("REQUEST PAYLOAD: " + JSON.stringify(request))
 
             return {
                 result: 500,

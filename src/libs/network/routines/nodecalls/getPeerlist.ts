@@ -20,11 +20,11 @@ export default async function getPeerlist(): Promise<Peer[]> {
             peer.connection.string.startsWith("http://127.0.0.1")
         ) {
             log.debug("Was returning local connection string")
-            log.debug(JSON.stringify(peer, null, 2))
+            log.debug(JSON.stringify(peer))
             log.debug("getSharedState.exposedUrl: " + getSharedState.exposedUrl)
 
             peer.connection.string = getSharedState.exposedUrl
-            log.debug(JSON.stringify(peer, null, 2))
+            log.debug(JSON.stringify(peer))
             // process.exit(0)
         }
     }
