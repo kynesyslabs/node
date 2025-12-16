@@ -49,7 +49,7 @@ export default class PeerManager {
             // INFO: Skip no file error
             if (!(error instanceof Error && error.message.includes("ENOENT"))) {
                 // INFO: Crash for debugging purposes
-                console.error("[PeerManager] Error loading peer list: " + error)
+                log.error("[PEER] Error loading peer list: " + error)
                 process.exit(1)
             }
         }
@@ -103,31 +103,22 @@ export default class PeerManager {
     }
 
     private getActors(peers: boolean, connections: boolean): Peer[] {
-        console.log("[PeerManager] Getting all peers...")
-        console.log("[PeerManager] peers: " + peers)
-        console.log("[PeerManager] connections: " + connections)
+        log.debug(`[PEER] Getting all peers... peers=${peers}, connections=${connections}`)
 
         const actorList: Peer[] = []
         const connectedList: Peer[] = []
         const authenticatedList: Peer[] = []
 
-        //console.log(this.peerList)
         for (const peer in this.peerList) {
-            console.log("[PeerManager] Getting peer " + peer)
+            log.debug(`[PEER] Getting peer ${peer}`)
             const peerInstance = this.peerList[peer]
-            console.log(
-                "[PeerManager] With url: " + peerInstance.connection.string,
-            )
+            log.debug(`[PEER] With url: ${peerInstance.connection.string}`)
             // Filtering
             if (peerInstance.identity != undefined) {
-                console.log(
-                    "[PEERMANAGER] This peer has an identity: treating it as an authenticated peer",
-                )
+                log.debug("[PEER] This peer has an identity: treating it as an authenticated peer")
                 authenticatedList.push(peerInstance)
             } else {
-                console.log(
-                    "[PEERMANAGER] This peer has no identity: treating it as a connection only peer",
-                )
+                log.debug("[PEER] This peer has no identity: treating it as a connection only peer")
                 connectedList.push(peerInstance)
             }
         }
@@ -141,10 +132,7 @@ export default class PeerManager {
             actorList.push(...connectedList)
         }
 
-        console.log(
-            "[PEERMANAGER] Retrieved and filtered actor list length: " +
-                actorList.length,
-        )
+        log.debug(`[PEER] Retrieved and filtered actor list length: ${actorList.length}`)
         return actorList
     }
 
@@ -207,7 +195,7 @@ export default class PeerManager {
         const existingPeer = this.peerList[identity]
 
         if (existingPeer) {
-            console.log("[PEERMANAGER] Peer already exists: updating it")
+            log.debug("[PEER] Peer already exists: updating it")
             action = "updated"
 
             const { block, status } = existingPeer.sync

@@ -280,9 +280,7 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
     }
 
     if (blockResponse.result === 200) {
-        console.log(
-            "[fastSync] Block response received for block: " + blockToAsk,
-        )
+        log.debug(`[SYNC] downloadBlock - Block response received for block: ${blockToAsk}`)
         const block = blockResponse.response as Block
 
         if (!block) {

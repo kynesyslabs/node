@@ -242,7 +242,7 @@ export async function consensusRoutine(): Promise<void> {
             return
         }
 
-        console.error(error)
+        log.error(`[CONSENSUS] Fatal consensus error: ${error}`)
         process.exit(1)
     } finally {
         cleanupConsensusState()
@@ -329,9 +329,8 @@ async function mergeAndOrderMempools(
     blockRef: number,
 ): Promise<(Transaction & { reference_block: number })[]> {
     const ourMempool = await Mempool.getMempool(blockRef)
-    console.log("[consensusRoutine] Our mempool:")
-    console.log(ourMempool)
-    log.info("[consensusRoutine] Our mempool has been retrieved")
+    log.debug(`[CONSENSUS] Our mempool: ${JSON.stringify(ourMempool)}`)
+    log.info("[CONSENSUS] Our mempool has been retrieved")
 
     // NOTE: Transactions here should be ordered by timestamp
     await mergeMempools(ourMempool, shard)
@@ -523,14 +522,14 @@ function isBlockValid(pro: number, totalVotes: number): boolean {
  * @param pro - The number of votes for the block
  */
 async function finalizeBlock(block: Block, pro: number): Promise<void> {
-    log.info(`[consensusRoutine] Block is valid with ${pro} votes`)
-    console.log(block)
+    log.info(`[CONSENSUS] Block is valid with ${pro} votes`)
+    log.debug(`[CONSENSUS] Block data: ${JSON.stringify(block)}`)
     await Chain.insertBlock(block) // NOTE Transactions are added to the Transactions table here
     //getSharedState.consensusMode = false
     ///getSharedState.inConsensusLoop = false
-    log.info("[consensusRoutine] Block added to the chain")
+    log.info("[CONSENSUS] Block added to the chain")
     const lastBlock = await Chain.getLastBlock()
-    console.log(lastBlock)
+    log.debug(`[CONSENSUS] Last block: ${JSON.stringify(lastBlock)}`)
 }
 
 function preventForgingEnded(blockRef: number) {
