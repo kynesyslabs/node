@@ -445,4 +445,3 @@ export function createDemosMCPServer(options?: {
     return new MCPServerManager(config)
 }
 
-export default MCPServerManager

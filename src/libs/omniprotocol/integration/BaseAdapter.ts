@@ -250,4 +250,3 @@ export abstract class BaseOmniAdapter {
     }
 }
 
-export default BaseOmniAdapter

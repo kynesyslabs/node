@@ -145,4 +145,3 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
     }
 }
 
-export default PeerOmniAdapter
