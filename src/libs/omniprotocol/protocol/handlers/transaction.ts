@@ -33,7 +33,7 @@ interface ConfirmRequest {
  * Handles transaction execution (both confirmTx and broadcastTx flows).
  * Wraps the existing manageExecution handler with binary encoding.
  */
-export const handleExecute: OmniHandler = async ({ message, context }) => {
+export const handleExecute: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for execute"))
     }
@@ -75,7 +75,7 @@ export const handleExecute: OmniHandler = async ({ message, context }) => {
  * Handles native bridge operations for cross-chain transactions.
  * Wraps the existing manageNativeBridge handler with binary encoding.
  */
-export const handleNativeBridge: OmniHandler = async ({ message, context }) => {
+export const handleNativeBridge: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for nativeBridge"))
     }
@@ -117,7 +117,7 @@ export const handleNativeBridge: OmniHandler = async ({ message, context }) => {
  * Handles bridge operations (get_trade, execute_trade via Rubic).
  * Wraps the existing manageBridges handler with binary encoding.
  */
-export const handleBridge: OmniHandler = async ({ message, context }) => {
+export const handleBridge: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for bridge"))
     }
@@ -165,7 +165,7 @@ export const handleBridge: OmniHandler = async ({ message, context }) => {
  * This is specifically for the broadcastTx flow after validation.
  * Wraps the existing manageExecution handler with binary encoding.
  */
-export const handleBroadcast: OmniHandler = async ({ message, context }) => {
+export const handleBroadcast: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for broadcast"))
     }
@@ -214,7 +214,7 @@ export const handleBroadcast: OmniHandler = async ({ message, context }) => {
  * Takes a Transaction directly and returns ValidityData with gas calculation.
  * This is the clean validation-only endpoint for basic transaction flows.
  */
-export const handleConfirm: OmniHandler = async ({ message, context }) => {
+export const handleConfirm: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for confirm"))
     }

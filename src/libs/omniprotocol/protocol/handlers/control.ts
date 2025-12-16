@@ -40,7 +40,7 @@ async function loadPeerlistEntries(): Promise<{
     return { entries, rawPeers: peers, hashBuffer }
 }
 
-export const handleGetPeerlist: OmniHandler = async () => {
+export const handleGetPeerlist: OmniHandler<Buffer> = async () => {
     const { entries } = await loadPeerlistEntries()
 
     return encodePeerlistResponse({
@@ -49,7 +49,7 @@ export const handleGetPeerlist: OmniHandler = async () => {
     })
 }
 
-export const handlePeerlistSync: OmniHandler = async () => {
+export const handlePeerlistSync: OmniHandler<Buffer> = async () => {
     const { entries, hashBuffer } = await loadPeerlistEntries()
 
     return encodePeerlistSyncResponse({
@@ -60,7 +60,7 @@ export const handlePeerlistSync: OmniHandler = async () => {
     })
 }
 
-export const handleNodeCall: OmniHandler = async ({ message, context }) => {
+export const handleNodeCall: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
     return encodeNodeCallResponse({
         status: 400,
@@ -155,19 +155,19 @@ export const handleNodeCall: OmniHandler = async ({ message, context }) => {
     })
 }
 
-export const handleGetPeerInfo: OmniHandler = async () => {
+export const handleGetPeerInfo: OmniHandler<Buffer> = async () => {
     const { getSharedState } = await import("src/utilities/sharedState")
     const connection = await getSharedState.getConnectionString()
 
     return encodeStringResponse(200, connection ?? "")
 }
 
-export const handleGetNodeVersion: OmniHandler = async () => {
+export const handleGetNodeVersion: OmniHandler<Buffer> = async () => {
     const { getSharedState } = await import("src/utilities/sharedState")
     return encodeStringResponse(200, getSharedState.version ?? "")
 }
 
-export const handleGetNodeStatus: OmniHandler = async () => {
+export const handleGetNodeStatus: OmniHandler<Buffer> = async () => {
     const { getSharedState } = await import("src/utilities/sharedState")
     const info = await getSharedState.getInfo()
     return encodeJsonResponse(200, info)

@@ -20,7 +20,7 @@ import {
  * Handles block hash proposal from secretary to shard members for voting.
  * Wraps the existing HTTP consensus_routine handler with binary encoding.
  */
-export const handleProposeBlockHash: OmniHandler = async ({ message, context }) => {
+export const handleProposeBlockHash: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeProposeBlockHashResponse({
             status: 400,
@@ -75,7 +75,7 @@ export const handleProposeBlockHash: OmniHandler = async ({ message, context }) 
  * Handles validator phase updates from validators to secretary.
  * Secretary uses this to coordinate consensus phase transitions.
  */
-export const handleSetValidatorPhase: OmniHandler = async ({ message, context }) => {
+export const handleSetValidatorPhase: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeSetValidatorPhaseResponse({
             status: 400,
@@ -126,7 +126,7 @@ export const handleSetValidatorPhase: OmniHandler = async ({ message, context })
  * Handles greenlight messages from secretary to validators.
  * Signals validators that they can proceed to the next consensus phase.
  */
-export const handleGreenlight: OmniHandler = async ({ message, context }) => {
+export const handleGreenlight: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeGreenlightResponse({
             status: 400,
@@ -168,7 +168,7 @@ export const handleGreenlight: OmniHandler = async ({ message, context }) => {
  *
  * Returns the common validator seed used for shard selection.
  */
-export const handleGetCommonValidatorSeed: OmniHandler = async () => {
+export const handleGetCommonValidatorSeed: OmniHandler<Buffer> = async () => {
     try {
         const { default: manageConsensusRoutines } = await import(
             "../../../network/manageConsensusRoutines"
@@ -199,7 +199,7 @@ export const handleGetCommonValidatorSeed: OmniHandler = async () => {
  *
  * Returns the current validator timestamp for block time averaging.
  */
-export const handleGetValidatorTimestamp: OmniHandler = async () => {
+export const handleGetValidatorTimestamp: OmniHandler<Buffer> = async () => {
     try {
         const { default: manageConsensusRoutines } = await import(
             "../../../network/manageConsensusRoutines"
@@ -231,7 +231,7 @@ export const handleGetValidatorTimestamp: OmniHandler = async () => {
  *
  * Returns the block timestamp from the secretary.
  */
-export const handleGetBlockTimestamp: OmniHandler = async () => {
+export const handleGetBlockTimestamp: OmniHandler<Buffer> = async () => {
     try {
         const { default: manageConsensusRoutines } = await import(
             "../../../network/manageConsensusRoutines"
@@ -263,7 +263,7 @@ export const handleGetBlockTimestamp: OmniHandler = async () => {
  *
  * Returns the current validator phase status.
  */
-export const handleGetValidatorPhase: OmniHandler = async () => {
+export const handleGetValidatorPhase: OmniHandler<Buffer> = async () => {
     try {
         const { default: manageConsensusRoutines } = await import(
             "../../../network/manageConsensusRoutines"

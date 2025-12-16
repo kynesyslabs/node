@@ -59,12 +59,12 @@ export interface HandlerDescriptor {
     opcode: OmniOpcode
     name: string
     authRequired: boolean
-    handler: OmniHandler
+    handler: OmniHandler<Buffer>
 }
 
 export type HandlerRegistry = Map<OmniOpcode, HandlerDescriptor>
 
-const createHttpFallbackHandler = (): OmniHandler => {
+const createHttpFallbackHandler = (): OmniHandler<Buffer> => {
     return async ({ fallbackToHttp }) => fallbackToHttp()
 }
 

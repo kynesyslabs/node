@@ -20,7 +20,7 @@ const SUPPORTED_CAPABILITIES: CapabilityDescriptor[] = [
     { featureId: 0x0003, version: 0x0001, enabled: true }, // Batching
 ]
 
-export const handleProtoVersionNegotiate: OmniHandler = async ({ message }) => {
+export const handleProtoVersionNegotiate: OmniHandler<Buffer> = async ({ message }) => {
     let requestVersions = [CURRENT_PROTOCOL_VERSION]
     let minVersion = CURRENT_PROTOCOL_VERSION
     let maxVersion = CURRENT_PROTOCOL_VERSION
@@ -53,7 +53,7 @@ export const handleProtoVersionNegotiate: OmniHandler = async ({ message }) => {
     })
 }
 
-export const handleProtoCapabilityExchange: OmniHandler = async ({ message }) => {
+export const handleProtoCapabilityExchange: OmniHandler<Buffer> = async ({ message }) => {
     if (message.payload && message.payload.length > 0) {
         try {
             decodeCapabilityExchangeRequest(message.payload)
@@ -69,7 +69,7 @@ export const handleProtoCapabilityExchange: OmniHandler = async ({ message }) =>
     })
 }
 
-export const handleProtoError: OmniHandler = async ({ message, context }) => {
+export const handleProtoError: OmniHandler<Buffer> = async ({ message, context }) => {
     if (message.payload && message.payload.length > 0) {
         try {
             const decoded = decodeProtocolError(message.payload)
@@ -84,7 +84,7 @@ export const handleProtoError: OmniHandler = async ({ message, context }) => {
     return Buffer.alloc(0)
 }
 
-export const handleProtoPing: OmniHandler = async ({ message }) => {
+export const handleProtoPing: OmniHandler<Buffer> = async ({ message }) => {
     let timestamp = BigInt(Date.now())
 
     if (message.payload && message.payload.length > 0) {
@@ -100,7 +100,7 @@ export const handleProtoPing: OmniHandler = async ({ message }) => {
     return encodeProtocolPingResponse({ status: 200, timestamp })
 }
 
-export const handleProtoDisconnect: OmniHandler = async ({ message, context }) => {
+export const handleProtoDisconnect: OmniHandler<Buffer> = async ({ message, context }) => {
     if (message.payload && message.payload.length > 0) {
         try {
             const decoded = decodeProtocolDisconnect(message.payload)

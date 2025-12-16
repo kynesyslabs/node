@@ -22,7 +22,7 @@ import {
 } from "../../serialization/transaction"
 import { errorResponse, encodeResponse } from "./utils"
 
-export const handleGetMempool: OmniHandler = async () => {
+export const handleGetMempool: OmniHandler<Buffer> = async () => {
     const { default: mempoolModule } = await import("src/libs/blockchain/mempool_v2")
     const mempool = await mempoolModule.getMempool()
 
@@ -34,7 +34,7 @@ export const handleGetMempool: OmniHandler = async () => {
     })
 }
 
-export const handleMempoolSync: OmniHandler = async ({ message }) => {
+export const handleMempoolSync: OmniHandler<Buffer> = async ({ message }) => {
     if (message.payload && message.payload.length > 0) {
         decodeMempoolSyncRequest(message.payload)
     }
@@ -92,7 +92,7 @@ function toBlockEntry(block: any): BlockEntryPayload {
     }
 }
 
-export const handleGetBlockByNumber: OmniHandler = async ({ message }) => {
+export const handleGetBlockByNumber: OmniHandler<Buffer> = async ({ message }) => {
     if (!message.payload || message.payload.length === 0) {
         return encodeResponse(
             errorResponse(400, "Missing payload for getBlockByNumber"),
@@ -129,7 +129,7 @@ export const handleGetBlockByNumber: OmniHandler = async ({ message }) => {
     })
 }
 
-export const handleBlockSync: OmniHandler = async ({ message }) => {
+export const handleBlockSync: OmniHandler<Buffer> = async ({ message }) => {
     if (!message.payload || message.payload.length === 0) {
         return encodeBlockSyncResponse({ status: 400, blocks: [] })
     }
@@ -156,7 +156,7 @@ export const handleBlockSync: OmniHandler = async ({ message }) => {
     })
 }
 
-export const handleGetBlocks: OmniHandler = async ({ message }) => {
+export const handleGetBlocks: OmniHandler<Buffer> = async ({ message }) => {
     if (!message.payload || message.payload.length === 0) {
         return encodeBlocksResponse({ status: 400, blocks: [] })
     }
@@ -175,7 +175,7 @@ export const handleGetBlocks: OmniHandler = async ({ message }) => {
     })
 }
 
-export const handleGetBlockByHash: OmniHandler = async ({ message }) => {
+export const handleGetBlockByHash: OmniHandler<Buffer> = async ({ message }) => {
     if (!message.payload || message.payload.length === 0) {
         return encodeBlockResponse({
             status: 400,
@@ -200,9 +200,9 @@ export const handleGetBlockByHash: OmniHandler = async ({ message }) => {
     })
 }
 
-export const handleGetTxByHash: OmniHandler = async ({ message }) => {
+export const handleGetTxByHash: OmniHandler<Buffer> = async ({ message }) => {
     if (!message.payload || message.payload.length === 0) {
-        return encodeTransactionResponse({
+        return encodeTransactionEnvelope({
             status: 400,
             transaction: Buffer.alloc(0),
         })
@@ -226,7 +226,7 @@ export const handleGetTxByHash: OmniHandler = async ({ message }) => {
     })
 }
 
-export const handleMempoolMerge: OmniHandler = async ({ message }) => {
+export const handleMempoolMerge: OmniHandler<Buffer> = async ({ message }) => {
     if (!message.payload || message.payload.length === 0) {
         return encodeMempoolResponse({ status: 400, transactions: [] })
     }

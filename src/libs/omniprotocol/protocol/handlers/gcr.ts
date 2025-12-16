@@ -48,7 +48,7 @@ interface IdentityAssignRequest {
  * Internal operation triggered by write transactions to assign/remove identities.
  * Uses GCRIdentityRoutines to apply identity changes (xm, web2, pqc, ud).
  */
-export const handleIdentityAssign: OmniHandler = async ({ message, context }) => {
+export const handleIdentityAssign: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for identityAssign"))
     }
@@ -91,10 +91,11 @@ export const handleIdentityAssign: OmniHandler = async ({ message, context }) =>
         const { default: gcrIdentityRoutines } = await import(
             "src/libs/blockchain/gcr/gcr_routines/GCRIdentityRoutines"
         )
-        const { default: datasource } = await import("src/model/datasource")
+        const { default: Datasource } = await import("src/model/datasource")
         const { GCRMain: gcrMain } = await import("@/model/entities/GCRv2/GCR_Main")
 
-        const gcrMainRepository = datasource.getRepository(gcrMain)
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(gcrMain)
 
         // Apply the identity operation (simulate = false for actual execution)
         const result = await gcrIdentityRoutines.apply(
@@ -117,7 +118,7 @@ export const handleIdentityAssign: OmniHandler = async ({ message, context }) =>
     }
 }
 
-export const handleGetAddressInfo: OmniHandler = async ({ message }) => {
+export const handleGetAddressInfo: OmniHandler<Buffer> = async ({ message }) => {
     if (!message.payload || message.payload.length === 0) {
         return encodeResponse(
             errorResponse(400, "Missing payload for getAddressInfo"),
@@ -162,7 +163,7 @@ export const handleGetAddressInfo: OmniHandler = async ({ message }) => {
  *
  * Returns all identities (web2, xm, pqc) for a given address.
  */
-export const handleGetIdentities: OmniHandler = async ({ message, context }) => {
+export const handleGetIdentities: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for getIdentities"))
     }
@@ -199,7 +200,7 @@ export const handleGetIdentities: OmniHandler = async ({ message, context }) => 
  *
  * Returns web2 identities only (twitter, github, discord) for a given address.
  */
-export const handleGetWeb2Identities: OmniHandler = async ({ message, context }) => {
+export const handleGetWeb2Identities: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for getWeb2Identities"))
     }
@@ -236,7 +237,7 @@ export const handleGetWeb2Identities: OmniHandler = async ({ message, context })
  *
  * Returns crosschain/XM identities only for a given address.
  */
-export const handleGetXmIdentities: OmniHandler = async ({ message, context }) => {
+export const handleGetXmIdentities: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for getXmIdentities"))
     }
@@ -273,7 +274,7 @@ export const handleGetXmIdentities: OmniHandler = async ({ message, context }) =
  *
  * Returns incentive points breakdown for a given address.
  */
-export const handleGetPoints: OmniHandler = async ({ message, context }) => {
+export const handleGetPoints: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for getPoints"))
     }
@@ -311,7 +312,7 @@ export const handleGetPoints: OmniHandler = async ({ message, context }) => {
  * Returns leaderboard of top accounts by incentive points.
  * No parameters required - returns all top accounts.
  */
-export const handleGetTopAccounts: OmniHandler = async ({ message, context }) => {
+export const handleGetTopAccounts: OmniHandler<Buffer> = async ({ message, context }) => {
     try {
         const { default: manageGCRRoutines } = await import("../../../network/manageGCRRoutines")
 
@@ -338,7 +339,7 @@ export const handleGetTopAccounts: OmniHandler = async ({ message, context }) =>
  *
  * Returns referral information for a given address.
  */
-export const handleGetReferralInfo: OmniHandler = async ({ message, context }) => {
+export const handleGetReferralInfo: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for getReferralInfo"))
     }
@@ -375,7 +376,7 @@ export const handleGetReferralInfo: OmniHandler = async ({ message, context }) =
  *
  * Validates a referral code and returns referrer information.
  */
-export const handleValidateReferral: OmniHandler = async ({ message, context }) => {
+export const handleValidateReferral: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for validateReferral"))
     }
@@ -412,7 +413,7 @@ export const handleValidateReferral: OmniHandler = async ({ message, context }) 
  *
  * Looks up an account by identity (e.g., twitter username, discord id).
  */
-export const handleGetAccountByIdentity: OmniHandler = async ({ message, context }) => {
+export const handleGetAccountByIdentity: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for getAccountByIdentity"))
     }
