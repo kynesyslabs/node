@@ -222,14 +222,46 @@ async function handleXRPLPay(
     console.log("[XMScript Parser] Ripple Pay: connected to the XRP network")
 
     try {
+        // Validate signedPayloads exists and has at least one element
+        if (!operation.task.signedPayloads || operation.task.signedPayloads.length === 0) {
+            return {
+                result: "error",
+                error: `Missing signed payloads for XRPL operation (${operation.chain}.${operation.subchain})`,
+            }
+        }
+
         const signedTx = operation.task.signedPayloads[0]
 
-        // Submit transaction and wait for validation
-        const res = await xrplInstance.provider.submitAndWait(signedTx.tx_blob)
+        // Extract tx_blob - handle both string and object formats
+        let txBlob: string
+        if (typeof signedTx === "string") {
+            txBlob = signedTx
+        } else if (signedTx && typeof signedTx === "object" && "tx_blob" in signedTx) {
+            txBlob = (signedTx as { tx_blob: string }).tx_blob
+        } else {
+            return {
+                result: "error",
+                error: `Invalid signed payload format for XRPL operation (${operation.chain}.${operation.subchain}). Expected string or object with tx_blob property.`,
+            }
+        }
 
-        const txResult = res.result.meta?.TransactionResult || res.result.engine_result
+        if (!txBlob || typeof txBlob !== 'string') {
+            return {
+                result: "error",
+                error: `Invalid tx_blob value for XRPL operation (${operation.chain}.${operation.subchain}). Expected non-empty string.`,
+            }
+        }
+
+        // Submit transaction and wait for validation
+        const res = await xrplInstance.provider.submitAndWait(txBlob)
+
+        // Extract transaction result - handle different response formats
+        const meta = res.result.meta
+        const txResult = (typeof meta === "object" && meta !== null && "TransactionResult" in meta
+            ? (meta as { TransactionResult: string }).TransactionResult
+            : (res.result as any).engine_result) as string | undefined
         const txHash = res.result.hash
-        const resultMessage = res.result.engine_result_message || ''
+        const resultMessage = ((res.result as any).engine_result_message || '') as string
 
         // Only tesSUCCESS indicates actual success
         if (txResult === 'tesSUCCESS') {
