@@ -1,4 +1,5 @@
 // REVIEW: GCR handlers for OmniProtocol binary communication
+import log from "src/utilities/logger"
 import { OmniHandler } from "../../types/message"
 import { decodeJsonRequest } from "../../serialization/jsonEnvelope"
 import { encodeResponse, errorResponse, successResponse } from "./utils"
@@ -111,7 +112,7 @@ export const handleIdentityAssign: OmniHandler = async ({ message, context }) =>
             return encodeResponse(errorResponse(400, result.message || "Identity assignment failed"))
         }
     } catch (error) {
-        console.error("[handleIdentityAssign] Error:", error)
+        log.error("[handleIdentityAssign] Error: " + error)
         return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
     }
 }
@@ -188,7 +189,7 @@ export const handleGetIdentities: OmniHandler = async ({ message, context }) => 
             return encodeResponse(errorResponse(httpResponse.result, "Failed to get identities", httpResponse.extra))
         }
     } catch (error) {
-        console.error("[handleGetIdentities] Error:", error)
+        log.error("[handleGetIdentities] Error: " + error)
         return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
     }
 }
@@ -225,7 +226,7 @@ export const handleGetWeb2Identities: OmniHandler = async ({ message, context })
             return encodeResponse(errorResponse(httpResponse.result, "Failed to get web2 identities", httpResponse.extra))
         }
     } catch (error) {
-        console.error("[handleGetWeb2Identities] Error:", error)
+        log.error("[handleGetWeb2Identities] Error: " + error)
         return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
     }
 }
@@ -262,7 +263,7 @@ export const handleGetXmIdentities: OmniHandler = async ({ message, context }) =
             return encodeResponse(errorResponse(httpResponse.result, "Failed to get XM identities", httpResponse.extra))
         }
     } catch (error) {
-        console.error("[handleGetXmIdentities] Error:", error)
+        log.error("[handleGetXmIdentities] Error: " + error)
         return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
     }
 }
@@ -299,7 +300,7 @@ export const handleGetPoints: OmniHandler = async ({ message, context }) => {
             return encodeResponse(errorResponse(httpResponse.result, "Failed to get points", httpResponse.extra))
         }
     } catch (error) {
-        console.error("[handleGetPoints] Error:", error)
+        log.error("[handleGetPoints] Error: " + error)
         return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
     }
 }
@@ -327,7 +328,7 @@ export const handleGetTopAccounts: OmniHandler = async ({ message, context }) =>
             return encodeResponse(errorResponse(httpResponse.result, "Failed to get top accounts", httpResponse.extra))
         }
     } catch (error) {
-        console.error("[handleGetTopAccounts] Error:", error)
+        log.error("[handleGetTopAccounts] Error: " + error)
         return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
     }
 }
@@ -364,7 +365,7 @@ export const handleGetReferralInfo: OmniHandler = async ({ message, context }) =
             return encodeResponse(errorResponse(httpResponse.result, "Failed to get referral info", httpResponse.extra))
         }
     } catch (error) {
-        console.error("[handleGetReferralInfo] Error:", error)
+        log.error("[handleGetReferralInfo] Error: " + error)
         return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
     }
 }
@@ -401,7 +402,7 @@ export const handleValidateReferral: OmniHandler = async ({ message, context }) 
             return encodeResponse(errorResponse(httpResponse.result, "Failed to validate referral", httpResponse.extra))
         }
     } catch (error) {
-        console.error("[handleValidateReferral] Error:", error)
+        log.error("[handleValidateReferral] Error: " + error)
         return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
     }
 }
@@ -438,7 +439,7 @@ export const handleGetAccountByIdentity: OmniHandler = async ({ message, context
             return encodeResponse(errorResponse(httpResponse.result, "Failed to get account by identity", httpResponse.extra))
         }
     } catch (error) {
-        console.error("[handleGetAccountByIdentity] Error:", error)
+        log.error("[handleGetAccountByIdentity] Error: " + error)
         return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
     }
 }

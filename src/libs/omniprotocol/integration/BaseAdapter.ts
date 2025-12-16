@@ -10,6 +10,7 @@
  * - Fatal error handling
  */
 
+import log from "src/utilities/logger"
 import {
     DEFAULT_OMNIPROTOCOL_CONFIG,
     MigrationMode,
@@ -232,16 +233,16 @@ export abstract class BaseOmniAdapter {
         const errorMessage = error instanceof Error ? error.message : String(error)
         const errorStack = error instanceof Error ? error.stack : undefined
 
-        console.error(`[OmniProtocol] OMNI_FATAL: ${context}`)
-        console.error(`[OmniProtocol] Error: ${errorMessage}`)
+        log.error(`[OmniProtocol] OMNI_FATAL: ${context}`)
+        log.error(`[OmniProtocol] Error: ${errorMessage}`)
         if (errorStack) {
-            console.error(`[OmniProtocol] Stack: ${errorStack}`)
+            log.error(`[OmniProtocol] Stack: ${errorStack}`)
         }
 
         // If it's already an OmniProtocolError, it should have already exited
         // This handles non-OmniProtocolError cases (like plain Error("Connection closed"))
         if (!(error instanceof OmniProtocolError)) {
-            console.error("[OmniProtocol] OMNI_FATAL: Exiting due to non-OmniProtocolError")
+            log.error("[OmniProtocol] OMNI_FATAL: Exiting due to non-OmniProtocolError")
             process.exit(1)
         }
 

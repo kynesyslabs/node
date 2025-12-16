@@ -54,8 +54,7 @@ export default class Chain {
             const db = await Datasource.getInstance()
             return await db.getDataSource().query(sqlQuery)
         } catch (err) {
-            console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
-            console.error(err)
+            log.error("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
             throw err
         }
     }
@@ -65,8 +64,7 @@ export default class Chain {
             const db = await Datasource.getInstance()
             return await db.getDataSource().query(sqlQuery)
         } catch (err) {
-            console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
-            console.error(err)
+            log.error("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
             throw err
         }
     }
@@ -81,8 +79,7 @@ export default class Chain {
                 }),
             )
         } catch (error) {
-            console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(error))
-            console.error(error)
+            log.error("[ChainDB] [ ERROR ]: " + JSON.stringify(error))
             throw error // It does not crash the node, as it is caught by the endpoint handler
         }
     }
@@ -493,13 +490,13 @@ export default class Chain {
         }
         // Insert the genesis block into the database
         //console.log(genesis_block)
-        console.log("[GENESIS] Block generated, ready to insert it")
+        log.debug("[GENESIS] Block generated, ready to insert it")
         // console.log(genesisBlock)
-        console.log("[GENESIS] inserting transaction into the mempool")
+        log.debug("[GENESIS] inserting transaction into the mempool")
         // console.log(genesisTx)
         //await this.insertTransaction(genesis_tx)
         await Mempool.addTransaction({ ...genesisTx, reference_block: 0 }) // ! FIXME This fails
-        console.log("[GENESIS] inserted transaction")
+        log.debug("[GENESIS] inserted transaction")
 
         // SECTION: Restoring account data
         const users = {}
@@ -525,7 +522,7 @@ export default class Chain {
         }
 
         const userAccounts: Record<string, any>[] = Object.values(users)
-        console.log("total users: " + userAccounts.length)
+        log.debug("total users: " + userAccounts.length)
 
         // INFO: Create all users in parallel batches
         const batchSize = 100
@@ -570,12 +567,12 @@ export default class Chain {
         transaction: Transaction,
         status = "confirmed",
     ): Promise<boolean> {
-        console.log(
+        log.debug(
             "[insertTransaction] Inserting transaction: " + transaction.hash,
         )
         const rawTransaction = Transaction.toRawTransaction(transaction, status)
-        console.log("[insertTransaction] Raw transaction: ")
-        console.log(rawTransaction)
+        log.debug("[insertTransaction] Raw transaction: ")
+        log.debug(JSON.stringify(rawTransaction))
         try {
             await this.transactions.save(rawTransaction)
             return true
@@ -646,12 +643,12 @@ export default class Chain {
 
     static async pruneBlocksToGenesisBlock(): Promise<void> {
         await this.blocks.delete({ number: MoreThan(0) })
-        console.log("Pruned all blocks except the genesis block.")
+        log.info("Pruned all blocks except the genesis block.")
     }
 
     static async nukeGenesis(): Promise<void> {
         await this.blocks.delete({ number: 0 })
-        console.log("Deleted the genesis block.")
+        log.info("Deleted the genesis block.")
     }
 
     static async updateGenesisTimestamp(newTimestamp: number): Promise<void> {
@@ -663,7 +660,7 @@ export default class Chain {
                 timestamp: newTimestamp,
             }
             await this.blocks.save(genesisBlock)
-            console.log("Updated the timestamp of the genesis block.")
+            log.info("Updated the timestamp of the genesis block.")
         }
     }
 }

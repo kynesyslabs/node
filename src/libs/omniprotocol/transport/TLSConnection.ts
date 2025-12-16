@@ -1,3 +1,4 @@
+import log from "src/utilities/logger"
 import * as tls from "tls"
 import * as fs from "fs"
 import { PeerConnection } from "./PeerConnection"
@@ -101,7 +102,7 @@ export class TLSConnection extends PeerConnection {
                 // Log TLS info
                 const protocol = socket.getProtocol()
                 const cipher = socket.getCipher()
-                console.log(
+                log.info(
                     `[TLSConnection] Connected with TLS ${protocol} using ${cipher?.name || "unknown cipher"}`,
                 )
 
@@ -111,7 +112,7 @@ export class TLSConnection extends PeerConnection {
             socket.on("error", (error: Error) => {
                 clearTimeout(timeoutTimer)
                 this.setState("ERROR")
-                console.error("[TLSConnection] Connection error:", error)
+                log.error("[TLSConnection] Connection error: " + error)
                 reject(error)
             })
         })
@@ -123,7 +124,7 @@ export class TLSConnection extends PeerConnection {
     private verifyServerCertificate(socket: tls.TLSSocket): boolean {
         // Check if TLS handshake succeeded
         if (!socket.authorized && this.tlsConfig.rejectUnauthorized) {
-            console.error(
+            log.error(
                 `[TLSConnection] Unauthorized server: ${socket.authorizationError}`,
             )
             return false
@@ -133,7 +134,7 @@ export class TLSConnection extends PeerConnection {
         if (this.tlsConfig.mode === "self-signed") {
             const cert = socket.getPeerCertificate()
             if (!cert || !cert.fingerprint256) {
-                console.error("[TLSConnection] No server certificate")
+                log.error("[TLSConnection] No server certificate")
                 return false
             }
 
@@ -143,39 +144,39 @@ export class TLSConnection extends PeerConnection {
             const trustedFingerprint = this.trustedFingerprints.get(this.peerIdentity)
             if (trustedFingerprint) {
                 if (trustedFingerprint !== fingerprint) {
-                    console.error(
+                    log.error(
                         `[TLSConnection] Certificate fingerprint mismatch for ${this.peerIdentity}`,
                     )
-                    console.error(`  Expected: ${trustedFingerprint}`)
-                    console.error(`  Got: ${fingerprint}`)
+                    log.error(`  Expected: ${trustedFingerprint}`)
+                    log.error(`  Got: ${fingerprint}`)
                     return false
                 }
 
-                console.log(
+                log.info(
                     `[TLSConnection] Verified trusted certificate: ${fingerprint.substring(0, 16)}...`,
                 )
             } else {
                 // No trusted fingerprint stored - this is the first connection
                 // Log the fingerprint so it can be pinned
-                console.warn(
+                log.warning(
                     `[TLSConnection] No trusted fingerprint for ${this.peerIdentity}`,
                 )
-                console.warn(`  Server certificate fingerprint: ${fingerprint}`)
-                console.warn("  Add to trustedFingerprints to pin this certificate")
+                log.warning(`  Server certificate fingerprint: ${fingerprint}`)
+                log.warning("  Add to trustedFingerprints to pin this certificate")
 
                 // In strict mode, reject unknown certificates
                 if (this.tlsConfig.rejectUnauthorized) {
-                    console.error("[TLSConnection] Rejecting unknown certificate")
+                    log.error("[TLSConnection] Rejecting unknown certificate")
                     return false
                 }
             }
 
             // Log certificate details
-            console.log("[TLSConnection] Server certificate:")
-            console.log(`  Subject: ${cert.subject.CN}`)
-            console.log(`  Issuer: ${cert.issuer.CN}`)
-            console.log(`  Valid from: ${cert.valid_from}`)
-            console.log(`  Valid to: ${cert.valid_to}`)
+            log.debug("[TLSConnection] Server certificate:")
+            log.debug(`  Subject: ${cert.subject.CN}`)
+            log.debug(`  Issuer: ${cert.issuer.CN}`)
+            log.debug(`  Valid from: ${cert.valid_from}`)
+            log.debug(`  Valid to: ${cert.valid_to}`)
         }
 
         return true
@@ -186,7 +187,7 @@ export class TLSConnection extends PeerConnection {
      */
     addTrustedFingerprint(fingerprint: string): void {
         this.trustedFingerprints.set(this.peerIdentity, fingerprint)
-        console.log(
+        log.info(
             `[TLSConnection] Added trusted fingerprint for ${this.peerIdentity}: ${fingerprint.substring(0, 16)}...`,
         )
     }

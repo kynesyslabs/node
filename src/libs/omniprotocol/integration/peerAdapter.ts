@@ -5,6 +5,7 @@
  * Extends BaseOmniAdapter for shared utilities.
  */
 
+import log from "src/utilities/logger"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import Peer from "src/libs/peer/Peer"
 
@@ -52,7 +53,7 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
                 const publicKey = this.getPublicKey()
 
                 if (!privateKey || !publicKey) {
-                    console.warn(
+                    log.warning(
                         "[PeerOmniAdapter] Node keys not available, falling back to HTTP",
                     )
                     // Use httpCall directly to avoid recursion through call()
@@ -97,9 +98,9 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
             this.handleFatalError(error, `OmniProtocol failed for peer ${peer.identity}`)
 
             // On OmniProtocol failure, fall back to HTTP
-            console.warn(
-                `[PeerOmniAdapter] OmniProtocol failed for ${peer.identity}, falling back to HTTP:`,
-                error,
+            log.warning(
+                `[PeerOmniAdapter] OmniProtocol failed for ${peer.identity}, falling back to HTTP: ` +
+                    error,
             )
 
             // Mark peer as HTTP-only to avoid repeated TCP failures

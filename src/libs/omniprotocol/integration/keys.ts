@@ -5,6 +5,7 @@
  * It provides helper functions to get the node's keys for signing authenticated messages.
  */
 
+import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
@@ -22,7 +23,7 @@ export function getNodePrivateKey(): Buffer | null {
         const keypair = getSharedState.keypair
 
         if (!keypair || !keypair.privateKey) {
-            console.warn("[OmniProtocol] Node private key not available")
+            log.warning("[OmniProtocol] Node private key not available")
             return null
         }
 
@@ -34,7 +35,7 @@ export function getNodePrivateKey(): Buffer | null {
         } else if (Buffer.isBuffer(keypair.privateKey)) {
             privateKeyBuffer = keypair.privateKey
         } else {
-            console.warn("[OmniProtocol] Private key is in unexpected format")
+            log.warning("[OmniProtocol] Private key is in unexpected format")
             return null
         }
 
@@ -47,13 +48,13 @@ export function getNodePrivateKey(): Buffer | null {
             // Already the correct size
             return privateKeyBuffer
         } else {
-            console.warn(
+            log.warning(
                 `[OmniProtocol] Unexpected private key length: ${privateKeyBuffer.length} bytes (expected 32 or 64)`,
             )
             return null
         }
     } catch (error) {
-        console.error("[OmniProtocol] Error getting node private key:", error)
+        log.error("[OmniProtocol] Error getting node private key: " + error)
         return null
     }
 }
@@ -67,7 +68,7 @@ export function getNodePublicKey(): Buffer | null {
         const keypair = getSharedState.keypair
 
         if (!keypair || !keypair.publicKey) {
-            console.warn("[OmniProtocol] Node public key not available")
+            log.warning("[OmniProtocol] Node public key not available")
             return null
         }
 
@@ -81,10 +82,10 @@ export function getNodePublicKey(): Buffer | null {
             return keypair.publicKey
         }
 
-        console.warn("[OmniProtocol] Public key is in unexpected format")
+        log.warning("[OmniProtocol] Public key is in unexpected format")
         return null
     } catch (error) {
-        console.error("[OmniProtocol] Error getting node public key:", error)
+        log.error("[OmniProtocol] Error getting node public key: " + error)
         return null
     }
 }
@@ -101,7 +102,7 @@ export function getNodeIdentity(): string | null {
         }
         return publicKey.toString("hex")
     } catch (error) {
-        console.error("[OmniProtocol] Error getting node identity:", error)
+        log.error("[OmniProtocol] Error getting node identity: " + error)
         return null
     }
 }
@@ -133,7 +134,7 @@ export function validateNodeKeys(): boolean {
     const validPrivateKey = privateKey.length === 64 || privateKey.length === 32 // Can be 32 or 64 bytes
 
     if (!validPublicKey || !validPrivateKey) {
-        console.warn(
+        log.warning(
             `[OmniProtocol] Invalid key sizes: publicKey=${publicKey.length} bytes, privateKey=${privateKey.length} bytes`,
         )
         return false

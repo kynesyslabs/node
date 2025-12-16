@@ -1,3 +1,4 @@
+import log from "src/utilities/logger"
 import { PeerConnection } from "./PeerConnection"
 import { TLSConnection } from "./TLSConnection"
 import { parseConnectionString } from "./types"
@@ -34,12 +35,12 @@ export class ConnectionFactory {
                 )
             }
 
-            console.log(
+            log.debug(
                 `[ConnectionFactory] Creating TLS connection to ${peerIdentity} at ${parsed.host}:${parsed.port}`,
             )
             return new TLSConnection(peerIdentity, connectionString, this.tlsConfig)
         } else {
-            console.log(
+            log.debug(
                 `[ConnectionFactory] Creating TCP connection to ${peerIdentity} at ${parsed.host}:${parsed.port}`,
             )
             return new PeerConnection(peerIdentity, connectionString)

@@ -1,4 +1,5 @@
 import * as path from "path"
+import log from "src/utilities/logger"
 import {
     generateSelfSignedCert,
     certificateExists,
@@ -31,39 +32,39 @@ export async function initializeTLSCertificates(
     const certPath = path.join(actualCertDir, "node-cert.pem")
     const keyPath = path.join(actualCertDir, "node-key.pem")
 
-    console.log(`[TLS] Initializing certificates in ${actualCertDir}`)
+    log.info(`[TLS] Initializing certificates in ${actualCertDir}`)
 
     // Ensure directory exists
     await ensureCertDirectory(actualCertDir)
 
     // Check if certificates exist
     if (certificateExists(certPath, keyPath)) {
-        console.log("[TLS] Found existing certificates")
+        log.info("[TLS] Found existing certificates")
 
         // Verify validity
         const isValid = await verifyCertificateValidity(certPath)
         if (!isValid) {
-            console.warn("[TLS] ⚠️  Existing certificate is invalid or expired")
-            console.log("[TLS] Generating new certificate...")
+            log.warning("[TLS] Existing certificate is invalid or expired")
+            log.info("[TLS] Generating new certificate...")
             await generateSelfSignedCert(certPath, keyPath)
         } else {
             // Check expiry
             const expiryDays = await getCertificateExpiryDays(certPath)
             if (expiryDays < 30) {
-                console.warn(
-                    `[TLS] ⚠️  Certificate expires in ${expiryDays} days - consider renewal`,
+                log.warning(
+                    `[TLS] Certificate expires in ${expiryDays} days - consider renewal`,
                 )
             } else {
-                console.log(`[TLS] Certificate valid for ${expiryDays} more days`)
+                log.info(`[TLS] Certificate valid for ${expiryDays} more days`)
             }
 
             // Log certificate info
             const certInfo = await getCertificateInfoString(certPath)
-            console.log(certInfo)
+            log.debug(certInfo)
         }
     } else {
         // Generate new certificate
-        console.log("[TLS] No existing certificates found, generating new ones...")
+        log.info("[TLS] No existing certificates found, generating new ones...")
         await generateSelfSignedCert(certPath, keyPath, {
             commonName: `omni-node-${Date.now()}`,
             validityDays: 365,
@@ -71,10 +72,10 @@ export async function initializeTLSCertificates(
 
         // Log certificate info
         const certInfo = await getCertificateInfoString(certPath)
-        console.log(certInfo)
+        log.debug(certInfo)
     }
 
-    console.log("[TLS] ✅ Certificates initialized successfully")
+    log.info("[TLS] Certificates initialized successfully")
 
     return {
         certPath,

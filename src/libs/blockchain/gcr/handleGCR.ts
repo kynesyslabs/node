@@ -277,7 +277,7 @@ export default class HandleGCR {
             case "assign":
             case "subnetsTx":
                 // TODO implementations
-                console.log(`Assigning GCREdit ${editOperation.type}`)
+                log.debug(`Assigning GCREdit ${editOperation.type}`)
                 return { success: true, message: "Not implemented" }
             default:
                 return { success: false, message: "Invalid GCREdit type" }
@@ -306,7 +306,7 @@ export default class HandleGCR {
             }
         }
 
-        console.log(
+        log.debug(
             "[applyToTx] Starting execution of " +
                 tx.content.gcr_edits.length +
                 " GCREdits",
@@ -314,7 +314,7 @@ export default class HandleGCR {
         // Keep track of applied edits to be able to rollback them
         const appliedEdits: GCREdit[] = []
         for (const edit of tx.content.gcr_edits) {
-            console.log("[applyToTx] Executing GCREdit: " + edit.type)
+            log.debug("[applyToTx] Executing GCREdit: " + edit.type)
             try {
                 const result = await HandleGCR.apply(
                     edit,
@@ -322,7 +322,7 @@ export default class HandleGCR {
                     isRollback,
                     simulate,
                 )
-                console.log(
+                log.debug(
                     "[applyToTx] GCREdit executed: " +
                         edit.type +
                         " with result: " +
@@ -343,7 +343,6 @@ export default class HandleGCR {
                 editsResults.push(result)
                 appliedEdits.push(edit) // Keep track of applied edits
             } catch (e) {
-                console.error("Error applying GCREdit: ", e)
                 log.error("[applyToTx] Error applying GCREdit: " + e)
                 editsResults.push({
                     success: false,
@@ -396,7 +395,7 @@ export default class HandleGCR {
         const counter = 0
         const results: GCRResult[] = []
         for (const edit of appliedEdits) {
-            console.log(
+            log.debug(
                 "[rollback] (" +
                     counter +
                     "/" +

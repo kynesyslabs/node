@@ -1,3 +1,4 @@
+import log from "src/utilities/logger"
 import { Server as NetServer, Socket } from "net"
 import { EventEmitter } from "events"
 import { ServerConnectionManager } from "./ServerConnectionManager"
@@ -73,13 +74,13 @@ export class OmniProtocolServer extends EventEmitter {
             // Handle server errors
             this.server.on("error", (error: Error) => {
                 this.emit("error", error)
-                console.error("[OmniProtocolServer] Server error:", error)
+                log.error("[OmniProtocolServer] Server error: " + error)
             })
 
             // Handle server close
             this.server.on("close", () => {
                 this.emit("close")
-                console.log("[OmniProtocolServer] Server closed")
+                log.info("[OmniProtocolServer] Server closed")
             })
 
             // Start listening
@@ -92,7 +93,7 @@ export class OmniProtocolServer extends EventEmitter {
                 () => {
                     this.isRunning = true
                     this.emit("listening", this.config.port)
-                    console.log(
+                    log.info(
                         `[OmniProtocolServer] Listening on ${this.config.host}:${this.config.port}`,
                     )
                     resolve()
@@ -111,7 +112,7 @@ export class OmniProtocolServer extends EventEmitter {
             return
         }
 
-        console.log("[OmniProtocolServer] Stopping server...")
+        log.info("[OmniProtocolServer] Stopping server...")
 
         // Stop accepting new connections
         await new Promise<void>((resolve, reject) => {
@@ -130,7 +131,7 @@ export class OmniProtocolServer extends EventEmitter {
         this.isRunning = false
         this.server = null
 
-        console.log("[OmniProtocolServer] Server stopped")
+        log.info("[OmniProtocolServer] Server stopped")
     }
 
     /**
@@ -140,12 +141,12 @@ export class OmniProtocolServer extends EventEmitter {
         const remoteAddress = `${socket.remoteAddress}:${socket.remotePort}`
         const ipAddress = socket.remoteAddress || "unknown"
 
-        console.log(`[OmniProtocolServer] New connection from ${remoteAddress}`)
+        log.debug(`[OmniProtocolServer] New connection from ${remoteAddress}`)
 
         // Check rate limits for IP
         const rateLimitResult = this.rateLimiter.checkConnection(ipAddress)
         if (!rateLimitResult.allowed) {
-            console.warn(
+            log.warning(
                 `[OmniProtocolServer] Rate limit exceeded for ${remoteAddress}: ${rateLimitResult.reason}`,
             )
             socket.destroy()
@@ -156,7 +157,7 @@ export class OmniProtocolServer extends EventEmitter {
 
         // Check if we're at capacity
         if (this.connectionManager.getConnectionCount() >= this.config.maxConnections) {
-            console.warn(
+            log.warning(
                 `[OmniProtocolServer] Connection limit reached, rejecting ${remoteAddress}`,
             )
             socket.destroy()
@@ -178,9 +179,9 @@ export class OmniProtocolServer extends EventEmitter {
             this.connectionManager.handleConnection(socket)
             this.emit("connection_accepted", remoteAddress)
         } catch (error) {
-            console.error(
-                `[OmniProtocolServer] Failed to handle connection from ${remoteAddress}:`,
-                error,
+            log.error(
+                `[OmniProtocolServer] Failed to handle connection from ${remoteAddress}: ` +
+                    error,
             )
             this.rateLimiter.removeConnection(ipAddress)
             socket.destroy()

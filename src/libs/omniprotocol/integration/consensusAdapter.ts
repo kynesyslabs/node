@@ -5,6 +5,7 @@
  * communication during consensus phases. Falls back to NODE_CALL for unsupported methods.
  */
 
+import log from "src/utilities/logger"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import Peer from "src/libs/peer/Peer"
 
@@ -83,7 +84,7 @@ export class ConsensusOmniAdapter extends BaseOmniAdapter {
             const publicKey = this.getPublicKey()
 
             if (!privateKey || !publicKey) {
-                console.warn(
+                log.warning(
                     "[ConsensusOmniAdapter] Node keys not available, falling back to HTTP",
                 )
                 return peer.httpCall(
@@ -123,9 +124,9 @@ export class ConsensusOmniAdapter extends BaseOmniAdapter {
         } catch (error) {
             this.handleFatalError(error, `OmniProtocol consensus failed for ${peer.identity}`)
 
-            console.warn(
-                `[ConsensusOmniAdapter] OmniProtocol failed for ${peer.identity}, falling back to HTTP:`,
-                error,
+            log.warning(
+                `[ConsensusOmniAdapter] OmniProtocol failed for ${peer.identity}, falling back to HTTP: ` +
+                    error,
             )
 
             this.markHttpPeer(peer.identity)
@@ -193,9 +194,9 @@ export class ConsensusOmniAdapter extends BaseOmniAdapter {
         } catch (error) {
             this.handleFatalError(error, `OmniProtocol NODE_CALL failed for ${peer.identity}`)
 
-            console.warn(
-                `[ConsensusOmniAdapter] NODE_CALL failed for ${peer.identity}, falling back to HTTP:`,
-                error,
+            log.warning(
+                `[ConsensusOmniAdapter] NODE_CALL failed for ${peer.identity}, falling back to HTTP: ` +
+                    error,
             )
 
             this.markHttpPeer(peer.identity)

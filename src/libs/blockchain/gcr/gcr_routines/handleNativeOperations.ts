@@ -2,17 +2,18 @@ import { GCREdit } from "node_modules/@kynesyslabs/demosdk/build/types/blockchai
 
 import { Transaction } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/Transaction"
 import { INativePayload } from "node_modules/@kynesyslabs/demosdk/build/types/native"
+import log from "src/utilities/logger"
 
 // NOTE This class is responsible for handling native operations such as sending native tokens, etc.
 export class HandleNativeOperations {
     static async handle(tx: Transaction, isRollback = false): Promise<GCREdit[]> {
         // TODO Implement this
         const edits: GCREdit[] = []
-        console.log("handleNativeOperations: ", tx.content.type)
+        log.debug("handleNativeOperations: " + tx.content.type)
         const nativePayloadData: ["native", INativePayload] = tx.content.data as ["native", INativePayload] // ? Is this typization correct and safe?
         const nativePayload: INativePayload = nativePayloadData[1]
-        console.log("nativePayload: ", nativePayload)
-        console.log("nativeOperation: ", nativePayload.nativeOperation)
+        log.debug("nativePayload: " + JSON.stringify(nativePayload))
+        log.debug("nativeOperation: " + nativePayload.nativeOperation)
         // Switching on the native operation type
         switch (nativePayload.nativeOperation) {
             // Balance operations for the send native method
@@ -20,8 +21,8 @@ export class HandleNativeOperations {
                 // eslint-disable-next-line no-var
                 var [to, amount] = nativePayload.args
                 // First, remove the amount from the sender's balance
-                console.log("to: ", to)
-                console.log("amount: ", amount)
+                log.debug("to: " + to)
+                log.debug("amount: " + amount)
                 var subtractEdit: GCREdit = {
                     type: "balance",
                     operation: "remove",
@@ -43,7 +44,7 @@ export class HandleNativeOperations {
                 edits.push(addEdit)
                 break
             default:
-                console.log("Unknown native operation: ", nativePayload.nativeOperation) // TODO Better error handling
+                log.warning("Unknown native operation: " + nativePayload.nativeOperation) // TODO Better error handling
                 // throw new Error("Unknown native operation: " + nativePayload.nativeOperation)
                 break
         }

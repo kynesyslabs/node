@@ -1,3 +1,4 @@
+import log from "src/utilities/logger"
 import { Socket } from "net"
 import { EventEmitter } from "events"
 import { MessageFramer } from "../transport/MessageFramer"
@@ -52,7 +53,7 @@ export class InboundConnection extends EventEmitter {
      * Start handling connection
      */
     start(): void {
-        console.log(`[InboundConnection] ${this.connectionId} starting`)
+        log.debug(`[InboundConnection] ${this.connectionId} starting`)
 
         // Setup socket handlers
         this.socket.on("data", (chunk: Buffer) => {
@@ -60,13 +61,13 @@ export class InboundConnection extends EventEmitter {
         })
 
         this.socket.on("error", (error: Error) => {
-            console.error(`[InboundConnection] ${this.connectionId} error:`, error)
+            log.error(`[InboundConnection] ${this.connectionId} error: ` + error)
             this.emit("error", error)
             this.close()
         })
 
         this.socket.on("close", () => {
-            console.log(`[InboundConnection] ${this.connectionId} socket closed`)
+            log.debug(`[InboundConnection] ${this.connectionId} socket closed`)
             this.state = "CLOSED"
             this.emit("close")
         })
@@ -74,7 +75,7 @@ export class InboundConnection extends EventEmitter {
         // Start authentication timeout
         this.authTimer = setTimeout(() => {
             if (this.state === "PENDING_AUTH") {
-                console.warn(
+                log.warning(
                     `[InboundConnection] ${this.connectionId} authentication timeout`,
                 )
                 this.close()
@@ -104,14 +105,14 @@ export class InboundConnection extends EventEmitter {
      */
     private async handleMessage(message: ParsedOmniMessage): Promise<void> {
         // REVIEW: Debug logging for peer identity tracking
-        console.log(
+        log.debug(
             `[InboundConnection] ${this.connectionId} received opcode 0x${message.header.opcode.toString(16)}`,
         )
-        console.log(
+        log.debug(
             `[InboundConnection] state=${this.state}, peerIdentity=${this.peerIdentity || "null"}`,
         )
         if (message.auth) {
-            console.log(
+            log.debug(
                 `[InboundConnection] auth.identity=${message.auth.identity ? "0x" + message.auth.identity.toString("hex") : "null"}`,
             )
         }
@@ -130,7 +131,7 @@ export class InboundConnection extends EventEmitter {
             }
 
             this.emit("authenticated", this.peerIdentity)
-            console.log(
+            log.info(
                 `[InboundConnection] ${this.connectionId} authenticated via auth block as ${this.peerIdentity}`,
             )
         }
@@ -142,7 +143,7 @@ export class InboundConnection extends EventEmitter {
             // Check IP-based rate limit
             const ipResult = this.rateLimiter.checkIPRequest(ipAddress)
             if (!ipResult.allowed) {
-                console.warn(
+                log.warning(
                     `[InboundConnection] ${this.connectionId} IP rate limit exceeded: ${ipResult.reason}`,
                 )
                 // Send error response
@@ -158,7 +159,7 @@ export class InboundConnection extends EventEmitter {
             if (this.peerIdentity) {
                 const identityResult = this.rateLimiter.checkIdentityRequest(this.peerIdentity)
                 if (!identityResult.allowed) {
-                    console.warn(
+                    log.warning(
                         `[InboundConnection] ${this.connectionId} identity rate limit exceeded: ${identityResult.reason}`,
                     )
                     // Send error response
@@ -193,9 +194,9 @@ export class InboundConnection extends EventEmitter {
             // Note: Authentication is now handled at the top of this method
             // for ANY message with a valid auth block, not just hello_peer
         } catch (error) {
-            console.error(
-                `[InboundConnection] ${this.connectionId} handler error:`,
-                error,
+            log.error(
+                `[InboundConnection] ${this.connectionId} handler error: ` +
+                    error,
             )
 
             // Send error response
@@ -224,9 +225,9 @@ export class InboundConnection extends EventEmitter {
         return new Promise((resolve, reject) => {
             this.socket.write(messageBuffer, (error) => {
                 if (error) {
-                    console.error(
-                        `[InboundConnection] ${this.connectionId} write error:`,
-                        error,
+                    log.error(
+                        `[InboundConnection] ${this.connectionId} write error: ` +
+                            error,
                     )
                     reject(error)
                 } else {

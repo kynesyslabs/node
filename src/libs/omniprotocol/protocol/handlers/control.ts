@@ -1,3 +1,4 @@
+import log from "src/utilities/logger"
 import { OmniHandler } from "../../types/message"
 import {
     decodeNodeCallRequest,
@@ -111,8 +112,8 @@ export const handleNodeCall: OmniHandler = async ({ message, context }) => {
         }
 
         // REVIEW: Debug logging for peer identity lookup
-        console.log(`[handleNodeCall] consensus_routine from peer: "${context.peerIdentity}"`)
-        console.log(`[handleNodeCall] isAuthenticated: ${context.isAuthenticated}`)
+        log.debug(`[handleNodeCall] consensus_routine from peer: "${context.peerIdentity}"`)
+        log.debug(`[handleNodeCall] isAuthenticated: ${context.isAuthenticated}`)
 
         // Call manageConsensusRoutines with sender identity and payload
         const response = await manageConsensusRoutines(

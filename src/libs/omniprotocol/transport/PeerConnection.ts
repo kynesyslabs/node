@@ -1,4 +1,5 @@
 // REVIEW: PeerConnection - TCP socket wrapper for single peer connection with state management
+import log from "src/utilities/logger"
 import { Socket } from "net"
 import * as ed25519 from "@noble/ed25519"
 import { sha256 } from "@noble/hashes/sha256"
@@ -404,7 +405,7 @@ export class PeerConnection {
         } else {
             // This is an unsolicited message (e.g., broadcast, push notification)
             // Wave 8.1: Log for now, will handle in Wave 8.4 (push message support)
-            console.warn(
+            log.warning(
                 `[PeerConnection] Received unsolicited message: opcode=0x${header.opcode.toString(16)}, sequence=${header.sequence}`,
             )
         }
@@ -461,7 +462,7 @@ export class PeerConnection {
         // Wave 8.4: Emit state change events for ConnectionPool to monitor
         // For now, just log
         if (oldState !== newState) {
-            console.debug(
+            log.debug(
                 `[PeerConnection] ${this.peerIdentity} state: ${oldState} → ${newState}`,
             )
         }

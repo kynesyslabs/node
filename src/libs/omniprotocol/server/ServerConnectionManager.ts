@@ -1,3 +1,4 @@
+import log from "src/utilities/logger"
 import { Socket } from "net"
 import { InboundConnection } from "./InboundConnection"
 import { EventEmitter } from "events"
@@ -64,7 +65,7 @@ export class ServerConnectionManager extends EventEmitter {
      * Close all connections
      */
     async closeAll(): Promise<void> {
-        console.log(`[ServerConnectionManager] Closing ${this.connections.size} connections...`)
+        log.info(`[ServerConnectionManager] Closing ${this.connections.size} connections...`)
 
         const closePromises = Array.from(this.connections.values()).map(conn =>
             conn.close(),
@@ -172,7 +173,7 @@ export class ServerConnectionManager extends EventEmitter {
             }
 
             if (toRemove.length > 0) {
-                console.log(
+                log.debug(
                     `[ServerConnectionManager] Cleaned up ${toRemove.length} connections`,
                 )
             }

@@ -2,6 +2,7 @@ import * as ed25519 from "@noble/ed25519"
 import { sha256 } from "@noble/hashes/sha256"
 import { AuthBlock, SignatureAlgorithm, SignatureMode, VerificationResult } from "./types"
 import type { OmniMessageHeader } from "../types/message"
+import log from "src/utilities/logger"
 
 export class SignatureVerifier {
     // Maximum clock skew allowed (5 minutes)
@@ -149,11 +150,11 @@ export class SignatureVerifier {
                 return await this.verifyEd25519(publicKey, data, signature)
 
             case SignatureAlgorithm.FALCON:
-                console.warn("Falcon signature verification not yet implemented")
+                log.warning("[SignatureVerifier] Falcon signature verification not yet implemented")
                 return false
 
             case SignatureAlgorithm.ML_DSA:
-                console.warn("ML-DSA signature verification not yet implemented")
+                log.warning("[SignatureVerifier] ML-DSA signature verification not yet implemented")
                 return false
 
             default:
@@ -172,12 +173,12 @@ export class SignatureVerifier {
         try {
             // Validate key and signature lengths
             if (publicKey.length !== 32) {
-                console.error(`Invalid Ed25519 public key length: ${publicKey.length}`)
+                log.error(`[SignatureVerifier] Invalid Ed25519 public key length: ${publicKey.length}`)
                 return false
             }
 
             if (signature.length !== 64) {
-                console.error(`Invalid Ed25519 signature length: ${signature.length}`)
+                log.error(`[SignatureVerifier] Invalid Ed25519 signature length: ${signature.length}`)
                 return false
             }
 
@@ -185,7 +186,7 @@ export class SignatureVerifier {
             const valid = await ed25519.verify(signature, data, publicKey)
             return valid
         } catch (error) {
-            console.error("Ed25519 verification error:", error)
+            log.error("[SignatureVerifier] Ed25519 verification error: " + error)
             return false
         }
     }

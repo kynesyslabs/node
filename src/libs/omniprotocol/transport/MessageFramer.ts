@@ -1,4 +1,5 @@
 // REVIEW: MessageFramer - Parse TCP stream into complete OmniProtocol messages
+import log from "src/utilities/logger"
 import { Buffer } from "buffer"
 import { crc32 } from "crc"
 import type { OmniMessage, OmniMessageHeader, ParsedOmniMessage } from "../types/message"
@@ -72,7 +73,7 @@ export class MessageFramer {
                 auth = authResult.auth
                 offset += authResult.bytesRead
             } catch (error) {
-                console.error("Failed to parse auth block:", error)
+                log.error("Failed to parse auth block: " + error)
                 throw new Error("Invalid auth block format")
             }
         }

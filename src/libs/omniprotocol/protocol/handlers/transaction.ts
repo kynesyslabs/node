@@ -1,4 +1,5 @@
 // REVIEW: Transaction handlers for OmniProtocol binary communication
+import log from "src/utilities/logger"
 import { OmniHandler } from "../../types/message"
 import { decodeJsonRequest } from "../../serialization/jsonEnvelope"
 import { encodeResponse, errorResponse, successResponse } from "./utils"
@@ -61,7 +62,7 @@ export const handleExecute: OmniHandler = async ({ message, context }) => {
             )
         }
     } catch (error) {
-        console.error("[handleExecute] Error:", error)
+        log.error("[handleExecute] Error: " + error)
         return encodeResponse(
             errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
         )
@@ -103,7 +104,7 @@ export const handleNativeBridge: OmniHandler = async ({ message, context }) => {
             )
         }
     } catch (error) {
-        console.error("[handleNativeBridge] Error:", error)
+        log.error("[handleNativeBridge] Error: " + error)
         return encodeResponse(
             errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
         )
@@ -150,7 +151,7 @@ export const handleBridge: OmniHandler = async ({ message, context }) => {
             )
         }
     } catch (error) {
-        console.error("[handleBridge] Error:", error)
+        log.error("[handleBridge] Error: " + error)
         return encodeResponse(
             errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
         )
@@ -199,7 +200,7 @@ export const handleBroadcast: OmniHandler = async ({ message, context }) => {
             )
         }
     } catch (error) {
-        console.error("[handleBroadcast] Error:", error)
+        log.error("[handleBroadcast] Error: " + error)
         return encodeResponse(
             errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
         )
@@ -236,7 +237,7 @@ export const handleConfirm: OmniHandler = async ({ message, context }) => {
         // ValidityData is always returned (with valid=false if validation fails)
         return encodeResponse(successResponse(validityData))
     } catch (error) {
-        console.error("[handleConfirm] Error:", error)
+        log.error("[handleConfirm] Error: " + error)
         return encodeResponse(
             errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
         )

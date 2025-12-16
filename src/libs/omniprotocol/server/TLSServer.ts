@@ -1,3 +1,4 @@
+import log from "src/utilities/logger"
 import * as tls from "tls"
 import * as fs from "fs"
 import { EventEmitter } from "events"
@@ -107,13 +108,13 @@ export class TLSServer extends EventEmitter {
             // Handle server errors
             this.server.on("error", (error: Error) => {
                 this.emit("error", error)
-                console.error("[TLSServer] Server error:", error)
+                log.error("[TLSServer] Server error: " + error)
             })
 
             // Handle server close
             this.server.on("close", () => {
                 this.emit("close")
-                console.log("[TLSServer] Server closed")
+                log.info("[TLSServer] Server closed")
             })
 
             // Start listening
@@ -126,8 +127,8 @@ export class TLSServer extends EventEmitter {
                 () => {
                     this.isRunning = true
                     this.emit("listening", this.config.port)
-                    console.log(
-                        `[TLSServer] 🔒 Listening on ${this.config.host}:${this.config.port} (TLS ${this.config.tls.minVersion})`,
+                    log.info(
+                        `[TLSServer] Listening on ${this.config.host}:${this.config.port} (TLS ${this.config.tls.minVersion})`,
                     )
                     resolve()
                 },
@@ -144,12 +145,12 @@ export class TLSServer extends EventEmitter {
         const remoteAddress = `${socket.remoteAddress}:${socket.remotePort}`
         const ipAddress = socket.remoteAddress || "unknown"
 
-        console.log(`[TLSServer] New TLS connection from ${remoteAddress}`)
+        log.debug(`[TLSServer] New TLS connection from ${remoteAddress}`)
 
         // Check rate limits for IP
         const rateLimitResult = this.rateLimiter.checkConnection(ipAddress)
         if (!rateLimitResult.allowed) {
-            console.warn(
+            log.warning(
                 `[TLSServer] Rate limit exceeded for ${remoteAddress}: ${rateLimitResult.reason}`,
             )
             socket.destroy()
@@ -160,7 +161,7 @@ export class TLSServer extends EventEmitter {
 
         // Verify TLS connection is authorized
         if (!socket.authorized && this.config.tls.rejectUnauthorized) {
-            console.warn(
+            log.warning(
                 `[TLSServer] Unauthorized TLS connection from ${remoteAddress}: ${socket.authorizationError}`,
             )
             socket.destroy()
@@ -172,7 +173,7 @@ export class TLSServer extends EventEmitter {
         if (this.config.tls.mode === "self-signed" && this.config.tls.requestCert) {
             const peerCert = socket.getPeerCertificate()
             if (!peerCert || !peerCert.fingerprint256) {
-                console.warn(
+                log.warning(
                     `[TLSServer] No client certificate from ${remoteAddress}`,
                 )
                 socket.destroy()
@@ -188,7 +189,7 @@ export class TLSServer extends EventEmitter {
                 )
 
                 if (!isTrusted) {
-                    console.warn(
+                    log.warning(
                         `[TLSServer] Untrusted certificate from ${remoteAddress}: ${fingerprint}`,
                     )
                     socket.destroy()
@@ -196,7 +197,7 @@ export class TLSServer extends EventEmitter {
                     return
                 }
 
-                console.log(
+                log.debug(
                     `[TLSServer] Verified trusted certificate: ${fingerprint.substring(0, 16)}...`,
                 )
             }
@@ -204,7 +205,7 @@ export class TLSServer extends EventEmitter {
 
         // Check connection limit
         if (this.connectionManager.getConnectionCount() >= this.config.maxConnections) {
-            console.warn(
+            log.warning(
                 `[TLSServer] Connection limit reached, rejecting ${remoteAddress}`,
             )
             socket.destroy()
@@ -219,7 +220,7 @@ export class TLSServer extends EventEmitter {
         // Get TLS info for logging
         const protocol = socket.getProtocol()
         const cipher = socket.getCipher()
-        console.log(
+        log.debug(
             `[TLSServer] TLS ${protocol} with ${cipher?.name || "unknown cipher"}`,
         )
 
@@ -231,9 +232,9 @@ export class TLSServer extends EventEmitter {
             this.connectionManager.handleConnection(socket)
             this.emit("connection_accepted", remoteAddress)
         } catch (error) {
-            console.error(
-                `[TLSServer] Failed to handle connection from ${remoteAddress}:`,
-                error,
+            log.error(
+                `[TLSServer] Failed to handle connection from ${remoteAddress}: ` +
+                    error,
             )
             this.rateLimiter.removeConnection(ipAddress)
             socket.destroy()
@@ -249,7 +250,7 @@ export class TLSServer extends EventEmitter {
             return
         }
 
-        console.log("[TLSServer] Stopping server...")
+        log.info("[TLSServer] Stopping server...")
 
         // Stop accepting new connections
         await new Promise<void>((resolve, reject) => {
@@ -268,7 +269,7 @@ export class TLSServer extends EventEmitter {
         this.isRunning = false
         this.server = null
 
-        console.log("[TLSServer] Server stopped")
+        log.info("[TLSServer] Server stopped")
     }
 
     /**
@@ -276,7 +277,7 @@ export class TLSServer extends EventEmitter {
      */
     addTrustedFingerprint(peerIdentity: string, fingerprint: string): void {
         this.trustedFingerprints.set(peerIdentity, fingerprint)
-        console.log(
+        log.debug(
             `[TLSServer] Added trusted fingerprint for ${peerIdentity}: ${fingerprint.substring(0, 16)}...`,
         )
     }
@@ -286,7 +287,7 @@ export class TLSServer extends EventEmitter {
      */
     removeTrustedFingerprint(peerIdentity: string): void {
         this.trustedFingerprints.delete(peerIdentity)
-        console.log(`[TLSServer] Removed trusted fingerprint for ${peerIdentity}`)
+        log.debug(`[TLSServer] Removed trusted fingerprint for ${peerIdentity}`)
     }
 
     /**

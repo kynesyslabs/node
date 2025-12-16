@@ -1,4 +1,5 @@
 // REVIEW: Consensus handlers for OmniProtocol binary communication
+import log from "src/utilities/logger"
 import { OmniHandler } from "../../types/message"
 import {
     decodeProposeBlockHashRequest,
@@ -57,7 +58,7 @@ export const handleProposeBlockHash: OmniHandler = async ({ message, context }) 
             metadata: httpResponse.extra,
         })
     } catch (error) {
-        console.error("[handleProposeBlockHash] Error:", error)
+        log.error("[handleProposeBlockHash] Error: " + error)
         return encodeProposeBlockHashResponse({
             status: 500,
             voter: "",
@@ -108,7 +109,7 @@ export const handleSetValidatorPhase: OmniHandler = async ({ message, context })
             metadata: httpResponse.extra,
         })
     } catch (error) {
-        console.error("[handleSetValidatorPhase] Error:", error)
+        log.error("[handleSetValidatorPhase] Error: " + error)
         return encodeSetValidatorPhaseResponse({
             status: 500,
             greenlight: false,
@@ -154,7 +155,7 @@ export const handleGreenlight: OmniHandler = async ({ message, context }) => {
             accepted: httpResponse.result === 200,
         })
     } catch (error) {
-        console.error("[handleGreenlight] Error:", error)
+        log.error("[handleGreenlight] Error: " + error)
         return encodeGreenlightResponse({
             status: 500,
             accepted: false,
@@ -185,7 +186,7 @@ export const handleGetCommonValidatorSeed: OmniHandler = async () => {
             seed: (httpResponse.response as string) ?? "",
         })
     } catch (error) {
-        console.error("[handleGetCommonValidatorSeed] Error:", error)
+        log.error("[handleGetCommonValidatorSeed] Error: " + error)
         return encodeValidatorSeedResponse({
             status: 500,
             seed: "",
@@ -217,7 +218,7 @@ export const handleGetValidatorTimestamp: OmniHandler = async () => {
             metadata: httpResponse.extra,
         })
     } catch (error) {
-        console.error("[handleGetValidatorTimestamp] Error:", error)
+        log.error("[handleGetValidatorTimestamp] Error: " + error)
         return encodeValidatorTimestampResponse({
             status: 500,
             timestamp: BigInt(0),
@@ -249,7 +250,7 @@ export const handleGetBlockTimestamp: OmniHandler = async () => {
             metadata: httpResponse.extra,
         })
     } catch (error) {
-        console.error("[handleGetBlockTimestamp] Error:", error)
+        log.error("[handleGetBlockTimestamp] Error: " + error)
         return encodeBlockTimestampResponse({
             status: 500,
             timestamp: BigInt(0),
@@ -286,7 +287,7 @@ export const handleGetValidatorPhase: OmniHandler = async () => {
             metadata: httpResponse.extra,
         })
     } catch (error) {
-        console.error("[handleGetValidatorPhase] Error:", error)
+        log.error("[handleGetValidatorPhase] Error: " + error)
         return encodeValidatorPhaseResponse({
             status: 500,
             hasPhase: false,

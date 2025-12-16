@@ -3,6 +3,7 @@ import * as fs from "fs"
 import * as path from "path"
 import { promisify } from "util"
 import type { CertificateInfo, CertificateGenerationOptions } from "./types"
+import log from "src/utilities/logger"
 
 const generateKeyPair = promisify(crypto.generateKeyPair)
 
@@ -23,7 +24,7 @@ export async function generateSelfSignedCert(
         keySize = 2048,
     } = options
 
-    console.log(`[TLS] Generating self-signed certificate for ${commonName}...`)
+    log.info(`[TLS] Generating self-signed certificate for ${commonName}...`)
 
     // Generate RSA key pair (TLS requires RSA/ECDSA, not Ed25519)
     const { publicKey, privateKey } = await generateKeyPair("rsa", {
@@ -85,13 +86,13 @@ IP.1 = 127.0.0.1
         if (fs.existsSync(configPath)) fs.unlinkSync(configPath)
         if (fs.existsSync(csrPath)) fs.unlinkSync(csrPath)
 
-        console.log("[TLS] Certificate generated successfully")
-        console.log(`[TLS] Certificate: ${certPath}`)
-        console.log(`[TLS] Private key: ${keyPath}`)
+        log.info("[TLS] Certificate generated successfully")
+        log.debug(`[TLS] Certificate: ${certPath}`)
+        log.debug(`[TLS] Private key: ${keyPath}`)
 
         return { certPath, keyPath }
     } catch (error) {
-        console.error("[TLS] Failed to generate certificate:", error)
+        log.error("[TLS] Failed to generate certificate: " + error)
         throw new Error(`Certificate generation failed: ${error.message}`)
     }
 }
@@ -145,18 +146,18 @@ export async function verifyCertificateValidity(certPath: string): Promise<boole
         const now = new Date()
 
         if (now < certInfo.validFrom) {
-            console.warn(`[TLS] Certificate not yet valid (valid from ${certInfo.validFrom})`)
+            log.warning(`[TLS] Certificate not yet valid (valid from ${certInfo.validFrom})`)
             return false
         }
 
         if (now > certInfo.validTo) {
-            console.warn(`[TLS] Certificate expired (expired on ${certInfo.validTo})`)
+            log.warning(`[TLS] Certificate expired (expired on ${certInfo.validTo})`)
             return false
         }
 
         return true
     } catch (error) {
-        console.error("[TLS] Certificate verification failed:", error)
+        log.error("[TLS] Certificate verification failed: " + error)
         return false
     }
 }
