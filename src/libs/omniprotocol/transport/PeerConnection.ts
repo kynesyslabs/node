@@ -2,7 +2,7 @@
 import log from "src/utilities/logger"
 import { Socket } from "net"
 import * as ed25519 from "@noble/ed25519"
-import { sha256 } from "@noble/hashes/sha2.js"
+import { keccak_256 } from "@noble/hashes/sha3.js"
 import { MessageFramer } from "./MessageFramer"
 import type { OmniMessageHeader } from "../types/message"
 import type { AuthBlock } from "../auth/types"
@@ -206,10 +206,10 @@ export class PeerConnection {
         const timeout = options.timeout ?? 30000 // 30 second default
         const timestamp = Date.now()
 
-        // Build data to sign: Message ID + SHA256(Payload)
+        // Build data to sign: Message ID + Keccak256(Payload)
         const msgIdBuf = Buffer.allocUnsafe(4)
         msgIdBuf.writeUInt32BE(sequence)
-        const payloadHash = Buffer.from(sha256(payload))
+        const payloadHash = Buffer.from(keccak_256(payload))
         const dataToSign = Buffer.concat([msgIdBuf, payloadHash])
 
         // Sign with Ed25519

@@ -1,5 +1,5 @@
 import * as ed25519 from "@noble/ed25519"
-import { sha256 } from "@noble/hashes/sha256"
+import { keccak_256 } from "@noble/hashes/sha3.js"
 import { AuthBlock, SignatureAlgorithm, SignatureMode, VerificationResult } from "./types"
 import type { OmniMessageHeader } from "../types/message"
 import log from "src/utilities/logger"
@@ -115,10 +115,10 @@ export class SignatureVerifier {
                 return payload
 
             case SignatureMode.SIGN_MESSAGE_ID_PAYLOAD_HASH: {
-                // Sign (Message ID + SHA256(Payload))
+                // Sign (Message ID + Keccak256(Payload))
                 const msgId = Buffer.allocUnsafe(4)
                 msgId.writeUInt32BE(header.sequence)
-                const payloadHash = Buffer.from(sha256(payload))
+                const payloadHash = Buffer.from(keccak_256(payload))
                 return Buffer.concat([msgId, payloadHash])
             }
 
