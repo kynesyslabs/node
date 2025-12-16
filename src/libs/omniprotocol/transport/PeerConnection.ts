@@ -2,7 +2,7 @@
 import log from "src/utilities/logger"
 import { Socket } from "net"
 import * as ed25519 from "@noble/ed25519"
-import { sha256 } from "@noble/hashes/sha256"
+import { sha256 } from "@noble/hashes/sha2.js"
 import { MessageFramer } from "./MessageFramer"
 import type { OmniMessageHeader } from "../types/message"
 import type { AuthBlock } from "../auth/types"
@@ -37,12 +37,12 @@ import {
  * - In-flight request tracking with timeout handling
  */
 export class PeerConnection {
-    private socket: Socket | null = null
+    protected socket: Socket | null = null
     private framer: MessageFramer = new MessageFramer()
-    private state: ConnectionState = "UNINITIALIZED"
-    private peerIdentity: string
-    private connectionString: string
-    private parsedConnection: ParsedConnectionString | null = null
+    protected state: ConnectionState = "UNINITIALIZED"
+    protected peerIdentity: string
+    protected connectionString: string
+    protected parsedConnection: ParsedConnectionString | null = null
 
     // Request tracking
     private inFlightRequests: Map<number, PendingRequest> = new Map()
@@ -453,9 +453,9 @@ export class PeerConnection {
 
     /**
      * Transition to new state
-     * @private
+     * @protected
      */
-    private setState(newState: ConnectionState): void {
+    protected setState(newState: ConnectionState): void {
         const oldState = this.state
         this.state = newState
 

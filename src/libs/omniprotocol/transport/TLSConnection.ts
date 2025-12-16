@@ -193,21 +193,17 @@ export class TLSConnection extends PeerConnection {
     }
 
     /**
-     * Helper to set socket (parent class has private socket)
+     * Helper to set socket (parent class has protected socket)
      */
     private setSocket(socket: tls.TLSSocket): void {
-        // Access parent's private socket via reflection
-        // This is a workaround since we can't modify PeerConnection
-        (this as any).socket = socket
+        this.socket = socket
     }
 
     /**
      * Helper to get parsed connection
      */
     private parseConnectionString() {
-        // Access parent's private parsedConnection
-        const parsed = (this as any).parsedConnection
-        if (!parsed) {
+        if (!this.parsedConnection) {
             // Parse manually
             const url = new URL(this.connectionString)
             return {
@@ -216,20 +212,7 @@ export class TLSConnection extends PeerConnection {
                 port: parseInt(url.port) || 3001,
             }
         }
-        return parsed
+        return this.parsedConnection
     }
 
-    /**
-     * Helper to access parent's peerIdentity
-     */
-    private get peerIdentity(): string {
-        return (this as any).peerIdentity || "unknown"
-    }
-
-    /**
-     * Helper to access parent's connectionString
-     */
-    private get connectionString(): string {
-        return (this as any).connectionString || ""
-    }
 }
