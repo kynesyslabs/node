@@ -43,8 +43,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
     response.result = 200 // Until proven otherwise
     response.require_reply = false // Until proven otherwise
     response.extra = null // Until proven otherwise
-    //console.log(typeof data)
-    console.log(JSON.stringify(content))
+    log.debug("[manageNodeCall] Content: " + JSON.stringify(content))
     switch (content.message) {
         case "getPeerInfo":
             response.response = await getPeerInfo()
@@ -84,10 +83,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             response.extra = result.extra
             break
         case "getLastBlockNumber":
-            console.log("[SERVER] Received getLastBlockNumber")
+            log.debug("[SERVER] Received getLastBlockNumber")
             response.response = await Chain.getLastBlockNumber()
-            console.log("[CHAIN.ts] Received reply from the database") // REVIEW Debug
-            //console.log(response)
+            log.debug("[CHAIN] Received reply from the database")
             break
         case "getLastBlock":
             response.response = await Chain.getLastBlock()
@@ -104,9 +102,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "getBlockByHash":
             // Check if we have .hash or .blockHash
             if (data.hash) {
-                console.log(`get block by hash ${data.hash}`)
+                log.debug(`[SERVER] getBlockByHash: ${data.hash}`)
             } else if (data.blockHash) {
-                console.log(`get block by hash ${data.blockHash}`)
+                log.debug(`[SERVER] getBlockByHash: ${data.blockHash}`)
                 data.hash = data.blockHash
             } else {
                 response.result = 400
@@ -128,7 +126,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "No hash specified"
                 break
             }
-            console.log(`getting tx with hash ${data.hash}`)
+            log.debug(`[SERVER] getTxByHash: ${data.hash}`)
             try {
                 response.response = await Chain.getTxByHash(data.hash)
             } catch (e) {
@@ -273,7 +271,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     response.response = res
                 }
             } catch (error) {
-                console.error(error)
+                log.error("[manageNodeCall] Failed to resolve web3 domain: " + error)
                 response.result = 400
                 response.response = {
                     success: false,
@@ -459,11 +457,11 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen
         case "hots":
-            console.log("[SERVER] Received hots")
+            log.debug("[SERVER] Received hots")
             response.response = eggs.hots()
             break
         default:
-            console.log("[SERVER] Received unknown message")
+            log.warning("[SERVER] Received unknown message")
             // eslint-disable-next-line quotes
             response.response = '{ error: "Unknown message"}'
             break

@@ -5,7 +5,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 
 export default async function getPeerlist(): Promise<Peer[]> {
-    console.log("[SERVER] Executing getPeerlist")
+    log.debug("[SERVER] Executing getPeerlist")
     // Getting our current peerlist
     const socketizedResponse = PeerManager.getInstance().getPeers()
     const response = [] as Peer[]

@@ -428,11 +428,7 @@ export async function serverRpcBun() {
                     true,
                 )
                 const headerValidation = await validateHeaders(headers)
-                console.log("headerValidation", headerValidation)
-                console.log(
-                    "headerValidation: " +
-                        JSON.stringify(headerValidation),
-                )
+                log.debug("[RPC Call] Header validation: " + JSON.stringify(headerValidation))
                 if (!headerValidation[0]) {
                     return jsonResponse(
                         { error: "Invalid headers:" + headerValidation[1] },

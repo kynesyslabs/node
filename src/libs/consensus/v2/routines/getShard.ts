@@ -15,7 +15,7 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     if (peers.length < maxShardSize) {
         maxShardSize = peers.length
     }
-    console.log("[getShard] maxShardSize: ", maxShardSize)
+    log.debug("[getShard] maxShardSize: " + maxShardSize)
     const shard: Peer[] = []
     log.custom("last_shard", "Shard seed is: " + seed)
     // getSharedState.lastShardSeed = seed

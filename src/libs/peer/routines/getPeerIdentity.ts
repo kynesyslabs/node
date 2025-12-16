@@ -13,6 +13,7 @@ import { NodeCall } from "src/libs/network/manageNodeCall"
 import Transmission from "../../communications/transmission"
 import Peer from "../Peer"
 import { getSharedState } from "src/utilities/sharedState"
+import log from "src/utilities/logger"
 
 // proxy method
 export async function verifyPeer(
@@ -29,9 +30,7 @@ export default async function getPeerIdentity(
     expectedKey: string,
 ): Promise<Peer> {
     // Getting our identity
-    console.warn("[PEER AUTHENTICATION] Getting peer identity")
-    console.log(peer)
-    console.log(expectedKey)
+    log.debug(`[PEER AUTH] Getting peer identity for ${expectedKey}`)
 
     const nodeCall: NodeCall = {
         message: "getPeerIdentity",
@@ -43,25 +42,14 @@ export default async function getPeerIdentity(
         method: "nodeCall",
         params: [nodeCall],
     })
-    console.log(
-        "[PEER AUTHENTICATION] Response Received: " +
-            JSON.stringify(response),
-    )
+    log.debug("[PEER AUTH] Response Received: " + JSON.stringify(response))
     // Response management
     if (response.result === 200) {
-        console.log("[PEER AUTHENTICATION] Received response")
-        //console.log(response[1].identity.toString("hex"))
-        console.log(response.response)
+        log.debug("[PEER AUTH] Received response: " + response.response)
         if (response.response === expectedKey) {
-            console.log("[PEER AUTHENTICATION] Identity is the expected one")
+            log.debug("[PEER AUTH] Identity is the expected one")
         } else {
-            console.log(
-                "[PEER AUTHENTICATION] Identity is not the expected one",
-            )
-            console.log("Expected: ")
-            console.log(expectedKey)
-            console.log("Received: ")
-            console.log(response.response)
+            log.warning(`[PEER AUTH] Identity mismatch - Expected: ${expectedKey}, Received: ${response.response}`)
             return null
         }
         // Adding the property to the peer
@@ -73,12 +61,7 @@ export default async function getPeerIdentity(
         peer.verification.message = "getPeerIdentity routine verified"
         peer.verification.timestamp = new Date().getTime()
     } else {
-        console.log(
-            "[PEER AUTHENTICATION] [FAILED] Response " +
-                response.result +
-                " received: " +
-                response.response,
-        )
+        log.warning(`[PEER AUTH] [FAILED] Response ${response.result} received: ${response.response}`)
         return null
     }
     // ? Should we add it to the peerList here instead of in the peerBootstrap routine / hello_peer routine?

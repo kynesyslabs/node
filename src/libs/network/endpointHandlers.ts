@@ -109,15 +109,14 @@ export default class ServerHandlers {
             })
             // Hashing both the gcredits
             const gcrEditsHash = Hashing.sha256(JSON.stringify(gcrEdits))
-            console.log("gcrEditsHash: " + gcrEditsHash)
+            log.debug("[handleValidateTransaction] gcrEditsHash: " + gcrEditsHash)
             const txGcrEditsHash = Hashing.sha256(
                 JSON.stringify(tx.content.gcr_edits),
             )
-            console.log("txGcrEditsHash: " + txGcrEditsHash)
+            log.debug("[handleValidateTransaction] txGcrEditsHash: " + txGcrEditsHash)
             const comparison = txGcrEditsHash == gcrEditsHash
             if (!comparison) {
-                log.error("[handleValidateTransaction] GCREdit mismatch")
-                console.log(txGcrEditsHash + " <> " + gcrEditsHash)
+                log.error("[handleValidateTransaction] GCREdit mismatch: " + txGcrEditsHash + " <> " + gcrEditsHash)
             }
             if (comparison) {
                 log.info("[handleValidateTransaction] GCREdit hash match")
@@ -171,7 +170,7 @@ export default class ServerHandlers {
         sender: string,
     ): Promise<ExecutionResult> {
         // Log the entire validatedData object to inspect its structure
-        console.log("[handleExecuteTransaction] Validated Data:", validatedData)
+        log.debug("[handleExecuteTransaction] Validated Data: " + JSON.stringify(validatedData))
 
         const fname = "[handleExecuteTransaction] "
         const result: ExecutionResult = {
@@ -203,10 +202,7 @@ export default class ServerHandlers {
                     queriedTx.blockNumber,
             )
         }
-        console.log(
-            "[handleExecuteTransaction] Queried tx processing in block: " +
-                queriedTx.blockNumber,
-        )
+        log.debug("[handleExecuteTransaction] Queried tx processing in block: " + queriedTx.blockNumber)
 
         // We need to have issued the validity data
         if (validatedData.rpc_public_key.data !== hexOurKey) {
@@ -286,8 +282,7 @@ export default class ServerHandlers {
             // NOTE This is to be removed once demosWork is in place, but is crucial for now
             case "crosschainOperation":
                 payload = tx.content.data
-                console.log("[Included XM Chainscript]")
-                console.log(payload[1])
+                log.debug("[handleExecuteTransaction] Included XM Chainscript: " + JSON.stringify(payload[1]))
                 // TODO Better types on answers
                 var xmResult = await ServerHandlers.handleXMChainOperation(
                     payload[1] as XMScript,
@@ -302,9 +297,7 @@ export default class ServerHandlers {
 
             case "subnet":
                 payload = tx.content.data
-                console.log(
-                    "[handleExecuteTransaction] Subnet payload: " + payload[1],
-                )
+                log.debug("[handleExecuteTransaction] Subnet payload: " + JSON.stringify(payload[1]))
                 var subnetResult = await ServerHandlers.handleSubnetTx(
                     payload[1] as SubnetPayload,
                 )
@@ -363,7 +356,6 @@ export default class ServerHandlers {
                             identityResult.message + `. Transaction ${status}.`,
                     }
                 } catch (e) {
-                    console.error(e)
                     log.error("[handleverifyPayload] Error in identity: " + e)
                     result.success = false
                     result.response = {
@@ -414,11 +406,7 @@ export default class ServerHandlers {
             }
 
             // We add the transaction to the mempool
-            console.log(
-                "[handleExecuteTransaction] Adding tx with hash: " +
-                    queriedTx.hash +
-                    " to the mempool",
-            )
+            log.debug("[handleExecuteTransaction] Adding tx with hash: " + queriedTx.hash + " to the mempool")
             try {
                 const { confirmationBlock, error } =
                     await Mempool.addTransaction({
@@ -426,9 +414,7 @@ export default class ServerHandlers {
                         reference_block: validatedData.data.reference_block,
                     })
 
-                console.log(
-                    "[handleExecuteTransaction] Transaction added to mempool",
-                )
+                log.debug("[handleExecuteTransaction] Transaction added to mempool")
 
                 if (error) {
                     result.success = false
@@ -482,7 +468,7 @@ export default class ServerHandlers {
          * An operation for the gas is also pushed it pn the GCR.
          * The tx is pushed in the mempool if applicable.
          */
-        console.log("[XMChain] Handling XM Chain Operation...")
+        log.debug("[XMChain] Handling XM Chain Operation...")
         // REVIEW Remember that crosschain operations can be in chainscript syntax
         // INFO Use the src/features/multichain/chainscript/chainscript.chs for the specs
         //console.log(content.data)
@@ -639,7 +625,7 @@ export default class ServerHandlers {
         try {
             response = await Mempool.receive(content.data as Transaction[])
         } catch (error) {
-            console.error(error)
+            log.error("[handleMempool] Error receiving mempool: " + error)
         }
 
         const ourId = getSharedState.publicKeyHex

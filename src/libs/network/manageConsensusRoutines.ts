@@ -191,9 +191,8 @@ export default async function manageConsensusRoutines(
             return response
 
         case "proposeBlockHash": // For shard members to vote on a block hash
-            console.log("[Consensus Message Received] Propose Block Hash")
-            console.log("Block Hash: ", payload.params[0])
-            console.log("Validation Data: ", payload.params[1])
+            log.debug("[Consensus] Received proposeBlockHash - Hash: " + payload.params[0])
+            log.debug("[Consensus] Validation Data: " + JSON.stringify(payload.params[1]))
             // TODO
             // compare the block hash with the one we have and reply
             try {
@@ -203,7 +202,6 @@ export default async function manageConsensusRoutines(
                     payload.params[2] as string,
                 )
             } catch (error) {
-                console.error(error)
                 log.error(
                     "[manageConsensusRoutines] Error proposing block hash: " +
                         error,
@@ -330,7 +328,6 @@ export default async function manageConsensusRoutines(
             } catch (error) {
                 // INFO: Node is secretary, but hasn't started the secretary routine yet!
                 // REVIEW: Should we start the secretary routine here?
-                console.error(error)
                 log.error(
                     "[manageConsensusRoutines] Error setting the validator phase: " +
                         error,

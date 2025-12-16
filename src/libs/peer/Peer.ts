@@ -110,7 +110,7 @@ export default class Peer {
      * @returns True if the peer is online, false otherwise
      */
     async connect(): Promise<boolean> {
-        console.log(
+        log.debug(
             "[PEER] Testing connection to peer: " + this.connection.string,
         )
         const call: NodeCall = {
@@ -122,7 +122,7 @@ export default class Peer {
             method: "nodeCall",
             params: [call],
         })
-        console.log(
+        log.debug(
             "[PEER] [PING] Response: " +
                 response.result +
                 " - " +

@@ -1,5 +1,6 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
+import log from "src/utilities/logger"
 
 interface InterfaceGetTransactionsData {
     start: number | "latest"
@@ -30,7 +31,7 @@ export default async function getTransactions(
 
     const [start, limit] = params
 
-    console.log(
+    log.debug(
         `[SERVER] Receiving request getAllTransactions: start=${start}, limit=${limit}`,
     )
 

@@ -7,6 +7,7 @@ import {
 import { handleWeb2 } from "src/features/web2/handleWeb2"
 import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
 import { validateAndNormalizeHttpUrl } from "src/features/web2/validator"
+import log from "src/utilities/logger"
 
 type IHandleWeb2ProxyRequestStepParams = Pick<
     IWeb2Payload["message"],
@@ -96,7 +97,7 @@ export async function handleWeb2ProxyRequest({
             }
         }
     } catch (error: any) {
-        console.error("Error in handleWeb2ProxyRequest:", error)
+        log.error("Error in handleWeb2ProxyRequest: " + error)
 
         return createRPCResponse(500, error, error.message)
     }
@@ -105,7 +106,7 @@ export async function handleWeb2ProxyRequest({
 function getDAHRInstance(sessionId: string): DAHR | null {
     const dahr = DAHRFactory.instance.getDAHR(sessionId)
     if (!dahr) {
-        console.error(`DAHR instance not found for sessionId: ${sessionId}`)
+        log.error(`DAHR instance not found for sessionId: ${sessionId}`)
         return null
     }
     return dahr

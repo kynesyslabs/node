@@ -13,6 +13,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { Socket } from "socket.io"
 
+import log from "src/utilities/logger"
 import Transmission from "../../communications/transmission"
 import Peer from "../Peer"
 import { NodeCall } from "src/libs/network/manageNodeCall"
@@ -32,11 +33,10 @@ export default async function getPeerConnectionString(
     })
     // Response management
     if (response.result === 200) {
-        console.log("[PEER CONNECTION] Received response")
-        //console.log(response[1])
+        log.debug("[PEER CONNECTION] Received response")
         peer.connection.string = response.response
     } else {
-        console.log("[PEER CONNECTION] Response " + response.result + " received: " + response.response)
+        log.warning("[PEER CONNECTION] Response " + response.result + " received: " + response.response)
     }
     return peer
 }

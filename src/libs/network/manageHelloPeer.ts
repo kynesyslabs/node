@@ -33,7 +33,7 @@ export async function manageHelloPeer(
     peerObject.identity = content.publicKey
 
     if (peerObject.identity == getSharedState.publicKeyHex) {
-        console.log("[Hello Peer Listener] Peer is us: skipping")
+        log.debug("[Hello Peer Listener] Peer is us: skipping")
         response.result = 200
         response.response = true
         response.extra = {

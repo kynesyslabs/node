@@ -897,9 +897,8 @@ export default class SecretaryManager {
         try {
             await Promise.all(waiters)
         } catch (error) {
-            console.error(error)
+            log.error("[SECRETARY] Error waiting for hanging greenlights: " + error)
             process.exit(1)
-            log.error("Error waiting for hanging greenlights: " + error)
         }
 
         // INFO: Delete pre-held keys for ended consensus round
