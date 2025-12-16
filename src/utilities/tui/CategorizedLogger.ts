@@ -228,6 +228,10 @@ export class CategorizedLogger extends EventEmitter {
     private lastRotationCheck = 0
     private rotationInProgress = false
 
+    // Async terminal output buffer (performance optimization)
+    private terminalBuffer: string[] = []
+    private terminalFlushScheduled = false
+
     private constructor(config: LoggerConfig = {}) {
         super()
         this.config = {
@@ -720,7 +724,41 @@ export class CategorizedLogger extends EventEmitter {
         const color = LEVEL_COLORS[entry.level]
 
         const line = `${color}[${timestamp}] [${level}] [${category}] ${entry.message}${RESET_COLOR}`
-        console.log(line)
+        
+        // Buffer the line instead of blocking with console.log
+        this.terminalBuffer.push(line)
+        this.scheduleTerminalFlush()
+    }
+
+
+    /**
+     * Schedule async terminal buffer flush
+     * Uses setImmediate to yield to event loop between log batches
+     */
+    private scheduleTerminalFlush(): void {
+        if (this.terminalFlushScheduled) return
+        this.terminalFlushScheduled = true
+        
+        setImmediate(() => {
+            this.flushTerminalBuffer()
+        })
+    }
+
+    /**
+     * Flush all buffered terminal output at once
+     * More efficient than individual console.log calls
+     */
+    private flushTerminalBuffer(): void {
+        this.terminalFlushScheduled = false
+        
+        if (this.terminalBuffer.length === 0) return
+        
+        // Capture and clear buffer atomically
+        const lines = this.terminalBuffer
+        this.terminalBuffer = []
+        
+        // Write all lines at once - more efficient than multiple console.log calls
+        process.stdout.write(lines.join("\n") + "\n")
     }
 
     // SECTION Buffer Access Methods
