@@ -5,6 +5,7 @@ import { decodeJsonRequest } from "../../serialization/jsonEnvelope"
 import { encodeResponse, errorResponse, successResponse } from "./utils"
 import type { BundleContent } from "@kynesyslabs/demosdk/types"
 import type Transaction from "../../../blockchain/transaction"
+import type * as bridge from "@kynesyslabs/demosdk/bridge"
 
 interface ExecuteRequest {
     content: BundleContent
@@ -16,6 +17,7 @@ interface NativeBridgeRequest {
 
 interface BridgeRequest {
     method: string
+    chain: string
     params: unknown[]
 }
 
@@ -45,7 +47,7 @@ export const handleExecute: OmniHandler<Buffer> = async ({ message, context }) =
             return encodeResponse(errorResponse(400, "content is required"))
         }
 
-        const { default: manageExecution } = await import("../../../network/manageExecution")
+        const { manageExecution } = await import("../../../network/manageExecution")
 
         // Call existing HTTP handler
         const httpResponse = await manageExecution(request.content, context.peerIdentity)
@@ -90,7 +92,7 @@ export const handleNativeBridge: OmniHandler<Buffer> = async ({ message, context
         const { manageNativeBridge } = await import("../../../network/manageNativeBridge")
 
         // Call existing HTTP handler
-        const httpResponse = await manageNativeBridge(request.operation)
+        const httpResponse = await manageNativeBridge(request.operation as bridge.NativeBridgeOperation)
 
         if (httpResponse.result === 200) {
             return encodeResponse(successResponse(httpResponse.response))
@@ -133,6 +135,7 @@ export const handleBridge: OmniHandler<Buffer> = async ({ message, context }) =>
 
         const bridgePayload = {
             method: request.method,
+            chain: request.chain,
             params: request.params || [],
         }
 
@@ -183,7 +186,7 @@ export const handleBroadcast: OmniHandler<Buffer> = async ({ message, context })
             extra: "broadcastTx",
         }
 
-        const { default: manageExecution } = await import("../../../network/manageExecution")
+        const { manageExecution } = await import("../../../network/manageExecution")
 
         // Call existing HTTP handler with broadcastTx mode
         const httpResponse = await manageExecution(broadcastContent, context.peerIdentity)

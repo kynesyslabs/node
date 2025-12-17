@@ -93,7 +93,7 @@ IP.1 = 127.0.0.1
         return { certPath, keyPath }
     } catch (error) {
         log.error("[TLS] Failed to generate certificate: " + error)
-        throw new Error(`Certificate generation failed: ${error.message}`)
+        throw new Error(`Certificate generation failed: ${(error as Error).message}`)
     }
 }
 
@@ -125,7 +125,7 @@ export async function loadCertificate(certPath: string): Promise<CertificateInfo
             serialNumber: cert.serialNumber,
         }
     } catch (error) {
-        throw new Error(`Failed to load certificate: ${error.message}`)
+        throw new Error(`Failed to load certificate: ${(error as Error).message}`)
     }
 }
 
@@ -207,6 +207,6 @@ Certificate Information:
   Serial Number: ${info.serialNumber}
 `
     } catch (error) {
-        return `Certificate info unavailable: ${error.message}`
+        return `Certificate info unavailable: ${(error as Error).message}`
     }
 }

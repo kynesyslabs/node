@@ -60,7 +60,7 @@ export async function dispatchOmniMessage<TPayload = unknown>(
     }
 
     try {
-        return await descriptor.handler(handlerContext)
+        return await descriptor.handler(handlerContext as HandlerContext<Buffer>)
     } catch (error) {
         if (error instanceof OmniProtocolError) {
             throw error

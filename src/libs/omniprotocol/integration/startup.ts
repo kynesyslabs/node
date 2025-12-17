@@ -166,7 +166,7 @@ export async function stopOmniProtocolServer(): Promise<void> {
 /**
  * Get the current server instance
  */
-export function getOmniProtocolServer(): OmniProtocolServer | null {
+export function getOmniProtocolServer(): OmniProtocolServer | TLSServer | null {
     return serverInstance
 }
 

@@ -384,7 +384,7 @@ export class PeerConnection {
         // Extract all complete messages
         let message = this.framer.extractMessage()
         while (message) {
-            this.handleMessage(message.header, message.payload)
+            this.handleMessage(message.header, message.payload as Buffer)
             message = this.framer.extractMessage()
         }
     }

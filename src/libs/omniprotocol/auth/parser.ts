@@ -54,7 +54,7 @@ export class AuthBlockParser {
             auth: {
                 algorithm: algorithm as SignatureAlgorithm,
                 signatureMode: signatureMode as SignatureMode,
-                timestamp,
+                timestamp: Number(timestamp),
                 identity,
                 signature,
             },
