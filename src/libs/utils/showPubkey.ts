@@ -88,7 +88,7 @@ async function main() {
     const identity = await ucrypto.getIdentity(SIGNING_ALGORITHM)
 
     // Get the public key
-    const publicKeyHex = uint8ArrayToHex(identity.publicKey)
+    const publicKeyHex = uint8ArrayToHex(identity.publicKey as Uint8Array)
 
     // Output to file if -o flag provided, otherwise display to console
     if (outputFile) {

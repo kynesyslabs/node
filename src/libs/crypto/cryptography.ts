@@ -9,7 +9,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import * as crypto from "crypto"
 import { promises as fs } from "fs"
 import forge from "node-forge"
 import { getSharedState } from "src/utilities/sharedState"
@@ -19,8 +18,6 @@ import log from "src/utilities/logger"
 import { forgeToHex } from "./forgeUtils"
 
 const term = terminalkit.terminal
-
-const algorithm = "aes-256-cbc"
 
 export default class Cryptography {
     static new() {
@@ -54,40 +51,6 @@ export default class Cryptography {
         log.debug("0x" + stringBuffer)
         return "0x" + stringBuffer
     }
-
-    // SECTION Encrypted save and load
-    static async saveEncrypted(
-        keypair: forge.pki.KeyPair,
-        path: string,
-        password: string,
-    ) {
-        const key = crypto.createCipher(algorithm, password)
-        // Getting the private key in hex form
-        const hexKey = keypair.privateKey.toString("hex")
-        // Encrypting and saving
-        const encryptedMessage = key.update(hexKey, "utf8", "hex")
-        await fs.writeFile(path, encryptedMessage)
-    }
-
-    static async loadEncrypted(path: string, password: string) {
-        let keypair: forge.pki.KeyPair = {
-            privateKey: null,
-            publicKey: null,
-        }
-        // Preparing the environment
-        const decipher = crypto.createDecipher(algorithm, password)
-        const contentOfFile = await fs.readFile(path, "utf8")
-        // Decrypting
-        const decryptedKey = decipher.update(contentOfFile, "hex", "utf8")
-        // Loading
-        if (decryptedKey.includes("{")) {
-            keypair = Cryptography.loadFromBufferString(contentOfFile)
-        } else {
-            keypair = Cryptography.loadFromHex(contentOfFile)
-        }
-        return keypair
-    }
-    // !SECTION Encrypted save and load
 
     static async load(path) {
         let keypair: forge.pki.KeyPair = {
