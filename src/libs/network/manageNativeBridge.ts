@@ -23,6 +23,8 @@ export async function manageNativeBridge(
     // eslint-disable-next-line prefer-const
     let compiledOperation: bridge.NativeBridgeOperationCompiled = {
         content: derivedContent,
+        // FIXME: Signature generation not yet implemented - operation is unsigned
+        // Once implemented: sign derivedContent with node's private key, set type to signing algorithm
         signature: { type: "", data: "" },
         rpcPublicKey: getSharedState.identity.ed25519_hex.publicKey,
     }

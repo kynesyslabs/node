@@ -131,6 +131,10 @@ export const handleBridge: OmniHandler<Buffer> = async ({ message, context }) =>
             return encodeResponse(errorResponse(400, "method is required"))
         }
 
+        if (!request.chain) {
+            return encodeResponse(errorResponse(400, "chain is required"))
+        }
+
         const { default: manageBridges } = await import("../../../network/manageBridge")
 
         const bridgePayload = {
