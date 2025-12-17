@@ -186,7 +186,7 @@ function toBigInt(value: unknown): bigint {
         const trimmed = value.trim()
         if (!trimmed) return 0n
         try {
-            return trimmed.startsWith("0x") ? BigInt(trimmed) : BigInt(trimmed)
+            return BigInt(trimmed)
         } catch {
             return 0n
         }
