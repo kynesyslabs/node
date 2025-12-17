@@ -101,7 +101,7 @@ export class SignalingServer {
      * @param details - Additional error details
      */
     private sendError(ws: WebSocket, errorType: ImErrorType, details?: string) {
-        log.debug("[IM] Sending an error message: ", errorType, details)
+        log.debug(`[IM] Sending an error message: ${errorType}${details ? ` - ${details}` : ""}`)
         ws.send(
             JSON.stringify({
                 type: "error",
@@ -289,7 +289,7 @@ export class SignalingServer {
             // Deserialize the proof
             const deserializedProof: signedObject = {
                 algorithm: proof.algorithm,
-                signedData: deserializeUint8Array(proof.serializedSignedData),
+                signature: deserializeUint8Array(proof.serializedSignedData),
                 publicKey: deserializeUint8Array(proof.serializedPublicKey),
                 message: deserializeUint8Array(proof.serializedMessage),
             }

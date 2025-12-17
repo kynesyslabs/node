@@ -12,7 +12,8 @@
         "aptos_tests",
         "omniprotocol_fixtures_scripts",
         "sdk",
-        "tests"
+        "tests",
+        "src/tests"
     ],
     "compilerOptions": {
         "target": "ESNext",

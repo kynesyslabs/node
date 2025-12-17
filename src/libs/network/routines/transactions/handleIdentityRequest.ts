@@ -75,8 +75,9 @@ export default async function handleIdentityRequest(
         case "ud_identity_assign":
             // NOTE: Sender here is the ed25519 address coming from the transaction body
             // UD follows signature-based verification like XM
+            // Type assertion needed due to SDK type export inconsistency between abstraction/index and abstraction/types/UDResolution
             return await UDIdentityManager.verifyPayload(
-                payload as UDIdentityAssignPayload,
+                payload as unknown as Parameters<typeof UDIdentityManager.verifyPayload>[0],
                 sender,
             )
         case "pqc_identity_assign":
@@ -102,7 +103,7 @@ export default async function handleIdentityRequest(
         default:
             return {
                 success: false,
-                message: `Unsupported identity method: ${payload.method}`,
+                message: `Unsupported identity method: ${(payload as IdentityPayload).method}`,
             }
     }
 }

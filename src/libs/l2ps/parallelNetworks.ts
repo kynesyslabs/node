@@ -1,4 +1,5 @@
-import type { BlockContent, EncryptedTransaction, Transaction } from "@kynesyslabs/demosdk/types"
+import type { BlockContent, Transaction } from "@kynesyslabs/demosdk/types"
+import type { EncryptedTransaction } from "./types"
 import * as forge from "node-forge"
 import Cryptography from "../crypto/cryptography"
 import Hashing from "../crypto/hashing"

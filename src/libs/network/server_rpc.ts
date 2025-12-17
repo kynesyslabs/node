@@ -288,8 +288,11 @@ async function processPayload(
         }
 
         case "awardPoints": {
-            const twitterUsernames = payload.params[0].message as string[]
-            const awardedAccounts = await GCR.awardPoints(twitterUsernames)
+            const awardPointsData = payload.params[0].message as {
+                username: string
+                points: number
+            }[]
+            const awardedAccounts = await GCR.awardPoints(awardPointsData)
 
             return {
                 result: 200,

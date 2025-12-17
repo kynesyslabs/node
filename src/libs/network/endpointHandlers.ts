@@ -44,7 +44,7 @@ import { DemoScript } from "@kynesyslabs/demosdk/types"
 import { Peer } from "../peer"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
-import { SubnetPayload } from "@kynesyslabs/demosdk/l2ps"
+import { SubnetPayload, EncryptedTransaction } from "@/libs/l2ps/types"
 import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
@@ -494,7 +494,7 @@ export default class ServerHandlers {
             type: "registerTx",
             data: {
                 uid: content.uid,
-                encryptedTransaction: content.data,
+                encryptedTransaction: JSON.parse(content.data) as EncryptedTransaction,
             },
             extra: "register",
         }
