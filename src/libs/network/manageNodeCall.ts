@@ -24,6 +24,7 @@ import { Tweet } from "@kynesyslabs/demosdk/types"
 import Mempool from "../blockchain/mempool_v2"
 import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Discord, DiscordMessage } from "../identity/tools/discord"
+import { UDIdentityManager } from "../blockchain/gcr/gcr_routines/udIdentityManager"
 
 export interface NodeCall {
     message: string
@@ -245,7 +246,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             response.result = tweet ? 200 : 400
             if (tweet) {
                 const data = {
-                    id: tweet.id,
+                    id: (tweet as any).id,
                     created_at: tweet.created_at,
                     text: tweet.text,
                     username: tweet.author.screen_name,
@@ -259,6 +260,24 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = {
                     success: false,
                     error: "Failed to get tweet",
+                }
+            }
+            break
+        }
+
+        case "resolveUdDomain": {
+            try {
+                const res = await UDIdentityManager.resolveUDDomain(data.domain)
+
+                if (res) {
+                    response.response = res
+                }
+            } catch (error) {
+                console.error(error)
+                response.result = 400
+                response.response = {
+                    success: false,
+                    error: "Failed to resolve web3 domain",
                 }
             }
             break

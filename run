@@ -4,6 +4,7 @@ PG_PORT=5332
 GIT_PULL=true
 PEER_LIST_FILE="demos_peerlist.json"
 VERBOSE=false
+NO_TUI=false
 
 # Detect platform for cross-platform compatibility
 PLATFORM=$(uname -s)
@@ -51,8 +52,10 @@ OPTIONS:
     -l <path>                      Peer list file (default: demos_peerlist.json)
     -r <runtime>                   Force runtime (bun only - node deprecated)
     -b <true/false>                Restore from backup
+    -t                             Disable TUI (use legacy scrolling logs)
     -v                             Verbose logging
     -h                             Show this help message
+    --no-tui                       Disable TUI (same as -t)
 
 EXAMPLES:
     ./run                          # Start with default settings
@@ -60,9 +63,11 @@ EXAMPLES:
     ./run -c                       # Clean start (fresh database)
     ./run -v                       # Verbose output for troubleshooting
     ./run -n                       # Skip git update (for development)
+    ./run -t                       # Legacy mode (scrolling logs for developers)
+    ./run --no-tui                 # Same as -t
 
 SYSTEM REQUIREMENTS:
-    - 8GB RAM minimum (12GB recommended)
+    - 4GB RAM minimum (8GB recommended)
     - 4+ CPU cores
     - Docker and Docker Compose
     - Bun runtime
@@ -73,14 +78,109 @@ For support and documentation: https://demos.network
 EOF
 }
 
+# Git origin validation - ensures origin points to official repo
+check_git_origin() {
+    log_verbose "Checking git origin configuration..."
+
+    # Get current origin URL
+    local origin_url=$(git remote get-url origin 2>/dev/null)
+
+    if [ -z "$origin_url" ]; then
+        echo "⚠️  No git origin configured"
+        return 0
+    fi
+
+    # Define valid official origins (both HTTPS and SSH)
+    local valid_https="https://github.com/kynesyslabs/node"
+    local valid_https_git="https://github.com/kynesyslabs/node.git"
+    local valid_ssh="git@github.com:kynesyslabs/node.git"
+    local valid_ssh_alt="git@github.com:kynesyslabs/node"
+
+    # Check if origin is the official repo
+    if [ "$origin_url" = "$valid_https" ] || [ "$origin_url" = "$valid_https_git" ] || \
+       [ "$origin_url" = "$valid_ssh" ] || [ "$origin_url" = "$valid_ssh_alt" ]; then
+        log_verbose "Git origin is correctly set to official repository"
+        return 0
+    fi
+
+    # Origin is not official - likely a fork
+    echo ""
+    echo "⚠️  Git origin mismatch detected!"
+    echo "   Current origin: $origin_url"
+    echo "   Expected origin: $valid_https"
+    echo ""
+    echo "   This can cause 'git pull' to fail if your fork doesn't have the 'testnet' branch."
+    echo ""
+
+    # Check if this is likely a fork (contains github.com and /node)
+    if echo "$origin_url" | grep -qE "github\.com.*node"; then
+        echo "   It looks like you're using a fork of the repository."
+        echo ""
+        read -p "   Would you like to fix the origin to point to the official repo? [Y/n] " -n 1 -r
+        echo ""
+
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            echo "   Skipping git pull for this run (origin unchanged)."
+            echo "   💡 Tip: Use './run -n true' to always skip git pull on custom setups."
+            GIT_PULL=false
+            return 0
+        else
+            echo "   🔧 Updating origin to official repository..."
+
+            # Save the old origin as 'fork' remote if it doesn't exist
+            if ! git remote get-url fork &>/dev/null; then
+                git remote add fork "$origin_url"
+                echo "   💾 Your fork saved as remote 'fork'"
+            fi
+
+            # Update origin to official repo
+            git remote set-url origin "$valid_https"
+            echo "   ✅ Origin updated to: $valid_https"
+
+            # Fetch from new origin
+            echo "   🔄 Fetching from official repository..."
+            git fetch origin
+
+            return 0
+        fi
+    else
+        echo "   Origin doesn't appear to be a GitHub repository."
+        echo "   Skipping git pull for this run."
+        echo "   💡 Tip: Use './run -n true' to always skip git pull on custom setups."
+        GIT_PULL=false
+        return 0
+    fi
+}
+
 # System requirements validation
 check_system_requirements() {
     echo "🔍 Checking system requirements..."
     log_verbose "Platform detected: $PLATFORM_NAME"
-    
+
     local failed_requirements=0
     local warnings=0
-    
+
+    # Load requirements from .requirements file if it exists
+    local MIN_RAM=4
+    local SUGGESTED_RAM=8
+    if [ -f ".requirements" ]; then
+        log_verbose "Loading requirements from .requirements file"
+        # Source the file to get the values
+        while IFS='=' read -r key value; do
+            # Skip comments and empty lines
+            [[ "$key" =~ ^#.*$ ]] && continue
+            [[ -z "$key" ]] && continue
+            # Remove any whitespace
+            key=$(echo "$key" | tr -d ' ')
+            value=$(echo "$value" | tr -d ' ')
+            case "$key" in
+                "MIN_RAM") MIN_RAM=$value ;;
+                "SUGGESTED_RAM") SUGGESTED_RAM=$value ;;
+            esac
+        done < .requirements
+        log_verbose "Loaded MIN_RAM=$MIN_RAM, SUGGESTED_RAM=$SUGGESTED_RAM"
+    fi
+
     # Check RAM
     log_verbose "Checking RAM requirements"
     if [ "$PLATFORM_NAME" = "macOS" ]; then
@@ -96,12 +196,12 @@ check_system_requirements() {
         ram_gb=0
         warnings=$((warnings + 1))
     fi
-    
-    if [ $ram_gb -lt 8 ]; then
-        echo "❌ Insufficient RAM: ${ram_gb}GB (minimum: 8GB)"
+
+    if [ $ram_gb -lt $MIN_RAM ]; then
+        echo "❌ Insufficient RAM: ${ram_gb}GB (minimum: ${MIN_RAM}GB)"
         failed_requirements=$((failed_requirements + 1))
-    elif [ $ram_gb -lt 12 ]; then
-        echo "⚠️  RAM below recommended: ${ram_gb}GB (recommended: 12GB)"
+    elif [ $ram_gb -lt $SUGGESTED_RAM ]; then
+        echo "⚠️  RAM below recommended: ${ram_gb}GB (recommended: ${SUGGESTED_RAM}GB)"
         warnings=$((warnings + 1))
     else
         echo "✅ RAM: ${ram_gb}GB"
@@ -154,40 +254,65 @@ check_system_requirements() {
         warnings=$((warnings + 1))
     fi
     
+    # Helper function to check if a port is in use
+    is_port_in_use() {
+        local port=$1
+        if command -v lsof > /dev/null; then
+            lsof -i :$port > /dev/null 2>&1
+            return $?
+        elif command -v netstat > /dev/null; then
+            netstat -an | grep ":$port " > /dev/null 2>&1
+            return $?
+        else
+            # Cannot check, assume not in use
+            return 1
+        fi
+    }
+
     # Check port availability
     log_verbose "Checking port availability"
-    if command -v lsof > /dev/null; then
-        if lsof -i :$PG_PORT > /dev/null 2>&1; then
-            echo "❌ PostgreSQL port $PG_PORT is already in use"
-            failed_requirements=$((failed_requirements + 1))
-        else
-            echo "✅ PostgreSQL port $PG_PORT is available"
-        fi
-        
-        if lsof -i :$PORT > /dev/null 2>&1; then
-            echo "❌ Node port $PORT is already in use"
-            failed_requirements=$((failed_requirements + 1))
-        else
-            echo "✅ Node port $PORT is available"
-        fi
-    elif command -v netstat > /dev/null; then
-        # Fallback to netstat if lsof is not available
-        if netstat -an | grep ":$PG_PORT " > /dev/null 2>&1; then
-            echo "❌ PostgreSQL port $PG_PORT is already in use"
-            failed_requirements=$((failed_requirements + 1))
-        else
-            echo "✅ PostgreSQL port $PG_PORT is available"
-        fi
-        
-        if netstat -an | grep ":$PORT " > /dev/null 2>&1; then
-            echo "❌ Node port $PORT is already in use"
-            failed_requirements=$((failed_requirements + 1))
-        else
-            echo "✅ Node port $PORT is available"
-        fi
-    else
+
+    if ! command -v lsof > /dev/null && ! command -v netstat > /dev/null; then
         echo "⚠️  Cannot check port availability - lsof and netstat not available"
         warnings=$((warnings + 1))
+    else
+        # Check PostgreSQL port with auto-recovery attempt
+        if is_port_in_use $PG_PORT; then
+            echo "⚠️  PostgreSQL port $PG_PORT is in use, attempting to stop leftover containers..."
+            log_verbose "Trying to stop postgres_${PG_PORT} container"
+
+            # Try to stop the docker container that might be using the port
+            PG_FOLDER="postgres_${PG_PORT}"
+            if [ -d "$PG_FOLDER" ]; then
+                (cd "$PG_FOLDER" && docker compose down 2>/dev/null) || true
+                sleep 2  # Give Docker time to release the port
+            fi
+
+            # Also try the base postgres folder in case it's using the port
+            if [ -d "postgres" ]; then
+                (cd "postgres" && docker compose down 2>/dev/null) || true
+                sleep 1
+            fi
+
+            # Recheck after cleanup attempt
+            if is_port_in_use $PG_PORT; then
+                echo "❌ PostgreSQL port $PG_PORT is still in use after cleanup attempt"
+                echo "   Another process is using this port. Check with: lsof -i :$PG_PORT"
+                failed_requirements=$((failed_requirements + 1))
+            else
+                echo "✅ PostgreSQL port $PG_PORT is now available (stopped leftover container)"
+            fi
+        else
+            echo "✅ PostgreSQL port $PG_PORT is available"
+        fi
+
+        # Check Node port
+        if is_port_in_use $PORT; then
+            echo "❌ Node port $PORT is already in use"
+            failed_requirements=$((failed_requirements + 1))
+        else
+            echo "✅ Node port $PORT is available"
+        fi
     fi
     
     # Summary
@@ -280,8 +405,19 @@ fi
 CLEAN="false"
 PORT=53550
 
+# Handle long options (--no-tui) before getopts
+for arg in "$@"; do
+    case $arg in
+        --no-tui)
+            NO_TUI=true
+            # Remove --no-tui from arguments so getopts doesn't choke on it
+            set -- "${@/--no-tui/}"
+            ;;
+    esac
+done
+
 # Getting arguments
-while getopts "p:d:c:i:n:u:l:r:b:vh" opt; do
+while getopts "p:d:c:i:n:u:l:r:b:tvh" opt; do
     case $opt in
         p) PORT=$OPTARG;;
         d) PG_PORT=$OPTARG;;
@@ -292,6 +428,7 @@ while getopts "p:d:c:i:n:u:l:r:b:vh" opt; do
         u) EXPOSED_URL=$OPTARG;;
         r) RUNTIME=$OPTARG;;
         b) RESTORE=$OPTARG;;
+        t) NO_TUI=true;;
         v) VERBOSE=true;;
         h) show_help; exit 0;;
         *) echo "Invalid option. Use -h for help."; exit 1;;
@@ -307,16 +444,64 @@ fi
 # Run system requirements check
 check_system_requirements
 
+# Check git origin configuration (may disable GIT_PULL if fork detected)
+if [ "$GIT_PULL" = true ]; then
+    check_git_origin
+fi
+
 # Perform git pull if GIT_PULL is true
 if [ "$GIT_PULL" = true ]; then
     echo "🔄 Updating repository..."
     log_verbose "Running git pull to get latest changes"
-    if ! git pull; then
-        echo "⚠️  Warning: Git pull failed, continuing with current version"
-        log_verbose "Git pull failed but continuing - might be in development mode"
+
+    # Attempt git pull, handle conflicts
+    PULL_OUTPUT=$(git pull 2>&1)
+    PULL_EXIT_CODE=$?
+
+    if [ $PULL_EXIT_CODE -ne 0 ]; then
+        # Check if the conflict is ONLY about package.json (stash issue)
+        if echo "$PULL_OUTPUT" | grep -qE "package\.json" && ! echo "$PULL_OUTPUT" | grep -vE "package\.json|error:|CONFLICT|stash|overwritten" | grep -qE "\.ts|\.js|\.md|\.json"; then
+            echo "⚠️  package.json conflict detected, stashing and retrying..."
+            log_verbose "Stashing local changes to package.json"
+            git stash
+            if ! git pull; then
+                echo "❌ Git pull failed even after stashing"
+                exit 1
+            fi
+            echo "✅ Repository updated after stashing package.json"
+        else
+            # Hard exit on any other git pull failure
+            echo "❌ Git pull failed:"
+            echo "$PULL_OUTPUT"
+            echo ""
+
+            # Check for specific "no such ref" error (common with forks)
+            if echo "$PULL_OUTPUT" | grep -q "no such ref was fetched"; then
+                echo "💡 This error typically occurs when:"
+                echo "   - Your 'origin' remote points to a fork that doesn't have the 'testnet' branch"
+                echo "   - Run 'git remote -v' to check your remotes"
+                echo ""
+                echo "   Quick fixes:"
+                echo "   1. Skip git pull: ./run -n true"
+                echo "   2. Fix origin: git remote set-url origin https://github.com/kynesyslabs/node"
+                echo "   3. Or re-run ./run and choose 'Y' when prompted about the fork"
+            else
+                echo "💡 Please resolve git conflicts manually and try again"
+            fi
+            exit 1
+        fi
     else
         echo "✅ Repository updated successfully"
     fi
+
+    # Always run bun install after successful git pull
+    echo "📦 Installing dependencies..."
+    log_verbose "Running bun install after git pull"
+    if ! bun install; then
+        echo "❌ Failed to install dependencies"
+        exit 1
+    fi
+    echo "✅ Dependencies installed successfully"
 fi
 
 
@@ -338,6 +523,11 @@ elif [ "$CLEAN" = "true" ]; then
     echo "   🧹 Mode: Clean start (fresh database)"
 else
     echo "   ▶️  Mode: Normal start"
+fi
+if [ "$NO_TUI" = true ]; then
+    echo "   📜 Display: Legacy logs (TUI disabled)"
+else
+    echo "   🖥️  Display: TUI (use -t or --no-tui for legacy logs)"
 fi
 log_verbose "Platform: $PLATFORM_NAME"
 log_verbose "Verbose logging enabled"
@@ -546,9 +736,16 @@ echo "💡 Press Ctrl+C to stop the node safely"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
+# Build the final command with optional --no-tui flag
+FINAL_COMMAND="$START_COMMAND"
+if [ "$NO_TUI" = true ]; then
+    FINAL_COMMAND="$START_COMMAND -- --no-tui"
+fi
+
 # Starting the node managing errors
 log_verbose "Starting node with environment: RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE"
-if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE $START_COMMAND; then
+log_verbose "Command: $FINAL_COMMAND"
+if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE $FINAL_COMMAND; then
     if [ "$HAS_BEEN_INTERRUPTED" == "true" ]; then
         echo ""
         echo "✅ Demos Network node stopped successfully"

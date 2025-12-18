@@ -335,12 +335,10 @@ export async function serverRpcBun() {
     // eslint-disable-next-line quotes
     server.get("/", req => {
         const clientIP = rateLimiter.getClientIP(req, server.server)
-        return new Response(
-            JSON.stringify({
-                message: "Hello, World!",
-                yourIP: clientIP,
-            }),
-        )
+        return new Response(JSON.stringify({
+            message: "Hello, World!",
+            yourIP: clientIP,
+        }))
     })
 
     server.get("/info", async () => {

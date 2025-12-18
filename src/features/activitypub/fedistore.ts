@@ -32,7 +32,7 @@ export class ActivityPubStorage {
         })
 
         // Initialize valid collections whitelist from the single source of truth
-        this.validCollections = new Set(Object.keys(this.collectionSchemas));
+        this.validCollections = new Set(Object.keys(this.collectionSchemas))
     }
 
     private validateCollection(collection: string): void {

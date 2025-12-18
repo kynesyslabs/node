@@ -70,8 +70,8 @@ export default class GroundControl {
                 // Else we can start da server
                 try {
                     // Validate file paths to prevent path traversal attacks
-                    if (keys.key.includes('..') || keys.cert.includes('..') || keys.ca.includes('..')) {
-                        throw new Error("Invalid file path");
+                    if (keys.key.includes("..") || keys.cert.includes("..") || keys.ca.includes("..")) {
+                        throw new Error("Invalid file path")
                     }
                     GroundControl.options = {
                         key: fs.readFileSync(keys.key),
