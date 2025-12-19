@@ -425,14 +425,14 @@ export default class ServerHandlers {
                     await isValidatorForNextBlock()
 
                 if (!isValidator) {
-                    log.only(
+                    log.debug(
                         "[DTR] Non-validator node: attempting relay to all validators",
                     )
                     const availableValidators = validators.sort(
                         () => Math.random() - 0.5,
                     ) // Random order for load balancing
 
-                    log.only(
+                    log.debug(
                         `[DTR] Found ${availableValidators.length} available validators, trying all`,
                     )
 
@@ -448,8 +448,6 @@ export default class ServerHandlers {
                     for (const result of results) {
                         if (result.status === "fulfilled") {
                             const response = result.value
-                            log.only("response: " + JSON.stringify(response))
-
                             if (response.result == 200) {
                                 continue
                             }
@@ -473,7 +471,7 @@ export default class ServerHandlers {
                 }
 
                 if (getSharedState.inConsensusLoop) {
-                    log.only(
+                    log.debug(
                         "in consensus loop, setting tx in cache: " +
                             queriedTx.hash,
                     )
@@ -484,7 +482,7 @@ export default class ServerHandlers {
 
                     // INFO: Start the relay waiter
                     if (!DTRManager.isWaitingForBlock) {
-                        log.only("not waiting for block, starting relay")
+                        log.debug("not waiting for block, starting relay")
                         DTRManager.waitForBlockThenRelay()
                     }
 
@@ -498,7 +496,7 @@ export default class ServerHandlers {
                     }
                 }
 
-                log.only(
+                log.debug(
                     "👀 not in consensus loop, adding tx to mempool: " +
                         queriedTx.hash,
                 )

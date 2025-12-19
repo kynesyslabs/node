@@ -214,13 +214,7 @@ export default class Mempool {
     public static async getDifference(txHashes: string[]) {
         const incomingSet = new Set(txHashes)
         const mempool = await this.getMempool(SecretaryManager.lastBlockRef)
-        log.only("🟠 [Mempool.getDifference] Our Mempool: " + mempool.length)
-        log.only("🟠 [Mempool.getDifference] Incoming Set: " + incomingSet.size)
-
-        const diff = mempool.filter(tx => !incomingSet.has(tx.hash))
-        log.only("🟠 [Mempool.getDifference] Difference: " + diff.length)
-
-        return diff
+        return mempool.filter(tx => !incomingSet.has(tx.hash))
     }
 
     /**

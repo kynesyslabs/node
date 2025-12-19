@@ -70,15 +70,15 @@ export class DTRManager {
      */
     static async releaseDTRWaiter(block?: Block) {
         if (Waiter.isWaiting(Waiter.keys.DTR_WAIT_FOR_BLOCK)) {
-            log.only(
-                "[consensusRoutine] releasing DTR transaction relay waiter",
-            )
+            log.debug("[DTRManager] releasing DTR transaction relay waiter")
             const { commonValidatorSeed } = await getCommonValidatorSeed(block)
             Waiter.resolve(Waiter.keys.DTR_WAIT_FOR_BLOCK, commonValidatorSeed)
         }
     }
 
     /**
+     * @deprecated
+     * 
      * Starts the background relay retry service
      * Only starts if not already running
      */
@@ -99,6 +99,8 @@ export class DTRManager {
     }
 
     /**
+     * @deprecated
+     * 
      * Stops the background relay retry service
      * Cleans up interval and resets state
      */
@@ -121,6 +123,8 @@ export class DTRManager {
     }
 
     /**
+     * @deprecated
+     * 
      * Main processing loop - runs every 10 seconds
      * Checks mempool for transactions that need relaying
      */
@@ -417,7 +421,7 @@ export class DTRManager {
 
         try {
             if (getSharedState.inConsensusLoop) {
-                log.only(
+                log.debug(
                     "[receiveRelayedTransaction] in consensus loop, adding tx in cache: " +
                         validityData.data.transaction.hash,
                 )
@@ -428,13 +432,13 @@ export class DTRManager {
 
                 // INFO: Start the relay waiter
                 if (!DTRManager.isWaitingForBlock) {
-                    log.only(
+                    log.debug(
                         "[receiveRelayedTransaction] not waiting for block, starting relay",
                     )
                     DTRManager.waitForBlockThenRelay()
                 }
 
-                log.only("[receiveRelayedTransaction] returning success")
+                log.debug("[receiveRelayedTransaction] returning success")
                 return {
                     success: true,
                     response: {
@@ -639,30 +643,23 @@ export class DTRManager {
 
     static async waitForBlockThenRelay() {
         let cvsa: string
-        log.only("Enter: waitForBlockThenRelay")
+
         try {
-            log.only("waiting for block ...")
             cvsa = await Waiter.wait(Waiter.keys.DTR_WAIT_FOR_BLOCK, 30_000)
-            log.only("waitForBlockThenRelay resolved. CVSA: " + cvsa)
+            log.debug("waitForBlockThenRelay resolved. CVSA: " + cvsa)
         } catch (error) {
-            log.only("exiting ...")
+            log.error("[waitForBlockThenRelay] Error waiting for block")
             console.error("waitForBlockThenRelay error: " + error)
-            process.exit(0)
         }
 
-        // relay transactions here
         const txs = Array.from(DTRManager.validityDataCache.values())
-
-        log.only("Transaction found: " + txs.length)
         const validators = await getShard(cvsa)
-        log.only(
-            "Validators found: " +
-                JSON.stringify(validators.map(v => v.connection.string)),
-        )
 
         // if we're up next, keep the transactions
         if (validators.some(v => v.identity === getSharedState.publicKeyHex)) {
-            log.only("We're up next, keeping transactions")
+            log.debug(
+                "[waitForBlockThenRelay] We're up next, keeping transactions",
+            )
             return await Promise.all(
                 txs.map(tx => {
                     Mempool.addTransaction({
@@ -678,37 +675,25 @@ export class DTRManager {
             )
         }
 
-        log.only("Relaying transactions to validators")
+        log.debug("[waitForBlockThenRelay] Relaying transactions to validators")
         const nodeResults = await Promise.all(
             validators.map(validator => this.relayTransactions(validator, txs)),
         )
 
         for (const result of nodeResults) {
-            log.only("result: " + JSON.stringify(result))
+            log.debug(
+                "[waitForBlockThenRelay] relay result: " +
+                    JSON.stringify(result),
+            )
 
             if (result.result === 200) {
                 for (const txres of result.response) {
                     if (txres.result == 200) {
-                        log.only("deleting tx: " + txres.extra.txhash)
+                        log.debug("deleting tx: " + txres.extra.txhash)
                         DTRManager.validityDataCache.delete(txres.extra.txhash)
                     }
                 }
             }
-        }
-    }
-
-    /**
-     * Returns service statistics for monitoring
-     * @returns Object with service stats
-     */
-    getStats() {
-        return {
-            isRunning: this.isRunning,
-            pendingRetries: this.retryAttempts.size,
-            cacheSize: getSharedState.validityDataCache.size,
-            retryAttempts: Object.fromEntries(this.retryAttempts),
-            lastBlockNumber: this.lastBlockNumber,
-            cachedValidators: this.cachedValidators.length,
         }
     }
 }

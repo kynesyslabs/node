@@ -329,18 +329,7 @@ export default class Chain {
         position?: number,
         cleanMempool = true,
     ): Promise<Blocks> {
-        log.only(
-            "[insertBlock] Attempting to insert a block with hash: " +
-                block.hash,
-        )
-        // Convert the transactions strings back to Transaction objects
-        log.only("[insertBlock] Extracting transactions from block")
-        // ! FIXME The below fails when a tx like a web2Request is inserted
         const orderedTransactionsHashes = block.content.ordered_transactions
-        log.only(
-            "[insertBlock] Ordered transactions hashes: " +
-                JSON.stringify(orderedTransactionsHashes),
-        )
         // Fetch transaction entities from the repository based on ordered transaction hashes
 
         const newBlock = new Blocks()
@@ -407,11 +396,6 @@ export default class Chain {
             // REVIEW We then add the transactions to the Transactions repository
             const transactionEntities = await Mempool.getTransactionsByHashes(
                 orderedTransactionsHashes,
-            )
-
-            log.only(
-                "[insertBlock] Transaction entities: " +
-                    JSON.stringify(transactionEntities.map(tx => tx.hash)),
             )
 
             for (let i = 0; i < transactionEntities.length; i++) {

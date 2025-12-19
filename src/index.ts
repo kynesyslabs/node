@@ -389,7 +389,7 @@ async function main() {
                 "[DTR] Initializing relay retry service (will start after sync)",
             )
             // Service will check syncStatus internally before processing
-            DTRManager.getInstance().start()
+            // DTRManager.getInstance().start()
         }
     }
 }
@@ -397,17 +397,17 @@ async function main() {
 // Graceful shutdown handling for DTR service
 process.on("SIGINT", () => {
     console.log("[DTR] Received SIGINT, shutting down gracefully...")
-    if (getSharedState.PROD) {
-        DTRManager.getInstance().stop()
-    }
+    // if (getSharedState.PROD) {
+    //     DTRManager.getInstance().stop()
+    // }
     process.exit(0)
 })
 
 process.on("SIGTERM", () => {
     console.log("[DTR] Received SIGTERM, shutting down gracefully...")
-    if (getSharedState.PROD) {
-        DTRManager.getInstance().stop()
-    }
+    // if (getSharedState.PROD) {
+    //     DTRManager.getInstance().stop()
+    // }
     process.exit(0)
 })
 
