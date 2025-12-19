@@ -116,7 +116,7 @@ const COMMANDS: Command[] = [
         handler: (_args, tui) => {
             tui.addCmdOutput("=== Available Commands ===")
             COMMANDS.forEach(cmd => {
-                tui.addCmdOutput(`  ${cmd.name.padEnd(12)} - ${cmd.description}`)
+                tui.addCmdOutput(`  ${cmd.name} - ${cmd.description}`)
             })
             tui.addCmdOutput("==========================")
         },
@@ -1238,7 +1238,7 @@ export class TUIManager extends EventEmitter {
 
         // Category with bracket styling
         term.cyan(" [")
-        term.brightCyan(entry.category.padEnd(10))
+        term.brightCyan(entry.category)
         term.cyan("] ")
 
         // Message (truncate if too long)

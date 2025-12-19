@@ -163,11 +163,11 @@ class RingBuffer<T> {
 // SECTION Level Priority Map
 
 const LEVEL_PRIORITY: Record<LogLevel, number> = {
-    debug: 0,
     info: 1,
     warning: 2,
     error: 3,
     critical: 4,
+    debug: 5,
 }
 
 // SECTION Color codes for terminal output (when not in TUI mode)
@@ -230,14 +230,20 @@ export class CategorizedLogger extends EventEmitter {
             bufferSize: config.bufferSize ?? 500, // Per-category buffer size
             logsDir: config.logsDir ?? "logs",
             terminalOutput: config.terminalOutput ?? true,
-            minLevel: config.minLevel ?? (process.env.LOG_LEVEL as LogLevel) ?? "info",
+            minLevel:
+                config.minLevel ??
+                (process.env.LOG_LEVEL as LogLevel) ??
+                "info",
             enabledCategories: config.enabledCategories ?? [],
             maxFileSize: config.maxFileSize ?? DEFAULT_MAX_FILE_SIZE,
             maxTotalSize: config.maxTotalSize ?? DEFAULT_MAX_TOTAL_SIZE,
         }
         // Initialize a buffer for each category
         for (const category of ALL_CATEGORIES) {
-            this.categoryBuffers.set(category, new RingBuffer<LogEntry>(this.config.bufferSize))
+            this.categoryBuffers.set(
+                category,
+                new RingBuffer<LogEntry>(this.config.bufferSize),
+            )
         }
     }
 
@@ -443,7 +449,10 @@ export class CategorizedLogger extends EventEmitter {
         this.appendToFile(`${entry.level}.log`, logLine)
 
         // Write to category-specific file
-        this.appendToFile(`category_${entry.category.toLowerCase()}.log`, logLine)
+        this.appendToFile(
+            `category_${entry.category.toLowerCase()}.log`,
+            logLine,
+        )
     }
 
     /**
@@ -456,30 +465,33 @@ export class CategorizedLogger extends EventEmitter {
      */
     private getOrCreateStream(filename: string): fs.WriteStream {
         let stream = this.fileHandles.get(filename)
-        
+
         if (!stream || stream.destroyed) {
             const filepath = path.join(this.config.logsDir, filename)
             stream = fs.createWriteStream(filepath, { flags: "a" })
-            
+
             // Handle stream errors to prevent crashes
-            stream.on("error", (err) => {
+            stream.on("error", err => {
                 originalConsoleError(`WriteStream error for ${filename}:`, err)
                 this.fileHandles.delete(filename)
             })
-            
+
             this.fileHandles.set(filename, stream)
         }
-        
+
         return stream
     }
 
     private appendToFile(filename: string, content: string): void {
         const stream = this.getOrCreateStream(filename)
-        
-        stream.write(content, (err) => {
+
+        stream.write(content, err => {
             if (err) {
                 // Silently fail file writes to avoid recursion.
-                originalConsoleError(`Failed to write to log file: ${filename}`, err)
+                originalConsoleError(
+                    `Failed to write to log file: ${filename}`,
+                    err,
+                )
                 return
             }
             // Trigger rotation check (debounced)
@@ -561,7 +573,10 @@ export class CategorizedLogger extends EventEmitter {
      * Truncate a file, keeping only the newest portion
      * Returns the new file size after truncation
      */
-    private async truncateFile(filepath: string, currentSize: number): Promise<number> {
+    private async truncateFile(
+        filepath: string,
+        currentSize: number,
+    ): Promise<number> {
         try {
             // Close the WriteStream if it exists (must close before truncating)
             const filename = path.basename(filepath)
@@ -572,7 +587,9 @@ export class CategorizedLogger extends EventEmitter {
             }
 
             // Calculate how much to keep (newest 50% of max size)
-            const keepSize = Math.floor(this.config.maxFileSize * TRUNCATE_KEEP_RATIO)
+            const keepSize = Math.floor(
+                this.config.maxFileSize * TRUNCATE_KEEP_RATIO,
+            )
             const skipBytes = currentSize - keepSize
 
             if (skipBytes <= 0) return currentSize
@@ -582,7 +599,8 @@ export class CategorizedLogger extends EventEmitter {
 
             // Find the first newline after the skip point (working with bytes)
             let startIndex = skipBytes
-            while (startIndex < buffer.length && buffer[startIndex] !== 0x0a) { // 0x0a = '\n'
+            while (startIndex < buffer.length && buffer[startIndex] !== 0x0a) {
+                // 0x0a = '\n'
                 startIndex++
             }
             startIndex++ // Skip the newline itself
@@ -595,7 +613,9 @@ export class CategorizedLogger extends EventEmitter {
 
             // Extract the tail portion as a buffer, then convert to string for the marker
             const tailBuffer = buffer.subarray(startIndex)
-            const rotationMarker = `[${new Date().toISOString()}] [SYSTEM  ] [CORE      ] --- Log rotated (file exceeded ${Math.round(this.config.maxFileSize / 1024 / 1024)}MB limit) ---\n`
+            const rotationMarker = `[${new Date().toISOString()}] [SYSTEM  ] [CORE] --- Log rotated (file exceeded ${Math.round(
+                this.config.maxFileSize / 1024 / 1024,
+            )}MB limit) ---\n`
 
             // Write marker + tail content
             const markerBuffer = Buffer.from(rotationMarker, "utf-8")
@@ -604,7 +624,10 @@ export class CategorizedLogger extends EventEmitter {
 
             return newContent.length
         } catch (err) {
-            originalConsoleError(`Failed to truncate log file: ${filepath}`, err)
+            originalConsoleError(
+                `Failed to truncate log file: ${filepath}`,
+                err,
+            )
             return currentSize // Return original size on error
         }
     }
@@ -623,7 +646,12 @@ export class CategorizedLogger extends EventEmitter {
         }
 
         // Get all log files with their stats
-        const logFiles: Array<{ name: string; path: string; size: number; mtime: number }> = []
+        const logFiles: Array<{
+            name: string
+            path: string
+            size: number
+            mtime: number
+        }> = []
         let totalSize = 0
 
         for (const file of files) {
@@ -667,8 +695,11 @@ export class CategorizedLogger extends EventEmitter {
             try {
                 // Don't delete, truncate instead to preserve some history
                 if (file.size > this.config.maxFileSize * TRUNCATE_KEEP_RATIO) {
-                    const newSize = await this.truncateFile(file.path, file.size)
-                    totalSize -= (file.size - newSize)
+                    const newSize = await this.truncateFile(
+                        file.path,
+                        file.size,
+                    )
+                    totalSize -= file.size - newSize
                 } else {
                     // File is small, delete it entirely
                     await fs.promises.unlink(file.path)
@@ -694,7 +725,8 @@ export class CategorizedLogger extends EventEmitter {
     async getLogsDirSize(): Promise<number> {
         let files: string[]
         try {
-            if (!this.logsInitialized || !fs.existsSync(this.config.logsDir)) return 0
+            if (!this.logsInitialized || !fs.existsSync(this.config.logsDir))
+                return 0
             files = await fs.promises.readdir(this.config.logsDir)
         } catch {
             // Directory doesn't exist or can't be read
@@ -705,7 +737,9 @@ export class CategorizedLogger extends EventEmitter {
         for (const file of files) {
             if (!file.endsWith(".log")) continue
             try {
-                const stats = await fs.promises.stat(path.join(this.config.logsDir, file))
+                const stats = await fs.promises.stat(
+                    path.join(this.config.logsDir, file),
+                )
                 totalSize += stats.size
             } catch {
                 // Ignore errors
@@ -719,8 +753,8 @@ export class CategorizedLogger extends EventEmitter {
      */
     private formatLogLine(entry: LogEntry): string {
         const timestamp = entry.timestamp.toISOString()
-        const level = entry.level.toUpperCase().padEnd(8)
-        const category = entry.category.padEnd(10)
+        const level = entry.level.toUpperCase()
+        const category = entry.category
         return `[${timestamp}] [${level}] [${category}] ${entry.message}\n`
     }
 
@@ -744,18 +778,20 @@ export class CategorizedLogger extends EventEmitter {
      * Write to terminal with colors
      */
     private writeToTerminal(entry: LogEntry): void {
-        const timestamp = entry.timestamp.toISOString().split("T")[1].slice(0, 8)
-        const level = entry.level.toUpperCase().padEnd(8)
-        const category = entry.category.padEnd(10)
+        const timestamp = entry.timestamp
+            .toISOString()
+            .split("T")[1]
+            .slice(0, 8)
+        const level = entry.level.toUpperCase()
+        const category = entry.category
         const color = LEVEL_COLORS[entry.level]
 
         const line = `${color}[${timestamp}] [${level}] [${category}] ${entry.message}${RESET_COLOR}`
-        
+
         // Buffer the line instead of blocking with console.log
         this.terminalBuffer.push(line)
         this.scheduleTerminalFlush()
     }
-
 
     /**
      * Schedule async terminal buffer flush
@@ -764,7 +800,7 @@ export class CategorizedLogger extends EventEmitter {
     private scheduleTerminalFlush(): void {
         if (this.terminalFlushScheduled) return
         this.terminalFlushScheduled = true
-        
+
         setImmediate(() => {
             this.flushTerminalBuffer()
         })
@@ -776,13 +812,13 @@ export class CategorizedLogger extends EventEmitter {
      */
     private flushTerminalBuffer(): void {
         this.terminalFlushScheduled = false
-        
+
         if (this.terminalBuffer.length === 0) return
-        
+
         // Capture and clear buffer atomically
         const lines = this.terminalBuffer
         this.terminalBuffer = []
-        
+
         // Write all lines at once - more efficient than multiple console.log calls
         process.stdout.write(lines.join("\n") + "\n")
     }
