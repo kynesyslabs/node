@@ -106,11 +106,24 @@ export async function manageHelloPeer(
         return response
     }
 
+    // INFO: Return a list of all our connected peers
+
     response.result = 200
     response.response = true
     response.extra = {
         msg: "Peer connected",
         syncData: peerManager.ourSyncData,
+        peerlist: peerManager
+            .getPeers()
+            .map(peer => ({
+                url: peer.connection.string,
+                publicKey: peer.identity,
+            }))
+            .filter(
+                peer =>
+                    peer.publicKey !== getSharedState.publicKeyHex &&
+                    peer.publicKey !== content.publicKey,
+            ),
     }
 
     return response

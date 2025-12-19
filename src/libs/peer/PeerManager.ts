@@ -103,7 +103,9 @@ export default class PeerManager {
     }
 
     private getActors(peers: boolean, connections: boolean): Peer[] {
-        log.debug(`[PEER] Getting all peers... peers=${peers}, connections=${connections}`)
+        log.debug(
+            `[PEER] Getting all peers... peers=${peers}, connections=${connections}`,
+        )
 
         const actorList: Peer[] = []
         const connectedList: Peer[] = []
@@ -115,10 +117,14 @@ export default class PeerManager {
             log.debug(`[PEER] With url: ${peerInstance.connection.string}`)
             // Filtering
             if (peerInstance.identity != undefined) {
-                log.debug("[PEER] This peer has an identity: treating it as an authenticated peer")
+                log.debug(
+                    "[PEER] This peer has an identity: treating it as an authenticated peer",
+                )
                 authenticatedList.push(peerInstance)
             } else {
-                log.debug("[PEER] This peer has no identity: treating it as a connection only peer")
+                log.debug(
+                    "[PEER] This peer has no identity: treating it as a connection only peer",
+                )
                 connectedList.push(peerInstance)
             }
         }
@@ -132,7 +138,9 @@ export default class PeerManager {
             actorList.push(...connectedList)
         }
 
-        log.debug(`[PEER] Retrieved and filtered actor list length: ${actorList.length}`)
+        log.debug(
+            `[PEER] Retrieved and filtered actor list length: ${actorList.length}`,
+        )
         return actorList
     }
 
@@ -147,12 +155,7 @@ export default class PeerManager {
             }
         }
         // Flushing the log file and logging the peerlist
-        log.custom(
-            "peer_list",
-            JSON.stringify(jsonPeerList),
-            false,
-            true,
-        )
+        log.custom("peer_list", JSON.stringify(jsonPeerList), false, true)
     }
 
     async getOnlinePeers(): Promise<Peer[]> {
@@ -182,10 +185,7 @@ export default class PeerManager {
                 "[PEERMANAGER] No identity detected: refusing to add peer",
                 true,
             )
-            log.info(
-                "[PEERMANAGER] Peer: " + JSON.stringify(peer),
-                false,
-            )
+            log.info("[PEERMANAGER] Peer: " + JSON.stringify(peer), false)
             return false
         }
 
@@ -296,7 +296,7 @@ export default class PeerManager {
     }
 
     // REVIEW This method should be tested and finalized with the new peer structure
-    static async sayHelloToPeer(peer: Peer) {
+    static async sayHelloToPeer(peer: Peer, recursive = false) {
         getSharedState.peerRoutineRunning += 1 // Adding one to the peer routine running counter
 
         // TODO test and finalize this method
@@ -328,10 +328,7 @@ export default class PeerManager {
             },
         }
 
-        log.debug(
-            "[Hello Peer] Hello request: " +
-                JSON.stringify(helloRequest),
-        )
+        log.debug("[Hello Peer] Hello request: " + JSON.stringify(helloRequest))
         // Not awaiting the response to not block the main thread
         const response = await peer.longCall(
             {
@@ -342,16 +339,33 @@ export default class PeerManager {
             250,
             3,
         )
-        return PeerManager.helloPeerCallback(response, peer)
 
-        // then(response => {
-        //     PeerManager.helloPeerCallback(response, peer)
-        // })
-        log.debug("[Hello Peer] Hello request sent: waiting for response")
+        log.debug("[Hello Peer] Response: " + JSON.stringify(response))
+
+        const newPeersUnfiltered = PeerManager.helloPeerCallback(response, peer)
+        if (!recursive) {
+            return
+        }
+
+        // INFO: Recursively say hello to the new peers
+        const peerManager = PeerManager.getInstance()
+        const newPeers = newPeersUnfiltered.filter(
+            ({ publicKey }) => !peerManager.getPeer(publicKey),
+        )
+
+        // say hello to the new peers
+        await Promise.all(
+            newPeers.map(peer =>
+                PeerManager.sayHelloToPeer(new Peer(peer.url, peer.publicKey)),
+            ),
+        )
     }
 
     // Callback for the hello peer
-    static helloPeerCallback(response: RPCResponse, peer: Peer) {
+    static helloPeerCallback(
+        response: RPCResponse,
+        peer: Peer,
+    ): { url: string; publicKey: string }[] {
         log.info(
             "[Hello Peer] Response received from peer: " + peer.identity,
             false,
@@ -386,6 +400,13 @@ export default class PeerManager {
 
             PeerManager.getInstance().addPeer(peer)
             PeerManager.getInstance().removeOfflinePeer(peer.identity)
+
+            log.debug(
+                "[Hello Peer] New peers: " +
+                    JSON.stringify(response.extra.peerlist, null, 2),
+            )
+
+            return response.extra.peerlist || []
         } else {
             log.info(
                 "[Hello Peer] Failed to connect to peer: " +
@@ -397,15 +418,9 @@ export default class PeerManager {
             PeerManager.getInstance().addOfflinePeer(peer)
             PeerManager.getInstance().removeOnlinePeer(peer.identity)
         }
+
         getSharedState.peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
         //process.exit(0)
-    }
-
-    async sayHelloToAllPeers() {
-        const allPeers = this.getPeers()
-
-        await Promise.all(
-            allPeers.map(peer => PeerManager.sayHelloToPeer(peer)),
-        )
+        return []
     }
 }

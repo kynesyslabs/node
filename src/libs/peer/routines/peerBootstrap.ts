@@ -17,12 +17,6 @@ import getPeerIdentity from "./getPeerIdentity"
 import log from "src/utilities/logger"
 
 const peerManager = PeerManager.getInstance()
-
-// Proxy function to call peerBootstrap in a nicer way
-export async function peerlistCheck(localList: Peer[]): Promise<Peer[]> {
-    return await peerBootstrap(localList)
-}
-
 // ANCHOR Main function
 
 export default async function peerBootstrap(
@@ -75,7 +69,7 @@ export default async function peerBootstrap(
         //         publicKey: currentPublicKey,
         //     }],
         // }, true, 250, 3)
-        await PeerManager.sayHelloToPeer(verifiedPeer)
+        await PeerManager.sayHelloToPeer(verifiedPeer, true)
         // console.log("[BOOTSTRAP] Response: " + JSON.stringify(response, null, 2))
     }
     // Dying if there are no valid peers

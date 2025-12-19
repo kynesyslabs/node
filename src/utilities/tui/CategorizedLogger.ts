@@ -790,7 +790,8 @@ export class CategorizedLogger extends EventEmitter {
 
         // Buffer the line instead of blocking with console.log
         this.terminalBuffer.push(line)
-        this.scheduleTerminalFlush()
+        // this.scheduleTerminalFlush()
+        this.flushTerminalBuffer()
     }
 
     /**
