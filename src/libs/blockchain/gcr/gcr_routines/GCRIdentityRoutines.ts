@@ -1049,6 +1049,7 @@ export default class GCRIdentityRoutines {
                 await IncentiveManager.nomisLinked(
                     accountGCR.pubkey,
                     chain,
+                    score,
                     editOperation.referralCode,
                 )
             }
@@ -1105,6 +1106,12 @@ export default class GCRIdentityRoutines {
 
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
+
+            await IncentiveManager.nomisUnlinked(
+                accountGCR.pubkey,
+                identity.chain,
+                identity.score,
+            )
         }
 
         return { success: true, message: "Nomis identity removed" }

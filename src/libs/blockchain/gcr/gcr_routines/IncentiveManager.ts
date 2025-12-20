@@ -168,11 +168,13 @@ export class IncentiveManager {
     static async nomisLinked(
         userId: string,
         chain: string,
+        nomisScore: number,
         referralCode?: string,
     ): Promise<RPCResponse> {
         return await this.pointSystem.awardNomisScorePoints(
             userId,
             chain,
+            nomisScore,
             referralCode,
         )
     }
@@ -183,7 +185,12 @@ export class IncentiveManager {
     static async nomisUnlinked(
         userId: string,
         chain: string,
+        nomisScore: number,
     ): Promise<RPCResponse> {
-        return await this.pointSystem.deductNomisScorePoints(userId, chain)
+        return await this.pointSystem.deductNomisScorePoints(
+            userId,
+            chain,
+            nomisScore,
+        )
     }
 }

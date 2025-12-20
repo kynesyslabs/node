@@ -21,7 +21,6 @@ const pointValues = {
     LINK_DISCORD: 1,
     LINK_UD_DOMAIN_DEMOS: 3,
     LINK_UD_DOMAIN: 1,
-    LINK_NOMIS_SCORE: 0.5,
 }
 
 export class PointSystem {
@@ -1286,6 +1285,7 @@ export class PointSystem {
     async awardNomisScorePoints(
         userId: string,
         chain: string,
+        nomisScore: number,
         referralCode?: string,
     ): Promise<RPCResponse> {
         let nomisScoreAlreadyLinkedForChain = false
@@ -1359,9 +1359,11 @@ export class PointSystem {
                 nomisScoreAlreadyLinkedForChain = true
             }
 
+            const pointsToAward = this.getNomisPointsByScore(nomisScore)
+
             await this.addPointsToGCR(
                 userId,
-                pointValues.LINK_NOMIS_SCORE,
+                pointsToAward,
                 "nomisScores",
                 chain,
                 referralCode,
@@ -1373,7 +1375,7 @@ export class PointSystem {
                 result: nomisScoreAlreadyLinkedForChain ? 400 : 200,
                 response: {
                     pointsAwarded: !nomisScoreAlreadyLinkedForChain
-                        ? pointValues.LINK_NOMIS_SCORE
+                        ? pointsToAward
                         : 0,
                     totalPoints: updatedPoints.totalPoints,
                     message: nomisScoreAlreadyLinkedForChain
@@ -1405,6 +1407,7 @@ export class PointSystem {
     async deductNomisScorePoints(
         userId: string,
         chain: string,
+        nomisScore: number,
     ): Promise<RPCResponse> {
         const validChains = ["evm", "solana"]
         const invalidChainMessage =
@@ -1420,9 +1423,11 @@ export class PointSystem {
                 }
             }
 
+            const pointsToDeduct = this.getNomisPointsByScore(nomisScore)
+
             await this.addPointsToGCR(
                 userId,
-                -pointValues.LINK_NOMIS_SCORE,
+                -pointsToDeduct,
                 "nomisScores",
                 chain,
             )
@@ -1432,7 +1437,7 @@ export class PointSystem {
             return {
                 result: 200,
                 response: {
-                    pointsDeducted: pointValues.LINK_NOMIS_SCORE,
+                    pointsDeducted: pointsToDeduct,
                     totalPoints: updatedPoints.totalPoints,
                     message: `Points deducted for unlinking Nomis score on ${chain}`,
                 },
@@ -1450,5 +1455,14 @@ export class PointSystem {
                 },
             }
         }
+    }
+
+    private getNomisPointsByScore(score: number): number {
+        const formattedScore = Number((score * 100).toFixed(0))
+        if (formattedScore >= 80) return 5
+        if (formattedScore >= 60) return 4
+        if (formattedScore >= 40) return 3
+        if (formattedScore >= 20) return 2
+        return 1
     }
 }
