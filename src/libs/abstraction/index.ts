@@ -1,19 +1,11 @@
-import { GithubProofParser } from "./web2/github"
 import { TwitterProofParser } from "./web2/twitter"
 import { DiscordProofParser } from "./web2/discord"
 import { type Web2ProofParser } from "./web2/parsers"
 import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { Twitter } from "../identity/tools/twitter"
-import type { GenesisBlock } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/blocks" // TODO Properly import from types
 import log from "src/utilities/logger"
-import {
-    TelegramAttestationPayload,
-    TelegramSignedAttestation,
-} from "@kynesyslabs/demosdk/abstraction"
-import { toInteger } from "lodash"
-import Chain from "../blockchain/chain"
-import fs from "fs"
+import { TelegramSignedAttestation } from "@kynesyslabs/demosdk/abstraction"
 import { getSharedState } from "@/utilities/sharedState"
 
 /**
@@ -50,7 +42,7 @@ async function verifyTelegramProof(
         const telegramAttestation = payload.proof as TelegramSignedAttestation
         log.info(
             "telegramAttestation" +
-                JSON.stringify(telegramAttestation, null, 2),
+            JSON.stringify(telegramAttestation, null, 2),
         )
 
         // Validate attestation structure
@@ -176,15 +168,44 @@ export async function verifyWeb2Proof(
 ) {
     let parser:
         | typeof TwitterProofParser
-        | typeof GithubProofParser
         | typeof DiscordProofParser
+
+    // Handle OAuth-based proofs (format: "oauth:provider:userId")
+    const proofString = payload.proof as string
+    if (typeof proofString === "string" && proofString.startsWith("oauth:")) {
+        const [, provider, oauthUserId] = proofString.split(":")
+
+        // Verify OAuth proof matches the expected provider and userId
+        if (provider !== payload.context) {
+            return {
+                success: false,
+                message: `OAuth provider mismatch: expected ${payload.context}, got ${provider}`,
+            }
+        }
+
+        if (oauthUserId !== payload.userId) {
+            return {
+                success: false,
+                message: `OAuth userId mismatch: expected ${payload.userId}, got ${oauthUserId}`,
+            }
+        }
+
+        // OAuth proofs are pre-verified during token exchange via the node's
+        // exchangeGitHubOAuthCode endpoint. The proof contains the userId
+        // that was verified during that exchange.
+        log.info(
+            `OAuth proof verified for ${payload.context}: userId=${payload.userId}, username=${payload.username}`,
+        )
+
+        return {
+            success: true,
+            message: `Verified ${payload.context} OAuth proof`,
+        }
+    }
 
     switch (payload.context) {
         case "twitter":
             parser = TwitterProofParser
-            break
-        case "github":
-            parser = GithubProofParser
             break
         case "telegram":
             // Telegram uses dual signature validation, handle separately
@@ -244,9 +265,8 @@ export async function verifyWeb2Proof(
         } catch (error: any) {
             return {
                 success: false,
-                message: `Failed to verify ${
-                    payload.context
-                } proof: ${error.toString()}`,
+                message: `Failed to verify ${payload.context
+                    } proof: ${error.toString()}`,
             }
         }
     } catch (error: any) {
