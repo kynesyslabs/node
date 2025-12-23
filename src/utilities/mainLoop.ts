@@ -49,20 +49,20 @@ async function mainLoopCycle() {
 
     // Diagnostic logging
     log.info("[MAIN LOOP] Logging current diagnostics", false)
-    logCurrentDiagnostics()
-    await yieldToEventLoop()
+    // logCurrentDiagnostics()
+    // await yieldToEventLoop()
 
     // ANCHOR Execute the peer routine before the consensus loop
     /* NOTE The peerRoutine also checks getOnlinePeers, so it works by waiting for
     getSharedState.peerRoutineRunning to be 0 so we don't get into conflicts while
     running the consensus routine. */
     // let currentlyOnlinePeers: Peer[] = await peerRoutine()
-    await checkOfflinePeers()
-    await yieldToEventLoop()
-    
-    await peerGossip()
-    await yieldToEventLoop()
-    
+    // await checkOfflinePeers()
+    // await yieldToEventLoop()
+
+    // await peerGossip()
+    // await yieldToEventLoop()
+
     await fastSync([], "mainloop") // REVIEW Test here
     await yieldToEventLoop()
     // we now have a list of online peers that can be used for consensus
