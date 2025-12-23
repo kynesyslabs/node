@@ -150,6 +150,8 @@ async function processPayload(
         sender = splits[1]
     }
 
+    PeerManager.getInstance().updatePeerLastSeen(sender)
+
     if (PROTECTED_ENDPOINTS.has(payload.method)) {
         if (sender !== getSharedState.SUDO_PUBKEY) {
             return {
@@ -338,10 +340,12 @@ export async function serverRpcBun() {
     // eslint-disable-next-line quotes
     server.get("/", req => {
         const clientIP = rateLimiter.getClientIP(req, server.server)
-        return new Response(JSON.stringify({
-            message: "Hello, World!",
-            yourIP: clientIP,
-        }))
+        return new Response(
+            JSON.stringify({
+                message: "Hello, World!",
+                yourIP: clientIP,
+            }),
+        )
     })
 
     server.get("/info", async () => {
@@ -418,20 +422,19 @@ export async function serverRpcBun() {
             }
 
             log.info(
-                "[RPC Call] Received request: " +
-                    JSON.stringify(payload),
+                "[RPC Call] Received request: " + JSON.stringify(payload),
                 false,
             )
 
             let sender = ""
             if (!noAuthMethods.includes(payload.method)) {
                 const headers = req.headers
-                log.info(
-                    "[RPC Call] Headers: " + JSON.stringify(headers),
-                    true,
-                )
+                log.info("[RPC Call] Headers: " + JSON.stringify(headers), true)
                 const headerValidation = await validateHeaders(headers)
-                log.debug("[RPC Call] Header validation: " + JSON.stringify(headerValidation))
+                log.debug(
+                    "[RPC Call] Header validation: " +
+                        JSON.stringify(headerValidation),
+                )
                 if (!headerValidation[0]) {
                     return jsonResponse(
                         { error: "Invalid headers:" + headerValidation[1] },

@@ -6,6 +6,7 @@ import { IncentiveManager } from "../blockchain/gcr/gcr_routines/IncentiveManage
 import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Referrals } from "@/features/incentive/referrals"
 import GCR from "../blockchain/gcr/gcr"
+import { BroadcastManager } from "../communications/broadcastManager"
 
 interface GCRRoutinePayload {
     method: string
@@ -92,6 +93,22 @@ export default async function manageGCRRoutines(
             }
 
             response.response = await GCR.getAccountByIdentity(identity)
+            break
+        }
+
+        case "syncNewBlock": {
+            response.response = await BroadcastManager.handleNewBlock(
+                sender,
+                params[0],
+            )
+            break
+        }
+
+        case "updateSyncData": {
+            response.response = await BroadcastManager.handleUpdatePeerSyncData(
+                sender,
+                params[0],
+            )
             break
         }
 

@@ -28,7 +28,11 @@ import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
-import { startOmniProtocolServer, stopOmniProtocolServer } from "./libs/omniprotocol/integration/startup"
+import {
+    startOmniProtocolServer,
+    stopOmniProtocolServer,
+} from "./libs/omniprotocol/integration/startup"
+import { fastSync } from "./libs/blockchain/routines/Sync"
 
 dotenv.config()
 
@@ -80,7 +84,9 @@ const indexState: {
 // ANCHOR Calibrating the time
 async function calibrateTime() {
     await getTimestampCorrection()
-    log.info("[SYNC] Timestamp correction: " + getSharedState.timestampCorrection)
+    log.info(
+        "[SYNC] Timestamp correction: " + getSharedState.timestampCorrection,
+    )
     log.info("[SYNC] Network timestamp: " + getNetworkTimestamp())
 }
 // ANCHOR Routine to handle parameters in advanced mode
@@ -121,11 +127,28 @@ async function digestArguments() {
                     break
                 case "log-level":
                     const level = param[1]?.toLowerCase()
-                    if (["debug", "info", "warning", "error", "critical"].includes(level)) {
-                        CategorizedLogger.getInstance().setMinLevel(level as "debug" | "info" | "warning" | "error" | "critical")
+                    if (
+                        [
+                            "debug",
+                            "info",
+                            "warning",
+                            "error",
+                            "critical",
+                        ].includes(level)
+                    ) {
+                        CategorizedLogger.getInstance().setMinLevel(
+                            level as
+                                | "debug"
+                                | "info"
+                                | "warning"
+                                | "error"
+                                | "critical",
+                        )
                         log.info(`[MAIN] Log level set to: ${level}`)
                     } else {
-                        log.warning(`[MAIN] Invalid log level: ${param[1]}. Valid: debug, info, warning, error, critical`)
+                        log.warning(
+                            `[MAIN] Invalid log level: ${param[1]}. Valid: debug, info, warning, error, critical`,
+                        )
                     }
                     break
                 default:
@@ -215,7 +238,8 @@ async function warmup() {
 
     // OmniProtocol TCP Server configuration
     indexState.OMNI_ENABLED = process.env.OMNI_ENABLED === "true"
-    indexState.OMNI_PORT = parseInt(process.env.OMNI_PORT, 10) || (indexState.SERVER_PORT + 1)
+    indexState.OMNI_PORT =
+        parseInt(process.env.OMNI_PORT, 10) || indexState.SERVER_PORT + 1
 
     // Setting the server port to the shared state
     getSharedState.serverPort = indexState.SERVER_PORT
@@ -228,7 +252,9 @@ async function warmup() {
     log.info("[MAIN] PG_PORT: " + indexState.PG_PORT)
     log.info("[MAIN] RPC_FEE: " + indexState.RPC_FEE)
     log.info("[MAIN] SERVER_PORT: " + indexState.SERVER_PORT)
-    log.info("[MAIN] SIGNALING_SERVER_PORT: " + indexState.SIGNALING_SERVER_PORT)
+    log.info(
+        "[MAIN] SIGNALING_SERVER_PORT: " + indexState.SIGNALING_SERVER_PORT,
+    )
     log.info("[MAIN] MCP_SERVER_PORT: " + indexState.MCP_SERVER_PORT)
     log.info("[MAIN] MCP_ENABLED: " + indexState.MCP_ENABLED)
     log.info("[MAIN] = End of Configuration =")
@@ -305,7 +331,10 @@ async function preMainLoop() {
 
     // ANCHOR Bootstrapping the peers
     log.info("[PEER] 🌐 Bootstrapping peers...")
-    log.debug("[PEER] Peer list: " + JSON.stringify(indexState.PeerList.map(p => p.identity)))
+    log.debug(
+        "[PEER] Peer list: " +
+            JSON.stringify(indexState.PeerList.map(p => p.identity)),
+    )
     await peerBootstrap(indexState.PeerList)
     // ? Remove the following code if it's not needed: indexState.peerManager.addPeer(peer) is called within peerBootstrap (hello_peer routines)
     /*for (const peer of peerList) {
@@ -355,7 +384,9 @@ async function main() {
 
                 // Set a timeout fallback for forced termination
                 const forceExitTimeout = setTimeout(() => {
-                    log.warning("[MAIN] Graceful shutdown timeout, forcing exit...")
+                    log.warning(
+                        "[MAIN] Graceful shutdown timeout, forcing exit...",
+                    )
                     process.exit(1)
                 }, 5000)
 
@@ -384,7 +415,10 @@ async function main() {
                     })
             })
         } catch (error) {
-            console.error("Failed to start TUI, falling back to standard output:", error)
+            console.error(
+                "Failed to start TUI, falling back to standard output:",
+                error,
+            )
             indexState.TUI_ENABLED = false
         }
     }
@@ -459,18 +493,40 @@ async function main() {
                     // TLS configuration
                     tls: {
                         enabled: process.env.OMNI_TLS_ENABLED === "true",
-                        mode: (process.env.OMNI_TLS_MODE as "self-signed" | "ca") || "self-signed",
-                        certPath: process.env.OMNI_CERT_PATH || "./certs/node-cert.pem",
-                        keyPath: process.env.OMNI_KEY_PATH || "./certs/node-key.pem",
+                        mode:
+                            (process.env.OMNI_TLS_MODE as
+                                | "self-signed"
+                                | "ca") || "self-signed",
+                        certPath:
+                            process.env.OMNI_CERT_PATH ||
+                            "./certs/node-cert.pem",
+                        keyPath:
+                            process.env.OMNI_KEY_PATH || "./certs/node-key.pem",
                         caPath: process.env.OMNI_CA_PATH,
-                        minVersion: (process.env.OMNI_TLS_MIN_VERSION as "TLSv1.2" | "TLSv1.3") || "TLSv1.3",
+                        minVersion:
+                            (process.env.OMNI_TLS_MIN_VERSION as
+                                | "TLSv1.2"
+                                | "TLSv1.3") || "TLSv1.3",
                     },
                     // Rate limiting configuration
                     rateLimit: {
-                        enabled: process.env.OMNI_RATE_LIMIT_ENABLED !== "false", // Default true
-                        maxConnectionsPerIP: parseInt(process.env.OMNI_MAX_CONNECTIONS_PER_IP || "10", 10),
-                        maxRequestsPerSecondPerIP: parseInt(process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP || "100", 10),
-                        maxRequestsPerSecondPerIdentity: parseInt(process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY || "200", 10),
+                        enabled:
+                            process.env.OMNI_RATE_LIMIT_ENABLED !== "false", // Default true
+                        maxConnectionsPerIP: parseInt(
+                            process.env.OMNI_MAX_CONNECTIONS_PER_IP || "10",
+                            10,
+                        ),
+                        maxRequestsPerSecondPerIP: parseInt(
+                            process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP ||
+                                "100",
+                            10,
+                        ),
+                        maxRequestsPerSecondPerIdentity: parseInt(
+                            process.env
+                                .OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY ||
+                                "200",
+                            10,
+                        ),
                     },
                 })
                 indexState.omniServer = omniServer
@@ -480,15 +536,26 @@ async function main() {
 
                 // REVIEW: Initialize OmniProtocol client adapter for outbound peer communication
                 // Use OMNI_ONLY mode for testing, OMNI_PREFERRED for production gradual rollout
-                const omniMode = (process.env.OMNI_MODE as "HTTP_ONLY" | "OMNI_PREFERRED" | "OMNI_ONLY") || "OMNI_ONLY"
+                const omniMode =
+                    (process.env.OMNI_MODE as
+                        | "HTTP_ONLY"
+                        | "OMNI_PREFERRED"
+                        | "OMNI_ONLY") || "OMNI_ONLY"
                 getSharedState.initOmniProtocol(omniMode)
-                console.log(`[MAIN] ✅ OmniProtocol client adapter initialized with mode: ${omniMode}`)
+                console.log(
+                    `[MAIN] ✅ OmniProtocol client adapter initialized with mode: ${omniMode}`,
+                )
             } catch (error) {
-                console.log("[MAIN] ⚠️  Failed to start OmniProtocol server:", error)
+                console.log(
+                    "[MAIN] ⚠️  Failed to start OmniProtocol server:",
+                    error,
+                )
                 // Continue without OmniProtocol (failsafe - falls back to HTTP)
             }
         } else {
-            console.log("[MAIN] OmniProtocol server disabled (set OMNI_ENABLED=true to enable)")
+            console.log(
+                "[MAIN] OmniProtocol server disabled (set OMNI_ENABLED=true to enable)",
+            )
         }
 
         // Start MCP server (failsafe)
@@ -533,6 +600,7 @@ async function main() {
             })
         }
 
+        await fastSync([], "index.ts")
         // ANCHOR Starting the main loop
         mainLoop() // Is an async function so running without waiting send that to the background
     }

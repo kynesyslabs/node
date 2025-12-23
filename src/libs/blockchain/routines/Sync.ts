@@ -138,8 +138,7 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     log.info("[fastSync] Peer last block numbers: " + peerLastBlockNumbers)
     log.custom(
         "fastsync_blocknumbers",
-        "Request block numbers: " +
-            JSON.stringify(requestBlockNumbers),
+        "Request block numbers: " + JSON.stringify(requestBlockNumbers),
     )
 
     // REVIEW Choose the peer with the highest last block number
@@ -249,6 +248,61 @@ async function verifyLastBlockIntegrity(
     return lastSyncedBlock.hash === ourLastBlockHash
 }
 
+/**
+ * Given a block and a peer, saves the block into the database, downloads the transactions
+ * from the peer and updates the GCR and transaction tables.
+ *
+ * @param block The block to sync
+ * @param peer The peer that sent the block
+ * @returns True if the block was synced successfully, false otherwise
+ */
+export async function syncBlock(block: Block, peer: Peer) {
+    log.info("[downloadBlock] Block received: " + block.hash)
+    await Chain.insertBlock(block, [], null, false)
+    log.debug("Block inserted successfully")
+    log.debug(
+        "Last block number: " +
+            getSharedState.lastBlockNumber +
+            " Last block hash: " +
+            getSharedState.lastBlockHash,
+    )
+    log.info("[fastSync] Block inserted successfully at the head of the chain!")
+
+    // REVIEW Merge the peerlist
+    log.info("[fastSync] Merging peers from block: " + block.hash)
+    const mergedPeerlist = await mergePeerlist(block)
+    log.info("[fastSync] Merged peers from block: " + mergedPeerlist)
+    // REVIEW Parse the txs hashes in the block
+    log.info("[fastSync] Asking for transactions in the block", true)
+    const txs = await askTxsForBlock(block, peer)
+    log.info("[fastSync] Transactions received: " + txs.length, true)
+
+    // ! Sync the native tables
+    await syncGCRTables(txs)
+
+    // REVIEW Insert the txs into the transactions database table
+    if (txs.length > 0) {
+        log.info("[fastSync] Inserting transactions into the database", true)
+        const success = await Chain.insertTransactions(txs)
+        if (success) {
+            log.info("[fastSync] Transactions inserted successfully")
+            return true
+        }
+
+        log.error("[fastSync] Transactions insertion failed")
+        return false
+    }
+
+    log.info("[fastSync] No transactions in the block")
+    return true
+}
+
+/**
+ *
+ * @param peer The peer to download the block from
+ * @param blockToAsk The block number to download
+ * @returns The block if downloaded successfully, false otherwise
+ */
 async function downloadBlock(peer: Peer, blockToAsk: number) {
     log.debug("Downloading block: " + blockToAsk)
     const blockRequest: RPCRequest = {
@@ -275,12 +329,17 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
     }
 
     if (blockResponse.result === 404) {
-        log.info("[fastSync] Block not found")
+        log.error("[fastSync] Block not found")
+        log.error("BLOCK TO ASK: " + blockToAsk)
+        log.error("PEER: " + peer.connection.string)
+
         throw new BlockNotFoundError("Block not found")
     }
 
     if (blockResponse.result === 200) {
-        log.debug(`[SYNC] downloadBlock - Block response received for block: ${blockToAsk}`)
+        log.debug(
+            `[SYNC] downloadBlock - Block response received for block: ${blockToAsk}`,
+        )
         const block = blockResponse.response as Block
 
         if (!block) {
@@ -288,46 +347,7 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
             return false
         }
 
-        log.info("[downloadBlock] Block received: " + block.hash)
-        await Chain.insertBlock(block, [], null, false)
-        log.debug("Block inserted successfully")
-        log.debug("Last block number: " + getSharedState.lastBlockNumber + " Last block hash: " + getSharedState.lastBlockHash)
-        log.info(
-            "[fastSync] Block inserted successfully at the head of the chain!",
-        )
-
-        // REVIEW Merge the peerlist
-        log.info("[fastSync] Merging peers from block: " + block.hash)
-        const mergedPeerlist = await mergePeerlist(block)
-        log.info("[fastSync] Merged peers from block: " + mergedPeerlist)
-        // REVIEW Parse the txs hashes in the block
-        log.info("[fastSync] Asking for transactions in the block", true)
-        const txs = await askTxsForBlock(block, peer)
-        log.info("[fastSync] Transactions received: " + txs.length, true)
-
-        // ! Sync the native tables
-        await syncGCRTables(txs)
-
-        // REVIEW Insert the txs into the transactions database table
-        if (txs.length > 0) {
-            log.info(
-                "[fastSync] Inserting transactions into the database",
-                true,
-            )
-            const success = await Chain.insertTransactions(txs)
-            if (success) {
-                log.info("[fastSync] Transactions inserted successfully")
-                return true
-            }
-
-            log.error("[fastSync] Transactions insertion failed")
-            return false
-        }
-
-        log.info("[fastSync] No transactions in the block")
-        return true
-
-        // ? We might want a rollback function here if something goes wrong
+        return await syncBlock(block, peer)
     }
 
     return false
@@ -340,17 +360,13 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
  * @returns True if the block was downloaded successfully, false otherwise
  */
 async function waitForNextBlock() {
-    log.debug("[waitForNextBlock] Waiting for next block")
+    const entryBlock = getSharedState.lastBlockNumber
 
-    while (getSharedState.lastBlockNumber >= latestBlock()) {
+    while (entryBlock >= latestBlock()) {
         await sleep(250)
     }
 
-    log.debug("[waitForNextBlock] NEXT BLOCK GENERATED. DOWNLOADING...")
-    return await downloadBlock(
-        highestBlockPeer(),
-        getSharedState.lastBlockNumber + 1,
-    )
+    return await downloadBlock(highestBlockPeer(), entryBlock + 1)
 }
 
 /**
@@ -538,5 +554,6 @@ export async function fastSync(
             " from: " +
             from,
     )
+
     return true
 }

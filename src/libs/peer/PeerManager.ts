@@ -262,6 +262,18 @@ export default class PeerManager {
         peer.sync.status = getSharedState.syncStatus
         peer.sync.block = getSharedState.lastBlockNumber
         peer.sync.block_hash = getSharedState.lastBlockHash
+
+        log.only("OUR PEER SYNC DATA UPDATED: " + JSON.stringify(peer.sync))
+    }
+
+    updatePeerLastSeen(pubkey: string) {
+        const peer = this.peerList[pubkey]
+        if (!peer) {
+            log.error("[PEERMANAGER] Peer not found: " + pubkey)
+            return
+        }
+
+        peer.status.timestamp = Date.now()
     }
 
     addOfflinePeer(peerInstance: Peer) {
@@ -297,7 +309,13 @@ export default class PeerManager {
 
     // REVIEW This method should be tested and finalized with the new peer structure
     static async sayHelloToPeer(peer: Peer, recursive = false) {
-        getSharedState.peerRoutineRunning += 1 // Adding one to the peer routine running counter
+        log.only(
+            "SAYING HELLO TO PEER: " +
+                peer.connection.string +
+                " 😂😂😂😂😂😂😂😂",
+        )
+        log.only("RECURSIVE: " + recursive)
+        // getSharedState.peerRoutineRunning += 1 // Adding one to the peer routine running counter
 
         // TODO test and finalize this method
         log.debug("[Hello Peer] Saying hello to peer " + peer.identity)
@@ -346,6 +364,11 @@ export default class PeerManager {
         if (!recursive) {
             return
         }
+
+        log.only(
+            "NEW PEERS UNFILTERED: 👀👀👀👀👀👀👀👀 " +
+                JSON.stringify(newPeersUnfiltered),
+        )
 
         // INFO: Recursively say hello to the new peers
         const peerManager = PeerManager.getInstance()
@@ -419,7 +442,7 @@ export default class PeerManager {
             PeerManager.getInstance().removeOnlinePeer(peer.identity)
         }
 
-        getSharedState.peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
+        // getSharedState.peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
         //process.exit(0)
         return []
     }

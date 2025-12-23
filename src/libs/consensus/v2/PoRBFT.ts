@@ -25,6 +25,7 @@ import {
 import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
 import { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Waiter } from "@/utilities/waiter"
+import { BroadcastManager } from "@/libs/communications/broadcastManager"
 
 /* INFO
 # Semaphore system
@@ -153,8 +154,7 @@ export async function consensusRoutine(): Promise<void> {
         // const mempool = await mergeAndOrderMempools(manager.shard.members)
 
         log.info(
-            "[consensusRoutine] mempool: " +
-                JSON.stringify(tempMempool),
+            "[consensusRoutine] mempool: " + JSON.stringify(tempMempool),
             true,
         )
 
@@ -196,6 +196,10 @@ export async function consensusRoutine(): Promise<void> {
                     " votes",
             )
             await finalizeBlock(block, pro)
+
+            // REVIEW: Should we await this?
+            await BroadcastManager.broadcastNewBlock(block)
+            // process.exit(0)
         } else {
             log.info(
                 `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
@@ -562,7 +566,9 @@ async function updateValidatorPhase(
     const manager = SecretaryManager.getInstance(blockRef)
 
     if (!manager) {
-        throw new ForgingEndedError("Secretary Manager instance for this block has been deleted")
+        throw new ForgingEndedError(
+            "Secretary Manager instance for this block has been deleted",
+        )
     }
 
     await manager.setOurValidatorPhase(phase, true)
