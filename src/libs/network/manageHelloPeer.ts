@@ -23,6 +23,8 @@ export async function manageHelloPeer(
     content: HelloPeerRequest,
     sender: string,
 ): Promise<RPCResponse> {
+    log.only("💚💚💚💚💚💚💚 RECEIVED HELLO PEER REQUEST FROM: " + sender)
+    log.only("CONTENT: " + JSON.stringify(content))
     log.debug("[manageHelloPeer] Content: " + JSON.stringify(content))
     // Prepare the response
     const response: RPCResponse = _.cloneDeep(emptyResponse)

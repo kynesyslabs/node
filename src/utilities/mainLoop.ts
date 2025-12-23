@@ -79,7 +79,7 @@ async function mainLoopCycle() {
     log.info("[MAINLOOP]: about to check if its time for consensus")
 
     if (!isConsensusTimeReached) {
-        log.debug("[MAINLOOP]: is not consensus time")
+        log.only ("[MAINLOOP]: is not consensus time ❎")
         //await sendNodeOnlineTx()
     }
 

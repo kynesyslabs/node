@@ -27,9 +27,17 @@ export default class PeerManager {
         this.offlinePeers = {}
     }
 
+    get ourPeer() {
+        return this.peerList[getSharedState.publicKeyHex]
+    }
+
     get ourSyncData() {
-        const peer = this.peerList[getSharedState.publicKeyHex]
-        return peer.sync
+        return this.ourPeer.sync
+    }
+
+    get ourSyncDataString() {
+        const { status, block, block_hash: blockHash } = this.ourPeer.sync
+        return `${status ? "1" : "0"}:${block}:${blockHash}`
     }
 
     static getInstance(): PeerManager {
@@ -160,18 +168,20 @@ export default class PeerManager {
 
     async getOnlinePeers(): Promise<Peer[]> {
         //const onlinePeers: Peer[] = []
-        for await (const peerInstance of Object.values(this.peerList)) {
-            log.info(
-                "[PEERMANAGER] Checking online status of peer " +
-                    peerInstance.identity,
-                false,
-            )
-            if (peerInstance.identity == getSharedState.publicKeyHex) {
-                log.info("[PEERMANAGER] Peer is us: skipping", false)
-                continue
-            }
-            await PeerManager.sayHelloToPeer(peerInstance)
-        }
+        // for await (const peerInstance of Object.values(this.peerList)) {
+        //     log.info(
+        //         "[PEERMANAGER] Checking online status of peer " +
+        //             peerInstance.identity,
+        //         false,
+        //     )
+        //     if (peerInstance.identity == getSharedState.publicKeyHex) {
+        //         log.info("[PEERMANAGER] Peer is us: skipping", false)
+        //         continue
+        //     }
+
+        //     await PeerManager.sayHelloToPeer(peerInstance)
+        // }
+
         // Returning the list of online peers from the peerlist
         return this.getPeers() // REVIEW is this working?
     }

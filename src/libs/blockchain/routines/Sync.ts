@@ -27,6 +27,7 @@ import {
 import { BlockNotFoundError, PeerUnreachableError } from "src/exceptions"
 import GCR from "../gcr/gcr"
 import HandleGCR from "../gcr/handleGCR"
+import { BroadcastManager } from "@/libs/communications/broadcastManager"
 
 const term = terminalkit.terminal
 
@@ -546,6 +547,7 @@ export async function fastSync(
 ): Promise<boolean> {
     const synced = await fastSyncRoutine(peers)
     getSharedState.syncStatus = synced
+    await BroadcastManager.broadcastOurSyncData()
 
     const lastBlockNumber = await Chain.getLastBlockNumber()
     log.info(

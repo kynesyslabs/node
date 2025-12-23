@@ -41,19 +41,29 @@ export class BroadcastManager {
                 ),
         )
 
-        const promises = peers.map(peer => {
+        const promises = peers.map(async peer => {
             const request: RPCRequest = {
                 method: "gcr_routine",
                 params: [{ method: "syncNewBlock", params: [block] }],
             }
 
             log.only("Sending to peer: " + peer.connection.string)
-            return peer.longCall(request, true, 250, 3, [400])
+            return {
+                pubkey: peer.identity,
+                result: await peer.longCall(request, true, 250, 3, [400]),
+            }
         })
 
-        const results = await Promise.all(promises)
-        log.only("RESULTS: " + JSON.stringify(results, null, 2))
-        const successful = results.filter(result => result.result === 200)
+        const responses = await Promise.all(promises)
+        log.only("RESULTS: " + JSON.stringify(responses, null, 2))
+        const successful = responses.filter(res => res.result.result === 200)
+
+        for (const res of responses) {
+            await this.handleUpdatePeerSyncData(
+                res.pubkey,
+                res.result.response.syncData,
+            )
+        }
 
         await this.broadcastOurSyncData()
 
@@ -70,6 +80,7 @@ export class BroadcastManager {
      * @param block The new block received
      */
     static async handleNewBlock(sender: string, block: Block) {
+        const peerman = PeerManager.getInstance()
         log.only("HANDLING NEW BLOCK: " + block.number + " from: " + sender)
         // check if we already have the block
         const existing = await Chain.getBlockByHash(block.hash)
@@ -78,10 +89,11 @@ export class BroadcastManager {
             return {
                 result: 200,
                 message: "Block already exists",
+                syncData: peerman.ourSyncDataString,
             }
         }
 
-        const peer = PeerManager.getInstance().getPeer(sender)
+        const peer = peerman.getPeer(sender)
         log.only("SYNCING BLOCK from PEER: " + peer.connection.string)
         const res = await syncBlock(block, peer)
         log.only("SYNC BLOCK RESULT: " + res ? "SUCCESS" : "FAILED")
@@ -92,6 +104,7 @@ export class BroadcastManager {
         return {
             result: res ? 200 : 400,
             message: res ? "Block synced successfully" : "Block sync failed",
+            syncData: peerman.ourSyncDataString,
         }
     }
 
@@ -102,7 +115,7 @@ export class BroadcastManager {
         log.only("BROADCASTING OUR SYNC DATA TO THE NETWORK")
 
         const peerlist = PeerManager.getInstance().getPeers()
-        const promises = peerlist.map(peer => {
+        const promises = peerlist.map(async peer => {
             const request: RPCRequest = {
                 method: "gcr_routine",
                 params: [
@@ -117,17 +130,24 @@ export class BroadcastManager {
                 ],
             }
 
-            return peer.longCall(request, true, 250, 3, [400])
+            return {
+                pubkey: peer.identity,
+                result: await peer.longCall(request, true, 250, 3, [400]),
+            }
         })
 
-        const results = await Promise.all(promises)
-        log.only("RESULTS: " + JSON.stringify(results, null, 2))
-        const successful = results.filter(result => result.result === 200)
-        if (successful.length > 0) {
-            return true
+        const responses = await Promise.all(promises)
+        log.only("RESULTS: " + JSON.stringify(responses, null, 2))
+        const successful = responses.filter(res => res.result.result === 200)
+
+        for (const res of responses) {
+            await this.handleUpdatePeerSyncData(
+                res.pubkey,
+                res.result.response.syncData,
+            )
         }
 
-        return false
+        return successful.length > 0
     }
 
     /**
@@ -137,7 +157,8 @@ export class BroadcastManager {
      * @param syncData The sync data to update
      */
     static async handleUpdatePeerSyncData(sender: string, syncData: string) {
-        const ePeer = PeerManager.getInstance().getPeer(sender)
+        const peerman = PeerManager.getInstance()
+        const ePeer = peerman.getPeer(sender)
 
         if (!ePeer) {
             return {
@@ -156,6 +177,7 @@ export class BroadcastManager {
             return {
                 result: 400,
                 message: "Invalid sync data",
+                syncData: peerman.ourSyncDataString,
             }
         }
 
@@ -164,8 +186,9 @@ export class BroadcastManager {
         peer.sync.status = splits[0] === "1" ? true : false
 
         return {
-            result: PeerManager.getInstance().addPeer(peer) ? 200 : 400,
+            result: peerman.addPeer(peer) ? 200 : 400,
             message: "Sync data updated",
+            syncData: peerman.ourSyncDataString,
         }
     }
 }

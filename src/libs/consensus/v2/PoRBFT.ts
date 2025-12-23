@@ -198,7 +198,7 @@ export async function consensusRoutine(): Promise<void> {
             await finalizeBlock(block, pro)
 
             // REVIEW: Should we await this?
-            await BroadcastManager.broadcastNewBlock(block)
+            BroadcastManager.broadcastNewBlock(block)
             // process.exit(0)
         } else {
             log.info(
