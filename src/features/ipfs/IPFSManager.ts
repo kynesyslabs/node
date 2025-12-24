@@ -213,8 +213,9 @@ export class IPFSManager {
         this.logDebug(`Adding content to IPFS (size: ${content.length} bytes)`)
 
         // Convert content to Blob for multipart form data
+        // Use Uint8Array to ensure compatibility with BlobPart type
         const contentBuffer = typeof content === "string" ? Buffer.from(content) : content
-        const blob = new Blob([contentBuffer])
+        const blob = new Blob([new Uint8Array(contentBuffer)])
 
         // Create multipart form data
         const formData = new FormData()
