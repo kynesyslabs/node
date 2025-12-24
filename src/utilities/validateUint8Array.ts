@@ -4,9 +4,15 @@ export default function validateIfUint8Array(input: unknown): Uint8Array | unkno
         return input
     }
 
-    // Handle hex string - convert back to Uint8Array
-    if (typeof input === "string" && /^[0-9a-fA-F]+$/.test(input) && input.length % 2 === 0) {
-        return Buffer.from(input, "hex")
+    // Handle hex strings
+    if (typeof input === "string" && input.startsWith("0x")) {
+        const hexString = input.slice(2) // Remove "0x" prefix
+        // Validate hex string before conversion
+        if (hexString.length % 2 === 0 && /^[0-9a-fA-F]*$/.test(hexString)) {
+            return Buffer.from(hexString, "hex")
+        }
+
+        return input
     }
 
     // Type guard: check if input is a record-like object with numeric integer keys and number values

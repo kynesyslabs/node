@@ -25,6 +25,7 @@ import Mempool from "../blockchain/mempool_v2"
 import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Discord, DiscordMessage } from "../identity/tools/discord"
 import { UDIdentityManager } from "../blockchain/gcr/gcr_routines/udIdentityManager"
+import { exchangeGitHubCode } from "../identity/oauth/github"
 
 export interface NodeCall {
     message: string
@@ -352,6 +353,23 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     error: "Failed to get Discord message",
                 }
             }
+            break
+        }
+
+        case "exchangeGitHubOAuthCode": {
+            if (!data.code) {
+                response.result = 400
+                response.response = {
+                    success: false,
+                    error: "No authorization code provided",
+                }
+                break
+            }
+
+            const oauthResult = await exchangeGitHubCode(data.code)
+
+            response.result = oauthResult.success ? 200 : 400
+            response.response = oauthResult
             break
         }
 

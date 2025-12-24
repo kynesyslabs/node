@@ -33,6 +33,10 @@ export const chainProviders = {
         mainnet: "https://stargaze-rpc.publicnode.com:443",
         testnet: "https://rpc.elgafar-1.stargaze-apis.com",
     },
+    atom: {
+        mainnet: "https://cosmos-rpc.publicnode.com:443",
+        testnet: "https://rpc.provider-sentry-01.ics-testnet.polypore.xyz",
+    },
     near: {
         mainnet: "https://rpc.fastnear.com",
         testnet: "https://test.rpc.fastnear.com",

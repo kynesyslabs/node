@@ -1,5 +1,7 @@
 # Demos Network Node
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/kynesyslabs/node)
+
 The official node implementation for the Demos Network - a decentralized network enabling secure, cross-chain communication and computation.
 
 ## Overview
@@ -44,6 +46,38 @@ For detailed installation instructions, please refer to [INSTALL.md](INSTALL.md)
 5. Run `./run` to start the node
 
 For complete step-by-step instructions, see [INSTALL.md](INSTALL.md).
+
+## Terminal User Interface (TUI)
+
+By default, the node runs with an interactive TUI that provides:
+
+- **Categorized log tabs**: View logs filtered by category (Core, Network, Chain, Consensus, etc.)
+- **Real-time node status**: Block height, peer count, sync status in the header
+- **Keyboard navigation**: Switch tabs with number keys (0-9), scroll with arrow keys or j/k
+
+### TUI Controls
+
+| Key | Action |
+|-----|--------|
+| `0-9`, `-`, `=` | Switch to tab |
+| `↑/↓` or `j/k` | Scroll logs |
+| `PgUp/PgDn` | Page scroll |
+| `Home/End` | Jump to top/bottom |
+| `A` | Toggle auto-scroll |
+| `C` | Clear current tab logs |
+| `H` or `?` | Show help |
+| `Q` | Quit node |
+
+### Legacy Mode (for developers)
+
+For debugging and development, you can disable the TUI and use traditional scrolling log output:
+
+```bash
+./run -t           # Short form
+./run --no-tui     # Long form
+```
+
+This provides linear console output that can be easily piped, searched with grep, or redirected to files.
 
 ## Technology Stack
 

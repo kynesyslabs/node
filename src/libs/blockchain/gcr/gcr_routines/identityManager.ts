@@ -44,6 +44,7 @@ const chains: { [key: string]: typeof DefaultChain } = {
     ton: TON,
     xrpl: XRPL,
     ibc: IBC,
+    atom: IBC,
     near: NEAR,
     // @ts-expect-error - BTC module contains more fields than the DefaultChain type
     btc: BTC,
@@ -207,6 +208,7 @@ export default class IdentityManager {
                 chainId === "xrpl" ||
                 chainId === "ton" ||
                 chainId === "ibc" ||
+                chainId === "atom" ||
                 chainId === "near"
             ) {
                 messageVerified = await sdk.verifyMessage(
@@ -326,12 +328,19 @@ export default class IdentityManager {
      * @param key - The key to get the identities of
      * @returns The identities of the address
      */
-    static async getIdentities(address: string, key?: "xm" | "web2" | "pqc" | "ud"): Promise<any> {
+    static async getIdentities(
+        address: string,
+        key?: "xm" | "web2" | "pqc" | "ud",
+    ): Promise<any> {
         const gcr = await ensureGCRForUser(address)
         if (key) {
             return gcr.identities[key]
         }
 
         return gcr.identities
+    }
+
+    static async getUDIdentities(address: string) {
+        return await this.getIdentities(address, "ud")
     }
 }
