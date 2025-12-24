@@ -7,6 +7,7 @@ import {
     PrimaryColumn,
 } from "typeorm"
 import type { StoredIdentities } from "../types/IdentityTypes"
+import type { AccountIPFSState } from "../types/IPFSTypes"
 // Define the shape of your JSON data
 
 @Entity("gcr_main")
@@ -54,6 +55,9 @@ export class GCRMain {
             pointsAwarded: number
         }>
     }
+    // REVIEW: IPFS state field added in Phase 3 of IPFS integration
+    @Column({ type: "jsonb", name: "ipfs", default: () => "'{}'" })
+    ipfs: AccountIPFSState
     @Column({ type: "boolean", name: "flagged", default: false })
     flagged: boolean
     @Column({ type: "text", name: "flaggedReason", default: "" })
