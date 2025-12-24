@@ -9,13 +9,13 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+import fs from "fs"
 import Peer from "./Peer"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { HelloPeerRequest } from "../network/manageHelloPeer"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-import fs from "fs"
 
 export default class PeerManager {
     private static instance: PeerManager

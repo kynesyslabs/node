@@ -388,8 +388,8 @@ export default class Chain {
                     " does not exist: inserting a new block",
             )
             const result = await this.blocks.save(newBlock)
-            getSharedState.lastBlockNumber = block.number
-            getSharedState.lastBlockHash = block.hash
+            getSharedState.lastBlockNumber = await this.getLastBlockNumber()
+            getSharedState.lastBlockHash = await this.getLastBlockHash()
 
             log.debug(
                 "[insertBlock] lastBlockNumber: " +

@@ -198,8 +198,9 @@ export async function consensusRoutine(): Promise<void> {
             await finalizeBlock(block, pro)
 
             // REVIEW: Should we await this?
-            BroadcastManager.broadcastNewBlock(block)
-            // process.exit(0)
+            if (manager.checkIfWeAreSecretary()) {
+                BroadcastManager.broadcastNewBlock(block)
+            }
         } else {
             log.info(
                 `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
