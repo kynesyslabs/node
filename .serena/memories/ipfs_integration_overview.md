@@ -43,18 +43,28 @@ Full blockchain integration of IPFS (Kubo) into Demos Network for decentralized 
   - `IPFSOperations.ipfsUnpin()` - Remove pin
 - Integration in `executeOperations.ts` switch dispatch
 
-### Phase 5: Tokenomics 🔲
-- Pricing formula for pinning
-- Cost calculation in TX handlers
-- Reward distribution for hosts
-- IPFS_CLAIM_REWARDS transaction
+### Phase 5: Tokenomics ✅
+- Pricing formula: 1 DEM per 100MB (regular), 1GB free + 1 DEM per GB (genesis)
+- Cost calculation in ipfsTokenomics.ts
+- Genesis account detection and caching
+- Fee distribution: 100% to host (MVP)
+- GCRIPFSRoutines for state management
 
-### Phase 6: SDK Integration 🔲
-- sdk.ipfs module in @kynesyslabs/demosdk
-- Read methods (demosCall wrappers)
-- Transaction builders for writes
+### Phase 6: SDK Integration ✅
+- sdk.ipfs module in @kynesyslabs/demosdk (../sdks)
+- IPFSOperations class with static payload creators
+- createAddPayload(), createPinPayload(), createUnpinPayload()
+- Validation utilities: isValidCID(), isValidContentSize()
+- Encoding utilities: encodeContent(), decodeContent()
+- Type guards: isAddPayload(), isPinPayload(), isUnpinPayload()
+- Build verified, awaiting publish
 
-### Phase 7: Streaming 🔲
+### Phase 7: RPC Handler Integration 🔲
+- Integrate SDK with node RPC handlers
+- Connect transaction handlers with tokenomics
+- End-to-end flow testing
+
+### Phase 8: Streaming 🔲
 - Large file upload/download
 - Memory-efficient chunked transfers
 
@@ -70,5 +80,9 @@ Full blockchain integration of IPFS (Kubo) into Demos Network for decentralized 
 ## Related Beads Issues
 - Epic: `node-qz1` - IPFS Integration for Demos Network
 - Phase 4: `node-xhh` - Transaction Types (CLOSED)
-- Phase 5: `node-5l8` - Tokenomics
-- Phase 6: `node-9pb` - SDK Integration
+- Phase 5: `node-5l8` - Tokenomics (CLOSED)
+- Phase 6: `node-9pb` - SDK Integration (CLOSED)
+- Phase 7: TBD - RPC Handler Integration
+- Phase 8: `node-eqn` - Streaming (open, priority 2)
+- Phase 9: `node-zmh` - Cluster Sync (open, priority 2)
+- Phase 10: `node-6qh` - Public Bridge (open, priority 3)
