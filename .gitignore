@@ -1,3 +1,6 @@
+# Beads issue tracker (branch-specific, like .serena)
+.beads/
+
 # Specific branches ignores
 *APTOS*.md
 *_TO_PORT.md
