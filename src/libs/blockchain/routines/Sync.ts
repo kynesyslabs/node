@@ -545,6 +545,7 @@ export async function fastSync(
     peers: Peer[] = [],
     from: string,
 ): Promise<boolean> {
+    getSharedState.inSyncLoop = true
     const synced = await fastSyncRoutine(peers)
     getSharedState.syncStatus = synced
     await BroadcastManager.broadcastOurSyncData()
@@ -557,5 +558,6 @@ export async function fastSync(
             from,
     )
 
+    getSharedState.inSyncLoop = false
     return true
 }

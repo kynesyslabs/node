@@ -168,19 +168,21 @@ export default class PeerManager {
 
     async getOnlinePeers(): Promise<Peer[]> {
         //const onlinePeers: Peer[] = []
-        // for await (const peerInstance of Object.values(this.peerList)) {
-        //     log.info(
-        //         "[PEERMANAGER] Checking online status of peer " +
-        //             peerInstance.identity,
-        //         false,
-        //     )
-        //     if (peerInstance.identity == getSharedState.publicKeyHex) {
-        //         log.info("[PEERMANAGER] Peer is us: skipping", false)
-        //         continue
-        //     }
+        await Promise.all(
+            Object.values(this.peerList).map(async peerInstance => {
+                log.info(
+                    "[PEERMANAGER] Checking online status of peer " +
+                        peerInstance.identity,
+                    false,
+                )
+                if (peerInstance.identity == getSharedState.publicKeyHex) {
+                    log.info("[PEERMANAGER] Peer is us: skipping", false)
+                    return
+                }
 
-        //     await PeerManager.sayHelloToPeer(peerInstance)
-        // }
+                await PeerManager.sayHelloToPeer(peerInstance)
+            }),
+        )
 
         // Returning the list of online peers from the peerlist
         return this.getPeers() // REVIEW is this working?

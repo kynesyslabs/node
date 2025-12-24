@@ -80,7 +80,17 @@ export class BroadcastManager {
      * @param block The new block received
      */
     static async handleNewBlock(sender: string, block: Block) {
+        // TODO: HANDLE RECEIVING THIS WHEN IN SYNC LOOP
         const peerman = PeerManager.getInstance()
+
+        if (getSharedState.inSyncLoop) {
+            return {
+                result: 200,
+                message: "Cannot handle new block when in sync loop",
+                syncData: peerman.ourSyncDataString,
+            }
+        }
+
         log.only("HANDLING NEW BLOCK: " + block.number + " from: " + sender)
         // check if we already have the block
         const existing = await Chain.getBlockByHash(block.hash)
