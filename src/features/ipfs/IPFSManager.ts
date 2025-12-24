@@ -25,7 +25,10 @@ import {
     IPFSConnectionError,
     IPFSTimeoutError,
     IPFSAPIError,
+    IPFSNotFoundError,
+    IPFSInvalidCIDError,
 } from "./errors"
+import log from "@/utilities/logger"
 import {
     type IpfsManagerConfig,
     type IpfsNodeInfo,
@@ -59,7 +62,7 @@ export class IPFSManager {
         this.timeout = config.timeout ?? IPFS_DEFAULTS.TIMEOUT
         this.debug = config.debug ?? false
 
-        this.log(`IPFSManager created with API URL: ${this.apiUrl}`)
+        this.logDebug(`IPFSManager created with API URL: ${this.apiUrl}`)
     }
 
     /**
@@ -72,17 +75,17 @@ export class IPFSManager {
      */
     async initialize(): Promise<void> {
         if (this.initialized) {
-            this.log("IPFSManager already initialized")
+            this.logDebug("IPFSManager already initialized")
             return
         }
 
-        this.log("Initializing IPFSManager...")
+        this.logDebug("Initializing IPFSManager...")
 
         try {
             // Verify connection by fetching node identity
             this.cachedNodeInfo = await this.fetchNodeInfo()
             this.initialized = true
-            this.log(`IPFSManager initialized. Node ID: ${this.cachedNodeInfo.peerId}`)
+            this.logDebug(`IPFSManager initialized. Node ID: ${this.cachedNodeInfo.peerId}`)
         } catch (error) {
             throw new IPFSConnectionError(
                 `Failed to initialize IPFS connection to ${this.apiUrl}`,
@@ -186,16 +189,231 @@ export class IPFSManager {
      * Clears cached state. Does not stop the Docker container.
      */
     async shutdown(): Promise<void> {
-        this.log("Shutting down IPFSManager...")
+        this.logDebug("Shutting down IPFSManager...")
         this.initialized = false
         this.cachedNodeInfo = null
         this.lastHealthCheck = null
-        this.log("IPFSManager shutdown complete")
+        this.logDebug("IPFSManager shutdown complete")
+    }
+
+    // =========================================================================
+    // Content Operations
+    // =========================================================================
+
+    /**
+     * Add content to IPFS and return the CID
+     *
+     * @param content - Content to add (Buffer, Uint8Array, or string)
+     * @param filename - Optional filename for the content
+     * @returns CID (Content Identifier) of the added content
+     * @throws {IPFSConnectionError} If unable to connect to IPFS node
+     * @throws {IPFSAPIError} If IPFS API returns an error
+     */
+    async add(content: Buffer | Uint8Array | string, filename?: string): Promise<string> {
+        this.logDebug(`Adding content to IPFS (size: ${content.length} bytes)`)
+
+        // Convert content to Blob for multipart form data
+        const contentBuffer = typeof content === "string" ? Buffer.from(content) : content
+        const blob = new Blob([contentBuffer])
+
+        // Create multipart form data
+        const formData = new FormData()
+        formData.append("file", blob, filename || "file")
+
+        const response = await this.apiRequest("/api/v0/add", "POST", formData)
+        const data = await response.json()
+
+        const cid = data.Hash
+        if (!cid) {
+            throw new IPFSAPIError("IPFS add response missing Hash field", undefined, JSON.stringify(data))
+        }
+
+        this.logDebug(`Content added successfully. CID: ${cid}`)
+        return cid
+    }
+
+    /**
+     * Retrieve content from IPFS by CID
+     *
+     * @param cid - Content Identifier to retrieve
+     * @returns Content as Buffer
+     * @throws {IPFSInvalidCIDError} If CID format is invalid
+     * @throws {IPFSNotFoundError} If content is not found
+     * @throws {IPFSConnectionError} If unable to connect to IPFS node
+     */
+    async get(cid: string): Promise<Buffer> {
+        this.validateCid(cid)
+        this.logDebug(`Getting content from IPFS. CID: ${cid}`)
+
+        try {
+            const response = await this.apiRequest(`/api/v0/cat?arg=${encodeURIComponent(cid)}`, "POST")
+            const arrayBuffer = await response.arrayBuffer()
+            const buffer = Buffer.from(arrayBuffer)
+
+            this.logDebug(`Content retrieved successfully (size: ${buffer.length} bytes)`)
+            return buffer
+        } catch (error) {
+            // Check for not found errors from IPFS API
+            if (error instanceof IPFSAPIError && error.apiMessage?.includes("not found")) {
+                throw new IPFSNotFoundError(cid, error)
+            }
+            throw error
+        }
+    }
+
+    /**
+     * Pin content to local IPFS node
+     *
+     * Pinning ensures content is not garbage collected.
+     *
+     * @param cid - Content Identifier to pin
+     * @throws {IPFSInvalidCIDError} If CID format is invalid
+     * @throws {IPFSNotFoundError} If content is not found
+     * @throws {IPFSConnectionError} If unable to connect to IPFS node
+     */
+    async pin(cid: string): Promise<void> {
+        this.validateCid(cid)
+        this.logDebug(`Pinning content. CID: ${cid}`)
+
+        try {
+            await this.apiRequest(`/api/v0/pin/add?arg=${encodeURIComponent(cid)}`, "POST")
+            this.logDebug(`Content pinned successfully. CID: ${cid}`)
+        } catch (error) {
+            if (error instanceof IPFSAPIError && error.apiMessage?.includes("not found")) {
+                throw new IPFSNotFoundError(cid, error)
+            }
+            throw error
+        }
+    }
+
+    /**
+     * Unpin content from local IPFS node
+     *
+     * Unpinned content may be garbage collected.
+     *
+     * @param cid - Content Identifier to unpin
+     * @throws {IPFSInvalidCIDError} If CID format is invalid
+     * @throws {IPFSConnectionError} If unable to connect to IPFS node
+     */
+    async unpin(cid: string): Promise<void> {
+        this.validateCid(cid)
+        this.logDebug(`Unpinning content. CID: ${cid}`)
+
+        try {
+            await this.apiRequest(`/api/v0/pin/rm?arg=${encodeURIComponent(cid)}`, "POST")
+            this.logDebug(`Content unpinned successfully. CID: ${cid}`)
+        } catch (error) {
+            // If content is not pinned, that's okay - it's already unpinned
+            if (error instanceof IPFSAPIError && error.apiMessage?.includes("not pinned")) {
+                this.logDebug(`Content was not pinned. CID: ${cid}`)
+                return
+            }
+            throw error
+        }
+    }
+
+    /**
+     * List all pinned content CIDs
+     *
+     * @returns Array of pinned CIDs
+     * @throws {IPFSConnectionError} If unable to connect to IPFS node
+     */
+    async listPins(): Promise<string[]> {
+        this.logDebug("Listing pinned content...")
+
+        const response = await this.apiRequest("/api/v0/pin/ls?type=recursive", "POST")
+        const data = await response.json()
+
+        // Kubo returns { Keys: { [cid]: { Type: "recursive" } } }
+        const keys = data.Keys || {}
+        const cids = Object.keys(keys)
+
+        this.logDebug(`Found ${cids.length} pinned items`)
+        return cids
+    }
+
+    /**
+     * Check if content is pinned
+     *
+     * @param cid - Content Identifier to check
+     * @returns true if pinned, false otherwise
+     * @throws {IPFSInvalidCIDError} If CID format is invalid
+     * @throws {IPFSConnectionError} If unable to connect to IPFS node
+     */
+    async isPinned(cid: string): Promise<boolean> {
+        this.validateCid(cid)
+        this.logDebug(`Checking pin status. CID: ${cid}`)
+
+        try {
+            const response = await this.apiRequest(`/api/v0/pin/ls?arg=${encodeURIComponent(cid)}`, "POST")
+            const data = await response.json()
+            const isPinned = Boolean(data.Keys && Object.keys(data.Keys).length > 0)
+            this.logDebug(`Pin status for ${cid}: ${isPinned}`)
+            return isPinned
+        } catch (error) {
+            // If not found, it's not pinned
+            if (error instanceof IPFSAPIError && error.apiMessage?.includes("not pinned")) {
+                return false
+            }
+            throw error
+        }
+    }
+
+    /**
+     * Get the size of content by CID without downloading it
+     *
+     * @param cid - Content Identifier
+     * @returns Size in bytes
+     * @throws {IPFSInvalidCIDError} If CID format is invalid
+     * @throws {IPFSNotFoundError} If content is not found
+     */
+    async getSize(cid: string): Promise<number> {
+        this.validateCid(cid)
+        this.logDebug(`Getting size for CID: ${cid}`)
+
+        try {
+            const response = await this.apiRequest(`/api/v0/object/stat?arg=${encodeURIComponent(cid)}`, "POST")
+            const data = await response.json()
+            const size = data.CumulativeSize || data.DataSize || 0
+            this.logDebug(`Size for ${cid}: ${size} bytes`)
+            return size
+        } catch (error) {
+            if (error instanceof IPFSAPIError && error.apiMessage?.includes("not found")) {
+                throw new IPFSNotFoundError(cid, error)
+            }
+            throw error
+        }
     }
 
     // =========================================================================
     // Private Methods
     // =========================================================================
+
+    /**
+     * Validate CID format
+     *
+     * Basic validation - checks for common CID patterns (CIDv0 and CIDv1)
+     * CIDv0: Qm... (46 characters, base58)
+     * CIDv1: bafy... or bafk... (base32/base58)
+     *
+     * @param cid - CID to validate
+     * @throws {IPFSInvalidCIDError} If CID format is invalid
+     */
+    private validateCid(cid: string): void {
+        if (!cid || typeof cid !== "string") {
+            throw new IPFSInvalidCIDError(cid || "(empty)")
+        }
+
+        // CIDv0 pattern (Qm followed by base58 characters)
+        const cidV0Pattern = /^Qm[1-9A-HJ-NP-Za-km-z]{44}$/
+
+        // CIDv1 patterns (bafy or bafk prefix with base32 characters)
+        const cidV1Pattern = /^(bafy|bafk|bafz|bafb)[a-z2-7]{50,}$/i
+
+        if (!cidV0Pattern.test(cid) && !cidV1Pattern.test(cid)) {
+            throw new IPFSInvalidCIDError(cid)
+        }
+    }
 
     /**
      * Fetch node identity from Kubo API
@@ -240,7 +458,7 @@ export class IPFSManager {
         const timeoutId = setTimeout(() => controller.abort(), this.timeout)
 
         try {
-            this.log(`API Request: ${method} ${endpoint}`)
+            this.logDebug(`API Request: ${method} ${endpoint}`)
 
             const response = await fetch(url, {
                 method,
@@ -282,9 +500,9 @@ export class IPFSManager {
     /**
      * Log message if debug mode is enabled
      */
-    private log(message: string): void {
+    private logDebug(message: string): void {
         if (this.debug) {
-            console.log(`[IPFSManager] ${message}`)
+            log.debug(`[IPFSManager] ${message}`)
         }
     }
 }

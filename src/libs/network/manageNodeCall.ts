@@ -26,6 +26,15 @@ import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Discord, DiscordMessage } from "../identity/tools/discord"
 import { UDIdentityManager } from "../blockchain/gcr/gcr_routines/udIdentityManager"
 import { exchangeGitHubCode } from "../identity/oauth/github"
+// REVIEW: IPFS NodeCall handlers (Phase 2)
+import {
+    ipfsStatus,
+    ipfsAdd,
+    ipfsGet,
+    ipfsPin,
+    ipfsUnpin,
+    ipfsListPins,
+} from "./routines/nodecalls/ipfs"
 
 export interface NodeCall {
     message: string
@@ -471,6 +480,27 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         //         : "Account not found"
         //     break
         // }
+
+        // =========================================================================
+        // REVIEW: IPFS Operations (Phase 2)
+        // =========================================================================
+        case "ipfsStatus":
+            return await ipfsStatus()
+
+        case "ipfsAdd":
+            return await ipfsAdd(data)
+
+        case "ipfsGet":
+            return await ipfsGet(data)
+
+        case "ipfsPin":
+            return await ipfsPin(data)
+
+        case "ipfsUnpin":
+            return await ipfsUnpin(data)
+
+        case "ipfsListPins":
+            return await ipfsListPins()
 
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen
