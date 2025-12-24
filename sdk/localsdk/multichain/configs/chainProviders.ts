@@ -38,8 +38,8 @@ export const chainProviders = {
         testnet: "https://rpc.provider-sentry-01.ics-testnet.polypore.xyz",
     },
     near: {
-        mainnet: "https://rpc.near.org",
-        testnet: "https://rpc.testnet.near.org",
+        mainnet: "https://rpc.fastnear.com",
+        testnet: "https://test.rpc.fastnear.com",
     },
     btc: {
         mainnet: "https://blockstream.info/api",
