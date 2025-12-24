@@ -21,6 +21,7 @@ import { Operation, OperationResult } from "@kynesyslabs/demosdk/types"
 import Block from "../block"
 import log from "src/utilities/logger"
 import subOperations from "./subOperations"
+import IPFSOperations from "./ipfsOperations"
 
 // export interface OperationResult {
 //     success: boolean
@@ -129,6 +130,20 @@ async function executeSequence(
                 result = await subOperations.gcrRoutines.assignWeb2(
                     operations[i],
                 )
+                results.operations.set(operations[i], result)
+                break
+
+            // REVIEW: IPFS Operations (Phase 4)
+            case "ipfs_add":
+                result = await IPFSOperations.ipfsAdd(operations[i])
+                results.operations.set(operations[i], result)
+                break
+            case "ipfs_pin":
+                result = await IPFSOperations.ipfsPin(operations[i])
+                results.operations.set(operations[i], result)
+                break
+            case "ipfs_unpin":
+                result = await IPFSOperations.ipfsUnpin(operations[i])
                 results.operations.set(operations[i], result)
                 break
 
