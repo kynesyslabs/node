@@ -56,6 +56,8 @@ export default class GCRIPFSRoutines {
             totalPinnedBytes: account.ipfs.totalPinnedBytes ?? 0,
             earnedRewards: account.ipfs.earnedRewards ?? "0",
             paidCosts: account.ipfs.paidCosts ?? "0",
+            freeAllocationBytes: account.ipfs.freeAllocationBytes ?? 0,
+            usedFreeBytes: account.ipfs.usedFreeBytes ?? 0,
             lastUpdated: account.ipfs.lastUpdated,
         }
     }

@@ -28,6 +28,23 @@ export interface PinnedContent {
 
     /** Optional metadata associated with the pin */
     metadata?: Record<string, unknown>
+
+    /**
+     * Whether this pin used free tier allocation
+     * Tracks for proper accounting when unpinning
+     */
+    wasFree?: boolean
+
+    /**
+     * How many bytes of this pin were covered by free tier
+     * For partial free tier usage (e.g., file crosses free tier boundary)
+     */
+    freeBytes?: number
+
+    /**
+     * Cost paid for this pin in DEM (as string for bigint serialization)
+     */
+    costPaid?: string
 }
 
 /**
@@ -37,6 +54,7 @@ export interface PinnedContent {
  * - Pinned content list
  * - Storage usage
  * - Economic tracking (rewards/costs)
+ * - Free tier allocation (for genesis accounts)
  */
 export interface AccountIPFSState {
     /** Array of pinned content items */
@@ -57,16 +75,46 @@ export interface AccountIPFSState {
      */
     paidCosts: string
 
+    /**
+     * Free allocation in bytes for this account
+     * Genesis accounts: 1GB (1073741824 bytes)
+     * Regular accounts: 0
+     * REVIEW: Future support for node operators and promotional allocations
+     */
+    freeAllocationBytes: number
+
+    /**
+     * How many bytes of the free allocation have been used
+     * Tracks consumption of the free tier for genesis accounts
+     */
+    usedFreeBytes: number
+
     /** Last time IPFS state was updated */
     lastUpdated?: number
 }
 
 /**
  * Default empty IPFS state for new accounts
+ * Note: freeAllocationBytes should be set based on account type (genesis vs regular)
  */
 export const DEFAULT_IPFS_STATE: AccountIPFSState = {
     pins: [],
     totalPinnedBytes: 0,
     earnedRewards: "0",
     paidCosts: "0",
+    freeAllocationBytes: 0,
+    usedFreeBytes: 0,
+}
+
+/**
+ * Create IPFS state for a genesis account with free allocation
+ * @param freeBytes - Free allocation in bytes (default: 1GB)
+ */
+export function createGenesisIPFSState(
+    freeBytes: number = 1024 * 1024 * 1024,
+): AccountIPFSState {
+    return {
+        ...DEFAULT_IPFS_STATE,
+        freeAllocationBytes: freeBytes,
+    }
 }

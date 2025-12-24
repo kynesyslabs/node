@@ -6,12 +6,17 @@
  * - ipfs_pin: Pin existing CID
  * - ipfs_unpin: Remove pin from account
  *
+ * REVIEW: Phase 5 - IPFS Tokenomics Integration
+ * - Pricing calculations based on file size
+ * - Genesis account detection and preferential pricing
+ * - Fee deduction and RPC credit
+ *
  * @fileoverview IPFS transaction operation handlers
  */
 
 import {
     Operation,
-    OperationResult,
+    OperationResult as SDKOperationResult,
     IPFSPayload,
     IPFSAddPayload,
     IPFSPinPayload,
@@ -20,9 +25,32 @@ import {
     isIPFSPinPayload,
     isIPFSUnpinPayload,
 } from "@kynesyslabs/demosdk/types"
+
+/**
+ * Extended OperationResult for IPFS operations
+ * Adds optional data field for returning operation details
+ */
+interface OperationResult extends SDKOperationResult {
+    data?: {
+        cid?: string
+        size?: number
+        cost?: string
+    }
+}
 import { PinnedContent } from "@/model/entities/types/IPFSTypes"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import Datasource from "@/model/datasource"
 import GCRIPFSRoutines from "../gcr/gcr_routines/GCRIPFSRoutines"
-import { ensureIpfsManager, getIpfsManager } from "@/libs/network/routines/nodecalls/ipfs/ipfsManager"
+import GCR from "../gcr/gcr"
+import { getIpfsManager } from "@/libs/network/routines/nodecalls/ipfs/ipfsManager"
+import {
+    isGenesisAccount,
+    calculatePinCost,
+    calculateFeeDistribution,
+    hasInsufficientBalance,
+    isTransactionAmountSufficient,
+} from "./ipfsTokenomics"
+import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 
 /**
@@ -39,10 +67,12 @@ export default class IPFSOperations {
      *
      * Flow:
      * 1. Validate payload (base64 content required)
-     * 2. Decode and add content to IPFS
-     * 3. Get content size
-     * 4. Update account IPFS state (add pin)
-     * 5. Return success with CID
+     * 2. Decode content and calculate size
+     * 3. Calculate fee and validate transaction amount
+     * 4. Deduct fee from sender, credit to hosting RPC
+     * 5. Add content to IPFS
+     * 6. Update account IPFS state (add pin with cost tracking)
+     * 7. Return success with CID
      *
      * @param operation - Operation containing IPFS_ADD payload
      * @returns Operation result with CID in data
@@ -50,6 +80,7 @@ export default class IPFSOperations {
     static async ipfsAdd(operation: Operation): Promise<OperationResult> {
         const from = operation.actor
         const payload = operation.params?.payload as IPFSPayload
+        const transactionAmount = operation.params?.amount ?? 0
 
         // REVIEW: Validate payload structure
         if (!payload || !isIPFSAddPayload(payload)) {
@@ -70,16 +101,7 @@ export default class IPFSOperations {
         }
 
         try {
-            // Get IPFS manager instance
-            const ipfs = getIpfsManager()
-            if (!ipfs || !ipfs.isInitialized()) {
-                return {
-                    success: false,
-                    message: "IPFS service is not available",
-                }
-            }
-
-            // Decode base64 content
+            // Decode base64 content to get size
             let contentBuffer: Buffer
             try {
                 contentBuffer = Buffer.from(addPayload.content, "base64")
@@ -90,18 +112,69 @@ export default class IPFSOperations {
                 }
             }
 
+            const size = contentBuffer.length
+
+            // REVIEW: Calculate fee and validate payment
+            const isGenesis = await isGenesisAccount(from)
+            const ipfsState = await GCRIPFSRoutines.getIPFSState(from)
+
+            const costResult = calculatePinCost(
+                size,
+                isGenesis,
+                ipfsState.usedFreeBytes,
+                ipfsState.freeAllocationBytes,
+            )
+
+            // Validate transaction amount covers the cost
+            if (!isTransactionAmountSufficient(transactionAmount, costResult.totalCost)) {
+                return {
+                    success: false,
+                    message: `Insufficient payment: required ${costResult.totalCost} DEM, provided ${transactionAmount} DEM`,
+                }
+            }
+
+            // REVIEW: Check sender has sufficient balance
+            const senderBalance = await GCR.getGCRNativeBalance(from)
+            if (hasInsufficientBalance(BigInt(senderBalance), costResult.totalCost)) {
+                return {
+                    success: false,
+                    message: `Insufficient balance: required ${costResult.totalCost} DEM, have ${senderBalance} DEM`,
+                }
+            }
+
+            // Get IPFS manager instance
+            const ipfs = getIpfsManager()
+            if (!ipfs || !ipfs.isInitialized()) {
+                return {
+                    success: false,
+                    message: "IPFS service is not available",
+                }
+            }
+
+            // REVIEW: Process fee payment (only if cost > 0)
+            if (costResult.totalCost > 0n) {
+                const feeResult = await IPFSOperations.processFeePayment(
+                    from,
+                    costResult.totalCost,
+                    operation.hash,
+                )
+                if (!feeResult.success) {
+                    return feeResult
+                }
+            }
+
             // Add content to IPFS
             const cid = await ipfs.add(contentBuffer, addPayload.filename)
 
-            // Get content size for state tracking
-            const size = contentBuffer.length
-
-            // Create pin record
+            // Create pin record with tokenomics tracking
             const pin: PinnedContent = {
                 cid,
                 size,
                 timestamp: Date.now(),
                 metadata: addPayload.metadata,
+                wasFree: costResult.usedFreeTier,
+                freeBytes: costResult.freeBytes,
+                costPaid: costResult.totalCost.toString(),
             }
 
             // Update account IPFS state
@@ -114,14 +187,19 @@ export default class IPFSOperations {
                 )
             }
 
+            // REVIEW: Update free tier usage if applicable
+            if (costResult.usedFreeTier && costResult.freeBytes > 0) {
+                await IPFSOperations.updateFreeTierUsage(from, costResult.freeBytes)
+            }
+
             log.debug(
-                `[IPFSOperations] IPFS_ADD successful: CID=${cid}, size=${size}, from=${from}`,
+                `[IPFSOperations] IPFS_ADD successful: CID=${cid}, size=${size}, cost=${costResult.totalCost}, from=${from}`,
             )
 
             return {
                 success: true,
                 message: "Content added and pinned successfully",
-                data: { cid, size },
+                data: { cid, size, cost: costResult.totalCost.toString() },
             }
         } catch (error) {
             log.error(`[IPFSOperations] IPFS_ADD failed: ${error}`)
@@ -140,10 +218,11 @@ export default class IPFSOperations {
      *
      * Flow:
      * 1. Validate payload (CID required)
-     * 2. Verify content exists on IPFS
-     * 3. Get content size
-     * 4. Pin content locally
-     * 5. Update account IPFS state
+     * 2. Verify content exists on IPFS and get size
+     * 3. Calculate fee and validate transaction amount
+     * 4. Deduct fee from sender, credit to hosting RPC
+     * 5. Pin content locally
+     * 6. Update account IPFS state
      *
      * @param operation - Operation containing IPFS_PIN payload
      * @returns Operation result
@@ -151,6 +230,7 @@ export default class IPFSOperations {
     static async ipfsPin(operation: Operation): Promise<OperationResult> {
         const from = operation.actor
         const payload = operation.params?.payload as IPFSPayload
+        const transactionAmount = operation.params?.amount ?? 0
 
         // REVIEW: Validate payload structure
         if (!payload || !isIPFSPinPayload(payload)) {
@@ -200,6 +280,46 @@ export default class IPFSOperations {
                 }
             }
 
+            // REVIEW: Calculate fee and validate payment
+            const isGenesis = await isGenesisAccount(from)
+            const ipfsState = await GCRIPFSRoutines.getIPFSState(from)
+
+            const costResult = calculatePinCost(
+                size,
+                isGenesis,
+                ipfsState.usedFreeBytes,
+                ipfsState.freeAllocationBytes,
+            )
+
+            // Validate transaction amount covers the cost
+            if (!isTransactionAmountSufficient(transactionAmount, costResult.totalCost)) {
+                return {
+                    success: false,
+                    message: `Insufficient payment: required ${costResult.totalCost} DEM, provided ${transactionAmount} DEM`,
+                }
+            }
+
+            // REVIEW: Check sender has sufficient balance
+            const senderBalance = await GCR.getGCRNativeBalance(from)
+            if (hasInsufficientBalance(BigInt(senderBalance), costResult.totalCost)) {
+                return {
+                    success: false,
+                    message: `Insufficient balance: required ${costResult.totalCost} DEM, have ${senderBalance} DEM`,
+                }
+            }
+
+            // REVIEW: Process fee payment (only if cost > 0)
+            if (costResult.totalCost > 0n) {
+                const feeResult = await IPFSOperations.processFeePayment(
+                    from,
+                    costResult.totalCost,
+                    operation.hash,
+                )
+                if (!feeResult.success) {
+                    return feeResult
+                }
+            }
+
             // Pin content locally
             await ipfs.pin(pinPayload.cid)
 
@@ -211,13 +331,16 @@ export default class IPFSOperations {
                 expiresAt = Date.now() + pinPayload.duration
             }
 
-            // Create pin record
+            // Create pin record with tokenomics tracking
             const pin: PinnedContent = {
                 cid: pinPayload.cid,
                 size,
                 timestamp: Date.now(),
                 metadata: pinPayload.metadata,
                 expiresAt,
+                wasFree: costResult.usedFreeTier,
+                freeBytes: costResult.freeBytes,
+                costPaid: costResult.totalCost.toString(),
             }
 
             // Update account IPFS state
@@ -228,14 +351,19 @@ export default class IPFSOperations {
                 )
             }
 
+            // REVIEW: Update free tier usage if applicable
+            if (costResult.usedFreeTier && costResult.freeBytes > 0) {
+                await IPFSOperations.updateFreeTierUsage(from, costResult.freeBytes)
+            }
+
             log.debug(
-                `[IPFSOperations] IPFS_PIN successful: CID=${pinPayload.cid}, size=${size}, from=${from}`,
+                `[IPFSOperations] IPFS_PIN successful: CID=${pinPayload.cid}, size=${size}, cost=${costResult.totalCost}, from=${from}`,
             )
 
             return {
                 success: true,
                 message: "Content pinned successfully",
-                data: { cid: pinPayload.cid, size },
+                data: { cid: pinPayload.cid, size, cost: costResult.totalCost.toString() },
             }
         } catch (error) {
             log.error(`[IPFSOperations] IPFS_PIN failed: ${error}`)
@@ -251,6 +379,7 @@ export default class IPFSOperations {
      *
      * Removes a pin from the sender's account.
      * Content may still exist on IPFS but sender no longer pays for hosting.
+     * NOTE: No refund is issued on unpin (payment is final per spec)
      *
      * Flow:
      * 1. Validate payload (CID required)
@@ -331,6 +460,94 @@ export default class IPFSOperations {
                 success: false,
                 message: error instanceof Error ? error.message : "IPFS_UNPIN operation failed",
             }
+        }
+    }
+
+    /**
+     * Process fee payment for IPFS operations
+     *
+     * Deducts fee from sender and credits hosting RPC (100% to host in MVP)
+     *
+     * @param from - Sender address
+     * @param amount - Fee amount in DEM
+     * @param txHash - Transaction hash for tracking
+     * @returns Operation result
+     */
+    private static async processFeePayment(
+        from: string,
+        amount: bigint,
+        txHash: string,
+    ): Promise<OperationResult> {
+        try {
+            // Get current balances
+            const senderBalance = await GCR.getGCRNativeBalance(from)
+
+            // Calculate fee distribution (MVP: 100% to host)
+            const feeDistribution = calculateFeeDistribution(amount)
+
+            // Deduct from sender
+            const newSenderBalance = senderBalance - Number(amount)
+            await GCR.setGCRNativeBalance(from, newSenderBalance, txHash)
+
+            // Credit hosting RPC (this node)
+            // REVIEW: In MVP, 100% goes to the hosting RPC
+            if (feeDistribution.hostShare > 0n) {
+                const hostAddress = getSharedState.publicKeyHex
+                if (hostAddress) {
+                    const hostBalance = await GCR.getGCRNativeBalance(hostAddress)
+                    const newHostBalance = hostBalance + Number(feeDistribution.hostShare)
+                    await GCR.setGCRNativeBalance(hostAddress, newHostBalance, txHash)
+
+                    log.debug(
+                        `[IPFSOperations] Fee credited to RPC: ${feeDistribution.hostShare} DEM to ${hostAddress}`,
+                    )
+                }
+            }
+
+            // REVIEW: Update paidCosts in account IPFS state
+            await GCRIPFSRoutines.updateCosts(from, amount)
+
+            return {
+                success: true,
+                message: "Fee payment processed",
+            }
+        } catch (error) {
+            log.error(`[IPFSOperations] Fee payment failed: ${error}`)
+            return {
+                success: false,
+                message: error instanceof Error ? error.message : "Fee payment failed",
+            }
+        }
+    }
+
+    /**
+     * Update free tier usage for an account
+     *
+     * @param pubkey - Account address
+     * @param bytesUsed - Bytes to add to free tier usage
+     */
+    private static async updateFreeTierUsage(
+        pubkey: string,
+        bytesUsed: number,
+    ): Promise<void> {
+        try {
+            const db = await Datasource.getInstance()
+            const repo = db.getDataSource().getRepository(GCRMain)
+
+            const account = await repo.findOneBy({ pubkey })
+            if (!account || !account.ipfs) {
+                return
+            }
+
+            account.ipfs.usedFreeBytes = (account.ipfs.usedFreeBytes ?? 0) + bytesUsed
+            account.ipfs.lastUpdated = Date.now()
+            await repo.save(account)
+
+            log.debug(
+                `[IPFSOperations] Updated free tier usage for ${pubkey}: +${bytesUsed} bytes`,
+            )
+        } catch (error) {
+            log.warning(`[IPFSOperations] Failed to update free tier usage: ${error}`)
         }
     }
 }
