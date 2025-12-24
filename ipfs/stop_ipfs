@@ -1,0 +1,27 @@
+#!/bin/bash
+# Manual IPFS node stop (for development/debugging only)
+#
+# NOTE: In production, IPFS is stopped automatically by ./run script.
+# This script is for manual testing or standalone IPFS usage.
+#
+# Usage:
+#   ./ipfs/stop_ipfs [port]
+#
+# Example:
+#   ./ipfs/stop_ipfs           # Stops default port 53550 instance
+#   ./ipfs/stop_ipfs 53551     # Stops port 53551 instance
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PORT="${1:-53550}"
+
+echo "Stopping Demos IPFS node (port: ${PORT})..."
+
+export PORT="${PORT}"
+export IPFS_API_PORT=$((PORT + 1000))
+
+cd "${SCRIPT_DIR}"
+docker compose down
+
+echo "✓ IPFS node stopped"

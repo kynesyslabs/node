@@ -1,0 +1,46 @@
+#!/bin/bash
+# Manual IPFS node startup (for development/debugging only)
+#
+# NOTE: In production, IPFS is started automatically by ./run script.
+# This script is for manual testing or standalone IPFS usage.
+#
+# Usage:
+#   ./ipfs/start_ipfs [port]
+#
+# Example:
+#   ./ipfs/start_ipfs           # Uses default port 53550
+#   ./ipfs/start_ipfs 53551     # Uses port 53551, IPFS API on 54551
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PORT="${1:-53550}"
+IPFS_API_PORT=$((PORT + 1000))
+
+echo "Starting Demos IPFS node (port: ${PORT}, API: ${IPFS_API_PORT})..."
+echo "NOTE: In production, IPFS is started automatically by ./run"
+echo ""
+
+export PORT="${PORT}"
+export IPFS_API_PORT="${IPFS_API_PORT}"
+
+cd "${SCRIPT_DIR}"
+docker compose up -d
+
+echo ""
+echo "IPFS node started. Checking health..."
+sleep 3
+
+# Health check
+CONTAINER_NAME="ipfs_${PORT}"
+if docker exec "${CONTAINER_NAME}" ipfs id > /dev/null 2>&1; then
+    PEER_ID=$(docker exec "${CONTAINER_NAME}" ipfs id -f '<id>')
+    echo "✓ IPFS node healthy"
+    echo "  Container: ${CONTAINER_NAME}"
+    echo "  Peer ID: ${PEER_ID}"
+    echo "  API: http://127.0.0.1:${IPFS_API_PORT}"
+else
+    echo "✗ IPFS node health check failed"
+    echo "  Check logs: docker logs ${CONTAINER_NAME}"
+    exit 1
+fi
