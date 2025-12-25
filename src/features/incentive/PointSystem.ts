@@ -1288,8 +1288,6 @@ export class PointSystem {
         nomisScore: number,
         referralCode?: string,
     ): Promise<RPCResponse> {
-        let nomisScoreAlreadyLinkedForChain = false
-
         const invalidChainMessage =
             "Invalid Nomis chain. Allowed values are 'evm' and 'solana'."
         const nomisScoreAlreadyLinkedMessage = `A Nomis score for ${chain} is already linked.`
@@ -1356,7 +1354,18 @@ export class PointSystem {
                 userPointsWithIdentities.breakdown.nomisScores?.[chain]
 
             if (existingNomisScoreOnChain != null) {
-                nomisScoreAlreadyLinkedForChain = true
+                const updatedPoints = await this.getUserPointsInternal(userId)
+
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: updatedPoints.totalPoints,
+                        message: nomisScoreAlreadyLinkedMessage,
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
             }
 
             const pointsToAward = this.getNomisPointsByScore(nomisScore)
@@ -1372,15 +1381,11 @@ export class PointSystem {
             const updatedPoints = await this.getUserPointsInternal(userId)
 
             return {
-                result: nomisScoreAlreadyLinkedForChain ? 400 : 200,
+                result: 200,
                 response: {
-                    pointsAwarded: !nomisScoreAlreadyLinkedForChain
-                        ? pointsToAward
-                        : 0,
+                    pointsAwarded: pointsToAward,
                     totalPoints: updatedPoints.totalPoints,
-                    message: nomisScoreAlreadyLinkedForChain
-                        ? nomisScoreAlreadyLinkedMessage
-                        : `Points awarded for linking Nomis score on ${chain}`,
+                    message: `Points awarded for linking Nomis score on ${chain}`,
                 },
                 require_reply: false,
                 extra: {},
