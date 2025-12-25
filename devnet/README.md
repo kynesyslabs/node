@@ -23,25 +23,32 @@ docker compose up --build
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Docker Network                            │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
-│  │  node-1  │──│  node-2  │──│  node-3  │──│  node-4  │    │
-│  │  :53551  │  │  :53552  │  │  :53553  │  │  :53554  │    │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘    │
-│       │             │             │             │           │
-│       └─────────────┴──────┬──────┴─────────────┘           │
-│                            │                                 │
-│                     ┌──────┴──────┐                         │
-│                     │  PostgreSQL │                         │
-│                     │  (4 DBs)    │                         │
-│                     └─────────────┘                         │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                       Docker Network                              │
+│                                                                   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │
+│  │  node-1  │──│  node-2  │──│  node-3  │──│  node-4  │        │
+│  │  :53551  │  │  :53552  │  │  :53553  │  │  :53554  │        │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘        │
+│       │             │             │             │               │
+│  ┌────┴─────┐  ┌────┴─────┐  ┌────┴─────┐  ┌────┴─────┐        │
+│  │  ipfs-1  │  │  ipfs-2  │  │  ipfs-3  │  │  ipfs-4  │        │
+│  │  (Kubo)  │  │  (Kubo)  │  │  (Kubo)  │  │  (Kubo)  │        │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘        │
+│       │             │             │             │               │
+│       └─────────────┴──────┬──────┴─────────────┘               │
+│                            │                                     │
+│                     ┌──────┴──────┐                             │
+│                     │  PostgreSQL │                             │
+│                     │  (4 DBs)    │                             │
+│                     └─────────────┘                             │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 - **PostgreSQL**: Single container with 4 databases (node1_db, node2_db, node3_db, node4_db)
+- **IPFS**: 4 Kubo containers (ipfs-1 to ipfs-4), one per node for decentralized storage
 - **Nodes**: 4 containers running the Demos node software
-- **Networking**: Full mesh via Docker DNS (`node-1`, `node-2`, etc.)
+- **Networking**: Full mesh via Docker DNS (`node-1`, `node-2`, `ipfs-1`, etc.)
 - **Identity**: Each node has its own cryptographic identity (BIP39 mnemonic)
 
 ## Configuration
@@ -63,7 +70,7 @@ cp .env.example .env
 | `NODE1_OMNI_PORT` | 53561 | OmniProtocol P2P port for node 1 |
 | `POSTGRES_USER` | demosuser | Postgres username |
 | `POSTGRES_PASSWORD` | demospass | Postgres password |
-| `PERSISTENT` | 0 | Set to 1 for persistent volumes |
+| `PERSISTENT` | 0 | Set to 1 for persistent volumes (PostgreSQL + IPFS) |
 
 ## Usage
 
@@ -93,9 +100,11 @@ docker compose down -v
 docker compose up --build
 ```
 
-## Node Endpoints
+## Endpoints
 
-Once running, nodes are accessible at:
+Once running, services are accessible at:
+
+### Node Endpoints
 
 | Node | HTTP RPC | OmniProtocol |
 |------|----------|--------------|
@@ -103,6 +112,19 @@ Once running, nodes are accessible at:
 | node-2 | http://localhost:53552 | localhost:53562 |
 | node-3 | http://localhost:53553 | localhost:53563 |
 | node-4 | http://localhost:53554 | localhost:53564 |
+
+### IPFS (Internal Only)
+
+IPFS nodes are only accessible from within the Docker network. Each Demos node connects to its IPFS container via internal DNS:
+
+| Node | IPFS Container | Internal URL |
+|------|----------------|--------------|
+| node-1 | ipfs-1 | http://ipfs-1:5001 |
+| node-2 | ipfs-2 | http://ipfs-2:5001 |
+| node-3 | ipfs-3 | http://ipfs-3:5001 |
+| node-4 | ipfs-4 | http://ipfs-4:5001 |
+
+IPFS API is not exposed to the host for security - all IPFS operations are proxied through the Demos RPC.
 
 ## Persistence Mode
 
@@ -114,7 +136,9 @@ For persistent development:
 PERSISTENT=1
 ```
 
-This creates a `postgres-data` volume that survives restarts.
+This creates persistent volumes that survive restarts:
+- `postgres-data`: PostgreSQL database
+- `ipfs-1-data` through `ipfs-4-data`: IPFS content storage
 
 ## Regenerating Identities
 
@@ -134,6 +158,7 @@ docker compose up --build
 ./scripts/logs.sh nodes     # All 4 nodes
 ./scripts/logs.sh node-1    # Specific node
 ./scripts/logs.sh postgres  # Database only
+./scripts/logs.sh ipfs-1    # Specific IPFS node
 ```
 
 ### Attach to container
@@ -166,6 +191,11 @@ Opens a tmux session with 4 panes, one per node:
 ### Database connection errors
 - Wait for PostgreSQL health check to pass
 - Check logs: `docker compose logs postgres`
+
+### IPFS connection errors
+- Nodes wait for IPFS health check before starting
+- Check IPFS logs: `docker compose logs ipfs-1`
+- Verify container is running: `docker ps | grep ipfs`
 
 ### Port already in use
 - Change ports in `.env` file

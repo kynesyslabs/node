@@ -25,14 +25,23 @@ Each node requires:
 - `PORT` - Node RPC port
 - `OMNI_PORT` - Omniprotocol port
 - `EXPOSED_URL` - Self URL for peer discovery (e.g., `http://node-1:53551`)
+- `IPFS_API_PORT` - Internal IPFS port (always 5001 in Docker)
+- `IPFS_API_URL` - Full URL to IPFS container (e.g., `http://ipfs-1:5001`)
 
 ### Port Mapping
-| Node   | RPC Port | Omni Port |
-|--------|----------|-----------|
-| node-1 | 53551    | 53561     |
-| node-2 | 53552    | 53562     |
-| node-3 | 53553    | 53563     |
-| node-4 | 53554    | 53564     |
+| Node   | RPC Port | Omni Port | IPFS Container |
+|--------|----------|-----------|----------------|
+| node-1 | 53551    | 53561     | ipfs-1         |
+| node-2 | 53552    | 53562     | ipfs-2         |
+| node-3 | 53553    | 53563     | ipfs-3         |
+| node-4 | 53554    | 53564     | ipfs-4         |
+
+### IPFS Integration
+- Each node has a dedicated IPFS Kubo container
+- IPFS API only accessible within Docker network (not exposed to host)
+- Nodes connect via internal DNS: `http://ipfs-N:5001`
+- Uses Docker named volumes for persistence: `ipfs-1-data` through `ipfs-4-data`
+- Memory limits: 1G per IPFS container (256M reserved)
 
 ## Build Optimization
 - Uses BuildKit: `DOCKER_BUILDKIT=1 docker-compose build`

@@ -20,6 +20,106 @@ services:
     networks:
       - demos-network
 
+  # IPFS Node 1
+  ipfs-1:
+    image: ipfs/kubo:v0.26.0
+    container_name: demos-devnet-ipfs-1
+    environment:
+      - IPFS_PROFILE=server
+      - IPFS_GATEWAY_WRITABLE=false
+    volumes:
+      - ${PERSISTENT:+ipfs-1-data:/data/ipfs}
+    healthcheck:
+      test: ["CMD-SHELL", "ipfs id || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - demos-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+
+  # IPFS Node 2
+  ipfs-2:
+    image: ipfs/kubo:v0.26.0
+    container_name: demos-devnet-ipfs-2
+    environment:
+      - IPFS_PROFILE=server
+      - IPFS_GATEWAY_WRITABLE=false
+    volumes:
+      - ${PERSISTENT:+ipfs-2-data:/data/ipfs}
+    healthcheck:
+      test: ["CMD-SHELL", "ipfs id || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - demos-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+
+  # IPFS Node 3
+  ipfs-3:
+    image: ipfs/kubo:v0.26.0
+    container_name: demos-devnet-ipfs-3
+    environment:
+      - IPFS_PROFILE=server
+      - IPFS_GATEWAY_WRITABLE=false
+    volumes:
+      - ${PERSISTENT:+ipfs-3-data:/data/ipfs}
+    healthcheck:
+      test: ["CMD-SHELL", "ipfs id || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - demos-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+
+  # IPFS Node 4
+  ipfs-4:
+    image: ipfs/kubo:v0.26.0
+    container_name: demos-devnet-ipfs-4
+    environment:
+      - IPFS_PROFILE=server
+      - IPFS_GATEWAY_WRITABLE=false
+    volumes:
+      - ${PERSISTENT:+ipfs-4-data:/data/ipfs}
+    healthcheck:
+      test: ["CMD-SHELL", "ipfs id || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - demos-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+
   # Node 1
   node-1:
     image: demos-devnet-node
@@ -29,6 +129,8 @@ services:
     container_name: demos-devnet-node-1
     depends_on:
       postgres:
+        condition: service_healthy
+      ipfs-1:
         condition: service_healthy
     environment:
       - NODE_ENV=development
@@ -40,6 +142,9 @@ services:
       - PORT=${NODE1_PORT:-53551}
       - OMNI_PORT=${NODE1_OMNI_PORT:-53561}
       - EXPOSED_URL=http://node-1:${NODE1_PORT:-53551}
+      # IPFS configuration - internal Docker network
+      - IPFS_API_PORT=5001
+      - IPFS_API_URL=http://ipfs-1:5001
     volumes:
       - ./identities/node1.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
@@ -57,6 +162,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      ipfs-2:
+        condition: service_healthy
       node-1:
         condition: service_started
     environment:
@@ -69,6 +176,9 @@ services:
       - PORT=${NODE2_PORT:-53552}
       - OMNI_PORT=${NODE2_OMNI_PORT:-53562}
       - EXPOSED_URL=http://node-2:${NODE2_PORT:-53552}
+      # IPFS configuration - internal Docker network
+      - IPFS_API_PORT=5001
+      - IPFS_API_URL=http://ipfs-2:5001
     volumes:
       - ./identities/node2.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
@@ -86,6 +196,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      ipfs-3:
+        condition: service_healthy
       node-1:
         condition: service_started
     environment:
@@ -98,6 +210,9 @@ services:
       - PORT=${NODE3_PORT:-53553}
       - OMNI_PORT=${NODE3_OMNI_PORT:-53563}
       - EXPOSED_URL=http://node-3:${NODE3_PORT:-53553}
+      # IPFS configuration - internal Docker network
+      - IPFS_API_PORT=5001
+      - IPFS_API_URL=http://ipfs-3:5001
     volumes:
       - ./identities/node3.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
@@ -115,6 +230,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      ipfs-4:
+        condition: service_healthy
       node-1:
         condition: service_started
     environment:
@@ -127,6 +244,9 @@ services:
       - PORT=${NODE4_PORT:-53554}
       - OMNI_PORT=${NODE4_OMNI_PORT:-53564}
       - EXPOSED_URL=http://node-4:${NODE4_PORT:-53554}
+      # IPFS configuration - internal Docker network
+      - IPFS_API_PORT=5001
+      - IPFS_API_URL=http://ipfs-4:5001
     volumes:
       - ./identities/node4.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
@@ -143,4 +263,12 @@ networks:
 
 volumes:
   postgres-data:
+    driver: local
+  ipfs-1-data:
+    driver: local
+  ipfs-2-data:
+    driver: local
+  ipfs-3-data:
+    driver: local
+  ipfs-4-data:
     driver: local
