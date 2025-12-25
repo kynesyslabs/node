@@ -26,6 +26,7 @@ import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Discord, DiscordMessage } from "../identity/tools/discord"
 import { UDIdentityManager } from "../blockchain/gcr/gcr_routines/udIdentityManager"
 import { exchangeGitHubCode } from "../identity/oauth/github"
+import { exchangeDiscordCode } from "../identity/oauth/discord"
 
 export interface NodeCall {
     message: string
@@ -370,6 +371,32 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
             response.result = oauthResult.success ? 200 : 400
             response.response = oauthResult
+            break
+        }
+
+        case "exchangeDiscordOAuthCode": {
+            if (!data.code) {
+                response.result = 400
+                response.response = {
+                    success: false,
+                    error: "No authorization code provided",
+                }
+                break
+            }
+
+            if (!data.redirectUri) {
+                response.result = 400
+                response.response = {
+                    success: false,
+                    error: "No redirect URI provided",
+                }
+                break
+            }
+
+            const discordOauthResult = await exchangeDiscordCode(data.code, data.redirectUri)
+
+            response.result = discordOauthResult.success ? 200 : 400
+            response.response = discordOauthResult
             break
         }
 
