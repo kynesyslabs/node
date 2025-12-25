@@ -5,6 +5,7 @@ GIT_PULL=true
 PEER_LIST_FILE="demos_peerlist.json"
 VERBOSE=false
 NO_TUI=false
+EXTERNAL_DB=false
 
 # Detect platform for cross-platform compatibility
 PLATFORM=$(uname -s)
@@ -54,8 +55,10 @@ OPTIONS:
     -b <true/false>                Restore from backup
     -t                             Disable TUI (use legacy scrolling logs)
     -v                             Verbose logging
+    -e                             Use external database (skip local PostgreSQL setup)
     -h                             Show this help message
     --no-tui                       Disable TUI (same as -t)
+    --external-db                  Use external database (same as -e)
 
 EXAMPLES:
     ./run                          # Start with default settings
@@ -65,11 +68,13 @@ EXAMPLES:
     ./run -n                       # Skip git update (for development)
     ./run -t                       # Legacy mode (scrolling logs for developers)
     ./run --no-tui                 # Same as -t
+    ./run -e                       # Use external database (DATABASE_URL from env)
+    ./run --external-db            # Same as -e
 
 SYSTEM REQUIREMENTS:
     - 4GB RAM minimum (8GB recommended)
     - 4+ CPU cores
-    - Docker and Docker Compose
+    - Docker and Docker Compose (unless using --external-db)
     - Bun runtime
     - Network: <200ms ping to 1.1.1.1 (<100ms recommended)
     - Free ports: 5332 (PostgreSQL) and 53550 (Node)
@@ -206,7 +211,7 @@ check_system_requirements() {
     else
         echo "✅ RAM: ${ram_gb}GB"
     fi
-    
+
     # Check CPU cores
     log_verbose "Checking CPU requirements"
     if [ "$PLATFORM_NAME" = "macOS" ]; then
@@ -218,14 +223,14 @@ check_system_requirements() {
         cpu_cores=0
         warnings=$((warnings + 1))
     fi
-    
+
     if [ $cpu_cores -lt 4 ]; then
         echo "❌ Insufficient CPU cores: ${cpu_cores} (minimum: 4)"
         failed_requirements=$((failed_requirements + 1))
     else
         echo "✅ CPU cores: ${cpu_cores}"
     fi
-    
+
     # Check network connectivity (ping 1.1.1.1)
     log_verbose "Checking network connectivity"
     if command -v ping > /dev/null; then
@@ -236,7 +241,7 @@ check_system_requirements() {
             # Linux ping syntax
             ping_result=$(ping -c 3 -W 5 1.1.1.1 2>/dev/null | tail -1 | awk -F'/' '{print $5}' | cut -d'.' -f1)
         fi
-        
+
         if [ -z "$ping_result" ]; then
             echo "❌ Network connectivity failed - cannot reach 1.1.1.1"
             failed_requirements=$((failed_requirements + 1))
@@ -253,7 +258,7 @@ check_system_requirements() {
         echo "⚠️  Cannot test network - ping command not available"
         warnings=$((warnings + 1))
     fi
-    
+
     # Helper function to check if a port is in use
     is_port_in_use() {
         local port=$1
@@ -276,34 +281,37 @@ check_system_requirements() {
         echo "⚠️  Cannot check port availability - lsof and netstat not available"
         warnings=$((warnings + 1))
     else
-        # Check PostgreSQL port with auto-recovery attempt
-        if is_port_in_use $PG_PORT; then
-            echo "⚠️  PostgreSQL port $PG_PORT is in use, attempting to stop leftover containers..."
-            log_verbose "Trying to stop postgres_${PG_PORT} container"
-
-            # Try to stop the docker container that might be using the port
-            PG_FOLDER="postgres_${PG_PORT}"
-            if [ -d "$PG_FOLDER" ]; then
-                (cd "$PG_FOLDER" && docker compose down 2>/dev/null) || true
-                sleep 2  # Give Docker time to release the port
-            fi
-
-            # Also try the base postgres folder in case it's using the port
-            if [ -d "postgres" ]; then
-                (cd "postgres" && docker compose down 2>/dev/null) || true
-                sleep 1
-            fi
-
-            # Recheck after cleanup attempt
+        # Only check PostgreSQL port if not using external database
+        if [ "$EXTERNAL_DB" = false ]; then
+            # Check PostgreSQL port with auto-recovery attempt
             if is_port_in_use $PG_PORT; then
-                echo "❌ PostgreSQL port $PG_PORT is still in use after cleanup attempt"
-                echo "   Another process is using this port. Check with: lsof -i :$PG_PORT"
-                failed_requirements=$((failed_requirements + 1))
+                echo "⚠️  PostgreSQL port $PG_PORT is in use, attempting to stop leftover containers..."
+                log_verbose "Trying to stop postgres_${PG_PORT} container"
+
+                # Try to stop the docker container that might be using the port
+                PG_FOLDER="postgres_${PG_PORT}"
+                if [ -d "$PG_FOLDER" ]; then
+                    (cd "$PG_FOLDER" && docker compose down 2>/dev/null) || true
+                    sleep 2  # Give Docker time to release the port
+                fi
+
+                # Also try the base postgres folder in case it's using the port
+                if [ -d "postgres" ]; then
+                    (cd "postgres" && docker compose down 2>/dev/null) || true
+                    sleep 1
+                fi
+
+                # Recheck after cleanup attempt
+                if is_port_in_use $PG_PORT; then
+                    echo "❌ PostgreSQL port $PG_PORT is still in use after cleanup attempt"
+                    echo "   Another process is using this port. Check with: lsof -i :$PG_PORT"
+                    failed_requirements=$((failed_requirements + 1))
+                else
+                    echo "✅ PostgreSQL port $PG_PORT is now available (stopped leftover container)"
+                fi
             else
-                echo "✅ PostgreSQL port $PG_PORT is now available (stopped leftover container)"
+                echo "✅ PostgreSQL port $PG_PORT is available"
             fi
-        else
-            echo "✅ PostgreSQL port $PG_PORT is available"
         fi
 
         # Check Node port
@@ -314,7 +322,7 @@ check_system_requirements() {
             echo "✅ Node port $PORT is available"
         fi
     fi
-    
+
     # Summary
     if [ $failed_requirements -gt 0 ]; then
         echo ""
@@ -338,9 +346,11 @@ check_system_requirements() {
 
 function ctrl_c() {
     HAS_BEEN_INTERRUPTED=true
-    cd postgres
-    docker compose down
-    cd ..
+    if [ "$EXTERNAL_DB" = false ]; then
+        cd postgres
+        docker compose down
+        cd ..
+    fi
 }
 
 # Function to check if we are on the first run with the .RUN file
@@ -361,33 +371,35 @@ if is_first_run; then
         exit 1
     fi
     echo "Ok, dependencies installed"
-    # We need docker and docker compose to be installed
-    echo "🔍 Checking Docker..."
-    if ! command -v docker &> /dev/null; then
-        echo "❌ Docker is not installed"
-        echo "💡 Install Docker from: https://docs.docker.com/get-docker/"
-        if [ "$PLATFORM_NAME" = "macOS" ]; then
-            echo "🍎 On macOS: Download Docker Desktop from https://docker.com/products/docker-desktop"
-        elif [ "$PLATFORM_NAME" = "Linux" ]; then
-            echo "🐧 On Linux: Use your package manager or install script"
+    # We need docker and docker compose to be installed (unless using external DB)
+    if [ "$EXTERNAL_DB" = false ]; then
+        echo "🔍 Checking Docker..."
+        if ! command -v docker &> /dev/null; then
+            echo "❌ Docker is not installed"
+            echo "💡 Install Docker from: https://docs.docker.com/get-docker/"
+            if [ "$PLATFORM_NAME" = "macOS" ]; then
+                echo "🍎 On macOS: Download Docker Desktop from https://docker.com/products/docker-desktop"
+            elif [ "$PLATFORM_NAME" = "Linux" ]; then
+                echo "🐧 On Linux: Use your package manager or install script"
+            fi
+            exit 1
         fi
-        exit 1
+
+        if ! docker compose version &> /dev/null; then
+            echo "❌ Docker Compose is not available"
+            echo "💡 Make sure Docker Desktop is running or install docker-compose-plugin"
+            exit 1
+        fi
+
+        # Check if Docker daemon is running
+        if ! docker info &> /dev/null; then
+            echo "❌ Docker daemon is not running"
+            echo "💡 Start Docker Desktop or run: sudo systemctl start docker"
+            exit 1
+        fi
+
+        echo "✅ Docker and Docker Compose are ready"
     fi
-    
-    if ! docker compose version &> /dev/null; then
-        echo "❌ Docker Compose is not available"
-        echo "💡 Make sure Docker Desktop is running or install docker-compose-plugin"
-        exit 1
-    fi
-    
-    # Check if Docker daemon is running
-    if ! docker info &> /dev/null; then
-        echo "❌ Docker daemon is not running"
-        echo "💡 Start Docker Desktop or run: sudo systemctl start docker"
-        exit 1
-    fi
-    
-    echo "✅ Docker and Docker Compose are ready"
     # Check if Bun is installed
     if ! command -v bun &> /dev/null; then
         echo "Error: Bun is not installed and is required to run the node (since 0.9.5)"
@@ -405,7 +417,7 @@ fi
 CLEAN="false"
 PORT=53550
 
-# Handle long options (--no-tui) before getopts
+# Handle long options (--no-tui, --external-db) before getopts
 for arg in "$@"; do
     case $arg in
         --no-tui)
@@ -413,11 +425,16 @@ for arg in "$@"; do
             # Remove --no-tui from arguments so getopts doesn't choke on it
             set -- "${@/--no-tui/}"
             ;;
+        --external-db)
+            EXTERNAL_DB=true
+            # Remove --external-db from arguments so getopts doesn't choke on it
+            set -- "${@/--external-db/}"
+            ;;
     esac
 done
 
 # Getting arguments
-while getopts "p:d:c:i:n:u:l:r:b:tvh" opt; do
+while getopts "p:d:c:i:n:u:l:r:b:tveh" opt; do
     case $opt in
         p) PORT=$OPTARG;;
         d) PG_PORT=$OPTARG;;
@@ -430,6 +447,7 @@ while getopts "p:d:c:i:n:u:l:r:b:tvh" opt; do
         b) RESTORE=$OPTARG;;
         t) NO_TUI=true;;
         v) VERBOSE=true;;
+        e) EXTERNAL_DB=true;;
         h) show_help; exit 0;;
         *) echo "Invalid option. Use -h for help."; exit 1;;
     esac
@@ -509,7 +527,9 @@ echo ""
 echo "🚀 Welcome to Demos Network!"
 echo "⚙️  Node Configuration:"
 echo "   🌐 Node Port: $PORT"
-echo "   🗄️  Database Port: $PG_PORT"
+if [ "$EXTERNAL_DB" = false ]; then
+    echo "   🗄️  Database Port: $PG_PORT"
+fi
 if [ ! -z "$IDENTITY_FILE" ]; then
     echo "   🔑 Identity File: $IDENTITY_FILE"
 fi
@@ -517,7 +537,9 @@ if [ ! -z "$EXPOSED_URL" ]; then
     echo "   📡 Exposed URL: $EXPOSED_URL"
 fi
 echo "   👥 Peer List: $PEER_LIST_FILE"
-if [ "$RESTORE" = "true" ]; then
+if [ "$EXTERNAL_DB" = true ]; then
+    echo "   🔗 Mode: External database (DATABASE_URL)"
+elif [ "$RESTORE" = "true" ]; then
     echo "   📦 Mode: Restore from backup"
 elif [ "$CLEAN" = "true" ]; then
     echo "   🧹 Mode: Clean start (fresh database)"
@@ -585,140 +607,143 @@ export EXPOSED_URL=$EXPOSED_URL
 export PEER_LIST_FILE=$PEER_LIST_FILE
 export RESTORE=$RESTORE
 
-# Database management with proper folder based on the port
-# Create a unique postgres folder for this instance based on the port number
-PG_FOLDER="postgres_${PG_PORT}" 
+# Only manage PostgreSQL if not using external database
+if [ "$EXTERNAL_DB" = false ]; then
+    # Database management with proper folder based on the port
+    # Create a unique postgres folder for this instance based on the port number
+    PG_FOLDER="postgres_${PG_PORT}"
 
-# If the folder doesn't exist yet, create it by copying the base postgres folder
-# This allows multiple instances to run simultaneously with different ports
-if [ ! -d "$PG_FOLDER" ]; then
-    cp -r postgres $PG_FOLDER
-fi
-cd $PG_FOLDER
+    # If the folder doesn't exist yet, create it by copying the base postgres folder
+    # This allows multiple instances to run simultaneously with different ports
+    if [ ! -d "$PG_FOLDER" ]; then
+        cp -r postgres $PG_FOLDER
+    fi
+    cd $PG_FOLDER
 
-# If we are cleaning, we need to remove the database
-if [ "$CLEAN" == "true" ]; then
-    echo "🧹 Cleaning the database..."
-    log_verbose "Removing existing database data for clean start"
-    sleep 1
-    rm -rf data_*
-    mkdir data_${PG_PORT}
-    echo "✅ Database cleaned"
-fi
-
-# Suppressing errors if the database is not running
-docker compose down > /dev/null 2>&1
-if [ "$CLEAN" == "true" ]; then
-    rm -rf data_${PG_PORT} || rm -rf data_${PG_PORT}
-    mkdir data_${PG_PORT}
-fi
-
-# Finally starting the database
-echo "🗄️  Starting PostgreSQL database..."
-log_verbose "Running docker compose up -d in $PG_FOLDER"
-if ! docker compose up -d; then
-    echo "❌ Failed to start PostgreSQL database"
-    echo "💡 Check Docker Desktop is running and try again"
-    exit 1
-fi
-echo "✅ PostgreSQL container started"
-cd ..
-
-function is_db_ready() {
-    docker exec postgres_${PG_PORT} pg_isready -U demosuser -d demos > /dev/null 2>&1
-    return $?
-}
-
-# Function to wait for database availability
-function wait_for_database() {
-    local port=$1
-    local timeout=${2:-30}  # Increased timeout to 30 seconds
-    
-    echo "⏳ Waiting for PostgreSQL to be available on port $port..."
-    log_verbose "Checking database connectivity with timeout of ${timeout}s"
-    local count=0
-    while ! nc -z localhost $port; do
-        if [ $((count % 5)) -eq 0 ]; then
-            echo "   Still waiting... (${count}s elapsed)"
-        fi
-        count=$((count+1))
-        if [ $count -gt $timeout ]; then
-            echo "❌ Timeout waiting for PostgreSQL to be available after ${timeout}s"
-            echo "💡 Try increasing resources or check Docker logs"
-            return 1
-        fi
+    # If we are cleaning, we need to remove the database
+    if [ "$CLEAN" == "true" ]; then
+        echo "🧹 Cleaning the database..."
+        log_verbose "Removing existing database data for clean start"
         sleep 1
-    done
-    echo "✅ PostgreSQL is accepting connections"
-    return 0
-}
-
-function wait_for_database_ready() {
-    local port=$1
-    local timeout=${2:-20}  # Increased timeout to 20 seconds
-    
-    echo "⏳ Waiting for PostgreSQL to be ready for connections..."
-    log_verbose "Checking database readiness with pg_isready, timeout ${timeout}s"
-    local count=0
-    while ! is_db_ready; do   
-        if [ $((count % 3)) -eq 0 ] && [ $count -gt 0 ]; then
-            echo "   Database initializing... (${count}s elapsed)"
-        fi
-        count=$((count+1))
-        if [ $count -gt $timeout ]; then
-            echo "❌ Timeout waiting for PostgreSQL to be ready after ${timeout}s"
-            echo "💡 Database may be still initializing - check Docker logs"
-            return 1
-        fi
-        sleep 1
-    done
-    echo "✅ PostgreSQL is ready for operations"
-    return 0
-}
-
-# Replace the original wait code with function call
-if ! wait_for_database $PG_PORT; then
-    echo "❌ Failed to connect to PostgreSQL database"
-    echo "💡 Try restarting Docker or check system resources"
-    exit 1
-fi
-
-if [ "$RESTORE" == "true" ]; then
-    if ! wait_for_database_ready $PG_PORT; then
-        echo "❌ Failed to connect to PostgreSQL database"
-        echo "💡 Database may need more time to initialize"
-        exit 1
+        rm -rf data_*
+        mkdir data_${PG_PORT}
+        echo "✅ Database cleaned"
     fi
 
-    echo "🔄 Restoring the node"
-    if ! bun run restore; then
-        echo "❌ Error: Failed to restore the node"
+    # Suppressing errors if the database is not running
+    docker compose down > /dev/null 2>&1
+    if [ "$CLEAN" == "true" ]; then
+        rm -rf data_${PG_PORT} || rm -rf data_${PG_PORT}
+        mkdir data_${PG_PORT}
+    fi
+
+    # Finally starting the database
+    echo "🗄️  Starting PostgreSQL database..."
+    log_verbose "Running docker compose up -d in $PG_FOLDER"
+    if ! docker compose up -d; then
+        echo "❌ Failed to start PostgreSQL database"
+        echo "💡 Check Docker Desktop is running and try again"
         exit 1
     fi
-    # sleep 20
-    # exit 0
-
-    # Stop the database
-    echo "Stopping the database"
-    cd postgres_${PG_PORT}
-    docker compose down
-
-    # Remove the database folder
-    echo "Removing the database folder"
-    rm -rf data_* || sudo rm -rf data_*
-    mkdir data_${PG_PORT}
-
-    # Start the database
-    echo "Starting the database"
-    docker compose up -d
+    echo "✅ PostgreSQL container started"
     cd ..
 
-    # Wait for the database to be available
-    echo "Restarting database"
-    wait_for_database $PG_PORT
-# else
-#     echo "Cleaning the output/ folder"
-#     rm -rf output/*
+    function is_db_ready() {
+        docker exec postgres_${PG_PORT} pg_isready -U demosuser -d demos > /dev/null 2>&1
+        return $?
+    }
+
+    # Function to wait for database availability
+    function wait_for_database() {
+        local port=$1
+        local timeout=${2:-30}  # Increased timeout to 30 seconds
+
+        echo "⏳ Waiting for PostgreSQL to be available on port $port..."
+        log_verbose "Checking database connectivity with timeout of ${timeout}s"
+        local count=0
+        while ! nc -z localhost $port; do
+            if [ $((count % 5)) -eq 0 ]; then
+                echo "   Still waiting... (${count}s elapsed)"
+            fi
+            count=$((count+1))
+            if [ $count -gt $timeout ]; then
+                echo "❌ Timeout waiting for PostgreSQL to be available after ${timeout}s"
+                echo "💡 Try increasing resources or check Docker logs"
+                return 1
+            fi
+            sleep 1
+        done
+        echo "✅ PostgreSQL is accepting connections"
+        return 0
+    }
+
+    function wait_for_database_ready() {
+        local port=$1
+        local timeout=${2:-20}  # Increased timeout to 20 seconds
+
+        echo "⏳ Waiting for PostgreSQL to be ready for connections..."
+        log_verbose "Checking database readiness with pg_isready, timeout ${timeout}s"
+        local count=0
+        while ! is_db_ready; do
+            if [ $((count % 3)) -eq 0 ] && [ $count -gt 0 ]; then
+                echo "   Database initializing... (${count}s elapsed)"
+            fi
+            count=$((count+1))
+            if [ $count -gt $timeout ]; then
+                echo "❌ Timeout waiting for PostgreSQL to be ready after ${timeout}s"
+                echo "💡 Database may be still initializing - check Docker logs"
+                return 1
+            fi
+            sleep 1
+        done
+        echo "✅ PostgreSQL is ready for operations"
+        return 0
+    }
+
+    # Replace the original wait code with function call
+    if ! wait_for_database $PG_PORT; then
+        echo "❌ Failed to connect to PostgreSQL database"
+        echo "💡 Try restarting Docker or check system resources"
+        exit 1
+    fi
+
+    if [ "$RESTORE" == "true" ]; then
+        if ! wait_for_database_ready $PG_PORT; then
+            echo "❌ Failed to connect to PostgreSQL database"
+            echo "💡 Database may need more time to initialize"
+            exit 1
+        fi
+
+        echo "🔄 Restoring the node"
+        if ! bun run restore; then
+            echo "❌ Error: Failed to restore the node"
+            exit 1
+        fi
+        # sleep 20
+        # exit 0
+
+        # Stop the database
+        echo "Stopping the database"
+        cd postgres_${PG_PORT}
+        docker compose down
+
+        # Remove the database folder
+        echo "Removing the database folder"
+        rm -rf data_* || sudo rm -rf data_*
+        mkdir data_${PG_PORT}
+
+        # Start the database
+        echo "Starting the database"
+        docker compose up -d
+        cd ..
+
+        # Wait for the database to be available
+        echo "Restarting database"
+        wait_for_database $PG_PORT
+    # else
+    #     echo "Cleaning the output/ folder"
+    #     rm -rf output/*
+    fi
 fi
 
 # Ensuring the logs folder exists
@@ -771,15 +796,18 @@ else
     exit_code=0
 fi
 
-# Once exiting, stopping the database
-echo "🛑 Stopping PostgreSQL database..."
-cd postgres_${PG_PORT}
-if docker compose down; then
-    echo "✅ PostgreSQL stopped successfully"
-else
-    echo "⚠️  Warning: Failed to stop PostgreSQL gracefully"
+# Only stop PostgreSQL if we started it
+if [ "$EXTERNAL_DB" = false ]; then
+    # Once exiting, stopping the database
+    echo "🛑 Stopping PostgreSQL database..."
+    cd postgres_${PG_PORT}
+    if docker compose down; then
+        echo "✅ PostgreSQL stopped successfully"
+    else
+        echo "⚠️  Warning: Failed to stop PostgreSQL gracefully"
+    fi
+    cd ..
 fi
-cd ..
 
 echo ""
 echo "🏁 Demos Network node session completed"
