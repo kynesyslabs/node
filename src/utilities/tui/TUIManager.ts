@@ -98,8 +98,9 @@ const TABS: Tab[] = [
     { key: "7", label: "ID", category: "IDENTITY" },
     { key: "8", label: "MCP", category: "MCP" },
     { key: "9", label: "XM", category: "MULTICHAIN" },
-    { key: "-", label: "DAHR", category: "DAHR" },
-    { key: "=", label: "CMD", category: "CMD" },
+    { key: "-", label: "IPFS", category: "IPFS" },
+    { key: "=", label: "DAHR", category: "DAHR" },
+    { key: "\\", label: "CMD", category: "CMD" },
 ]
 
 // SECTION Command definitions for CMD tab
@@ -510,11 +511,15 @@ export class TUIManager extends EventEmitter {
                 break
 
             case "-":
-                this.setActiveTab(10) // DAHR tab
+                this.setActiveTab(10) // IPFS tab
                 break
 
             case "=":
-                this.setActiveTab(11) // CMD tab
+                this.setActiveTab(11) // DAHR tab
+                break
+
+            case "\\":
+                this.setActiveTab(12) // CMD tab
                 break
 
             // Tab navigation

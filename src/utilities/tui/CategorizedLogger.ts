@@ -32,6 +32,7 @@ export type LogCategory =
     | "IDENTITY" // GCR, identity management
     | "MCP" // MCP server operations
     | "MULTICHAIN" // Cross-chain/XM operations
+    | "IPFS" // IPFS storage operations
     | "DAHR" // DAHR-specific operations
     | "CMD" // Command execution and TUI commands
 
@@ -197,6 +198,7 @@ const ALL_CATEGORIES: LogCategory[] = [
     "IDENTITY",
     "MCP",
     "MULTICHAIN",
+    "IPFS",
     "DAHR",
 ]
 
@@ -929,6 +931,7 @@ export class CategorizedLogger extends EventEmitter {
             "IDENTITY",
             "MCP",
             "MULTICHAIN",
+            "IPFS",
             "DAHR",
         ]
     }

@@ -100,6 +100,15 @@ export const TAG_TO_CATEGORY: Record<string, LogCategory> = {
     "LONG CALL": "MULTICHAIN",
     POC: "MULTICHAIN",
 
+    // IPFS - IPFS storage operations
+    IPFS: "IPFS",
+    "IPFS MANAGER": "IPFS",
+    "IPFS UPLOAD": "IPFS",
+    "IPFS DOWNLOAD": "IPFS",
+    "IPFS PIN": "IPFS",
+    "IPFS UNPIN": "IPFS",
+    "IPFS ERROR": "IPFS",
+
     // DAHR - DAHR-specific operations, instant messaging, social
     DAHR: "DAHR",
     WEB2: "DAHR",
