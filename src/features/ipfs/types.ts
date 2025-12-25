@@ -107,3 +107,38 @@ export const IPFS_DEFAULTS = {
     /** Health check interval in milliseconds */
     HEALTH_CHECK_INTERVAL: 30000,
 } as const
+
+
+// ============================================================================
+// Streaming Types (Phase 8)
+// ============================================================================
+
+/**
+ * Progress callback for streaming operations
+ * @param bytesTransferred - Number of bytes transferred so far
+ * @param totalBytes - Total bytes (if known), undefined for unknown size
+ */
+export type StreamProgressCallback = (bytesTransferred: number, totalBytes?: number) => void
+
+/**
+ * Options for streaming add operation
+ */
+export interface AddStreamOptions {
+    /** Optional filename for the content */
+    filename?: string
+    /** Progress callback fired during upload */
+    onProgress?: StreamProgressCallback
+}
+
+/**
+ * Options for streaming get operation
+ */
+export interface GetStreamOptions {
+    /** Progress callback fired during download */
+    onProgress?: StreamProgressCallback
+}
+
+/**
+ * Default chunk size for streaming operations (256KB)
+ */
+export const STREAM_CHUNK_SIZE = 256 * 1024

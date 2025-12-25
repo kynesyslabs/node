@@ -33,6 +33,8 @@ import {
     type IpfsManagerConfig,
     type IpfsNodeInfo,
     type IpfsHealthStatus,
+    type AddStreamOptions,
+    type GetStreamOptions,
     IPFS_DEFAULTS,
 } from "./types"
 
@@ -384,6 +386,295 @@ export class IPFSManager {
             }
             throw error
         }
+    }
+
+
+    // =========================================================================
+    // Streaming Operations (Phase 8)
+    // =========================================================================
+
+    /**
+     * Add content to IPFS using streaming for memory efficiency
+     *
+     * Suitable for large files (1GB+) as content is never fully loaded into memory.
+     * Uses chunked transfer encoding to the Kubo API.
+     *
+     * @param stream - ReadableStream of content to upload
+     * @param options - Optional filename and progress callback
+     * @returns CID (Content Identifier) of the added content
+     * @throws {IPFSConnectionError} If unable to connect to IPFS node
+     * @throws {IPFSAPIError} If IPFS API returns an error
+     *
+     * @example
+     * ```typescript
+     * import { createReadStream } from 'fs'
+     * import { Readable } from 'stream'
+     *
+     * // From file
+     * const fileStream = Readable.toWeb(createReadStream('large-file.zip'))
+     * const cid = await ipfs.addStream(fileStream, {
+     *   filename: 'large-file.zip',
+     *   onProgress: (bytes) => console.log(`Uploaded ${bytes} bytes`)
+     * })
+     * ```
+     */
+    async addStream(
+        stream: ReadableStream<Uint8Array>,
+        options: AddStreamOptions = {},
+    ): Promise<string> {
+        const { filename, onProgress } = options
+        this.logDebug(`Adding content via stream${filename ? ` (${filename})` : ""}`)
+
+        // REVIEW: Streaming add implementation for large file support
+        // Create a tracking stream that reports progress
+        let bytesTransferred = 0
+        const trackingStream = new TransformStream<Uint8Array, Uint8Array>({
+            transform(chunk, controller) {
+                bytesTransferred += chunk.length
+                if (onProgress) {
+                    onProgress(bytesTransferred)
+                }
+                controller.enqueue(chunk)
+            },
+        })
+
+        // Pipe through the tracking stream
+        const trackedStream = stream.pipeThrough(trackingStream)
+
+        // Create multipart form data with streaming body
+        // Note: We need to use a custom approach since FormData doesn't support streaming
+        const boundary = `----DemosIPFSBoundary${Date.now()}`
+        const contentDisposition = filename
+            ? `form-data; name="file"; filename="${filename}"`
+            : "form-data; name=\"file\"; filename=\"file\""
+
+        // Build the multipart header and footer
+        const headerStr = `--${boundary}\r\nContent-Disposition: ${contentDisposition}\r\nContent-Type: application/octet-stream\r\n\r\n`
+        const footerStr = `\r\n--${boundary}--\r\n`
+
+        const encoder = new TextEncoder()
+        const header = encoder.encode(headerStr)
+        const footer = encoder.encode(footerStr)
+
+        // Create a composite stream: header + content + footer
+        const compositeStream = this.createCompositeStream(header, trackedStream, footer)
+
+        const url = `${this.apiUrl}/api/v0/add`
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), this.timeout * 10) // Extended timeout for large files
+
+        try {
+            this.logDebug("API Request: POST /api/v0/add (streaming)")
+
+            const response = await fetch(url, {
+                method: "POST",
+                body: compositeStream,
+                signal: controller.signal,
+                headers: {
+                    "Content-Type": `multipart/form-data; boundary=${boundary}`,
+                },
+                // @ts-expect-error - Bun supports duplex: 'half' for streaming uploads
+                duplex: "half",
+            })
+
+            if (!response.ok) {
+                const errorText = await response.text().catch(() => "Unknown error")
+                throw new IPFSAPIError(
+                    `IPFS API error: ${response.status} ${response.statusText}`,
+                    response.status,
+                    errorText,
+                )
+            }
+
+            const data = await response.json()
+            const cid = data.Hash
+
+            if (!cid) {
+                throw new IPFSAPIError("IPFS add response missing Hash field", undefined, JSON.stringify(data))
+            }
+
+            this.logDebug(`Content added via stream. CID: ${cid}, Total bytes: ${bytesTransferred}`)
+            return cid
+        } catch (error) {
+            if (error instanceof IPFSAPIError) {
+                throw error
+            }
+
+            if (error instanceof Error && error.name === "AbortError") {
+                throw new IPFSTimeoutError("/api/v0/add (streaming)", this.timeout * 10)
+            }
+
+            throw new IPFSConnectionError(
+                `Failed to stream content to IPFS API at ${url}`,
+                error instanceof Error ? error : undefined,
+            )
+        } finally {
+            clearTimeout(timeoutId)
+        }
+    }
+
+    /**
+     * Retrieve content from IPFS as a stream for memory efficiency
+     *
+     * Suitable for large files (1GB+) as content is never fully loaded into memory.
+     * Returns a ReadableStream that can be piped to a file or processed in chunks.
+     *
+     * @param cid - Content Identifier to retrieve
+     * @param options - Optional progress callback
+     * @returns ReadableStream of the content
+     * @throws {IPFSInvalidCIDError} If CID format is invalid
+     * @throws {IPFSNotFoundError} If content is not found
+     * @throws {IPFSConnectionError} If unable to connect to IPFS node
+     *
+     * @example
+     * ```typescript
+     * import { createWriteStream } from 'fs'
+     * import { Writable } from 'stream'
+     *
+     * const stream = await ipfs.getStream('QmExample...', {
+     *   onProgress: (bytes) => console.log(`Downloaded ${bytes} bytes`)
+     * })
+     *
+     * // Pipe to file
+     * const writeStream = Writable.toWeb(createWriteStream('output.zip'))
+     * await stream.pipeTo(writeStream)
+     * ```
+     */
+    async getStream(
+        cid: string,
+        options: GetStreamOptions = {},
+    ): Promise<ReadableStream<Uint8Array>> {
+        this.validateCid(cid)
+        const { onProgress } = options
+        this.logDebug(`Getting content as stream. CID: ${cid}`)
+
+        // REVIEW: Streaming get implementation for large file support
+        const url = `${this.apiUrl}/api/v0/cat?arg=${encodeURIComponent(cid)}`
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), this.timeout * 10) // Extended timeout for large files
+
+        try {
+            this.logDebug("API Request: POST /api/v0/cat (streaming)")
+
+            const response = await fetch(url, {
+                method: "POST",
+                signal: controller.signal,
+            })
+
+            if (!response.ok) {
+                const errorText = await response.text().catch(() => "Unknown error")
+
+                if (errorText.includes("not found")) {
+                    throw new IPFSNotFoundError(cid, new IPFSAPIError(
+                        `IPFS API error: ${response.status}`,
+                        response.status,
+                        errorText,
+                    ))
+                }
+
+                throw new IPFSAPIError(
+                    `IPFS API error: ${response.status} ${response.statusText}`,
+                    response.status,
+                    errorText,
+                )
+            }
+
+            if (!response.body) {
+                throw new IPFSAPIError("IPFS cat response has no body", undefined, "No body in response")
+            }
+
+            // Clear the initial timeout - streaming will handle its own chunk timeouts
+            clearTimeout(timeoutId)
+
+            // If no progress callback, return the raw stream
+            if (!onProgress) {
+                this.logDebug(`Returning raw stream for CID: ${cid}`)
+                return response.body
+            }
+
+            // Wrap in a tracking stream for progress reporting
+            let bytesTransferred = 0
+            const trackingStream = new TransformStream<Uint8Array, Uint8Array>({
+                transform(chunk, controller) {
+                    bytesTransferred += chunk.length
+                    onProgress(bytesTransferred)
+                    controller.enqueue(chunk)
+                },
+            })
+
+            this.logDebug(`Returning tracked stream for CID: ${cid}`)
+            return response.body.pipeThrough(trackingStream)
+        } catch (error) {
+            clearTimeout(timeoutId)
+
+            if (error instanceof IPFSAPIError || error instanceof IPFSNotFoundError) {
+                throw error
+            }
+
+            if (error instanceof Error && error.name === "AbortError") {
+                throw new IPFSTimeoutError(`/api/v0/cat?arg=${cid}`, this.timeout * 10)
+            }
+
+            throw new IPFSConnectionError(
+                `Failed to stream content from IPFS API at ${url}`,
+                error instanceof Error ? error : undefined,
+            )
+        }
+    }
+
+    /**
+     * Create a composite ReadableStream from header, content, and footer
+     *
+     * Helper method for multipart streaming uploads.
+     *
+     * @param header - Header bytes (multipart boundary and headers)
+     * @param content - Content stream
+     * @param footer - Footer bytes (closing boundary)
+     * @returns Composite ReadableStream
+     */
+    private createCompositeStream(
+        header: Uint8Array,
+        content: ReadableStream<Uint8Array>,
+        footer: Uint8Array,
+    ): ReadableStream<Uint8Array> {
+        let headerSent = false
+        let contentReader: ReadableStreamDefaultReader<Uint8Array> | null = null
+        let contentDone = false
+
+        return new ReadableStream<Uint8Array>({
+            async pull(controller) {
+                // First, send the header
+                if (!headerSent) {
+                    controller.enqueue(header)
+                    headerSent = true
+                    contentReader = content.getReader()
+                    return
+                }
+
+                // Then, stream the content
+                if (!contentDone && contentReader) {
+                    const { done, value } = await contentReader.read()
+                    if (done) {
+                        contentDone = true
+                        contentReader.releaseLock()
+                    } else if (value) {
+                        controller.enqueue(value)
+                        return
+                    }
+                }
+
+                // Finally, send the footer and close
+                if (contentDone) {
+                    controller.enqueue(footer)
+                    controller.close()
+                }
+            },
+            cancel() {
+                if (contentReader) {
+                    contentReader.releaseLock()
+                }
+            },
+        })
     }
 
     // =========================================================================

@@ -40,9 +40,12 @@ export type {
     IpfsHealthStatus,
     IpfsPin,
     AccountIpfsState,
+    StreamProgressCallback,
+    AddStreamOptions,
+    GetStreamOptions,
 } from "./types"
 
-export { IPFS_DEFAULTS } from "./types"
+export { IPFS_DEFAULTS, STREAM_CHUNK_SIZE } from "./types"
 
 // Errors
 export {
